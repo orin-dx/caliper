@@ -1,0 +1,1 @@
+<local-command-stdout>✓ Installed canon. Run /reload-plugins to apply.</local-command-stdout>
