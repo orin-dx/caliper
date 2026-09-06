@@ -1,0 +1,219 @@
+<task-notification>
+<task-id>ac515710cb7a0cb1d</task-id>
+<tool-use-id>toolu_014PVnPHvueupVA7N3L3fuSu</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-oxc-react-codegen/0602cae8-9776-4cab-baaa-67ad00aaf7d1/tasks/ac515710cb7a0cb1d.output</output-file>
+<status>completed</status>
+<summary>Agent "Search angle 2: Rolldown plugin RFC and design docs" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have sufficient verified data to synthesize the report now. Here is the comprehensive findings report:
+
+---
+
+# Rolldown Plugin System: Architecture, Design Docs &amp; RFCs
+
+## Summary
+
+No single "RFC document" exists for Rolldown's plugin system in the traditional RFC sense — there is no `rfcs/` directory in the repo. Instead, design intent is distributed across GitHub discussions, tracking issues, official blog posts, and the `deepwiki.com` auto-generated architecture wiki. What follows consolidates all primary sources found.
+
+---
+
+## 1. Core Design Philosophy: Rollup Compatibility
+
+The foundational architectural decision was to clone Rollup's plugin API rather than invent a new one. From the [Rolldown 1.0 announcement](https://voidzero.dev/posts/announcing-rolldown-1-0):
+
+&gt; "Plugins that declare an `id`, `code`, or `moduleType` filter skip the Rust-to-JS hop when the filter doesn't match, so adding plugins doesn't linearly slow your build."
+
+And from [Vite 8 stable](https://vite.dev/blog/announcing-vite8):
+
+&gt; "Rolldown supports the same plugin API as Rollup and Vite. Most existing Vite plugins work out of the box with Vite 8."
+
+The [Roadmap discussion #153](https://github.com/rolldown/rolldown/discussions/153) explicitly scoped this:
+
+&gt; "we are currently not focusing on 100% compatibility because there are many APIs that are very niche and rarely used. Instead we are focusing on implementing **enough** compatibility to run as many commonly used plugins as possible."
+
+---
+
+## 2. Plugin Compatibility Tracking Issue (Primary Design Doc)
+
+**[Issue #819 — [Tracking] Rollup Plugin Compat Status](https://github.com/rolldown/rolldown/issues/819)**
+
+This is the closest thing to a formal design doc for plugin API compatibility. Key findings:
+
+**Fully supported hooks:** `options`, `buildStart`, `buildEnd`, `renderStart`, `generateBundle`, `writeBundle`, and others.
+
+**Partially supported (common cases work, niche options missing):**
+- `resolveId` — missing `attributes` argument and return fields like `syntheticNamedExports`
+- `load` / `transform` — no `attributes`, no `syntheticNamedExports`, no `ast` (explicitly "will not support")
+- `moduleParsed` — only partial `moduleInfo`
+- `resolveDynamicImport` — missing `attributes`
+
+**Not yet supported:** `shouldTransformCachedModule`, `resolveFileUrl`, `resolveImportMeta`, `renderDynamicImport`
+
+Design principle stated directly:
+
+&gt; "Our priority...is implement enough compatibility for most plugins to run, and determine whether to support niche options...based on user demand."
+
+---
+
+## 3. Hook Filters — The Key Novel Architecture
+
+**[Plugin Hook Filters docs](https://rolldown.rs/apis/plugin-api/hook-filters)**
+
+This is Rolldown's most significant architectural departure from Rollup. Hook filters are evaluated on the **Rust side** before any JS is called:
+
+```js
+// Old pattern (evaluates filter in JS — requires Rust→JS call)
+transform(code, id) {
+  if (!id.endsWith('.data')) return
+  return transformedCode
+}
+
+// New pattern (filter evaluated in Rust — no JS call if no match)
+transform: {
+  filter: { id: /\.data$/ },
+  handler(code) { return transformedCode }
+}
+```
+
+Supported filter properties per hook:
+- `resolveId`: `id` only
+- `load`: `id`
+- `transform`: `id`, `moduleType`, `code`
+
+Filter logic: multiple properties use AND; multiple values within a property use OR; `exclude` takes precedence over `include`.
+
+The `@rolldown/pluginutils` package exposes composable operators: `and()`, `or()`, `not()`, `code()`, `query()`, `queries()`.
+
+**Compatibility:** Supported in Rollup 4.38.0+, Vite 6.3.0+, and all Rolldown versions.
+
+---
+
+## 4. Internal Architecture: Three-Stage Pipeline + Plugin Driver
+
+**[DeepWiki: Plugin Lifecycle and Hooks](https://deepwiki.com/rolldown/rolldown/4.2-plugin-lifecycle-and-hooks)**
+
+The pipeline is **Scan → Link → Generate**. Plugins integrate at each stage.
+
+Hook execution patterns:
+- **First-wins:** `resolveId`, `load`, `resolveDynamicImport` — stop at first non-null result
+- **Sequential:** `transform`, `renderChunk`, `banner/footer` — chain through all plugins in order
+- **Parallel:** `buildStart`, `buildEnd`, `moduleParsed`, `writeBundle` — run concurrently
+
+Plugin ordering via metadata: `order: 'pre'` | `order: 'post'` | default. The `PluginDriverFactory` pre-sorts plugins at initialization for deterministic execution.
+
+**Context types per hook:**
+- `MinimalPluginContext` — logging/options only
+- `PluginContext` — full API: `emitFile`, `resolve`, `getModuleInfo` ([docs](https://rolldown.rs/reference/interface.plugincontext))
+- `TransformPluginContext` — adds `magicString` and AST access
+- `LoadPluginContext` — specialized for `load`
+
+**NAPI-RS bridge:** All JS plugin hooks are "bindingified" — wrapped to convert between JS and Rust data types via the `rolldown_binding` crate. The `BindingBundler` class orchestrates the lifecycle.
+
+**Performance instrumentation:** `PluginDriver` tracks execution time per plugin via `HookTimingCollector`, accessible via `checks.pluginTimings`.
+
+**Key difference from Rollup:** Build hooks are called per output, not once globally. `writeBundle` is sequential by default (Rollup: parallel).
+
+---
+
+## 5. Native Rust Plugins
+
+**[Vite 8 Beta](https://vite.dev/blog/announcing-vite8-beta):**
+
+&gt; "Various internal Vite plugins, such as the alias or resolve plugin, have been converted to Rust, and native plugins are now enabled by default."
+
+Built-in native plugins exposed via JS API:
+- `replacePlugin` (variable replacement, replaces `@rollup/plugin-replace`)
+- `esmExternalRequirePlugin` (CJS interop)
+- `BundleAnalyzer`
+- `IsolatedDeclaration`
+
+Built-in capabilities replacing plugins entirely:
+- CJS/ESM interop (replaces `@rollup/plugin-commonjs`)
+- Node module resolution (replaces `@rollup/plugin-node-resolve`)
+- TypeScript/JSX/syntax lowering via OXC (replaces esbuild transform)
+
+---
+
+## 6. Native MagicString (Experimental)
+
+**[Rolldown docs: Native MagicString](https://rolldown.rs/in-depth/native-magic-string)**
+
+An experimental feature where string manipulation in the `transform` hook runs in Rust rather than JS. Plugins receive a `meta.magicString` object and return it directly:
+
+```js
+transform(code, id, meta) {
+  if (meta?.magicString) {
+    const { magicString } = meta;
+    // manipulate, then:
+    return { code: magicString }; // return object directly, not .toString()
+  }
+}
+```
+
+Performance benchmarks: 1.15x speedup at 1k modules, 1.33x at 10k modules; transform-specific gains of 1.63x–2.26x. Source map generation offloads to background threads.
+
+---
+
+## 7. RFC: CSS as a Plugin (Issue #8403)
+
+**[RFC: Vite-inspired CSS Solution — Issue #8403](https://github.com/rolldown/rolldown/issues/8403)** (filed February 2026)
+
+A formal design proposal for implementing CSS bundling as a Rolldown plugin with zero core changes. Key architectural principles:
+
+- "All logic lives in a Rolldown plugin. No changes to `rolldown` core code should be required."
+- Uses `ModuleType::Css` as the input signal
+- Uses only standard Rolldown APIs: `PluginContext`, `emit_file`, `get_module_info`
+
+Hooks used: `build_start`, `transform`, `render_chunk`, `generate_bundle`, `augment_chunk_hash`
+
+Shared state via `PluginContextMeta` (type-erased map accessible across hook invocations): `CssStylesCache`, `ChunkCssMap`, `CssModulesExportsCache`
+
+CSS engine: `lightningcss` (not PostCSS). 10 implementation stages planned.
+
+6 unresolved design questions including: PostCSS integration scope, `?inline`/`?url` query param support, `emit_file` during render phase.
+
+---
+
+## 8. Built-in Plugin API Design Discussion
+
+**[Discussion #1807 — API design for built-in plugins](https://github.com/rolldown/rolldown/discussions/1807)**
+
+Maintainer `hyf0` proposed 4 patterns for how to reference built-in (Rust-native) plugins in config:
+
+- **Enhancement B** (community favorite): `name: 'builtin:import-meta-vars'` syntax, consistent with existing tooling conventions
+- Scope decision: only Rust-native implementations will be exported from `rolldown` directly; official JS plugins go in `@rolldown/plugin-xxx` packages
+
+---
+
+## 9. Future: Raw AST Transfer
+
+Mentioned in [Vite 8 beta](https://vite.dev/blog/announcing-vite8-beta) as upcoming:
+
+&gt; "allow JavaScript plugins to access the Rust-produced AST with minimal serialization overhead, bridging the performance gap between Rust internals and JS plugin code"
+
+This would let JS plugins read/walk the OXC-parsed AST without a serialize/deserialize round-trip.
+
+---
+
+## Key URLs
+
+| Resource | URL |
+|---|---|
+| Plugin API docs | https://rolldown.rs/apis/plugin-api |
+| Hook Filters docs | https://rolldown.rs/apis/plugin-api/hook-filters |
+| PluginContext reference | https://rolldown.rs/reference/interface.plugincontext |
+| Rollup compat tracking issue #819 | https://github.com/rolldown/rolldown/issues/819 |
+| CSS RFC issue #8403 | https://github.com/rolldown/rolldown/issues/8403 |
+| Built-in plugin API discussion #1807 | https://github.com/rolldown/rolldown/discussions/1807 |
+| Plugin config discussion #2577 | https://github.com/rolldown/rolldown/discussions/2577 |
+| Roadmap discussion #153 | https://github.com/rolldown/rolldown/discussions/153 |
+| Native MagicString | https://rolldown.rs/in-depth/native-magic-string |
+| DeepWiki plugin lifecycle | https://deepwiki.com/rolldown/rolldown/4.2-plugin-lifecycle-and-hooks |
+| DeepWiki bundling pipeline | https://deepwiki.com/rolldown/rolldown/2.1-bundling-pipeline |
+| Rolldown 1.0 announcement | https://voidzero.dev/posts/announcing-rolldown-1-0 |
+| Vite 8 beta blog | https://vite.dev/blog/announcing-vite8-beta |
+| Vite 8 stable blog | https://vite.dev/blog/announcing-vite8 |
+| Rolldown/plugins repo | https://github.com/rolldown/plugins |
+| @rolldown/pluginutils | https://github.com/rolldown/rolldown/tree/main/packages/pluginutils |</result>
+<usage><subagent_tokens>35461</subagent_tokens><tool_uses>16</tool_uses><duration_ms>160602</duration_ms></usage>
+</task-notification>
