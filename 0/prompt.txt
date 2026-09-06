@@ -1,0 +1,1 @@
+npm and pnpm installs right? Can we make sure we produce and test with a matrix of node 24 and 26?
