@@ -1,0 +1,1 @@
+Is there a meaninful way to record the HTML attributes and where they came from without being overwhelming? Is it possible in the react-docgen format?
