@@ -163,7 +163,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/callisto-validate@c5578e6a63754b54575b3ac7518cc1753e443393 # callisto@0.8.0
+      - uses: orin-dx/callisto/.github/actions/callisto-validate@0a971b2118954e7089c1a0aa28aebbf131ed1602 # callisto@0.10.0
 
   # The one check to require in branch protection.
   ci:
