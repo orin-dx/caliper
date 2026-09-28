@@ -1,0 +1,1 @@
+From your loaded project instructions only (do not read any files), quote non-negotiable 6 verbatim and say which instruction file it came from. Also quote the first line of the 'Decisions' section.
