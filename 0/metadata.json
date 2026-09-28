@@ -1,0 +1,483 @@
+{
+  "cli_version": "0.11.4-nightly.202609260624.c369a70d2",
+  "checkpoint_id": "01M3K6YCQQN6HT7HSZKANBT5QS",
+  "session_id": "233bd878-80fe-4479-b3b8-1b505e3fbc36",
+  "strategy": "manual-commit",
+  "created_at": "2026-09-28T05:14:29.242522Z",
+  "branch": "main",
+  "checkpoints_count": 15,
+  "save_step_count": 11,
+  "files_touched": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "crates/binding/src/lib.rs",
+    "crates/cli/AGENTS.md",
+    "crates/cli/CLAUDE.md",
+    "crates/cli/src/config.rs",
+    "crates/core/AGENTS.md",
+    "crates/core/CLAUDE.md",
+    "crates/core/src/pipeline/discover.rs",
+    "crates/core/src/pipeline/mod.rs",
+    "crates/core/src/react_types.rs",
+    "docs/STATUS.md",
+    "docs/adr/0001-oxc-over-typescript-compiler.md",
+    "docs/adr/0004-defer-type-checker-integration.md",
+    "docs/adr/0006-semantic-backend-as-second-resolver.md",
+    "docs/adr/README.md",
+    "docs/benchmarks.md",
+    "docs/edge-cases.md",
+    "docs/root-cause-analysis.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "e8cf099e38be",
+  "checkpoint_transcript_start": 5500,
+  "transcript_lines_at_start": 5500,
+  "compact_transcript_start": 570,
+  "token_usage": {
+    "input_tokens": 204,
+    "cache_creation_tokens": 1796812,
+    "cache_read_tokens": 52302619,
+    "output_tokens": 159465,
+    "api_call_count": 101,
+    "subagent_tokens": {
+      "input_tokens": 0,
+      "cache_creation_tokens": 0,
+      "cache_read_tokens": 0,
+      "output_tokens": 0,
+      "api_call_count": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01YG3oDJ3u2rG9m6NPRHvBjM",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "rust-style"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "d587da396c05",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 1203,
+        "end": 1204,
+        "entry_ids": [
+          "975f8d08-d217-419c-950a-d513b23b4a79"
+        ],
+        "tool_use_id": "toolu_01YG3oDJ3u2rG9m6NPRHvBjM"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01YG3oDJ3u2rG9m6NPRHvBjM"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: rust-style",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_014ecxa8WByXsgrAF7rszBnh",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "snapshot"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "d587da396c05",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 1493,
+        "end": 1494,
+        "entry_ids": [
+          "f9add5d0-49c3-4ea3-85bc-762cfb5be9bf"
+        ],
+        "tool_use_id": "toolu_014ecxa8WByXsgrAF7rszBnh"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_014ecxa8WByXsgrAF7rszBnh"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: snapshot",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01HM5PkSk5Yrkamvd3vR65mU",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "courier:commit"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "6ecb37b60ce5",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 3211,
+        "end": 3212,
+        "entry_ids": [
+          "e31e1a98-9cad-4726-8248-12f74284b4d0"
+        ],
+        "tool_use_id": "toolu_01HM5PkSk5Yrkamvd3vR65mU"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01HM5PkSk5Yrkamvd3vR65mU"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: courier:commit",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_014PDacXqT8LdTgBKvgtAd5Q",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "adr"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "e8cf099e38be",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 5773,
+        "end": 5774,
+        "entry_ids": [
+          "0bdfb1fa-f0b9-4e4c-a5ce-8078b00b104b"
+        ],
+        "tool_use_id": "toolu_014PDacXqT8LdTgBKvgtAd5Q"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_014PDacXqT8LdTgBKvgtAd5Q"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: adr",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 49
+  },
+  "summary": {
+    "intent": "Manage a batch of open PRs/CI on oxc-react-codegen, resolve a Dependabot conflict, assess TS 7.1 prep status, and rewrite ADR/architecture docs to be clear and agent-friendly — then propagate those documentation/memory-boundary learnings to sibling repos (callisto, agent-plugins, wisp).",
+    "outcome": "Verified all four PRs green and explained the Dependabot rebase behavior; assessed TS 7.1 readiness (three fixes landed, semantic backend not started, RDT oracle broken); researched ADR best practices and the ADR/AGENTS.md/memory boundary, then applied it: wrote ADR 0006, rewrote type-checker-integration.md, renamed CLAUDE.md→AGENTS.md repo-wide, added ADR README index/guardrails, pruned stale project memory files, and wrote a 'Next step' section plus a starter prompt for a fresh session to fix the RDT oracle.",
+    "learnings": {
+      "repo": [
+        "apps/validate's RDT oracle crashes on import against typescript ^7.0.2 (ts.JsxEmit undefined); RDT 2.4.0 needs a TypeScript 6 API (typescript@6 or @typescript/typescript6), separate from the typescript@next build used by the semantic probe.",
+        "Claude Code >= 2.1.277 reads AGENTS.md only when no CLAUDE.md exists in the working directory or above; if both exist, only CLAUDE.md loads unless it has an @AGENTS.md import.",
+        "The validation harness only compares name, required, type, and default, and renders types itself — narrower than docs implied.",
+        "crates/core/AGENTS.md still describes the DTS cache as mtime+size invalidation; the code actually uses a content hash (not yet fixed).",
+        "docs/benchmarks.md is a stale 2026-07-25 report whose 'outliers dominate structural bucket' claim can't be re-verified until the RDT oracle is fixed.",
+        "oxc dependency is now 0.151 (memory/doc references citing 0.135 were stale)."
+      ],
+      "code": [
+        {
+          "path": "crates/cli/Cargo.toml",
+          "finding": "watchexec-signals dependency (added in PR #16) sits adjacent to comfy-table/crossterm lines that Dependabot's PR #10 bumps, causing a textual (non-semantic) merge conflict."
+        },
+        {
+          "path": "docs/adr/0006-semantic-backend-as-second-resolver.md",
+          "finding": "ADR records running RDT's algorithm on tsc --api merged into the structural result; trimmed after review to decision/why/constraints/alternatives only, removing volatile cost numbers (ms, MB) and dates that belong in type-checker-integration.md instead."
+        }
+      ],
+      "workflow": [
+        "ADRs should record only architecturally-significant, hard-to-reverse decisions plus rejected alternatives and the causal 'because' — not measured costs, timelines, or enforcement/process scaffolding (Enforcement/Revisit-when/Sources sections, 'Proposed until implemented' status, superseded/ folders) which are conventions from other repos (callisto), not core ADR practice per Nygard/MADR.",
+        "For agents specifically, ADRs matter because an agent with no memory will silently reverse a structural decision by reading only the code — the rejected alternative and reason must reach the agent before it edits, via routing from AGENTS.md to an ADR index.",
+        "Clear content-type boundary: ADR = architecture/direction decisions; AGENTS.md = session rules/conventions (committed, cross-agent); specs = required behavior; docs = current-state description; agent memory = personal/uncommitted preferences and corrections; commit message = why one change was made.",
+        "Repo conventions (comment style, commit style) belong in committed AGENTS.md, not personal memory, especially when other agent tool configs (.codex, .cursor, .gemini, .opencode) exist and can't read Claude's memory.",
+        "Before citing repo facts in docs, verify them against actual code/config rather than relying on prior assumptions (caught several stale/incorrect claims this way)."
+      ]
+    },
+    "friction": [
+      "A background CI-wait task notification reported 'failed' when it had actually succeeded — the failure was just grep exiting 1 on no matches, causing a false alarm.",
+      "The callisto repo's working tree changed mid-investigation (restructured docs while being read), requiring a re-survey.",
+      "Scratchpad/probe scripts were purged by environment cleanup/compaction between sessions, requiring recreation of the parity probe.",
+      "Auto-mode classifier denied force-deleting three stale local branches, leaving manual cleanup to the user.",
+      "Untracked AGENTS.md copy in the repo had @crates/*/AGENTS.md imports pointing to files that didn't exist, silently making it dead weight until discovered."
+    ],
+    "open_items": [
+      "Fix the RDT oracle in apps/validate by pointing it at a TypeScript 6 API, separate from the typescript@next build.",
+      "Commit the parity probe script into apps/validate instead of leaving it in the scratchpad.",
+      "Re-run parity probe against full fixture corpus once oracle is fixed; extend beyond the 13 hand-picked components.",
+      "Build a Rust client for the lifecycle gate (timeout/crash/staleness fixtures) — not started.",
+      "Add core contract/reconcile step: PropType variant and schema version field — not started.",
+      "Decide on and change branch protection's 'CI' setting (deferred to user).",
+      "Local branch deletion (fix/ts7-lib-resolution, fix/child-interface-prop-override, wip/session-work) deferred to user.",
+      "Decide on bigger diagnostics-lifecycle change (snapshot() keeping first extraction's diagnostics, update_file running plugin hooks) — deferred to user.",
+      "Fix crates/core/AGENTS.md's stale claim that DTS cache uses mtime+size (actual: content hash).",
+      "Re-verify docs/benchmarks.md's outlier-dominance claim once oracle is fixed.",
+      "Apply agent-plugins fixes (CLAUDE.md @AGENTS.md import, new decision-records.md reference, comments.md line 15 split, ranger adversary.md dual-file check) — briefed to a new agent, not yet executed.",
+      "Apply wisp changes (first-class decision artifact/schema, memory-boundary statement, artifact precedence rule, CONTRIBUTING.md/CI references to nonexistent AGENTS.md and just docs-lint, hard-wrapped docs) — explicitly out of scope/deferred as separate task.",
+      "Uncommitted changes to AGENTS.md/CLAUDE.md renames, ADR 0006, ADR README, and docs remain on main branch — user was advised to branch before committing (two proposed commits: ADR+index, then AGENTS.md rename+references)."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-09-28T05:14:03.993741Z",
+    "agent_lines": 143,
+    "agent_removed": 125,
+    "human_added": 5546,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 5689,
+    "total_lines_changed": 11353,
+    "agent_percentage": 2.360609530520567,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 964,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".agents/skills/adr/SKILL.md": 33,
+        ".agents/skills/entire-search/SKILL.md": 22,
+        ".agents/skills/rust-style/SKILL.md": 63,
+        ".agents/skills/rust-types/SKILL.md": 21,
+        ".agents/skills/rustdoc/SKILL.md": 36,
+        ".agents/skills/source-command-check/SKILL.md": 20,
+        ".agents/skills/source-command-snapshot/SKILL.md": 19,
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.local.json": 8,
+        ".claude/skills/entire-search/SKILL.md": 22,
+        ".codex/hooks.json": 77,
+        ".cursor/hooks.json": 40,
+        ".cursor/skills/entire-search/SKILL.md": 22,
+        ".gemini/settings.json": 141,
+        ".gemini/skills/entire-search/SKILL.md": 22,
+        ".github/hooks/entire.json": 61,
+        ".github/skills/entire-search/SKILL.md": 22,
+        ".opencode/plugins/entire.ts": 269,
+        ".opencode/skills/entire-search/SKILL.md": 22,
+        "AGENTS.md": 43
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 685,
+      "user_lines_removed": 0,
+      "agent_lines_added": 441,
+      "agent_lines_removed": 92,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.local.json": 8,
+        ".claude/skills/entire-search/SKILL.md": 22,
+        ".codex/hooks.json": 77,
+        ".cursor/hooks.json": 40,
+        ".cursor/skills/entire-search/SKILL.md": 22,
+        ".gemini/settings.json": 141,
+        ".gemini/skills/entire-search/SKILL.md": 22,
+        ".github/hooks/entire.json": 61,
+        ".opencode/plugins/entire.ts": 269,
+        ".opencode/skills/entire-search/SKILL.md": 22
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 685,
+      "user_lines_removed": 0,
+      "agent_lines_added": 441,
+      "agent_lines_removed": 92,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.local.json": 8,
+        ".claude/skills/entire-search/SKILL.md": 22,
+        ".codex/hooks.json": 77,
+        ".cursor/hooks.json": 40,
+        ".cursor/skills/entire-search/SKILL.md": 22,
+        ".gemini/settings.json": 141,
+        ".gemini/skills/entire-search/SKILL.md": 22,
+        ".github/hooks/entire.json": 61,
+        ".opencode/plugins/entire.ts": 269,
+        ".opencode/skills/entire-search/SKILL.md": 22
+      }
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 685,
+      "user_lines_removed": 0,
+      "agent_lines_added": 441,
+      "agent_lines_removed": 92,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.local.json": 8,
+        ".claude/skills/entire-search/SKILL.md": 22,
+        ".codex/hooks.json": 77,
+        ".cursor/hooks.json": 40,
+        ".cursor/skills/entire-search/SKILL.md": 22,
+        ".gemini/settings.json": 141,
+        ".gemini/skills/entire-search/SKILL.md": 22,
+        ".github/hooks/entire.json": 61,
+        ".opencode/plugins/entire.ts": 269,
+        ".opencode/skills/entire-search/SKILL.md": 22
+      }
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 685,
+      "user_lines_removed": 0,
+      "agent_lines_added": 441,
+      "agent_lines_removed": 92,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.local.json": 8,
+        ".claude/skills/entire-search/SKILL.md": 22,
+        ".codex/hooks.json": 77,
+        ".cursor/hooks.json": 40,
+        ".cursor/skills/entire-search/SKILL.md": 22,
+        ".gemini/settings.json": 141,
+        ".gemini/skills/entire-search/SKILL.md": 22,
+        ".github/hooks/entire.json": 61,
+        ".opencode/plugins/entire.ts": 269,
+        ".opencode/skills/entire-search/SKILL.md": 22
+      }
+    },
+    {
+      "checkpoint_number": 7,
+      "user_lines_added": 685,
+      "user_lines_removed": 0,
+      "agent_lines_added": 441,
+      "agent_lines_removed": 92,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.local.json": 8,
+        ".claude/skills/entire-search/SKILL.md": 22,
+        ".codex/hooks.json": 77,
+        ".cursor/hooks.json": 40,
+        ".cursor/skills/entire-search/SKILL.md": 22,
+        ".gemini/settings.json": 141,
+        ".gemini/skills/entire-search/SKILL.md": 22,
+        ".github/hooks/entire.json": 61,
+        ".opencode/plugins/entire.ts": 269,
+        ".opencode/skills/entire-search/SKILL.md": 22
+      }
+    },
+    {
+      "checkpoint_number": 8,
+      "user_lines_added": 685,
+      "user_lines_removed": 0,
+      "agent_lines_added": 441,
+      "agent_lines_removed": 92,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.local.json": 8,
+        ".claude/skills/entire-search/SKILL.md": 22,
+        ".codex/hooks.json": 77,
+        ".cursor/hooks.json": 40,
+        ".cursor/skills/entire-search/SKILL.md": 22,
+        ".gemini/settings.json": 141,
+        ".gemini/skills/entire-search/SKILL.md": 22,
+        ".github/hooks/entire.json": 61,
+        ".opencode/plugins/entire.ts": 269,
+        ".opencode/skills/entire-search/SKILL.md": 22
+      }
+    },
+    {
+      "checkpoint_number": 9,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 10,
+      "user_lines_added": 706,
+      "user_lines_removed": 21,
+      "agent_lines_added": 534,
+      "agent_lines_removed": 201,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/semantic-model/INDEX.md": 1,
+        ".claude/semantic-model/cli-commands.md": 6,
+        ".claude/semantic-model/napi-binding.md": 1,
+        ".claude/semantic-model/pipeline-orchestration.md": 3,
+        ".claude/semantic-model/resolver-type-resolution.md": 2,
+        ".claude/semantic-model/serialization-formats.md": 3,
+        ".claude/semantic-model/types-and-output-contract.md": 5,
+        ".claude/settings.local.json": 8,
+        ".claude/skills/entire-search/SKILL.md": 22,
+        ".codex/hooks.json": 77,
+        ".cursor/hooks.json": 40,
+        ".cursor/skills/entire-search/SKILL.md": 22,
+        ".gemini/settings.json": 141,
+        ".gemini/skills/entire-search/SKILL.md": 22,
+        ".github/hooks/entire.json": 61,
+        ".opencode/plugins/entire.ts": 269,
+        ".opencode/skills/entire-search/SKILL.md": 22
+      },
+      "user_removed_per_file": {
+        ".claude/semantic-model/INDEX.md": 1,
+        ".claude/semantic-model/cli-commands.md": 6,
+        ".claude/semantic-model/napi-binding.md": 1,
+        ".claude/semantic-model/pipeline-orchestration.md": 3,
+        ".claude/semantic-model/resolver-type-resolution.md": 2,
+        ".claude/semantic-model/serialization-formats.md": 3,
+        ".claude/semantic-model/types-and-output-contract.md": 5
+      }
+    },
+    {
+      "checkpoint_number": 11,
+      "user_lines_added": 706,
+      "user_lines_removed": 21,
+      "agent_lines_added": 534,
+      "agent_lines_removed": 201,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/semantic-model/INDEX.md": 1,
+        ".claude/semantic-model/cli-commands.md": 6,
+        ".claude/semantic-model/napi-binding.md": 1,
+        ".claude/semantic-model/pipeline-orchestration.md": 3,
+        ".claude/semantic-model/resolver-type-resolution.md": 2,
+        ".claude/semantic-model/serialization-formats.md": 3,
+        ".claude/semantic-model/types-and-output-contract.md": 5,
+        ".claude/settings.local.json": 8,
+        ".claude/skills/entire-search/SKILL.md": 22,
+        ".codex/hooks.json": 77,
+        ".cursor/hooks.json": 40,
+        ".cursor/skills/entire-search/SKILL.md": 22,
+        ".gemini/settings.json": 141,
+        ".gemini/skills/entire-search/SKILL.md": 22,
+        ".github/hooks/entire.json": 61,
+        ".opencode/plugins/entire.ts": 269,
+        ".opencode/skills/entire-search/SKILL.md": 22
+      },
+      "user_removed_per_file": {
+        ".claude/semantic-model/INDEX.md": 1,
+        ".claude/semantic-model/cli-commands.md": 6,
+        ".claude/semantic-model/napi-binding.md": 1,
+        ".claude/semantic-model/pipeline-orchestration.md": 3,
+        ".claude/semantic-model/resolver-type-resolution.md": 2,
+        ".claude/semantic-model/serialization-formats.md": 3,
+        ".claude/semantic-model/types-and-output-contract.md": 5
+      }
+    }
+  ]
+}

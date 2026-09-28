@@ -1,0 +1,51 @@
+{
+  "cli_version": "0.11.4-nightly.202609260624.c369a70d2",
+  "checkpoint_id": "01M3K6YCQQN6HT7HSZKANBT5QS",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 15,
+  "files_touched": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "crates/binding/src/lib.rs",
+    "crates/cli/AGENTS.md",
+    "crates/cli/CLAUDE.md",
+    "crates/cli/src/config.rs",
+    "crates/core/AGENTS.md",
+    "crates/core/CLAUDE.md",
+    "crates/core/src/pipeline/discover.rs",
+    "crates/core/src/pipeline/mod.rs",
+    "crates/core/src/react_types.rs",
+    "docs/STATUS.md",
+    "docs/adr/0001-oxc-over-typescript-compiler.md",
+    "docs/adr/0004-defer-type-checker-integration.md",
+    "docs/adr/0006-semantic-backend-as-second-resolver.md",
+    "docs/adr/README.md",
+    "docs/benchmarks.md",
+    "docs/edge-cases.md",
+    "docs/root-cause-analysis.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 204,
+    "cache_creation_tokens": 1796812,
+    "cache_read_tokens": 52302619,
+    "output_tokens": 159465,
+    "api_call_count": 101,
+    "subagent_tokens": {
+      "input_tokens": 0,
+      "cache_creation_tokens": 0,
+      "cache_read_tokens": 0,
+      "output_tokens": 0,
+      "api_call_count": 0
+    }
+  }
+}

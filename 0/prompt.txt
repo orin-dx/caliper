@@ -1,0 +1,61 @@
+<task-notification>
+<task-id>b5rx92fb6</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-oxc-react-codegen/dce1e269-1dd4-48a9-879d-48cd2a7df5e5/tasks/b5rx92fb6.output</output-file>
+<status>failed</status>
+<summary>Background command "Wait for CI on the four new PRs and report any non-passing checks" failed with exit code 1</summary>
+</task-notification>
+
+---
+
+How do we get dependabot to resolve conflicts? https://github.com/orin-dx/oxc-react-docgen/pull/10
+
+---
+
+We've made a bunch of changes to our repo. Where are we with relation to the ts 7.1 prep work now?
+
+---
+
+Start with the ADR and doc rewrite. We want our docs to be maintainer and user friendly. Succinct, devoid of wordy prose and AI slop. We want to be brilliant, world class but easy to follow and understand. Think of the best practices for writing professional work, the guidelines for undestandable documentation and text when considering how we read and retain information please.
+
+---
+
+Any inspiration we can take from the ADRs and docs in ~/Projects/callisto?
+
+---
+
+We need to keep in mind the point and goal of an ADR. Research because you make a lot of assumptions. Consider the goal in an agentic world too. Does it change? We want to be clear, to the point, succinct and avoid wordy prose. Like all communcation, docs, comments, commits, etc
+
+Also, note that callisto moves to just using AGENTS.md since claude supports that now right?
+
+---
+
+Also note that ADRs are not to record things that should be in the agentic memory right? It's about architecture, model, direction, decisions. No?
+
+---
+
+Should any of these learnings help adjust the ~/projects/agent-plugins in wisp? How so?
+
+---
+
+Give me context and details to pass on to a new agent please, for wisp plugins
+
+---
+
+Also note that ADRs are not to record things that should be in the agentic memory right? It's about architecture, model, direction, decisions. No?
+
+---
+
+How does all of this change the proposed changes?
+
+---
+
+Let's address this now
+
+---
+
+What's the next step in ts 7.1 workd?
+
+---
+
+Can we write this down to the repo so I can start wiht a fresh session? Give me a starting point prompt too to kick it off. Be succinct, avoid wordy prose but save all information needed.
