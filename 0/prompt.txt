@@ -45,3 +45,7 @@ models should not be in the .claude folder right? We moved them in callisto
 ---
 
 We should make sure all our MD docs, specs are clean, consistent, organized appropriately, succinct, friendly and devoid of AI slop, word salad and wordy prose.
+
+---
+
+Commit this. Does this close out the uncommitted files?
