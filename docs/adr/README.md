@@ -68,6 +68,8 @@ Write like you're explaining it to the next engineer over their shoulder, not pr
 
 **Show the trade-off, not just the win.** A decision with no downside isn't a decision, it's a fact. Say what it costs.
 
+**Structure isn't fixed.** A paragraph, a paragraph plus bullets, a short table — whatever makes it scannable in one pass. `0006`'s Decision section is an intro line plus three bullets because it's three real choices; don't force that into one paragraph, and don't add sections or padding a one-line decision doesn't need.
+
 ## What good looks like
 
 Read `0002-manual-serialize-for-prop-type.md` — a real bug behind it, a real number (`recursion_limit = 2048`), a real consequence, four sections, no throat-clearing.
