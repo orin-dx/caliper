@@ -1,6 +1,6 @@
 # 0004. Defer full type-checker integration
 
-**Status:** Accepted **Date:** 2026-07-22 (retroactive)
+**Status:** Superseded by 0006 **Date:** 2026-07-22 (retroactive)
 
 ## Context
 

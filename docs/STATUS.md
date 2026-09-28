@@ -10,7 +10,7 @@ Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are f
 - `cargo clippy --workspace --all-targets -D warnings` clean with `unsafe_code = "deny"` enforced workspace-wide
 - 20 real-world fixture libraries validated against `react-docgen-typescript` (shadcn, Radix, MUI, Chakra, Mantine, React Aria, antd, ariakit, ark-ui, base-ui, blueprint, day-picker, fluentui, headlessui, panda, react-final-form, react-resizable-panels, storybook-emotion, tanstack-table, zendesk-garden — see `rdt-coverage.md`)
 
-## Features & Improvements Added
+## Features and improvements
 
 - **Testing Stack** — `cargo-nextest` process runner, `rstest` parameterized spec tables, `insta` snapshots, and `trycmd` executable Markdown CLI specs.
 - **Plugin system** (`DocgenPlugin` / `PluginRegistry`) — Extensible AST and component resolution hooks in `crates/core/src/plugin.rs`.
@@ -22,14 +22,14 @@ Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are f
 
 ## Known gaps that won't get fixed without a type checker
 
-See the "Known gaps summary" table in `rdt-coverage.md` for the full, maintained list. The short version: conditional types, mapped types over an unbound generic, and a couple of `@emotion/styled`-specific call shapes all need real type inference OXC deliberately doesn't do. Not bugs, and not on the roadmap until a stable programmatic or LSP-backed TypeScript semantic route passes the gates in `type-checker-integration.md`.
+See the "Known gaps summary" table in `rdt-coverage.md` for the full, maintained list. The short version: conditional types, mapped types over an unbound generic, and a couple of `@emotion/styled`-specific call shapes all need real type inference OXC deliberately doesn't do. Not bugs. An opt-in TypeScript 7 semantic backend is designed but not implemented: see ADR 0006 and `type-checker-integration.md`.
 
 ## Where to look next
 
 - **Edge cases, failure modes, and gaps not yet fixed** → `edge-cases.md` — comprehensive audit of crash/hang risks, silent data loss, and silent correctness bugs across every subsystem, prioritized. Update it as findings get fixed or new ones turn up.
 - **Why those gaps happened, and the plan to fix them** → `root-cause-analysis.md` — the edge-case findings collapsed into 11 mechanism-level root causes with concrete fix proposals, plus a Phase 1 task breakdown.
 - **What broke and why, historically** → `rdt-coverage.md` — every bug found during real-library validation, root cause, and the fix. Keep this updated; it's the project's memory.
-- **Why a hard-to-reverse decision was made** → `docs/adr/` — OXC over the TypeScript compiler, manual serde for `PropType`, positional msgpack encoding, deferring type-checker integration. Write a new one when you make a decision like these (see `docs/adr/README.md`).
+- **Why a hard-to-reverse decision was made** → `docs/adr/` — OXC over the TypeScript compiler, manual serde for `PropType`, positional msgpack encoding, panic containment, the TypeScript 7 semantic backend. Write a new one when you make a decision like these (see `docs/adr/README.md`).
 - **How the pipeline fits together** → `ARCHITECTURE.md`
 - **Setup, testing, code style, commit conventions** → `CONTRIBUTING.md`
 - **Migrating from react-docgen-typescript** → `MIGRATING.md`

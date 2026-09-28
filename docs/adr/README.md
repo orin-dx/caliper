@@ -2,6 +2,19 @@
 
 Short, dated records of _architectural_ decisions — ones that shape system structure, boundaries, or contracts other code depends on. Not a changelog, not a design doc, not a place to explain what the code does — comments and `ARCHITECTURE.md` already do that.
 
+## Index
+
+One line per ADR, with what it guards. Add a line when you add an ADR.
+
+- [1. Parse with OXC instead of the TypeScript compiler](0001-oxc-over-typescript-compiler.md) — do not add a type-checking pass to the default path. The opt-in backend is 0006.
+- [2. Hand-write Serialize/Deserialize for PropType instead of deriving it](0002-manual-serialize-for-prop-type.md) — do not derive them on `PropType` or `CollectedType`.
+- [3. Cache the DTS parse cache with positional (not named) MessagePack](0003-positional-msgpack-cache-encoding.md) — do not reorder, insert or remove `SourceData` fields without bumping `CACHE_SCHEMA_VERSION`.
+- [4. Defer full type-checker integration](0004-defer-type-checker-integration.md) — superseded by 0006.
+- [5. Contain panics at a single, per-item boundary](0005-panic-containment-boundary.md) — route anything reachable from a rayon `.map()`, a `DocgenPlugin` hook or a NAPI entry point through `contain_panic`.
+- [6. Run the TypeScript backend as a second resolver](0006-semantic-backend-as-second-resolver.md) — do not patch `Opaque` leaves, give `crates/core` a compiler process or I/O, or route the backend through NAPI.
+
+Changing any of these needs a new ADR.
+
 ## When to write one
 
 Two gates, both required:
@@ -22,8 +35,9 @@ Not ADR material:
 - A single function's algorithm choice, confined to that function — that's a code comment
 - A bug fix — commit message, and if it's the kind of thing that could recur, a line in `rdt-coverage.md`
 - A behavior-preserving refactor — commit message is enough
-- A naming or style convention — that's `CLAUDE.md` or a lint rule
-- Anything already obvious from the code or from `CLAUDE.md`'s non-negotiables
+- A naming or style convention — that's `AGENTS.md` or a lint rule
+- Anything already obvious from the code or from `AGENTS.md`'s non-negotiables
+- Per-user preferences, workflow notes and tool quirks — that's agent memory
 
 ## Format
 
@@ -31,7 +45,7 @@ One file per decision: `docs/adr/NNNN-short-title.md`, numbered sequentially, ne
 
 - **Never edit history.** If a decision changes, write a new ADR and mark the old one's status `Superseded by 000X`. Don't rewrite the old file to look like you knew all along.
 - **Status** is one of: `Accepted`, `Superseded by NNNN`, `Deprecated`.
-- Keep it short. If the technical depth doesn't fit on a screen, split it into its own doc and link it — see `0004-defer-type-checker-integration.md` pointing at `type-checker-integration.md` instead of inlining it.
+- Keep it short. If the technical depth doesn't fit on a screen, split it into its own doc and link it — see `0006-semantic-backend-as-second-resolver.md` pointing at `type-checker-integration.md` instead of inlining it.
 
 ## Writing it
 

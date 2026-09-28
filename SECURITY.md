@@ -1,6 +1,6 @@
-# Security Policy
+# Security policy
 
-## Reporting a Vulnerability
+## Reporting a vulnerability
 
 Email **security@orin-dx.com** — don't open a public issue for anything that could be exploited before a fix ships.
 
@@ -23,6 +23,6 @@ This tool parses TypeScript/TSX source to extract React component props. The rea
 
 Out of scope: accuracy gaps in prop extraction (wrong or missing props for a valid pattern) — those are correctness bugs, file them as a normal issue, not a security report.
 
-## Supported Versions
+## Supported versions
 
 This project is pre-1.0 and not yet published to npm. Security fixes land on `main`; there's no older release line to backport to yet. Once versioned releases ship, this section will name which lines receive fixes.

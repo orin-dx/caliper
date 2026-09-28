@@ -103,7 +103,7 @@ pub fn load_config_file(start_dir: &std::path::Path) -> Result<Option<PipelineOp
 /// A config file that fails to evaluate, or evaluates to something that doesn't
 /// match [`DocgenConfigSchema`] (a typo'd key, wrong value type, or a field this
 /// module doesn't support yet), is a hard error rather than silently falling back
-/// to defaults — CLAUDE.md non-negotiable #6: never fail silently. A
+/// to defaults — AGENTS.md non-negotiable #6: never fail silently. A
 /// config a user explicitly wrote getting quietly ignored is a plausible-looking
 /// but wrong result forever.
 pub fn try_load_config(path: &std::path::Path) -> Result<Option<PipelineOptions>> {

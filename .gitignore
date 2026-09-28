@@ -50,3 +50,6 @@ lcov.info
 .cache/
 # tempfile's default prefix; tests that need the real node_modules create these in-tree and a killed run leaves them
 .tmp*/
+
+# Entire (local checkpoint/session history, not repo content)
+.entire/
