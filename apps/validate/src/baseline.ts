@@ -27,6 +27,10 @@ console.log('Running react-docgen-typescript baseline...')
 writeFileSync('./baselines/react-docgen-typescript.json', runScript('run-react-docgen-typescript.ts'))
 console.log('✅ react-docgen-typescript baseline saved')
 
+console.log('Running semantic (tsc --api) baseline...')
+writeFileSync('./baselines/semantic.json', runScript('run-semantic.ts'))
+console.log('✅ semantic baseline saved')
+
 console.log('Running oxc-react-docgen baseline (html-attributes=full, fair vs RDT)...')
 writeFileSync('./baselines/oxc-react-docgen.json', runScript('run-ours.ts'))
 console.log('✅ oxc-react-docgen baseline saved')

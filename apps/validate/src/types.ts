@@ -6,6 +6,10 @@ export interface NormalizedProp {
   type: string
   description: string
   defaultValue?: string
+  /** First declaring interface/type-alias name (semantic tool only). */
+  parent?: string
+  /** Every declaring interface/type-alias name (semantic tool only). */
+  declarations?: string[]
 }
 
 export interface NormalizedComponent {
@@ -17,7 +21,7 @@ export interface NormalizedComponent {
 export type NormalizedOutput = Record<string, NormalizedComponent>
 
 export interface ToolResult {
-  tool: 'react-docgen' | 'react-docgen-typescript' | 'oxc-react-docgen'
+  tool: 'react-docgen' | 'react-docgen-typescript' | 'oxc-react-docgen' | 'semantic'
   fixture: string
   durationMs: number
   output: NormalizedOutput

@@ -8,11 +8,13 @@
     "run:rdg": "tsx src/run-react-docgen.ts",
     "run:rdt": "tsx src/run-react-docgen-typescript.ts",
     "run:ours": "tsx src/run-ours.ts",
+    "run:semantic": "tsx src/run-semantic.ts",
     "compare": "tsx src/compare.ts",
     "analyze": "tsx src/analyze.ts",
     "baseline": "tsx src/baseline.ts",
     "compare:all": "tsx src/baseline.ts && tsx src/compare.ts",
     "analyze:all": "tsx src/baseline.ts && tsx src/analyze.ts",
+    "parity": "tsx src/baseline.ts && tsx src/parity.ts",
     "bench:cold": "./bench-cold.sh"
   },
   "dependencies": {
@@ -20,7 +22,8 @@
     "fast-deep-equal": "^3.1.3",
     "react-docgen": "^8.0.3",
     "react-docgen-typescript": "^2.4.0",
-    "typescript": "^7.0.2"
+    "typescript": "^6.0.3",
+    "typescript-next": "npm:typescript@next"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",
