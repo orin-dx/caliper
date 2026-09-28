@@ -87,18 +87,16 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       # Pinned here, not inherited from the action's default.
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@c5578e6a63754b54575b3ac7518cc1753e443393 # callisto@0.8.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@0a971b2118954e7089c1a0aa28aebbf131ed1602 # callisto@0.10.0
         with:
-          version: callisto@0.8.0
+          version: callisto@0.10.0
           verification: require
       - name: Compose, version, and open the release PR
-        uses: orin-dx/callisto/.github/actions/callisto-action@c5578e6a63754b54575b3ac7518cc1753e443393 # callisto@0.8.0
+        uses: orin-dx/callisto/.github/actions/callisto-action@0a971b2118954e7089c1a0aa28aebbf131ed1602 # callisto@0.10.0
         with:
           setup_callisto: 'false'
           branch: main
           release_branch: callisto/version-packages
-          # Core bumps otherwise leave path-dependents stale in Cargo.lock.
-          version_command: 'callisto version --refresh-lockfiles'
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -115,9 +113,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@c5578e6a63754b54575b3ac7518cc1753e443393 # callisto@0.8.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@0a971b2118954e7089c1a0aa28aebbf131ed1602 # callisto@0.10.0
         with:
-          version: callisto@0.8.0
+          version: callisto@0.10.0
           verification: require
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -132,7 +130,7 @@ jobs:
           set -euo pipefail
           handoff_dir="${RUNNER_TEMP}/release-intent"
           mkdir -p "$handoff_dir"
-          callisto release plan --profile production \
+          callisto release plan \
             --source-root "$GITHUB_WORKSPACE/release-source" \
             --orchestration-revision "$GITHUB_SHA" \
             --from-release-commit "$RELEASE_SOURCE_SHA" \
@@ -242,10 +240,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      # Needs callisto >= 0.9.0 (gitignored release-source files, platform-package publish).
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@c5578e6a63754b54575b3ac7518cc1753e443393 # callisto@0.8.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@0a971b2118954e7089c1a0aa28aebbf131ed1602 # callisto@0.10.0
         with:
-          version: callisto@0.8.0
+          version: callisto@0.10.0
           verification: require
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -314,7 +311,6 @@ jobs:
             --intent "${RUNNER_TEMP}/release-intent/release-intent.json"
             --receipt "$receipt_dir/release-receipt.json"
             --orchestration-revision "$GITHUB_SHA"
-            --profile production
           )
           callisto release execute "${args[@]}"
       - name: Summarize receipt
