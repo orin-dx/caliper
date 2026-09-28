@@ -1,0 +1,69 @@
+Starting prompt for the fresh session:
+
+Read docs/type-checker-integration.md's "Next step" section and do step 1: fix apps/validate's RDT oracle (crashes on import against typescript ^7.0.2 — ts.JsxEmit undefined). Give it a TypeScript 6 API (typescript@6 or @typescript/typescript6) separate from the typescript@next build the semantic probe uses. Then do steps 2-3. Stop before step 4.
+
+---
+
+should we be using console log or our CLI output libraries for these???
+
+---
+
+We should be following our best practices for world class CLI output
+
+---
+
+We should also be keeping in mind succinct, friendly and to the point docs and comments. No wordy prose or AI slop or word salad please.
+
+---
+
+Is the oracle part of the workflow or for comparison?
+
+---
+
+start the Rust client for the Lifecycle gate
+
+---
+
+Shall we commit this work as a logical commit? How should we structure our PRs?
+
+---
+
+That is weird that we have a large pile of pending changes. What are they? Where did they come from? Entire might help us here
+
+---
+
+Is that the work getting ready for release and for callisto's working version?
+
+---
+
+What are we doing for .agents, .codex, etc configs in callisto? What do others do for open source projects?
+
+---
+
+models should not be in the .claude folder right? We moved them in callisto
+
+---
+
+We should make sure all our MD docs, specs are clean, consistent, organized appropriately, succinct, friendly and devoid of AI slop, word salad and wordy prose.
+
+---
+
+Commit this. Does this close out the uncommitted files?
+
+---
+
+The tool config folders? Is that what you’re talking about?
+
+---
+
+Just commit
+
+---
+
+What’s next?
+
+---
+
+Let's reshape the ADRs to be clean, friendly, succint and consistent. If it needs more content do it. One paragraph is too restrictive, if we need more info we do. The rules should not be super prescriptive. The goal is to be scannable, friendly and to avoid unecessary wordy prose or filler words, right?
+
+Also update the status

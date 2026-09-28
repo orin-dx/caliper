@@ -1,0 +1,140 @@
+{
+  "cli_version": "0.11.4-nightly.202609260624.c369a70d2",
+  "checkpoint_id": "01M3MCJF5HKW1ZGBKWM127RVDC",
+  "session_id": "73921187-a5dd-4f6c-b579-5f138a710070",
+  "strategy": "manual-commit",
+  "created_at": "2026-09-28T16:12:03.042205Z",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "save_step_count": 1,
+  "files_touched": [
+    "docs/STATUS.md",
+    "docs/adr/README.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "043b7aeae823",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 532,
+    "cache_creation_tokens": 1259185,
+    "cache_read_tokens": 71748670,
+    "output_tokens": 163708,
+    "api_call_count": 266
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01BiECMyywZScg77AqWrfyaW",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "entire-search"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "5a0cd3843056",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 1389,
+        "end": 1390,
+        "entry_ids": [
+          "736455ad-19ce-49db-9875-fb538862f37e"
+        ],
+        "tool_use_id": "toolu_01BiECMyywZScg77AqWrfyaW"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01BiECMyywZScg77AqWrfyaW"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: entire-search",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 15
+  },
+  "summary": {
+    "intent": "Fix apps/validate's RDT oracle crash under typescript^7, build a TS-API-based semantic parity probe, re-verify accuracy Evidence against the full fixture corpus (docs/type-checker-integration.md steps 1-3), then investigate and land a large pile of unrelated pending doc/config changes discovered in the working tree, and reshape ADR formatting guidance.",
+    "outcome": "RDT oracle fixed via a typescript-next aliased dependency (RDT stays on typescript@6.0.3, semantic probe uses typescript-next@7.1.0-dev); run-semantic.ts and parity.ts were built, lint/format-clean, and re-verified (99.7% required-match, 95.3% type-string-match across 44 files/47 components/5554 props). Traced and landed the unrelated pending pile as three more commits (AGENTS.md/ADR/prose cleanup, semantic-model relocation to docs/architecture, per-tool Entire CLI hooks/skill mirrors), then relaxed the ADR Decision-section rule and refreshed docs/STATUS.md.",
+    "learnings": {
+      "repo": [
+        "apps/validate has no output-abstraction convention (unlike crates/cli's AGENTS.md rule to avoid println!) — plain console.log/console.error is the established pattern across baseline.ts, compare.ts, analyze.ts, run-react-docgen-typescript.ts",
+        "pnpm-workspace `overrides` for a peer dependency gets recorded in the lockfile but does not actually rewrite the resolved peer version in node_modules — had to use an aliased dependency (typescript-next: npm:typescript@next) instead",
+        "typescript@next (7.x) ships a new async Program/Checker API at 'typescript/unstable/async' (class-based, not raw JSON-RPC); SyntaxKind lives separately in 'typescript/unstable/ast'",
+        "RDT 2.4.0 crashes on import against typescript@7 because ts.JsxEmit is undefined in that version's API surface",
+        "docs/adr/README.md defines house style (banned words like leverage/utilize/robust, sentence-case headers, active voice, cut filler) that should apply repo-wide, not just to ADRs",
+        "This repo's cross-tool agent convention (from a sibling project 'agent-plugins' and inspired by callisto) is: AGENTS.md replaces CLAUDE.md as the shared doc, with .agents/.codex/.cursor/.gemini/.github/hooks/.github/skills holding per-tool mirrors of .claude/ hooks and skills",
+        "callisto's precedent: model/architecture docs should live in docs/architecture/ (not .claude/) so every agent tool can read them — this repo followed that pattern, moving .claude/semantic-model/ to docs/architecture/",
+        "docs/archive/ is this repo's convention for retiring stale planning/handoff docs, with a README index noting why each was archived — archived docs' own internal content/paths are never rewritten (treated like git history)",
+        ".claude/skills/entire-search/SKILL.md is marked ENTIRE-MANAGED and auto-synced by the entire CLI tool — must not be hand-edited"
+      ],
+      "code": [
+        {
+          "path": "apps/validate/package.json",
+          "finding": "typescript pinned to ^6.0.3 for RDT; typescript-next added as npm:typescript@next alias for the semantic probe"
+        },
+        {
+          "path": "apps/validate/src/run-semantic.ts",
+          "finding": "New file implementing RDT's extraction algorithm via typescript@next's async Checker API; refactored to Promise.all-based parallelism to satisfy oxlint's no-await-in-loop, and added literal-union extraction matching RDT's shouldExtractLiteralValuesFromEnum behavior"
+        },
+        {
+          "path": "apps/validate/src/parity.ts",
+          "finding": "New file diffing run-semantic.ts output against the RDT baseline; wired into `pnpm parity`, uses chalk for summary coloring"
+        },
+        {
+          "path": "docs/adr/0000-template.md",
+          "finding": "Decision section rule relaxed from mandatory one-paragraph to 'shape should match the decision' (paragraph, or paragraph plus bullets)"
+        }
+      ],
+      "workflow": [
+        "Used `entire search`/`entire checkpoint explain` to trace which prior session/prompt produced a pile of uncommitted changes when git history alone didn't explain it",
+        "When uncommitted changes could stem from multiple sessions, cross-reference session timestamps and commit history to rule out unrelated already-landed work before attributing to the real source",
+        "Parallel background agents (Agent tool) used to audit/clean prose across independent doc groups (root docs, ADRs, topic docs, semantic-model move) simultaneously, each reporting back via teammate messages with no git commits, letting the orchestrating session verify and commit centrally",
+        "Verified a refactor's correctness by diffing normalized JSON output (sorted keys, zeroed volatile fields) between pre- and post-refactor runs before overwriting the committed baseline",
+        "Split unrelated work into separate logical commits even when discovered together: oracle-fix, AGENTS.md/ADR/prose cleanup, semantic-model move, and tool-config hooks/skills each got their own commit"
+      ]
+    },
+    "friction": [
+      "pnpm-workspace `overrides` silently failed to rewrite RDT's peer typescript resolution despite being recorded in the lockfile, requiring multiple rounds of node_modules/lockfile wipes and a different approach (aliased dependency)",
+      "typescript@next's async API is undocumented/unstable (no clear docs), requiring reading compiled dist/api/async/api.js source directly to discover the Checker/Symbol/Type wrapper class methods",
+      "SyntaxKind not re-exported from 'typescript/unstable/async', causing an initial smoke-test failure until imported from 'typescript/unstable/ast' instead",
+      "Determining the true source of a large uncommitted change pile required significant investigative work (entire search/checkpoint explain across multiple candidate sessions) since git history and file diffs alone were ambiguous"
+    ],
+    "open_items": [
+      "Rust client for the Lifecycle gate (step 4 of docs/type-checker-integration.md) — explicitly deferred per user's 'stop before step 4' instruction, user later said 'start' but no work shown yet in transcript",
+      "Lifecycle gate still needs: missing-binary handling, unsupported-version detection, timeout/crash/restart-storm handling, malformed/oversized frame handling, partial-project failure, shutdown reaping, stale-notification handling — all 'not started' per Gates table",
+      "rdt-compat/svg-icon.tsx has a genuine RDT bug (multiple forwardRef in one file causes cross-contamination of element types between components) — documented but not fixed, since RDT is only the oracle, not shipped code"
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-09-28T16:11:38.402243Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 16,
+    "human_modified": 3,
+    "human_removed": 0,
+    "total_committed": 16,
+    "total_lines_changed": 23,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 9,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.local.json": 8
+      }
+    }
+  ]
+}
