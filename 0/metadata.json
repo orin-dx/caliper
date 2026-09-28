@@ -1,0 +1,125 @@
+{
+  "cli_version": "0.11.4-nightly.202609260624.c369a70d2",
+  "checkpoint_id": "01M3K717FJE2PBJXNGTYFH50F6",
+  "session_id": "73921187-a5dd-4f6c-b579-5f138a710070",
+  "strategy": "manual-commit",
+  "created_at": "2026-09-28T05:15:58.187911Z",
+  "branch": "main",
+  "checkpoints_count": 11,
+  "save_step_count": 1,
+  "files_touched": [
+    "apps/validate/package.json",
+    "apps/validate/src/baseline.ts",
+    "apps/validate/src/parity.ts",
+    "apps/validate/src/run-semantic.ts",
+    "apps/validate/src/types.ts",
+    "docs/type-checker-integration.md",
+    "pnpm-lock.yaml"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "5a0cd3843056",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 474,
+    "cache_creation_tokens": 387812,
+    "cache_read_tokens": 59801027,
+    "output_tokens": 148976,
+    "api_call_count": 237
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01BiECMyywZScg77AqWrfyaW",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "entire-search"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "5a0cd3843056",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 1389,
+        "end": 1390,
+        "entry_ids": [
+          "736455ad-19ce-49db-9875-fb538862f37e"
+        ],
+        "tool_use_id": "toolu_01BiECMyywZScg77AqWrfyaW"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01BiECMyywZScg77AqWrfyaW"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: entire-search",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 11
+  },
+  "summary": {
+    "intent": "Fix apps/validate's RDT oracle crash against typescript^7 (steps 1-3 of the type-checker-integration.md 'Next step' plan: TS6 API for RDT, build a tsc-api semantic probe, re-run parity against the full fixture corpus), then investigate and clean up a large pile of unrelated pending doc/config changes found sitting uncommitted in the working tree.",
+    "outcome": "RDT oracle fixed via an aliased typescript-next dependency (RDT stays on typescript@6.0.3, semantic probe uses typescript@next), a new run-semantic.ts/parity.ts pipeline was built and verified against the full 44-file/47-component corpus with results documented in docs/type-checker-integration.md, and three commits landed: the oracle fix, an AGENTS.md/ADR/prose cleanup pass, and a .claude/semantic-model → docs/architecture/ relocation, all done via four parallel subagents plus manual follow-up fixes.",
+    "learnings": {
+      "repo": [
+        "apps/validate has no output abstraction (unlike crates/cli's AGENTS.md rule); console.log/console.error is the established convention across baseline.ts, compare.ts, analyze.ts, run-react-docgen-typescript.ts despite chalk being a listed dependency",
+        "pnpm-workspace 'overrides' entries get recorded in pnpm-lock.yaml but don't actually rewrite peer dependency resolution in practice; use a package.json aliased dependency (e.g. typescript-next: npm:typescript@next) instead to pin a specific subdependency's resolution",
+        "typescript@next ships a full async Checker/Program API under typescript/unstable/async (class-based, not raw JSON-RPC) with SyntaxKind separately exported from typescript/unstable/ast",
+        "RDT (react-docgen-typescript) has a real bug: multiple forwardRef components in one file cross-contaminate element types between components (found in fixtures/rdt-compat/svg-icon.tsx)",
+        "docs/adr/README.md contains the house style rules (banned words like leverage/utilize/robust, sentence-case headers, active voice, no filler) that should apply repo-wide to all .md docs, not just ADRs",
+        "docs/archive/README.md convention: archived docs' internal content/paths are never rewritten to look historically accurate; only the archive index entry gets updated with a 'superseded by X' note",
+        "repo convention: .claude/, .codex/, .gemini/, .agents/ are per-tool config dirs invisible to other agents — cross-tool-relevant docs (like the semantic model) must live under docs/ instead, matching callisto's prior 'move semantic model out of .claude' precedent"
+      ],
+      "code": [
+        {
+          "path": "apps/validate/src/run-semantic.ts",
+          "finding": "Reimplements RDT's extraction algorithm via typescript@next's tsc-api async client; was refactored from an await-in-loop shape to Promise.all-based parallelism to satisfy oxlint's no-await-in-loop/no-nested-ternary rules, verified byte-identical output (modulo Symbol.iterator id noise) before/after refactor"
+        },
+        {
+          "path": "apps/validate/src/parity.ts",
+          "finding": "New script diffing run-semantic.ts output against the committed RDT baseline; added chalk-colored summary output"
+        },
+        {
+          "path": "docs/rdt-coverage.md",
+          "line": 126,
+          "finding": "'Template literal type → opaque' row was stale; current snapshot (crates/core/tests/snapshots/snapshots__snapshot_mantine.snap) shows mantine's size MantineSize | `compact-${MantineSize}` now fully resolves to a proper literal union, so the row was corrected from ❌ to ✅"
+        }
+      ],
+      "workflow": [
+        "When several teammate subagents edit overlapping files concurrently (e.g. AGENTS.md touched by both docs-cleanup-root and docs-cleanup-semantic-model), their edits can apply cleanly without conflict if scoped to different lines — worth spot-checking afterward rather than assuming collision",
+        "Used the 'entire' search/checkpoint CLI to trace the provenance of a large uncommitted working-tree change pile back to a specific prior session's checkpoints and exact prompts, rather than guessing from git diff alone",
+        "Split unrelated concurrent work into separate commits even when found in the same working tree at the same time: oracle-fix (steps1-3) landed as its own commit, separate from the AGENTS.md/ADR/prose cleanup and the semantic-model relocation, because they were causally and thematically independent",
+        "For teammate (SendMessage/subagent) idle_notification messages that duplicate an already-reported summary, acknowledge briefly rather than re-summarizing"
+      ]
+    },
+    "friction": [
+      "pnpm-workspace overrides silently failed to rewrite RDT's typescript peer resolution despite being recorded in the lockfile, requiring several install/verify/rm -rf node_modules cycles before switching to the aliased-dependency approach",
+      "Reading typescript@next's unstable async API required manually greping/reading compiled dist/api/async/api.js since there's no public documentation for the new tsc-api surface",
+      "A large, seemingly unrelated pile of uncommitted changes (CLAUDE.md→AGENTS.md renames, .agents/.codex/.cursor/.gemini scaffolding, semantic-model regeneration) sat in the working tree with unclear origin, requiring cross-session archaeology via the entire tool to establish provenance before it could be safely committed separately"
+    ],
+    "open_items": [
+      "docs/adr/0005 and 0006 use multi-paragraph Decision sections instead of the ADR template's one-paragraph shape — flagged by docs-cleanup-adr as a readability call, left for user's decision, not yet resolved",
+      "Step 4 (Rust client for the Lifecycle gate) of docs/type-checker-integration.md's Next step plan was explicitly stopped before, per original instructions — still pending",
+      "AGENTS.md tagline was corrected from 'drop-in replacement' to 'RDT-compatible JSON via --format rdt' by docs-cleanup-root; user was asked to give it a quick look since it changed a factual claim, not just wording, but no explicit confirmation was captured in transcript"
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-09-28T05:15:36.154556Z",
+    "agent_lines": 500,
+    "agent_removed": 95,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 500,
+    "total_lines_changed": 595,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
