@@ -1,0 +1,430 @@
+{
+  "cli_version": "0.11.4-nightly.202609260624.c369a70d2",
+  "checkpoint_id": "01M3K701S88NW7PMF1A1T2DBSJ",
+  "session_id": "73921187-a5dd-4f6c-b579-5f138a710070",
+  "strategy": "manual-commit",
+  "created_at": "2026-09-28T05:15:21.529062Z",
+  "branch": "main",
+  "checkpoints_count": 11,
+  "save_step_count": 11,
+  "files_touched": [
+    "docs/architecture/README.md",
+    "docs/architecture/cli-commands.md",
+    "docs/architecture/extractor-ast-visiting.md",
+    "docs/architecture/napi-binding.md",
+    "docs/architecture/pipeline-orchestration.md",
+    "docs/architecture/resolver-type-resolution.md",
+    "docs/architecture/serialization-formats.md",
+    "docs/architecture/types-and-output-contract.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "5a0cd3843056",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 468,
+    "cache_creation_tokens": 385648,
+    "cache_read_tokens": 58532462,
+    "output_tokens": 148321,
+    "api_call_count": 234
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01BiECMyywZScg77AqWrfyaW",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "entire-search"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "5a0cd3843056",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 1389,
+        "end": 1390,
+        "entry_ids": [
+          "736455ad-19ce-49db-9875-fb538862f37e"
+        ],
+        "tool_use_id": "toolu_01BiECMyywZScg77AqWrfyaW"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01BiECMyywZScg77AqWrfyaW"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: entire-search",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 11
+  },
+  "summary": {
+    "intent": "Fix apps/validate's RDT oracle (crashing on typescript@7 import) with a separate TypeScript 6 API, then build a semantic probe via typescript@next's tsc-api and re-verify the type-checker-integration doc's Evidence numbers against the full fixture corpus (stopping before Rust client work). Later, investigate and clean up a large pile of unrelated uncommitted repo changes (AGENTS.md migration, semantic-model relocation, doc prose) discovered via the `entire` search tool.",
+    "outcome": "RDT now resolves against typescript@6.0.3 via a `typescript-next: npm:typescript@next` aliased dependency (pnpm-workspace overrides didn't actually take effect); wrote run-semantic.ts and parity.ts, re-ran the full 44-file/47-component corpus (99.7% required-prop match, 95.3% type-string match), and updated docs/type-checker-integration.md. Traced the unrelated uncommitted pile to a prior session via `entire checkpoint explain`, ran 4 parallel cleanup agents (ADR, root docs, topic docs, semantic-model relocation), fixed remaining flagged issues, and committed everything as two logical commits (a8875cb docs/AGENTS.md migration + prose cleanup, and a second commit moving .claude/semantic-model to docs/architecture).",
+    "learnings": {
+      "repo": [
+        "apps/validate uses console.log/console.error as its style convention (not chalk, despite it being a dependency) — the crates/cli AGENTS.md 'no println!, use output.rs' rule is Rust-CLI-specific and doesn't apply to this Node/TS harness",
+        "pnpm-workspace.yaml `overrides` entries get recorded in pnpm-lock.yaml but don't actually rewrite peer dependency resolution in this pnpm version (11.9.0) — use an aliased dependency (`name: npm:pkg@tag`) instead to force a specific version for one consumer",
+        "typescript@next ships a `typescript/unstable/async` module (API/Checker/Program classes, async methods) that is a full JS wrapper, not raw JSON-RPC; SyntaxKind/TypeFlags/SymbolFlags live in `typescript/unstable/ast` and `typescript/dist/enums/*.enum.js`, not the async module",
+        "react-docgen-typescript 2.4.0 has a real bug: multiple forwardRef components in one file (fixtures/rdt-compat/svg-icon.tsx) cross-contaminate element types between components",
+        "docs/adr/README.md defines house style for the whole repo (banned words list: leverage/utilize/robust/essentially/seamless; sentence-case headers; active voice; no filler) — cleanup agents applied this repo-wide, not just to ADRs",
+        "this repo's convention: .claude/, .codex/, .gemini/, .agents/, .github/hooks|skills/ are per-tool config dirs; shared docs must live in AGENTS.md/docs/ so every agent tool can read them, not just Claude Code — callisto (sibling repo) already made this same .claude/semantic-model → docs/architecture/ move for the same reason",
+        "docs/archive/ is the repo's convention for retiring stale planning docs, with a README index; archived docs should not have internal paths rewritten to match current state (treated like not rewriting ADR history)",
+        "`entire checkpoint explain --session <id>` and `entire search --json --compact` can reconstruct provenance of uncommitted changes across prior sessions when git history alone doesn't explain them"
+      ],
+      "code": [
+        {
+          "path": "apps/validate/src/run-semantic.ts",
+          "finding": "Reimplements RDT's extraction algorithm using typescript@next's async Checker API; refactored from an await-in-loop pattern to Promise.all-based parallelism to satisfy oxlint's no-await-in-loop/no-nested-ternary rules, verified output-identical (ignoring Symbol.iterator id noise) after refactor"
+        },
+        {
+          "path": "apps/validate/src/parity.ts",
+          "finding": "New script diffing run-semantic.ts output against the committed RDT baseline; wired into `pnpm parity`"
+        },
+        {
+          "path": "apps/validate/package.json",
+          "finding": "typescript stays ^6.0.3 for RDT's peer dep; added typescript-next as npm:typescript@next alias for the semantic probe's own use"
+        }
+      ],
+      "workflow": [
+        "When multiple background subagents report via teammate-message notifications, dedupe idle_notification pings that just restate an already-reported summary rather than re-summarizing to the user",
+        "For causally-chained work (broken tool blocked the probe, which blocked the re-run), commit as one unit rather than splitting by step, but split truly unrelated concurrent work (doc/AGENTS.md migration) into its own separate commit(s)",
+        "When investigating stale/uncommitted changes with unclear origin, `entire search` + `entire checkpoint explain --session <id>` can trace them back to the originating conversation and its actual prompts far faster than guessing from diff content alone"
+      ]
+    },
+    "friction": [
+      "pnpm-workspace.yaml overrides silently failed to rewrite peer resolution despite being written to the lockfile, requiring several install/verify cycles (including a full node_modules + lockfile wipe) before switching to the aliased-dependency approach",
+      "Had to reverse-engineer typescript@next's undocumented `typescript/unstable/async` API by reading minified/compiled dist JS directly (api.js, node.js) since no docs exist for the TS7 tsc-api yet",
+      "SyntaxKind import initially failed because it's not re-exported from typescript/unstable/async, only from typescript/unstable/ast — cost a debug cycle",
+      "Large unrelated pile of uncommitted changes (AGENTS.md migration, semantic-model, ADRs) sitting in the working tree caused confusion about scope and required a full investigation via `entire` before it could be safely separated from the oracle-fix commit"
+    ],
+    "open_items": [
+      "docs/adr/0005 and 0006 use multi-paragraph Decision sections instead of the ADR template's one-paragraph shape — flagged by docs-cleanup-adr agent as a readability call, left for user to decide whether to reformat",
+      "docs/archive/2026-08-12-sdd-spec-drift-session-handoff.md still contains internal .claude/semantic-model path references — intentionally left unedited as historical record; docs/archive/README.md's index entry was updated instead to note supersession",
+      "Step 4 (Rust client for the Lifecycle gate) explicitly deferred per original instructions to stop before it — user separately said 'start the Rust client for the Lifecycle gate' but no work on it appears in the transcript yet"
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-09-28T05:14:57.785579Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 84,
+    "human_removed": 973,
+    "total_committed": 952,
+    "total_lines_changed": 2009,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 1626,
+      "user_lines_removed": 229,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".agents/skills/adr/SKILL.md": 33,
+        ".agents/skills/entire-search/SKILL.md": 22,
+        ".agents/skills/rust-style/SKILL.md": 63,
+        ".agents/skills/rust-types/SKILL.md": 21,
+        ".agents/skills/rustdoc/SKILL.md": 36,
+        ".agents/skills/source-command-check/SKILL.md": 20,
+        ".agents/skills/source-command-snapshot/SKILL.md": 19,
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/semantic-model/INDEX.md": 1,
+        ".claude/semantic-model/cli-commands.md": 6,
+        ".claude/semantic-model/napi-binding.md": 1,
+        ".claude/semantic-model/pipeline-orchestration.md": 3,
+        ".claude/semantic-model/resolver-type-resolution.md": 2,
+        ".claude/semantic-model/serialization-formats.md": 3,
+        ".claude/semantic-model/types-and-output-contract.md": 5,
+        ".claude/settings.local.json": 8,
+        ".claude/skills/entire-search/SKILL.md": 22,
+        ".codex/hooks.json": 77,
+        ".cursor/hooks.json": 40,
+        ".cursor/skills/entire-search/SKILL.md": 22,
+        ".gemini/settings.json": 141,
+        ".gemini/skills/entire-search/SKILL.md": 22,
+        ".github/hooks/entire.json": 61,
+        ".github/skills/entire-search/SKILL.md": 22,
+        ".opencode/plugins/entire.ts": 269,
+        ".opencode/skills/entire-search/SKILL.md": 22,
+        "AGENTS.md": 54,
+        "apps/validate/package.json": 4,
+        "apps/validate/src/baseline.ts": 4,
+        "apps/validate/src/parity.ts": 107,
+        "apps/validate/src/run-semantic.ts": 169,
+        "apps/validate/src/types.ts": 5,
+        "crates/binding/src/lib.rs": 1,
+        "crates/cli/AGENTS.md": 18,
+        "crates/cli/src/config.rs": 1,
+        "crates/core/AGENTS.md": 32,
+        "crates/core/src/pipeline/discover.rs": 1,
+        "crates/core/src/pipeline/mod.rs": 2,
+        "crates/core/src/react_types.rs": 1,
+        "docs/STATUS.md": 2,
+        "docs/adr/0001-oxc-over-typescript-compiler.md": 2,
+        "docs/adr/0004-defer-type-checker-integration.md": 1,
+        "docs/adr/0006-semantic-backend-as-second-resolver.md": 34,
+        "docs/adr/README.md": 17,
+        "docs/benchmarks.md": 1,
+        "docs/edge-cases.md": 1,
+        "docs/root-cause-analysis.md": 4,
+        "docs/type-checker-integration.md": 137,
+        "pnpm-lock.yaml": 86
+      },
+      "user_removed_per_file": {
+        ".claude/semantic-model/INDEX.md": 1,
+        ".claude/semantic-model/cli-commands.md": 6,
+        ".claude/semantic-model/napi-binding.md": 1,
+        ".claude/semantic-model/pipeline-orchestration.md": 3,
+        ".claude/semantic-model/resolver-type-resolution.md": 2,
+        ".claude/semantic-model/serialization-formats.md": 3,
+        ".claude/semantic-model/types-and-output-contract.md": 5,
+        "CLAUDE.md": 43,
+        "apps/validate/package.json": 1,
+        "apps/validate/src/types.ts": 1,
+        "crates/binding/src/lib.rs": 1,
+        "crates/cli/CLAUDE.md": 18,
+        "crates/cli/src/config.rs": 1,
+        "crates/core/CLAUDE.md": 32,
+        "crates/core/src/pipeline/discover.rs": 1,
+        "crates/core/src/pipeline/mod.rs": 2,
+        "crates/core/src/react_types.rs": 1,
+        "docs/STATUS.md": 2,
+        "docs/adr/0001-oxc-over-typescript-compiler.md": 2,
+        "docs/adr/0004-defer-type-checker-integration.md": 1,
+        "docs/adr/README.md": 3,
+        "docs/benchmarks.md": 1,
+        "docs/edge-cases.md": 1,
+        "docs/root-cause-analysis.md": 4,
+        "docs/type-checker-integration.md": 88,
+        "pnpm-lock.yaml": 5
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 706,
+      "user_lines_removed": 21,
+      "agent_lines_added": 908,
+      "agent_lines_removed": 208,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/semantic-model/INDEX.md": 1,
+        ".claude/semantic-model/cli-commands.md": 6,
+        ".claude/semantic-model/napi-binding.md": 1,
+        ".claude/semantic-model/pipeline-orchestration.md": 3,
+        ".claude/semantic-model/resolver-type-resolution.md": 2,
+        ".claude/semantic-model/serialization-formats.md": 3,
+        ".claude/semantic-model/types-and-output-contract.md": 5,
+        ".claude/settings.local.json": 8,
+        ".claude/skills/entire-search/SKILL.md": 22,
+        ".codex/hooks.json": 77,
+        ".cursor/hooks.json": 40,
+        ".cursor/skills/entire-search/SKILL.md": 22,
+        ".gemini/settings.json": 141,
+        ".gemini/skills/entire-search/SKILL.md": 22,
+        ".github/hooks/entire.json": 61,
+        ".opencode/plugins/entire.ts": 269,
+        ".opencode/skills/entire-search/SKILL.md": 22
+      },
+      "user_removed_per_file": {
+        ".claude/semantic-model/INDEX.md": 1,
+        ".claude/semantic-model/cli-commands.md": 6,
+        ".claude/semantic-model/napi-binding.md": 1,
+        ".claude/semantic-model/pipeline-orchestration.md": 3,
+        ".claude/semantic-model/resolver-type-resolution.md": 2,
+        ".claude/semantic-model/serialization-formats.md": 3,
+        ".claude/semantic-model/types-and-output-contract.md": 5
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 706,
+      "user_lines_removed": 21,
+      "agent_lines_added": 908,
+      "agent_lines_removed": 208,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/semantic-model/INDEX.md": 1,
+        ".claude/semantic-model/cli-commands.md": 6,
+        ".claude/semantic-model/napi-binding.md": 1,
+        ".claude/semantic-model/pipeline-orchestration.md": 3,
+        ".claude/semantic-model/resolver-type-resolution.md": 2,
+        ".claude/semantic-model/serialization-formats.md": 3,
+        ".claude/semantic-model/types-and-output-contract.md": 5,
+        ".claude/settings.local.json": 8,
+        ".claude/skills/entire-search/SKILL.md": 22,
+        ".codex/hooks.json": 77,
+        ".cursor/hooks.json": 40,
+        ".cursor/skills/entire-search/SKILL.md": 22,
+        ".gemini/settings.json": 141,
+        ".gemini/skills/entire-search/SKILL.md": 22,
+        ".github/hooks/entire.json": 61,
+        ".opencode/plugins/entire.ts": 269,
+        ".opencode/skills/entire-search/SKILL.md": 22
+      },
+      "user_removed_per_file": {
+        ".claude/semantic-model/INDEX.md": 1,
+        ".claude/semantic-model/cli-commands.md": 6,
+        ".claude/semantic-model/napi-binding.md": 1,
+        ".claude/semantic-model/pipeline-orchestration.md": 3,
+        ".claude/semantic-model/resolver-type-resolution.md": 2,
+        ".claude/semantic-model/serialization-formats.md": 3,
+        ".claude/semantic-model/types-and-output-contract.md": 5
+      }
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 706,
+      "user_lines_removed": 21,
+      "agent_lines_added": 908,
+      "agent_lines_removed": 208,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/semantic-model/INDEX.md": 1,
+        ".claude/semantic-model/cli-commands.md": 6,
+        ".claude/semantic-model/napi-binding.md": 1,
+        ".claude/semantic-model/pipeline-orchestration.md": 3,
+        ".claude/semantic-model/resolver-type-resolution.md": 2,
+        ".claude/semantic-model/serialization-formats.md": 3,
+        ".claude/semantic-model/types-and-output-contract.md": 5,
+        ".claude/settings.local.json": 8,
+        ".claude/skills/entire-search/SKILL.md": 22,
+        ".codex/hooks.json": 77,
+        ".cursor/hooks.json": 40,
+        ".cursor/skills/entire-search/SKILL.md": 22,
+        ".gemini/settings.json": 141,
+        ".gemini/skills/entire-search/SKILL.md": 22,
+        ".github/hooks/entire.json": 61,
+        ".opencode/plugins/entire.ts": 269,
+        ".opencode/skills/entire-search/SKILL.md": 22
+      },
+      "user_removed_per_file": {
+        ".claude/semantic-model/INDEX.md": 1,
+        ".claude/semantic-model/cli-commands.md": 6,
+        ".claude/semantic-model/napi-binding.md": 1,
+        ".claude/semantic-model/pipeline-orchestration.md": 3,
+        ".claude/semantic-model/resolver-type-resolution.md": 2,
+        ".claude/semantic-model/serialization-formats.md": 3,
+        ".claude/semantic-model/types-and-output-contract.md": 5
+      }
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 706,
+      "user_lines_removed": 21,
+      "agent_lines_added": 908,
+      "agent_lines_removed": 208,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/semantic-model/INDEX.md": 1,
+        ".claude/semantic-model/cli-commands.md": 6,
+        ".claude/semantic-model/napi-binding.md": 1,
+        ".claude/semantic-model/pipeline-orchestration.md": 3,
+        ".claude/semantic-model/resolver-type-resolution.md": 2,
+        ".claude/semantic-model/serialization-formats.md": 3,
+        ".claude/semantic-model/types-and-output-contract.md": 5,
+        ".claude/settings.local.json": 8,
+        ".claude/skills/entire-search/SKILL.md": 22,
+        ".codex/hooks.json": 77,
+        ".cursor/hooks.json": 40,
+        ".cursor/skills/entire-search/SKILL.md": 22,
+        ".gemini/settings.json": 141,
+        ".gemini/skills/entire-search/SKILL.md": 22,
+        ".github/hooks/entire.json": 61,
+        ".opencode/plugins/entire.ts": 269,
+        ".opencode/skills/entire-search/SKILL.md": 22
+      },
+      "user_removed_per_file": {
+        ".claude/semantic-model/INDEX.md": 1,
+        ".claude/semantic-model/cli-commands.md": 6,
+        ".claude/semantic-model/napi-binding.md": 1,
+        ".claude/semantic-model/pipeline-orchestration.md": 3,
+        ".claude/semantic-model/resolver-type-resolution.md": 2,
+        ".claude/semantic-model/serialization-formats.md": 3,
+        ".claude/semantic-model/types-and-output-contract.md": 5
+      }
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 7,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 8,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 9,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 10,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 11,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 12,
+      "user_lines_added": 685,
+      "user_lines_removed": 952,
+      "agent_lines_added": 7417,
+      "agent_lines_removed": 5759,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.local.json": 8,
+        ".claude/skills/entire-search/SKILL.md": 22,
+        ".codex/hooks.json": 77,
+        ".cursor/hooks.json": 40,
+        ".cursor/skills/entire-search/SKILL.md": 22,
+        ".gemini/settings.json": 141,
+        ".gemini/skills/entire-search/SKILL.md": 22,
+        ".github/hooks/entire.json": 61,
+        ".opencode/plugins/entire.ts": 269,
+        ".opencode/skills/entire-search/SKILL.md": 22
+      },
+      "user_removed_per_file": {
+        ".claude/semantic-model/INDEX.md": 44,
+        ".claude/semantic-model/cli-commands.md": 82,
+        ".claude/semantic-model/extractor-ast-visiting.md": 103,
+        ".claude/semantic-model/napi-binding.md": 63,
+        ".claude/semantic-model/pipeline-orchestration.md": 111,
+        ".claude/semantic-model/resolver-type-resolution.md": 102,
+        ".claude/semantic-model/serialization-formats.md": 169,
+        ".claude/semantic-model/types-and-output-contract.md": 278
+      }
+    }
+  ]
+}
