@@ -4,7 +4,7 @@
 
 ## Next step
 
-Start the Rust client for the Lifecycle gate — Accuracy is re-verified and the probe is committed, so this is no longer blocked on unreproducible numbers.
+The Rust client exists (`crates/tsc-client`, ADR 0007) and covers the Lifecycle cases below. Next: close the open Lifecycle items in the Gates table, then re-measure Cost with the Rust client. The client is not wired into `crates/core`, the CLI or the NAPI binding yet, which waits on the "Open decisions" below.
 
 Some props can't be resolved from the AST alone. An opt-in backend asks TypeScript's checker instead, using the algorithm react-docgen-typescript (RDT) uses, and merges the answer into the structural result. Structural extraction stays the default.
 
@@ -154,7 +154,7 @@ Pass only the files you need as roots. The API's checker is lazy, and diagnostic
 | Gate | Status |
 | --- | --- |
 | Accuracy against RDT | Passed on 13 components and re-verified on the full 47-component fixture corpus. See Evidence and not verified below |
-| Lifecycle | Not started: missing binary, unsupported version, timeout, crash, restart storm, malformed or oversized frame, partial project failure, shutdown reaping, stale notification |
+| Lifecycle | Client built and tested against a fake tsc and the real nightly (`crates/tsc-client`): missing binary, unsupported version, timeout, crash, restart storm, malformed or oversized frame, partial project failure, shutdown reaping, stale notification. Open: header-size cap, stderr that isn't UTF-8, honoring `handshake_timeout`, recovery after the restart cap trips, whether a restarted request may replay |
 | Cost | Measured through the Node client. Repeat with the Rust client |
 | Determinism | Clean and incremental runs must produce the same output |
 | Oracle | Fixed. See below |
@@ -174,7 +174,7 @@ Pass only the files you need as roots. The API's checker is lazy, and diagnostic
 
 ## Not verified
 
-- A Rust client. Every measurement uses the Node client.
+- Cost through the Rust client. Every measurement uses the Node client.
 - Overloads with more than one signature, static sub-components (`Menu.Item`), and barrel re-exports, where RDT names components by the barrel file.
 - `@default` and `@type` JSDoc overrides.
 - Projects larger than the 44-file corpus.
