@@ -27,7 +27,7 @@
     "@oxc-react-docgen/napi": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^26.0.0",
+    "@types/node": "^26.6.2",
     "@vitest/coverage-v8": "^5.0.1",
     "typescript": "^7.0.2",
     "vite": "^8.0.0",
