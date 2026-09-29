@@ -1939,3 +1939,7 @@ EOF" was stopped because the system is running low on memory</summary>
 </result>
 <usage><subagent_tokens>185387</subagent_tokens><tool_uses>53</tool_uses><duration_ms>3601639</duration_ms></usage>
 </task-notification>
+
+---
+
+Remember ADRs are for architectural decisions, not internal decisions, or repo config decisions right?
