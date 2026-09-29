@@ -1,0 +1,32 @@
+{
+  "tool_use_id": "toolu_014k5H5NuxaVRMx5wF9cX8sF",
+  "agent_id": "a5822b58e1a07334a",
+  "subagent_type": "ranger:adversary",
+  "task_description": "Adversary: dead config and API gaps",
+  "files": [
+    "Cargo.lock",
+    "Cargo.toml",
+    "crates/tsc-client/Cargo.toml",
+    "crates/tsc-client/examples/smoke_real_tsc.rs",
+    "crates/tsc-client/src/client.rs",
+    "crates/tsc-client/src/error.rs",
+    "crates/tsc-client/src/lib.rs",
+    "crates/tsc-client/src/protocol.rs",
+    "crates/tsc-client/src/supervisor.rs",
+    "crates/tsc-client/src/transport/framing.rs",
+    "crates/tsc-client/src/transport/mod.rs",
+    "crates/tsc-client/tests/bin/fake_tsc.rs",
+    "crates/tsc-client/tests/common/mod.rs",
+    "crates/tsc-client/tests/lifecycle_crash.rs",
+    "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs",
+    "crates/tsc-client/tests/lifecycle_missing_binary.rs",
+    "crates/tsc-client/tests/lifecycle_partial_project_failure.rs",
+    "crates/tsc-client/tests/lifecycle_restart_storm.rs",
+    "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs",
+    "crates/tsc-client/tests/lifecycle_stale_notification.rs",
+    "crates/tsc-client/tests/lifecycle_timeout.rs",
+    "crates/tsc-client/tests/lifecycle_unsupported_version.rs"
+  ],
+  "started_at": "2026-09-28T16:58:59.920376-07:00",
+  "completed_at": "2026-09-28T16:58:59.921694-07:00"
+}

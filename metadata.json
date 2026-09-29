@@ -1,0 +1,54 @@
+{
+  "cli_version": "0.11.4-nightly.202609260624.c369a70d2",
+  "checkpoint_id": "01M3NMN0W4EKXV311T235D944G",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 35,
+  "files_touched": [
+    "Cargo.lock",
+    "Cargo.toml",
+    "crates/tsc-client/Cargo.toml",
+    "crates/tsc-client/examples/smoke_real_tsc.rs",
+    "crates/tsc-client/src/client.rs",
+    "crates/tsc-client/src/error.rs",
+    "crates/tsc-client/src/lib.rs",
+    "crates/tsc-client/src/protocol.rs",
+    "crates/tsc-client/src/supervisor.rs",
+    "crates/tsc-client/src/transport/framing.rs",
+    "crates/tsc-client/src/transport/mod.rs",
+    "crates/tsc-client/tests/bin/fake_tsc.rs",
+    "crates/tsc-client/tests/common/mod.rs",
+    "crates/tsc-client/tests/lifecycle_crash.rs",
+    "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs",
+    "crates/tsc-client/tests/lifecycle_missing_binary.rs",
+    "crates/tsc-client/tests/lifecycle_partial_project_failure.rs",
+    "crates/tsc-client/tests/lifecycle_restart_storm.rs",
+    "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs",
+    "crates/tsc-client/tests/lifecycle_stale_notification.rs",
+    "crates/tsc-client/tests/lifecycle_timeout.rs",
+    "crates/tsc-client/tests/lifecycle_unsupported_version.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 980,
+    "cache_creation_tokens": 2906342,
+    "cache_read_tokens": 205671131,
+    "output_tokens": 385826,
+    "api_call_count": 464,
+    "subagent_tokens": {
+      "input_tokens": 1104,
+      "cache_creation_tokens": 2189702,
+      "cache_read_tokens": 25223025,
+      "output_tokens": 50904,
+      "api_call_count": 308
+    }
+  }
+}

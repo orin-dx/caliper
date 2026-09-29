@@ -1,0 +1,973 @@
+{
+  "cli_version": "0.11.4-nightly.202609260624.c369a70d2",
+  "checkpoint_id": "01M3NMN0W4EKXV311T235D944G",
+  "session_id": "73921187-a5dd-4f6c-b579-5f138a710070",
+  "strategy": "manual-commit",
+  "created_at": "2026-09-29T03:52:24.910708Z",
+  "branch": "main",
+  "checkpoints_count": 35,
+  "save_step_count": 32,
+  "files_touched": [
+    "Cargo.lock",
+    "Cargo.toml",
+    "crates/tsc-client/Cargo.toml",
+    "crates/tsc-client/examples/smoke_real_tsc.rs",
+    "crates/tsc-client/src/client.rs",
+    "crates/tsc-client/src/error.rs",
+    "crates/tsc-client/src/lib.rs",
+    "crates/tsc-client/src/protocol.rs",
+    "crates/tsc-client/src/supervisor.rs",
+    "crates/tsc-client/src/transport/framing.rs",
+    "crates/tsc-client/src/transport/mod.rs",
+    "crates/tsc-client/tests/bin/fake_tsc.rs",
+    "crates/tsc-client/tests/common/mod.rs",
+    "crates/tsc-client/tests/lifecycle_crash.rs",
+    "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs",
+    "crates/tsc-client/tests/lifecycle_missing_binary.rs",
+    "crates/tsc-client/tests/lifecycle_partial_project_failure.rs",
+    "crates/tsc-client/tests/lifecycle_restart_storm.rs",
+    "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs",
+    "crates/tsc-client/tests/lifecycle_stale_notification.rs",
+    "crates/tsc-client/tests/lifecycle_timeout.rs",
+    "crates/tsc-client/tests/lifecycle_unsupported_version.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5",
+  "turn_id": "e5b92bdf9782",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 980,
+    "cache_creation_tokens": 2906342,
+    "cache_read_tokens": 205671131,
+    "output_tokens": 385826,
+    "api_call_count": 464,
+    "subagent_tokens": {
+      "input_tokens": 1104,
+      "cache_creation_tokens": 2189702,
+      "cache_read_tokens": 25223025,
+      "output_tokens": 50904,
+      "api_call_count": 308
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01BiECMyywZScg77AqWrfyaW",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "entire-search"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "5a0cd3843056",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 1389,
+        "end": 1390,
+        "entry_ids": [
+          "736455ad-19ce-49db-9875-fb538862f37e"
+        ],
+        "tool_use_id": "toolu_01BiECMyywZScg77AqWrfyaW"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01BiECMyywZScg77AqWrfyaW"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: entire-search",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01P8aB3syQA339QyANngAvs6",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "ranger:audit"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "e5b92bdf9782",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 3774,
+        "end": 3775,
+        "entry_ids": [
+          "04d6be96-cafa-455f-ac04-603805220728"
+        ],
+        "tool_use_id": "toolu_01P8aB3syQA339QyANngAvs6"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01P8aB3syQA339QyANngAvs6"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: ranger:audit",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01GyyFdbxNnetunugTSSGXSr",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "smith:implement"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "e5b92bdf9782",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 4094,
+        "end": 4095,
+        "entry_ids": [
+          "8d5ded12-84ef-447a-8448-52445b0b581b"
+        ],
+        "tool_use_id": "toolu_01GyyFdbxNnetunugTSSGXSr"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01GyyFdbxNnetunugTSSGXSr"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: smith:implement",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 50
+  },
+  "summary": {
+    "intent": "Fix apps/validate's broken react-docgen-typescript oracle by giving it a TypeScript 6 API separate from typescript@next, build the semantic probe and parity check, then build the Rust tsc-client for the Lifecycle gate and commit it with an ADR.",
+    "outcome": "The RDT oracle was fixed and the probe and parity scripts were added, reproducing the Evidence numbers on the full corpus. The crates/tsc-client crate was built, mutation-tested and reviewed, then committed in two commits (crate, then ADR 0007 plus doc updates). The exit gate returned a process-level fail, and its two blockers were addressed before committing.",
+    "learnings": {
+      "repo": [
+        "apps/validate is a Node/TS harness where console.log is the convention; the Rust CLI's no-println rule (crates/cli/AGENTS.md) does not apply to it.",
+        "pnpm workspace `overrides` did not rewrite react-docgen-typescript's typescript peer resolution. Aliasing `typescript-next: npm:typescript@next` as a direct dependency and keeping `typescript@^6.0.3` for RDT worked.",
+        "typescript@next exposes a JS async API via `typescript/unstable/async` (API, SignatureKind, SymbolFlags). SyntaxKind is in `typescript/unstable/ast`, and plain file-path strings work as document identifiers.",
+        "oxlint enforces no-await-in-loop and no-nested-ternary in apps/validate; oxfmt is the formatter.",
+        "Callisto moved its semantic-model docs from .claude/ to docs/architecture (commit a3351846c) because only Claude Code could find them there.",
+        "The large uncommitted pile at session start (AGENTS.md rename, .agents/.codex/.cursor dirs, ADR 0006) came from one earlier session, 233bd878.",
+        "tsc-client design: a session owns its child's I/O. A single writer task takes whole frames from a bounded 16-frame channel, and `closed` is set once via OnceLock. CloseOnDrop guards close the session on task exit, and restart is decided from `closed()`.",
+        "Root-level mutants.out/ and mutants.out.old/ are gitignored leftovers from Sep 26."
+      ],
+      "code": [
+        {
+          "path": "crates/tsc-client/src/client.rs",
+          "line": 257,
+          "finding": "The request send is `write_tx.send(body).await`, which is cancel-safe. Swapping it for try_send was caught by the 24-request timeout test."
+        },
+        {
+          "path": "crates/tsc-client/src/client.rs",
+          "line": 134,
+          "finding": "The writer's stop branch (`stop_writer.notified() => return`) lets shutdown wake a writer blocked mid-write. A new test covers it, and it fails when the line is deleted."
+        },
+        {
+          "path": "crates/tsc-client/src/supervisor.rs",
+          "line": 165,
+          "finding": "Restart is decided from `closed()`, not from JoinHandle state."
+        }
+      ],
+      "workflow": [
+        "Delegated implementer, reviewer and exit-gate subagents plus cargo-mutants gave strong verification, but they were slow and hit the memory reaper.",
+        "Subagent hand-backs must be treated as reports, not authority. The harness flagged settings-json patterns that were only git status listings.",
+        "Timing-sensitive async tests need a multi-thread runtime and widened bounds. On a single-threaded runtime, 24 synchronous 1 MiB serializations delayed timers and made the test flaky.",
+        "A fake child must reproduce real process behavior. The noisy_stderr fake had to exit when a stderr write fails, or the mutant survived.",
+        "Verify shell loops actually ran the test. One flake-hunting loop was meaningless because the `ls` alias rejected `-t`.",
+        "Stage only the files you own, since the working tree contained unrelated pending changes."
+      ]
+    },
+    "friction": [
+      "The `react-docgen-typescript` peer dependency on typescript@7 crashed on import (ts.JsxEmit undefined). The pnpm override did not take effect, and several install and lockfile attempts were needed.",
+      "The exit gate ran nearly an hour and returned an interim result several times, with the machine low on memory. The memory reaper killed a background command and a mutation rerun at 115 of 125 mutants.",
+      "The exit gate reported one unexplained failure of one_failing_call_does_not_affect_a_concurrently_in_flight_sibling in an isolated copy. It could not be reproduced in 40 normal runs or under CPU load.",
+      "Spec AC-12 (`exit_after:1:7`) was unachievable because the restarted child also exits after one answer. The spec had to be revised to use `fatal_frame_once_then_echo`.",
+      "A persisted mutants2 report still listed spawn_stderr_drain as MISSED after the fix, so it was stale.",
+      "git status briefly looked as if something had been committed, which prompted a check."
+    ],
+    "open_items": [
+      "Lifecycle items still open: header-size cap, stderr that isn't UTF-8, honoring handshake_timeout, recovery after the restart cap trips, and whether a restarted request may replay.",
+      "The tsc-client is not wired into crates/core, the CLI or the NAPI binding, which waits on the doc's 'Open decisions'.",
+      "Cost needs re-measuring through the Rust client. Step 4 of the original doc was intentionally left for later.",
+      "Hand mutants P13 and P14 and about 10 framing.rs mutants were never run. Writer-mid-write stop, Write-vs-Crashed, and the post-insert re-check race have weak or no coverage.",
+      "The unrelated uncommitted pile (AGENTS.md migration, .agents/.codex/.cursor/.gemini scaffolding, ADR 0006, .claude/semantic-model regeneration, and hook/settings changes) still needs its own commit or PR.",
+      "The oracle-fix work (apps/validate, docs, pnpm-lock) was proposed as its own commit but the transcript doesn't show it committed.",
+      "The AC-12 spec revision was made in the scratchpad spec JSON only. Whether it counts as recorded through scribe:correct-spec is unverified.",
+      "Whether .claude/semantic-model should move to docs/architecture, as Callisto did, is undecided."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 9,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.local.json": 8
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 9,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1408,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.local.json": 8
+      }
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 227,
+      "user_lines_removed": 171,
+      "agent_lines_added": 1408,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.local.json": 8,
+        "crates/tsc-client/Cargo.toml": 3,
+        "crates/tsc-client/src/client.rs": 23,
+        "crates/tsc-client/src/error.rs": 13,
+        "crates/tsc-client/src/supervisor.rs": 5,
+        "crates/tsc-client/src/transport/framing.rs": 173,
+        "crates/tsc-client/src/transport/mod.rs": 1
+      },
+      "user_removed_per_file": {
+        "crates/tsc-client/src/client.rs": 55,
+        "crates/tsc-client/src/error.rs": 5,
+        "crates/tsc-client/src/supervisor.rs": 2,
+        "crates/tsc-client/src/transport/framing.rs": 108,
+        "crates/tsc-client/src/transport/mod.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 260,
+      "user_lines_removed": 194,
+      "agent_lines_added": 1436,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8,
+        "crates/tsc-client/Cargo.toml": 3,
+        "crates/tsc-client/src/client.rs": 23,
+        "crates/tsc-client/src/error.rs": 24,
+        "crates/tsc-client/src/supervisor.rs": 5,
+        "crates/tsc-client/src/transport/framing.rs": 174,
+        "crates/tsc-client/src/transport/mod.rs": 1,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 20
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10,
+        "crates/tsc-client/src/client.rs": 55,
+        "crates/tsc-client/src/error.rs": 5,
+        "crates/tsc-client/src/supervisor.rs": 3,
+        "crates/tsc-client/src/transport/framing.rs": 108,
+        "crates/tsc-client/src/transport/mod.rs": 1,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 12
+      }
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 10,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 7,
+      "user_lines_added": 10,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 8,
+      "user_lines_added": 10,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 9,
+      "user_lines_added": 10,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 10,
+      "user_lines_added": 10,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 11,
+      "user_lines_added": 95,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8,
+        "crates/tsc-client/tests/zz_throwaway_header_cap.rs": 85
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 12,
+      "user_lines_added": 10,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1587,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 13,
+      "user_lines_added": 223,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8,
+        "crates/tsc-client/examples/zz_adv_shutdown.rs": 75,
+        "crates/tsc-client/tests/zz_adversary_tmp.rs": 138
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 14,
+      "user_lines_added": 70,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1715,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8,
+        "crates/tsc-client/tests/zz_adv_shutdown_cluster.rs": 60
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 15,
+      "user_lines_added": 10,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1775,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 16,
+      "user_lines_added": 10,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1775,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 17,
+      "user_lines_added": 122,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1640,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8,
+        "crates/tsc-client/tests/zz_adversary_restart_probe.rs": 112
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 18,
+      "user_lines_added": 10,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 19,
+      "user_lines_added": 10,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 20,
+      "user_lines_added": 10,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 21,
+      "user_lines_added": 10,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 22,
+      "user_lines_added": 10,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 23,
+      "user_lines_added": 10,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 1,
+        ".claude/settings.local.json": 8
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 24,
+      "user_lines_added": 582,
+      "user_lines_removed": 167,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 12,
+        ".claude/settings.local.json": 8,
+        ".codex/hooks.json": 38,
+        ".github/hooks/entire.json": 7,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 3,
+        "crates/tsc-client/src/client.rs": 156,
+        "crates/tsc-client/src/supervisor.rs": 45,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 41,
+        "crates/tsc-client/tests/common/mod.rs": 16,
+        "crates/tsc-client/tests/lifecycle_cancelled_request.rs": 21,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 87,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 35,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 67,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 43
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 15,
+        ".codex/hooks.json": 16,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 2,
+        "crates/tsc-client/src/client.rs": 68,
+        "crates/tsc-client/src/supervisor.rs": 50,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 6,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 2,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 2,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 3,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 25,
+      "user_lines_added": 585,
+      "user_lines_removed": 167,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 12,
+        ".claude/settings.local.json": 8,
+        ".codex/hooks.json": 38,
+        ".github/hooks/entire.json": 7,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 3,
+        "crates/tsc-client/src/client.rs": 156,
+        "crates/tsc-client/src/supervisor.rs": 45,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 41,
+        "crates/tsc-client/tests/common/mod.rs": 16,
+        "crates/tsc-client/tests/lifecycle_cancelled_request.rs": 21,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 89,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 35,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 67,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 44
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 15,
+        ".codex/hooks.json": 16,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 2,
+        "crates/tsc-client/src/client.rs": 68,
+        "crates/tsc-client/src/supervisor.rs": 50,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 6,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 2,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 2,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 3,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 26,
+      "user_lines_added": 585,
+      "user_lines_removed": 167,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 12,
+        ".claude/settings.local.json": 8,
+        ".codex/hooks.json": 38,
+        ".github/hooks/entire.json": 7,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 3,
+        "crates/tsc-client/src/client.rs": 156,
+        "crates/tsc-client/src/supervisor.rs": 45,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 41,
+        "crates/tsc-client/tests/common/mod.rs": 16,
+        "crates/tsc-client/tests/lifecycle_cancelled_request.rs": 21,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 89,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 35,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 67,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 44
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 15,
+        ".codex/hooks.json": 16,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 2,
+        "crates/tsc-client/src/client.rs": 68,
+        "crates/tsc-client/src/supervisor.rs": 50,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 6,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 2,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 2,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 3,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 27,
+      "user_lines_added": 634,
+      "user_lines_removed": 171,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 12,
+        ".claude/settings.local.json": 8,
+        ".codex/hooks.json": 38,
+        ".github/hooks/entire.json": 7,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 3,
+        "crates/tsc-client/src/client.rs": 203,
+        "crates/tsc-client/src/error.rs": 2,
+        "crates/tsc-client/src/supervisor.rs": 50,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 41,
+        "crates/tsc-client/tests/common/mod.rs": 16,
+        "crates/tsc-client/tests/lifecycle_cancelled_request.rs": 21,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 82,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 35,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 67,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 46
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 15,
+        ".codex/hooks.json": 16,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 2,
+        "crates/tsc-client/src/client.rs": 70,
+        "crates/tsc-client/src/error.rs": 2,
+        "crates/tsc-client/src/supervisor.rs": 50,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 6,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 2,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 2,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 3,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 28,
+      "user_lines_added": 754,
+      "user_lines_removed": 171,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 12,
+        ".claude/settings.local.json": 8,
+        ".codex/hooks.json": 38,
+        ".github/hooks/entire.json": 7,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 3,
+        "crates/tsc-client/src/client.rs": 217,
+        "crates/tsc-client/src/error.rs": 2,
+        "crates/tsc-client/src/supervisor.rs": 50,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 67,
+        "crates/tsc-client/tests/common/mod.rs": 16,
+        "crates/tsc-client/tests/lifecycle_cancelled_request.rs": 21,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 97,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 35,
+        "crates/tsc-client/tests/lifecycle_notifications.rs": 27,
+        "crates/tsc-client/tests/lifecycle_partial_project_failure.rs": 7,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 67,
+        "crates/tsc-client/tests/lifecycle_stderr_drain.rs": 17,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 60
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 15,
+        ".codex/hooks.json": 16,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 2,
+        "crates/tsc-client/src/client.rs": 70,
+        "crates/tsc-client/src/error.rs": 2,
+        "crates/tsc-client/src/supervisor.rs": 50,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 6,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 2,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 2,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 3,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 29,
+      "user_lines_added": 754,
+      "user_lines_removed": 171,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 12,
+        ".claude/settings.local.json": 8,
+        ".codex/hooks.json": 38,
+        ".github/hooks/entire.json": 7,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 3,
+        "crates/tsc-client/src/client.rs": 217,
+        "crates/tsc-client/src/error.rs": 2,
+        "crates/tsc-client/src/supervisor.rs": 50,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 67,
+        "crates/tsc-client/tests/common/mod.rs": 16,
+        "crates/tsc-client/tests/lifecycle_cancelled_request.rs": 21,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 97,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 35,
+        "crates/tsc-client/tests/lifecycle_notifications.rs": 27,
+        "crates/tsc-client/tests/lifecycle_partial_project_failure.rs": 7,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 67,
+        "crates/tsc-client/tests/lifecycle_stderr_drain.rs": 17,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 60
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 15,
+        ".codex/hooks.json": 16,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 2,
+        "crates/tsc-client/src/client.rs": 70,
+        "crates/tsc-client/src/error.rs": 2,
+        "crates/tsc-client/src/supervisor.rs": 50,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 6,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 2,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 2,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 3,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 30,
+      "user_lines_added": 754,
+      "user_lines_removed": 171,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 12,
+        ".claude/settings.local.json": 8,
+        ".codex/hooks.json": 38,
+        ".github/hooks/entire.json": 7,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 3,
+        "crates/tsc-client/src/client.rs": 217,
+        "crates/tsc-client/src/error.rs": 2,
+        "crates/tsc-client/src/supervisor.rs": 50,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 67,
+        "crates/tsc-client/tests/common/mod.rs": 16,
+        "crates/tsc-client/tests/lifecycle_cancelled_request.rs": 21,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 97,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 35,
+        "crates/tsc-client/tests/lifecycle_notifications.rs": 27,
+        "crates/tsc-client/tests/lifecycle_partial_project_failure.rs": 7,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 67,
+        "crates/tsc-client/tests/lifecycle_stderr_drain.rs": 17,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 60
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 15,
+        ".codex/hooks.json": 16,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 2,
+        "crates/tsc-client/src/client.rs": 70,
+        "crates/tsc-client/src/error.rs": 2,
+        "crates/tsc-client/src/supervisor.rs": 50,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 6,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 2,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 2,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 3,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 31,
+      "user_lines_added": 754,
+      "user_lines_removed": 171,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 12,
+        ".claude/settings.local.json": 8,
+        ".codex/hooks.json": 38,
+        ".github/hooks/entire.json": 7,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 3,
+        "crates/tsc-client/src/client.rs": 217,
+        "crates/tsc-client/src/error.rs": 2,
+        "crates/tsc-client/src/supervisor.rs": 50,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 67,
+        "crates/tsc-client/tests/common/mod.rs": 16,
+        "crates/tsc-client/tests/lifecycle_cancelled_request.rs": 21,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 97,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 35,
+        "crates/tsc-client/tests/lifecycle_notifications.rs": 27,
+        "crates/tsc-client/tests/lifecycle_partial_project_failure.rs": 7,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 67,
+        "crates/tsc-client/tests/lifecycle_stderr_drain.rs": 17,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 60
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 15,
+        ".codex/hooks.json": 16,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 2,
+        "crates/tsc-client/src/client.rs": 70,
+        "crates/tsc-client/src/error.rs": 2,
+        "crates/tsc-client/src/supervisor.rs": 50,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 6,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 2,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 2,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 3,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 32,
+      "user_lines_added": 754,
+      "user_lines_removed": 171,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 12,
+        ".claude/settings.local.json": 8,
+        ".codex/hooks.json": 38,
+        ".github/hooks/entire.json": 7,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 3,
+        "crates/tsc-client/src/client.rs": 217,
+        "crates/tsc-client/src/error.rs": 2,
+        "crates/tsc-client/src/supervisor.rs": 50,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 67,
+        "crates/tsc-client/tests/common/mod.rs": 16,
+        "crates/tsc-client/tests/lifecycle_cancelled_request.rs": 21,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 97,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 35,
+        "crates/tsc-client/tests/lifecycle_notifications.rs": 27,
+        "crates/tsc-client/tests/lifecycle_partial_project_failure.rs": 7,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 67,
+        "crates/tsc-client/tests/lifecycle_stderr_drain.rs": 17,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 60
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 15,
+        ".codex/hooks.json": 16,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 2,
+        "crates/tsc-client/src/client.rs": 70,
+        "crates/tsc-client/src/error.rs": 2,
+        "crates/tsc-client/src/supervisor.rs": 50,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 6,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 2,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 2,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 3,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 33,
+      "user_lines_added": 754,
+      "user_lines_removed": 171,
+      "agent_lines_added": 1502,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/scheduled_tasks.lock": 1,
+        ".claude/settings.json": 12,
+        ".claude/settings.local.json": 8,
+        ".codex/hooks.json": 38,
+        ".github/hooks/entire.json": 7,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 3,
+        "crates/tsc-client/src/client.rs": 217,
+        "crates/tsc-client/src/error.rs": 2,
+        "crates/tsc-client/src/supervisor.rs": 50,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 67,
+        "crates/tsc-client/tests/common/mod.rs": 16,
+        "crates/tsc-client/tests/lifecycle_cancelled_request.rs": 21,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 97,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 35,
+        "crates/tsc-client/tests/lifecycle_notifications.rs": 27,
+        "crates/tsc-client/tests/lifecycle_partial_project_failure.rs": 7,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 67,
+        "crates/tsc-client/tests/lifecycle_stderr_drain.rs": 17,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 60
+      },
+      "user_removed_per_file": {
+        ".claude/settings.json": 15,
+        ".codex/hooks.json": 16,
+        "crates/tsc-client/examples/smoke_real_tsc.rs": 2,
+        "crates/tsc-client/src/client.rs": 70,
+        "crates/tsc-client/src/error.rs": 2,
+        "crates/tsc-client/src/supervisor.rs": 50,
+        "crates/tsc-client/src/transport/framing.rs": 2,
+        "crates/tsc-client/tests/bin/fake_tsc.rs": 6,
+        "crates/tsc-client/tests/lifecycle_crash.rs": 2,
+        "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs": 2,
+        "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs": 3,
+        "crates/tsc-client/tests/lifecycle_timeout.rs": 1
+      }
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "tool_use_id": "toolu_012mJRZ6XBZfnu4VoCEqTPnN",
+  "agent_id": "a9f4c26370e35ec93",
+  "subagent_type": "smith:reviewer",
+  "task_description": "Review session-owns-IO batch",
+  "files": [
+    "Cargo.lock",
+    "Cargo.toml",
+    "crates/tsc-client/Cargo.toml",
+    "crates/tsc-client/examples/smoke_real_tsc.rs",
+    "crates/tsc-client/src/client.rs",
+    "crates/tsc-client/src/error.rs",
+    "crates/tsc-client/src/lib.rs",
+    "crates/tsc-client/src/protocol.rs",
+    "crates/tsc-client/src/supervisor.rs",
+    "crates/tsc-client/src/transport/framing.rs",
+    "crates/tsc-client/src/transport/mod.rs",
+    "crates/tsc-client/tests/bin/fake_tsc.rs",
+    "crates/tsc-client/tests/common/mod.rs",
+    "crates/tsc-client/tests/lifecycle_crash.rs",
+    "crates/tsc-client/tests/lifecycle_malformed_or_oversized_frame.rs",
+    "crates/tsc-client/tests/lifecycle_missing_binary.rs",
+    "crates/tsc-client/tests/lifecycle_partial_project_failure.rs",
+    "crates/tsc-client/tests/lifecycle_restart_storm.rs",
+    "crates/tsc-client/tests/lifecycle_shutdown_reaping.rs",
+    "crates/tsc-client/tests/lifecycle_stale_notification.rs",
+    "crates/tsc-client/tests/lifecycle_timeout.rs",
+    "crates/tsc-client/tests/lifecycle_unsupported_version.rs"
+  ],
+  "started_at": "2026-09-28T18:37:02.796971-07:00",
+  "completed_at": "2026-09-28T18:37:02.797254-07:00"
+}
