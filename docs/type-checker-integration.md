@@ -4,7 +4,7 @@
 
 ## Next step
 
-The Rust client exists (`crates/tsc-client`, ADR 0007) and covers the Lifecycle cases below. Next: close the open Lifecycle items in the Gates table, then re-measure Cost with the Rust client. The client is not wired into `crates/core`, the CLI or the NAPI binding yet, which waits on the "Open decisions" below.
+The Rust client exists (`crates/tsc-client`) and covers the Lifecycle cases below. Next: close the open Lifecycle items in the Gates table, then re-measure Cost with the Rust client. The client is not wired into `crates/core`, the CLI or the NAPI binding yet, which waits on the "Open decisions" below.
 
 Some props can't be resolved from the AST alone. An opt-in backend asks TypeScript's checker instead, using the algorithm react-docgen-typescript (RDT) uses, and merges the answer into the structural result. Structural extraction stays the default.
 
