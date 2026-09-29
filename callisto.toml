@@ -1,4 +1,4 @@
-# Pinned to callisto 0.8.0 in .github/workflows/release.yml.
+# Pinned to callisto 0.10.0 in .github/workflows/release.yml.
 
 # `match` is a package name ("<ecosystem>/<name>"), never a directory path.
 # Root package.json is `oxc-react-docgen-workspace` so bare `oxc-react-docgen` stays unambiguous.
