@@ -1,4 +1,11 @@
-# oxc-react-docgen
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/hero-dark.png">
+    <img src="assets/brand/hero-light.png" alt="caliper, an Orin DX tool" width="360">
+  </picture>
+</p>
+
+<p align="center"><code>oxc-react-docgen</code></p>
 
 React component prop extraction powered by [OXC](https://oxc.rs). Parses TypeScript natively in Rust — no TypeScript compiler program, no type-checking pass, no startup tax.
 
