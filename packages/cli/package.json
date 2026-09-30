@@ -1,18 +1,20 @@
 {
   "name": "@oxc-react-docgen/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "npm-installable oxc-react-docgen CLI — thin wrapper that execs the compiled Rust binary. All argument parsing, formatting, and RDT/Storybook serialization happen in crates/cli, not here, so there is exactly one implementation of CLI behavior.",
   "type": "commonjs",
   "bin": {
     "oxc-react-docgen": "./bin/cli.js"
   },
-  "files": ["bin"],
+  "files": [
+    "bin"
+  ],
   "optionalDependencies": {
-    "@oxc-react-docgen/cli-darwin-arm64": "0.1.0",
-    "@oxc-react-docgen/cli-darwin-x64": "0.1.0",
-    "@oxc-react-docgen/cli-linux-x64-gnu": "0.1.0",
-    "@oxc-react-docgen/cli-win32-x64-msvc": "0.1.0",
-    "@oxc-react-docgen/cli-linux-arm64-gnu": "0.1.0"
+    "@oxc-react-docgen/cli-darwin-arm64": "0.1.1",
+    "@oxc-react-docgen/cli-darwin-x64": "0.1.1",
+    "@oxc-react-docgen/cli-linux-x64-gnu": "0.1.1",
+    "@oxc-react-docgen/cli-win32-x64-msvc": "0.1.1",
+    "@oxc-react-docgen/cli-linux-arm64-gnu": "0.1.1"
   },
   "license": "AGPL-3.0-or-later",
   "repository": {

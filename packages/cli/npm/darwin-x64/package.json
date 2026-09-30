@@ -1,10 +1,16 @@
 {
   "name": "@oxc-react-docgen/cli-darwin-x64",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "oxc-react-docgen CLI binary for macOS x64 (Intel) — not meant to be installed directly, pulled in as an optionalDependency of @oxc-react-docgen/cli",
-  "os": ["darwin"],
-  "cpu": ["x64"],
-  "files": ["oxc-react-docgen"],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "oxc-react-docgen"
+  ],
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",

@@ -1,0 +1,18 @@
+# oxc-react-docgen-core
+
+## 0.1.1
+
+- Ambient `.d.ts` files are merged for their types only, never their components. `@types/react` declares `class PureComponent<P, S, SS> extends Component<P, S, SS>`, which matched the class-component detector — full HTML-attribute mode emitted `PureComponent` as a 0-prop component alongside a `Cannot resolve type 'P'` diagnostic. Both are gone, from batch extraction and from the watch session's first revision.
+- A prop redeclared in a child interface now replaces the inherited one. `interface Child extends Base { x: "a" | "b" }` used to resolve `x` to `Base`'s type, description and parent. An undocumented redeclaration keeps the inherited description, as react-docgen-typescript does.
+- Lint policy (`unsafe_code`, clippy `all`) moved from per-crate `#![...]` attributes into a single `[workspace.lints]` table in the workspace root, with each crate opting in via `[lints] workspace = true`. `unsafe_code` is now `"deny"` rather than `"forbid"` — no crate currently uses `unsafe`, including the NAPI FFI boundary, but `deny` allows a local `#[allow(unsafe_code)]` override if one is ever genuinely needed there.
+  
+  Also dropped 11 dependencies that `cargo-machete` confirmed were unused: `indexmap`, `oxc_module_lexer`, `thiserror`, `tokio`, `dirs`, `miette` (core); `anyhow`, `clap_mangen`, `lsp-types`, `tracing-indicatif` (cli); `rustc-hash` (binding). No behavior change — smaller dependency graph and faster builds.
+- Concurrent runs sharing one DTS cache directory — the CLI and the Vite plugin in the same project, or parallel builds — no longer report a spurious `IO_ERROR` "Failed to persist the DTS cache" diagnostic. Every writer used the same temp file name, so the second rename found it already moved. Temp names are now unique per process and write.
+- Fixed 7 doc-comment errors that broke `cargo doc` under `-D warnings`: 6 unescaped angle-bracket type names (`Ref<T>`, `RefObject<T>`, `HTMLButtonElement`, etc.) that rustdoc parsed as unclosed HTML tags, and one `[default]` that rustdoc parsed as a broken intra-doc link. No behavior change — fixes how the published crate's documentation renders on docs.rs.
+- An unrecognized `htmlAttributes` value (a typo in `docgen.config.ts` or in the JS options) is now an error naming the value, instead of silently falling back to `curated`, as `reactVersion` already does.
+- String-literal union aliases now report bare member values. A `type Size = "sm" | "md"` alias previously came back with each member already quoted, so serialized output showed `""sm"" | ""md""` and a template literal over the alias expanded to `compact-"sm"`. `undefined` members are dropped (optionality is reported through `required`); a `null` member keeps the alias a plain union, since a string-only literal union can't represent it.
+  
+  The DTS cache schema version moved to 4 — its key is a content hash and can't detect that the extractor now produces different data for identical input, so existing cache files are discarded rather than served stale.
+- DOM and ES globals (`HTMLDivElement["dir"]`, `Date`, …) resolve again in projects on TypeScript 7, which moved `lib.dom.d.ts`/`lib.es5.d.ts` into its per-platform `@typescript/typescript-*` package. A `typescript` install whose lib files can't be found (TypeScript 7 without its optional platform package) now warns instead of silently leaving those globals unexpanded.
+- `WatchSession::update_file` now reports a re-read file's syntax errors and other parse diagnostics, as a cold extraction does. An edit that broke a file used to produce no diagnostic at all, so `watch` showed nothing and its exit code stayed 0.
+

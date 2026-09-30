@@ -1425,7 +1425,7 @@ checksum = "13c45bb4a6ae1280ec0803b1ef9d3455eb50f01efbbe1447ab020f1d54fba9d8"
 
 [[package]]
 name = "oxc-react-docgen"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "camino",
  "clap",
@@ -1452,7 +1452,7 @@ dependencies = [
 
 [[package]]
 name = "oxc-react-docgen-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arc-swap",
  "camino",
@@ -1481,7 +1481,7 @@ dependencies = [
 
 [[package]]
 name = "oxc-react-docgen-napi"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "camino",
  "compact_str",

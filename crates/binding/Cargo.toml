@@ -1,6 +1,6 @@
 [package]
 name = "oxc-react-docgen-napi"
-version.workspace = true
+version = "0.1.1"
 edition.workspace = true
 license.workspace = true
 publish = false
@@ -12,7 +12,7 @@ workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-oxc-react-docgen-core = { path = "../core", version = "0.1.0" }
+oxc-react-docgen-core = { path = "../core", version = "0.1.1" }
 napi = { workspace = true, features = ["tokio_rt"] }
 napi-derive.workspace  = true
 serde_json.workspace   = true
