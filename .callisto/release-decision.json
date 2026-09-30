@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 2,
+  "entries": [
+    {
+      "package": "cargo/oxc-react-docgen",
+      "targetVersion": "0.1.1",
+      "reasons": [
+        {
+          "kind": "changeset"
+        }
+      ]
+    },
+    {
+      "package": "cargo/oxc-react-docgen-core",
+      "targetVersion": "0.1.1",
+      "reasons": [
+        {
+          "kind": "changeset"
+        }
+      ]
+    },
+    {
+      "package": "cargo/oxc-react-docgen-napi",
+      "targetVersion": "0.1.1",
+      "reasons": [
+        {
+          "kind": "changeset"
+        }
+      ]
+    },
+    {
+      "package": "npm/@oxc-react-docgen/cli",
+      "targetVersion": "0.1.1",
+      "reasons": [
+        {
+          "kind": "fixedGroup",
+          "groupId": "cli-and-npm-wrapper"
+        }
+      ]
+    },
+    {
+      "package": "npm/@oxc-react-docgen/napi",
+      "targetVersion": "0.1.1",
+      "reasons": [
+        {
+          "kind": "fixedGroup",
+          "groupId": "napi-and-binding"
+        }
+      ]
+    }
+  ],
+  "digest": "24d93a32fb0b183b71ec45d936808b92f1048b22f46046ff501d7e69566d02ae"
+}

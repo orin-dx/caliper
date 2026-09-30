@@ -1,6 +1,6 @@
 {
   "name": "@oxc-react-docgen/napi",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Native Node.js bindings for oxc-react-docgen",
   "main": "index.js",
   "types": "index.d.ts",
@@ -27,11 +27,11 @@
     "*.node"
   ],
   "optionalDependencies": {
-    "@oxc-react-docgen/napi-darwin-arm64": "0.1.0",
-    "@oxc-react-docgen/napi-darwin-x64": "0.1.0",
-    "@oxc-react-docgen/napi-linux-arm64-gnu": "0.1.0",
-    "@oxc-react-docgen/napi-linux-x64-gnu": "0.1.0",
-    "@oxc-react-docgen/napi-win32-x64-msvc": "0.1.0"
+    "@oxc-react-docgen/napi-darwin-arm64": "0.1.1",
+    "@oxc-react-docgen/napi-darwin-x64": "0.1.1",
+    "@oxc-react-docgen/napi-linux-arm64-gnu": "0.1.1",
+    "@oxc-react-docgen/napi-linux-x64-gnu": "0.1.1",
+    "@oxc-react-docgen/napi-win32-x64-msvc": "0.1.1"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.10.4"
