@@ -34,7 +34,7 @@
     "@oxc-react-docgen/napi-win32-x64-msvc": "0.1.0"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.10.4"
+    "@napi-rs/cli": "^3.10.5"
   },
   "license": "AGPL-3.0-or-later",
   "repository": {
