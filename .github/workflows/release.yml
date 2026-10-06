@@ -87,12 +87,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       # Pinned here, not inherited from the action's default.
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@0a971b2118954e7089c1a0aa28aebbf131ed1602 # callisto@0.10.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@129936ddc54686cc8acda013d2ece75b7f258135 # callisto@0.10.0
         with:
           version: callisto@0.10.0
           verification: require
       - name: Compose, version, and open the release PR
-        uses: orin-dx/callisto/.github/actions/callisto-action@0a971b2118954e7089c1a0aa28aebbf131ed1602 # callisto@0.10.0
+        uses: orin-dx/callisto/.github/actions/callisto-action@129936ddc54686cc8acda013d2ece75b7f258135 # callisto@0.10.0
         with:
           setup_callisto: 'false'
           branch: main
@@ -113,7 +113,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@0a971b2118954e7089c1a0aa28aebbf131ed1602 # callisto@0.10.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@129936ddc54686cc8acda013d2ece75b7f258135 # callisto@0.10.0
         with:
           version: callisto@0.10.0
           verification: require
@@ -193,7 +193,7 @@ jobs:
           version: 0.14.1
           use-cache: false
       - if: matrix.zig
-        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: cargo-zigbuild
       - run: pnpm install --frozen-lockfile --filter @oxc-react-docgen/napi
@@ -240,7 +240,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@0a971b2118954e7089c1a0aa28aebbf131ed1602 # callisto@0.10.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@129936ddc54686cc8acda013d2ece75b7f258135 # callisto@0.10.0
         with:
           version: callisto@0.10.0
           verification: require
