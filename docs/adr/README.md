@@ -13,7 +13,6 @@ One line per ADR, with what it guards. Add a line when you add an ADR.
 - [5. Contain panics at a single, per-item boundary](0005-panic-containment-boundary.md) — route anything reachable from a rayon `.map()`, a `DocgenPlugin` hook or a NAPI entry point through `contain_panic`.
 - [6. Run the TypeScript backend as a second resolver](0006-semantic-backend-as-second-resolver.md) — do not patch `Opaque` leaves, give `crates/core` a compiler process or I/O, or route the backend through NAPI.
 
-
 Changing any of these needs a new ADR.
 
 ## When to write one

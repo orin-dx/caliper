@@ -1,6 +1,6 @@
 ---
-name: "source-command-check"
-description: "Migrated source command `check`"
+name: 'source-command-check'
+description: 'Migrated source command `check`'
 ---
 
 # source-command-check

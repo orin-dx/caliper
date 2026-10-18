@@ -1,6 +1,6 @@
 ---
-name: "source-command-snapshot"
-description: "Migrated source command `snapshot`"
+name: 'source-command-snapshot'
+description: 'Migrated source command `snapshot`'
 ---
 
 # source-command-snapshot

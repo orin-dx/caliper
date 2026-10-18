@@ -2,7 +2,7 @@
 oxc-react-docgen-core: minor
 oxc-react-docgen: minor
 oxc-react-docgen-napi: minor
-"@oxc-react-docgen/vite-plugin": minor
+'@oxc-react-docgen/vite-plugin': minor
 ---
 
 First public release. React component prop extraction on OXC, with no TypeScript `Program` and no type-checking pass: cold extraction across 21 real component libraries in about 50ms and ~2ms for an incremental single-file update.

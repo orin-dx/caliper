@@ -123,7 +123,7 @@ Each `PropType` variant the resolver can emit; whether any fixture produces it.
 | HTML element inheritance, curated | ✅ | all fixtures |
 | HTML element inheritance, full real resolution | ✅ | shadcn, **blueprint** — see [HtmlAttributeMode](#htmlattributemode-curated--full--none) |
 | `styled.X.attrs<T>()` (styled-components) | ❌ | **zendesk-garden** — neither this tool nor real RDT detects this pattern; a shared blind spot, not a competitive gap, not fixed |
-| Template literal type → expanded literal union | ✅ | mantine `size?: MantineSize \| \`compact-${MantineSize}\`` resolves to a `union` of two `literalUnion`s (`xs`/`sm`/.../`xl` and `compact-xs`/.../`compact-xl`), not left opaque |
+| Template literal type → expanded literal union | ✅ | mantine `size?: MantineSize \| \`compact-${MantineSize}\``resolves to a`union`of two`literalUnion`s (`xs`/`sm`/.../`xl`and`compact-xs`/.../`compact-xl`), not left opaque |
 | HOC pattern | ✅ | extractor unit test only (no snapshot fixture) |
 | Generic component | ⚠️ partial | own generic type ALIAS substitution works (**ark-ui**); React's own builtin generics resolve by name only, never by substituted value (sufficient for docgen — see `docs/type-checker-integration.md`); component-level `<T,>()=>` type-param flow through a multi-file component tree not covered |
 | `defaultProps` static assignment | ❌ | no fixture |
