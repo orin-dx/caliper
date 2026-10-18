@@ -10,7 +10,7 @@ done
 
 . "$HOME/.cargo/env"
 cargo fmt --check
-cargo clippy --workspace --exclude oxc-react-docgen-napi --locked -- -D warnings
+cargo clippy --workspace --exclude caliper-docgen-napi --locked -- -D warnings
 typos
 cargo deny check
 

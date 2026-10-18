@@ -1,5 +1,5 @@
 [package]
-name = "oxc-react-docgen"
+name = "caliper-docgen"
 description = "Fast React prop extraction — CLI"
 version = "0.2.0"
 edition.workspace = true
@@ -9,11 +9,11 @@ license.workspace = true
 workspace = true
 
 [[bin]]
-name = "oxc-react-docgen"
+name = "caliper-docgen"
 path = "src/main.rs"
 
 [dependencies]
-oxc-react-docgen-core = { path = "../core", version = "0.2.0" }
+caliper-docgen-core = { path = "../core", version = "0.2.0" }
 clap.workspace            = true
 clap_complete.workspace   = true
 miette                    = { workspace = true, features = ["fancy"] }

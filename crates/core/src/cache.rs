@@ -104,12 +104,11 @@ impl DtsCache {
     /// On any error (missing dir, schema mismatch, corrupt data) the cache
     /// starts empty — subsequent `insert` calls will repopulate it.
     ///
-    /// `cache_dir` defaults to `node_modules/.cache/oxc-react-docgen/` relative
+    /// `cache_dir` defaults to `node_modules/.cache/caliper-docgen/` relative
     /// to the current working directory.
     pub fn load_from_disk(cache_dir: Option<&Utf8Path>) -> Self {
-        let dir = cache_dir
-            .map(|p| p.to_owned())
-            .unwrap_or_else(|| Utf8PathBuf::from("node_modules/.cache/oxc-react-docgen"));
+        let dir =
+            cache_dir.map(|p| p.to_owned()).unwrap_or_else(|| Utf8PathBuf::from("node_modules/.cache/caliper-docgen"));
 
         let store = Self::try_load(&dir).unwrap_or_default();
         Self { store, cache_dir: dir, dirty: std::sync::atomic::AtomicBool::new(false) }

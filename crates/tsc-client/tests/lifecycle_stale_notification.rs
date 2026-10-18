@@ -2,7 +2,7 @@ mod common;
 
 use std::time::Duration;
 
-use oxc_react_docgen_tsc_client::Supervisor;
+use caliper_docgen_tsc_client::Supervisor;
 
 #[tokio::test]
 async fn seq_reflects_wire_arrival_order_not_issue_order() {

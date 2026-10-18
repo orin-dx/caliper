@@ -16,7 +16,7 @@ use common::strip_ansi;
 const MAX_LSP_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 
 fn run_lsp(args: &[&str], stdin_bytes: &[u8]) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_oxc-react-docgen"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_caliper-docgen"))
         .arg("lsp")
         .args(args)
         .stdin(Stdio::piped())
@@ -115,11 +115,11 @@ fn verbose_mode_writes_tracing_output_to_stderr_only() {
         String::from_utf8_lossy(&verbose.stdout)
     );
     let stderr = strip_ansi(&String::from_utf8_lossy(&verbose.stderr));
-    assert!(stderr.contains("ERROR oxc_react_docgen::commands::lsp: LSP frame declared Content-Length"), "{stderr}");
+    assert!(stderr.contains("ERROR caliper_docgen::commands::lsp: LSP frame declared Content-Length"), "{stderr}");
 
     let quiet = run_lsp(&[], frame.as_bytes());
     let stderr = strip_ansi(&String::from_utf8_lossy(&quiet.stderr));
-    assert!(!stderr.contains("ERROR oxc_react_docgen"), "no tracing output without -v: {stderr}");
+    assert!(!stderr.contains("ERROR caliper_docgen"), "no tracing output without -v: {stderr}");
 }
 
 // ── SPEC-CLI-001c AC-005c: a client that declares a valid Content-Length

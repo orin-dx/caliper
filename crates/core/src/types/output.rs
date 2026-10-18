@@ -37,7 +37,7 @@ impl ExtractionOutput {
     /// Process exit code for this output: `2` if any diagnostic is
     /// `Error`-severity, `1` if `strict` and any diagnostic is at least
     /// `Warning`-severity, `0` otherwise. This is the CLI's shared exit-code
-    /// contract — `oxc-react-docgen check --strict`'s mapping, reused as-is
+    /// contract — `caliper-docgen check --strict`'s mapping, reused as-is
     /// by `extract`, `watch`, and `inspect`.
     pub fn exit_code(&self, strict: bool) -> i32 {
         match self.max_severity() {

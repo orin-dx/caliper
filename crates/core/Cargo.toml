@@ -1,5 +1,5 @@
 [package]
-name = "oxc-react-docgen-core"
+name = "caliper-docgen-core"
 description = "Fast React prop extraction via OXC — core library"
 version = "0.2.0"
 edition.workspace = true

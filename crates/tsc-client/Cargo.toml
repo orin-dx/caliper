@@ -1,5 +1,5 @@
 [package]
-name = "oxc-react-docgen-tsc-client"
+name = "caliper-docgen-tsc-client"
 description = "Process supervisor and JSON-RPC transport client for TypeScript 7's tsc --api"
 version.workspace = true
 edition.workspace = true

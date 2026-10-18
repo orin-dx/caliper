@@ -19,7 +19,7 @@ hyperfine \
   --export-json bench-cold.json \
   -n "react-docgen" "pnpm exec tsx src/run-react-docgen.ts" \
   -n "react-docgen-typescript" "pnpm exec tsx src/run-react-docgen-typescript.ts" \
-  -n "oxc-react-docgen" "pnpm exec tsx src/run-ours.ts"
+  -n "caliper-docgen" "pnpm exec tsx src/run-ours.ts"
 
 echo
 echo "Results written to apps/validate/bench-cold.md and apps/validate/bench-cold.json"

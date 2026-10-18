@@ -1,4 +1,4 @@
-# @oxc-react-docgen/cli
+# @orin-dx/caliper-docgen
 
 ## 0.2.0
 

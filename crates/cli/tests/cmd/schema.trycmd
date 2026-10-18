@@ -1,9 +1,9 @@
 ```console
-$ oxc-react-docgen schema
+$ caliper-docgen schema
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ExtractionOutput",
-  "description": "Output schema for oxc-react-docgen component prop extraction",
+  "description": "Output schema for caliper-docgen component prop extraction",
   "type": "object",
   "required": [
     "components",

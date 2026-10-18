@@ -10,17 +10,17 @@ function loadBaseline(name: string): Map<string, ToolResult> | null {
   return new Map(results.map((r) => [r.fixture, r]))
 }
 
-const ours = loadBaseline('oxc-react-docgen')
+const ours = loadBaseline('caliper-docgen')
 // react-docgen resolves no inherited/`extends` props of its own — compare against our
 // html-attributes=none baseline (falls back to the full baseline if that variant wasn't
 // generated) so this pair isn't dominated by an inheritance-resolution mismatch instead of
 // an actual prop-level agreement signal.
-const oursForRdg = loadBaseline('oxc-react-docgen-none') ?? ours
+const oursForRdg = loadBaseline('caliper-docgen-none') ?? ours
 const rdt = loadBaseline('react-docgen-typescript')
 const rdg = loadBaseline('react-docgen')
 
 if (!ours) {
-  console.error('No oxc-react-docgen baseline found — run `pnpm run:ours` first.')
+  console.error('No caliper-docgen baseline found — run `pnpm run:ours` first.')
   process.exit(1)
 }
 

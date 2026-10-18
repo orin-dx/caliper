@@ -4,7 +4,7 @@
 //! codes) still match reality. Run from the repo root:
 //!
 //! ```sh
-//! cargo run -p oxc-react-docgen-tsc-client --example smoke_real_tsc
+//! cargo run -p caliper-docgen-tsc-client --example smoke_real_tsc
 //! ```
 //!
 //! Requires `apps/validate`'s `typescript-next` dependency to be installed (`pnpm
@@ -12,8 +12,8 @@
 
 use std::time::Duration;
 
+use caliper_docgen_tsc_client::{Supervisor, SupervisorConfig};
 use camino::Utf8PathBuf;
-use oxc_react_docgen_tsc_client::{Supervisor, SupervisorConfig};
 
 #[tokio::main]
 async fn main() {

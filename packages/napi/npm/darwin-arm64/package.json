@@ -1,14 +1,14 @@
 {
-  "name": "@oxc-react-docgen/napi-darwin-arm64",
+  "name": "@orin-dx/caliper-docgen-napi-darwin-arm64",
   "version": "0.2.0",
   "cpu": [
     "arm64"
   ],
-  "main": "oxc_react_docgen_napi.darwin-arm64.node",
+  "main": "caliper_docgen_napi.darwin-arm64.node",
   "files": [
-    "oxc_react_docgen_napi.darwin-arm64.node"
+    "caliper_docgen_napi.darwin-arm64.node"
   ],
-  "description": "Native Node.js bindings for oxc-react-docgen",
+  "description": "Native Node.js bindings for caliper-docgen",
   "license": "AGPL-3.0-or-later",
   "os": [
     "darwin"

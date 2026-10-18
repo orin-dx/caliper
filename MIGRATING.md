@@ -1,6 +1,6 @@
 # Migrating from react-docgen-typescript
 
-`oxc-react-docgen` targets output-shape compatibility with `react-docgen-typescript` (RDT) via the CLI's `--format rdt` flag. The NAPI binding and Vite plugin currently only expose this tool's own canonical format (`kind`-tagged `PropType`, shown in the main README) — no RDT-shape option at that layer yet.
+`caliper-docgen` targets output-shape compatibility with `react-docgen-typescript` (RDT) via the CLI's `--format rdt` flag. The NAPI binding and Vite plugin currently only expose this tool's own canonical format (`kind`-tagged `PropType`, shown in the main README) — no RDT-shape option at that layer yet.
 
 This document covers what's compatible today, what's intentionally different, and what's a known gap rather than a design choice.
 
@@ -71,7 +71,7 @@ If you need the full attribute set and aren't ready to opt into `full` mode, thi
 Don't just trust this document — run it against your own components:
 
 ```bash
-pnpm --filter @oxc-react-docgen/validate compare:all
+pnpm --filter @orin-dx/caliper-docgen-validate compare:all
 ```
 
 `docs/rdt-coverage.md` tracks which pattern each fixture exercises and the bugs found along the way (almost all now fixed).

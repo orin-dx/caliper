@@ -24,7 +24,7 @@ import { isPropValid, styled } from './theming';
  *
  * `Button`'s own props type then threads that shape back out via a utility
  * type over the styled component itself: `ButtonProps extends
- * Omit<ComponentProps<typeof StyledButton>, 'as'>` — real RDT/oxc-react-docgen
+ * Omit<ComponentProps<typeof StyledButton>, 'as'>` — real RDT/caliper-docgen
  * would need to resolve `typeof StyledButton`'s inferred return type through
  * `@emotion/styled`'s overloaded `CreateStyled` call signature to recover
  * those props, which is a materially different (and arguably harder) chain

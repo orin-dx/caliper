@@ -1,4 +1,4 @@
-# @oxc-react-docgen/napi
+# @orin-dx/caliper-docgen-napi
 
 ## 0.2.0
 

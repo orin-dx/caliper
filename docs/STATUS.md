@@ -15,9 +15,9 @@ Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are f
 - **Testing Stack** — `cargo-nextest` process runner, `rstest` parameterized spec tables, `insta` snapshots, and `trycmd` executable Markdown CLI specs.
 - **Plugin system** (`DocgenPlugin` / `PluginRegistry`) — Extensible AST and component resolution hooks in `crates/core/src/plugin.rs`.
 - **TOON output format** (`--format toon` / `toon.rs`) — Token-optimized format for LLM agents, cutting context window token usage by ~65-75%.
-- **JSON schema export** (`oxc-react-docgen schema`) — Machine-readable Draft-07 JSON Schema export for component metadata validation.
+- **JSON schema export** (`caliper-docgen schema`) — Machine-readable Draft-07 JSON Schema export for component metadata validation.
 - **Atomic & Bounded DTS cache** (`cache.rs`) — Atomic temp-file swap writes, dirty flag tracking, and 5,000 entry eviction cap.
-- **LSP server scaffold** (`oxc-react-docgen lsp`) — bounded framing plus initialize/shutdown/exit lifecycle. It currently advertises `hoverProvider: false` and does not serve component prop hovers yet.
+- **LSP server scaffold** (`caliper-docgen lsp`) — bounded framing plus initialize/shutdown/exit lifecycle. It currently advertises `hoverProvider: false` and does not serve component prop hovers yet.
 - **Strict Safe Rust** — `unsafe_code = "deny"` via `[workspace.lints]`, active across all three crates (`core`, `cli`, `binding`) — none currently use `unsafe`, including the NAPI FFI boundary (napi-rs's `#[napi]` macros generate the glue without user-visible `unsafe`).
 
 ## Known gaps that won't get fixed without a type checker

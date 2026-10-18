@@ -38,11 +38,11 @@ Gate that target with clean/incremental equivalence. Generated modify, edit-reve
 
 ```mermaid
 graph TD
-    core["crates/core\noxc-react-docgen-core\nPure extraction — no I/O, no async"]
-    binding["crates/binding\noxc-react-docgen-napi\nNAPI + tokio runtime"]
-    cli["crates/cli\noxc-react-docgen\nCLI binary"]
-    napi["packages/napi\n@oxc-react-docgen/napi\nTS types + dev binary loader"]
-    vite["packages/vite-plugin\n@oxc-react-docgen/vite-plugin\nVite HMR plugin"]
+    core["crates/core\ncaliper-docgen-core\nPure extraction — no I/O, no async"]
+    binding["crates/binding\ncaliper-docgen-napi\nNAPI + tokio runtime"]
+    cli["crates/cli\ncaliper-docgen\nCLI binary"]
+    napi["packages/napi\n@orin-dx/caliper-docgen-napi\nTS types + dev binary loader"]
+    vite["packages/vite-plugin\n@orin-dx/caliper-docgen-vite-plugin\nVite HMR plugin"]
     validate["apps/validate\nAccuracy comparison harness"]
 
     core --> binding
@@ -156,7 +156,7 @@ The merged view across all parsed files: component declarations, type aliases, i
 
 ### OXC instead of the TypeScript compiler
 
-`react-docgen-typescript` creates a TypeScript `Program` — this loads all imported types transitively, runs type inference, and is single-threaded. `oxc-react-docgen` parses each file independently in parallel with no type-checking pass. The trade-off: TypeScript-only semantics (conditional types, `infer`, deep utility type evaluation) fall through to `{ kind: "opaque" }`. Everything structurally expressible — interfaces, intersections, unions, `Omit`, `Pick`, `VariantProps` — resolves correctly.
+`react-docgen-typescript` creates a TypeScript `Program` — this loads all imported types transitively, runs type inference, and is single-threaded. `caliper-docgen` parses each file independently in parallel with no type-checking pass. The trade-off: TypeScript-only semantics (conditional types, `infer`, deep utility type evaluation) fall through to `{ kind: "opaque" }`. Everything structurally expressible — interfaces, intersections, unions, `Omit`, `Pick`, `VariantProps` — resolves correctly.
 
 ### `FxHashMap` over `HashMap`
 
@@ -186,7 +186,7 @@ Component props and enums are serialized as `BTreeMap<String, …>` rather than 
 
 | Feature | Status |
 | --- | --- |
-| Preset system (`@oxc-react-docgen/presets`) | Designed; no Rust changes needed — config-side only. |
+| Preset system (`@orin-dx/caliper-docgen-presets`) | Designed; no Rust changes needed — config-side only. |
 | LSP server | Protocol layer implemented (`initialize`/`shutdown`, frame parsing) — `textDocument/hover`, the actual prop-lookup handler, isn't wired up yet. |
 | Conditional types (`T extends U ? X : Y`) | Emitted as `opaque` — needs a real type checker, see `docs/type-checker-integration.md`. |
 | Mapped types with computed keys | Emitted as `opaque`. |

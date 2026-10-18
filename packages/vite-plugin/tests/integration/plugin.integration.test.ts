@@ -1,7 +1,7 @@
-// Layer 2 — integration tests, against the REAL @oxc-react-docgen/napi native
+// Layer 2 — integration tests, against the REAL @orin-dx/caliper-docgen-napi native
 // binding (never mocked here — see tests/unit/plugin.test.ts for the mocked
 // unit tier). Requires a locally-built `.node` binary
-// (`pnpm --filter @oxc-react-docgen/napi build:napi`); auto-skips the whole
+// (`pnpm --filter @orin-dx/caliper-docgen-napi build:napi`); auto-skips the whole
 // file when one isn't available, so a fresh checkout without the native
 // toolchain doesn't fail. Set NAPI_BINARY_AVAILABLE=false to force-skip
 // regardless of whether a binary happens to be present.
@@ -14,7 +14,7 @@ import { createServer, type ViteDevServer } from 'vite'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { oxcReactDocgen } from '../../src/index.js'
+import { caliperDocgen } from '../../src/index.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURES_ROOT = path.join(__dirname, 'fixtures')
@@ -22,7 +22,7 @@ const BUTTON_FIXTURE = path.join(FIXTURES_ROOT, 'src/Button.tsx')
 
 let napiAvailable = false
 try {
-  await import('@oxc-react-docgen/napi')
+  await import('@orin-dx/caliper-docgen-napi')
   napiAvailable = true
 } catch {
   napiAvailable = false
@@ -38,7 +38,7 @@ const shouldRun = napiAvailable && process.env.NAPI_BINARY_AVAILABLE !== 'false'
 // async cold-extraction result actually work.
 async function loadVirtualModule(server: ViteDevServer): Promise<any> {
   server.moduleGraph.invalidateAll()
-  const mod = await server.ssrLoadModule('virtual:oxc-react-docgen')
+  const mod = await server.ssrLoadModule('virtual:caliper-docgen')
   return mod.default
 }
 
@@ -52,7 +52,7 @@ async function waitForComponents(server: ViteDevServer, timeoutMs = 5000): Promi
   throw new Error(`waitForComponents: no components populated within ${timeoutMs}ms`)
 }
 
-describe.skipIf(!shouldRun)('oxcReactDocgen (integration, real native binding)', () => {
+describe.skipIf(!shouldRun)('caliperDocgen (integration, real native binding)', () => {
   let server: ViteDevServer | undefined
   const originalButtonSource = fs.readFileSync(BUTTON_FIXTURE, 'utf8')
 
@@ -71,7 +71,7 @@ describe.skipIf(!shouldRun)('oxcReactDocgen (integration, real native binding)',
       configFile: false,
       root: FIXTURES_ROOT,
       server: { middlewareMode: true },
-      plugins: [oxcReactDocgen({ srcDirs: ['src'] })],
+      plugins: [caliperDocgen({ srcDirs: ['src'] })],
     })
 
     const data = await waitForComponents(server)
@@ -87,7 +87,7 @@ describe.skipIf(!shouldRun)('oxcReactDocgen (integration, real native binding)',
   })
 
   it('re-extracts real prop changes via a direct hotUpdate call against the real binding', async () => {
-    const plugin = oxcReactDocgen({ srcDirs: ['src'] })
+    const plugin = caliperDocgen({ srcDirs: ['src'] })
     server = await createServer({
       configFile: false,
       root: FIXTURES_ROOT,
@@ -126,7 +126,7 @@ export function Button({ label, disabled = false }: ButtonProps) {
       server,
     })
 
-    const updateEvent = hotSend.find((e) => e.event === 'oxc-react-docgen:update')
+    const updateEvent = hotSend.find((e) => e.event === 'caliper-docgen:update')
     expect(updateEvent).toBeDefined()
     const updated = (updateEvent!.data as any).updatedComponents[0]
     expect(updated.displayName).toBe('Button')
@@ -141,7 +141,7 @@ export function Button({ label, disabled = false }: ButtonProps) {
       configFile: false,
       root: FIXTURES_ROOT,
       server: { middlewareMode: true },
-      plugins: [oxcReactDocgen({ srcDirs: ['src'] })],
+      plugins: [caliperDocgen({ srcDirs: ['src'] })],
     })
     await waitForComponents(server)
 

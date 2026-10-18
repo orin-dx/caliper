@@ -1,6 +1,6 @@
 mod common;
 
-use oxc_react_docgen_tsc_client::{Supervisor, SupervisorConfig, TscClientError};
+use caliper_docgen_tsc_client::{Supervisor, SupervisorConfig, TscClientError};
 
 #[tokio::test]
 async fn spawning_a_nonexistent_binary_reports_spawn_failed() {

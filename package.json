@@ -1,5 +1,5 @@
 {
-  "name": "oxc-react-docgen-workspace",
+  "name": "caliper-docgen-workspace",
   "version": "0.0.0",
   "private": true,
   "license": "AGPL-3.0-or-later",
@@ -8,9 +8,9 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "cargo build --workspace --exclude oxc-react-docgen-napi && moon run napi:build vite-plugin:build",
-    "test": "cargo nextest run --workspace --exclude oxc-react-docgen-napi --locked && pnpm --filter @oxc-react-docgen/vite-plugin test",
-    "lint": "cargo clippy --workspace --exclude oxc-react-docgen-napi --locked -- -D warnings"
+    "build": "cargo build --workspace --exclude caliper-docgen-napi && moon run napi:build vite-plugin:build",
+    "test": "cargo nextest run --workspace --exclude caliper-docgen-napi --locked && pnpm --filter @orin-dx/caliper-docgen-vite-plugin test",
+    "lint": "cargo clippy --workspace --exclude caliper-docgen-napi --locked -- -D warnings"
   },
   "devDependencies": {
     "@chakra-ui/react": "^3.37.0",

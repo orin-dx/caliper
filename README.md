@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<p align="center"><code>oxc-react-docgen</code></p>
+<p align="center"><code>caliper-docgen</code></p>
 
 React component prop extraction powered by [OXC](https://oxc.rs). Parses TypeScript natively in Rust — no TypeScript compiler program, no type-checking pass, no startup tax.
 
@@ -30,8 +30,8 @@ The CLI can emit an RDT-compatible shape via `--format rdt` (see [MIGRATING.md](
 git clone https://github.com/orin-dx/caliper
 cd caliper
 pnpm install
-pnpm --filter @oxc-react-docgen/napi run build:napi   # builds the native addon for your platform
-pnpm --filter @oxc-react-docgen/vite-plugin build
+pnpm --filter @orin-dx/caliper-docgen-napi run build:napi   # builds the native addon for your platform
+pnpm --filter @orin-dx/caliper-docgen-vite-plugin build
 ```
 
 Use `pnpm run build:napi`, not a bare `cargo build` — it invokes `napi build`, which places the compiled addon exactly where `packages/napi/index.js`'s loader expects it.
@@ -44,17 +44,17 @@ Migrating off `react-docgen-typescript`? See [MIGRATING.md](MIGRATING.md) for wh
 // vite.config.ts
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { oxcReactDocgen } from '@oxc-react-docgen/vite-plugin'
+import { caliperDocgen } from '@orin-dx/caliper-docgen-vite-plugin'
 
 export default defineConfig({
-  plugins: [react(), oxcReactDocgen({ srcDirs: ['src'] })],
+  plugins: [react(), caliperDocgen({ srcDirs: ['src'] })],
 })
 ```
 
-Metadata is available on the `virtual:oxc-react-docgen` module and pushed via HMR as components change:
+Metadata is available on the `virtual:caliper-docgen` module and pushed via HMR as components change:
 
 ```ts
-import docgen from 'virtual:oxc-react-docgen'
+import docgen from 'virtual:caliper-docgen'
 
 docgen.components['Button'].props
 // {
@@ -70,26 +70,26 @@ docgen.components['Button'].props
 
 ## CLI
 
-A single Rust binary (`crates/cli`) — argument parsing, output formatting, and `--format rdt`/`--format storybook` serialization all live there. `@oxc-react-docgen/cli` (once published) is a thin npm wrapper that execs the platform-appropriate compiled binary — no reimplemented logic, so there's exactly one place CLI behavior can drift.
+A single Rust binary (`crates/cli`) — argument parsing, output formatting, and `--format rdt`/`--format storybook` serialization all live there. `@orin-dx/caliper-docgen` (once published) is a thin npm wrapper that execs the platform-appropriate compiled binary — no reimplemented logic, so there's exactly one place CLI behavior can drift.
 
 ```bash
-# Once published: npx @oxc-react-docgen/cli extract --src src/ --out docgen.json
-# From source today: ./target/release/oxc-react-docgen (after cargo build --release)
+# Once published: npx @orin-dx/caliper-docgen extract --src src/ --out docgen.json
+# From source today: ./target/release/caliper-docgen (after cargo build --release)
 
 # One-shot extraction
-oxc-react-docgen extract --src src/ --out docgen.json
+caliper-docgen extract --src src/ --out docgen.json
 
 # Inspect a single file
-oxc-react-docgen inspect src/components/Button.tsx
+caliper-docgen inspect src/components/Button.tsx
 
 # Watch mode
-oxc-react-docgen watch --src src/
+caliper-docgen watch --src src/
 
 # Shell completions
-oxc-react-docgen completions zsh > ~/.zsh/completions/_oxc-react-docgen
+caliper-docgen completions zsh > ~/.zsh/completions/_caliper-docgen
 
 # Full HTML attribute expansion instead of the default curated subset
-oxc-react-docgen extract --src src/ --html-attributes full
+caliper-docgen extract --src src/ --html-attributes full
 ```
 
 Settings can also live in `docgen.config.ts` (`srcDirs`, `htmlAttributes`, `reactVersion`, `crossPackage`, and more — see `crates/cli/src/config.rs` for the full schema) instead of CLI flags.
@@ -148,9 +148,9 @@ Settings can also live in `docgen.config.ts` (`srcDirs`, `htmlAttributes`, `reac
 crates/core/          pure extraction logic (no I/O, no async, Send + Sync)
 crates/binding/       thin NAPI wrapper over core
 crates/cli/           clap + miette CLI
-packages/napi/        @oxc-react-docgen/napi (dev binary loader + TS types)
-packages/vite-plugin/ @oxc-react-docgen/vite-plugin
-packages/cli/         @oxc-react-docgen/cli (npx wrapper — execs crates/cli's binary, no reimplemented logic)
+packages/napi/        @orin-dx/caliper-docgen-napi (dev binary loader + TS types)
+packages/vite-plugin/ @orin-dx/caliper-docgen-vite-plugin
+packages/cli/         @orin-dx/caliper-docgen (npx wrapper — execs crates/cli's binary, no reimplemented logic)
 apps/validate/        accuracy comparison harness (react-docgen, rdt, ours)
 fixtures/             real library .d.ts/.tsx files (shadcn, MUI, Chakra, Mantine, etc.)
 ```

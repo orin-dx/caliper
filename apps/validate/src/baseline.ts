@@ -31,18 +31,18 @@ console.log('Running semantic (tsc --api) baseline...')
 writeFileSync('./baselines/semantic.json', runScript('run-semantic.ts'))
 console.log('✅ semantic baseline saved')
 
-console.log('Running oxc-react-docgen baseline (html-attributes=full, fair vs RDT)...')
-writeFileSync('./baselines/oxc-react-docgen.json', runScript('run-ours.ts'))
-console.log('✅ oxc-react-docgen baseline saved')
+console.log('Running caliper-docgen baseline (html-attributes=full, fair vs RDT)...')
+writeFileSync('./baselines/caliper-docgen.json', runScript('run-ours.ts'))
+console.log('✅ caliper-docgen baseline saved')
 
 // react-docgen resolves zero `extends`/inherited-interface props of its own — comparing
 // our html-attributes=full output (hundreds of synthesized inherited attrs per component)
 // against it would manufacture a huge "extra in ours" count that's really just a
 // no-inheritance-resolution-at-all vs some-resolution mismatch, not a real quality gap.
 // A separate html-attributes=none baseline is the fair apples-to-apples comparator here.
-console.log('Running oxc-react-docgen baseline (html-attributes=none, fair vs react-docgen)...')
+console.log('Running caliper-docgen baseline (html-attributes=none, fair vs react-docgen)...')
 process.env.HTML_ATTRIBUTES_MODE = 'none'
-writeFileSync('./baselines/oxc-react-docgen-none.json', runScript('run-ours.ts'))
-console.log('✅ oxc-react-docgen (none) baseline saved')
+writeFileSync('./baselines/caliper-docgen-none.json', runScript('run-ours.ts'))
+console.log('✅ caliper-docgen (none) baseline saved')
 
 console.log('\nBaselines saved to ./baselines/')

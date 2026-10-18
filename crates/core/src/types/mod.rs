@@ -1,4 +1,4 @@
-//! Shared data types for oxc-react-docgen.
+//! Shared data types for caliper-docgen.
 //!
 //! These types form the contract between pipeline stages.
 //! Rules:

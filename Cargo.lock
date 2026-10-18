@@ -192,6 +192,94 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "caliper-docgen"
+version = "0.2.0"
+dependencies = [
+ "caliper-docgen-core",
+ "camino",
+ "clap",
+ "clap_complete",
+ "comfy-table",
+ "crossterm",
+ "indicatif",
+ "insta",
+ "miette",
+ "owo-colors",
+ "rstest",
+ "rustix",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trycmd",
+ "watchexec",
+ "watchexec-signals",
+]
+
+[[package]]
+name = "caliper-docgen-core"
+version = "0.2.0"
+dependencies = [
+ "arc-swap",
+ "camino",
+ "compact_str",
+ "criterion",
+ "dashmap",
+ "ignore",
+ "insta",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_parser",
+ "oxc_resolver",
+ "oxc_span",
+ "oxc_syntax",
+ "pretty_assertions",
+ "rayon",
+ "rmp-serde",
+ "rstest",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "trybuild",
+]
+
+[[package]]
+name = "caliper-docgen-napi"
+version = "0.2.0"
+dependencies = [
+ "caliper-docgen-core",
+ "camino",
+ "compact_str",
+ "dashmap",
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "caliper-docgen-tsc-client"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "camino",
+ "dashmap",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "camino"
 version = "1.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1422,94 +1510,6 @@ name = "owo-colors"
 version = "4.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c45bb4a6ae1280ec0803b1ef9d3455eb50f01efbbe1447ab020f1d54fba9d8"
-
-[[package]]
-name = "oxc-react-docgen"
-version = "0.2.0"
-dependencies = [
- "camino",
- "clap",
- "clap_complete",
- "comfy-table",
- "crossterm",
- "indicatif",
- "insta",
- "miette",
- "owo-colors",
- "oxc-react-docgen-core",
- "rstest",
- "rustix",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "trycmd",
- "watchexec",
- "watchexec-signals",
-]
-
-[[package]]
-name = "oxc-react-docgen-core"
-version = "0.2.0"
-dependencies = [
- "arc-swap",
- "camino",
- "compact_str",
- "criterion",
- "dashmap",
- "ignore",
- "insta",
- "oxc_allocator",
- "oxc_ast",
- "oxc_ast_visit",
- "oxc_parser",
- "oxc_resolver",
- "oxc_span",
- "oxc_syntax",
- "pretty_assertions",
- "rayon",
- "rmp-serde",
- "rstest",
- "rustc-hash",
- "serde",
- "serde_json",
- "tempfile",
- "trybuild",
-]
-
-[[package]]
-name = "oxc-react-docgen-napi"
-version = "0.2.0"
-dependencies = [
- "camino",
- "compact_str",
- "dashmap",
- "napi",
- "napi-build",
- "napi-derive",
- "oxc-react-docgen-core",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "oxc-react-docgen-tsc-client"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "camino",
- "dashmap",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
-]
 
 [[package]]
 name = "oxc_allocator"

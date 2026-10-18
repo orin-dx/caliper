@@ -3,10 +3,10 @@ use std::path::Path;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
+use caliper_docgen_core::pipeline::{PipelineOptions, WatchSession};
+use caliper_docgen_core::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, ExtractionOutput};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use miette::{IntoDiagnostic, Result};
-use oxc_react_docgen_core::pipeline::{PipelineOptions, WatchSession};
-use oxc_react_docgen_core::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, ExtractionOutput};
 use watchexec_signals::Signal;
 
 use crate::config::{build_options, BuildOptionsArgs};
@@ -44,7 +44,7 @@ fn start_session(
         println!(
             "  {}  {} watching {}{}",
             "⚡".yellow(),
-            "oxc-react-docgen".bold(),
+            "caliper-docgen".bold(),
             options.src_dirs.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(", ").cyan(),
             hint.dimmed()
         );

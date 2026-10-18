@@ -1,3 +1,4 @@
+use caliper_docgen_core::pipeline::{extract, PipelineOptions};
 /// Snapshot tests for extraction output.
 ///
 /// These lock the exact JSON output for every fixture so that any refactor
@@ -5,12 +6,11 @@
 /// as a snapshot diff rather than a silent regression.
 ///
 /// To update snapshots after an intentional change:
-///   INSTA_UPDATE=always cargo test -p oxc-react-docgen-core --test snapshots
+///   INSTA_UPDATE=always cargo test -p caliper-docgen-core --test snapshots
 ///
 /// To review pending snapshots interactively:
 ///   cargo insta review
 use camino::Utf8PathBuf;
-use oxc_react_docgen_core::pipeline::{extract, PipelineOptions};
 
 /// Absolute path to the workspace root, resolved from this crate's manifest dir.
 fn workspace_root() -> Utf8PathBuf {

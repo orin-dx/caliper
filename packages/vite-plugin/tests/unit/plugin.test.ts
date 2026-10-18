@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Mock BEFORE importing plugin — vi.mock is hoisted by Vitest
-vi.mock('@oxc-react-docgen/napi', () => ({
+vi.mock('@orin-dx/caliper-docgen-napi', () => ({
   createSession: vi.fn().mockReturnValue(42),
   initializeSession: vi
     .fn()
@@ -30,15 +30,15 @@ vi.mock('@oxc-react-docgen/napi', () => ({
   closeSession: vi.fn(),
 }))
 
-import { oxcReactDocgen } from '../../src/index.js'
-import * as napi from '@oxc-react-docgen/napi'
+import { caliperDocgen } from '../../src/index.js'
+import * as napi from '@orin-dx/caliper-docgen-napi'
 
-describe('oxcReactDocgen', () => {
-  let plugin: ReturnType<typeof oxcReactDocgen>
+describe('caliperDocgen', () => {
+  let plugin: ReturnType<typeof caliperDocgen>
 
   beforeEach(() => {
     vi.clearAllMocks()
-    plugin = oxcReactDocgen({ srcDirs: ['src'] })
+    plugin = caliperDocgen({ srcDirs: ['src'] })
     // Simulate Vite calling configResolved
     ;(plugin.configResolved as Function)({ root: '/project' })
   })
@@ -47,8 +47,8 @@ describe('oxcReactDocgen', () => {
 
   describe('resolveId', () => {
     it('resolves the virtual module id', () => {
-      const result = (plugin.resolveId as Function)('virtual:oxc-react-docgen')
-      expect(result).toBe('\0virtual:oxc-react-docgen')
+      const result = (plugin.resolveId as Function)('virtual:caliper-docgen')
+      expect(result).toBe('\0virtual:caliper-docgen')
     })
 
     it('returns undefined for unrelated ids', () => {
@@ -61,7 +61,7 @@ describe('oxcReactDocgen', () => {
 
   describe('load', () => {
     it('returns a JS module for the resolved virtual id', () => {
-      const code = (plugin.load as Function)('\0virtual:oxc-react-docgen') as string
+      const code = (plugin.load as Function)('\0virtual:caliper-docgen') as string
       expect(code).toMatch(/^export default \{/)
       const data = JSON.parse(code.replace('export default ', ''))
       expect(data).toHaveProperty('components')
@@ -69,7 +69,7 @@ describe('oxcReactDocgen', () => {
 
     it('returns undefined for other ids', () => {
       expect((plugin.load as Function)('\0other')).toBeUndefined()
-      expect((plugin.load as Function)('virtual:oxc-react-docgen')).toBeUndefined()
+      expect((plugin.load as Function)('virtual:caliper-docgen')).toBeUndefined()
     })
   })
 
@@ -93,9 +93,9 @@ describe('oxcReactDocgen', () => {
       ;(napi.createSession as any).mockImplementationOnce(() => {
         throw boom
       })
-      const p = oxcReactDocgen({ srcDirs: ['src'] })
+      const p = caliperDocgen({ srcDirs: ['src'] })
       expect(() => (p.configResolved as Function)({ root: '/project' })).toThrow(boom)
-      expect(consoleError).toHaveBeenCalledWith('[oxc-react-docgen] createSession failed:', boom)
+      expect(consoleError).toHaveBeenCalledWith('[caliper-docgen] createSession failed:', boom)
       consoleError.mockRestore()
     })
   })
@@ -160,11 +160,11 @@ describe('oxcReactDocgen', () => {
       )
     })
 
-    it('sends oxc-react-docgen:update over HMR', async () => {
+    it('sends caliper-docgen:update over HMR', async () => {
       const ctx = clientEnv()
       await (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
       expect(ctx.environment.hot.send).toHaveBeenCalledWith(
-        'oxc-react-docgen:update',
+        'caliper-docgen:update',
         expect.objectContaining({ file: '/project/src/Button.tsx' }),
       )
     })
@@ -222,7 +222,7 @@ describe('oxcReactDocgen', () => {
     // otherwise require a double slash no real file path ever has.
 
     it('still matches files when srcDirs has a trailing slash (relative)', async () => {
-      const p = oxcReactDocgen({ srcDirs: ['src/'] })
+      const p = caliperDocgen({ srcDirs: ['src/'] })
       ;(p.configResolved as Function)({ root: '/project' })
       const ctx = clientEnv()
       await (p.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
@@ -234,7 +234,7 @@ describe('oxcReactDocgen', () => {
     })
 
     it('still matches files when srcDirs has a trailing slash (absolute)', async () => {
-      const p = oxcReactDocgen({ srcDirs: ['/project/src/'] })
+      const p = caliperDocgen({ srcDirs: ['/project/src/'] })
       ;(p.configResolved as Function)({ root: '/project' })
       const ctx = clientEnv()
       await (p.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
@@ -255,13 +255,13 @@ describe('oxcReactDocgen', () => {
       const ctx = clientEnv()
       await (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
 
-      expect(ctx.environment.hot.send).toHaveBeenCalledWith('oxc-react-docgen:update', {
+      expect(ctx.environment.hot.send).toHaveBeenCalledWith('caliper-docgen:update', {
         file: '/project/src/Button.tsx',
         updatedComponents: [],
         diagnostics: [],
       })
       expect(consoleError).toHaveBeenCalledWith(
-        '[oxc-react-docgen] Failed to parse extractFileIncremental output:',
+        '[caliper-docgen] Failed to parse extractFileIncremental output:',
         expect.any(Error),
       )
       consoleError.mockRestore()
@@ -341,7 +341,7 @@ describe('oxcReactDocgen', () => {
       resolveFirst(JSON.stringify({ updatedComponents: [makeComponent('stale')], diagnostics: [] }))
       await firstCall
 
-      const code = (plugin.load as Function)('\0virtual:oxc-react-docgen') as string
+      const code = (plugin.load as Function)('\0virtual:caliper-docgen') as string
       const data = JSON.parse(code.replace('export default ', ''))
       expect(data.components.Button.description).toBe('fresh')
     })
@@ -373,7 +373,7 @@ describe('oxcReactDocgen', () => {
       resolveButton(JSON.stringify({ updatedComponents: [makeComponent('button')], diagnostics: [] }))
       await buttonCall
 
-      const code = (plugin.load as Function)('\0virtual:oxc-react-docgen') as string
+      const code = (plugin.load as Function)('\0virtual:caliper-docgen') as string
       const data = JSON.parse(code.replace('export default ', ''))
       expect(data.components.Button.description).toBe('button')
       expect(data.components.Input.description).toBe('input')
@@ -389,7 +389,7 @@ describe('oxcReactDocgen', () => {
     })
 
     it('still closes the session for a normal (non-watch) vite build', () => {
-      const p = oxcReactDocgen({ srcDirs: ['src'] })
+      const p = caliperDocgen({ srcDirs: ['src'] })
       ;(p.configResolved as Function)({ root: '/project', command: 'build' })
       ;(p.buildEnd as Function)()
       expect(napi.closeSession).toHaveBeenCalledWith(42)
@@ -408,7 +408,7 @@ describe('oxcReactDocgen', () => {
 
   describe('buildEnd / closeWatcher session lifecycle under `vite build --watch`', () => {
     it('does not close the session on buildEnd while watching', () => {
-      const p = oxcReactDocgen({ srcDirs: ['src'] })
+      const p = caliperDocgen({ srcDirs: ['src'] })
       ;(p.configResolved as Function)({ root: '/project', command: 'build', build: { watch: {} } })
       ;(p.buildEnd as Function)()
       ;(p.buildEnd as Function)() // a second rebuild's buildEnd
@@ -416,7 +416,7 @@ describe('oxcReactDocgen', () => {
     })
 
     it('closes the session via closeWatcher when the watch process shuts down', () => {
-      const p = oxcReactDocgen({ srcDirs: ['src'] })
+      const p = caliperDocgen({ srcDirs: ['src'] })
       ;(p.configResolved as Function)({ root: '/project', command: 'build', build: { watch: {} } })
       ;(p.closeWatcher as Function)()
       expect(napi.closeSession).toHaveBeenCalledWith(42)
@@ -428,7 +428,7 @@ describe('oxcReactDocgen', () => {
   // configureServer (which runs the cold extraction that populates the virtual
   // module's data) is a dev-server-only hook — Vite never calls it during
   // `vite build`. Without a build-mode extraction path, a production build's
-  // `virtual:oxc-react-docgen` import always resolved to the empty placeholder
+  // `virtual:caliper-docgen` import always resolved to the empty placeholder
   // stats/components declared at plugin construction time.
 
   describe('buildStart', () => {
@@ -436,7 +436,7 @@ describe('oxcReactDocgen', () => {
       ;(plugin.configResolved as Function)({ root: '/project', command: 'build' })
       await (plugin.buildStart as Function)()
       expect(napi.initializeSession).toHaveBeenCalledWith(42, expect.objectContaining({ srcDirs: ['/project/src'] }))
-      const code = (plugin.load as Function)('\0virtual:oxc-react-docgen') as string
+      const code = (plugin.load as Function)('\0virtual:caliper-docgen') as string
       expect(code).toMatch(/^export default \{/)
     })
 
@@ -457,10 +457,10 @@ describe('oxcReactDocgen', () => {
       await (plugin.buildStart as Function)()
 
       expect(consoleError).toHaveBeenCalledWith(
-        '[oxc-react-docgen] Failed to parse initializeSession output:',
+        '[caliper-docgen] Failed to parse initializeSession output:',
         expect.any(Error),
       )
-      const code = (plugin.load as Function)('\0virtual:oxc-react-docgen') as string
+      const code = (plugin.load as Function)('\0virtual:caliper-docgen') as string
       const data = JSON.parse(code.replace('export default ', ''))
       expect(data.components).toEqual({})
       consoleError.mockRestore()
@@ -471,13 +471,13 @@ describe('oxcReactDocgen', () => {
 
   describe('skipHtmlProps', () => {
     it('maps to htmlAttributes: "none" for the NAPI call', () => {
-      const p = oxcReactDocgen({ srcDirs: ['src'], skipHtmlProps: true })
+      const p = caliperDocgen({ srcDirs: ['src'], skipHtmlProps: true })
       ;(p.configResolved as Function)({ root: '/project' })
       expect(napi.createSession).toHaveBeenCalledWith(expect.objectContaining({ htmlAttributes: 'none' }))
     })
 
     it('leaves htmlAttributes unset when skipHtmlProps is not passed', () => {
-      const p = oxcReactDocgen({ srcDirs: ['src'] })
+      const p = caliperDocgen({ srcDirs: ['src'] })
       ;(p.configResolved as Function)({ root: '/project' })
       expect(napi.createSession).toHaveBeenCalledWith(expect.objectContaining({ htmlAttributes: undefined }))
     })
@@ -490,7 +490,7 @@ describe('oxcReactDocgen', () => {
 
   describe('exclude / reactVersion options forwarding', () => {
     it('forwards exclude and reactVersion to the NAPI call', () => {
-      const p = oxcReactDocgen({ srcDirs: ['src'], exclude: ['**/*.stories.tsx'], reactVersion: 'react19' })
+      const p = caliperDocgen({ srcDirs: ['src'], exclude: ['**/*.stories.tsx'], reactVersion: 'react19' })
       ;(p.configResolved as Function)({ root: '/project' })
       expect(napi.createSession).toHaveBeenCalledWith(
         expect.objectContaining({ exclude: ['**/*.stories.tsx'], reactVersion: 'react19' }),
@@ -498,7 +498,7 @@ describe('oxcReactDocgen', () => {
     })
 
     it('leaves exclude and reactVersion unset when not passed', () => {
-      const p = oxcReactDocgen({ srcDirs: ['src'] })
+      const p = caliperDocgen({ srcDirs: ['src'] })
       ;(p.configResolved as Function)({ root: '/project' })
       expect(napi.createSession).toHaveBeenCalledWith(
         expect.objectContaining({ exclude: undefined, reactVersion: undefined }),

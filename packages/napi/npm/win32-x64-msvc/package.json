@@ -1,14 +1,14 @@
 {
-  "name": "@oxc-react-docgen/napi-win32-x64-msvc",
+  "name": "@orin-dx/caliper-docgen-napi-win32-x64-msvc",
   "version": "0.2.0",
   "cpu": [
     "x64"
   ],
-  "main": "oxc_react_docgen_napi.win32-x64-msvc.node",
+  "main": "caliper_docgen_napi.win32-x64-msvc.node",
   "files": [
-    "oxc_react_docgen_napi.win32-x64-msvc.node"
+    "caliper_docgen_napi.win32-x64-msvc.node"
   ],
-  "description": "Native Node.js bindings for oxc-react-docgen",
+  "description": "Native Node.js bindings for caliper-docgen",
   "license": "AGPL-3.0-or-later",
   "os": [
     "win32"

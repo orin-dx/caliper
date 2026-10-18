@@ -6,9 +6,9 @@ import type { ToolResult, NormalizedOutput } from './types.ts'
 const __dirname = import.meta.dirname
 const FIXTURES_ROOT = resolve(__dirname, '../../../fixtures')
 // Prefer release build (faster, has all fixes); fall back to debug for dev convenience.
-const CLI = existsSync(resolve(__dirname, '../../../target/release/oxc-react-docgen'))
-  ? resolve(__dirname, '../../../target/release/oxc-react-docgen')
-  : resolve(__dirname, '../../../target/debug/oxc-react-docgen')
+const CLI = existsSync(resolve(__dirname, '../../../target/release/caliper-docgen'))
+  ? resolve(__dirname, '../../../target/release/caliper-docgen')
+  : resolve(__dirname, '../../../target/debug/caliper-docgen')
 
 function discoverLibraries(): string[] {
   return readdirSync(FIXTURES_ROOT)
@@ -184,7 +184,7 @@ const results: ToolResult[] = []
           ?.replace(/\.tsx?$/, '')
           .replace(/\.d$/, '') ?? c.displayName
       results.push({
-        tool: 'oxc-react-docgen',
+        tool: 'caliper-docgen',
         fixture: `${lib}/${basename}/${c.displayName}`,
         durationMs,
         output: normalize({ components: { [c.displayName]: c } }),
@@ -194,7 +194,7 @@ const results: ToolResult[] = []
     }
   } catch (error: any) {
     results.push({
-      tool: 'oxc-react-docgen',
+      tool: 'caliper-docgen',
       fixture: 'all-fixtures',
       durationMs: performance.now() - start,
       output: {},

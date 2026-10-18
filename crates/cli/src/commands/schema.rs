@@ -1,6 +1,6 @@
 use miette::Result;
 
-/// Build the JSON Schema for the oxc-react-docgen `ExtractionOutput` format.
+/// Build the JSON Schema for the caliper-docgen `ExtractionOutput` format.
 /// Hand-maintained per ADR-0002-style precedent — see the drift-detection
 /// test below for the guard against it silently falling out of sync with the
 /// real `ComponentEntry`/`ExtractionStats`/`Diagnostic` structs.
@@ -8,7 +8,7 @@ fn schema_value() -> serde_json::Value {
     serde_json::json!({
         "$schema": "http://json-schema.org/draft-07/schema#",
         "title": "ExtractionOutput",
-        "description": "Output schema for oxc-react-docgen component prop extraction",
+        "description": "Output schema for caliper-docgen component prop extraction",
         "type": "object",
         "required": ["components", "enums", "diagnostics", "stats"],
         "properties": {
@@ -98,7 +98,7 @@ fn schema_value() -> serde_json::Value {
     })
 }
 
-/// Output JSON schema for the oxc-react-docgen ExtractionOutput format.
+/// Output JSON schema for the caliper-docgen ExtractionOutput format.
 pub fn cmd_schema() -> Result<()> {
     println!("{}", serde_json::to_string_pretty(&schema_value()).unwrap_or_default());
     Ok(())
@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn schema_covers_every_field_name_the_real_output_serializes() {
-        use oxc_react_docgen_core::types::{
+        use caliper_docgen_core::types::{
             ComponentEntry, DefaultValue, Diagnostic, DiagnosticCode, DiagnosticSeverity, ExtractionOutput,
             ExtractionStats, InheritedLayer, ParsedProp, PropParent, PropType,
         };

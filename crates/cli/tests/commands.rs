@@ -9,7 +9,7 @@ mod common;
 use common::strip_ansi;
 
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_oxc-react-docgen")).args(args).output().expect("failed to spawn the real binary")
+    Command::new(env!("CARGO_BIN_EXE_caliper-docgen")).args(args).output().expect("failed to spawn the real binary")
 }
 
 /// A source directory holding one clean `Widget` component.
@@ -49,7 +49,7 @@ fn inspect_prints_the_component_and_its_props_table() {
 #[test]
 fn completions_prints_a_shell_script() {
     let stdout = stdout_of(&run(&["completions", "bash"]));
-    assert!(stdout.starts_with("_oxc__react__docgen() {"), "{}", stdout.lines().next().unwrap_or_default());
+    assert!(stdout.starts_with("_caliper__docgen() {"), "{}", stdout.lines().next().unwrap_or_default());
 }
 
 #[test]
@@ -125,7 +125,7 @@ impl Drop for KillOnDrop {
 fn a_bare_out_file_name_is_written_into_the_current_directory() {
     let src = widget_dir();
     let cwd = TempDir::new().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_oxc-react-docgen"))
+    let output = Command::new(env!("CARGO_BIN_EXE_caliper-docgen"))
         .current_dir(cwd.path())
         .args(["--quiet", "extract", "--out", "out.json", "--src", src.path().to_str().unwrap()])
         .output()
@@ -152,7 +152,7 @@ fn spawn_watch(src: &TempDir, quiet: bool) -> Watch {
     let scratch = TempDir::new().unwrap();
     let (out, stdout, stderr) =
         (scratch.path().join("out.json"), scratch.path().join("stdout.log"), scratch.path().join("stderr.log"));
-    let mut command = Command::new(env!("CARGO_BIN_EXE_oxc-react-docgen"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_caliper-docgen"));
     if quiet {
         command.arg("--quiet");
     }
@@ -202,7 +202,7 @@ fn out_is_staged_next_to_the_target_not_in_the_current_directory() {
     let out = target_dir.path().join("out.json");
     std::fs::set_permissions(cwd.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_oxc-react-docgen"))
+    let output = Command::new(env!("CARGO_BIN_EXE_caliper-docgen"))
         .current_dir(cwd.path())
         .args(["--quiet", "extract", "--src", src.path().to_str().unwrap()])
         .args(["--cache-dir", target_dir.path().join("cache").to_str().unwrap(), "--out", out.to_str().unwrap()])
@@ -302,7 +302,7 @@ fn extract_finds_docgen_config_ts_in_the_working_directory_and_applies_it() {
     }
     std::fs::write(project.path().join("docgen.config.ts"), "export default { srcDirs: ['components'] };\n").unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_oxc-react-docgen"))
+    let output = Command::new(env!("CARGO_BIN_EXE_caliper-docgen"))
         .current_dir(project.path())
         .args(["--quiet", "extract", "--json"])
         .output()

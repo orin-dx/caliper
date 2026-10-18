@@ -1,8 +1,8 @@
 ```console
-$ oxc-react-docgen --help
+$ caliper-docgen --help
 Fast React prop extraction powered by OXC
 
-Usage: oxc-react-docgen [OPTIONS] <COMMAND>
+Usage: caliper-docgen [OPTIONS] <COMMAND>
 
 Commands:
   extract      Extract prop types and write to stdout or --out file

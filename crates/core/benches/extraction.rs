@@ -11,12 +11,12 @@ fn fixture_dir(fixture: &str) -> camino::Utf8PathBuf {
 fn extract_file_bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("extract_file");
     for fixture in ["shadcn/button.tsx", "shadcn/input.tsx", "radix/button.d.ts", "mui/Button.d.ts"] {
-        let options = oxc_react_docgen_core::pipeline::PipelineOptions {
+        let options = caliper_docgen_core::pipeline::PipelineOptions {
             src_dirs: vec![fixture_dir(fixture)],
             ..Default::default()
         };
         group.bench_with_input(BenchmarkId::from_parameter(fixture), &options, |b, options| {
-            b.iter(|| oxc_react_docgen_core::pipeline::extract(options));
+            b.iter(|| caliper_docgen_core::pipeline::extract(options));
         });
     }
     group.finish();
@@ -43,13 +43,13 @@ fn incremental_update_bench(c: &mut Criterion) {
             (fixture_path.parent().expect("file has a parent dir").to_path_buf(), fixture_path)
         };
 
-        let options = oxc_react_docgen_core::pipeline::PipelineOptions {
+        let options = caliper_docgen_core::pipeline::PipelineOptions {
             src_dirs: vec![camino::Utf8PathBuf::from_path_buf(lib_dir).expect("valid utf8 path")],
             ..Default::default()
         };
         let changed = camino::Utf8PathBuf::from_path_buf(changed_file).expect("valid utf8 path");
 
-        let session = oxc_react_docgen_core::pipeline::WatchSession::new(options);
+        let session = caliper_docgen_core::pipeline::WatchSession::new(options);
         let _ = session.initialize();
 
         group.bench_with_input(BenchmarkId::from_parameter(fixture), &changed, |b, changed| {

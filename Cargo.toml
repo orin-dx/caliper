@@ -11,7 +11,7 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.94"
-authors = ["oxc-react-docgen contributors"]
+authors = ["caliper-docgen contributors"]
 license = "AGPL-3.0-or-later"
 
 # "deny" rather than "forbid": a member crate could locally #[allow(unsafe_code)]

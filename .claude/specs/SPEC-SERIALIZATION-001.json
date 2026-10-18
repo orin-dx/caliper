@@ -1,7 +1,7 @@
 {
   "id": "SPEC-SERIALIZATION-001",
   "requirement_id": "REQ-SERIALIZATION-001",
-  "purpose": "Guarantee that every consumer-facing projection of ExtractionOutput -- RDT-compat JSON, Storybook JSON, TOON text, and the exported JSON Schema -- faithfully represents the canonical data, with no silent truncation, no misleading enum-shapes, and no undetected schema drift, so tools that treat oxc-react-docgen as a drop-in react-docgen-typescript replacement can trust the output without re-deriving it from the resolver's internal types.",
+  "purpose": "Guarantee that every consumer-facing projection of ExtractionOutput -- RDT-compat JSON, Storybook JSON, TOON text, and the exported JSON Schema -- faithfully represents the canonical data, with no silent truncation, no misleading enum-shapes, and no undetected schema drift, so tools that treat caliper-docgen as a drop-in react-docgen-typescript replacement can trust the output without re-deriving it from the resolver's internal types.",
   "scope": [
     "crates/cli/src/commands/extract.rs: serialize_rdt, rdt_type_json (serialize_storybook is referenced only in non_goals for context -- no acceptance criterion here constrains its output shape)",
     "crates/core/src/toon.rs: render_output_toon, render_component_toon, format_type_compact, truncate_with_indicator",

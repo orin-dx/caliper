@@ -8,8 +8,8 @@
 //! finding — hence the blanket allow below.
 #![allow(dead_code)]
 
+use caliper_docgen_tsc_client::SupervisorConfig;
 use camino::Utf8PathBuf;
-use oxc_react_docgen_tsc_client::SupervisorConfig;
 
 pub const PINNED_VERSION: &str = "7.1.0-test";
 

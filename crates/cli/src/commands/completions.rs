@@ -2,7 +2,7 @@ use miette::Result;
 
 pub fn cmd_completions(args: crate::CompletionsArgs) -> Result<()> {
     use clap::CommandFactory;
-    clap_complete::generate(args.shell, &mut crate::Cli::command(), "oxc-react-docgen", &mut std::io::stdout());
+    clap_complete::generate(args.shell, &mut crate::Cli::command(), "caliper-docgen", &mut std::io::stdout());
     Ok(())
 }
 
@@ -31,11 +31,11 @@ mod tests {
             clap_complete::Shell::Elvish,
         ] {
             let mut buf = Vec::new();
-            clap_complete::generate(shell, &mut crate::Cli::command(), "oxc-react-docgen", &mut buf);
+            clap_complete::generate(shell, &mut crate::Cli::command(), "caliper-docgen", &mut buf);
             assert!(!buf.is_empty(), "expected a non-empty completion script for {shell:?}");
             let script = String::from_utf8(buf).expect("completion script should be valid UTF-8");
             assert!(
-                script.contains("oxc-react-docgen"),
+                script.contains("caliper-docgen"),
                 "expected the completion script to reference the binary name, got {script:?}"
             );
         }

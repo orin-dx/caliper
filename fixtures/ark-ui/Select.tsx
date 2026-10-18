@@ -20,7 +20,7 @@
  * i.e. `Omit<HTMLProps<'div'>, keyof SelectRootBaseProps<T>> & SelectRootBaseProps<T>`
  * (see `Assign`/`Optional`/`HTMLProps` in ./types.ts — kept there verbatim for
  * reference), rather than the flattened plain-`extends` workaround this fixture
- * used previously. Restored once oxc-react-docgen gained structural
+ * used previously. Restored once caliper-docgen gained structural
  * substitution of type arguments into user-defined generic type aliases
  * (`Assign<T, U>`) plus `keyof`-argument expansion for `Omit<>`.
  */
@@ -160,7 +160,7 @@ export type SelectRootComponent<P = {}> = <T extends CollectionItem>(
 // form is kept above (`SelectRootComponent`) for fidelity, but the actual
 // export below instead gives `forwardRef` its type arguments directly
 // (`<HTMLDivElement, SelectRootProps<CollectionItem>>`), because
-// oxc-react-docgen's forwardRef detector requires an explicit 2-arg
+// caliper-docgen's forwardRef detector requires an explicit 2-arg
 // `forwardRef<Ref, Props>(...)` type-argument list and does not unwrap an
 // outer `as` cast expression to find the call it wraps (confirmed: with the
 // `as SelectRootComponent` form, none of the component detectors fire and

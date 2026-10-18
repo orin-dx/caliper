@@ -7,8 +7,8 @@ dist/
 debug/
 target/
 *.node
-packages/cli/npm/*/oxc-react-docgen
-packages/cli/npm/*/oxc-react-docgen.exe
+packages/cli/npm/*/caliper-docgen
+packages/cli/npm/*/caliper-docgen.exe
 
 # Rust build artifacts
 **/*.rs.bk

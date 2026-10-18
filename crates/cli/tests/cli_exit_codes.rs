@@ -7,7 +7,7 @@
 use std::process::Command;
 
 fn run(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_oxc-react-docgen")).args(args).output().expect("failed to spawn the real binary")
+    Command::new(env!("CARGO_BIN_EXE_caliper-docgen")).args(args).output().expect("failed to spawn the real binary")
 }
 
 // ── AC-015: an unrecognized `completions` shell value is rejected by clap

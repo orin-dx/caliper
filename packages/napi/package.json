@@ -1,13 +1,13 @@
 {
-  "name": "@oxc-react-docgen/napi",
+  "name": "@orin-dx/caliper-docgen-napi",
   "version": "0.2.0",
-  "description": "Native Node.js bindings for oxc-react-docgen",
+  "description": "Native Node.js bindings for caliper-docgen",
   "main": "index.js",
   "types": "index.d.ts",
   "type": "commonjs",
   "napi": {
-    "binaryName": "oxc_react_docgen_napi",
-    "packageName": "@oxc-react-docgen/napi",
+    "binaryName": "caliper_docgen_napi",
+    "packageName": "@orin-dx/caliper-docgen-napi",
     "targets": [
       "aarch64-apple-darwin",
       "x86_64-apple-darwin",
@@ -27,11 +27,11 @@
     "*.node"
   ],
   "optionalDependencies": {
-    "@oxc-react-docgen/napi-darwin-arm64": "0.2.0",
-    "@oxc-react-docgen/napi-darwin-x64": "0.2.0",
-    "@oxc-react-docgen/napi-linux-arm64-gnu": "0.2.0",
-    "@oxc-react-docgen/napi-linux-x64-gnu": "0.2.0",
-    "@oxc-react-docgen/napi-win32-x64-msvc": "0.2.0"
+    "@orin-dx/caliper-docgen-napi-darwin-arm64": "0.2.0",
+    "@orin-dx/caliper-docgen-napi-darwin-x64": "0.2.0",
+    "@orin-dx/caliper-docgen-napi-linux-arm64-gnu": "0.2.0",
+    "@orin-dx/caliper-docgen-napi-linux-x64-gnu": "0.2.0",
+    "@orin-dx/caliper-docgen-napi-win32-x64-msvc": "0.2.0"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.10.8"

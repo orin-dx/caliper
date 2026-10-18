@@ -13,7 +13,7 @@ pub fn cmd_inspect(args: crate::InspectArgs, config_path: Option<&str>) -> Resul
         config_path,
         extra_builtins: &[],
     })?;
-    let output = oxc_react_docgen_core::pipeline::extract(&options);
+    let output = caliper_docgen_core::pipeline::extract(&options);
 
     let component = output.components.get(&args.component).ok_or_else(|| {
         miette::miette!(

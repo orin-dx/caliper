@@ -1,4 +1,4 @@
-//! LSP (Language Server Protocol) command scaffold for oxc-react-docgen.
+//! LSP (Language Server Protocol) command scaffold for caliper-docgen.
 //!
 //! Provides IDE hover and component prop documentation in editors (VS Code, Neovim, Helix).
 
@@ -68,7 +68,7 @@ fn initialize_result() -> serde_json::Value {
             "hoverProvider": false
         },
         "serverInfo": {
-            "name": "oxc-react-docgen-lsp",
+            "name": "caliper-docgen-lsp",
             "version": env!("CARGO_PKG_VERSION")
         }
     })

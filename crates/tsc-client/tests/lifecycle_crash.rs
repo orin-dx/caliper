@@ -2,14 +2,14 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use oxc_react_docgen_tsc_client::{Client, Supervisor, TscClientError};
+use caliper_docgen_tsc_client::{Client, Supervisor, TscClientError};
 use serde_json::json;
 
 #[tokio::test]
 async fn a_process_that_exits_mid_session_fails_the_next_request_as_crashed() {
     // Answers the first request, then exits — a second request gets no response.
     let (_dir, config) = common::spawn_fake("exit_after:1:7");
-    let mut supervisor = oxc_react_docgen_tsc_client::Supervisor::spawn(config).await.expect("spawn fake tsc");
+    let mut supervisor = caliper_docgen_tsc_client::Supervisor::spawn(config).await.expect("spawn fake tsc");
 
     let first = supervisor.request("first", serde_json::json!({}), Duration::from_secs(2)).await;
     assert!(first.is_ok(), "expected the first request to succeed, got {first:?}");

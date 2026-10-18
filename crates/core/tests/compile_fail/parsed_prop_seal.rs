@@ -3,7 +3,7 @@
 // field is what enforces this. This file lives outside the crate entirely
 // (trybuild compiles it as its own crate), the strictest possible test of
 // "outside this module."
-use oxc_react_docgen_core::types::{ParsedProp, PropType};
+use caliper_docgen_core::types::{ParsedProp, PropType};
 
 fn main() {
     let _ = ParsedProp {

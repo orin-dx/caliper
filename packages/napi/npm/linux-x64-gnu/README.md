@@ -1,3 +1,3 @@
-# `@oxc-react-docgen/napi-linux-x64-gnu`
+# `@orin-dx/caliper-docgen-napi-linux-x64-gnu`
 
-This is the **x86_64-unknown-linux-gnu** binary for `@oxc-react-docgen/napi`
+This is the **x86_64-unknown-linux-gnu** binary for `@orin-dx/caliper-docgen-napi`
