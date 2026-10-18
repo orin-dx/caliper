@@ -729,7 +729,8 @@ export function oxcReactDocgen(options: OxcDocgenOptions): Plugin {
       // declared this-type across different Vite patch versions.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const env = (this as any).environment as
-        { name: string; hot: { send(event: string, data?: unknown): void } } | undefined
+        | { name: string; hot: { send(event: string, data?: unknown): void } }
+        | undefined
 
       if (!env || env.name !== 'client') return
       if (!isSrcFile(opts.file)) return

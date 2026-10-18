@@ -590,7 +590,7 @@ This task just links the already-written `docs/type-checker-integration.md` from
 At the very bottom of `docs/rdt-coverage.md`, add:
 
 ```markdown
----
+***
 
 ## Deferred gaps (require Corsa / TypeScript 7.1 type checker)
 
