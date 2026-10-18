@@ -1,6 +1,6 @@
 # oxc-react-docgen
 
-10-100x faster drop-in replacement for react-docgen-typescript. OXC parses TypeScript/TSX; we extract React component props and emit RDT-compatible JSON. See `docs/STATUS.md` for current state and known gaps.
+10-100x faster than react-docgen-typescript. OXC parses TypeScript/TSX; we extract React component props and emit RDT-compatible JSON via `--format rdt`. See `docs/STATUS.md` for current state and known gaps.
 
 ## Commands
 
@@ -29,6 +29,12 @@ OXC parse → SourceData (extractor/) → GlobalSourceData (pipeline/) → Compo
 
 No reverse dependencies. `pub(crate)` for implementation modules; `pub` only for consumer-facing API (`pipeline/`, `types/`, `react_types`).
 
+See `ARCHITECTURE.md` for the full pipeline/crate-graph overview, and `docs/architecture/` for per-subsystem invariants and known gaps (pipeline orchestration, extractor, resolver, types, serialization, CLI, NAPI binding) — start at `docs/architecture/README.md`.
+
+## Decisions
+
+Read `docs/adr/README.md` before changing the parser choice, `PropType` serialization, the DTS cache format, panic containment or the semantic backend. Reversing an ADR needs a new ADR.
+
 ## Testing discipline
 
 Two habits that repeatedly caught real bugs during the 2026-08-12 spec-validation pass (a stale-by-one-edit watch mode, always-zero watch stats — both had zero test coverage despite extensive existing suites):
@@ -38,6 +44,13 @@ Two habits that repeatedly caught real bugs during the 2026-08-12 spec-validatio
 
 ## Crate guide
 
-- `crates/core` — pure extraction logic; @crates/core/CLAUDE.md
-- `crates/cli` — clap CLI, no logic; @crates/cli/CLAUDE.md
+- `crates/core` — pure extraction logic; @crates/core/AGENTS.md
+- `crates/cli` — clap CLI, no logic; @crates/cli/AGENTS.md
 - `crates/binding` — thin NAPI wrapper, delegates to core
+
+## Writing and commits
+
+- Succinct: short sentences, bullets, tables. No backstory, hedging or filler. Banned words are in `docs/adr/README.md`.
+- Never hard-wrap Markdown, commit messages or PR descriptions: one line per paragraph.
+- Comments: only the non-obvious why, no history (the commit records it). Fill to 120 columns (`.rustfmt.toml`). Rewriting a comment block counts as writing it: re-fill and cut it, don't inherit the old wrapping.
+- Commits: imperative subject, at most one or two sentences of why, no list of what changed, no "This commit...". Skip the body when the subject says it all.

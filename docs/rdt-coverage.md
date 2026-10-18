@@ -1,4 +1,4 @@
-# RDT Spec Coverage Matrix
+# RDT spec coverage matrix
 
 Maps each react-docgen-typescript (RDT) output field and component pattern to the fixtures that exercise it. Run `cargo test -p oxc-react-docgen-core --test snapshots` to validate the original 8 snapshot fixtures. The 8 real-world library fixtures added since (fluentui, base-ui, antd, ark-ui, zendesk-garden, day-picker, headlessui, blueprint) aren't snapshot-tested — validate them via `pnpm --filter @oxc-react-docgen/validate compare:all`.
 
@@ -123,7 +123,7 @@ Each `PropType` variant the resolver can emit; whether any fixture produces it.
 | HTML element inheritance, curated | ✅ | all fixtures |
 | HTML element inheritance, full real resolution | ✅ | shadcn, **blueprint** — see [HtmlAttributeMode](#htmlattributemode-curated--full--none) |
 | `styled.X.attrs<T>()` (styled-components) | ❌ | **zendesk-garden** — neither this tool nor real RDT detects this pattern; a shared blind spot, not a competitive gap, not fixed |
-| Template literal type → opaque | ❌ | mantine has `"compact-${MantineSize}"` but it's not seen as `opaque` in snapshots — verify |
+| Template literal type → expanded literal union | ✅ | mantine `size?: MantineSize \| \`compact-${MantineSize}\``resolves to a`union`of two`literalUnion`s (`xs`/`sm`/.../`xl`and`compact-xs`/.../`compact-xl`), not left opaque |
 | HOC pattern | ✅ | extractor unit test only (no snapshot fixture) |
 | Generic component | ⚠️ partial | own generic type ALIAS substitution works (**ark-ui**); React's own builtin generics resolve by name only, never by substituted value (sufficient for docgen — see `docs/type-checker-integration.md`); component-level `<T,>()=>` type-param flow through a multi-file component tree not covered |
 | `defaultProps` static assignment | ❌ | no fixture |

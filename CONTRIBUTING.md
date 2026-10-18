@@ -29,7 +29,7 @@ pnpm --filter @oxc-react-docgen/vite-plugin test:integration  # 3 integration te
 moon run validate:compare
 ```
 
-The pre-commit hook runs `cargo fmt`, `cargo clippy --all-targets -D warnings`, `typos`, and `cargo deny` on every commit. If you're on a machine where the hook fires on every `git commit`, the hook is fast enough that it's not worth bypassing.
+The pre-commit hook runs `cargo fmt`, `cargo clippy --all-targets -D warnings`, `typos`, and `cargo deny` on every commit. It's fast enough that skipping it isn't worth the trouble.
 
 ## Snapshot tests
 

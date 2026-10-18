@@ -1,8 +1,8 @@
-# Semantic Model — Index
+# Semantic model
 
-Read this first. Load only the files your task requires — never load all seven at once. This index is ~500 tokens; each topic file is 1200-3700 words. The goal is progressive loading, not a single monolithic architecture doc.
+Read this first. Load only the file your task requires — never load all seven at once. This index is short; each topic file runs 1200-3700 words. The goal is progressive loading, not a single monolithic architecture doc.
 
-**The spec@1 is the authority; these files are the reference layer beneath it.** When a spec (`.claude/specs/`) and a semantic-model file disagree, the spec wins for the feature it covers — but that usually means the semantic-model file is stale and should be corrected, not ignored. Each file states its `Source:` — the real `.rs` files it's distilled from — so staleness is always checkable against ground truth.
+**The spec@1 is the authority; these files are the reference layer beneath it.** When a spec (`.claude/specs/`) and a file here disagree, the spec wins for the feature it covers — but that usually means the file here is stale and should be corrected, not ignored. Each file states its `Source:` — the real `.rs` files it's distilled from — so staleness is always checkable against ground truth.
 
 ## Task → file routing
 
@@ -20,15 +20,15 @@ Read this first. Load only the files your task requires — never load all seven
 
 - **Source code** — read it directly from the crate. These files summarize invariants, they don't replace reading the function you're about to change.
 - **Spec@1 artifacts** (`.claude/specs/`) — testable acceptance criteria for a specific unit of work. These files are broader and looser; specs are narrow and binding.
-- **`docs/edge-cases.md` / `docs/root-cause-analysis.md`** — the project's bug/gap tracker and its root-cause analysis. Semantic-model files cross-reference these rather than duplicating them; check those docs directly for current, itemized gap status.
-- **`docs/adr/`** — hard-to-reverse decisions with their own record format. Semantic-model files cite the relevant ADR by number rather than re-explaining the decision.
-- **`ARCHITECTURE.md`, `CLAUDE.md` files** — human-facing prose reference and contributor rules. Treat as context, not as the invariant source — the semantic-model files here are the ones checked against real source per-subsystem.
+- **`docs/edge-cases.md` / `docs/root-cause-analysis.md`** — the project's bug/gap tracker and its root-cause analysis. Files here cross-reference those rather than duplicating them; check those docs directly for current, itemized gap status.
+- **`docs/adr/`** — hard-to-reverse decisions with their own record format. Files here cite the relevant ADR by number rather than re-explaining the decision.
+- **`ARCHITECTURE.md`, `AGENTS.md` files** — human-facing prose reference and contributor rules. Treat as context, not as the invariant source — the files here are the ones checked against real source per subsystem.
 
 ## Cross-cutting invariants (span every file — not worth repeating seven times)
 
 - No `unwrap()`/`expect()` outside `#[cfg(test)]` anywhere in `crates/core` or `crates/cli` (verified repeatedly across this project's own audits — holds today).
 - `FxHashMap` for internal maps, `BTreeMap` for anything serialized to JSON output (determinism).
-- Always emit a `Diagnostic` when degrading — the single most-violated-then-fixed rule in this project's history; every semantic-model file below documents where this discipline is solid and where residual gaps remain.
+- Always emit a `Diagnostic` when degrading — the single most-violated-then-fixed rule in this project's history; every file below documents where this discipline is solid and where residual gaps remain.
 - `panic_guard::contain_panic` is the one sanctioned panic-containment boundary (ADR-0005) — see `pipeline-orchestration.md` and `napi-binding.md` for where it's wired in.
 
 ## Known doc-hygiene corrections found while writing this layer (2026-08-12)

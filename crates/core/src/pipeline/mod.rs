@@ -242,7 +242,7 @@ pub(crate) fn extract_with_global(
 
     // Phase 0: Validate that configured source directories exist. A typo'd --src (or a
     // stale docgen.config.ts srcDirs) must not silently produce an empty-but-valid-looking
-    // result — see CLAUDE.md non-negotiable #6.
+    // result — see AGENTS.md non-negotiable #6.
     let missing_src_dirs: Vec<&Utf8PathBuf> =
         options.src_dirs.iter().filter(|dir| !dir.as_std_path().is_dir()).collect();
     if options.src_dirs.is_empty() {
@@ -881,7 +881,7 @@ mod tests {
     #[test]
     fn test_extract_missing_src_dir() {
         // A typo'd/stale --src must surface as an Error diagnostic, not silently
-        // produce an empty-but-valid-looking result (CLAUDE.md non-negotiable #6).
+        // produce an empty-but-valid-looking result (AGENTS.md non-negotiable #6).
         let tmp = TempDir::new().unwrap();
         let missing = Utf8PathBuf::from_path_buf(tmp.path().join("does-not-exist")).unwrap();
 

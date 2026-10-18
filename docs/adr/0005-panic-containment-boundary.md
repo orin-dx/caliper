@@ -4,13 +4,21 @@
 
 ## Context
 
-There was no `catch_unwind` anywhere in the repo. Panic safety existed only by accident: `extract_all`, `extract_file_incremental`, and `initialize_session` happened to run inside `tokio::task::spawn_blocking`, whose `JoinError` catches an unwind as a side effect of tokio's own plumbing, not a decision anyone made. `pipeline/mod.rs`'s rayon `.map()` closures had no per-item boundary, `plugin.rs` called each `DocgenPlugin` hook with zero isolation between plugins, `create_session`/`close_session` skipped `spawn_blocking` entirely and got no protection at all, and `watch.rs`'s `std::sync::Mutex` could poison permanently as a direct consequence of an unprotected panic happening while the lock was held.
+There was no `catch_unwind` anywhere in the repo. What safety existed was accidental:
+
+- `extract_all`, `extract_file_incremental`, and `initialize_session` happened to run inside `tokio::task::spawn_blocking`, whose `JoinError` catches an unwind as a side effect of tokio's own plumbing — not a decision anyone made.
+- `pipeline/mod.rs`'s rayon `.map()` closures had no per-item boundary.
+- `plugin.rs` called each `DocgenPlugin` hook with zero isolation between plugins.
+- `create_session`/`close_session` skipped `spawn_blocking` entirely and got no protection at all.
+- `watch.rs`'s `std::sync::Mutex` could poison permanently — a direct consequence of an unprotected panic happening while the lock was held.
 
 ## Decision
 
-Panics reachable from a rayon `.map()`, a `DocgenPlugin` hook, or a NAPI entry point are caught at `crates/core/src/panic_guard.rs`'s `pub fn contain_panic<T>(label: &str, f: impl FnOnce() -> T) -> Result<T, Diagnostic>`, converting the payload into a `Diagnostic` tagged `DiagnosticCode::InternalPanic` instead of aborting a batch, killing the whole pipeline, or poisoning a lock. `contain_panic` wraps its closure in `AssertUnwindSafe` internally, so callers never reason about `UnwindSafe` themselves — this matters because the plugin-hook call sites pass `&mut SourceData`/`&mut ComponentEntry`, and `&mut T` is unconditionally `!UnwindSafe` in std. The internal `AssertUnwindSafe` is justified by this codebase's data shape: `SourceData` and `ComponentEntry` have no interior mutability (`Cell`/`RefCell`) that could leave a torn, observable half-write behind a caught panic — the whole per-item operation is what gets abandoned, not a partial mutation trusted afterward.
+Panics reachable from a rayon `.map()`, a `DocgenPlugin` hook, or a NAPI entry point are caught at `crates/core/src/panic_guard.rs`'s `pub fn contain_panic<T>(label: &str, f: impl FnOnce() -> T) -> Result<T, Diagnostic>`, converting the payload into a `Diagnostic` tagged `DiagnosticCode::InternalPanic` instead of aborting a batch, killing the whole pipeline, or poisoning a lock.
 
-`contain_panic` wraps the rayon parse-phase and resolve-phase closure bodies in `pipeline/mod.rs`, each individual `plugin.on_x(...)` call inside `PluginRegistry::run_on_file_extracted`/`run_on_component_resolved` in `plugin.rs` (not the whole loop, so one bad plugin degrades only itself), and all five NAPI entry points in `crates/binding/src/lib.rs`. `watch.rs`'s poisoned-lock `.expect()` was also replaced with `.unwrap_or_else(|p| p.into_inner())` as defense in depth.
+- **`AssertUnwindSafe` lives inside `contain_panic`**, so callers never reason about `UnwindSafe` themselves. This matters because plugin-hook call sites pass `&mut SourceData`/`&mut ComponentEntry`, and `&mut T` is unconditionally `!UnwindSafe` in std. It's safe here because `SourceData`/`ComponentEntry` have no interior mutability (`Cell`/`RefCell`) that could leave a torn, observable half-write behind a caught panic — the whole per-item operation is abandoned, not a partial mutation trusted afterward.
+- **Call sites:** the rayon parse-phase and resolve-phase closure bodies in `pipeline/mod.rs`; each individual `plugin.on_x(...)` call inside `PluginRegistry::run_on_file_extracted`/`run_on_component_resolved` in `plugin.rs` (not the whole loop, so one bad plugin degrades only itself); all five NAPI entry points in `crates/binding/src/lib.rs`.
+- **Defense in depth:** `watch.rs`'s poisoned-lock `.expect()` was replaced with `.unwrap_or_else(|p| p.into_inner())`.
 
 ## Consequences
 

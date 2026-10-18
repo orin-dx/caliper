@@ -1,5 +1,7 @@
 # Architecture
 
+This is the entry point: the pipeline shape, the crate graph, the key types, and why the big calls were made. For subsystem-level detail — invariants, locked design decisions, known gaps, each checked against the real source — see `docs/architecture/`, starting at `docs/architecture/README.md`'s task-to-file routing table.
+
 ## Pipeline
 
 Every extraction — cold or incremental — flows through four phases:

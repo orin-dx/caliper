@@ -8,7 +8,7 @@ What forced this? The constraint, not the backstory. 2-4 sentences.
 
 ## Decision
 
-What we're doing, stated plainly. One paragraph.
+What we're doing, stated plainly. A paragraph if it's one thing; a short paragraph plus bullets if it splits into a few discrete parts. Match the shape to the decision — don't pad a simple one or cram a multi-part one into a single block.
 
 ## Consequences
 

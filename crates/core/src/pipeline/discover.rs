@@ -7,7 +7,7 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 /// - User-supplied extra exclude patterns
 ///
 /// Returns discovered files alongside any diagnostics raised while walking
-/// (e.g. a permission-denied subtree) — never dropped silently (CLAUDE.md
+/// (e.g. a permission-denied subtree) — never dropped silently (AGENTS.md
 /// non-negotiable #6).
 pub(super) fn discover_files(
     src_dirs: &[Utf8PathBuf],

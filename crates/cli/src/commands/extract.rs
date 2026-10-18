@@ -311,7 +311,9 @@ mod tests {
         // contiguous substring — check the load-bearing pieces separately instead.
         let message = format!("{err:?}");
         assert!(message.contains("Writing to"), "expected the error to say 'Writing to', got {message}");
-        assert!(message.contains("no-such-dir"), "expected the error to name the target path, got {message}");
+        // The wrap can also split inside "no-such-dir" itself, so drop the whitespace and gutter first.
+        let unwrapped: String = message.chars().filter(|c| !c.is_whitespace() && *c != '│').collect();
+        assert!(unwrapped.contains("no-such-dir"), "expected the error to name the target path, got {message}");
         assert!(
             message.contains("No such file or directory"),
             "expected the underlying io::Error's message, got {message}"

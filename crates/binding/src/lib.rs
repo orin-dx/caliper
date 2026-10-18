@@ -114,7 +114,7 @@ pub struct JsExtractOptions {
 
 impl TryFrom<JsExtractOptions> for PipelineOptions {
     /// Names the bad `reactVersion` or `htmlAttributes` value — a typo (or a caller bypassing the TS union, e.g. via
-    /// `as any`) must not silently fall back to a default (CLAUDE.md non-negotiable #6).
+    /// `as any`) must not silently fall back to a default (AGENTS.md non-negotiable #6).
     type Error = String;
 
     fn try_from(js: JsExtractOptions) -> Result<Self, Self::Error> {

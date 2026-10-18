@@ -1,0 +1,30 @@
+[package]
+name = "oxc-react-docgen-tsc-client"
+description = "Process supervisor and JSON-RPC transport client for TypeScript 7's tsc --api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "fake-tsc"
+path = "tests/bin/fake_tsc.rs"
+
+[dependencies]
+tokio         = { workspace = true, features = ["time", "io-std"] }
+serde.workspace         = true
+serde_json.workspace    = true
+camino.workspace        = true
+tracing.workspace       = true
+dashmap.workspace       = true
+thiserror                = "2"
+tokio-util                = { version = "0.7", features = ["codec"] }
+tokio-stream               = "0.1"
+bytes                     = "1"
+
+[dev-dependencies]
+tokio         = { workspace = true, features = ["time", "test-util"] }
+tempfile.workspace       = true
