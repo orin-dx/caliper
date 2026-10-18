@@ -17,8 +17,8 @@ pnpm --filter @orin-dx/caliper-docgen-napi --filter @orin-dx/caliper-docgen-vite
 PROTO_PNPM_VERSION=$(pnpm --version)
 export PROTO_PNPM_VERSION
 
-napi=$(ls "$packed"/caliper-docgen-napi-*.tgz)
-plugin=$(ls "$packed"/caliper-docgen-vite-plugin-*.tgz)
+napi=$(ls "$packed"/orin-dx-caliper-docgen-napi-*.tgz)
+plugin=$(ls "$packed"/orin-dx-caliper-docgen-vite-plugin-*.tgz)
 
 # The override serves napi from this checkout's tarball instead of the registry. pnpm 11 reads overrides from
 # pnpm-workspace.yaml, not package.json.
