@@ -15,7 +15,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/orin-dx/oxc-react-docgen.git"
+    "url": "git+https://github.com/orin-dx/caliper.git"
   },
   "publishConfig": {
     "access": "public"

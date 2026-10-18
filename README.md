@@ -27,8 +27,8 @@ The CLI can emit an RDT-compatible shape via `--format rdt` (see [MIGRATING.md](
 > Not yet on npm. No prebuilt per-platform binaries exist yet — build from source:
 
 ```bash
-git clone https://github.com/orin-dx/oxc-react-docgen
-cd oxc-react-docgen
+git clone https://github.com/orin-dx/caliper
+cd caliper
 pnpm install
 pnpm --filter @oxc-react-docgen/napi run build:napi   # builds the native addon for your platform
 pnpm --filter @oxc-react-docgen/vite-plugin build
