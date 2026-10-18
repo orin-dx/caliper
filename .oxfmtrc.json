@@ -6,6 +6,7 @@
   "ignorePatterns": [
     "dist/**",
     "**/binding.d.ts",
+    "**/CHANGELOG.md",
     "packages/napi/index.js"
   ],
   "proseWrap": "never"
