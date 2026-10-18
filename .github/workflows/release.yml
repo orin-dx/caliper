@@ -145,7 +145,7 @@ jobs:
             echo "::error::intent declares artifact slots but this workflow has no build job"
             exit 1
           fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-intent
           path: ${{ runner.temp }}/release-intent
@@ -193,7 +193,7 @@ jobs:
           version: 0.14.1
           use-cache: false
       - if: matrix.zig
-        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-zigbuild
       - run: pnpm install --frozen-lockfile --filter @oxc-react-docgen/napi
@@ -208,13 +208,13 @@ jobs:
           TARGET: ${{ matrix.target }}
           ZIG: ${{ matrix.zig }}
         run: cargo "${ZIG:+zig}build" --release --locked -p oxc-react-docgen --target "$TARGET"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: napi-${{ matrix.platform }}
           path: packages/napi/oxc_react_docgen_napi.${{ matrix.platform }}.node
           if-no-files-found: error
           retention-days: 7
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cli-${{ matrix.platform }}
           path: target/${{ matrix.target }}/release/${{ matrix.bin }}
@@ -252,7 +252,7 @@ jobs:
           # Tag dispatch pushes from here.
           persist-credentials: true
       # Outside release-source: callisto rejects non-ignored untracked files there.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-intent
           path: ${{ runner.temp }}/release-intent
@@ -261,12 +261,12 @@ jobs:
           set -euo pipefail
           cd "${RUNNER_TEMP}/release-intent"
           shasum -a 256 -c release-intent.json.sha256
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: napi-*
           path: ${{ runner.temp }}/napi-artifacts
           merge-multiple: true
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: cli-*
           path: ${{ runner.temp }}/cli-artifacts
@@ -327,7 +327,7 @@ jobs:
           fi
       - name: Upload receipt
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-receipt
           path: ${{ runner.temp }}/callisto-release-receipt/${{ github.run_id }}
