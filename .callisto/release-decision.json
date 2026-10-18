@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 2,
+  "entries": [
+    {
+      "package": "cargo/oxc-react-docgen",
+      "targetVersion": "0.2.0",
+      "reasons": [
+        {
+          "kind": "changeset"
+        }
+      ]
+    },
+    {
+      "package": "cargo/oxc-react-docgen-core",
+      "targetVersion": "0.2.0",
+      "reasons": [
+        {
+          "kind": "changeset"
+        }
+      ]
+    },
+    {
+      "package": "cargo/oxc-react-docgen-napi",
+      "targetVersion": "0.2.0",
+      "reasons": [
+        {
+          "kind": "changeset"
+        }
+      ]
+    },
+    {
+      "package": "npm/@oxc-react-docgen/cli",
+      "targetVersion": "0.2.0",
+      "reasons": [
+        {
+          "kind": "fixedGroup",
+          "groupId": "cli-and-npm-wrapper"
+        }
+      ]
+    },
+    {
+      "package": "npm/@oxc-react-docgen/napi",
+      "targetVersion": "0.2.0",
+      "reasons": [
+        {
+          "kind": "fixedGroup",
+          "groupId": "napi-and-binding"
+        }
+      ]
+    },
+    {
+      "package": "npm/@oxc-react-docgen/vite-plugin",
+      "targetVersion": "0.2.0",
+      "reasons": [
+        {
+          "kind": "changeset"
+        }
+      ]
+    }
+  ],
+  "digest": "85055212565e579d3a4d8a125666f0f6e23cbee5c585a7374f87d4d2182009c1"
+}
