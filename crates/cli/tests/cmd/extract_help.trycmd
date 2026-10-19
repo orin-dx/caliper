@@ -1,8 +1,8 @@
 ```console
-$ oxc-react-docgen extract --help
+$ caliper-docgen extract --help
 Extract prop types and write to stdout or --out file
 
-Usage: oxc-react-docgen extract [OPTIONS]
+Usage: caliper-docgen extract [OPTIONS]
 
 Options:
   -s, --src <SRC>
@@ -15,7 +15,7 @@ Options:
           Output format
 
           Possible values:
-          - canonical: oxc-react-docgen canonical schema (richest)
+          - canonical: caliper-docgen canonical schema (richest)
           - rdt:       react-docgen-typescript compatible output
           - storybook: Storybook __docgenInfo blocks
           - toon:      Token-Optimized Object Notation (compact agent format)

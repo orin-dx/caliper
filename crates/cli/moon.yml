@@ -2,7 +2,7 @@ language: rust
 
 tasks:
   build:
-    command: cargo build -p oxc-react-docgen
+    command: cargo build -p caliper-docgen
     deps:
       - "core:build"
     options:
@@ -12,7 +12,7 @@ tasks:
       - "Cargo.toml"
 
   test:
-    command: cargo nextest run -p oxc-react-docgen --locked
+    command: cargo nextest run -p caliper-docgen --locked
     deps:
       - "core:build"
     options:
@@ -23,7 +23,7 @@ tasks:
       - "Cargo.toml"
 
   lint:
-    command: cargo clippy -p oxc-react-docgen --locked -- -D warnings
+    command: cargo clippy -p caliper-docgen --locked -- -D warnings
     deps:
       - "core:build"
     options:

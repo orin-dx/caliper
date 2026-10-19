@@ -1,6 +1,6 @@
 mod common;
 
-use oxc_react_docgen_tsc_client::{Supervisor, SupervisorConfig, TscClientError};
+use caliper_docgen_tsc_client::{Supervisor, SupervisorConfig, TscClientError};
 
 #[tokio::test]
 async fn a_version_not_in_the_pinned_list_is_rejected_before_spawning() {

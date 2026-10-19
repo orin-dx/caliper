@@ -2,7 +2,7 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use oxc_react_docgen_tsc_client::{MalformedFrameReason, Supervisor, TscClientError};
+use caliper_docgen_tsc_client::{MalformedFrameReason, Supervisor, TscClientError};
 
 async fn expect_malformed(scenario: &str, expected_reason: MalformedFrameReason) {
     let (_dir, config) = common::spawn_fake(scenario);
@@ -48,7 +48,7 @@ async fn an_oversized_declared_length_is_rejected_before_reading_the_body() {
     match result {
         Err(TscClientError::OversizedFrame { declared, cap }) => {
             assert_eq!(declared, 100_000_000);
-            assert_eq!(cap, oxc_react_docgen_tsc_client::transport::DEFAULT_MAX_FRAME_BYTES);
+            assert_eq!(cap, caliper_docgen_tsc_client::transport::DEFAULT_MAX_FRAME_BYTES);
         }
         Err(other) => panic!("expected OversizedFrame, got {other:?}"),
         Ok(response) => panic!("expected OversizedFrame, got a response: {response:?}"),

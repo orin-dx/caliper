@@ -5,7 +5,7 @@ use camino::Utf8Path;
 use dashmap::DashMap;
 use napi_derive::napi;
 
-use oxc_react_docgen_core::pipeline::{
+use caliper_docgen_core::pipeline::{
     extraction_output_to_json, incremental_update_to_json, PipelineOptions, WatchSession,
 };
 
@@ -17,7 +17,7 @@ static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(0);
 /// Src-dir value that trips a simulated panic inside `create_session`'s real
 /// body — exists only to let tests exercise `panic_guard::contain_panic`'s
 /// containment through the actual production entry point, the same pattern
-/// `oxc_react_docgen_core::pipeline`'s `PARSE_PANIC_TEST_SENTINEL` uses.
+/// `caliper_docgen_core::pipeline`'s `PARSE_PANIC_TEST_SENTINEL` uses.
 #[cfg(test)]
 const CREATE_SESSION_PANIC_TEST_SENTINEL: &str = "__CREATE_SESSION_PANIC_TEST__";
 
@@ -127,7 +127,7 @@ impl TryFrom<JsExtractOptions> for PipelineOptions {
             opts.exclude_patterns = exclude;
         }
         if let Some(v) = js.react_version.as_deref() {
-            opts.react_version = oxc_react_docgen_core::react_types::parse_react_version(v)
+            opts.react_version = caliper_docgen_core::react_types::parse_react_version(v)
                 .map_err(|bad| format!("reactVersion is '{bad}', expected \"react18\" or \"react19\""))?;
         }
         if let Some(cross_package) = js.cross_package {
@@ -140,7 +140,7 @@ impl TryFrom<JsExtractOptions> for PipelineOptions {
             opts.variant_functions = fns;
         }
         if let Some(mode) = js.html_attributes.as_deref() {
-            opts.html_attributes = oxc_react_docgen_core::pipeline::HtmlAttributeMode::parse(mode)
+            opts.html_attributes = caliper_docgen_core::pipeline::HtmlAttributeMode::parse(mode)
                 .map_err(|bad| format!("htmlAttributes is '{bad}', expected \"curated\", \"full\" or \"none\""))?;
         }
         if let Some(path) = js.tsconfig_path {
@@ -178,13 +178,13 @@ impl TryFrom<JsExtractOptions> for PipelineOptions {
 pub async fn extract_all(options: JsExtractOptions) -> napi::Result<String> {
     let pipeline_options = PipelineOptions::try_from(options).map_err(napi::Error::from_reason)?;
     tokio::task::spawn_blocking(move || {
-        match oxc_react_docgen_core::panic_guard::contain_panic("extract_all", move || {
+        match caliper_docgen_core::panic_guard::contain_panic("extract_all", move || {
             #[cfg(test)]
             if pipeline_options.src_dirs.iter().any(|d| d.as_str() == EXTRACT_ALL_PANIC_TEST_SENTINEL) {
                 panic!("simulated extract_all panic (test-only sentinel)");
             }
 
-            let output = oxc_react_docgen_core::pipeline::extract(&pipeline_options);
+            let output = caliper_docgen_core::pipeline::extract(&pipeline_options);
             extraction_output_to_json(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
         }) {
             Ok(result) => result,
@@ -199,7 +199,7 @@ pub async fn extract_all(options: JsExtractOptions) -> napi::Result<String> {
 /// Call this in Vite's configResolved hook.
 #[napi]
 pub fn create_session(options: JsExtractOptions) -> napi::Result<u32> {
-    match oxc_react_docgen_core::panic_guard::contain_panic("create_session", move || {
+    match caliper_docgen_core::panic_guard::contain_panic("create_session", move || {
         let pipeline_options = PipelineOptions::try_from(options).map_err(napi::Error::from_reason)?;
 
         #[cfg(test)]
@@ -227,7 +227,7 @@ pub async fn extract_file_incremental(
     options: JsExtractOptions,
 ) -> napi::Result<String> {
     tokio::task::spawn_blocking(move || {
-        match oxc_react_docgen_core::panic_guard::contain_panic("extract_file_incremental", move || {
+        match caliper_docgen_core::panic_guard::contain_panic("extract_file_incremental", move || {
             let session = match SESSIONS.get(&session_id) {
                 Some(s) => s.clone(),
                 None => {
@@ -266,7 +266,7 @@ pub async fn extract_file_incremental(
 #[napi]
 pub async fn initialize_session(session_id: u32, options: JsExtractOptions) -> napi::Result<String> {
     tokio::task::spawn_blocking(move || {
-        match oxc_react_docgen_core::panic_guard::contain_panic("initialize_session", move || {
+        match caliper_docgen_core::panic_guard::contain_panic("initialize_session", move || {
             let session = match SESSIONS.get(&session_id) {
                 Some(s) => s.clone(),
                 None => {
@@ -288,7 +288,7 @@ pub async fn initialize_session(session_id: u32, options: JsExtractOptions) -> n
             }
 
             let output = session.initialize();
-            oxc_react_docgen_core::pipeline::extraction_output_to_json(&output)
+            caliper_docgen_core::pipeline::extraction_output_to_json(&output)
                 .map_err(|e| napi::Error::from_reason(e.to_string()))
         }) {
             Ok(result) => result,
@@ -302,7 +302,7 @@ pub async fn initialize_session(session_id: u32, options: JsExtractOptions) -> n
 /// Release session state. Call in Vite's buildEnd hook.
 #[napi]
 pub fn close_session(session_id: u32) {
-    let _ = oxc_react_docgen_core::panic_guard::contain_panic("close_session", move || {
+    let _ = caliper_docgen_core::panic_guard::contain_panic("close_session", move || {
         #[cfg(test)]
         if session_id == CLOSE_SESSION_PANIC_TEST_SENTINEL {
             panic!("simulated close_session panic (test-only sentinel)");
@@ -349,7 +349,7 @@ mod tests {
 
     #[test]
     fn html_attributes_names_map_onto_pipeline_options() {
-        use oxc_react_docgen_core::pipeline::HtmlAttributeMode;
+        use caliper_docgen_core::pipeline::HtmlAttributeMode;
 
         for (name, expected) in [
             ("curated", HtmlAttributeMode::Curated),

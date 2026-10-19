@@ -1,5 +1,5 @@
+use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions};
 use miette::{IntoDiagnostic, Result, WrapErr};
-use oxc_react_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions};
 use serde::Deserialize;
 
 /// The JSON-facing shape of `docgen.config.ts`'s default export.
@@ -42,7 +42,7 @@ impl DocgenConfigSchema {
             opts.exclude_prefixes = prefixes;
         }
         if let Some(v) = self.react_version.as_deref() {
-            opts.react_version = oxc_react_docgen_core::react_types::parse_react_version(v)
+            opts.react_version = caliper_docgen_core::react_types::parse_react_version(v)
                 .map_err(|bad| format!("reactVersion is '{bad}', expected \"react18\" or \"react19\""))?;
         }
         if let Some(cross_package) = self.cross_package {
@@ -211,7 +211,7 @@ pub fn build_options(args: BuildOptionsArgs) -> Result<PipelineOptions> {
         opts.cross_package = false;
     }
     if let Some(v) = args.react_version {
-        opts.react_version = oxc_react_docgen_core::react_types::parse_react_version(v).map_err(|bad| {
+        opts.react_version = caliper_docgen_core::react_types::parse_react_version(v).map_err(|bad| {
             miette::miette!(
                 help = "Expected \"react18\" or \"react19\".",
                 "--react-version is '{}', which isn't a recognized value",

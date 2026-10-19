@@ -1,6 +1,6 @@
 //! Process supervisor and JSON-RPC transport client for TypeScript 7's `tsc --api`.
 //!
-//! Standalone: this crate has no dependency on `oxc-react-docgen-core` and nothing in
+//! Standalone: this crate has no dependency on `caliper-docgen-core` and nothing in
 //! the workspace consumes it yet. It exists to satisfy the Lifecycle gate in
 //! `docs/type-checker-integration.md` ("Gates before it ships") — missing binary,
 //! unsupported version, timeout, crash, restart storm, malformed/oversized frame,

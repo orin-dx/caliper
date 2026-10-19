@@ -12,8 +12,8 @@ Use this skill when the user asks to run the migrated source command `check`.
 Run the verification suite and report status. Do not fix anything.
 
 ```bash
-cargo clippy -p oxc-react-docgen-core -- -D warnings 2>&1
-cargo test -p oxc-react-docgen-core 2>&1
+cargo clippy -p caliper-docgen-core -- -D warnings 2>&1
+cargo test -p caliper-docgen-core 2>&1
 cargo insta pending-snapshots 2>/dev/null && echo "⚠ pending snapshots" || echo "✓ no pending snapshots"
 ```
 

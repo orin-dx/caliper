@@ -27,9 +27,9 @@ pub fn write_atomic(path: &str, contents: &str) -> std::io::Result<()> {
 }
 
 /// Human-readable extraction summary. Always written to stderr — stdout is reserved for the
-/// JSON payload (canonical/RDT/storybook), in every mode, so `oxc-react-docgen extract | jq .`
+/// JSON payload (canonical/RDT/storybook), in every mode, so `caliper-docgen extract | jq .`
 /// never sees this interleaved with the data.
-pub fn print_summary(output: &oxc_react_docgen_core::types::ExtractionOutput, quiet: bool) {
+pub fn print_summary(output: &caliper_docgen_core::types::ExtractionOutput, quiet: bool) {
     if quiet {
         return;
     }
@@ -39,19 +39,19 @@ pub fn print_summary(output: &oxc_react_docgen_core::types::ExtractionOutput, qu
 
 fn write_summary(
     w: &mut impl std::io::Write,
-    output: &oxc_react_docgen_core::types::ExtractionOutput,
+    output: &caliper_docgen_core::types::ExtractionOutput,
 ) -> std::io::Result<()> {
     use owo_colors::OwoColorize;
 
     let errors = output
         .diagnostics
         .iter()
-        .filter(|d| matches!(d.severity, oxc_react_docgen_core::types::DiagnosticSeverity::Error))
+        .filter(|d| matches!(d.severity, caliper_docgen_core::types::DiagnosticSeverity::Error))
         .count();
     let warnings = output
         .diagnostics
         .iter()
-        .filter(|d| matches!(d.severity, oxc_react_docgen_core::types::DiagnosticSeverity::Warning))
+        .filter(|d| matches!(d.severity, caliper_docgen_core::types::DiagnosticSeverity::Warning))
         .count();
 
     writeln!(w)?;
@@ -69,13 +69,13 @@ fn write_summary(
 }
 
 /// Human-readable diagnostic list. Always written to stderr — see [`print_summary`].
-pub fn print_diagnostics(diagnostics: &[oxc_react_docgen_core::types::Diagnostic]) {
+pub fn print_diagnostics(diagnostics: &[caliper_docgen_core::types::Diagnostic]) {
     let _ = write_diagnostics(&mut std::io::stderr().lock(), diagnostics);
 }
 
 fn write_diagnostics(
     w: &mut impl std::io::Write,
-    diagnostics: &[oxc_react_docgen_core::types::Diagnostic],
+    diagnostics: &[caliper_docgen_core::types::Diagnostic],
 ) -> std::io::Result<()> {
     for line in format_diagnostics(diagnostics) {
         writeln!(w, "{line}")?;
@@ -99,7 +99,7 @@ fn extract_subject(message: &str) -> &str {
 
 /// One or more diagnostics collapsed into a single reported group, keyed by `(code, subject)`.
 struct DiagnosticGroup<'a> {
-    representative: &'a oxc_react_docgen_core::types::Diagnostic,
+    representative: &'a caliper_docgen_core::types::Diagnostic,
     count: usize,
     files_seen: Vec<Option<&'a str>>,
 }
@@ -107,8 +107,8 @@ struct DiagnosticGroup<'a> {
 /// Collapses near-duplicate diagnostics (same code + same quoted subject) into groups, so a
 /// single root cause that produced hundreds of diagnostics reports as one line with a count
 /// instead of flooding the terminal. Order is preserved as first-seen, per group.
-fn group_diagnostics(diagnostics: &[oxc_react_docgen_core::types::Diagnostic]) -> Vec<DiagnosticGroup<'_>> {
-    let mut groups: Vec<(&oxc_react_docgen_core::types::DiagnosticCode, &str, DiagnosticGroup)> = Vec::new();
+fn group_diagnostics(diagnostics: &[caliper_docgen_core::types::Diagnostic]) -> Vec<DiagnosticGroup<'_>> {
+    let mut groups: Vec<(&caliper_docgen_core::types::DiagnosticCode, &str, DiagnosticGroup)> = Vec::new();
     for d in diagnostics {
         let subject = extract_subject(&d.message);
         match groups.iter_mut().find(|(code, s, _)| *code == &d.code && *s == subject) {
@@ -132,16 +132,16 @@ fn group_diagnostics(diagnostics: &[oxc_react_docgen_core::types::Diagnostic]) -
 
 /// Formats grouped diagnostics into the lines `print_diagnostics` writes to stderr. Pulled out
 /// as a pure function so grouping/formatting behavior is unit-testable without capturing stderr.
-fn format_diagnostics(diagnostics: &[oxc_react_docgen_core::types::Diagnostic]) -> Vec<String> {
+fn format_diagnostics(diagnostics: &[caliper_docgen_core::types::Diagnostic]) -> Vec<String> {
     use owo_colors::OwoColorize;
 
     let mut lines = Vec::new();
     for group in group_diagnostics(diagnostics) {
         let d = group.representative;
         let prefix = match d.severity {
-            oxc_react_docgen_core::types::DiagnosticSeverity::Error => "error".red().to_string(),
-            oxc_react_docgen_core::types::DiagnosticSeverity::Warning => "warn".yellow().to_string(),
-            oxc_react_docgen_core::types::DiagnosticSeverity::Info => "info".dimmed().to_string(),
+            caliper_docgen_core::types::DiagnosticSeverity::Error => "error".red().to_string(),
+            caliper_docgen_core::types::DiagnosticSeverity::Warning => "warn".yellow().to_string(),
+            caliper_docgen_core::types::DiagnosticSeverity::Info => "info".dimmed().to_string(),
             _ => "info".dimmed().to_string(),
         };
 
@@ -164,7 +164,7 @@ fn format_diagnostics(diagnostics: &[oxc_react_docgen_core::types::Diagnostic]) 
 }
 
 /// The `inspect` view of one component: header, description, props table, and the inherited-attributes note.
-pub fn format_component(component: &oxc_react_docgen_core::types::ComponentEntry) -> Vec<String> {
+pub fn format_component(component: &caliper_docgen_core::types::ComponentEntry) -> Vec<String> {
     use comfy_table::{Attribute, Cell, Color, ContentArrangement, Table};
     use owo_colors::OwoColorize;
 
@@ -218,7 +218,7 @@ pub fn format_component(component: &oxc_react_docgen_core::types::ComponentEntry
     lines
 }
 
-pub fn print_component(component: &oxc_react_docgen_core::types::ComponentEntry) {
+pub fn print_component(component: &caliper_docgen_core::types::ComponentEntry) {
     for line in format_component(component) {
         println!("{line}");
     }
@@ -241,11 +241,11 @@ pub(crate) fn strip_ansi(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use owo_colors::OwoColorize;
-    use oxc_react_docgen_core::types::{
+    use caliper_docgen_core::types::{
         ComponentEntry, DefaultValue, Diagnostic, DiagnosticCode, DiagnosticSeverity, ExtractionOutput,
         ExtractionStats, InheritedLayer, ParsedProp, PropParent, PropType,
     };
+    use owo_colors::OwoColorize;
 
     use super::{
         extract_subject, format_component, format_diagnostics, strip_ansi, write_atomic, write_diagnostics,

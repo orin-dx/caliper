@@ -20,10 +20,10 @@ The smallest TSX/TS snippet that reproduces it — this is the single most usefu
 
 ## How you ran it
 
-- [ ] CLI (`oxc-react-docgen extract`/`inspect`)
+- [ ] CLI (`caliper-docgen extract`/`inspect`)
 - [ ] Vite plugin
 - [ ] NAPI binding directly
 
 ## Version
 
-`oxc-react-docgen --version`, or the commit you're on
+`caliper-docgen --version`, or the commit you're on

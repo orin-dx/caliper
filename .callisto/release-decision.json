@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "entries": [
     {
-      "package": "cargo/oxc-react-docgen",
+      "package": "cargo/caliper-docgen",
       "targetVersion": "0.2.0",
       "reasons": [
         {
@@ -11,7 +11,7 @@
       ]
     },
     {
-      "package": "cargo/oxc-react-docgen-core",
+      "package": "cargo/caliper-docgen-core",
       "targetVersion": "0.2.0",
       "reasons": [
         {
@@ -20,7 +20,7 @@
       ]
     },
     {
-      "package": "cargo/oxc-react-docgen-napi",
+      "package": "cargo/caliper-docgen-napi",
       "targetVersion": "0.2.0",
       "reasons": [
         {
@@ -29,7 +29,7 @@
       ]
     },
     {
-      "package": "npm/@oxc-react-docgen/cli",
+      "package": "npm/caliper-docgen",
       "targetVersion": "0.2.0",
       "reasons": [
         {
@@ -39,7 +39,7 @@
       ]
     },
     {
-      "package": "npm/@oxc-react-docgen/napi",
+      "package": "npm/caliper-docgen-napi",
       "targetVersion": "0.2.0",
       "reasons": [
         {
@@ -49,7 +49,7 @@
       ]
     },
     {
-      "package": "npm/@oxc-react-docgen/vite-plugin",
+      "package": "npm/caliper-docgen-vite-plugin",
       "targetVersion": "0.2.0",
       "reasons": [
         {

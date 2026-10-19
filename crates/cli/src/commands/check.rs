@@ -16,7 +16,7 @@ pub fn cmd_check(args: crate::CheckArgs, quiet: bool, config_path: Option<&str>)
         config_path,
         extra_builtins: &[],
     })?;
-    let output = oxc_react_docgen_core::pipeline::extract(&options);
+    let output = caliper_docgen_core::pipeline::extract(&options);
 
     if args.json {
         println!("{}", serde_json::to_string(&output.diagnostics).into_diagnostic()?);

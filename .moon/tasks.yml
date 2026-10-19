@@ -20,7 +20,7 @@ tasks:
       cache: false
 
   lint:
-    command: cargo clippy --workspace --exclude oxc-react-docgen-napi --locked -- -D warnings
+    command: cargo clippy --workspace --exclude caliper-docgen-napi --locked -- -D warnings
     options:
       runFromWorkspaceRoot: true
       cache: false
@@ -38,19 +38,19 @@ tasks:
       cache: false
 
   test:
-    command: cargo nextest run --workspace --exclude oxc-react-docgen-napi --locked
+    command: cargo nextest run --workspace --exclude caliper-docgen-napi --locked
     options:
       runFromWorkspaceRoot: true
       cache: false
 
   bench:
-    command: cargo bench --workspace --exclude oxc-react-docgen-napi
+    command: cargo bench --workspace --exclude caliper-docgen-napi
     options:
       runFromWorkspaceRoot: true
       cache: false
 
   coverage:
-    command: cargo llvm-cov nextest --workspace --exclude oxc-react-docgen-napi --locked --html --open
+    command: cargo llvm-cov nextest --workspace --exclude caliper-docgen-napi --locked --html --open
     options:
       runFromWorkspaceRoot: true
       cache: false

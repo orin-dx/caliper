@@ -1,4 +1,4 @@
-# Benchmarks: oxc-react-docgen vs. react-docgen-typescript vs. react-docgen
+# Benchmarks: caliper-docgen vs. react-docgen-typescript vs. react-docgen
 
 **Generated:** 2026-07-25.
 
@@ -10,7 +10,7 @@ This report has two independent halves: **performance** (how fast) and **output 
 
 | Tool                      | Version   | Approach                                         |
 | ------------------------- | --------- | ------------------------------------------------ |
-| `oxc-react-docgen`        | this repo | OXC parser, no type-checking pass                |
+| `caliper-docgen`          | this repo | OXC parser, no type-checking pass                |
 | `react-docgen-typescript` | 2.2.2     | full `ts.Program` + real TypeScript type checker |
 | `react-docgen`            | 7.1.1     | Babel AST walk, weak native TS support           |
 
@@ -34,11 +34,11 @@ react-docgen and react-docgen-typescript can only run inside a Node process — 
 Two costs affect all three equally, plus one extra for us:
 
 - A `proto → pnpm → tsx → Node` startup tax, common to all three tools
-- For `oxc-react-docgen` specifically: one extra child-process spawn on top of that, since the harness shells out to the compiled binary from inside that already-started Node process — the same way a real consumer's tooling would call it
+- For `caliper-docgen` specifically: one extra child-process spawn on top of that, since the harness shells out to the compiled binary from inside that already-started Node process — the same way a real consumer's tooling would call it
 
 | Tool                      |               Mean |     Min |      Max |     Relative |
 | ------------------------- | -----------------: | ------: | -------: | -----------: |
-| `oxc-react-docgen`        |  2.963 s ± 0.157 s | 2.759 s |  3.208 s |         1.00 |
+| `caliper-docgen`          |  2.963 s ± 0.157 s | 2.759 s |  3.208 s |         1.00 |
 | `react-docgen`            |  3.387 s ± 0.524 s | 3.046 s |  4.510 s | 1.14× slower |
 | `react-docgen-typescript` | 10.374 s ± 1.317 s | 9.196 s | 13.156 s | 3.50× slower |
 
@@ -53,7 +53,7 @@ Two costs affect all three equally, plus one extra for us:
 
 ### Per-fixture cold extraction (Rust-internal, criterion)
 
-`cargo bench -p oxc-react-docgen-core` (criterion 0.7, 100 samples, reports 95% CI):
+`cargo bench -p caliper-docgen-core` (criterion 0.7, 100 samples, reports 95% CI):
 
 | Fixture             |                    Time |
 | ------------------- | ----------------------: |
@@ -201,7 +201,7 @@ Confirmed still accurate against current code during this report — see `docs/t
 
 ```bash
 # Performance
-cargo bench -p oxc-react-docgen-core                    # per-fixture cold + incremental, criterion
+cargo bench -p caliper-docgen-core                    # per-fixture cold + incremental, criterion
 cd apps/validate && ./bench-cold.sh                     # cross-tool cold, hyperfine (needs `brew install hyperfine`)
 
 # Quality

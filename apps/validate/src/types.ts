@@ -21,7 +21,7 @@ export interface NormalizedComponent {
 export type NormalizedOutput = Record<string, NormalizedComponent>
 
 export interface ToolResult {
-  tool: 'react-docgen' | 'react-docgen-typescript' | 'oxc-react-docgen' | 'semantic'
+  tool: 'react-docgen' | 'react-docgen-typescript' | 'caliper-docgen' | 'semantic'
   fixture: string
   durationMs: number
   output: NormalizedOutput

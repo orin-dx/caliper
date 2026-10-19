@@ -10,7 +10,7 @@ function loadBaseline(name: string): Map<string, ToolResult> | null {
 
 const rdg = loadBaseline('react-docgen')
 const rdt = loadBaseline('react-docgen-typescript')
-const ours = loadBaseline('oxc-react-docgen')
+const ours = loadBaseline('caliper-docgen')
 
 if (!rdg && !rdt && !ours) {
   console.error('No baselines found. Run at least one tool first.')
@@ -39,7 +39,7 @@ for (const fixture of [...allFixtures].toSorted()) {
 
   if (r_rdg?.error) console.log(`  ❌ react-docgen: ${r_rdg.error.slice(0, 100)}`)
   if (r_rdt?.error) console.log(`  ❌ react-docgen-typescript: ${r_rdt.error.slice(0, 100)}`)
-  if (r_ours?.error) console.log(`  ❌ oxc-react-docgen: ${r_ours.error.slice(0, 100)}`)
+  if (r_ours?.error) console.log(`  ❌ caliper-docgen: ${r_ours.error.slice(0, 100)}`)
 
   const times: string[] = []
   if (r_rdg) times.push(`rdg: ${r_rdg.durationMs.toFixed(1)}ms`)
@@ -152,6 +152,6 @@ console.log(`\n${'='.repeat(60)}`)
 console.log('SUMMARY')
 console.log('='.repeat(60))
 if (rdt) console.log(`react-docgen-typescript: ${rdtTotal} total props across all components`)
-if (ours) console.log(`oxc-react-docgen:        ${oursTotal} total props across all components`)
+if (ours) console.log(`caliper-docgen:        ${oursTotal} total props across all components`)
 console.log(`Coverage: ${oursTotal}/${rdtTotal} (${Math.round((oursTotal / Math.max(rdtTotal, 1)) * 100)}%)`)
 console.log(`Identical matches: ${wins}  |  Both empty: ${ties}  |  Misses: ${misses}`)

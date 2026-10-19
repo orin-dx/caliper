@@ -164,11 +164,11 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - { host: macos-latest, target: aarch64-apple-darwin, platform: darwin-arm64, bin: oxc-react-docgen }
-          - { host: macos-latest, target: x86_64-apple-darwin, platform: darwin-x64, bin: oxc-react-docgen }
-          - { host: ubuntu-latest, target: x86_64-unknown-linux-gnu, platform: linux-x64-gnu, bin: oxc-react-docgen }
-          - { host: ubuntu-latest, target: aarch64-unknown-linux-gnu, platform: linux-arm64-gnu, bin: oxc-react-docgen, zig: true }
-          - { host: windows-latest, target: x86_64-pc-windows-msvc, platform: win32-x64-msvc, bin: oxc-react-docgen.exe }
+          - { host: macos-latest, target: aarch64-apple-darwin, platform: darwin-arm64, bin: caliper-docgen }
+          - { host: macos-latest, target: x86_64-apple-darwin, platform: darwin-x64, bin: caliper-docgen }
+          - { host: ubuntu-latest, target: x86_64-unknown-linux-gnu, platform: linux-x64-gnu, bin: caliper-docgen }
+          - { host: ubuntu-latest, target: aarch64-unknown-linux-gnu, platform: linux-arm64-gnu, bin: caliper-docgen, zig: true }
+          - { host: windows-latest, target: x86_64-pc-windows-msvc, platform: win32-x64-msvc, bin: caliper-docgen.exe }
     defaults:
       run:
         shell: bash
@@ -196,7 +196,7 @@ jobs:
         uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-zigbuild
-      - run: pnpm install --frozen-lockfile --filter @oxc-react-docgen/napi
+      - run: pnpm install --frozen-lockfile --filter caliper-docgen-napi
       - name: Build napi addon
         working-directory: packages/napi
         env:
@@ -207,11 +207,11 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
           ZIG: ${{ matrix.zig }}
-        run: cargo "${ZIG:+zig}build" --release --locked -p oxc-react-docgen --target "$TARGET"
+        run: cargo "${ZIG:+zig}build" --release --locked -p caliper-docgen --target "$TARGET"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: napi-${{ matrix.platform }}
-          path: packages/napi/oxc_react_docgen_napi.${{ matrix.platform }}.node
+          path: packages/napi/caliper_docgen_napi.${{ matrix.platform }}.node
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -287,7 +287,7 @@ jobs:
             dest="packages/cli/npm/${platform}"
             [[ -d "$dest" ]] || { echo "::error::no package dir for $platform"; exit 1; }
             mv "$dir"/* "$dest/"
-            chmod +x "$dest"/oxc-react-docgen*
+            chmod +x "$dest"/caliper-docgen*
           done
           for dir in packages/napi/npm/* packages/cli/npm/*; do
             files=$(jq -r '.files[]' "$dir/package.json")

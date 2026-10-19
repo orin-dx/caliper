@@ -35,7 +35,7 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
         None
     };
 
-    let output = oxc_react_docgen_core::pipeline::extract(&options);
+    let output = caliper_docgen_core::pipeline::extract(&options);
 
     if let Some(pb) = pb {
         pb.finish_and_clear();
@@ -54,7 +54,7 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
             crate::OutputFormat::Canonical => serde_json::to_string_pretty(&output).into_diagnostic()?,
             crate::OutputFormat::Rdt => serialize_rdt(&output),
             crate::OutputFormat::Storybook => serialize_storybook(&output),
-            crate::OutputFormat::Toon => oxc_react_docgen_core::toon::render_output_toon(&output),
+            crate::OutputFormat::Toon => caliper_docgen_core::toon::render_output_toon(&output),
         };
 
         match args.out {
@@ -73,8 +73,8 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
 /// prop-table renderers that pattern-match `type.name === "enum"` (a common
 /// Storybook addon integration point) show a `<select>` control for the most
 /// common, most curated props in any design system (variant, size, color…).
-fn rdt_type_json(prop_type: &oxc_react_docgen_core::types::PropType) -> serde_json::Value {
-    use oxc_react_docgen_core::types::PropType;
+fn rdt_type_json(prop_type: &caliper_docgen_core::types::PropType) -> serde_json::Value {
+    use caliper_docgen_core::types::PropType;
 
     if prop_type.is_literal_union() {
         let values: Vec<serde_json::Value> = match prop_type {
@@ -91,13 +91,13 @@ fn rdt_type_json(prop_type: &oxc_react_docgen_core::types::PropType) -> serde_js
 
 /// RDT's default `skipChildrenPropWithoutDoc`: an undocumented `children` says nothing a
 /// prop table can show, so RDT never emits it. Canonical output keeps it.
-fn rdt_omits(prop: &oxc_react_docgen_core::types::ParsedProp) -> bool {
+fn rdt_omits(prop: &caliper_docgen_core::types::ParsedProp) -> bool {
     prop.name == "children" && prop.description.is_empty()
 }
 
 /// `methods` is always `[]` — this tool doesn't extract class methods, and RDT
 /// consumers (Storybook's docgen addon) only ever read it for class components.
-pub fn serialize_rdt(output: &oxc_react_docgen_core::types::ExtractionOutput) -> String {
+pub fn serialize_rdt(output: &caliper_docgen_core::types::ExtractionOutput) -> String {
     let mut map = serde_json::Map::new();
     for (name, entry) in &output.components {
         let props: serde_json::Map<String, serde_json::Value> = entry
@@ -131,7 +131,7 @@ pub fn serialize_rdt(output: &oxc_react_docgen_core::types::ExtractionOutput) ->
     serde_json::to_string_pretty(&serde_json::Value::Object(map)).unwrap_or_default()
 }
 
-pub fn serialize_storybook(output: &oxc_react_docgen_core::types::ExtractionOutput) -> String {
+pub fn serialize_storybook(output: &caliper_docgen_core::types::ExtractionOutput) -> String {
     let mut map = serde_json::Map::new();
     for (name, entry) in &output.components {
         let props: serde_json::Map<String, serde_json::Value> = entry
@@ -374,12 +374,12 @@ export function Comp(props: CompProps) { return null; }
         .unwrap();
 
         let dir = camino::Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
-        let options = oxc_react_docgen_core::pipeline::PipelineOptions {
+        let options = caliper_docgen_core::pipeline::PipelineOptions {
             src_dirs: vec![dir],
             cache_dir: Some(camino::Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
             ..Default::default()
         };
-        let output = oxc_react_docgen_core::pipeline::extract(&options);
+        let output = caliper_docgen_core::pipeline::extract(&options);
 
         let rdt_json = serialize_rdt(&output);
         let parsed: serde_json::Value = serde_json::from_str(&rdt_json).unwrap();
@@ -390,7 +390,7 @@ export function Comp(props: CompProps) { return null; }
     // ── SPEC-SERIALIZATION-001 AC-1/AC-2/AC-3/AC-4: rdt_type_json had zero
     // direct tests — it's private and was only ever exercised indirectly.
 
-    use oxc_react_docgen_core::types::PropType;
+    use caliper_docgen_core::types::PropType;
 
     #[test]
     fn rdt_type_json_zero_and_one_member_unions_never_produce_enum_shape() {
@@ -472,7 +472,7 @@ export function Comp(props: CompProps) { return null; }
 
     #[test]
     fn serialize_rdt_emits_composes_exactly() {
-        use oxc_react_docgen_core::types::ComponentEntry;
+        use caliper_docgen_core::types::ComponentEntry;
         let entry = ComponentEntry {
             display_name: "Widget".to_string(),
             file_path: "Widget.tsx".into(),
@@ -487,7 +487,7 @@ export function Comp(props: CompProps) { return null; }
         };
         let mut components = std::collections::BTreeMap::new();
         components.insert("Widget".to_string(), entry);
-        let output = oxc_react_docgen_core::types::ExtractionOutput {
+        let output = caliper_docgen_core::types::ExtractionOutput {
             components,
             enums: Default::default(),
             diagnostics: vec![],
@@ -502,8 +502,8 @@ export function Comp(props: CompProps) { return null; }
     // ── RDT's default `skipChildrenPropWithoutDoc`: an undocumented `children`
     // never appears in `--format rdt`, a documented one does, canonical keeps both.
 
-    fn component_with_props(name: &str, props: Vec<(&str, &str)>) -> oxc_react_docgen_core::types::ComponentEntry {
-        use oxc_react_docgen_core::types::{ComponentEntry, ParsedProp};
+    fn component_with_props(name: &str, props: Vec<(&str, &str)>) -> caliper_docgen_core::types::ComponentEntry {
+        use caliper_docgen_core::types::{ComponentEntry, ParsedProp};
         ComponentEntry {
             display_name: name.to_string(),
             file_path: format!("{name}.tsx").into(),
@@ -541,7 +541,7 @@ export function Comp(props: CompProps) { return null; }
             "Documented".to_string(),
             component_with_props("Documented", vec![("children", "Slot content."), ("label", "")]),
         );
-        let output = oxc_react_docgen_core::types::ExtractionOutput {
+        let output = caliper_docgen_core::types::ExtractionOutput {
             components,
             enums: Default::default(),
             diagnostics: vec![],
@@ -564,7 +564,7 @@ export function Comp(props: CompProps) { return null; }
 
     #[test]
     fn serialize_storybook_emits_exact_docgen_blocks() {
-        use oxc_react_docgen_core::types::{DefaultValue, ParsedProp};
+        use caliper_docgen_core::types::{DefaultValue, ParsedProp};
         let label = ParsedProp::new(
             "label".to_string(),
             PropType::ReactNode,
@@ -580,7 +580,7 @@ export function Comp(props: CompProps) { return null; }
         entry.props.insert("label".to_string(), label);
         let mut components = std::collections::BTreeMap::new();
         components.insert("Widget".to_string(), entry);
-        let output = oxc_react_docgen_core::types::ExtractionOutput {
+        let output = caliper_docgen_core::types::ExtractionOutput {
             components,
             enums: Default::default(),
             diagnostics: vec![],
@@ -689,12 +689,12 @@ export function Comp(props: Props) { return null; }
         .unwrap();
 
         let dir = camino::Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
-        let options = oxc_react_docgen_core::pipeline::PipelineOptions {
+        let options = caliper_docgen_core::pipeline::PipelineOptions {
             src_dirs: vec![dir],
             cache_dir: Some(camino::Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
             ..Default::default()
         };
-        let output = oxc_react_docgen_core::pipeline::extract(&options);
+        let output = caliper_docgen_core::pipeline::extract(&options);
 
         let comp = output.components.get("Comp").expect("expected a Comp component");
         assert_eq!(

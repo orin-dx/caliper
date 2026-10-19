@@ -63,7 +63,7 @@ fn watched_dir() -> tempfile::TempDir {
 }
 
 fn spawn_watch(src: &Path, stdin: Stdio, stdout: Stdio, stderr: Stdio) -> Child {
-    Command::new(env!("CARGO_BIN_EXE_oxc-react-docgen"))
+    Command::new(env!("CARGO_BIN_EXE_caliper-docgen"))
         .args(["watch", "--src"])
         .arg(src)
         .stdin(stdin)
@@ -237,7 +237,7 @@ fn the_banner_only_advertises_key_shortcuts_when_stdin_is_a_terminal() {
 
     let banner = watch.expect_line("watching");
 
-    assert_eq!(banner, format!("  ⚡  oxc-react-docgen watching {}", watch.src.path().display()));
+    assert_eq!(banner, format!("  ⚡  caliper-docgen watching {}", watch.src.path().display()));
 }
 
 // ── In a terminal: the keys and the terminal mode, which only a pty can observe ─────────────────────────────────────
@@ -250,7 +250,7 @@ fn a_terminal_session_advertises_its_key_shortcuts() {
 
     assert_eq!(
         banner,
-        format!("  ⚡  oxc-react-docgen watching {}  (press q to quit, r to re-extract)", watch.src.path().display())
+        format!("  ⚡  caliper-docgen watching {}  (press q to quit, r to re-extract)", watch.src.path().display())
     );
 }
 

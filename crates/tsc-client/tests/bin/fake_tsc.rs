@@ -15,7 +15,7 @@
 
 use std::time::Duration;
 
-use oxc_react_docgen_tsc_client::transport::{write_frame, ContentLengthDecoder, DEFAULT_MAX_FRAME_BYTES};
+use caliper_docgen_tsc_client::transport::{write_frame, ContentLengthDecoder, DEFAULT_MAX_FRAME_BYTES};
 use tokio::io::AsyncWriteExt;
 use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;

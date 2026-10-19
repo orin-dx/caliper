@@ -30,7 +30,7 @@ install:
 # output). napi/vite-plugin have no such lock to contend over, so moon
 # still orchestrates those directly.
 build:
-    cargo build --workspace --exclude oxc-react-docgen-napi
+    cargo build --workspace --exclude caliper-docgen-napi
     moon run napi:build vite-plugin:build
     cargo build --release
 
@@ -40,12 +40,12 @@ test: test-rust test-ts
 # Run Rust tests (via nextest, which doesn't run doctests — paired
 # with `cargo test --doc` to cover those too)
 test-rust:
-    cargo nextest run --workspace --exclude oxc-react-docgen-napi --locked
-    cargo test --doc --workspace --exclude oxc-react-docgen-napi
+    cargo nextest run --workspace --exclude caliper-docgen-napi --locked
+    cargo test --doc --workspace --exclude caliper-docgen-napi
 
 # Run TypeScript tests
 test-ts:
-    pnpm --filter @oxc-react-docgen/vite-plugin test
+    pnpm --filter caliper-docgen-vite-plugin test
 
 # Pack the npm packages and check napi arrives only as vite-plugin's transitive dependency (pm: npm or pnpm)
 verify-install pm="pnpm":
@@ -53,7 +53,7 @@ verify-install pm="pnpm":
 
 # Run benchmarks
 bench:
-    cargo bench --workspace --exclude oxc-react-docgen-napi
+    cargo bench --workspace --exclude caliper-docgen-napi
 
 # Rust and TypeScript line coverage; with a threshold, fails if either is below it
 coverage threshold="": (coverage-rust threshold) (coverage-ts threshold)
@@ -62,7 +62,7 @@ coverage threshold="": (coverage-rust threshold) (coverage-ts threshold)
 coverage-rust threshold="":
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo llvm-cov nextest --workspace --exclude oxc-react-docgen-napi --locked --lcov --output-path lcov.info
+    cargo llvm-cov nextest --workspace --exclude caliper-docgen-napi --locked --lcov --output-path lcov.info
     cargo llvm-cov report --summary-only
     if [[ -n "{{ threshold }}" ]]; then
       cargo llvm-cov report --summary-only --fail-under-lines "{{ threshold }}"
@@ -70,16 +70,16 @@ coverage-rust threshold="":
 
 # TypeScript coverage: prints the summary and writes packages/vite-plugin/coverage/lcov.info
 coverage-ts threshold="":
-    pnpm --filter @oxc-react-docgen/vite-plugin exec vitest run --coverage {{ if threshold != "" { "--coverage.thresholds.lines=" + threshold } else { "" } }}
+    pnpm --filter caliper-docgen-vite-plugin exec vitest run --coverage {{ if threshold != "" { "--coverage.thresholds.lines=" + threshold } else { "" } }}
 
 # Rust coverage report, opened in the browser
 coverage-html:
-    cargo llvm-cov nextest --workspace --exclude oxc-react-docgen-napi --locked --html --open
+    cargo llvm-cov nextest --workspace --exclude caliper-docgen-napi --locked --html --open
 
 # Documentation build check (warnings, including broken intra-doc links,
 # treated as errors)
 doc-check:
-    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --exclude oxc-react-docgen-napi
+    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --exclude caliper-docgen-napi
 
 # Unused-dependency check
 machete:
@@ -87,7 +87,7 @@ machete:
 
 # Mutation testing sweep — slow, run on demand, not part of `just ci`
 mutants:
-    cargo mutants --workspace --exclude oxc-react-docgen-napi
+    cargo mutants --workspace --exclude caliper-docgen-napi
 
 ts_src := "'packages/vite-plugin/src/**/*.ts' 'packages/vite-plugin/tests/**/*.ts' 'packages/vite-plugin/vitest.config.ts' 'packages/napi/*.d.ts' 'packages/cli/bin/**/*.js' 'apps/validate/src/**/*.ts'"
 ts_src_only := "'packages/vite-plugin/src' 'packages/vite-plugin/vitest.config.ts' 'packages/napi/*.d.ts' 'packages/cli/bin/**/*.js' 'apps/validate/src'"
@@ -97,7 +97,7 @@ md_src := "'**/*.md' '!node_modules/**' '!target/**' '!dist/**'"
 # Lint and format check
 lint:
     cargo fmt --check
-    cargo clippy --workspace --exclude oxc-react-docgen-napi --locked -- -D warnings
+    cargo clippy --workspace --exclude caliper-docgen-napi --locked -- -D warnings
     pnpm exec oxfmt --check {{ts_src}}
     pnpm exec oxfmt --check {{md_src}}
     pnpm exec oxlint {{ts_src_only}}
@@ -128,7 +128,7 @@ zizmor:
 # `just ci` can't drift apart.
 pre-commit:
     cargo fmt --check
-    cargo clippy --workspace --exclude oxc-react-docgen-napi --locked -- -D warnings
+    cargo clippy --workspace --exclude caliper-docgen-napi --locked -- -D warnings
     typos
     cargo deny check
 

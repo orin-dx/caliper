@@ -11,5 +11,5 @@ allowBuilds:
 # record them and failed. Consumers installing from npm are unaffected: this
 # only governs this workspace's own install.
 ignoredOptionalDependencies:
-  - "@oxc-react-docgen/cli-*"
-  - "@oxc-react-docgen/napi-*"
+  - "caliper-docgen-*"
+  - "caliper-docgen-napi-*"

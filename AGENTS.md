@@ -1,12 +1,12 @@
-# oxc-react-docgen
+# caliper-docgen
 
 10-100x faster than react-docgen-typescript. OXC parses TypeScript/TSX; we extract React component props and emit RDT-compatible JSON via `--format rdt`. See `docs/STATUS.md` for current state and known gaps.
 
 ## Commands
 
 ```bash
-cargo test -p oxc-react-docgen-core          # unit + snapshot tests
-cargo clippy -p oxc-react-docgen-core -- -D warnings
+cargo test -p caliper-docgen-core          # unit + snapshot tests
+cargo clippy -p caliper-docgen-core -- -D warnings
 cargo build --release                         # full build including CLI
 ```
 

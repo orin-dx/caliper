@@ -94,7 +94,7 @@ With the notification, the dependent component's props updated (0.5 ms update, 2
 
 ## Evidence
 
-Method: RDT 2.4.0 on typescript@6.0.3 (`apps/validate`'s RDT is pinned to a TS6 API — see "The RDT oracle" below) with the harness options (`shouldExtractLiteralValuesFromEnum`, `shouldRemoveUndefinedFromOptional`, `propFilter: { skipPropsWithoutDoc: false }`), against the algorithm above via `apps/validate/src/run-semantic.ts` on typescript@next. Run with `pnpm --filter @oxc-react-docgen/validate parity`.
+Method: RDT 2.4.0 on typescript@6.0.3 (`apps/validate`'s RDT is pinned to a TS6 API — see "The RDT oracle" below) with the harness options (`shouldExtractLiteralValuesFromEnum`, `shouldRemoveUndefinedFromOptional`, `propFilter: { skipPropsWithoutDoc: false }`), against the algorithm above via `apps/validate/src/run-semantic.ts` on typescript@next. Run with `pnpm --filter caliper-docgen-validate parity`.
 
 | Check | Result | Nightly |
 | --- | --- | --- |
@@ -163,7 +163,7 @@ Pass only the files you need as roots. The API's checker is lazy, and diagnostic
 
 `apps/validate` depends on `typescript@next` directly (for `run-semantic.ts`'s own `tsc --api` probe), but RDT 2.4.0 crashes on import against it (`ts.JsxEmit` is undefined). RDT now resolves its `typescript` peer to `typescript@6.0.3` instead, via the aliased `typescript-next` package dependency `run-semantic.ts` imports from — no pnpm override needed, since pnpm overrides don't reliably rewrite a peer dependency's resolution (tried `pnpm-workspace.yaml`'s `overrides: { "react-docgen-typescript>typescript": ... }`; the lockfile recorded it but RDT kept resolving against whatever `typescript` apps/validate depended on directly).
 
-`compare.ts`/`analyze.ts` (oxc-react-docgen vs RDT/react-docgen) still compare only name, `required`, type and default, and render our types themselves in `run-ours.ts` (objects print as `{ ... }`). Their type mismatches mix resolver and renderer differences, and description, `parent` and `declarations` are never compared. `parity.ts` (RDT vs the semantic algorithm) compares description too.
+`compare.ts`/`analyze.ts` (caliper-docgen vs RDT/react-docgen) still compare only name, `required`, type and default, and render our types themselves in `run-ours.ts` (objects print as `{ ... }`). Their type mismatches mix resolver and renderer differences, and description, `parent` and `declarations` are never compared. `parity.ts` (RDT vs the semantic algorithm) compares description too.
 
 ## Open decisions
 

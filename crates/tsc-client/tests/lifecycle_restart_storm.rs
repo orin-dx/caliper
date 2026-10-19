@@ -2,7 +2,7 @@ mod common;
 
 use std::time::Duration;
 
-use oxc_react_docgen_tsc_client::{Supervisor, TscClientError};
+use caliper_docgen_tsc_client::{Supervisor, TscClientError};
 
 #[tokio::test]
 async fn a_process_that_crashes_on_every_restart_gives_up_after_the_cap() {

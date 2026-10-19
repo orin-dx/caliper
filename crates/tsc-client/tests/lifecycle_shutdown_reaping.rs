@@ -2,7 +2,7 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use oxc_react_docgen_tsc_client::{Supervisor, TscClientError};
+use caliper_docgen_tsc_client::{Supervisor, TscClientError};
 use serde_json::json;
 
 #[tokio::test]

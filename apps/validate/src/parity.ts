@@ -4,7 +4,7 @@ import type { ToolResult } from './types.ts'
 
 // Parity check: does run-semantic.ts's tsc-api algorithm reproduce real RDT's output?
 // See docs/type-checker-integration.md, "Evidence". Not a quality comparison — that's
-// compare.ts/analyze.ts, which weigh oxc-react-docgen against RDT.
+// compare.ts/analyze.ts, which weigh caliper-docgen against RDT.
 
 function loadBaseline(name: string): Map<string, ToolResult> {
   const p = `./baselines/${name}.json`

@@ -1,8 +1,8 @@
 import type { Plugin, ResolvedConfig, ViteDevServer, HotUpdateOptions } from 'vite'
-import * as napi from '@oxc-react-docgen/napi'
-import type { ExtractionOutput, IncrementalUpdate } from '@oxc-react-docgen/napi'
+import * as napi from 'caliper-docgen-napi'
+import type { ExtractionOutput, IncrementalUpdate } from 'caliper-docgen-napi'
 
-const VIRTUAL_ID = 'virtual:oxc-react-docgen'
+const VIRTUAL_ID = 'virtual:caliper-docgen'
 const RESOLVED_VIRTUAL_ID = `\0${VIRTUAL_ID}`
 
 export interface OxcDocgenOptions {
@@ -12,7 +12,7 @@ export interface OxcDocgenOptions {
   skipHtmlProps?: boolean
 }
 
-export function oxcReactDocgen(options: OxcDocgenOptions): Plugin {
+export function caliperDocgen(options: OxcDocgenOptions): Plugin {
   let sessionId: number
   let root: string
   let command: 'build' | 'serve' | undefined
@@ -66,7 +66,7 @@ export function oxcReactDocgen(options: OxcDocgenOptions): Plugin {
       currentOutput = JSON.parse(json) as ExtractionOutput
       return true
     } catch (error) {
-      console.error('[oxc-react-docgen] Failed to parse initializeSession output:', error)
+      console.error('[caliper-docgen] Failed to parse initializeSession output:', error)
       return false
     }
   }
@@ -76,7 +76,7 @@ export function oxcReactDocgen(options: OxcDocgenOptions): Plugin {
   }
 
   return {
-    name: 'oxc-react-docgen',
+    name: 'caliper-docgen',
 
     configResolved(config: ResolvedConfig) {
       ;({ root, command } = config)
@@ -97,7 +97,7 @@ export function oxcReactDocgen(options: OxcDocgenOptions): Plugin {
       try {
         sessionId = napi.createSession(napiOptions())
       } catch (error) {
-        console.error('[oxc-react-docgen] createSession failed:', error)
+        console.error('[caliper-docgen] createSession failed:', error)
         throw error
       }
     },
@@ -108,7 +108,7 @@ export function oxcReactDocgen(options: OxcDocgenOptions): Plugin {
       try {
         await coldExtract()
       } catch (error) {
-        console.error('[oxc-react-docgen] initializeSession failed:', error)
+        console.error('[caliper-docgen] initializeSession failed:', error)
       }
     },
 
@@ -125,12 +125,12 @@ export function oxcReactDocgen(options: OxcDocgenOptions): Plugin {
         .then((ok) => {
           if (!ok) return
           // environments.client.hot is Vite 6+ API; cast avoids typing fight across patch versions
-          ;(server as any).environments?.client?.hot?.send('oxc-react-docgen:ready', {
+          ;(server as any).environments?.client?.hot?.send('caliper-docgen:ready', {
             components: currentOutput.components,
           })
         })
         .catch((error: unknown) => {
-          console.error('[oxc-react-docgen] initializeSession failed:', error)
+          console.error('[caliper-docgen] initializeSession failed:', error)
         })
       /* oxlint-enable promise/prefer-await-to-then, promise/always-return, promise/prefer-await-to-callbacks */
 
@@ -170,8 +170,8 @@ export function oxcReactDocgen(options: OxcDocgenOptions): Plugin {
       try {
         update = JSON.parse(json) as IncrementalUpdate
       } catch (error) {
-        console.error('[oxc-react-docgen] Failed to parse extractFileIncremental output:', error)
-        env.hot.send('oxc-react-docgen:update', { file: opts.file, updatedComponents: [], diagnostics: [] })
+        console.error('[caliper-docgen] Failed to parse extractFileIncremental output:', error)
+        env.hot.send('caliper-docgen:update', { file: opts.file, updatedComponents: [], diagnostics: [] })
         return
       }
 
@@ -179,7 +179,7 @@ export function oxcReactDocgen(options: OxcDocgenOptions): Plugin {
         currentOutput.components[comp.displayName] = comp
       }
 
-      env.hot.send('oxc-react-docgen:update', {
+      env.hot.send('caliper-docgen:update', {
         file: opts.file,
         updatedComponents: update.updatedComponents,
         diagnostics: update.diagnostics,

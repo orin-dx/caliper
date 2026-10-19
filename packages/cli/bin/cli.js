@@ -10,19 +10,19 @@ const { existsSync } = require('node:fs')
 const { join } = require('node:path')
 const { spawnSync } = require('node:child_process')
 
-const BINARY_NAME = process.platform === 'win32' ? 'oxc-react-docgen.exe' : 'oxc-react-docgen'
+const BINARY_NAME = process.platform === 'win32' ? 'caliper-docgen.exe' : 'caliper-docgen'
 
 function platformPackageName() {
   const { platform, arch } = process
   if (platform === 'darwin') {
-    if (arch === 'arm64') return '@oxc-react-docgen/cli-darwin-arm64'
-    if (arch === 'x64') return '@oxc-react-docgen/cli-darwin-x64'
+    if (arch === 'arm64') return 'caliper-docgen-darwin-arm64'
+    if (arch === 'x64') return 'caliper-docgen-darwin-x64'
   }
-  if (platform === 'win32' && arch === 'x64') return '@oxc-react-docgen/cli-win32-x64-msvc'
+  if (platform === 'win32' && arch === 'x64') return 'caliper-docgen-win32-x64-msvc'
   if (platform === 'linux') {
     const isMusl = !process.report?.getReport()?.header?.glibcVersionRuntime
-    if (arch === 'x64' && !isMusl) return '@oxc-react-docgen/cli-linux-x64-gnu'
-    if (arch === 'arm64' && !isMusl) return '@oxc-react-docgen/cli-linux-arm64-gnu'
+    if (arch === 'x64' && !isMusl) return 'caliper-docgen-linux-x64-gnu'
+    if (arch === 'arm64' && !isMusl) return 'caliper-docgen-linux-arm64-gnu'
   }
   return null
 }
@@ -51,7 +51,7 @@ const binary = findBinary()
 if (!binary) {
   const pkg = platformPackageName()
   process.stderr.write(
-    `oxc-react-docgen: native binary not found.\n${
+    `caliper-docgen: native binary not found.\n${
       pkg
         ? `Expected it via the optional dependency '${pkg}' — make sure your package manager installs ` +
           `optionalDependencies for your platform (${process.platform}-${process.arch}), or run ` +
@@ -64,7 +64,7 @@ if (!binary) {
 
 const result = spawnSync(binary, process.argv.slice(2), { stdio: 'inherit' })
 if (result.error) {
-  process.stderr.write(`oxc-react-docgen: failed to run native binary: ${result.error.message}\n`)
+  process.stderr.write(`caliper-docgen: failed to run native binary: ${result.error.message}\n`)
   process.exit(1)
 }
 process.exit(result.status ?? 1)

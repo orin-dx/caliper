@@ -1,7 +1,7 @@
 {
-  "name": "@oxc-react-docgen/cli-win32-x64-msvc",
+  "name": "caliper-docgen-win32-x64-msvc",
   "version": "0.2.0",
-  "description": "oxc-react-docgen CLI binary for Windows x64 — not meant to be installed directly, pulled in as an optionalDependency of @oxc-react-docgen/cli",
+  "description": "caliper-docgen CLI binary for Windows x64 — not meant to be installed directly, pulled in as an optionalDependency of caliper-docgen",
   "os": [
     "win32"
   ],
@@ -9,7 +9,7 @@
     "x64"
   ],
   "files": [
-    "oxc-react-docgen.exe"
+    "caliper-docgen.exe"
   ],
   "license": "AGPL-3.0-or-later",
   "repository": {

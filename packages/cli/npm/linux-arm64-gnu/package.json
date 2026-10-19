@@ -1,7 +1,7 @@
 {
-  "name": "@oxc-react-docgen/cli-linux-arm64-gnu",
+  "name": "caliper-docgen-linux-arm64-gnu",
   "version": "0.2.0",
-  "description": "oxc-react-docgen CLI binary for Linux ARM64 (glibc) — not meant to be installed directly, pulled in as an optionalDependency of @oxc-react-docgen/cli",
+  "description": "caliper-docgen CLI binary for Linux ARM64 (glibc) — not meant to be installed directly, pulled in as an optionalDependency of caliper-docgen",
   "os": [
     "linux"
   ],
@@ -9,7 +9,7 @@
     "arm64"
   ],
   "files": [
-    "oxc-react-docgen"
+    "caliper-docgen"
   ],
   "license": "AGPL-3.0-or-later",
   "repository": {

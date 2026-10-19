@@ -1,14 +1,14 @@
 {
-  "name": "@oxc-react-docgen/napi-linux-x64-gnu",
+  "name": "caliper-docgen-napi-linux-x64-gnu",
   "version": "0.2.0",
   "cpu": [
     "x64"
   ],
-  "main": "oxc_react_docgen_napi.linux-x64-gnu.node",
+  "main": "caliper_docgen_napi.linux-x64-gnu.node",
   "files": [
-    "oxc_react_docgen_napi.linux-x64-gnu.node"
+    "caliper_docgen_napi.linux-x64-gnu.node"
   ],
-  "description": "Native Node.js bindings for oxc-react-docgen",
+  "description": "Native Node.js bindings for caliper-docgen",
   "license": "AGPL-3.0-or-later",
   "os": [
     "linux"

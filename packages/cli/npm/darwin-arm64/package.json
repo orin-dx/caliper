@@ -1,7 +1,7 @@
 {
-  "name": "@oxc-react-docgen/cli-darwin-arm64",
+  "name": "caliper-docgen-darwin-arm64",
   "version": "0.2.0",
-  "description": "oxc-react-docgen CLI binary for macOS ARM64 (Apple Silicon) — not meant to be installed directly, pulled in as an optionalDependency of @oxc-react-docgen/cli",
+  "description": "caliper-docgen CLI binary for macOS ARM64 (Apple Silicon) — not meant to be installed directly, pulled in as an optionalDependency of caliper-docgen",
   "os": [
     "darwin"
   ],
@@ -9,7 +9,7 @@
     "arm64"
   ],
   "files": [
-    "oxc-react-docgen"
+    "caliper-docgen"
   ],
   "license": "AGPL-3.0-or-later",
   "repository": {

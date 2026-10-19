@@ -2,7 +2,7 @@ mod common;
 
 use std::time::Duration;
 
-use oxc_react_docgen_tsc_client::{Supervisor, TscClientError};
+use caliper_docgen_tsc_client::{Supervisor, TscClientError};
 
 #[tokio::test]
 async fn a_live_supervisor_reports_alive() {

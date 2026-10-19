@@ -1,7 +1,7 @@
 # Pinned to callisto 0.11.0 in .github/workflows/release.yml.
 
 # `match` is a package name ("<ecosystem>/<name>"), never a directory path.
-# Root package.json is `oxc-react-docgen-workspace` so bare `oxc-react-docgen` stays unambiguous.
+# Root package.json is `caliper-docgen-workspace` so bare `caliper-docgen` stays unambiguous.
 
 [changesets]
 dir = ".changeset"
@@ -13,42 +13,42 @@ peer-escalation = true
 preserve-npm-ranges = true
 
 [[package]]
-match = "cargo/oxc-react-docgen-core"
+match = "cargo/caliper-docgen-core"
 publish-to = ["crates-io"]
 release-trigger = "changeset"
 
 [[package]]
-match = "cargo/oxc-react-docgen"
+match = "cargo/caliper-docgen"
 publish-to = ["crates-io"]
 release-trigger = "changeset"
 
 [[package]]
-match = "npm/@oxc-react-docgen/cli"
+match = "npm/caliper-docgen"
 publish-to = ["npm"]
 release-trigger = "changeset"
 
 # FFI shim: versioned with its npm wrapper, never published to crates.io.
 [[package]]
-match = "cargo/oxc-react-docgen-napi"
+match = "cargo/caliper-docgen-napi"
 publish-to = []
 release-trigger = "changeset"
 
 [[package]]
-match = "npm/@oxc-react-docgen/napi"
+match = "npm/caliper-docgen-napi"
 publish-to = ["npm"]
 release-trigger = "changeset"
 
 [[package]]
-match = "npm/@oxc-react-docgen/vite-plugin"
+match = "npm/caliper-docgen-vite-plugin"
 publish-to = ["npm"]
 release-trigger = "changeset"
 
 # The npm wrapper is meaningless without a matching binding build.
 [[fixed-group]]
 name = "napi-and-binding"
-members = ["cargo/oxc-react-docgen-napi", "npm/@oxc-react-docgen/napi"]
+members = ["cargo/caliper-docgen-napi", "npm/caliper-docgen-napi"]
 
 # The npm wrapper redistributes this crate's binaries.
 [[fixed-group]]
 name = "cli-and-npm-wrapper"
-members = ["cargo/oxc-react-docgen", "npm/@oxc-react-docgen/cli"]
+members = ["cargo/caliper-docgen", "npm/caliper-docgen"]

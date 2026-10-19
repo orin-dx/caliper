@@ -17,13 +17,13 @@ After installing proto, run `moon setup` once to pull the pinned Node version an
 ```bash
 # Rust
 cargo build                                            # dev build
-cargo test -p oxc-react-docgen-core                   # unit + snapshot tests
-cargo clippy -p oxc-react-docgen-core -- -D warnings
+cargo test -p caliper-docgen-core                   # unit + snapshot tests
+cargo clippy -p caliper-docgen-core -- -D warnings
 cargo fmt --all
 
 # TypeScript
-pnpm --filter @oxc-react-docgen/vite-plugin test      # 33 unit tests (mocked NAPI)
-pnpm --filter @oxc-react-docgen/vite-plugin test:integration  # 3 integration tests (real native binding)
+pnpm --filter caliper-docgen-vite-plugin test      # 33 unit tests (mocked NAPI)
+pnpm --filter caliper-docgen-vite-plugin test:integration  # 3 integration tests (real native binding)
 
 # Accuracy comparison (informational — exits 0 regardless of gaps)
 moon run validate:compare
@@ -36,7 +36,7 @@ The pre-commit hook runs `cargo fmt`, `cargo clippy --all-targets -D warnings`, 
 Snapshot tests use [insta](https://insta.rs). Each fixture (shadcn, MUI, Chakra, etc.) has a snapshot of the full extraction output. If your change touches extraction output, insta will flag it:
 
 ```bash
-cargo test -p oxc-react-docgen-core    # fails with "snapshot mismatch"
+cargo test -p caliper-docgen-core    # fails with "snapshot mismatch"
 cargo insta review                     # review diffs, accept or reject
 ```
 
@@ -50,9 +50,9 @@ Accept any snapshot change that is intentional (i.e., the output got more accura
 
 **`crates/binding`** — thin NAPI wrapper. Owns the async runtime (tokio) and exposes the five NAPI functions (`extractAll`, `createSession`, `initializeSession`, `extractFileIncremental`, `closeSession`). No business logic.
 
-**`packages/napi`** — `@oxc-react-docgen/napi`. TypeScript types (`index.d.ts`) and the dev binary loader (`index.js`) that finds the `.node` file from `target/` or `NAPI_RS_NATIVE_LIBRARY_PATH`. No logic.
+**`packages/napi`** — `caliper-docgen-napi`. TypeScript types (`index.d.ts`) and the dev binary loader (`index.js`) that finds the `.node` file from `target/` or `NAPI_RS_NATIVE_LIBRARY_PATH`. No logic.
 
-**`packages/vite-plugin`** — `@oxc-react-docgen/vite-plugin`. Single Vite `Plugin` object. No extraction logic — calls NAPI and manages HMR.
+**`packages/vite-plugin`** — `caliper-docgen-vite-plugin`. Single Vite `Plugin` object. No extraction logic — calls NAPI and manages HMR.
 
 ## Code style
 

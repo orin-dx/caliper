@@ -1,7 +1,7 @@
 {
-  "name": "@oxc-react-docgen/vite-plugin",
+  "name": "caliper-docgen-vite-plugin",
   "version": "0.2.0",
-  "description": "Vite plugin for oxc-react-docgen — live prop type extraction",
+  "description": "Vite plugin for caliper-docgen — live prop type extraction",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -24,7 +24,7 @@
     "vite": "^7.0.0 || ^8.0.0"
   },
   "dependencies": {
-    "@oxc-react-docgen/napi": "workspace:*"
+    "caliper-docgen-napi": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

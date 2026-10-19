@@ -1,6 +1,6 @@
 {
   "id": "SPEC-CLI-001b",
-  "purpose": "Define the atomicity, error-surfacing, and downstream-exit-code effect of every file write a oxc-react-docgen CLI subcommand performs, so a failed or interrupted write via extract --out or watch --out can never leave a truncated file at the target path, and so a write failure is always surfaced rather than silently swallowed.",
+  "purpose": "Define the atomicity, error-surfacing, and downstream-exit-code effect of every file write a caliper-docgen CLI subcommand performs, so a failed or interrupted write via extract --out or watch --out can never leave a truncated file at the target path, and so a write failure is always surfaced rather than silently swallowed.",
   "scope": "crates/cli/src/output.rs (the shared write_atomic helper) and its two call sites: crates/cli/src/commands/extract.rs's --out handling and crates/cli/src/commands/watch.rs's --out handling. Covers: which commands write files at all, the temp-file-then-rename mechanism's success/failure behavior, and how each caller (extract vs. watch) surfaces a write failure — extract propagates as a hard Err, watch degrades to a Diagnostic and keeps running.",
   "non_goals": [
     "The extraction/resolution logic itself — owned by crates/core, a separate capability under a separate spec.",

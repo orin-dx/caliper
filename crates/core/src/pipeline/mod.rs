@@ -108,7 +108,7 @@ pub struct PipelineOptions {
     pub extra_builtins: FxHashSet<compact_str::CompactString>,
     /// Enable vanilla-extract CSS-in-JS support.
     pub vanilla_extract: bool,
-    /// Cache directory. Defaults to `node_modules/.cache/oxc-react-docgen`.
+    /// Cache directory. Defaults to `node_modules/.cache/caliper-docgen`.
     pub cache_dir: Option<Utf8PathBuf>,
     /// Future: opt-in to typescript-go for conditional/mapped type resolution.
     pub resolve_complex_types: bool,

@@ -28,7 +28,7 @@ Add sections only when they carry information: `# Examples`, `# Panics`, `# Erro
 ````rust
 /// # Examples
 /// ```
-/// # use oxc_react_docgen_core::pipeline::PipelineOptions;
+/// # use caliper_docgen_core::pipeline::PipelineOptions;
 /// let opts = PipelineOptions::default();
 /// ```
 ````

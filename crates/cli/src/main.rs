@@ -17,7 +17,7 @@ use commands::watch::cmd_watch;
 
 #[derive(Parser)]
 #[command(
-    name = "oxc-react-docgen",
+    name = "caliper-docgen",
     about = "Fast React prop extraction powered by OXC",
     version,
     propagate_version = true
@@ -108,7 +108,7 @@ pub struct ExtractArgs {
 
 #[derive(clap::ValueEnum, Clone)]
 pub enum OutputFormat {
-    /// oxc-react-docgen canonical schema (richest)
+    /// caliper-docgen canonical schema (richest)
     Canonical,
     /// react-docgen-typescript compatible output
     Rdt,
