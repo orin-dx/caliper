@@ -1,4 +1,4 @@
-# @orin-dx/caliper-docgen-vite-plugin
+# caliper-docgen-vite-plugin
 
 ## 0.2.0
 

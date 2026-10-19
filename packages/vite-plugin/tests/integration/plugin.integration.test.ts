@@ -1,7 +1,7 @@
-// Layer 2 — integration tests, against the REAL @orin-dx/caliper-docgen-napi native
+// Layer 2 — integration tests, against the REAL caliper-docgen-napi native
 // binding (never mocked here — see tests/unit/plugin.test.ts for the mocked
 // unit tier). Requires a locally-built `.node` binary
-// (`pnpm --filter @orin-dx/caliper-docgen-napi build:napi`); auto-skips the whole
+// (`pnpm --filter caliper-docgen-napi build:napi`); auto-skips the whole
 // file when one isn't available, so a fresh checkout without the native
 // toolchain doesn't fail. Set NAPI_BINARY_AVAILABLE=false to force-skip
 // regardless of whether a binary happens to be present.
@@ -22,7 +22,7 @@ const BUTTON_FIXTURE = path.join(FIXTURES_ROOT, 'src/Button.tsx')
 
 let napiAvailable = false
 try {
-  await import('@orin-dx/caliper-docgen-napi')
+  await import('caliper-docgen-napi')
   napiAvailable = true
 } catch {
   napiAvailable = false

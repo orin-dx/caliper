@@ -1,5 +1,5 @@
 {
-  "name": "@orin-dx/caliper-docgen-napi-win32-x64-msvc",
+  "name": "caliper-docgen-napi-win32-x64-msvc",
   "version": "0.2.0",
   "cpu": [
     "x64"

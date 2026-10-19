@@ -45,7 +45,7 @@ test-rust:
 
 # Run TypeScript tests
 test-ts:
-    pnpm --filter @orin-dx/caliper-docgen-vite-plugin test
+    pnpm --filter caliper-docgen-vite-plugin test
 
 # Pack the npm packages and check napi arrives only as vite-plugin's transitive dependency (pm: npm or pnpm)
 verify-install pm="pnpm":
@@ -70,7 +70,7 @@ coverage-rust threshold="":
 
 # TypeScript coverage: prints the summary and writes packages/vite-plugin/coverage/lcov.info
 coverage-ts threshold="":
-    pnpm --filter @orin-dx/caliper-docgen-vite-plugin exec vitest run --coverage {{ if threshold != "" { "--coverage.thresholds.lines=" + threshold } else { "" } }}
+    pnpm --filter caliper-docgen-vite-plugin exec vitest run --coverage {{ if threshold != "" { "--coverage.thresholds.lines=" + threshold } else { "" } }}
 
 # Rust coverage report, opened in the browser
 coverage-html:

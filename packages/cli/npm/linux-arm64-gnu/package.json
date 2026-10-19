@@ -1,7 +1,7 @@
 {
-  "name": "@orin-dx/caliper-docgen-linux-arm64-gnu",
+  "name": "caliper-docgen-linux-arm64-gnu",
   "version": "0.2.0",
-  "description": "caliper-docgen CLI binary for Linux ARM64 (glibc) — not meant to be installed directly, pulled in as an optionalDependency of @orin-dx/caliper-docgen",
+  "description": "caliper-docgen CLI binary for Linux ARM64 (glibc) — not meant to be installed directly, pulled in as an optionalDependency of caliper-docgen",
   "os": [
     "linux"
   ],

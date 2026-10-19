@@ -196,7 +196,7 @@ jobs:
         uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-zigbuild
-      - run: pnpm install --frozen-lockfile --filter @orin-dx/caliper-docgen-napi
+      - run: pnpm install --frozen-lockfile --filter caliper-docgen-napi
       - name: Build napi addon
         working-directory: packages/napi
         env:

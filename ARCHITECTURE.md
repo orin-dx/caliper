@@ -41,8 +41,8 @@ graph TD
     core["crates/core\ncaliper-docgen-core\nPure extraction — no I/O, no async"]
     binding["crates/binding\ncaliper-docgen-napi\nNAPI + tokio runtime"]
     cli["crates/cli\ncaliper-docgen\nCLI binary"]
-    napi["packages/napi\n@orin-dx/caliper-docgen-napi\nTS types + dev binary loader"]
-    vite["packages/vite-plugin\n@orin-dx/caliper-docgen-vite-plugin\nVite HMR plugin"]
+    napi["packages/napi\ncaliper-docgen-napi\nTS types + dev binary loader"]
+    vite["packages/vite-plugin\ncaliper-docgen-vite-plugin\nVite HMR plugin"]
     validate["apps/validate\nAccuracy comparison harness"]
 
     core --> binding
@@ -186,7 +186,7 @@ Component props and enums are serialized as `BTreeMap<String, …>` rather than 
 
 | Feature | Status |
 | --- | --- |
-| Preset system (`@orin-dx/caliper-docgen-presets`) | Designed; no Rust changes needed — config-side only. |
+| Preset system (`caliper-docgen-presets`) | Designed; no Rust changes needed — config-side only. |
 | LSP server | Protocol layer implemented (`initialize`/`shutdown`, frame parsing) — `textDocument/hover`, the actual prop-lookup handler, isn't wired up yet. |
 | Conditional types (`T extends U ? X : Y`) | Emitted as `opaque` — needs a real type checker, see `docs/type-checker-integration.md`. |
 | Mapped types with computed keys | Emitted as `opaque`. |

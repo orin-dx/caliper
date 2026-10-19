@@ -1,5 +1,5 @@
 {
-  "name": "@orin-dx/caliper-docgen-napi-darwin-arm64",
+  "name": "caliper-docgen-napi-darwin-arm64",
   "version": "0.2.0",
   "cpu": [
     "arm64"

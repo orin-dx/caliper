@@ -29,7 +29,7 @@
       ]
     },
     {
-      "package": "npm/@orin-dx/caliper-docgen",
+      "package": "npm/caliper-docgen",
       "targetVersion": "0.2.0",
       "reasons": [
         {
@@ -39,7 +39,7 @@
       ]
     },
     {
-      "package": "npm/@orin-dx/caliper-docgen-napi",
+      "package": "npm/caliper-docgen-napi",
       "targetVersion": "0.2.0",
       "reasons": [
         {
@@ -49,7 +49,7 @@
       ]
     },
     {
-      "package": "npm/@orin-dx/caliper-docgen-vite-plugin",
+      "package": "npm/caliper-docgen-vite-plugin",
       "targetVersion": "0.2.0",
       "reasons": [
         {

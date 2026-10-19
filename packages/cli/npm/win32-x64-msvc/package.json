@@ -1,7 +1,7 @@
 {
-  "name": "@orin-dx/caliper-docgen-win32-x64-msvc",
+  "name": "caliper-docgen-win32-x64-msvc",
   "version": "0.2.0",
-  "description": "caliper-docgen CLI binary for Windows x64 — not meant to be installed directly, pulled in as an optionalDependency of @orin-dx/caliper-docgen",
+  "description": "caliper-docgen CLI binary for Windows x64 — not meant to be installed directly, pulled in as an optionalDependency of caliper-docgen",
   "os": [
     "win32"
   ],

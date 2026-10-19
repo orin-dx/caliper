@@ -1,4 +1,4 @@
-# @orin-dx/caliper-docgen
+# caliper-docgen
 
 ## 0.2.0
 

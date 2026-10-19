@@ -1,6 +1,6 @@
 import type { Plugin, ResolvedConfig, ViteDevServer, HotUpdateOptions } from 'vite'
-import * as napi from '@orin-dx/caliper-docgen-napi'
-import type { ExtractionOutput, IncrementalUpdate } from '@orin-dx/caliper-docgen-napi'
+import * as napi from 'caliper-docgen-napi'
+import type { ExtractionOutput, IncrementalUpdate } from 'caliper-docgen-napi'
 
 const VIRTUAL_ID = 'virtual:caliper-docgen'
 const RESOLVED_VIRTUAL_ID = `\0${VIRTUAL_ID}`

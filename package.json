@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "cargo build --workspace --exclude caliper-docgen-napi && moon run napi:build vite-plugin:build",
-    "test": "cargo nextest run --workspace --exclude caliper-docgen-napi --locked && pnpm --filter @orin-dx/caliper-docgen-vite-plugin test",
+    "test": "cargo nextest run --workspace --exclude caliper-docgen-napi --locked && pnpm --filter caliper-docgen-vite-plugin test",
     "lint": "cargo clippy --workspace --exclude caliper-docgen-napi --locked -- -D warnings"
   },
   "devDependencies": {

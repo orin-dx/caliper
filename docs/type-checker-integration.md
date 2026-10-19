@@ -94,7 +94,7 @@ With the notification, the dependent component's props updated (0.5 ms update, 2
 
 ## Evidence
 
-Method: RDT 2.4.0 on typescript@6.0.3 (`apps/validate`'s RDT is pinned to a TS6 API — see "The RDT oracle" below) with the harness options (`shouldExtractLiteralValuesFromEnum`, `shouldRemoveUndefinedFromOptional`, `propFilter: { skipPropsWithoutDoc: false }`), against the algorithm above via `apps/validate/src/run-semantic.ts` on typescript@next. Run with `pnpm --filter @orin-dx/caliper-docgen-validate parity`.
+Method: RDT 2.4.0 on typescript@6.0.3 (`apps/validate`'s RDT is pinned to a TS6 API — see "The RDT oracle" below) with the harness options (`shouldExtractLiteralValuesFromEnum`, `shouldRemoveUndefinedFromOptional`, `propFilter: { skipPropsWithoutDoc: false }`), against the algorithm above via `apps/validate/src/run-semantic.ts` on typescript@next. Run with `pnpm --filter caliper-docgen-validate parity`.
 
 | Check | Result | Nightly |
 | --- | --- | --- |

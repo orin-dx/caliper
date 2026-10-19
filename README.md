@@ -30,8 +30,8 @@ The CLI can emit an RDT-compatible shape via `--format rdt` (see [MIGRATING.md](
 git clone https://github.com/orin-dx/caliper
 cd caliper
 pnpm install
-pnpm --filter @orin-dx/caliper-docgen-napi run build:napi   # builds the native addon for your platform
-pnpm --filter @orin-dx/caliper-docgen-vite-plugin build
+pnpm --filter caliper-docgen-napi run build:napi   # builds the native addon for your platform
+pnpm --filter caliper-docgen-vite-plugin build
 ```
 
 Use `pnpm run build:napi`, not a bare `cargo build` — it invokes `napi build`, which places the compiled addon exactly where `packages/napi/index.js`'s loader expects it.
@@ -44,7 +44,7 @@ Migrating off `react-docgen-typescript`? See [MIGRATING.md](MIGRATING.md) for wh
 // vite.config.ts
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { caliperDocgen } from '@orin-dx/caliper-docgen-vite-plugin'
+import { caliperDocgen } from 'caliper-docgen-vite-plugin'
 
 export default defineConfig({
   plugins: [react(), caliperDocgen({ srcDirs: ['src'] })],
@@ -70,10 +70,10 @@ docgen.components['Button'].props
 
 ## CLI
 
-A single Rust binary (`crates/cli`) — argument parsing, output formatting, and `--format rdt`/`--format storybook` serialization all live there. `@orin-dx/caliper-docgen` (once published) is a thin npm wrapper that execs the platform-appropriate compiled binary — no reimplemented logic, so there's exactly one place CLI behavior can drift.
+A single Rust binary (`crates/cli`) — argument parsing, output formatting, and `--format rdt`/`--format storybook` serialization all live there. `caliper-docgen` (once published) is a thin npm wrapper that execs the platform-appropriate compiled binary — no reimplemented logic, so there's exactly one place CLI behavior can drift.
 
 ```bash
-# Once published: npx @orin-dx/caliper-docgen extract --src src/ --out docgen.json
+# Once published: npx caliper-docgen extract --src src/ --out docgen.json
 # From source today: ./target/release/caliper-docgen (after cargo build --release)
 
 # One-shot extraction
@@ -148,9 +148,9 @@ Settings can also live in `docgen.config.ts` (`srcDirs`, `htmlAttributes`, `reac
 crates/core/          pure extraction logic (no I/O, no async, Send + Sync)
 crates/binding/       thin NAPI wrapper over core
 crates/cli/           clap + miette CLI
-packages/napi/        @orin-dx/caliper-docgen-napi (dev binary loader + TS types)
-packages/vite-plugin/ @orin-dx/caliper-docgen-vite-plugin
-packages/cli/         @orin-dx/caliper-docgen (npx wrapper — execs crates/cli's binary, no reimplemented logic)
+packages/napi/        caliper-docgen-napi (dev binary loader + TS types)
+packages/vite-plugin/ caliper-docgen-vite-plugin
+packages/cli/         caliper-docgen (npx wrapper — execs crates/cli's binary, no reimplemented logic)
 apps/validate/        accuracy comparison harness (react-docgen, rdt, ours)
 fixtures/             real library .d.ts/.tsx files (shadcn, MUI, Chakra, Mantine, etc.)
 ```

@@ -15,14 +15,14 @@ const BINARY_NAME = process.platform === 'win32' ? 'caliper-docgen.exe' : 'calip
 function platformPackageName() {
   const { platform, arch } = process
   if (platform === 'darwin') {
-    if (arch === 'arm64') return '@orin-dx/caliper-docgen-darwin-arm64'
-    if (arch === 'x64') return '@orin-dx/caliper-docgen-darwin-x64'
+    if (arch === 'arm64') return 'caliper-docgen-darwin-arm64'
+    if (arch === 'x64') return 'caliper-docgen-darwin-x64'
   }
-  if (platform === 'win32' && arch === 'x64') return '@orin-dx/caliper-docgen-win32-x64-msvc'
+  if (platform === 'win32' && arch === 'x64') return 'caliper-docgen-win32-x64-msvc'
   if (platform === 'linux') {
     const isMusl = !process.report?.getReport()?.header?.glibcVersionRuntime
-    if (arch === 'x64' && !isMusl) return '@orin-dx/caliper-docgen-linux-x64-gnu'
-    if (arch === 'arm64' && !isMusl) return '@orin-dx/caliper-docgen-linux-arm64-gnu'
+    if (arch === 'x64' && !isMusl) return 'caliper-docgen-linux-x64-gnu'
+    if (arch === 'arm64' && !isMusl) return 'caliper-docgen-linux-arm64-gnu'
   }
   return null
 }

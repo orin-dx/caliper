@@ -1,7 +1,7 @@
 {
-  "name": "@orin-dx/caliper-docgen-darwin-arm64",
+  "name": "caliper-docgen-darwin-arm64",
   "version": "0.2.0",
-  "description": "caliper-docgen CLI binary for macOS ARM64 (Apple Silicon) — not meant to be installed directly, pulled in as an optionalDependency of @orin-dx/caliper-docgen",
+  "description": "caliper-docgen CLI binary for macOS ARM64 (Apple Silicon) — not meant to be installed directly, pulled in as an optionalDependency of caliper-docgen",
   "os": [
     "darwin"
   ],

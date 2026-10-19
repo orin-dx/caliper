@@ -22,8 +22,8 @@ cargo clippy -p caliper-docgen-core -- -D warnings
 cargo fmt --all
 
 # TypeScript
-pnpm --filter @orin-dx/caliper-docgen-vite-plugin test      # 33 unit tests (mocked NAPI)
-pnpm --filter @orin-dx/caliper-docgen-vite-plugin test:integration  # 3 integration tests (real native binding)
+pnpm --filter caliper-docgen-vite-plugin test      # 33 unit tests (mocked NAPI)
+pnpm --filter caliper-docgen-vite-plugin test:integration  # 3 integration tests (real native binding)
 
 # Accuracy comparison (informational — exits 0 regardless of gaps)
 moon run validate:compare
@@ -50,9 +50,9 @@ Accept any snapshot change that is intentional (i.e., the output got more accura
 
 **`crates/binding`** — thin NAPI wrapper. Owns the async runtime (tokio) and exposes the five NAPI functions (`extractAll`, `createSession`, `initializeSession`, `extractFileIncremental`, `closeSession`). No business logic.
 
-**`packages/napi`** — `@orin-dx/caliper-docgen-napi`. TypeScript types (`index.d.ts`) and the dev binary loader (`index.js`) that finds the `.node` file from `target/` or `NAPI_RS_NATIVE_LIBRARY_PATH`. No logic.
+**`packages/napi`** — `caliper-docgen-napi`. TypeScript types (`index.d.ts`) and the dev binary loader (`index.js`) that finds the `.node` file from `target/` or `NAPI_RS_NATIVE_LIBRARY_PATH`. No logic.
 
-**`packages/vite-plugin`** — `@orin-dx/caliper-docgen-vite-plugin`. Single Vite `Plugin` object. No extraction logic — calls NAPI and manages HMR.
+**`packages/vite-plugin`** — `caliper-docgen-vite-plugin`. Single Vite `Plugin` object. No extraction logic — calls NAPI and manages HMR.
 
 ## Code style
 

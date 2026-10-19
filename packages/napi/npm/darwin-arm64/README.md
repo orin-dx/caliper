@@ -1,3 +1,3 @@
-# `@orin-dx/caliper-docgen-napi-darwin-arm64`
+# `caliper-docgen-napi-darwin-arm64`
 
-This is the **aarch64-apple-darwin** binary for `@orin-dx/caliper-docgen-napi`
+This is the **aarch64-apple-darwin** binary for `caliper-docgen-napi`

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Mock BEFORE importing plugin — vi.mock is hoisted by Vitest
-vi.mock('@orin-dx/caliper-docgen-napi', () => ({
+vi.mock('caliper-docgen-napi', () => ({
   createSession: vi.fn().mockReturnValue(42),
   initializeSession: vi
     .fn()
@@ -31,7 +31,7 @@ vi.mock('@orin-dx/caliper-docgen-napi', () => ({
 }))
 
 import { caliperDocgen } from '../../src/index.js'
-import * as napi from '@orin-dx/caliper-docgen-napi'
+import * as napi from 'caliper-docgen-napi'
 
 describe('caliperDocgen', () => {
   let plugin: ReturnType<typeof caliperDocgen>

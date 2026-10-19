@@ -71,7 +71,7 @@ If you need the full attribute set and aren't ready to opt into `full` mode, thi
 Don't just trust this document — run it against your own components:
 
 ```bash
-pnpm --filter @orin-dx/caliper-docgen-validate compare:all
+pnpm --filter caliper-docgen-validate compare:all
 ```
 
 `docs/rdt-coverage.md` tracks which pattern each fixture exercises and the bugs found along the way (almost all now fixed).

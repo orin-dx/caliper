@@ -95,7 +95,7 @@ importers:
 
   packages/vite-plugin:
     dependencies:
-      '@orin-dx/caliper-docgen-napi':
+      caliper-docgen-napi:
         specifier: workspace:*
         version: link:../napi
     devDependencies:
@@ -3017,8 +3017,8 @@ packages:
     engines: {node: '>= 6'}
 
 ignoredOptionalDependencies:
-  - '@orin-dx/caliper-docgen-*'
-  - '@orin-dx/caliper-docgen-napi-*'
+  - caliper-docgen-*
+  - caliper-docgen-napi-*
 
 snapshots:
 

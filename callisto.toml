@@ -23,7 +23,7 @@ publish-to = ["crates-io"]
 release-trigger = "changeset"
 
 [[package]]
-match = "npm/@orin-dx/caliper-docgen"
+match = "npm/caliper-docgen"
 publish-to = ["npm"]
 release-trigger = "changeset"
 
@@ -34,21 +34,21 @@ publish-to = []
 release-trigger = "changeset"
 
 [[package]]
-match = "npm/@orin-dx/caliper-docgen-napi"
+match = "npm/caliper-docgen-napi"
 publish-to = ["npm"]
 release-trigger = "changeset"
 
 [[package]]
-match = "npm/@orin-dx/caliper-docgen-vite-plugin"
+match = "npm/caliper-docgen-vite-plugin"
 publish-to = ["npm"]
 release-trigger = "changeset"
 
 # The npm wrapper is meaningless without a matching binding build.
 [[fixed-group]]
 name = "napi-and-binding"
-members = ["cargo/caliper-docgen-napi", "npm/@orin-dx/caliper-docgen-napi"]
+members = ["cargo/caliper-docgen-napi", "npm/caliper-docgen-napi"]
 
 # The npm wrapper redistributes this crate's binaries.
 [[fixed-group]]
 name = "cli-and-npm-wrapper"
-members = ["cargo/caliper-docgen", "npm/@orin-dx/caliper-docgen"]
+members = ["cargo/caliper-docgen", "npm/caliper-docgen"]

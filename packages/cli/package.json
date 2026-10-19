@@ -1,5 +1,5 @@
 {
-  "name": "@orin-dx/caliper-docgen",
+  "name": "caliper-docgen",
   "version": "0.2.0",
   "description": "npm-installable caliper-docgen CLI — thin wrapper that execs the compiled Rust binary. All argument parsing, formatting, and RDT/Storybook serialization happen in crates/cli, not here, so there is exactly one implementation of CLI behavior.",
   "type": "commonjs",
@@ -10,11 +10,11 @@
     "bin"
   ],
   "optionalDependencies": {
-    "@orin-dx/caliper-docgen-darwin-arm64": "0.2.0",
-    "@orin-dx/caliper-docgen-darwin-x64": "0.2.0",
-    "@orin-dx/caliper-docgen-linux-x64-gnu": "0.2.0",
-    "@orin-dx/caliper-docgen-win32-x64-msvc": "0.2.0",
-    "@orin-dx/caliper-docgen-linux-arm64-gnu": "0.2.0"
+    "caliper-docgen-darwin-arm64": "0.2.0",
+    "caliper-docgen-darwin-x64": "0.2.0",
+    "caliper-docgen-linux-x64-gnu": "0.2.0",
+    "caliper-docgen-win32-x64-msvc": "0.2.0",
+    "caliper-docgen-linux-arm64-gnu": "0.2.0"
   },
   "license": "AGPL-3.0-or-later",
   "repository": {
