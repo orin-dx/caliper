@@ -1,5 +1,9 @@
 # caliper-docgen-core
 
+## 0.2.1
+
+- First release under the Caliper names. The crates, the CLI binary and the npm packages were published as `oxc-react-docgen*` before, and are now `caliper-docgen`, `caliper-docgen-core`, `caliper-docgen-napi`, `caliper-docgen-vite-plugin` and their platform packages. The Vite plugin export is `caliperDocgen`. Nothing else changes.
+
 ## 0.2.0
 
 - Ambient `.d.ts` files are merged for their types only, never their components. `@types/react` declares `class PureComponent<P, S, SS> extends Component<P, S, SS>`, which matched the class-component detector — full HTML-attribute mode emitted `PureComponent` as a 0-prop component alongside a `Cannot resolve type 'P'` diagnostic. Both are gone, from batch extraction and from the watch session's first revision.
