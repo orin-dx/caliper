@@ -1,6 +1,6 @@
 {
   "name": "caliper-docgen-vite-plugin",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Vite plugin for caliper-docgen — live prop type extraction",
   "type": "module",
   "main": "./dist/index.js",
