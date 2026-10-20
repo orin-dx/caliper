@@ -5,14 +5,14 @@ import type { ExtractionOutput, IncrementalUpdate } from 'caliper-docgen-napi'
 const VIRTUAL_ID = 'virtual:caliper-docgen'
 const RESOLVED_VIRTUAL_ID = `\0${VIRTUAL_ID}`
 
-export interface OxcDocgenOptions {
+export interface CaliperDocgenOptions {
   srcDirs: string[]
   exclude?: string[]
   reactVersion?: 'react18' | 'react19'
   skipHtmlProps?: boolean
 }
 
-export function caliperDocgen(options: OxcDocgenOptions): Plugin {
+export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
   let sessionId: number
   let root: string
   let command: 'build' | 'serve' | undefined

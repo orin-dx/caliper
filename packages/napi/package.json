@@ -2,6 +2,18 @@
   "name": "caliper-docgen-napi",
   "version": "0.2.1",
   "description": "Native Node.js bindings for caliper-docgen",
+  "keywords": [
+    "react",
+    "docgen",
+    "typescript",
+    "oxc",
+    "napi",
+    "native"
+  ],
+  "homepage": "https://orin-dx.com/tools/caliper/",
+  "bugs": {
+    "url": "https://github.com/orin-dx/caliper/issues"
+  },
   "main": "index.js",
   "types": "index.d.ts",
   "type": "commonjs",
@@ -36,10 +48,11 @@
   "devDependencies": {
     "@napi-rs/cli": "^3.10.8"
   },
-  "license": "AGPL-3.0-or-later",
+  "license": "FSL-1.1-MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/orin-dx/caliper.git"
+    "url": "git+https://github.com/orin-dx/caliper.git",
+    "directory": "packages/napi"
   },
   "publishConfig": {
     "access": "public"

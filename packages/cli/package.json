@@ -1,7 +1,19 @@
 {
   "name": "caliper-docgen",
   "version": "0.2.1",
-  "description": "npm-installable caliper-docgen CLI — thin wrapper that execs the compiled Rust binary. All argument parsing, formatting, and RDT/Storybook serialization happen in crates/cli, not here, so there is exactly one implementation of CLI behavior.",
+  "description": "Fast React component prop extraction CLI, powered by OXC",
+  "keywords": [
+    "react",
+    "docgen",
+    "typescript",
+    "oxc",
+    "cli",
+    "storybook"
+  ],
+  "homepage": "https://orin-dx.com/tools/caliper/",
+  "bugs": {
+    "url": "https://github.com/orin-dx/caliper/issues"
+  },
   "type": "commonjs",
   "bin": {
     "caliper-docgen": "./bin/cli.js"
@@ -16,10 +28,11 @@
     "caliper-docgen-win32-x64-msvc": "0.2.1",
     "caliper-docgen-linux-arm64-gnu": "0.2.1"
   },
-  "license": "AGPL-3.0-or-later",
+  "license": "FSL-1.1-MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/orin-dx/caliper.git"
+    "url": "git+https://github.com/orin-dx/caliper.git",
+    "directory": "packages/cli"
   },
   "publishConfig": {
     "access": "public"

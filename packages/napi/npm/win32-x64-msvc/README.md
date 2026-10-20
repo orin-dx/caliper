@@ -1,3 +1,5 @@
-# `caliper-docgen-napi-win32-x64-msvc`
+# caliper-docgen-napi-win32-x64-msvc
 
-This is the **x86_64-pc-windows-msvc** binary for `caliper-docgen-napi`
+Platform binary for [caliper-docgen-napi](https://www.npmjs.com/package/caliper-docgen-napi). Don't install it directly: `caliper-docgen-napi` pulls in the right one for your OS and CPU as an optional dependency.
+
+Project page: https://orin-dx.com/tools/caliper/ · Source: https://github.com/orin-dx/caliper

@@ -9,7 +9,19 @@
     "caliper_docgen_napi.linux-x64-gnu.node"
   ],
   "description": "Native Node.js bindings for caliper-docgen",
-  "license": "AGPL-3.0-or-later",
+  "keywords": [
+    "react",
+    "docgen",
+    "typescript",
+    "oxc",
+    "napi",
+    "native"
+  ],
+  "homepage": "https://orin-dx.com/tools/caliper/",
+  "bugs": {
+    "url": "https://github.com/orin-dx/caliper/issues"
+  },
+  "license": "FSL-1.1-MIT",
   "os": [
     "linux"
   ],
@@ -18,7 +30,8 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/orin-dx/caliper.git"
+    "url": "git+https://github.com/orin-dx/caliper.git",
+    "directory": "packages/napi/npm/linux-x64-gnu"
   },
   "publishConfig": {
     "access": "public"

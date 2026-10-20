@@ -2,7 +2,7 @@
   "name": "caliper-docgen-workspace",
   "version": "0.0.0",
   "private": true,
-  "license": "AGPL-3.0-or-later",
+  "license": "FSL-1.1-MIT",
   "type": "module",
   "engines": {
     "node": ">=24"
