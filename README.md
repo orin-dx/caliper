@@ -20,7 +20,7 @@
 
 `react-docgen-typescript` builds a full TypeScript `Program`, which takes seconds on a mid-size design system. Caliper parses files in parallel with OXC and skips the type checker.
 
-Cold run over 21 real component libraries, Apple Silicon, October 2026:
+Cold run over 21 real component libraries, Apple M5 Max, October 2026:
 
 |                                                    | Time  |
 | -------------------------------------------------- | ----- |
