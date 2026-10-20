@@ -20,16 +20,16 @@
 
 `react-docgen-typescript` builds a full TypeScript `Program`, which takes seconds on a mid-size design system. Caliper parses files in parallel with OXC and skips the type checker.
 
-Cold run over 21 real component libraries, Apple Silicon, July 2026:
+Cold run over 21 real component libraries, Apple Silicon, October 2026:
 
-|                                                    | Time   |
-| -------------------------------------------------- | ------ |
-| Caliper binary alone                               | 50.5ms |
-| Caliper through a Node harness                     | 2.96s  |
-| `react-docgen` through the same harness            | 3.39s  |
-| `react-docgen-typescript` through the same harness | 10.37s |
+|                                                    | Time  |
+| -------------------------------------------------- | ----- |
+| Caliper binary alone                               | 42ms  |
+| Caliper through a Node harness                     | 0.38s |
+| `react-docgen` through the same harness            | 0.52s |
+| `react-docgen-typescript` through the same harness | 4.9s  |
 
-Most of the harness time is Node startup, which all three tools pay. A watch-mode update to one file takes about 2ms, where `react-docgen-typescript` pays the full cold cost on every edit. Method and raw numbers: [`docs/benchmarks.md`](docs/benchmarks.md).
+`react-docgen` and `react-docgen-typescript` only run inside Node, so all three share one harness (`pnpm exec tsx`, 5 runs each). Starting that harness costs 0.32s on its own, which is most of the Caliper figure. A watch-mode update to one file takes about 2ms, where `react-docgen-typescript` pays the full cold cost on every edit. Method and raw numbers: [`docs/benchmarks.md`](docs/benchmarks.md).
 
 ## A component through Caliper
 
