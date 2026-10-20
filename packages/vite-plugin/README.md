@@ -25,7 +25,7 @@ docgen.components['Button'].props
 
 Extraction runs on OXC through [`caliper-docgen-napi`](https://www.npmjs.com/package/caliper-docgen-napi), so a single-file update takes about 2ms. Requires Vite 7 or 8. The module uses the canonical output format, not the `react-docgen-typescript` shape.
 
-Docs and benchmarks: [github.com/orin-dx/caliper](https://github.com/orin-dx/caliper).
+Docs and benchmarks: [orin-dx.com/tools/caliper](https://orin-dx.com/tools/caliper/). Source: [github.com/orin-dx/caliper](https://github.com/orin-dx/caliper).
 
 ## License
 

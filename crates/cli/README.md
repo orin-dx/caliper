@@ -19,7 +19,7 @@ caliper-docgen extract --src src --format rdt
 
 Prefer npm? `npm install --save-dev caliper-docgen` installs the same binary.
 
-Extraction is in [`caliper-docgen-core`](https://crates.io/crates/caliper-docgen-core). Docs, benchmarks and migration notes: [github.com/orin-dx/caliper](https://github.com/orin-dx/caliper).
+Extraction is in [`caliper-docgen-core`](https://crates.io/crates/caliper-docgen-core). Docs, benchmarks and migration notes: [orin-dx.com/tools/caliper](https://orin-dx.com/tools/caliper/). Source: [github.com/orin-dx/caliper](https://github.com/orin-dx/caliper).
 
 ## License
 

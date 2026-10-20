@@ -10,7 +10,7 @@ The prebuilt addon for your OS and CPU installs as an optional dependency (`cali
 
 Most projects want [`caliper-docgen-vite-plugin`](https://www.npmjs.com/package/caliper-docgen-vite-plugin) or the [`caliper-docgen`](https://www.npmjs.com/package/caliper-docgen) CLI, which use this package. The binding returns the canonical output format, not the `react-docgen-typescript` shape.
 
-Docs and source: [github.com/orin-dx/caliper](https://github.com/orin-dx/caliper).
+Project page: [orin-dx.com/tools/caliper](https://orin-dx.com/tools/caliper/). Source: [github.com/orin-dx/caliper](https://github.com/orin-dx/caliper).
 
 ## License
 

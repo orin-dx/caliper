@@ -19,7 +19,7 @@ npx caliper-docgen extract --src src --format rdt
 
 This package is a thin wrapper. It runs the prebuilt binary for your platform, installed as an optional dependency (`caliper-docgen-darwin-arm64`, `caliper-docgen-linux-x64-gnu`, and so on). All behavior is in the Rust CLI.
 
-Docs, benchmarks and migration notes: [github.com/orin-dx/caliper](https://github.com/orin-dx/caliper).
+Docs, benchmarks and migration notes: [orin-dx.com/tools/caliper](https://orin-dx.com/tools/caliper/). Source: [github.com/orin-dx/caliper](https://github.com/orin-dx/caliper).
 
 ## License
 

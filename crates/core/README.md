@@ -6,7 +6,7 @@ It parses files in parallel, merges symbols across them, and resolves each compo
 
 Most people want a front end instead: the [`caliper-docgen`](https://crates.io/crates/caliper-docgen) CLI, or the Node bindings [`caliper-docgen-napi`](https://www.npmjs.com/package/caliper-docgen-napi).
 
-API docs: [docs.rs/caliper-docgen-core](https://docs.rs/caliper-docgen-core). Architecture and known gaps: [github.com/orin-dx/caliper](https://github.com/orin-dx/caliper).
+API docs: [docs.rs/caliper-docgen-core](https://docs.rs/caliper-docgen-core). Project page: [orin-dx.com/tools/caliper](https://orin-dx.com/tools/caliper/). Source and architecture notes: [github.com/orin-dx/caliper](https://github.com/orin-dx/caliper).
 
 ## License
 
