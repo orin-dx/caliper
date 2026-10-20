@@ -26,12 +26,12 @@ all = { level = "warn", priority = -1 }
 
 [workspace.dependencies]
 # OXC — all main crates move in lockstep; resolver has separate versioning
-oxc_allocator     = "0.153"
-oxc_parser        = "0.153"
-oxc_ast           = "0.153"
-oxc_ast_visit     = "0.153"
-oxc_span          = "0.153"
-oxc_syntax        = "0.153"
+oxc_allocator     = "0.154"
+oxc_parser        = "0.154"
+oxc_ast           = "0.154"
+oxc_ast_visit     = "0.154"
+oxc_span          = "0.154"
+oxc_syntax        = "0.154"
 oxc_resolver      = "11"
 
 # Core data
