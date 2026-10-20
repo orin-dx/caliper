@@ -251,7 +251,7 @@ mod tests {
         use std::time::{SystemTime, UNIX_EPOCH};
         let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
         let base = std::env::temp_dir();
-        let dir = base.join(format!("oxc-docgen-cache-test-{}-{}", suffix, ts));
+        let dir = base.join(format!("caliper-docgen-cache-test-{}-{}", suffix, ts));
         std::fs::create_dir_all(&dir).unwrap();
         Utf8PathBuf::from_path_buf(dir).unwrap()
     }
