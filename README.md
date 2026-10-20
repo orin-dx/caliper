@@ -20,10 +20,16 @@
 
 `react-docgen-typescript` builds a full TypeScript `Program`, which takes seconds on a mid-size design system. Caliper parses files in parallel with OXC and skips the type checker.
 
-|                                       | Caliper                                | `react-docgen-typescript` |
-| ------------------------------------- | -------------------------------------- | ------------------------- |
-| Cold run, 21 real component libraries | 50ms ([breakdown](docs/benchmarks.md)) | seconds                   |
-| Single-file update                    | about 2ms                              | full cold cost            |
+Cold run over 21 real component libraries, Apple Silicon, July 2026:
+
+|                                                    | Time   |
+| -------------------------------------------------- | ------ |
+| Caliper binary alone                               | 50.5ms |
+| Caliper through a Node harness                     | 2.96s  |
+| `react-docgen` through the same harness            | 3.39s  |
+| `react-docgen-typescript` through the same harness | 10.37s |
+
+Most of the harness time is Node startup, which all three tools pay. A watch-mode update to one file takes about 2ms, where `react-docgen-typescript` pays the full cold cost on every edit. Method and raw numbers: [`docs/benchmarks.md`](docs/benchmarks.md).
 
 ## A component through Caliper
 
@@ -134,6 +140,7 @@ The module updates through HMR as components change. The plugin and the `caliper
 
 ## Documentation
 
+- [Project page](https://orin-dx.com/tools/caliper/) on orin-dx.com.
 - [Architecture](ARCHITECTURE.md): pipeline, crate map, invariants.
 - [Decisions](docs/adr/README.md): why OXC, the cache format, panic containment, the planned TypeScript 7 backend.
 - [Status](docs/STATUS.md), [edge cases](docs/edge-cases.md) and [benchmarks](docs/benchmarks.md).

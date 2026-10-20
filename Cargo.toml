@@ -14,7 +14,7 @@ rust-version = "1.94"
 authors = ["caliper-docgen contributors"]
 license = "FSL-1.1-MIT"
 repository = "https://github.com/orin-dx/caliper"
-homepage = "https://github.com/orin-dx/caliper"
+homepage = "https://orin-dx.com/tools/caliper/"
 keywords = ["react", "docgen", "typescript", "oxc", "storybook"]
 categories = ["development-tools", "command-line-utilities"]
 
