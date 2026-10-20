@@ -1,0 +1,94 @@
+{
+  "cli_version": "0.11.6-nightly.202610141814.4b8cdfaf0",
+  "checkpoint_id": "01M5BGC0SP1Q0T1B3WQ4P1Q2TH",
+  "session_id": "ba6a68d6-c702-4382-ab2f-60cd0f6af675",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-20T01:56:28.261325Z",
+  "branch": "main",
+  "checkpoints_count": 4,
+  "save_step_count": 4,
+  "files_touched": [
+    "README.md",
+    "packages/cli/npm/darwin-arm64/package.json",
+    "packages/cli/npm/darwin-x64/package.json",
+    "packages/cli/npm/linux-arm64-gnu/package.json",
+    "packages/cli/npm/linux-x64-gnu/package.json",
+    "packages/cli/npm/win32-x64-msvc/package.json",
+    "packages/cli/package.json",
+    "packages/napi/npm/darwin-arm64/package.json",
+    "packages/napi/npm/darwin-x64/package.json",
+    "packages/napi/npm/linux-arm64-gnu/package.json",
+    "packages/napi/npm/linux-x64-gnu/package.json",
+    "packages/napi/npm/win32-x64-msvc/package.json",
+    "packages/napi/package.json",
+    "packages/vite-plugin/package.json"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "ccc1bf17626c",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 30,
+    "cache_creation_tokens": 95523,
+    "cache_read_tokens": 1027479,
+    "output_tokens": 7122,
+    "api_call_count": 15
+  },
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "summary": {
+    "intent": "Get oriented in the caliper repo, commit the uncommitted tool-config changes so they aren't lost, and prepare a proper first release by adapting to the latest callisto (0.11.0) after reading its docs and the last 3 weeks of PRs.",
+    "outcome": "Surveyed repo status, callisto docs/release notes and recent PRs, and produced a release plan; nothing was committed or changed. Work is paused awaiting user decisions on the first release version (0.1.0 vs 0.2.0) and which uncommitted changes to commit.",
+    "learnings": {
+      "repo": [
+        "Caliper is a Rust/OXC replacement for react-docgen-typescript; core extraction, resolver, CLI, NAPI binding and Vite plugin are done, and the active work is the opt-in TypeScript 7 type-checker backend (tsc-client crate, ADR 0006).",
+        "The local checkout can be stale: local main was 8 commits behind origin/main, so the 0.8.0 callisto pins seen locally were already fixed to 0.10.0 on origin (PR #20). Fetch before drawing conclusions.",
+        "Nothing has ever been released: no version tags exist and all packages are at 0.1.0. Callisto releases any package whose current version has no tag, so release PR #22 (bumping to 0.1.1) is a leftover from the changesets and would skip 0.1.0.",
+        "Callisto 0.11.0 is out while origin pins 0.10.0 and the local mise shim is 0.5.0. Notes for 0.9-0.11 show no breaking change for this config: 0.9 made release intent schema v4 and publishes napi platform packages with their owner, and 0.10.3/0.11.0 add rerun fixes after failed tag pushes, builds only for released packages, and a stop on malformed workspace manifests.",
+        "8 changesets exist, all patches. The tsc-client crate (1f0be33) has no changeset and may need publish = false or a callisto.toml entry. TOON, the LSP scaffold, plugins and the schema export predate the last 3 weeks and are covered by no changeset.",
+        "Package.json repo URLs on origin still point to oxc-react-docgen while NPM_CONFIG_PROVENANCE is on, so the uncommitted URL fix to 'caliper' matters for npm provenance publishing.",
+        "The uncommitted tool-config changes look like an `entire` regeneration: .claude/settings.json drops the Read(./.entire/metadata/**) deny rule and empties enabledPlugins (removing 8 orin-dx-agent-plugins entries), .gemini/settings.json loses all 136 hook lines, while .codex/hooks.json and .github/hooks/entire.json look fine."
+      ],
+      "code": [
+        {
+          "path": "callisto.toml",
+          "line": 1,
+          "finding": "Comment still says 'Pinned to callisto 0.8.0' in the local stale checkout, whereas origin pins 0.10.0."
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "line": 166,
+          "finding": "The callisto-validate step had a stale callisto pin locally; commit 3f27029 already fixed it on origin."
+        },
+        {
+          "path": "docs/STATUS.md",
+          "finding": "Last updated 2026-09-28; reports 545 Rust tests and 36 vitest tests all green (not re-verified). Says the tsc --api process lifecycle (crash/restart/timeout) has not started."
+        }
+      ],
+      "workflow": [
+        "Check `git fetch` and local-vs-origin divergence before reporting repo state or stale pins.",
+        "Tool-config regenerations can silently delete deny rules and plugin lists, so review diffs before committing them for the team.",
+        "Keep unrelated uncommitted changes (tool config, package.json URL fix, README) in separate commits or branches."
+      ]
+    },
+    "friction": [
+      "Earlier claim that callisto pins were 0.8.0 was wrong because the local checkout was stale; it had to be corrected after fetching.",
+      "The user's recollection of being blocked on callisto could not be confirmed from the repo, and prior session context was unavailable.",
+      "CI on main is red: Coverage and Test / Rust fail with an install-action error, and the 3 newest dependabot PRs fail too. The cause has not been diagnosed.",
+      "Local mise shim for callisto is 0.5.0, far behind 0.11.0.",
+      "The user did not answer the earlier choice about handling .claude and .gemini changes, so tool-config commits are still pending."
+    ],
+    "open_items": [
+      "Decide first release version: 0.1.0 (delete changesets) or 0.2.0 (add a minor changeset for the feature set; recommended).",
+      "Decide which uncommitted changes to commit (URL fix, .codex/.github hooks) and what to do with .claude and .gemini (restore deny rule and enabledPlugins, verify .gemini).",
+      "Pull origin/main, branch, and bump callisto pins to 0.11.0 in release.yml, ci.yml and the callisto.toml comment.",
+      "Add a changeset for the features and decide how to handle the tsc-client crate (publish = false or callisto.toml entry).",
+      "Diagnose and fix the install-action CI failure on main before releasing.",
+      "Land the package.json repo URL fix (oxc-react-docgen -> caliper); the other 17 modified files were not individually reviewed.",
+      "Run `callisto release --dry-run` and `status --check` on 0.11.0, then merge the release PR (closing or superseding stale PR #22).",
+      "Dependabot PRs #27, #30, #31 and #32 are open and unmerged.",
+      "Implement the tsc --api lifecycle (crash, restart, timeout) and the ADR 0006 semantic backend, which are needed to close known gaps like conditional types and mapped types over unbound generics."
+    ]
+  }
+}

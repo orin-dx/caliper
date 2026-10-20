@@ -1,0 +1,17 @@
+Where are we in this repo?
+
+---
+
+Last I remember we got blocked on callisto right?
+
+---
+
+We should be commiting tool stuff so it doesn't get lost
+
+---
+
+We should adapt to the latest callisto and attempt a proper release. We added a lot of features so read the callisto docs and the last 3 weeks of PRs
+
+---
+
+Let's follow the plan, yes. Just move forward in versions to avoid problems
