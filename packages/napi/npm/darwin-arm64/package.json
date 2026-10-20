@@ -21,7 +21,7 @@
   "bugs": {
     "url": "https://github.com/orin-dx/caliper/issues"
   },
-  "license": "AGPL-3.0-or-later",
+  "license": "FSL-1.1-MIT",
   "os": [
     "darwin"
   ],

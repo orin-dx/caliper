@@ -23,7 +23,7 @@
   "files": [
     "caliper-docgen"
   ],
-  "license": "AGPL-3.0-or-later",
+  "license": "FSL-1.1-MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/orin-dx/caliper.git",
