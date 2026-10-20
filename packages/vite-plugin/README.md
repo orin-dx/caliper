@@ -1,6 +1,6 @@
 # caliper-docgen-vite-plugin
 
-Vite plugin for [caliper-docgen](https://github.com/orin-dx/caliper): React component prop metadata on a virtual module, updated through HMR as components change.
+A Vite plugin that exposes your React components' props on a virtual module and updates it through HMR as you edit.
 
 ```bash
 npm install --save-dev caliper-docgen-vite-plugin
@@ -23,8 +23,10 @@ import docgen from 'virtual:caliper-docgen'
 docgen.components['Button'].props
 ```
 
-Extraction runs on OXC through [`caliper-docgen-napi`](https://www.npmjs.com/package/caliper-docgen-napi): about 50ms cold across 21 real component libraries and about 2ms for an incremental single-file update. Requires Vite 7 or 8.
+Extraction runs on OXC through [`caliper-docgen-napi`](https://www.npmjs.com/package/caliper-docgen-napi), so a single-file update takes about 2ms. Requires Vite 7 or 8. The module uses the canonical output format, not the `react-docgen-typescript` shape.
 
-Options, benchmarks and migration notes: https://github.com/orin-dx/caliper
+Docs and benchmarks: [github.com/orin-dx/caliper](https://github.com/orin-dx/caliper).
 
-License: AGPL-3.0-or-later.
+## License
+
+FSL-1.1-MIT. Each version becomes MIT two years after its release.

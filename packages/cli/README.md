@@ -1,18 +1,26 @@
 # caliper-docgen
 
-React component prop extraction, powered by [OXC](https://oxc.rs). Parses TypeScript natively in Rust, with no TypeScript compiler program and no type-checking pass.
+Extract React component props from the command line. Built on [OXC](https://oxc.rs), so there is no type-checking pass.
 
 ```bash
 npm install --save-dev caliper-docgen
 npx caliper-docgen extract --src src --format rdt
 ```
 
-- `--format canonical | rdt | toon`: `rdt` emits a `react-docgen-typescript`-compatible shape, `toon` a token-optimized one for LLM agents.
-- `watch` re-extracts on change. `schema` prints the JSON Schema for the output.
-- Loads `docgen.config.ts`, or the file passed with `--config <path>`.
+| Command               | Does                                                                 |
+| --------------------- | -------------------------------------------------------------------- |
+| `extract`             | Writes every component's props to stdout or `--out`                  |
+| `watch`               | Re-extracts on change                                                |
+| `inspect <Component>` | Shows one component's props as a table                               |
+| `check`               | Exits non-zero on errors, for CI (`--strict` also fails on warnings) |
+| `schema`              | Prints the JSON Schema of the output                                 |
 
-This package is a thin wrapper that runs the prebuilt binary for your platform (`caliper-docgen-darwin-arm64`, `-linux-x64-gnu`, and so on, pulled in as optional dependencies). All behavior lives in the Rust CLI.
+`--format` is `canonical`, `rdt` (the `react-docgen-typescript` shape) or `toon` (compact, for LLM agents). Settings can also live in `docgen.config.ts`, or in the file passed with `--config`.
 
-Docs, benchmarks and migration notes from `react-docgen-typescript`: https://github.com/orin-dx/caliper
+This package is a thin wrapper. It runs the prebuilt binary for your platform, installed as an optional dependency (`caliper-docgen-darwin-arm64`, `caliper-docgen-linux-x64-gnu`, and so on). All behavior is in the Rust CLI.
 
-License: AGPL-3.0-or-later.
+Docs, benchmarks and migration notes: [github.com/orin-dx/caliper](https://github.com/orin-dx/caliper).
+
+## License
+
+FSL-1.1-MIT. Each version becomes MIT two years after its release.
