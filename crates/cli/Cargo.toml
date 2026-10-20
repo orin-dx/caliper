@@ -3,7 +3,14 @@ name = "caliper-docgen"
 description = "Fast React prop extraction — CLI"
 version = "0.2.1"
 edition.workspace = true
+authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/caliper-docgen"
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
 
 [lints]
 workspace = true

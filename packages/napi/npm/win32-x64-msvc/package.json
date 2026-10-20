@@ -9,13 +9,26 @@
     "caliper_docgen_napi.win32-x64-msvc.node"
   ],
   "description": "Native Node.js bindings for caliper-docgen",
+  "keywords": [
+    "react",
+    "docgen",
+    "typescript",
+    "oxc",
+    "napi",
+    "native"
+  ],
+  "homepage": "https://github.com/orin-dx/caliper#readme",
+  "bugs": {
+    "url": "https://github.com/orin-dx/caliper/issues"
+  },
   "license": "AGPL-3.0-or-later",
   "os": [
     "win32"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/orin-dx/caliper.git"
+    "url": "git+https://github.com/orin-dx/caliper.git",
+    "directory": "packages/napi/npm/win32-x64-msvc"
   },
   "publishConfig": {
     "access": "public"

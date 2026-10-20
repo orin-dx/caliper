@@ -2,6 +2,19 @@
   "name": "caliper-docgen-vite-plugin",
   "version": "0.2.1",
   "description": "Vite plugin for caliper-docgen — live prop type extraction",
+  "keywords": [
+    "react",
+    "docgen",
+    "typescript",
+    "oxc",
+    "vite",
+    "vite-plugin",
+    "storybook"
+  ],
+  "homepage": "https://github.com/orin-dx/caliper#readme",
+  "bugs": {
+    "url": "https://github.com/orin-dx/caliper/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -36,7 +49,8 @@
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/orin-dx/caliper.git"
+    "url": "git+https://github.com/orin-dx/caliper.git",
+    "directory": "packages/vite-plugin"
   },
   "publishConfig": {
     "access": "public"

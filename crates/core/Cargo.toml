@@ -3,7 +3,14 @@ name = "caliper-docgen-core"
 description = "Fast React prop extraction via OXC — core library"
 version = "0.2.1"
 edition.workspace = true
+authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/caliper-docgen-core"
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
 
 [lints]
 workspace = true

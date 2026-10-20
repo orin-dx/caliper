@@ -2,6 +2,18 @@
   "name": "caliper-docgen-win32-x64-msvc",
   "version": "0.2.1",
   "description": "caliper-docgen CLI binary for Windows x64 — not meant to be installed directly, pulled in as an optionalDependency of caliper-docgen",
+  "keywords": [
+    "react",
+    "docgen",
+    "typescript",
+    "oxc",
+    "cli",
+    "binary"
+  ],
+  "homepage": "https://github.com/orin-dx/caliper#readme",
+  "bugs": {
+    "url": "https://github.com/orin-dx/caliper/issues"
+  },
   "os": [
     "win32"
   ],
@@ -14,7 +26,8 @@
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/orin-dx/caliper.git"
+    "url": "git+https://github.com/orin-dx/caliper.git",
+    "directory": "packages/cli/npm/win32-x64-msvc"
   },
   "publishConfig": {
     "access": "public"

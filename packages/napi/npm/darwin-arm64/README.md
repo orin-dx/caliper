@@ -1,3 +1,5 @@
-# `caliper-docgen-napi-darwin-arm64`
+# caliper-docgen-napi-darwin-arm64
 
-This is the **aarch64-apple-darwin** binary for `caliper-docgen-napi`
+Platform binary for [caliper-docgen-napi](https://www.npmjs.com/package/caliper-docgen-napi). Don't install it directly: `caliper-docgen-napi` pulls in the right one for your OS and CPU as an optional dependency.
+
+Source and docs: https://github.com/orin-dx/caliper

@@ -2,6 +2,18 @@
   "name": "caliper-docgen-linux-arm64-gnu",
   "version": "0.2.1",
   "description": "caliper-docgen CLI binary for Linux ARM64 (glibc) — not meant to be installed directly, pulled in as an optionalDependency of caliper-docgen",
+  "keywords": [
+    "react",
+    "docgen",
+    "typescript",
+    "oxc",
+    "cli",
+    "binary"
+  ],
+  "homepage": "https://github.com/orin-dx/caliper#readme",
+  "bugs": {
+    "url": "https://github.com/orin-dx/caliper/issues"
+  },
   "os": [
     "linux"
   ],
@@ -14,7 +26,8 @@
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/orin-dx/caliper.git"
+    "url": "git+https://github.com/orin-dx/caliper.git",
+    "directory": "packages/cli/npm/linux-arm64-gnu"
   },
   "publishConfig": {
     "access": "public"

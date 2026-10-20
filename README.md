@@ -24,7 +24,13 @@ The CLI can emit an RDT-compatible shape via `--format rdt` (see [MIGRATING.md](
 
 ## Install
 
-> Not yet on npm. No prebuilt per-platform binaries exist yet — build from source:
+```bash
+npm install --save-dev caliper-docgen                # CLI, with the prebuilt binary for your platform
+npm install --save-dev caliper-docgen-vite-plugin    # Vite plugin
+cargo install caliper-docgen                         # CLI from crates.io
+```
+
+To build from source:
 
 ```bash
 git clone https://github.com/orin-dx/caliper
