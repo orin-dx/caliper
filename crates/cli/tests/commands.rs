@@ -175,11 +175,16 @@ fn spawn_watch(src: &TempDir, quiet: bool) -> Watch {
 }
 
 impl Watch {
-    /// Edits `Widget.tsx` until `--out` appears, then returns what was written. An edit made before the watcher is
-    /// listening is lost, so the edit is repeated.
+    /// Edits `Widget.tsx` until `--out` shows the edit, then returns what was written. An edit made before the watcher
+    /// is listening is lost, so the edit is repeated.
     fn edit_until_out_is_written(&self, src: &TempDir) -> serde_json::Value {
         let widget = src.path().join("Widget.tsx");
         let deadline = Instant::now() + Duration::from_secs(30);
+        // `--out` is written at startup, from the files as they were before the edit.
+        while !self.out.exists() {
+            assert!(Instant::now() < deadline, "watch never wrote --out at startup");
+            std::thread::sleep(Duration::from_millis(50));
+        }
         loop {
             std::fs::write(
                 &widget,
@@ -188,9 +193,12 @@ impl Watch {
             .unwrap();
             std::thread::sleep(Duration::from_millis(300));
             if let Ok(json) = std::fs::read_to_string(&self.out) {
-                return serde_json::from_str(&json).unwrap();
+                let written: serde_json::Value = serde_json::from_str(&json).unwrap();
+                if written["components"]["Widget"]["props"]["size"].is_object() {
+                    return written;
+                }
             }
-            assert!(Instant::now() < deadline, "watch never wrote --out");
+            assert!(Instant::now() < deadline, "watch never wrote the edit to --out");
         }
     }
 
@@ -248,6 +256,25 @@ fn watch_reports_a_change_and_writes_out_what_extract_produces() {
         stderr.contains("1 components  ·  0 enums  ·  0 warnings  ·  0 errors"),
         "the first extraction is summarized: {stderr}"
     );
+}
+
+#[test]
+fn watch_writes_out_before_any_change() {
+    let src = widget_dir();
+    let watch = spawn_watch(&src, true);
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let written = loop {
+        if let Ok(json) = std::fs::read_to_string(&watch.out) {
+            break serde_json::from_str::<serde_json::Value>(&json).unwrap();
+        }
+        assert!(Instant::now() < deadline, "watch never wrote --out");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+
+    let extracted: serde_json::Value =
+        serde_json::from_str(&stdout_of(&run(&["extract", "--json", "--src", src.path().to_str().unwrap()]))).unwrap();
+    assert_eq!(written["components"], extracted["components"]);
 }
 
 #[test]

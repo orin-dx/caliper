@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use rstest::rstest;
 use rustix::pty::{grantpt, openpt, ptsname, unlockpt, OpenptFlags};
-use rustix::termios::{tcgetattr, LocalModes};
+use rustix::termios::{tcgetattr, LocalModes, OutputModes};
 
 mod common;
 use common::strip_ansi;
@@ -282,6 +282,30 @@ fn ctrl_c_quits_a_terminal_session_but_a_bare_c_does_not() {
 
     watch.pty().type_bytes(&[0x03]);
     assert_eq!(watch.expect_exit("Ctrl-C"), Some(0));
+}
+
+#[test]
+fn r_extracts_a_terminal_session_again() {
+    let mut watch = Watch::start_in_terminal();
+    watch.expect_line("1 components");
+    watch.wait_until_raw();
+
+    watch.pty().type_bytes(b"r");
+
+    let summary = watch.expect_line("components");
+    assert!(summary.contains("1 components  ·  0 enums  ·  0 warnings  ·  0 errors"), "{summary}");
+}
+
+/// Raw mode is for reading keys; output must still translate `\n` to `\r\n`, or every line printed during the session
+/// starts where the previous one ended.
+#[test]
+fn raw_mode_keeps_newline_translation_for_output() {
+    let watch = Watch::start_in_terminal();
+    watch.wait_until_raw();
+
+    let output_modes = tcgetattr(&watch.pty().slave).unwrap().output_modes;
+
+    assert!(output_modes.contains(OutputModes::OPOST | OutputModes::ONLCR), "output modes: {output_modes:?}");
 }
 
 #[test]
