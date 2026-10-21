@@ -159,6 +159,15 @@ const CASES: &[Case] = &[
         "#,
         expect: &[("A", &["more", "value"])],
     },
+    Case {
+        shape: "Required and PropsWithChildren wrappers",
+        source: r#"
+            interface P { label?: string }
+            export function Req(props: Required<P>) { return <b />; }
+            export function Kids(props: React.PropsWithChildren<P>) { return <b />; }
+        "#,
+        expect: &[("Kids", &["children", "label"]), ("Req", &["label"])],
+    },
     // ── near misses that are not components ──────────────────────────────────
     Case {
         shape: "createContext with a default value",

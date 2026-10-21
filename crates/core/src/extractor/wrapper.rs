@@ -103,8 +103,8 @@ fn component_argument_evidence(callee: &str, call: &CallExpression<'_>) -> Resul
 
 impl<'src> SourceDataCollector<'src> {
     /// Record `const Name = callee<...>(first, ...)` as a candidate. Returns whether it was recorded.
-    pub(super) fn try_record_wrapper_call<'a>(&mut self, decl: &VariableDeclarator<'a>, name: &str) -> bool {
-        let Some(init) = decl.init.as_ref() else { return false };
+    pub(super) fn try_record_wrapper_call<'a>(&mut self, decl: &super::component::Binding<'_, 'a>, name: &str) -> bool {
+        let Some(init) = decl.init else { return false };
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
         let Some(type_arguments) = call.type_arguments.as_ref() else { return false };
         let Some(callee) = self.extract_callee_name(call) else { return false };

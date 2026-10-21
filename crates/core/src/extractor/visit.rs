@@ -9,6 +9,7 @@ use crate::types::{
     ImportBinding, LexedExport, RawProp, TypeName,
 };
 
+use super::component::Binding;
 use super::{declaration_name, is_pascal_case, SourceDataCollector};
 
 impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
@@ -229,13 +230,8 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             if self.is_tsx {
                 if let Some(name) = self.extract_pascal_name(declarator) {
                     self.decline_reason = None;
-                    if let Some(mapping) = self
-                        .try_fc_annotation(declarator, &name)
-                        .or_else(|| self.try_forward_ref(declarator, &name))
-                        .or_else(|| self.try_hoc_wrapped(declarator, &name))
-                        .or_else(|| self.try_class_expression_wrapped(declarator, &name))
-                        .or_else(|| self.try_typed_function_expression(declarator, &name))
-                    {
+                    let binding = Binding::of(declarator);
+                    if let Some(mapping) = self.detect_component(&binding, &name) {
                         self.data.component_mappings.push(mapping);
                         continue;
                     }
@@ -248,8 +244,8 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     // those are ambient type-only bindings handled by Pattern 5 below
                     // (or legitimately not components at all), not failed candidates.
                     if declarator.init.is_some()
-                        && !self.try_rename_identifier_wrapped_component(declarator, &name)
-                        && !self.try_record_wrapper_call(declarator, &name)
+                        && !self.try_rename_identifier_wrapped_component(&binding, &name)
+                        && !self.try_record_wrapper_call(&binding, &name)
                     {
                         let message = self.decline_reason.take().unwrap_or_else(|| {
                             format!(
@@ -387,12 +383,34 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     }
 
     fn visit_export_default_declaration(&mut self, node: &ExportDefaultDeclaration<'a>) {
-        // `export default function(props: Props) {}` — anonymous, no `func.id`,
-        // so Pattern 4 above (which requires an identifier) never fires for it.
+        // An anonymous default export has no binding name, so the component is named after its file, as
+        // `try_anonymous_default_export_component` already does for `export default function(props: Props) {}`.
         if self.is_tsx {
-            if let ExportDefaultDeclarationKind::FunctionDeclaration(func) = &node.declaration {
-                if func.id.is_none() {
+            match &node.declaration {
+                ExportDefaultDeclarationKind::FunctionDeclaration(func) if func.id.is_none() => {
                     self.try_anonymous_default_export_component(func);
+                }
+                ExportDefaultDeclarationKind::ClassDeclaration(class) if class.id.is_none() => {
+                    if let Some(name) = super::component::pascal_case_from_file_stem(&self.file_path) {
+                        if let Some(mapping) = self.try_class_component(class, &name) {
+                            self.data.component_mappings.push(mapping);
+                        }
+                    }
+                }
+                // `export default (props: P) => …`, `export default memo(function Badge(…))`,
+                // `export default forwardRef<El, P>(…)`: an expression, so the declarator rules apply.
+                kind => {
+                    if let (Some(expr), Some(name)) =
+                        (kind.as_expression(), super::component::pascal_case_from_file_stem(&self.file_path))
+                    {
+                        let binding = Binding { init: Some(expr), span: node.span, annotation: None };
+                        self.decline_reason = None;
+                        if let Some(mapping) = self.detect_component(&binding, &name) {
+                            self.data.component_mappings.push(mapping);
+                        } else {
+                            self.try_record_wrapper_call(&binding, &name);
+                        }
+                    }
                 }
             }
         }

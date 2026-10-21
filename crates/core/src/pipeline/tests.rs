@@ -1720,6 +1720,38 @@ fn test_key_sets_resolve_exactly() {
     );
 }
 
+// Excludes describe paths inside the project; the directory the project lives in must not trigger them.
+#[test]
+fn test_excludes_match_inside_the_source_directory_only() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("work.test.repo").join("node_modules-backup").join("src");
+    fs::create_dir_all(root.join("__snapshots__")).unwrap();
+    fs::write(
+        root.join("Button.tsx"),
+        "interface P { a?: string }\nexport function Button(props: P) { return <b /> }\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("Button.test.tsx"),
+        "interface Q { a?: string }\nexport function InTest(props: Q) { return <b /> }\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("__snapshots__").join("Snap.tsx"),
+        "interface S { a?: string }\nexport function Snap(props: S) { return <b /> }\n",
+    )
+    .unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(root).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+
+    let output = extract(&options);
+
+    assert_eq!(output.components.keys().collect::<Vec<_>>(), vec!["Button"]);
+}
+
 // ── test_overlapping_src_dirs_two_directories_deduplicates_without_a_duplicate_listing ─
 //
 // Corrected finding: the insert-return check above only catches a genuine

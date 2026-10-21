@@ -29,6 +29,21 @@ pub(super) fn peel_expr<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> 
     }
 }
 
+/// What the component rules read from a binding: its initializer, span and type annotation. Built from a
+/// `const X = ...` declarator or from an `export default ...` expression, so both go through the same rules.
+#[derive(Clone, Copy)]
+pub(super) struct Binding<'b, 'a> {
+    pub(super) init: Option<&'b Expression<'a>>,
+    pub(super) span: oxc_span::Span,
+    pub(super) annotation: Option<&'b TSTypeAnnotation<'a>>,
+}
+
+impl<'b, 'a> Binding<'b, 'a> {
+    pub(super) fn of(decl: &'b VariableDeclarator<'a>) -> Self {
+        Self { init: decl.init.as_ref(), span: decl.span, annotation: decl.type_annotation.as_deref() }
+    }
+}
+
 /// Names `@types/react` (and its `React.`-qualified form) recognizes as a
 /// function-component type. Shared between `extract_props_from_type_annotation`
 /// (which additionally requires the props argument itself to resolve) and
@@ -43,7 +58,7 @@ const FC_FAMILY_TYPE_NAMES: &[&str] =
 /// separator (`-`, `_`, `.`, space) and capitalizes each segment's first
 /// character. Returns `None` when the path has no usable stem at all (e.g.
 /// nothing but separators).
-fn pascal_case_from_file_stem(file_path: &Utf8Path) -> Option<String> {
+pub(super) fn pascal_case_from_file_stem(file_path: &Utf8Path) -> Option<String> {
     let stem = file_path.file_stem()?;
     let mut pascal = String::new();
     for segment in stem.split(|c: char| !c.is_alphanumeric()) {
@@ -74,13 +89,18 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
+    /// The ordered rules for a binding whose initializer may be a component; the first that matches wins.
+    pub(super) fn detect_component<'a>(&mut self, binding: &Binding<'_, 'a>, name: &str) -> Option<ComponentMapping> {
+        self.try_fc_annotation(binding, name)
+            .or_else(|| self.try_forward_ref(binding, name))
+            .or_else(|| self.try_hoc_wrapped(binding, name))
+            .or_else(|| self.try_class_expression_wrapped(binding, name))
+            .or_else(|| self.try_typed_function_expression(binding, name))
+    }
+
     /// Try to detect: `const Button: FC<ButtonProps> = ({ variant = 'primary' }) => ...`
-    pub(super) fn try_fc_annotation<'a>(
-        &mut self,
-        decl: &VariableDeclarator<'a>,
-        name: &str,
-    ) -> Option<ComponentMapping> {
-        let type_ann = decl.type_annotation.as_ref()?;
+    pub(super) fn try_fc_annotation<'a>(&mut self, decl: &Binding<'_, 'a>, name: &str) -> Option<ComponentMapping> {
+        let type_ann = decl.annotation?;
         let init_params = match decl.init.as_ref() {
             Some(Expression::ArrowFunctionExpression(afe)) => Some(&*afe.params),
             Some(Expression::FunctionExpression(fe)) => Some(&*fe.params),
@@ -134,11 +154,7 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     /// Try to detect: `const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(...)`
-    pub(super) fn try_forward_ref<'a>(
-        &mut self,
-        decl: &VariableDeclarator<'a>,
-        name: &str,
-    ) -> Option<ComponentMapping> {
+    pub(super) fn try_forward_ref<'a>(&mut self, decl: &Binding<'_, 'a>, name: &str) -> Option<ComponentMapping> {
         let init = decl.init.as_ref()?;
         let call = match peel_expr(init) {
             Expression::CallExpression(ce) => ce,
@@ -188,7 +204,7 @@ impl<'src> SourceDataCollector<'src> {
     /// `FormatName = (u: User) => string`. A first parameter that is not a named type is not a props object.
     pub(super) fn try_typed_function_expression<'a>(
         &mut self,
-        decl: &VariableDeclarator<'a>,
+        decl: &Binding<'_, 'a>,
         name: &str,
     ) -> Option<ComponentMapping> {
         let (params, shape) = match peel_expr(decl.init.as_ref()?) {
@@ -220,11 +236,7 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     /// Try to detect: `const Button = anyHOC(function Button(props: ButtonProps) {...})`
-    pub(super) fn try_hoc_wrapped<'a>(
-        &mut self,
-        decl: &VariableDeclarator<'a>,
-        name: &str,
-    ) -> Option<ComponentMapping> {
+    pub(super) fn try_hoc_wrapped<'a>(&mut self, decl: &Binding<'_, 'a>, name: &str) -> Option<ComponentMapping> {
         let init = decl.init.as_ref()?;
         let call = match peel_expr(init) {
             Expression::CallExpression(ce) => ce,
@@ -455,7 +467,7 @@ impl<'src> SourceDataCollector<'src> {
     /// under both names.
     pub(super) fn try_class_expression_wrapped<'a>(
         &mut self,
-        decl: &VariableDeclarator<'a>,
+        decl: &Binding<'_, 'a>,
         name: &str,
     ) -> Option<ComponentMapping> {
         let init = decl.init.as_ref()?;
@@ -512,11 +524,7 @@ impl<'src> SourceDataCollector<'src> {
     /// base unfindable for that second alias — silently dropping it. The base's
     /// own (implementation-only) name is filtered out of the final output in
     /// `finish()` via `aliased_away`.
-    pub(super) fn try_rename_identifier_wrapped_component<'a>(
-        &mut self,
-        decl: &VariableDeclarator<'a>,
-        name: &str,
-    ) -> bool {
+    pub(super) fn try_rename_identifier_wrapped_component<'a>(&mut self, decl: &Binding<'_, 'a>, name: &str) -> bool {
         let Some(init) = decl.init.as_ref() else { return false };
         let (inner_name, call) = match peel_expr(init) {
             Expression::CallExpression(call) => match call.arguments.first() {

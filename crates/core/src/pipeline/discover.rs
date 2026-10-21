@@ -46,20 +46,25 @@ pub(super) fn discover_files(
                 continue;
             }
 
-            let path_str = path.to_str().unwrap_or("");
+            // Excludes apply to the path inside the source directory: a project checked out under `my.test.repo/` or
+            // `~/node_modules-backup/` must not lose every file.
+            let relative = path.strip_prefix(dir.as_std_path()).unwrap_or(path);
+            let relative_str = relative.to_str().unwrap_or("");
+            let file_name = relative.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let in_component = |name: &str| relative.components().any(|c| c.as_os_str() == name);
 
             // Built-in excludes — skip node_modules sub-dirs only when not intentionally targeting them.
-            if path_str.contains(".stories.")
-                || path_str.contains(".test.")
-                || path_str.contains(".spec.")
-                || path_str.contains("__snapshots__")
-                || (!dir_is_in_node_modules && path_str.contains("node_modules"))
+            if file_name.contains(".stories.")
+                || file_name.contains(".test.")
+                || file_name.contains(".spec.")
+                || in_component("__snapshots__")
+                || (!dir_is_in_node_modules && in_component("node_modules"))
             {
                 continue;
             }
 
             // User-supplied excludes.
-            if extra_excludes.iter().any(|p| path_str.contains(p.as_str())) {
+            if extra_excludes.iter().any(|p| relative_str.contains(p.as_str())) {
                 continue;
             }
 
