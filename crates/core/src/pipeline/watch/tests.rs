@@ -726,9 +726,10 @@ fn deleting_a_file_removes_its_components_and_re_resolves_dependents() {
 // surfaces an IoError and does not re-resolve that file's own component.
 
 #[test]
-fn update_file_with_non_utf8_content_surfaces_io_error_and_skips_that_files_own_component() {
+fn update_file_with_non_utf8_content_surfaces_io_error_and_removes_that_files_own_component() {
+    // Canonical, so the component's recorded file path can actually match (macOS temp dirs live under a symlink).
     let tmp = tempfile::tempdir().expect("tempdir");
-    let dir = camino::Utf8Path::from_path(tmp.path()).expect("utf8 path").to_owned();
+    let dir = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().expect("canonicalize")).expect("utf8 path");
     let file_path = dir.join("Bad.tsx");
     std::fs::write(file_path.as_std_path(), "export function Bad(props: { x: string }) { return null; }\n")
         .expect("write Bad.tsx");
@@ -736,12 +737,11 @@ fn update_file_with_non_utf8_content_surfaces_io_error_and_skips_that_files_own_
     let options = PipelineOptions { src_dirs: vec![dir], ..Default::default() };
     let session = WatchSession::new(options);
     let _ignored = session.initialize();
+    assert_eq!(session.snapshot().components["Bad"].file_path, file_path, "sanity: the paths compare equal");
 
-    // Overwrite with invalid UTF-8 bytes directly (std::fs::write accepts any
-    // AsRef<[u8]>, unlike a &str write, which couldn't express this at all).
     std::fs::write(file_path.as_std_path(), [0x42, 0xFF, 0xFE, 0x00, 0xFF]).expect("write invalid utf8 bytes");
-
     let update = session.update_file(&file_path);
+
     assert!(
         update
             .diagnostics
@@ -750,12 +750,8 @@ fn update_file_with_non_utf8_content_surfaces_io_error_and_skips_that_files_own_
         "expected an IoError diagnostic naming Bad.tsx, got {:?}",
         update.diagnostics
     );
-    assert!(
-        !update.updated_components.iter().any(|c| c.file_path == file_path),
-        "the changed file's own component must not be re-resolved successfully after an unreadable-content \
-         error, got {:?}",
-        update.updated_components
-    );
+    assert_eq!((update.updated_keys, update.removed_keys), (vec![], vec!["Bad".to_string()]));
+    assert_matches_cold(&session);
 }
 
 #[test]
@@ -935,6 +931,7 @@ fn a_wrapper_component_with_unresolvable_props_is_kept_by_update_file_like_extra
 /// One step of a watch session: write or delete each file, then report every touched path to `update_file`.
 enum Step<'s> {
     Write(&'s str, &'s str),
+    WriteBytes(&'s str, &'s [u8]),
     Delete(&'s str),
 }
 
@@ -1000,6 +997,7 @@ fn every_kind_of_change_leaves_the_snapshot_equal_to_a_cold_extract() {
         ),
         ("stop being a component", vec![Step::Write("button/Panel.tsx", "export const panelHeight = 4;\n")]),
         ("break a file", vec![Step::Write("Card.tsx", "export const = ;\n")]),
+        ("make a file unreadable", vec![Step::WriteBytes("Card.tsx", &[0x42, 0xFF, 0xFE])]),
         ("fix it", vec![Step::Write("Card.tsx", "export function Card(props: { title: string }) { return null; }\n")]),
         ("delete a dependency", vec![Step::Delete("shared.ts")]),
         ("restore it", vec![Step::Write("shared.ts", "export interface SharedProps { size: 'sm'; }\n")]),
@@ -1025,6 +1023,10 @@ fn every_kind_of_change_leaves_the_snapshot_equal_to_a_cold_extract() {
             match change {
                 Step::Write(name, body) => {
                     std::fs::write(src.join(name), body).expect("write");
+                    touched.push(src.join(name));
+                }
+                Step::WriteBytes(name, bytes) => {
+                    std::fs::write(src.join(name), bytes).expect("write");
                     touched.push(src.join(name));
                 }
                 Step::Delete(name) => {
