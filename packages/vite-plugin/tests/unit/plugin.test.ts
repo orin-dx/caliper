@@ -28,6 +28,7 @@ const update = (revision: number, updated: string[], removed: string[] = [], des
     removedKeys: removed,
     affectedFiles: [],
     diagnostics: [],
+    removedDiagnostics: [],
     durationMs: 1,
   })
 
@@ -201,6 +202,7 @@ describe('caliperDocgen', () => {
           updatedComponents: [component('Panel')],
           removedKeys: ['Card'],
           diagnostics: [],
+          removedDiagnostics: [],
         },
       ])
     })
@@ -309,47 +311,46 @@ describe('caliperDocgen', () => {
       expect(napi.extractFileIncremental).toHaveBeenCalled()
     })
 
-    // A rapid double-save can resolve its two NAPI calls out of order; only the newer one's event is sent.
-    it('drops the event of an older call for the same file that resolves after a newer one', async () => {
-      let resolveFirst: (v: string) => void = () => {}
-      let resolveSecond: (v: string) => void = () => {}
-      ;(napi.extractFileIncremental as any)
-        .mockReturnValueOnce(new Promise<string>((r) => (resolveFirst = r)))
-        .mockReturnValueOnce(new Promise<string>((r) => (resolveSecond = r)))
-
-      const ctx = clientEnv()
-      const firstCall = (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
-      await Promise.resolve()
-      const secondCall = (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
-      await Promise.resolve()
-
-      resolveSecond(update(3, ['Button'], [], 'fresh'))
-      await secondCall
-      resolveFirst(update(2, ['Button'], [], 'stale'))
-      await firstCall
-
-      expect(sentUpdates(ctx).map((u: any) => u.updatedComponents[0].description)).toEqual(['fresh'])
-    })
-
-    it('does not let the staleness guard for one file drop a concurrent update for a different file', async () => {
+    // Each update is a delta from the revision before it, so a second change, to any file, starts only after the first
+    // has been applied and announced.
+    it('applies and announces changes one at a time, in revision order, across files', async () => {
       let resolveButton: (v: string) => void = () => {}
-      let resolveInput: (v: string) => void = () => {}
       ;(napi.extractFileIncremental as any)
         .mockReturnValueOnce(new Promise<string>((r) => (resolveButton = r)))
-        .mockReturnValueOnce(new Promise<string>((r) => (resolveInput = r)))
+        .mockResolvedValueOnce(update(3, ['Input']))
 
       const ctx = clientEnv()
       const buttonCall = (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
-      await Promise.resolve()
       const inputCall = (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Input.tsx'))
       await Promise.resolve()
+      await Promise.resolve()
+      expect((napi.extractFileIncremental as any).mock.calls.map(([file]: [string]) => file)).toEqual([
+        '/project/src/Button.tsx',
+      ])
 
-      resolveInput(update(3, ['Input']))
-      await inputCall
       resolveButton(update(2, ['Button']))
-      await buttonCall
+      await Promise.all([buttonCall, inputCall])
 
-      expect(sentUpdates(ctx).map((u: any) => u.updatedKeys[0])).toEqual(['Input', 'Button'])
+      expect(sentUpdates(ctx).map((u: any) => [u.revision, u.updatedKeys[0]])).toEqual([
+        [2, 'Button'],
+        [3, 'Input'],
+      ])
+    })
+
+    it('keeps applying changes after one fails', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      ;(napi.extractFileIncremental as any)
+        .mockRejectedValueOnce(new Error('boom'))
+        .mockResolvedValueOnce(update(2, ['Input']))
+
+      const ctx = clientEnv()
+      await Promise.all([
+        (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx')),
+        (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Input.tsx')),
+      ])
+
+      expect(sentUpdates(ctx).map((u: any) => u.updatedKeys[0])).toEqual(['Input'])
+      consoleError.mockRestore()
     })
   })
 

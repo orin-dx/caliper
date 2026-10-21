@@ -110,14 +110,19 @@ impl Default for PipelineOptions {
 pub struct IncrementalUpdate {
     /// The session revision this update produced; a consumer can drop an update older than one it already applied.
     pub revision: u64,
-    /// Components re-resolved by this change, in the same order as `updated_keys`.
+    /// The current entry of every key this change affected, in the same order as `updated_keys`.
     pub updated_components: Vec<ComponentEntry>,
-    /// The output key each updated component is published under (a bare name, or `Name (file)` when disambiguated).
+    /// Keys whose entry changed: re-resolved components, and kept ones whose key moved when a same-named component
+    /// elsewhere appeared or disappeared (a bare name, or `Name (file)` when disambiguated).
     pub updated_keys: Vec<String>,
     /// Output keys that no longer exist: the component was renamed, deleted, or stopped being a component.
     pub removed_keys: Vec<String>,
     pub affected_files: Vec<Utf8PathBuf>,
+    /// Diagnostics this revision added. A client holding the previous output applies `removed_keys`, then
+    /// `updated_keys`, then drops `removed_diagnostics` and adds these, and holds the new output.
     pub diagnostics: Vec<Diagnostic>,
+    /// Diagnostics the previous revision had and this one does not: fixed, or replaced by a changed one.
+    pub removed_diagnostics: Vec<Diagnostic>,
     pub duration_ms: u64,
 }
 

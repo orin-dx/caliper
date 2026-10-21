@@ -28,8 +28,9 @@ On every change the virtual module reloads with the same output a fresh extracti
 ```ts
 import.meta.hot?.on(
   'caliper-docgen:update',
-  ({ revision, updatedKeys, updatedComponents, removedKeys, diagnostics }) => {
-    // Delete removedKeys, then set updatedKeys[i] to updatedComponents[i]. Ignore a revision older than one applied.
+  ({ updatedKeys, updatedComponents, removedKeys, diagnostics, removedDiagnostics }) => {
+    // Events arrive in revision order, each a delta from the one before: delete removedKeys, set updatedKeys[i] to
+    // updatedComponents[i], drop removedDiagnostics and add diagnostics.
   },
 )
 ```

@@ -14,14 +14,21 @@ export interface CaliperDocgenOptions {
   skipHtmlProps?: boolean
 }
 
-/** What `caliper-docgen:update` carries to the client. Apply `removedKeys`, then `updatedKeys`, in `revision` order. */
+/**
+ * What `caliper-docgen:update` carries to the client. Events arrive in `revision` order; each is a delta from the one
+ * before. Delete `removedKeys`, set `updatedKeys[i]` to `updatedComponents[i]`, drop `removedDiagnostics` and add
+ * `diagnostics`, and the client holds the same output the virtual module serves.
+ */
 export interface CaliperDocgenUpdate {
   file: string
   revision: number
   updatedKeys: string[]
   updatedComponents: IncrementalUpdate['updatedComponents']
   removedKeys: string[]
+  /** Diagnostics this revision added. */
   diagnostics: IncrementalUpdate['diagnostics']
+  /** Diagnostics this revision no longer has. */
+  removedDiagnostics: IncrementalUpdate['removedDiagnostics']
 }
 
 export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
@@ -37,11 +44,9 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
   let initPromise: Promise<void> | null = null
   // The newest revision this plugin has seen; an update that reports it again changed nothing.
   let latestRevision = FIRST_REVISION
-  // Per-file monotonic sequence guard: two overlapping hotUpdate calls for
-  // the same file (e.g. a rapid double-save) can have their async NAPI
-  // calls resolve out of order; only the newest one's event is sent.
-  let hotUpdateSeq = 0
-  const latestSeqByFile = new Map<string, number>()
+  // Changes are applied and announced one at a time: each update is a delta from the revision before it, so a
+  // client must receive them in revision order. The session serializes writers anyway.
+  let previousChange: Promise<unknown> = Promise.resolve()
   // `vite build --watch` changes applied before the next rebuild's load().
   let pendingWatchChanges: Promise<unknown>[] = []
   let extracted = false
@@ -58,13 +63,26 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
     return (file.endsWith('.tsx') || file.endsWith('.ts')) && resolvedSrcDirs.some((dir) => file.startsWith(`${dir}/`))
   }
 
-  /** Applies one file change to the session; `undefined` when it changed nothing. */
+  /** Runs `task` after every earlier one has finished, failed or not. */
+  function inOrder<T>(task: () => Promise<T>): Promise<T> {
+    const earlier = previousChange
+    const run = (async () => {
+      try {
+        await earlier
+      } catch {
+        // An earlier change's failure belongs to its own caller.
+      }
+      return task()
+    })()
+    previousChange = run
+    return run
+  }
+
+  /** Applies one file change to the session; `undefined` when it produced no new revision. */
   async function applyChange(file: string): Promise<IncrementalUpdate | undefined> {
     const update = JSON.parse(await napi.extractFileIncremental(file, sessionId, napiOptions())) as IncrementalUpdate
-    if (update.revision <= latestRevision && update.updatedKeys.length === 0 && update.removedKeys.length === 0) {
-      return undefined
-    }
-    latestRevision = Math.max(latestRevision, update.revision)
+    if (update.revision <= latestRevision) return undefined
+    latestRevision = update.revision
     return update
   }
 
@@ -117,13 +135,13 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
     // `vite build --watch` never calls hotUpdate; Rollup reports each changed file here before rebuilding.
     async watchChange(id: string) {
       if (!isSrcFile(id)) return
-      const change = (async () => {
+      const change = inOrder(async () => {
         try {
           await applyChange(id)
         } catch (error) {
           console.error('[caliper-docgen] Failed to apply the change:', error)
         }
-      })()
+      })
       pendingWatchChanges.push(change)
       await change
     },
@@ -176,28 +194,29 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
 
       if (initPromise) await initPromise
 
-      const seq = ++hotUpdateSeq
-      latestSeqByFile.set(opts.file, seq)
-
-      let update: IncrementalUpdate | undefined
-      try {
-        update = await applyChange(opts.file)
-      } catch (error) {
-        console.error('[caliper-docgen] Failed to apply the change:', error)
-        return
-      }
-      // A newer call for the same file has its own, fresher event to send.
-      if (!update || latestSeqByFile.get(opts.file) !== seq) return
-
-      const payload: CaliperDocgenUpdate = {
-        file: opts.file,
-        revision: update.revision,
-        updatedKeys: update.updatedKeys,
-        updatedComponents: update.updatedComponents,
-        removedKeys: update.removedKeys,
-        diagnostics: update.diagnostics,
-      }
-      env.hot.send('caliper-docgen:update', payload)
+      // Apply and announce inside one turn of the queue, so events leave in revision order.
+      const update = await inOrder(async () => {
+        let applied: IncrementalUpdate | undefined
+        try {
+          applied = await applyChange(opts.file)
+        } catch (error) {
+          console.error('[caliper-docgen] Failed to apply the change:', error)
+          return
+        }
+        if (!applied) return
+        const payload: CaliperDocgenUpdate = {
+          file: opts.file,
+          revision: applied.revision,
+          updatedKeys: applied.updatedKeys,
+          updatedComponents: applied.updatedComponents,
+          removedKeys: applied.removedKeys,
+          diagnostics: applied.diagnostics,
+          removedDiagnostics: applied.removedDiagnostics,
+        }
+        env.hot.send('caliper-docgen:update', payload)
+        return applied
+      })
+      if (!update) return
 
       // The virtual module serves the whole output, so its importers must reload it. Keeping `opts.modules` keeps
       // React Fast Refresh for the changed file; returning [] would suppress it.
