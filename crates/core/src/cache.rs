@@ -232,7 +232,7 @@ fn write_atomic(dir: &Utf8Path, name: &str, bytes: &[u8]) -> Result<(), String> 
     let result = std::fs::write(tmp_path.as_std_path(), bytes)
         .and_then(|()| std::fs::rename(tmp_path.as_std_path(), final_path.as_std_path()));
     if result.is_err() {
-        let _ = std::fs::remove_file(tmp_path.as_std_path());
+        std::fs::remove_file(tmp_path.as_std_path()).ok();
     }
     result.map_err(|e| e.to_string())
 }

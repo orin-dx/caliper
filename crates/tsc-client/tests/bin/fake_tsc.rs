@@ -1,3 +1,11 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stdout,
+    clippy::print_stderr,
+    clippy::let_underscore_must_use
+)]
 //! A scenario-driven fake `tsc --api` process for the Lifecycle-gate test suite.
 //! Scenario is picked via the `FAKE_TSC_SCENARIO` env var (env, not argv, matching
 //! `crates/cli/src/config.rs`'s precedent for test/caller-controlled input):

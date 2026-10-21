@@ -1195,7 +1195,7 @@ fn test_watch_session_update() {
     };
 
     let session = WatchSession::new(options);
-    let _ = session.initialize();
+    let _ignored = session.initialize();
 
     // Modify the file and trigger an incremental update.
     let button_path = Utf8PathBuf::from_path_buf(tmp.path().join("Button.tsx")).unwrap();

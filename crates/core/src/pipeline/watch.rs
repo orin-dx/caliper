@@ -119,7 +119,7 @@ impl WatchSession {
             self.source_cache.insert(path, data);
         }
 
-        let _ = self.ambient_global_files.set(crate::resolver::compute_ambient_global_files(&self.options));
+        self.ambient_global_files.set(crate::resolver::compute_ambient_global_files(&self.options)).ok();
         self.reverse_deps.store(Arc::new(ReverseDeps::build(&global)));
         *self.named_types.lock().unwrap_or_else(|p| p.into_inner()) =
             Arc::new(crate::named_type_index::NamedTypeIndex::build(&global));

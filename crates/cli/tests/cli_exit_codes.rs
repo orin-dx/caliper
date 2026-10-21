@@ -1,3 +1,11 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stdout,
+    clippy::print_stderr,
+    clippy::let_underscore_must_use
+)]
 //! Process-level tests for clap-level argument-rejection exit codes.
 //! These happen in `main()` before any command handler runs, so they can't
 //! be exercised through `cmd_extract`/`cmd_inspect`/etc. directly — only a

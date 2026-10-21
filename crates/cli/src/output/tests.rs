@@ -160,7 +160,7 @@ fn write_atomic_cleans_up_temp_file_when_rename_fails() {
     let tmp_path = dir.join(".out.json.tmp");
     assert!(!tmp_path.exists(), "temp file should be cleaned up after a failed rename, found {tmp_path:?}");
 
-    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn write_atomic_writes_via_temp_then_rename() {
 
     let contents = std::fs::read_to_string(&target).expect("read back written file");
     assert_eq!(contents, "{\"a\":1}");
-    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::remove_dir_all(&dir).ok();
 }
 
 fn diag(severity: DiagnosticSeverity, code: DiagnosticCode, message: &str, file: Option<&str>) -> Diagnostic {

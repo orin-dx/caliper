@@ -54,7 +54,7 @@ impl ContentLengthDecoder {
     /// Scans every line in a complete header block for `Content-Length` — like the
     /// sync original, an unrelated header before or after it doesn't confuse this.
     fn parse_content_length(header: &[u8]) -> Result<usize, MalformedFrameReason> {
-        let text = std::str::from_utf8(header).map_err(|_| MalformedFrameReason::NoContentLengthHeader)?;
+        let text = std::str::from_utf8(header).map_err(|_not_utf8| MalformedFrameReason::NoContentLengthHeader)?;
         let mut found = None;
         let mut saw_header_line = false;
         for line in text.split("\r\n") {

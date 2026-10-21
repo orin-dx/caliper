@@ -1,3 +1,11 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stdout,
+    clippy::print_stderr,
+    clippy::let_underscore_must_use
+)]
 //! Shared helper for the Lifecycle-gate integration tests: builds a `SupervisorConfig`
 //! pointing at a fresh copy of the `fake-tsc` binary inside a `node_modules/typescript/
 //! bin/` layout, so `check_version`'s `package.json` lookup finds a real, matching

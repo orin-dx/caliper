@@ -302,14 +302,15 @@ pub async fn initialize_session(session_id: u32, options: JsExtractOptions) -> n
 /// Release session state. Call in Vite's buildEnd hook.
 #[napi]
 pub fn close_session(session_id: u32) {
-    let _ = caliper_docgen_core::panic_guard::contain_panic("close_session", move || {
+    caliper_docgen_core::panic_guard::contain_panic("close_session", move || {
         #[cfg(test)]
         if session_id == CLOSE_SESSION_PANIC_TEST_SENTINEL {
             panic!("simulated close_session panic (test-only sentinel)");
         }
 
         SESSIONS.remove(&session_id);
-    });
+    })
+    .ok();
 }
 
 #[cfg(test)]

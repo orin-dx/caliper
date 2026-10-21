@@ -196,8 +196,8 @@ impl Supervisor {
 
         // Best-effort cleanup of the crashed process before respawning — it may
         // already be gone, so failures here are expected and ignored.
-        let _ = self.child.start_kill();
-        let _ = self.child.wait().await;
+        self.child.start_kill().ok();
+        self.child.wait().await.ok();
 
         let (child, client) = spawn_process(&self.config).await?;
         self.child = child;
@@ -215,7 +215,7 @@ impl Supervisor {
         match tokio::time::timeout(SHUTDOWN_GRACE, self.child.wait()).await {
             Ok(waited) => waited.map_err(|source| TscClientError::Reap(Arc::new(source))),
             Err(_elapsed) => {
-                let _ = self.child.start_kill();
+                self.child.start_kill().ok();
                 // Unconditional — never left unreaped.
                 self.child.wait().await.map_err(|source| TscClientError::Reap(Arc::new(source)))
             }

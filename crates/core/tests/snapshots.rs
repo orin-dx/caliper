@@ -1,3 +1,11 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stdout,
+    clippy::print_stderr,
+    clippy::let_underscore_must_use
+)]
 use caliper_docgen_core::pipeline::{extract, PipelineOptions};
 /// Snapshot tests for extraction output.
 ///
