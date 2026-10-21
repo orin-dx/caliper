@@ -28,8 +28,13 @@ async fn main() {
     // Assumes invocation from the repo root, per this file's doc comment.
     let repo_root = Utf8PathBuf::from_path_buf(std::env::current_dir().expect("cwd")).expect("repo root is UTF-8");
 
-    let tsc_path = repo_root.join("apps/validate/node_modules/typescript-next/bin/tsc");
-    let package_json_path = repo_root.join("apps/validate/node_modules/typescript-next/package.json");
+    // `TSC_PACKAGE_DIR` points at any installed `typescript` package, so a new build can be probed without touching
+    // `apps/validate`.
+    let package_dir = std::env::var("TSC_PACKAGE_DIR")
+        .map(Utf8PathBuf::from)
+        .unwrap_or_else(|_| repo_root.join("apps/validate/node_modules/typescript-next"));
+    let tsc_path = package_dir.join("bin/tsc");
+    let package_json_path = package_dir.join("package.json");
     let version = std::fs::read_to_string(&package_json_path)
         .ok()
         .and_then(|contents| serde_json::from_str::<serde_json::Value>(&contents).ok())

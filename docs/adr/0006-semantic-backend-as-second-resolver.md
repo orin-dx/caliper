@@ -1,6 +1,6 @@
 # 0006. Run the TypeScript backend as a second resolver, not a leaf patcher
 
-**Status:** Accepted **Date:** 2026-09-26
+**Status:** Accepted, feature-gating superseded by 0007 **Date:** 2026-09-26
 
 ## Context
 
