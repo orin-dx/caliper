@@ -1,4 +1,4 @@
-msrv = "1.94"
+msrv = "1.97"
 too-many-arguments-threshold = 6
 too-many-lines-threshold = 150
 allow-unwrap-in-tests = true

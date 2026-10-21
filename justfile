@@ -8,14 +8,27 @@ install-tools:
     cargo install cargo-llvm-cov --locked
     cargo install cargo-machete --locked
     cargo install cargo-mutants --locked
+    cargo install cargo-semver-checks --locked
     rustup component add llvm-tools-preview
 
-# Check the public Rust API for accidental SemVer breaks against the last
-# published version. Not wired into `just ci` yet — there is no published
-# baseline to diff against until v0.1.0's first real crates.io release ships.
-# Install with `cargo install cargo-semver-checks --locked` once needed.
-check-api:
-    cargo semver-checks check-release
+# Check the public Rust API of the core crate for SemVer breaks against the last published version. The version only
+# moves in the release PR, so a break is accepted when a pending minor or major changeset covers the crate.
+semver:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if cargo semver-checks check-release -p caliper-docgen-core; then
+        exit 0
+    fi
+    if grep -qsE '^cargo/caliper-docgen-core: (minor|major)$' .changeset/*.md; then
+        echo "breaking API changes are covered by a pending minor or major changeset for caliper-docgen-core"
+        exit 0
+    fi
+    echo "breaking API changes need a minor or major changeset for cargo/caliper-docgen-core" >&2
+    exit 1
+
+# Build with the minimum supported Rust version declared in Cargo.toml.
+msrv:
+    cargo +$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml) check --workspace --exclude caliper-docgen-napi --locked
 
 # Install all dependencies
 install:
@@ -133,7 +146,7 @@ pre-commit:
     cargo deny check
 
 # Everything the CI jobs run, minus the Node version matrix and verify-install
-ci: lint test deny typos zizmor doc-check machete (coverage "90")
+ci: lint test deny typos zizmor doc-check machete semver msrv (coverage "90")
 
 # Run moon compare task (accuracy vs react-docgen + react-docgen-typescript)
 compare:
