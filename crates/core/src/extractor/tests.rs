@@ -821,6 +821,29 @@ fn each_mapping_records_the_rule_that_found_it() {
 }
 
 #[test]
+fn typed_arrow_and_function_expression_components_are_detected() {
+    use crate::types::DetectionRule::TypedFunctionExpression;
+    let source = r#"
+        interface AProps { a: string }
+        interface BProps { b: string }
+        interface CProps { c: string }
+        export const A = ({ a }: AProps) => <div>{a}</div>;
+        export const B = function (props: BProps) { return <div />; };
+        export const C = async (props: CProps): Promise<JSX.Element> => <div />;
+        export const helper = (props: AProps) => props.a;
+        export const Sum = (a: number, b: number) => a + b;
+        export const Untyped = (props) => <div />;
+    "#;
+    let data = parse_file(Utf8Path::new("/test/arrows.tsx"), source);
+    let found: Vec<(&str, &str, crate::types::DetectionRule)> = data
+        .component_mappings
+        .iter()
+        .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule))
+        .collect();
+    assert_eq!(found, vec![("A", "AProps", TypedFunctionExpression), ("B", "BProps", TypedFunctionExpression)]);
+}
+
+#[test]
 fn test_memo_forward_ref_detected() {
     let source = r#"
         import React, { memo, forwardRef } from "react";
