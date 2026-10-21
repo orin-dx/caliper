@@ -4,15 +4,17 @@
 
 use std::cell::RefCell;
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use compact_str::CompactString;
 use rustc_hash::FxHashSet;
+
+use crate::path_key::PathKey;
 
 /// Everything outside the component's own mapping that its resolution read.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Dependencies {
     /// Source files whose declarations, imports or exports were read, including lookups that found nothing there.
-    pub(crate) files: FxHashSet<Utf8PathBuf>,
+    pub(crate) files: FxHashSet<PathKey>,
     /// Enum and const-array names looked up project-wide by bare name. A file that starts or stops declaring one of
     /// these can change which declaration the name binds to.
     pub(crate) bare_names: FxHashSet<CompactString>,
@@ -36,8 +38,8 @@ fn with_recorder(f: impl FnOnce(&mut Dependencies)) {
 /// Note that the current resolution read `file`. A no-op outside `recording`.
 pub(super) fn record(file: &Utf8Path) {
     with_recorder(|deps| {
-        if !deps.files.contains(file) {
-            deps.files.insert(file.to_owned());
+        if !deps.files.contains(file.as_str()) {
+            deps.files.insert(PathKey::from(file));
         }
     });
 }

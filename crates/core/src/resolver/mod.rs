@@ -128,6 +128,11 @@ pub struct ResolutionContext {
     /// maps.
     pub(crate) named_types: Arc<crate::named_type_index::NamedTypeIndex>,
     pub oxc_resolver: Arc<Resolver>,
+    /// Module resolutions by `(directory, specifier)`. Resolution only reads the file system, which a run treats as
+    /// fixed, and every component importing from the same directory asks again; a watch revision builds a fresh
+    /// context, so nothing outlives one revision.
+    pub(crate) module_resolutions:
+        dashmap::DashMap<(Box<str>, Box<str>), import::ModuleResolution, rustc_hash::FxBuildHasher>,
     pub extra_builtins: FxHashSet<CompactString>,
     /// Bare name → full scoped key ("file:name") index over `global.enums`,
     /// built once per resolution pass so `resolve_typeof` and
@@ -215,6 +220,7 @@ impl ResolutionContext {
             const_array_bare_index,
             html_attributes: options.html_attributes,
             ambient_global_files,
+            module_resolutions: Default::default(),
         }
     }
 }
@@ -349,7 +355,7 @@ pub(crate) fn resolve_component_tracked(
     ctx: &ResolutionContext,
 ) -> (ComponentEntry, Vec<Diagnostic>, Dependencies) {
     let ((entry, diagnostics), mut deps) = deps::recording(|| resolve_component(mapping, ctx));
-    deps.files.insert(mapping.file_path.clone());
+    deps.files.insert(crate::path_key::PathKey::from(mapping.file_path.as_path()));
     (entry, diagnostics, deps)
 }
 

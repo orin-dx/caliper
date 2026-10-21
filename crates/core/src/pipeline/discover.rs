@@ -13,75 +13,86 @@ pub(super) fn discover_files(
     src_dirs: &[Utf8PathBuf],
     extra_excludes: &[String],
 ) -> (Vec<Utf8PathBuf>, Vec<Diagnostic>) {
-    let mut files = Vec::new();
-    let mut diagnostics = Vec::new();
+    let found = std::sync::Mutex::new((Vec::new(), Vec::new()));
 
     for dir in src_dirs {
         // If the user explicitly points at a node_modules path, respect it.
-        let dir_str = dir.as_str();
-        let dir_is_in_node_modules = dir_str.contains("node_modules");
+        let dir_is_in_node_modules = dir.as_str().contains("node_modules");
 
-        let walker =
-            ignore::WalkBuilder::new(dir.as_std_path()).hidden(false).git_ignore(!dir_is_in_node_modules).build();
-
-        for result in walker {
-            let entry = match result {
-                Ok(entry) => entry,
-                Err(err) => {
-                    diagnostics.push(Diagnostic {
-                        severity: DiagnosticSeverity::Warning,
-                        message: format!("Error walking '{dir}': {err}"),
-                        file: Some(dir.to_string()),
-                        line: None,
-                        column: None,
-                        help: Some("Check file/directory permissions and for broken symlinks under this path.".into()),
-                        code: DiagnosticCode::IoError,
-                        affects: Vec::new(),
-                    });
-                    continue;
+        // Walking from the canonical root makes every entry's path canonical except a symlink itself (the walker
+        // doesn't follow symlinked directories), so only those pay for `canonicalize` below.
+        let root = dir.canonicalize_utf8().unwrap_or_else(|_| dir.clone());
+        let walker = ignore::WalkBuilder::new(root.as_std_path())
+            .hidden(false)
+            .git_ignore(!dir_is_in_node_modules)
+            .build_parallel();
+        walker.run(|| {
+            let (found, root) = (&found, &root);
+            Box::new(move |result| {
+                let visited = visit(result, dir, root, dir_is_in_node_modules, extra_excludes);
+                if let Some(visited) = visited {
+                    let mut found = found.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    match visited {
+                        Ok(file) => found.0.push(file),
+                        Err(diagnostic) => found.1.push(diagnostic),
+                    }
                 }
-            };
-            let path = entry.path();
-            if !is_typescript(path) {
-                continue;
-            }
-            let relative = path.strip_prefix(dir.as_std_path()).unwrap_or(path);
-            if excluded(relative, dir_is_in_node_modules, extra_excludes) {
-                continue;
-            }
-
-            if let Ok(utf8) = Utf8PathBuf::from_path_buf(path.to_owned()) {
-                // Canonicalize to an absolute path so parent.fileName in output is
-                // stable regardless of invocation context (relative --src, absolute
-                // --src, or cwd inside the src dir all previously produced different
-                // strings for the same file). Fall back to the uncanonicalized path
-                // if canonicalization fails (e.g. a dangling symlink) rather than
-                // dropping the file.
-                let canonical = utf8.canonicalize_utf8().unwrap_or(utf8);
-                files.push(canonical);
-            } else {
-                diagnostics.push(Diagnostic {
-                    severity: DiagnosticSeverity::Warning,
-                    message: format!("Skipping non-UTF8 path: {}", path.to_string_lossy()),
-                    file: None,
-                    line: None,
-                    column: None,
-                    help: Some("Rename the file to use valid UTF-8 characters in its path.".into()),
-                    code: DiagnosticCode::IoError,
-                    affects: Vec::new(),
-                });
-            }
-        }
+                ignore::WalkState::Continue
+            })
+        });
     }
 
-    // Sort for deterministic ordering across OS/FS, then dedup: overlapping
-    // src_dirs (e.g. ["./src", "./src/components"]) walk the same physical
-    // file more than once, and since paths are canonicalized above, an exact
-    // duplicate always sorts adjacent — this catches it here rather than
-    // producing two separate component_mappings downstream.
+    let (mut files, mut diagnostics) = found.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
+    // Sort for deterministic ordering across OS/FS and walker threads, then dedup: overlapping src_dirs (e.g.
+    // ["./src", "./src/components"]) walk the same physical file more than once, and since paths are canonical, an
+    // exact duplicate always sorts adjacent.
     files.sort();
     files.dedup();
+    diagnostics.sort_by(|a, b| a.message.cmp(&b.message));
     (files, diagnostics)
+}
+
+/// One walked entry: a source file to keep, a diagnostic, or `None` to skip it.
+fn visit(
+    result: Result<ignore::DirEntry, ignore::Error>,
+    dir: &Utf8Path,
+    root: &Utf8Path,
+    dir_is_in_node_modules: bool,
+    extra_excludes: &[String],
+) -> Option<Result<Utf8PathBuf, Diagnostic>> {
+    let entry = match result {
+        Ok(entry) => entry,
+        Err(err) => {
+            return Some(Err(Diagnostic::new(
+                DiagnosticSeverity::Warning,
+                DiagnosticCode::IoError,
+                format!("Error walking '{dir}': {err}"),
+            )
+            .with_file(dir.to_string())
+            .with_help("Check file/directory permissions and for broken symlinks under this path.")));
+        }
+    };
+    let path = entry.path();
+    if !is_typescript(path) {
+        return None;
+    }
+    let relative = path.strip_prefix(root.as_std_path()).unwrap_or(path);
+    if excluded(relative, dir_is_in_node_modules, extra_excludes) {
+        return None;
+    }
+    match Utf8PathBuf::from_path_buf(path.to_owned()) {
+        // Absolute and canonical, so parent.fileName in output is stable regardless of invocation context (relative
+        // --src, absolute --src, cwd inside the src dir). A dangling symlink keeps its own path rather than being
+        // dropped.
+        Ok(utf8) if entry.path_is_symlink() => Some(Ok(utf8.canonicalize_utf8().unwrap_or(utf8))),
+        Ok(utf8) => Some(Ok(utf8)),
+        Err(_) => Some(Err(Diagnostic::new(
+            DiagnosticSeverity::Warning,
+            DiagnosticCode::IoError,
+            format!("Skipping non-UTF8 path: {}", path.to_string_lossy()),
+        )
+        .with_help("Rename the file to use valid UTF-8 characters in its path."))),
+    }
 }
 
 fn is_typescript(path: &std::path::Path) -> bool {
