@@ -1369,6 +1369,60 @@ fn test_duplicate_component_declarations_in_one_file_emit_a_collision_diagnostic
     );
 }
 
+// A name exported by two files must resolve identically whatever order the source directories are given in.
+#[test]
+fn test_same_named_exported_enums_resolve_deterministically_and_warn() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("a")).unwrap();
+    fs::create_dir_all(tmp.path().join("b")).unwrap();
+    write_file(&tmp, "a/Size.ts", "export enum Size { Small = \"sm\" }\n");
+    write_file(&tmp, "b/Size.ts", "export enum Size { Large = \"lg\" }\n");
+
+    let run = |first: &str, second: &str| {
+        let options = PipelineOptions {
+            src_dirs: vec![
+                Utf8PathBuf::from_path_buf(tmp.path().join(first)).unwrap(),
+                Utf8PathBuf::from_path_buf(tmp.path().join(second)).unwrap(),
+            ],
+            cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+            ..Default::default()
+        };
+        extract(&options)
+    };
+
+    let forward = run("a", "b");
+    let reversed = run("b", "a");
+
+    assert_eq!(serde_json::to_value(&forward.enums).unwrap(), serde_json::to_value(&reversed.enums).unwrap());
+    let sizes: Vec<String> = forward.enums["Size"].iter().map(|e| e.name.to_string()).collect();
+    assert_eq!(sizes, vec!["Small"]);
+    let dupes = |o: &ExtractionOutput| -> Vec<String> {
+        o.diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DuplicateEnumName)
+            .map(|d| d.message.clone())
+            .collect()
+    };
+    assert_eq!(dupes(&forward).len(), 1);
+    assert_eq!(dupes(&forward), dupes(&reversed));
+}
+
+#[test]
+fn test_enum_scoped_keys_split_on_the_last_colon() {
+    let mut global = GlobalSourceData::default();
+    global.enums.insert(
+        "C:\\src\\Size.ts:Size".to_owned(),
+        vec![EnumEntry { name: "Small".into(), value: EnumValue::String("sm".into()), description: String::new() }],
+    );
+    global.re_export_map.insert(
+        Utf8PathBuf::from("C:\\src\\Size.ts"),
+        vec![LexedExport::LocalDeclaration { name: "Size".into(), is_type_only: false }],
+    );
+    let (enums, diagnostics) = collect_public_enums(&global);
+    assert_eq!(enums.keys().collect::<Vec<_>>(), vec!["Size"]);
+    assert!(diagnostics.is_empty());
+}
+
 // ── test_overlapping_src_dirs_two_directories_deduplicates_without_a_duplicate_listing ─
 //
 // Corrected finding: the insert-return check above only catches a genuine

@@ -99,6 +99,9 @@ pub enum DiagnosticCode {
     /// the earlier in `ExtractionOutput::components`. Seen with 3+ same-named
     /// declarations in one file, or with overlapping `src_dirs` configs.
     ComponentKeyCollision,
+    /// Two source files export an enum with the same name. The public `enums` map is keyed by bare name, so only the
+    /// one from the lexicographically first file path is kept.
+    DuplicateEnumName,
 }
 
 #[cfg(test)]
