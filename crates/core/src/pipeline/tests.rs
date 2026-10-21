@@ -2127,3 +2127,25 @@ fn a_diagnostic_shared_by_many_components_is_reported_once_listing_them() {
         output.diagnostics
     );
 }
+
+#[test]
+fn stats_count_every_dts_file_through_the_cache_and_its_hits() {
+    let tmp = TempDir::new().unwrap();
+    write_file(&tmp, "types.d.ts", "export interface Shared { size: number }\n");
+    write_file(
+        &tmp,
+        "Button.tsx",
+        "import type { Shared } from './types';\nexport function Button(props: Shared) { return null; }\n",
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+
+    let first = extract(&options).stats;
+    let second = extract(&options).stats;
+
+    assert_eq!((first.dts_files_parsed, first.dts_cache_hits), (1, 0));
+    assert_eq!((second.dts_files_parsed, second.dts_cache_hits), (1, 1));
+}

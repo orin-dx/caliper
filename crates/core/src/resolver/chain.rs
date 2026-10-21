@@ -50,7 +50,9 @@ pub(super) fn resolve_props_chain(
                 line: None,
                 column: None,
                 help: Some("This type (directly or indirectly) extends or references itself.".into()),
-                code: DiagnosticCode::CircularReference, affects: Vec::new(), }),
+                code: DiagnosticCode::CircularReference,
+                affects: Vec::new(),
+            }),
             state,
         );
     }

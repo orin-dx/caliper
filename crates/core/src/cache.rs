@@ -2,7 +2,8 @@
 //!
 //! Cache validity is based on a content hash of the file's actual bytes, not
 //! mtime/size (see `CacheKey`'s doc comment for why that was replaced).
-//! Schema version bumps automatically invalidate the entire cache.
+//! The payload starts with a `CacheHeader`; a header that doesn't match the
+//! running build (schema, crate version, source fingerprint) discards the whole cache.
 //!
 //! The cache never panics — load failures degrade gracefully to an empty
 //! state, and save failures are reported via a `Diagnostic` (see
@@ -26,10 +27,31 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 /// Also bumped for the mtime+size -> content-hash key change (P0-2 fix):
 /// `SerializableCacheKey`'s own shape changed, so pre-existing on-disk cache
 /// files must be discarded rather than misread under the new field layout.
-/// Also bumped when the extractor produces different `SourceData` for byte-identical
-/// input — the content-hash key can't notice that, so a stale entry would be served
-/// forever (v4: `LiteralUnion` alias members are stored bare instead of quote-wrapped).
-const CACHE_SCHEMA_VERSION: u32 = 12;
+/// Extractor changes that keep the shape are covered by `CacheHeader::fingerprint` instead.
+const CACHE_SCHEMA_VERSION: u32 = 13;
+
+const DATA_FILE: &str = "dts.msgpack";
+
+/// Written first in the payload, so a cache written by a different build is recognized before its entries are decoded.
+/// The manifest repeats it for inspection only.
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+struct CacheHeader {
+    schema: u32,
+    version: String,
+    /// A hash of this crate's sources and locked dependencies (see `build.rs`): any change to the code that produces
+    /// `SourceData` invalidates the cache, bumped or not.
+    fingerprint: String,
+}
+
+impl CacheHeader {
+    fn current() -> CacheHeader {
+        CacheHeader {
+            schema: CACHE_SCHEMA_VERSION,
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+            fingerprint: env!("CALIPER_SOURCE_FINGERPRINT").to_owned(),
+        }
+    }
+}
 
 // ─── Internal key type ────────────────────────────────────────────────────────
 
@@ -96,13 +118,24 @@ pub struct DtsCache {
     store: DashMap<CacheKey, SourceData>,
     cache_dir: Utf8PathBuf,
     dirty: std::sync::atomic::AtomicBool,
+    lookups: std::sync::atomic::AtomicU32,
+    hits: std::sync::atomic::AtomicU32,
+    load_diagnostic: Option<Diagnostic>,
+}
+
+/// Why a cache on disk was not used.
+enum LoadFailure {
+    /// No cache yet, or one written by a different build: expected, so not reported.
+    Absent,
+    /// A cache from this build that could not be read.
+    Unreadable(String),
 }
 
 impl DtsCache {
     /// Load cache from disk.
     ///
-    /// On any error (missing dir, schema mismatch, corrupt data) the cache
-    /// starts empty — subsequent `insert` calls will repopulate it.
+    /// On any error (missing dir, a different build's cache, corrupt data) the cache starts empty and `insert` calls
+    /// repopulate it. A cache from this build that can't be decoded is reported by `load_diagnostic`.
     ///
     /// `cache_dir` defaults to `node_modules/.cache/caliper-docgen/` relative
     /// to the current working directory.
@@ -110,32 +143,65 @@ impl DtsCache {
         let dir =
             cache_dir.map(|p| p.to_owned()).unwrap_or_else(|| Utf8PathBuf::from("node_modules/.cache/caliper-docgen"));
 
-        let store = Self::try_load(&dir).unwrap_or_default();
-        Self { store, cache_dir: dir, dirty: std::sync::atomic::AtomicBool::new(false) }
+        let (store, load_diagnostic) = match Self::try_load(&dir) {
+            Ok(store) => (store, None),
+            Err(LoadFailure::Absent) => (DashMap::default(), None),
+            Err(LoadFailure::Unreadable(reason)) => (
+                DashMap::default(),
+                Some(
+                    Diagnostic::new(
+                        DiagnosticSeverity::Info,
+                        DiagnosticCode::IoError,
+                        format!("Discarded the unreadable DTS cache at '{dir}': {reason}"),
+                    )
+                    .with_help("This run parsed every file and rewrites the cache; extraction is unaffected."),
+                ),
+            ),
+        };
+        Self {
+            store,
+            cache_dir: dir,
+            dirty: std::sync::atomic::AtomicBool::new(false),
+            lookups: std::sync::atomic::AtomicU32::new(0),
+            hits: std::sync::atomic::AtomicU32::new(0),
+            load_diagnostic,
+        }
     }
 
-    fn try_load(dir: &Utf8Path) -> Option<DashMap<CacheKey, SourceData>> {
-        // Check schema version via manifest first.
-        let manifest_path = dir.join("manifest.json");
-        let manifest_bytes = std::fs::read_to_string(manifest_path.as_std_path()).ok()?;
-        let manifest: serde_json::Value = serde_json::from_str(&manifest_bytes).ok()?;
+    fn try_load(dir: &Utf8Path) -> Result<DashMap<CacheKey, SourceData>, LoadFailure> {
+        use serde::Deserialize as _;
 
-        let schema = manifest["schema"].as_u64()?;
-        if schema != CACHE_SCHEMA_VERSION as u64 {
-            // Schema changed — discard entire cache.
-            return None;
+        let bytes = match std::fs::read(dir.join(DATA_FILE).as_std_path()) {
+            Ok(bytes) => bytes,
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => {
+                return Err(LoadFailure::Absent)
+            }
+            Err(error) => return Err(LoadFailure::Unreadable(error.to_string())),
+        };
+        let mut decoder = rmp_serde::Deserializer::new(bytes.as_slice());
+        // A header that doesn't decode is a payload from an older layout; that is a different build too.
+        match CacheHeader::deserialize(&mut decoder) {
+            Ok(header) if header == CacheHeader::current() => {}
+            _ => return Err(LoadFailure::Absent),
         }
-
-        let data_path = dir.join("dts-v1.msgpack");
-        let bytes = std::fs::read(data_path.as_std_path()).ok()?;
-
-        let entries: Vec<(SerializableCacheKey, SourceData)> = rmp_serde::from_slice(&bytes).ok()?;
+        let entries = Vec::<(SerializableCacheKey, SourceData)>::deserialize(&mut decoder)
+            .map_err(|error| LoadFailure::Unreadable(error.to_string()))?;
 
         let map = DashMap::with_capacity(entries.len());
         for (k, v) in entries {
             map.insert(CacheKey::from(k), v);
         }
-        Some(map)
+        Ok(map)
+    }
+
+    /// Why the cache on disk could not be used, when that is worth reporting.
+    pub fn load_diagnostic(&self) -> Option<&Diagnostic> {
+        self.load_diagnostic.as_ref()
+    }
+
+    /// `(lookups, hits)` since load: how many `.d.ts` files went through the cache and how many it answered.
+    pub fn counts(&self) -> (u32, u32) {
+        (self.lookups.load(std::sync::atomic::Ordering::Relaxed), self.hits.load(std::sync::atomic::Ordering::Relaxed))
     }
 
     /// Look up cached `SourceData` for `path`, given its current content.
@@ -146,7 +212,12 @@ impl DtsCache {
     /// content here means neither a hit nor a miss ever reads the file twice.
     pub fn get(&self, path: &Utf8Path, content: &str) -> Option<SourceData> {
         let key = self.key_for(path, content);
-        self.store.get(&key).map(|v| v.clone())
+        self.lookups.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let hit = self.store.get(&key).map(|v| v.clone());
+        if hit.is_some() {
+            self.hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        hit
     }
 
     /// Insert `data` into the cache, keyed by `path` + a hash of `content`.
@@ -185,7 +256,9 @@ impl DtsCache {
             line: None,
             column: None,
             help: Some("Check that the cache directory is writable. Extraction still succeeded; only caching for the next run was affected.".into()),
-            code: DiagnosticCode::IoError, affects: Vec::new(), })
+            code: DiagnosticCode::IoError,
+            affects: Vec::new(),
+        })
     }
 
     fn try_save(&self) -> Result<(), String> {
@@ -195,13 +268,17 @@ impl DtsCache {
         let entries: Vec<(SerializableCacheKey, SourceData)> =
             self.store.iter().map(|r| (SerializableCacheKey::from(r.key()), r.value().clone())).collect();
 
-        let bytes = rmp_serde::to_vec(&entries).map_err(|e| e.to_string())?;
+        let header = CacheHeader::current();
+        let mut bytes = rmp_serde::to_vec(&header).map_err(|e| e.to_string())?;
+        bytes.extend(rmp_serde::to_vec(&entries).map_err(|e| e.to_string())?);
 
-        write_atomic(&self.cache_dir, "dts-v1.msgpack", &bytes)?;
+        write_atomic(&self.cache_dir, DATA_FILE, &bytes)?;
 
-        // Write manifest (schema version + entry count for quick inspection).
+        // For inspection only; loading trusts the payload's own header.
         let manifest = serde_json::json!({
-            "schema": CACHE_SCHEMA_VERSION,
+            "schema": header.schema,
+            "version": header.version,
+            "fingerprint": header.fingerprint,
             "entry_count": entries.len(),
         });
         let manifest_json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
@@ -316,22 +393,97 @@ mod tests {
         assert!(cache2.get(&file_path, content).is_some());
     }
 
-    #[test]
-    fn test_schema_version_mismatch_returns_empty() {
-        let tmp = temp_dir("schema");
-        let cache_dir = tmp.join("cache");
-        std::fs::create_dir_all(cache_dir.as_std_path()).unwrap();
+    /// A cache with unsaved changes, so `save_to_disk` tries to write.
+    fn dirty_cache_at(dir: &Utf8Path) -> DtsCache {
+        let cache = DtsCache::load_from_disk(Some(dir));
+        cache.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+        cache
+    }
 
-        // Write a manifest with a different schema version.
-        let bad_manifest = serde_json::json!({ "schema": 999u64, "entry_count": 0u64 });
-        std::fs::write(
-            cache_dir.join("manifest.json").as_std_path(),
-            serde_json::to_string(&bad_manifest).unwrap().as_bytes(),
-        )
-        .unwrap();
+    /// A saved cache holding one entry, and the file it caches.
+    fn saved_cache(suffix: &str) -> (Utf8PathBuf, Utf8PathBuf, &'static str) {
+        let tmp = temp_dir(suffix);
+        let cache_dir = tmp.join("cache");
+        let content = "export type X = number;";
+        let file = make_temp_file(&tmp, "x.d.ts", content.as_bytes());
+        let cache = DtsCache::load_from_disk(Some(&cache_dir));
+        cache.insert(&file, content, SourceData::default());
+        assert_eq!(cache.save_to_disk(), None);
+        (cache_dir, file, content)
+    }
+
+    fn rewrite_payload(cache_dir: &Utf8Path, header: &CacheHeader, entries: &[u8]) {
+        let mut bytes = rmp_serde::to_vec(header).unwrap();
+        bytes.extend_from_slice(entries);
+        std::fs::write(cache_dir.join(DATA_FILE).as_std_path(), bytes).unwrap();
+    }
+
+    #[test]
+    fn a_cache_from_this_build_is_used() {
+        let (cache_dir, file, content) = saved_cache("same-build");
 
         let cache = DtsCache::load_from_disk(Some(&cache_dir));
-        assert!(cache.store.is_empty());
+
+        assert!(cache.get(&file, content).is_some());
+        assert_eq!(cache.load_diagnostic(), None);
+    }
+
+    #[test]
+    fn a_cache_from_a_different_build_is_discarded_silently() {
+        for header in [
+            CacheHeader { schema: CACHE_SCHEMA_VERSION + 1, ..CacheHeader::current() },
+            CacheHeader { version: "0.0.0".into(), ..CacheHeader::current() },
+            CacheHeader { fingerprint: "0000000000000000".into(), ..CacheHeader::current() },
+        ] {
+            let (cache_dir, file, content) = saved_cache("other-build");
+            let entries = rmp_serde::to_vec(&vec![(
+                SerializableCacheKey { path: file.to_string(), content_hash: hash_content(content) },
+                SourceData::default(),
+            )])
+            .unwrap();
+            rewrite_payload(&cache_dir, &header, &entries);
+
+            let cache = DtsCache::load_from_disk(Some(&cache_dir));
+
+            assert!(cache.get(&file, content).is_none(), "{header:?}");
+            assert_eq!(cache.load_diagnostic(), None, "{header:?}");
+        }
+    }
+
+    #[test]
+    fn a_payload_without_a_header_is_discarded_silently() {
+        let (cache_dir, file, content) = saved_cache("headerless");
+        std::fs::write(cache_dir.join(DATA_FILE).as_std_path(), [0xc1]).unwrap();
+
+        let cache = DtsCache::load_from_disk(Some(&cache_dir));
+
+        assert!(cache.get(&file, content).is_none());
+        assert_eq!(cache.load_diagnostic(), None);
+    }
+
+    #[test]
+    fn corrupt_entries_under_this_builds_header_are_reported_and_discarded() {
+        let (cache_dir, file, content) = saved_cache("corrupt");
+        rewrite_payload(&cache_dir, &CacheHeader::current(), &[0x92, 0xc1]);
+
+        let cache = DtsCache::load_from_disk(Some(&cache_dir));
+
+        assert!(cache.get(&file, content).is_none());
+        let diagnostic = cache.load_diagnostic().expect("a diagnostic");
+        assert_eq!((&diagnostic.severity, &diagnostic.code), (&DiagnosticSeverity::Info, &DiagnosticCode::IoError));
+        assert!(diagnostic.message.starts_with(&format!("Discarded the unreadable DTS cache at '{cache_dir}': ")));
+    }
+
+    #[test]
+    fn counts_report_every_lookup_and_every_hit() {
+        let (cache_dir, file, content) = saved_cache("counts");
+        let cache = DtsCache::load_from_disk(Some(&cache_dir));
+
+        let _ = cache.get(&file, content);
+        let _ = cache.get(&file, "export type X = string;");
+        let _ = cache.get(&file, content);
+
+        assert_eq!(cache.counts(), (3, 2));
     }
 
     #[test]
@@ -392,11 +544,7 @@ mod tests {
     #[test]
     fn test_save_to_disk_never_panics_on_bad_dir() {
         // Writing to a path that can't be created should not panic.
-        let cache = DtsCache {
-            store: DashMap::new(),
-            cache_dir: Utf8PathBuf::from("/dev/null/impossible/cache"),
-            dirty: std::sync::atomic::AtomicBool::new(true),
-        };
+        let cache = dirty_cache_at(Utf8Path::new("/dev/null/impossible/cache"));
         cache.save_to_disk(); // must not panic
     }
 
@@ -407,11 +555,7 @@ mod tests {
         // self.try_save()`, violating "always emit a Diagnostic when
         // degrading" — every subsequent run would re-parse every .d.ts file
         // with zero user-visible signal.
-        let cache = DtsCache {
-            store: DashMap::new(),
-            cache_dir: Utf8PathBuf::from("/dev/null/impossible/cache"),
-            dirty: std::sync::atomic::AtomicBool::new(true),
-        };
+        let cache = dirty_cache_at(Utf8Path::new("/dev/null/impossible/cache"));
         let diagnostic = cache.save_to_disk();
         assert!(diagnostic.is_some(), "expected a diagnostic when cache persistence fails, got None");
         let diagnostic = diagnostic.unwrap();
@@ -498,7 +642,7 @@ mod tests {
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         leftovers.sort();
-        assert_eq!(leftovers, vec!["dts-v1.msgpack".to_owned(), "manifest.json".to_owned()]);
+        assert_eq!(leftovers, vec![DATA_FILE.to_owned(), "manifest.json".to_owned()]);
 
         // Last rename wins. It may hold several writers' entries: a later writer's load starts from an earlier save.
         let reloaded = DtsCache::load_from_disk(Some(&cache_dir));

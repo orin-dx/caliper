@@ -1,6 +1,6 @@
 //! Pins the on-disk shape of `SourceData`. The cache is positional MessagePack (ADR 0003), so reordering a field or
-//! adding a variant silently corrupts old entries unless `CACHE_SCHEMA_VERSION` moves. A change here that is not
-//! accompanied by a version bump is the bug this test exists to catch.
+//! adding a variant silently corrupts old entries unless `CACHE_SCHEMA_VERSION` moves. A shape change here that is not
+//! accompanied by a version bump is the bug this test exists to catch; the source fingerprint covers the rest.
 
 use camino::Utf8Path;
 
@@ -105,9 +105,12 @@ fn a_blob_from_the_previous_schema_version_is_rejected() {
     assert!(writer.save_to_disk().is_none());
     assert!(super::DtsCache::load_from_disk(Some(&cache_dir)).get(&source_path, FIXTURE).is_some());
 
-    // Same data file, manifest rewritten as the previous schema version wrote it.
-    let previous = serde_json::json!({ "schema": u64::from(CACHE_SCHEMA_VERSION - 1), "entry_count": 1u64 });
-    std::fs::write(cache_dir.join("manifest.json"), serde_json::to_string(&previous).unwrap()).unwrap();
+    // The same entries under the header the previous schema version wrote.
+    let header = super::CacheHeader { schema: CACHE_SCHEMA_VERSION - 1, ..super::CacheHeader::current() };
+    let key = super::SerializableCacheKey { path: source_path.to_string(), content_hash: super::hash_content(FIXTURE) };
+    let mut bytes = rmp_serde::to_vec(&header).unwrap();
+    bytes.extend(rmp_serde::to_vec(&vec![(key, fixture())]).unwrap());
+    std::fs::write(cache_dir.join(super::DATA_FILE), bytes).unwrap();
     let reloaded = super::DtsCache::load_from_disk(Some(&cache_dir));
     let loaded = reloaded.get(&source_path, FIXTURE).is_some();
     std::fs::remove_dir_all(&dir).unwrap();

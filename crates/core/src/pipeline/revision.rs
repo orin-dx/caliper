@@ -6,7 +6,6 @@
 //! drift between them.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -81,6 +80,8 @@ pub(crate) struct Revision {
     resolved: FxHashMap<ComponentId, Arc<Resolved>>,
     /// The project's source files.
     files: Arc<FxHashSet<Utf8PathBuf>>,
+    /// `.d.ts` files the cold run parsed or loaded from the parse cache, and how many the cache answered.
+    dts_files_parsed: u32,
     dts_cache_hits: u32,
     duration_ms: u64,
     pub(crate) output: Arc<ExtractionOutput>,
@@ -129,13 +130,12 @@ impl Revision {
         let start = Instant::now();
         let mut head_diagnostics = source_dir_diagnostics(options);
 
-        // Load the DTS parse-result cache (silently empty if missing/stale).
         let cache = Arc::new(DtsCache::load_from_disk(options.cache_dir.as_deref()));
+        head_diagnostics.extend(cache.load_diagnostic().cloned());
 
         let (src_files, discover_diagnostics) = discover_files(&options.src_dirs, &options.exclude_patterns);
         head_diagnostics.extend(discover_diagnostics);
 
-        let cache_hits = AtomicU32::new(0);
         // The whole closure body is wrapped in `contain_panic` so one file's parse panicking degrades to a per-file
         // diagnostic instead of poisoning the `.collect()` and crashing the whole extraction run.
         let parsed: Vec<(Utf8PathBuf, SourceData, Option<Diagnostic>)> = src_files
@@ -147,10 +147,7 @@ impl Revision {
                     if path.file_name() == Some(super::PARSE_PANIC_TEST_SENTINEL) {
                         panic!("simulated parse-phase panic (test-only sentinel)");
                     }
-                    let (data, io_diag, hit) = parse_source_file(path, &cache);
-                    if hit {
-                        cache_hits.fetch_add(1, Ordering::Relaxed);
-                    }
+                    let (data, io_diag) = parse_source_file(path, &cache);
                     (path.clone(), data, io_diag)
                 })
                 .unwrap_or_else(|diag| (path.clone(), SourceData::default(), Some(diag)))
@@ -211,6 +208,7 @@ impl Revision {
         let resolved = resolve_all(&component_ids(&global, options), &ctx);
         let files = Arc::new(src_files.into_iter().collect());
 
+        let (dts_files_parsed, dts_cache_hits) = cache.counts();
         // Arc::try_unwrap succeeds because all rayon workers have finished.
         let tail_diagnostics: Vec<Diagnostic> = match Arc::try_unwrap(cache) {
             Ok(c) => c.save_to_disk(),
@@ -230,7 +228,8 @@ impl Revision {
             tail_diagnostics,
             resolved,
             files,
-            dts_cache_hits: cache_hits.load(Ordering::Relaxed),
+            dts_files_parsed,
+            dts_cache_hits,
             duration_ms: 0,
             output: Arc::new(empty_output()),
             keys: FxHashMap::default(),
@@ -317,6 +316,7 @@ impl Revision {
             tail_diagnostics: self.tail_diagnostics.clone(),
             resolved,
             files: Arc::new(files),
+            dts_files_parsed: self.dts_files_parsed,
             dts_cache_hits: self.dts_cache_hits,
             duration_ms: self.duration_ms,
             output: Arc::new(empty_output()),
@@ -417,6 +417,7 @@ impl Revision {
             stats: ExtractionStats {
                 components_extracted,
                 files_parsed: self.files.len() as u32,
+                dts_files_parsed: self.dts_files_parsed,
                 dts_cache_hits: self.dts_cache_hits,
                 duration_ms: self.duration_ms,
                 ..Default::default()
@@ -474,8 +475,8 @@ impl DiagnosticSet {
     }
 }
 
-/// Read and parse one source file, through the parse cache for `.d.ts`. The third field reports a cache hit.
-fn parse_source_file(path: &Utf8Path, cache: &DtsCache) -> (SourceData, Option<Diagnostic>, bool) {
+/// Read and parse one source file, through the parse cache for `.d.ts`.
+fn parse_source_file(path: &Utf8Path, cache: &DtsCache) -> (SourceData, Option<Diagnostic>) {
     let is_dts = path.as_str().ends_with(".d.ts");
     let (source, io_diag) = match std::fs::read_to_string(path) {
         Ok(s) => (s, None),
@@ -483,14 +484,14 @@ fn parse_source_file(path: &Utf8Path, cache: &DtsCache) -> (SourceData, Option<D
     };
     if is_dts {
         if let Some(cached) = cache.get(path, &source) {
-            return (cached, io_diag, true);
+            return (cached, io_diag);
         }
     }
     let data = crate::extractor::parse_file(path, &source);
     if is_dts {
         cache.insert(path, &source, data.clone());
     }
-    (data, io_diag, false)
+    (data, io_diag)
 }
 
 /// A typo'd `--src` (or a stale config `srcDirs`) must not silently produce an empty-but-valid-looking result.
