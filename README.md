@@ -101,7 +101,7 @@ caliper-docgen watch --src src
 caliper-docgen check --src src
 ```
 
-Settings can also live in a `docgen.config.ts` (`srcDirs`, `htmlAttributes`, `reactVersion`, `crossPackage`, and more). `caliper-docgen --help` lists the rest, including `schema` for the JSON Schema of the output.
+Settings can also live in a `docgen.config.ts` (`srcDirs`, `htmlAttributes`, `cacheDir`, and more). `caliper-docgen --help` lists the rest, including `schema` for the JSON Schema of the output.
 
 ## Vite plugin
 

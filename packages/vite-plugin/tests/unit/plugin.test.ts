@@ -82,14 +82,14 @@ describe('caliperDocgen', () => {
 
     // Unlike buildStart/coldExtract, createSession runs synchronously inside
     // configResolved with no try/catch anywhere in the plugin. Per the Rust
-    // binding's own contract this can legitimately throw (a bad reactVersion
+    // binding's own contract this can legitimately throw (a bad htmlAttributes
     // value, malformed option JSON reaching the NAPI boundary) — it must
     // surface as a clear, prefixed error rather than a raw native stack
     // trace or a silently-undefined sessionId that breaks every later hook.
 
     it('logs and rethrows when createSession throws', () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-      const boom = new Error('invalid reactVersion')
+      const boom = new Error('invalid htmlAttributes')
       ;(napi.createSession as any).mockImplementationOnce(() => {
         throw boom
       })
@@ -483,26 +483,22 @@ describe('caliperDocgen', () => {
     })
   })
 
-  // ── exclude / reactVersion pass-through ────────────────────────────────────
+  // ── exclude pass-through ───────────────────────────────────────────────────
   //
   // Simple pass-through in napiOptions(), but previously unasserted by any
   // test with a non-default value.
 
-  describe('exclude / reactVersion options forwarding', () => {
-    it('forwards exclude and reactVersion to the NAPI call', () => {
-      const p = caliperDocgen({ srcDirs: ['src'], exclude: ['**/*.stories.tsx'], reactVersion: 'react19' })
+  describe('exclude options forwarding', () => {
+    it('forwards exclude to the NAPI call', () => {
+      const p = caliperDocgen({ srcDirs: ['src'], exclude: ['**/*.stories.tsx'] })
       ;(p.configResolved as Function)({ root: '/project' })
-      expect(napi.createSession).toHaveBeenCalledWith(
-        expect.objectContaining({ exclude: ['**/*.stories.tsx'], reactVersion: 'react19' }),
-      )
+      expect(napi.createSession).toHaveBeenCalledWith(expect.objectContaining({ exclude: ['**/*.stories.tsx'] }))
     })
 
-    it('leaves exclude and reactVersion unset when not passed', () => {
+    it('leaves exclude unset when not passed', () => {
       const p = caliperDocgen({ srcDirs: ['src'] })
       ;(p.configResolved as Function)({ root: '/project' })
-      expect(napi.createSession).toHaveBeenCalledWith(
-        expect.objectContaining({ exclude: undefined, reactVersion: undefined }),
-      )
+      expect(napi.createSession).toHaveBeenCalledWith(expect.objectContaining({ exclude: undefined }))
     })
   })
 })

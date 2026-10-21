@@ -40,15 +40,6 @@ const RESOLVE_PANIC_TEST_SENTINEL: &str = "ResolvePanicTestSentinel";
 
 // ─── PipelineOptions ─────────────────────────────────────────────────────────
 
-/// User-supplied known type override for custom library patterns.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum KnownTypeOverride {
-    Opaque { label: Option<String> },
-    Alias { arg_index: usize },
-    Skip,
-}
-
 /// How much of an inherited HTML element's attribute surface to expose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,31 +78,14 @@ pub struct PipelineOptions {
     pub exclude_patterns: Vec<String>,
     /// Component name prefixes to skip.
     pub exclude_prefixes: Vec<String>,
-    /// React version — default: React 19.
-    pub react_version: crate::react_types::ReactVersion,
-    /// Whether to resolve cross-package types.
-    pub cross_package: bool,
-    /// PandaCSS generated output dir, if applicable.
-    pub pandacss_outdir: Option<Utf8PathBuf>,
-    /// Extra function names to treat as cva-like variant functions.
-    pub variant_functions: Vec<String>,
     /// How much of an inherited HTML element's attributes to expose.
     pub html_attributes: HtmlAttributeMode,
-    // ── Fields from architectural review ─────────────────────────────────────
     /// Path to tsconfig.json (auto-detected if None).
     pub tsconfig_path: Option<Utf8PathBuf>,
-    /// Monorepo path aliases: package name → list of candidate root dirs.
-    pub extra_paths: FxHashMap<String, Vec<Utf8PathBuf>>,
-    /// User-supplied overrides for specific named types.
-    pub known_type_overrides: FxHashMap<String, KnownTypeOverride>,
     /// Additional builtin type names beyond the React standard set.
     pub extra_builtins: FxHashSet<compact_str::CompactString>,
-    /// Enable vanilla-extract CSS-in-JS support.
-    pub vanilla_extract: bool,
     /// Cache directory. Defaults to `node_modules/.cache/caliper-docgen`.
     pub cache_dir: Option<Utf8PathBuf>,
-    /// Future: opt-in to typescript-go for conditional/mapped type resolution.
-    pub resolve_complex_types: bool,
     /// Custom docgen extension plugins.
     pub plugins: crate::plugin::PluginRegistry,
 }
@@ -122,18 +96,10 @@ impl Default for PipelineOptions {
             src_dirs: vec![Utf8PathBuf::from("./src")],
             exclude_patterns: vec![],
             exclude_prefixes: vec![],
-            react_version: crate::react_types::REACT_19,
-            cross_package: true,
-            pandacss_outdir: None,
-            variant_functions: vec!["cva".into(), "tv".into(), "defineRecipe".into(), "recipe".into()],
             html_attributes: HtmlAttributeMode::Curated,
             tsconfig_path: None,
-            extra_paths: Default::default(),
-            known_type_overrides: Default::default(),
             extra_builtins: Default::default(),
-            vanilla_extract: false,
             cache_dir: None,
-            resolve_complex_types: false,
             plugins: crate::plugin::PluginRegistry::default(),
         }
     }

@@ -91,29 +91,17 @@ fn next_session_id() -> u32 {
 pub struct JsExtractOptions {
     pub src_dirs: Vec<String>,
     pub exclude: Option<Vec<String>>,
-    #[napi(ts_type = "'react18' | 'react19'")]
-    pub react_version: Option<String>,
-    pub cross_package: Option<bool>,
-    pub pandacss_outdir: Option<String>,
-    pub variant_functions: Option<Vec<String>>,
     #[napi(ts_type = "'curated' | 'full' | 'none'")]
     pub html_attributes: Option<String>,
     pub tsconfig_path: Option<String>,
     pub extra_builtins: Option<Vec<String>>,
-    pub vanilla_extract: Option<bool>,
     pub cache_dir: Option<String>,
-    pub resolve_complex_types: Option<bool>,
-    // Complex fields accepted as JSON strings to avoid napi object complexity:
-    /// JSON: Record<string, string[]>
-    pub extra_paths_json: Option<String>,
-    /// JSON: Record<string, {kind: ...}>
-    pub known_type_overrides_json: Option<String>,
 }
 
 // ─── TryFrom<JsExtractOptions> for PipelineOptions ────────────────────────────
 
 impl TryFrom<JsExtractOptions> for PipelineOptions {
-    /// Names the bad `reactVersion` or `htmlAttributes` value — a typo (or a caller bypassing the TS union, e.g. via
+    /// Names the bad `htmlAttributes` value — a typo (or a caller bypassing the TS union, e.g. via
     /// `as any`) must not silently fall back to a default (AGENTS.md non-negotiable #6).
     type Error = String;
 
@@ -126,19 +114,6 @@ impl TryFrom<JsExtractOptions> for PipelineOptions {
         if let Some(exclude) = js.exclude {
             opts.exclude_patterns = exclude;
         }
-        if let Some(v) = js.react_version.as_deref() {
-            opts.react_version = caliper_docgen_core::react_types::parse_react_version(v)
-                .map_err(|bad| format!("reactVersion is '{bad}', expected \"react18\" or \"react19\""))?;
-        }
-        if let Some(cross_package) = js.cross_package {
-            opts.cross_package = cross_package;
-        }
-        if let Some(dir) = js.pandacss_outdir {
-            opts.pandacss_outdir = Some(dir.into());
-        }
-        if let Some(fns) = js.variant_functions {
-            opts.variant_functions = fns;
-        }
         if let Some(mode) = js.html_attributes.as_deref() {
             opts.html_attributes = caliper_docgen_core::pipeline::HtmlAttributeMode::parse(mode)
                 .map_err(|bad| format!("htmlAttributes is '{bad}', expected \"curated\", \"full\" or \"none\""))?;
@@ -149,21 +124,8 @@ impl TryFrom<JsExtractOptions> for PipelineOptions {
         if let Some(names) = js.extra_builtins {
             opts.extra_builtins = names.into_iter().map(CompactString::from).collect();
         }
-        if let Some(json) = js.extra_paths_json {
-            opts.extra_paths = serde_json::from_str(&json).map_err(|e| format!("extraPaths is not valid JSON: {e}"))?;
-        }
-        if let Some(json) = js.known_type_overrides_json {
-            opts.known_type_overrides =
-                serde_json::from_str(&json).map_err(|e| format!("knownTypeOverrides is not valid JSON: {e}"))?;
-        }
-        if let Some(v) = js.vanilla_extract {
-            opts.vanilla_extract = v;
-        }
         if let Some(dir) = js.cache_dir {
             opts.cache_dir = Some(dir.into());
-        }
-        if let Some(v) = js.resolve_complex_types {
-            opts.resolve_complex_types = v;
         }
 
         Ok(opts)
@@ -321,18 +283,10 @@ mod tests {
         JsExtractOptions {
             src_dirs: vec!["./src".into()],
             exclude: None,
-            react_version: None,
-            cross_package: None,
-            pandacss_outdir: None,
-            variant_functions: None,
             html_attributes: None,
             tsconfig_path: None,
             extra_builtins: None,
-            vanilla_extract: None,
             cache_dir: None,
-            resolve_complex_types: None,
-            extra_paths_json: None,
-            known_type_overrides_json: None,
         }
     }
 
@@ -341,11 +295,9 @@ mod tests {
         let opts = PipelineOptions::try_from(base_options()).expect("should convert");
         let defaults = PipelineOptions::default();
 
-        assert_eq!(opts.cross_package, defaults.cross_package);
-        assert_eq!(opts.variant_functions, defaults.variant_functions);
         assert_eq!(opts.html_attributes, defaults.html_attributes);
-        assert_eq!(opts.vanilla_extract, defaults.vanilla_extract);
-        assert_eq!(opts.resolve_complex_types, defaults.resolve_complex_types);
+        assert_eq!(opts.extra_builtins, defaults.extra_builtins);
+        assert_eq!(opts.cache_dir, defaults.cache_dir);
     }
 
     #[test]
@@ -371,33 +323,6 @@ mod tests {
         let err = PipelineOptions::try_from(js).expect_err("a typo must not silently fall back to curated");
 
         assert_eq!(err, "htmlAttributes is 'all', expected \"curated\", \"full\" or \"none\"");
-    }
-
-    #[test]
-    fn malformed_extra_paths_json_is_a_hard_error_not_a_silent_empty_map() {
-        let mut js = base_options();
-        js.extra_paths_json = Some("not valid json".into());
-
-        let err = PipelineOptions::try_from(js).expect_err("malformed JSON should not silently default");
-        assert!(err.contains("extraPaths"), "error should name the bad field, got: {err}");
-    }
-
-    #[test]
-    fn malformed_known_type_overrides_json_is_a_hard_error_not_a_silent_empty_map() {
-        let mut js = base_options();
-        js.known_type_overrides_json = Some("not valid json".into());
-
-        let err = PipelineOptions::try_from(js).expect_err("malformed JSON should not silently default");
-        assert!(err.contains("knownTypeOverrides"), "error should name the bad field, got: {err}");
-    }
-
-    #[test]
-    fn valid_extra_paths_json_is_parsed_correctly() {
-        let mut js = base_options();
-        js.extra_paths_json = Some(r#"{"@myorg/ui": ["../packages/ui/src"]}"#.into());
-
-        let opts = PipelineOptions::try_from(js).expect("should parse valid JSON");
-        assert_eq!(opts.extra_paths.get("@myorg/ui").map(|v| v.len()), Some(1));
     }
 
     #[test]

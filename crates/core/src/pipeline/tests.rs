@@ -1148,11 +1148,10 @@ Button.defaultProps = { size: 'md' };
 #[test]
 fn test_pipeline_options_default() {
     let opts = PipelineOptions::default();
-    let fns = &opts.variant_functions;
-    assert!(fns.contains(&"cva".to_string()), "cva should be a default variant function");
-    assert!(fns.contains(&"tv".to_string()), "tv should be a default variant function");
-    assert!(fns.contains(&"defineRecipe".to_string()), "defineRecipe should be a default variant function");
-    assert!(fns.contains(&"recipe".to_string()), "recipe should be a default variant function");
+    assert_eq!(opts.src_dirs, vec![Utf8PathBuf::from("./src")]);
+    assert_eq!(opts.html_attributes, HtmlAttributeMode::Curated);
+    assert!(opts.exclude_patterns.is_empty() && opts.exclude_prefixes.is_empty() && opts.extra_builtins.is_empty());
+    assert_eq!((opts.tsconfig_path, opts.cache_dir), (None, None));
 }
 
 // ── test_reverse_deps_bfs ─────────────────────────────────────────────────
