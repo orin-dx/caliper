@@ -32,9 +32,8 @@ export declare function extractAll(options: JsExtractOptions): Promise<string>
 export declare function extractFileIncremental(filePath: string, sessionId: number, options: JsExtractOptions): Promise<string>
 
 /**
- * Initialize a watch session with a full cold extraction.
- * Returns JSON string of ExtractionOutput.
- * Call this after create_session(), in configureServer.
+ * The session's current output as a JSON string of ExtractionOutput, running the cold extraction first if the
+ * session has none. Every change applied through `extract_file_incremental` is reflected.
  */
 export declare function initializeSession(sessionId: number, options: JsExtractOptions): Promise<string>
 

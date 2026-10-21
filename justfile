@@ -60,6 +60,11 @@ test-rust:
 test-ts:
     pnpm --filter caliper-docgen-vite-plugin test
 
+# Build the native binding and run the Vite plugin against it
+test-integration:
+    pnpm --filter caliper-docgen-napi build:napi
+    NAPI_BINARY_REQUIRED=true pnpm --filter caliper-docgen-vite-plugin test:integration
+
 # Pack the npm packages and check napi arrives only as vite-plugin's transitive dependency (pm: npm or pnpm)
 verify-install pm="pnpm":
     scripts/verify-install.sh {{ pm }}

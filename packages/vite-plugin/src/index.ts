@@ -1,14 +1,27 @@
-import type { Plugin, ResolvedConfig, ViteDevServer, HotUpdateOptions } from 'vite'
+import type { Plugin, ResolvedConfig, ViteDevServer, HotUpdateOptions, EnvironmentModuleNode } from 'vite'
 import * as napi from 'caliper-docgen-napi'
 import type { ExtractionOutput, IncrementalUpdate } from 'caliper-docgen-napi'
 
 const VIRTUAL_ID = 'virtual:caliper-docgen'
 const RESOLVED_VIRTUAL_ID = `\0${VIRTUAL_ID}`
 
+/** A session's cold extraction is revision 1; every change that alters the output publishes the next one. */
+const FIRST_REVISION = 1
+
 export interface CaliperDocgenOptions {
   srcDirs: string[]
   exclude?: string[]
   skipHtmlProps?: boolean
+}
+
+/** What `caliper-docgen:update` carries to the client. Apply `removedKeys`, then `updatedKeys`, in `revision` order. */
+export interface CaliperDocgenUpdate {
+  file: string
+  revision: number
+  updatedKeys: string[]
+  updatedComponents: IncrementalUpdate['updatedComponents']
+  removedKeys: string[]
+  diagnostics: IncrementalUpdate['diagnostics']
 }
 
 export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
@@ -20,31 +33,18 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
   // correct once-per-process hook for that. See buildEnd's own comment below.
   let isWatchBuild = false
   let resolvedSrcDirs: string[] = []
-  let currentOutput: ExtractionOutput = {
-    components: {},
-    enums: {},
-    diagnostics: [],
-    stats: {
-      componentsExtracted: 0,
-      componentsSkipped: 0,
-      filesParsed: 0,
-      dtsFilesParsed: 0,
-      dtsCacheHits: 0,
-      durationMs: 0,
-      tier1Count: 0,
-      tier3Count: 0,
-      opaqueCount: 0,
-    },
-  }
-  // Holds the in-flight init promise so hotUpdate can await it before first incremental call.
+  // Holds the in-flight init promise so hotUpdate and load can await it.
   let initPromise: Promise<void> | null = null
+  // The newest revision this plugin has seen; an update that reports it again changed nothing.
+  let latestRevision = FIRST_REVISION
   // Per-file monotonic sequence guard: two overlapping hotUpdate calls for
   // the same file (e.g. a rapid double-save) can have their async NAPI
-  // calls resolve out of order. Without this, an older call finishing last
-  // would silently overwrite currentOutput/the HMR payload with stale data
-  // even though a newer call already applied fresher results.
+  // calls resolve out of order; only the newest one's event is sent.
   let hotUpdateSeq = 0
   const latestSeqByFile = new Map<string, number>()
+  // `vite build --watch` changes applied before the next rebuild's load().
+  let pendingWatchChanges: Promise<unknown>[] = []
+  let extracted = false
 
   function napiOptions() {
     return {
@@ -54,23 +54,18 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
     }
   }
 
-  // configureServer (dev-only) is where cold extraction normally runs and
-  // populates `currentOutput` for the virtual module. Vite never calls
-  // configureServer during `vite build`, so without this, a production
-  // build's virtual module always resolved to the empty placeholder below.
-  async function coldExtract(): Promise<boolean> {
-    const json = await napi.initializeSession(sessionId, napiOptions())
-    try {
-      currentOutput = JSON.parse(json) as ExtractionOutput
-      return true
-    } catch (error) {
-      console.error('[caliper-docgen] Failed to parse initializeSession output:', error)
-      return false
-    }
-  }
-
   function isSrcFile(file: string): boolean {
     return (file.endsWith('.tsx') || file.endsWith('.ts')) && resolvedSrcDirs.some((dir) => file.startsWith(`${dir}/`))
+  }
+
+  /** Applies one file change to the session; `undefined` when it changed nothing. */
+  async function applyChange(file: string): Promise<IncrementalUpdate | undefined> {
+    const update = JSON.parse(await napi.extractFileIncremental(file, sessionId, napiOptions())) as IncrementalUpdate
+    if (update.revision <= latestRevision && update.updatedKeys.length === 0 && update.removedKeys.length === 0) {
+      return undefined
+    }
+    latestRevision = Math.max(latestRevision, update.revision)
+    return update
   }
 
   return {
@@ -88,10 +83,9 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
         return abs.endsWith('/') ? abs.slice(0, -1) : abs
       })
       // sessionId is foundational to every other hook, so a failure here
-      // can't be swallowed the way coldExtract's failures are — log for
-      // discoverability, then rethrow so Vite's own config-resolution fails
-      // loudly instead of every later hook failing confusingly against an
-      // undefined sessionId.
+      // can't be swallowed — log for discoverability, then rethrow so Vite's
+      // own config-resolution fails loudly instead of every later hook
+      // failing confusingly against an undefined sessionId.
       try {
         sessionId = napi.createSession(napiOptions())
       } catch (error) {
@@ -100,14 +94,38 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
       }
     },
 
-    // Build-only counterpart to coldExtract() in configureServer; see that comment.
+    // A build has no dev server to run the cold extraction, and a build that
+    // cannot extract must fail rather than ship an empty virtual module.
     async buildStart() {
       if (command !== 'build') return
-      try {
-        await coldExtract()
-      } catch (error) {
-        console.error('[caliper-docgen] initializeSession failed:', error)
+      if (isWatchBuild) {
+        // Source files no bundle module imports must still trigger a rebuild, since the docs come from them.
+        for (const dir of resolvedSrcDirs) this.addWatchFile(dir)
+        await Promise.all(pendingWatchChanges)
+        pendingWatchChanges = []
       }
+      // A watch rebuild reuses the session; its changes arrived through watchChange.
+      if (extracted) return
+      try {
+        await napi.initializeSession(sessionId, napiOptions())
+        extracted = true
+      } catch (error) {
+        this.error(`[caliper-docgen] extraction failed: ${String(error)}`)
+      }
+    },
+
+    // `vite build --watch` never calls hotUpdate; Rollup reports each changed file here before rebuilding.
+    async watchChange(id: string) {
+      if (!isSrcFile(id)) return
+      const change = (async () => {
+        try {
+          await applyChange(id)
+        } catch (error) {
+          console.error('[caliper-docgen] Failed to apply the change:', error)
+        }
+      })()
+      pendingWatchChanges.push(change)
+      await change
     },
 
     configureServer(server: ViteDevServer) {
@@ -115,17 +133,16 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
       // sessionId and resolvedSrcDirs are safe to use here.
       //
       // This hook must return its teardown function synchronously — it can't
-      // be `async` or `await` coldExtract() here without breaking that contract,
-      // so the fire-and-forget .then()/.catch() chain below is intentional,
-      // not an oversight.
+      // be `async` or `await` the extraction here without breaking that
+      // contract, so the fire-and-forget .then()/.catch() chain below is
+      // intentional, not an oversight.
       /* oxlint-disable promise/prefer-await-to-then, promise/always-return, promise/prefer-await-to-callbacks */
-      initPromise = coldExtract()
-        .then((ok) => {
-          if (!ok) return
+      initPromise = napi
+        .initializeSession(sessionId, napiOptions())
+        .then((json) => {
+          const output = JSON.parse(json) as ExtractionOutput
           // environments.client.hot is Vite 6+ API; cast avoids typing fight across patch versions
-          ;(server as any).environments?.client?.hot?.send('caliper-docgen:ready', {
-            components: currentOutput.components,
-          })
+          ;(server as any).environments?.client?.hot?.send('caliper-docgen:ready', { components: output.components })
         })
         .catch((error: unknown) => {
           console.error('[caliper-docgen] initializeSession failed:', error)
@@ -144,7 +161,14 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
       // declared this-type across different Vite patch versions.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const env = (this as any).environment as
-        | { name: string; hot: { send(event: string, data?: unknown): void } }
+        | {
+            name: string
+            hot: { send(event: string, data?: unknown): void }
+            moduleGraph?: {
+              getModuleById(id: string): EnvironmentModuleNode | undefined
+              invalidateModule(mod: EnvironmentModuleNode): void
+            }
+          }
         | undefined
 
       if (!env || env.name !== 'client') return
@@ -155,45 +179,48 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
       const seq = ++hotUpdateSeq
       latestSeqByFile.set(opts.file, seq)
 
-      const json = await napi.extractFileIncremental(opts.file, sessionId, napiOptions())
-
-      // A newer hotUpdate call for this same file has already taken over —
-      // its own result (in flight or already applied) is authoritative, so
-      // applying this now-stale one would be a straight regression. Drop it
-      // silently rather than race it, for both the success and the
-      // malformed-JSON fallback path below.
-      if (latestSeqByFile.get(opts.file) !== seq) return
-
-      let update: IncrementalUpdate
+      let update: IncrementalUpdate | undefined
       try {
-        update = JSON.parse(json) as IncrementalUpdate
+        update = await applyChange(opts.file)
       } catch (error) {
-        console.error('[caliper-docgen] Failed to parse extractFileIncremental output:', error)
-        env.hot.send('caliper-docgen:update', { file: opts.file, updatedComponents: [], diagnostics: [] })
+        console.error('[caliper-docgen] Failed to apply the change:', error)
         return
       }
+      // A newer call for the same file has its own, fresher event to send.
+      if (!update || latestSeqByFile.get(opts.file) !== seq) return
 
-      for (const comp of update.updatedComponents) {
-        currentOutput.components[comp.displayName] = comp
-      }
-
-      env.hot.send('caliper-docgen:update', {
+      const payload: CaliperDocgenUpdate = {
         file: opts.file,
+        revision: update.revision,
+        updatedKeys: update.updatedKeys,
         updatedComponents: update.updatedComponents,
+        removedKeys: update.removedKeys,
         diagnostics: update.diagnostics,
-      })
+      }
+      env.hot.send('caliper-docgen:update', payload)
 
-      // Return undefined (NOT []) — returning [] suppresses React Fast Refresh
-      // for the changed file. We want both: updated types AND component re-render.
+      // The virtual module serves the whole output, so its importers must reload it. Keeping `opts.modules` keeps
+      // React Fast Refresh for the changed file; returning [] would suppress it.
+      const virtual = env.moduleGraph?.getModuleById(RESOLVED_VIRTUAL_ID)
+      if (!virtual) return
+      env.moduleGraph!.invalidateModule(virtual)
+      return [...opts.modules, virtual]
     },
 
     resolveId(id: string) {
       if (id === VIRTUAL_ID) return RESOLVED_VIRTUAL_ID
     },
 
-    load(id: string) {
+    // Served from the session, so it always carries every change applied so far: removals, enums and diagnostics
+    // included.
+    async load(id: string) {
       if (id !== RESOLVED_VIRTUAL_ID) return
-      return `export default ${JSON.stringify(currentOutput)}`
+      if (initPromise) await initPromise
+      try {
+        return `export default ${await napi.initializeSession(sessionId, napiOptions())}`
+      } catch (error) {
+        this.error(`[caliper-docgen] extraction failed: ${String(error)}`)
+      }
     },
 
     buildEnd() {

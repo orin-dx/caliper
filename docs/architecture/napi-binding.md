@@ -8,7 +8,7 @@ This is the only consumer-facing FFI boundary in the workspace: a thin `cdylib` 
 
 - `extract_all(options) -> String` — cold, one-shot extraction. Runs inside `tokio::task::spawn_blocking`.
 - `create_session(options) -> u32` — allocates a session ID, builds a `WatchSession`, inserts it into `SESSIONS`. Runs **synchronously on the calling (JS) thread** — no `spawn_blocking`.
-- `initialize_session(session_id, options) -> String` — looks up or lazily creates the session, then runs `WatchSession::initialize()` (the first full cold pass). Runs inside `spawn_blocking`.
+- `initialize_session(session_id, options) -> String` — looks up or lazily creates the session, then returns `WatchSession::initialize()`: the session's current output, running the cold extraction first if the session has none. The Vite plugin's virtual-module `load` uses it as the snapshot. Runs inside `spawn_blocking`.
 - `extract_file_incremental(file_path, session_id, options) -> String` — looks up or lazily creates the session, then runs `WatchSession::update_file()`. Runs inside `spawn_blocking`.
 - `close_session(session_id) -> ()` — removes the session from `SESSIONS`. Runs synchronously on the calling thread, like `create_session`.
 

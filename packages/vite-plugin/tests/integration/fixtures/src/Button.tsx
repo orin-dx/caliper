@@ -8,5 +8,9 @@ export interface ButtonProps {
 }
 
 export function Button({ label, onClick, variant = 'primary' }: ButtonProps) {
-  return { label, onClick, variant }
+  return (
+    <button onClick={onClick} data-variant={variant}>
+      {label}
+    </button>
+  )
 }

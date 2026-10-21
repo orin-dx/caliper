@@ -1,43 +1,62 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+const SNAPSHOT = JSON.stringify({
+  components: { Button: { displayName: 'Button' } },
+  enums: {},
+  diagnostics: [],
+  stats: {},
+})
+
+const component = (displayName: string, description = '') => ({
+  displayName,
+  filePath: `/project/src/${displayName}.tsx`,
+  props: {},
+  inheritance: [],
+  notableInherited: {},
+  description,
+  discriminantProp: null,
+  composes: [],
+  tags: {},
+  methods: [],
+})
+
+const update = (revision: number, updated: string[], removed: string[] = [], description = '') =>
+  JSON.stringify({
+    revision,
+    updatedComponents: updated.map((name) => component(name, description)),
+    updatedKeys: updated,
+    removedKeys: removed,
+    affectedFiles: [],
+    diagnostics: [],
+    durationMs: 1,
+  })
+
 // Mock BEFORE importing plugin — vi.mock is hoisted by Vitest
 vi.mock('caliper-docgen-napi', () => ({
   createSession: vi.fn().mockReturnValue(42),
-  initializeSession: vi
-    .fn()
-    .mockResolvedValue(JSON.stringify({ components: {}, enums: {}, diagnostics: [], stats: {} })),
-  extractFileIncremental: vi.fn().mockResolvedValue(
-    JSON.stringify({
-      updatedComponents: [
-        {
-          displayName: 'Button',
-          filePath: '/project/src/Button.tsx',
-          props: {},
-          inheritance: [],
-          notableInherited: {},
-          description: '',
-          discriminantProp: null,
-          composes: [],
-          tags: {},
-          methods: [],
-        },
-      ],
-      affectedFiles: ['/project/src/Button.tsx'],
-      diagnostics: [],
-      durationMs: 5,
-    }),
-  ),
+  initializeSession: vi.fn(),
+  extractFileIncremental: vi.fn(),
   closeSession: vi.fn(),
 }))
 
 import { caliperDocgen } from '../../src/index.js'
 import * as napi from 'caliper-docgen-napi'
 
+/** A Rollup/Vite plugin context whose `error` throws like the real one. */
+const pluginContext = () => ({
+  error: vi.fn((message: string) => {
+    throw new Error(message)
+  }),
+  addWatchFile: vi.fn(),
+})
+
 describe('caliperDocgen', () => {
   let plugin: ReturnType<typeof caliperDocgen>
 
   beforeEach(() => {
     vi.clearAllMocks()
+    ;(napi.initializeSession as any).mockResolvedValue(SNAPSHOT)
+    ;(napi.extractFileIncremental as any).mockResolvedValue(update(2, ['Button']))
     plugin = caliperDocgen({ srcDirs: ['src'] })
     // Simulate Vite calling configResolved
     ;(plugin.configResolved as Function)({ root: '/project' })
@@ -60,16 +79,23 @@ describe('caliperDocgen', () => {
   // ── load ───────────────────────────────────────────────────────────────────
 
   describe('load', () => {
-    it('returns a JS module for the resolved virtual id', () => {
-      const code = (plugin.load as Function)('\0virtual:caliper-docgen') as string
-      expect(code).toMatch(/^export default \{/)
-      const data = JSON.parse(code.replace('export default ', ''))
-      expect(data).toHaveProperty('components')
+    it("serves the session's current output", async () => {
+      const code = await (plugin.load as Function).call(pluginContext(), '\0virtual:caliper-docgen')
+      expect(code).toBe(`export default ${SNAPSHOT}`)
+      expect(napi.initializeSession).toHaveBeenCalledWith(42, expect.objectContaining({ srcDirs: ['/project/src'] }))
     })
 
-    it('returns undefined for other ids', () => {
-      expect((plugin.load as Function)('\0other')).toBeUndefined()
-      expect((plugin.load as Function)('virtual:caliper-docgen')).toBeUndefined()
+    it('returns undefined for other ids', async () => {
+      expect(await (plugin.load as Function).call(pluginContext(), '\0other')).toBeUndefined()
+      expect(await (plugin.load as Function).call(pluginContext(), 'virtual:caliper-docgen')).toBeUndefined()
+    })
+
+    it('fails the module load when extraction fails', async () => {
+      ;(napi.initializeSession as any).mockRejectedValueOnce(new Error('boom'))
+      const ctx = pluginContext()
+      await expect((plugin.load as Function).call(ctx, '\0virtual:caliper-docgen')).rejects.toThrow(
+        '[caliper-docgen] extraction failed: Error: boom',
+      )
     })
   })
 
@@ -80,8 +106,7 @@ describe('caliperDocgen', () => {
       expect(napi.createSession).toHaveBeenCalledWith(expect.objectContaining({ srcDirs: ['/project/src'] }))
     })
 
-    // Unlike buildStart/coldExtract, createSession runs synchronously inside
-    // configResolved with no try/catch anywhere in the plugin. Per the Rust
+    // createSession runs synchronously inside configResolved. Per the Rust
     // binding's own contract this can legitimately throw (a bad htmlAttributes
     // value, malformed option JSON reaching the NAPI boundary) — it must
     // surface as a clear, prefixed error rather than a raw native stack
@@ -103,30 +128,20 @@ describe('caliperDocgen', () => {
   // ── configureServer ────────────────────────────────────────────────────────
 
   describe('configureServer', () => {
-    it('calls initializeSession with the session id and resolved options', async () => {
-      const mockServer = {
-        environments: { client: { hot: { send: vi.fn() } } },
-      } as any
-      // configureServer returns a teardown fn; initializeSession is async internally.
-      // Flush the microtask queue so the .then() callback runs before asserting.
-      ;(plugin.configureServer as Function)(mockServer)
-      await vi.waitUntil(() => (napi.initializeSession as any).mock.calls.length > 0)
-      await (napi.initializeSession as any).mock.results[0].value
+    it('runs the cold extraction and announces it', async () => {
+      const send = vi.fn()
+      ;(plugin.configureServer as Function)({ environments: { client: { hot: { send } } } })
+      await vi.waitUntil(() => send.mock.calls.length > 0)
       expect(napi.initializeSession).toHaveBeenCalledWith(42, expect.objectContaining({ srcDirs: ['/project/src'] }))
+      expect(send).toHaveBeenCalledWith('caliper-docgen:ready', { components: { Button: { displayName: 'Button' } } })
     })
 
-    // Regression test for the dev-server session leak fixed in commit
-    // 49b12c6 — buildEnd isn't called in dev mode, so configureServer's
-    // returned teardown function is the only reliable cleanup hook. No test
-    // previously called the returned function at all.
+    // buildEnd isn't called in dev mode, so configureServer's returned
+    // teardown function is the only reliable cleanup hook.
 
     it('returns a teardown function that closes the NAPI session', async () => {
-      const mockServer = {
-        environments: { client: { hot: { send: vi.fn() } } },
-      } as any
-      const teardown = (plugin.configureServer as Function)(mockServer)
+      const teardown = (plugin.configureServer as Function)({ environments: { client: { hot: { send: vi.fn() } } } })
       await vi.waitUntil(() => (napi.initializeSession as any).mock.calls.length > 0)
-      await (napi.initializeSession as any).mock.results[0].value
 
       expect(napi.closeSession).not.toHaveBeenCalled()
       teardown()
@@ -137,22 +152,36 @@ describe('caliperDocgen', () => {
   // ── hotUpdate ──────────────────────────────────────────────────────────────
 
   describe('hotUpdate', () => {
-    const clientEnv = () => ({
-      environment: { name: 'client', hot: { send: vi.fn() } },
+    const virtualModule = { id: '\0virtual:caliper-docgen' }
+
+    const clientEnv = (withVirtualModule = false) => ({
+      environment: {
+        name: 'client',
+        hot: { send: vi.fn() },
+        moduleGraph: {
+          getModuleById: vi.fn((id: string) =>
+            withVirtualModule && id === virtualModule.id ? virtualModule : undefined,
+          ),
+          invalidateModule: vi.fn(),
+        },
+      },
     })
 
+    const changedModule = { id: '/project/src/Button.tsx' }
     const makeOpts = (file: string) => ({
       file,
       type: 'update' as const,
-      modules: [],
+      modules: [changedModule],
       timestamp: 1000,
       read: vi.fn().mockResolvedValue(''),
       server: {} as any,
     })
 
+    const sentUpdates = (ctx: ReturnType<typeof clientEnv>) =>
+      ctx.environment.hot.send.mock.calls.filter(([event]) => event === 'caliper-docgen:update').map(([, data]) => data)
+
     it('calls extractFileIncremental for tsx files in srcDirs', async () => {
-      const ctx = clientEnv()
-      await (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
+      await (plugin.hotUpdate as Function).call(clientEnv(), makeOpts('/project/src/Button.tsx'))
       expect(napi.extractFileIncremental).toHaveBeenCalledWith(
         '/project/src/Button.tsx',
         42,
@@ -160,19 +189,49 @@ describe('caliperDocgen', () => {
       )
     })
 
-    it('sends caliper-docgen:update over HMR', async () => {
+    it('sends the keyed update over HMR', async () => {
+      ;(napi.extractFileIncremental as any).mockResolvedValueOnce(update(2, ['Panel'], ['Card']))
       const ctx = clientEnv()
-      await (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
-      expect(ctx.environment.hot.send).toHaveBeenCalledWith(
-        'caliper-docgen:update',
-        expect.objectContaining({ file: '/project/src/Button.tsx' }),
-      )
+      await (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Card.tsx'))
+      expect(sentUpdates(ctx)).toEqual([
+        {
+          file: '/project/src/Card.tsx',
+          revision: 2,
+          updatedKeys: ['Panel'],
+          updatedComponents: [component('Panel')],
+          removedKeys: ['Card'],
+          diagnostics: [],
+        },
+      ])
     })
 
-    it('returns undefined so React Fast Refresh still processes the file', async () => {
-      const ctx = clientEnv()
+    it('invalidates the virtual module and returns it with the changed modules', async () => {
+      const ctx = clientEnv(true)
       const result = await (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
+      expect(ctx.environment.moduleGraph.invalidateModule).toHaveBeenCalledWith(virtualModule)
+      expect(result).toEqual([changedModule, virtualModule])
+    })
+
+    it('returns undefined when nothing imports the virtual module, so Fast Refresh handles the file', async () => {
+      const result = await (plugin.hotUpdate as Function).call(clientEnv(), makeOpts('/project/src/Button.tsx'))
       expect(result).toBeUndefined()
+    })
+
+    it('sends nothing for a change that produced no new revision', async () => {
+      ;(napi.extractFileIncremental as any).mockResolvedValueOnce(update(1, []))
+      const ctx = clientEnv(true)
+      const result = await (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.stories.tsx'))
+      expect(sentUpdates(ctx)).toEqual([])
+      expect(ctx.environment.moduleGraph.invalidateModule).not.toHaveBeenCalled()
+      expect(result).toBeUndefined()
+    })
+
+    it('still reloads for a change that only changed diagnostics', async () => {
+      ;(napi.extractFileIncremental as any).mockResolvedValueOnce(update(2, []))
+      const ctx = clientEnv(true)
+      const result = await (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/types.ts'))
+      expect(sentUpdates(ctx)).toHaveLength(1)
+      expect(result).toEqual([changedModule, virtualModule])
     })
 
     it('skips SSR and other non-client environments', async () => {
@@ -182,27 +241,18 @@ describe('caliperDocgen', () => {
     })
 
     it('skips files outside srcDirs', async () => {
-      const ctx = clientEnv()
-      await (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/node_modules/react/index.js'))
+      await (plugin.hotUpdate as Function).call(clientEnv(), makeOpts('/project/node_modules/react/index.js'))
       expect(napi.extractFileIncremental).not.toHaveBeenCalled()
     })
 
     it('skips non-ts/tsx files inside srcDirs', async () => {
-      const ctx = clientEnv()
-      await (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/styles.css'))
+      await (plugin.hotUpdate as Function).call(clientEnv(), makeOpts('/project/src/styles.css'))
       expect(napi.extractFileIncremental).not.toHaveBeenCalled()
     })
 
-    // `.d.ts` files match isSrcFile's `.ts` suffix check and are treated as
-    // a valid extraction target — intentional, not an oversight: the core
-    // Rust extractor treats declaration files as valid component/interface
-    // sources too (`is_tsx = source_type.is_jsx() || is_typescript_definition()`),
-    // since a project's own ambient .d.ts declarations can affect prop
-    // resolution for components declared elsewhere.
-
+    // A project's own .d.ts declarations can affect prop resolution for components declared elsewhere.
     it('treats a .d.ts file inside srcDirs as a valid extraction target', async () => {
-      const ctx = clientEnv()
-      await (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/types.d.ts'))
+      await (plugin.hotUpdate as Function).call(clientEnv(), makeOpts('/project/src/types.d.ts'))
       expect(napi.extractFileIncremental).toHaveBeenCalledWith(
         '/project/src/types.d.ts',
         42,
@@ -211,21 +261,15 @@ describe('caliperDocgen', () => {
     })
 
     it('skips files in a sibling directory that shares the srcDir prefix', async () => {
-      const ctx = clientEnv()
-      await (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src-generated/Button.tsx'))
+      await (plugin.hotUpdate as Function).call(clientEnv(), makeOpts('/project/src-generated/Button.tsx'))
       expect(napi.extractFileIncremental).not.toHaveBeenCalled()
     })
 
-    // A trailing slash on a configured srcDir (relative `'src/'`, or an
-    // already-absolute dir ending in `/`) must not silently exclude every
-    // file under it — isSrcFile's `startsWith(`${dir}/`)` check would
-    // otherwise require a double slash no real file path ever has.
-
-    it('still matches files when srcDirs has a trailing slash (relative)', async () => {
-      const p = caliperDocgen({ srcDirs: ['src/'] })
+    // A trailing slash on a configured srcDir must not silently exclude every file under it.
+    it.each([['src/'], ['/project/src/']])('still matches files when srcDirs is %s', async (dir) => {
+      const p = caliperDocgen({ srcDirs: [dir] })
       ;(p.configResolved as Function)({ root: '/project' })
-      const ctx = clientEnv()
-      await (p.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
+      await (p.hotUpdate as Function).call(clientEnv(), makeOpts('/project/src/Button.tsx'))
       expect(napi.extractFileIncremental).toHaveBeenCalledWith(
         '/project/src/Button.tsx',
         42,
@@ -233,98 +277,45 @@ describe('caliperDocgen', () => {
       )
     })
 
-    it('still matches files when srcDirs has a trailing slash (absolute)', async () => {
-      const p = caliperDocgen({ srcDirs: ['/project/src/'] })
-      ;(p.configResolved as Function)({ root: '/project' })
-      const ctx = clientEnv()
-      await (p.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
-      expect(napi.extractFileIncremental).toHaveBeenCalledWith(
-        '/project/src/Button.tsx',
-        42,
-        expect.objectContaining({ srcDirs: ['/project/src'] }),
-      )
-    })
-
-    // The documented fallback contract (src/index.ts) is that clients still
-    // receive an update event rather than an unhandled rejection when the
-    // NAPI call resolves with unparsable JSON — never exercised before now.
-
-    it('sends an empty update and logs when extractFileIncremental returns malformed JSON', async () => {
+    it('logs and sends nothing when the change cannot be applied', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
       ;(napi.extractFileIncremental as any).mockResolvedValueOnce('not valid json')
-      const ctx = clientEnv()
-      await (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
+      const ctx = clientEnv(true)
+      const result = await (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
 
-      expect(ctx.environment.hot.send).toHaveBeenCalledWith('caliper-docgen:update', {
-        file: '/project/src/Button.tsx',
-        updatedComponents: [],
-        diagnostics: [],
-      })
-      expect(consoleError).toHaveBeenCalledWith(
-        '[caliper-docgen] Failed to parse extractFileIncremental output:',
-        expect.any(Error),
-      )
+      expect(sentUpdates(ctx)).toEqual([])
+      expect(result).toBeUndefined()
+      expect(consoleError).toHaveBeenCalledWith('[caliper-docgen] Failed to apply the change:', expect.any(Error))
       consoleError.mockRestore()
     })
 
-    // The queue/replay race-guard described in the archived plugin spec: a
-    // file-change event arriving while cold extraction is still in flight
-    // must wait for it, not race it. Every other hotUpdate test calls
-    // hotUpdate directly without configureServer, so initPromise is always
-    // null and this blocking behavior was never actually exercised.
-
-    it('waits for a still-pending initPromise before calling extractFileIncremental', async () => {
+    // A file-change event arriving while cold extraction is still in flight must wait for it, not race it.
+    it('waits for a still-pending cold extraction before calling extractFileIncremental', async () => {
       let resolveInit: (value: string) => void = () => {}
-      const initDeferred = new Promise<string>((resolve) => {
-        resolveInit = resolve
-      })
-      ;(napi.initializeSession as any).mockReturnValueOnce(initDeferred)
+      ;(napi.initializeSession as any).mockReturnValueOnce(
+        new Promise<string>((resolve) => {
+          resolveInit = resolve
+        }),
+      )
+      ;(plugin.configureServer as Function)({ environments: { client: { hot: { send: vi.fn() } } } })
 
-      const mockServer = { environments: { client: { hot: { send: vi.fn() } } } } as any
-      ;(plugin.configureServer as Function)(mockServer)
-      // Cold extraction is now in flight — initPromise is set and unresolved.
-
-      const ctx = clientEnv()
-      const hotUpdatePromise = (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
-
+      const hotUpdatePromise = (plugin.hotUpdate as Function).call(clientEnv(), makeOpts('/project/src/Button.tsx'))
       await Promise.resolve()
       await Promise.resolve()
       expect(napi.extractFileIncremental).not.toHaveBeenCalled()
 
-      resolveInit(JSON.stringify({ components: {}, enums: {}, diagnostics: [], stats: {} }))
+      resolveInit(SNAPSHOT)
       await hotUpdatePromise
-
       expect(napi.extractFileIncremental).toHaveBeenCalled()
     })
 
-    // Two overlapping hotUpdate calls for the same file (e.g. a rapid
-    // double-save) have no sequencing guard against their async NAPI calls
-    // resolving out of order — an older, now-stale result could silently
-    // overwrite a newer one already applied.
-
-    const makeComponent = (tag: string) => ({
-      displayName: 'Button',
-      filePath: '/project/src/Button.tsx',
-      props: {},
-      inheritance: [],
-      notableInherited: {},
-      description: tag,
-      discriminantProp: null,
-      composes: [],
-      tags: {},
-      methods: [],
-    })
-
-    it('drops a stale result when an older hotUpdate call for the same file resolves after a newer one', async () => {
+    // A rapid double-save can resolve its two NAPI calls out of order; only the newer one's event is sent.
+    it('drops the event of an older call for the same file that resolves after a newer one', async () => {
       let resolveFirst: (v: string) => void = () => {}
       let resolveSecond: (v: string) => void = () => {}
-      const firstDeferred = new Promise<string>((r) => {
-        resolveFirst = r
-      })
-      const secondDeferred = new Promise<string>((r) => {
-        resolveSecond = r
-      })
-      ;(napi.extractFileIncremental as any).mockReturnValueOnce(firstDeferred).mockReturnValueOnce(secondDeferred)
+      ;(napi.extractFileIncremental as any)
+        .mockReturnValueOnce(new Promise<string>((r) => (resolveFirst = r)))
+        .mockReturnValueOnce(new Promise<string>((r) => (resolveSecond = r)))
 
       const ctx = clientEnv()
       const firstCall = (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
@@ -332,30 +323,20 @@ describe('caliperDocgen', () => {
       const secondCall = (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
       await Promise.resolve()
 
-      // Second (newer) call's NAPI promise resolves FIRST — out of order.
-      resolveSecond(JSON.stringify({ updatedComponents: [makeComponent('fresh')], diagnostics: [] }))
+      resolveSecond(update(3, ['Button'], [], 'fresh'))
       await secondCall
-
-      // First (older) call resolves LAST — its result must be dropped, not
-      // applied on top of the newer one.
-      resolveFirst(JSON.stringify({ updatedComponents: [makeComponent('stale')], diagnostics: [] }))
+      resolveFirst(update(2, ['Button'], [], 'stale'))
       await firstCall
 
-      const code = (plugin.load as Function)('\0virtual:caliper-docgen') as string
-      const data = JSON.parse(code.replace('export default ', ''))
-      expect(data.components.Button.description).toBe('fresh')
+      expect(sentUpdates(ctx).map((u: any) => u.updatedComponents[0].description)).toEqual(['fresh'])
     })
 
     it('does not let the staleness guard for one file drop a concurrent update for a different file', async () => {
       let resolveButton: (v: string) => void = () => {}
       let resolveInput: (v: string) => void = () => {}
-      const buttonDeferred = new Promise<string>((r) => {
-        resolveButton = r
-      })
-      const inputDeferred = new Promise<string>((r) => {
-        resolveInput = r
-      })
-      ;(napi.extractFileIncremental as any).mockReturnValueOnce(buttonDeferred).mockReturnValueOnce(inputDeferred)
+      ;(napi.extractFileIncremental as any)
+        .mockReturnValueOnce(new Promise<string>((r) => (resolveButton = r)))
+        .mockReturnValueOnce(new Promise<string>((r) => (resolveInput = r)))
 
       const ctx = clientEnv()
       const buttonCall = (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
@@ -363,20 +344,12 @@ describe('caliperDocgen', () => {
       const inputCall = (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Input.tsx'))
       await Promise.resolve()
 
-      resolveInput(
-        JSON.stringify({
-          updatedComponents: [{ ...makeComponent('input'), displayName: 'Input', filePath: '/project/src/Input.tsx' }],
-          diagnostics: [],
-        }),
-      )
+      resolveInput(update(3, ['Input']))
       await inputCall
-      resolveButton(JSON.stringify({ updatedComponents: [makeComponent('button')], diagnostics: [] }))
+      resolveButton(update(2, ['Button']))
       await buttonCall
 
-      const code = (plugin.load as Function)('\0virtual:caliper-docgen') as string
-      const data = JSON.parse(code.replace('export default ', ''))
-      expect(data.components.Button.description).toBe('button')
-      expect(data.components.Input.description).toBe('input')
+      expect(sentUpdates(ctx).map((u: any) => u.updatedKeys[0])).toEqual(['Input', 'Button'])
     })
   })
 
@@ -396,74 +369,75 @@ describe('caliperDocgen', () => {
     })
   })
 
-  // ── buildEnd / closeWatcher under `vite build --watch` ────────────────────
+  // ── `vite build --watch` ─────────────────────────────────────────────────
   //
-  // Per Rollup's own plugin hook contract, buildEnd fires once per rebuild
-  // in watch mode — not once when the watch process actually shuts down
-  // (that's what closeWatcher is for). Closing the session in buildEnd
-  // during a watched build would make every subsequent rebuild's buildStart
-  // auto-vivify a brand new session (the Rust binding's initializeSession
-  // creates one for any unrecognized/closed session id), silently losing
-  // all incremental-cache benefit on every rebuild after the first.
+  // Per Rollup's plugin hook contract, buildEnd fires once per rebuild in watch mode; closeWatcher fires once when
+  // the watch process shuts down. hotUpdate never fires; Rollup reports changes through watchChange.
 
-  describe('buildEnd / closeWatcher session lifecycle under `vite build --watch`', () => {
-    it('does not close the session on buildEnd while watching', () => {
-      const p = caliperDocgen({ srcDirs: ['src'] })
+  describe('vite build --watch', () => {
+    const watchBuild = () => {
+      const p = caliperDocgen({ srcDirs: ['src', 'lib'] })
       ;(p.configResolved as Function)({ root: '/project', command: 'build', build: { watch: {} } })
+      return p
+    }
+
+    it('does not close the session on buildEnd while watching', () => {
+      const p = watchBuild()
       ;(p.buildEnd as Function)()
       ;(p.buildEnd as Function)() // a second rebuild's buildEnd
       expect(napi.closeSession).not.toHaveBeenCalled()
     })
 
     it('closes the session via closeWatcher when the watch process shuts down', () => {
-      const p = caliperDocgen({ srcDirs: ['src'] })
-      ;(p.configResolved as Function)({ root: '/project', command: 'build', build: { watch: {} } })
-      ;(p.closeWatcher as Function)()
+      ;(watchBuild().closeWatcher as Function)()
       expect(napi.closeSession).toHaveBeenCalledWith(42)
+    })
+
+    it('watches every source directory, so a change to a file no bundle module imports still rebuilds', async () => {
+      const ctx = pluginContext()
+      await (watchBuild().buildStart as Function).call(ctx)
+      expect(ctx.addWatchFile.mock.calls).toEqual([['/project/src'], ['/project/lib']])
+    })
+
+    it('applies a changed source file before the next rebuild loads the virtual module', async () => {
+      const p = watchBuild()
+      await (p.buildStart as Function).call(pluginContext())
+
+      await (p.watchChange as Function)('/project/src/Button.tsx', { event: 'update' })
+      await (p.watchChange as Function)('/project/src/notes.md', { event: 'update' })
+      await (p.buildStart as Function).call(pluginContext())
+
+      expect((napi.extractFileIncremental as any).mock.calls.map(([file]: [string]) => file)).toEqual([
+        '/project/src/Button.tsx',
+      ])
+      expect(napi.initializeSession).toHaveBeenCalledTimes(1)
+      const code = await (p.load as Function).call(pluginContext(), '\0virtual:caliper-docgen')
+      expect(code).toBe(`export default ${SNAPSHOT}`)
     })
   })
 
   // ── buildStart ─────────────────────────────────────────────────────────────
-  //
-  // configureServer (which runs the cold extraction that populates the virtual
-  // module's data) is a dev-server-only hook — Vite never calls it during
-  // `vite build`. Without a build-mode extraction path, a production build's
-  // `virtual:caliper-docgen` import always resolved to the empty placeholder
-  // stats/components declared at plugin construction time.
 
   describe('buildStart', () => {
     it('runs cold extraction when the command is "build"', async () => {
       ;(plugin.configResolved as Function)({ root: '/project', command: 'build' })
-      await (plugin.buildStart as Function)()
+      await (plugin.buildStart as Function).call(pluginContext())
       expect(napi.initializeSession).toHaveBeenCalledWith(42, expect.objectContaining({ srcDirs: ['/project/src'] }))
-      const code = (plugin.load as Function)('\0virtual:caliper-docgen') as string
-      expect(code).toMatch(/^export default \{/)
     })
 
     it('does not run cold extraction when the command is "serve" (configureServer handles it)', async () => {
       ;(plugin.configResolved as Function)({ root: '/project', command: 'serve' })
-      await (plugin.buildStart as Function)()
+      await (plugin.buildStart as Function).call(pluginContext())
       expect(napi.initializeSession).not.toHaveBeenCalled()
     })
 
-    // coldExtract's own malformed-JSON fallback (distinct from hotUpdate's —
-    // see that describe block): logs and leaves currentOutput at its
-    // placeholder value rather than throwing out of buildStart.
-
-    it('logs and leaves the virtual module at its placeholder when initializeSession returns malformed JSON', async () => {
-      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-      ;(napi.initializeSession as any).mockResolvedValueOnce('not valid json')
+    it('fails the build when extraction fails, instead of shipping an empty virtual module', async () => {
+      ;(napi.initializeSession as any).mockRejectedValueOnce(new Error('no source directories'))
       ;(plugin.configResolved as Function)({ root: '/project', command: 'build' })
-      await (plugin.buildStart as Function)()
-
-      expect(consoleError).toHaveBeenCalledWith(
-        '[caliper-docgen] Failed to parse initializeSession output:',
-        expect.any(Error),
+      const ctx = pluginContext()
+      await expect((plugin.buildStart as Function).call(ctx)).rejects.toThrow(
+        '[caliper-docgen] extraction failed: Error: no source directories',
       )
-      const code = (plugin.load as Function)('\0virtual:caliper-docgen') as string
-      const data = JSON.parse(code.replace('export default ', ''))
-      expect(data.components).toEqual({})
-      consoleError.mockRestore()
     })
   })
 
@@ -484,9 +458,6 @@ describe('caliperDocgen', () => {
   })
 
   // ── exclude pass-through ───────────────────────────────────────────────────
-  //
-  // Simple pass-through in napiOptions(), but previously unasserted by any
-  // test with a non-default value.
 
   describe('exclude options forwarding', () => {
     it('forwards exclude to the NAPI call', () => {
