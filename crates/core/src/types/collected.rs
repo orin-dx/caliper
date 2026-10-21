@@ -741,6 +741,9 @@ pub enum DetectionRule {
     /// `const Button = (props: Props) => ...` or `const Button = function (props: Props) {}`: a PascalCase binding
     /// whose initializer is a synchronous function with a props-typed first parameter.
     TypedFunctionExpression,
+    /// `const Button = wrapper<ButtonFactory>(...)` or `wrapper<El, ButtonProps>(...)`: a generic call whose type
+    /// arguments carry the props type, chosen by shape from declarations in the same file.
+    WrapperTypeArgument,
 }
 
 /// A component → prop type mapping.
