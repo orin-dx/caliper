@@ -794,6 +794,33 @@ fn test_wrappers_that_do_not_change_the_value_are_peeled() {
 }
 
 #[test]
+fn each_mapping_records_the_rule_that_found_it() {
+    use crate::types::DetectionRule::*;
+    let source = r#"
+        import React, { forwardRef, memo, Component } from "react";
+        interface P { a: string }
+        export const Fc: React.FC<P> = (props) => <div />;
+        export const Fwd = forwardRef<HTMLDivElement, P>((props, ref) => <div ref={ref} />);
+        export const Hoc = memo(function Hoc(props: P) { return <div />; });
+        export function Decl(props: P) { return <div />; }
+        export class Cls extends Component<P> { render() { return <div />; } }
+    "#;
+    let data = parse_file(Utf8Path::new("/test/rules.tsx"), source);
+    let found: Vec<(&str, crate::types::DetectionRule)> =
+        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.rule)).collect();
+    assert_eq!(
+        found,
+        vec![
+            ("Fc", FcAnnotation),
+            ("Fwd", ForwardRef),
+            ("Hoc", HocWrapper),
+            ("Decl", FunctionDeclaration),
+            ("Cls", ClassComponent)
+        ]
+    );
+}
+
+#[test]
 fn test_memo_forward_ref_detected() {
     let source = r#"
         import React, { memo, forwardRef } from "react";

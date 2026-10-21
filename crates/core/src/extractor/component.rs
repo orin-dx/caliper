@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use camino::Utf8Path;
 use oxc_ast::ast::*;
 
-use crate::types::{ComponentMapping, DiagnosticCode};
+use crate::types::{ComponentMapping, DetectionRule, DiagnosticCode};
 
 use super::{is_pascal_case, SourceDataCollector};
 
@@ -16,7 +16,7 @@ use super::{is_pascal_case, SourceDataCollector};
 /// "required due to lack of distributive union to support unions on
 /// @types/react"); `satisfies` (TS 4.9+) is the modern equivalent of the same
 /// pattern and must be peeled the same way.
-fn unwrap_as_expression<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
+fn peel_expr<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
     let mut expr = expr;
     loop {
         expr = match expr {
@@ -112,10 +112,17 @@ impl<'src> SourceDataCollector<'src> {
                 let (props_name, type_args) = self.extract_props_arg(&tr.type_arguments)?;
                 let (description, tags) = self.find_jsdoc_with_tags(span_start);
                 Some(
-                    ComponentMapping::new(name.to_owned(), props_name, self.file_path.clone(), span_start, span_end)
-                        .with_props_type_args(type_args)
-                        .with_doc(description, tags)
-                        .with_param_defaults(init_params.map(|p| self.extract_param_defaults(p)).unwrap_or_default()),
+                    ComponentMapping::new(
+                        name.to_owned(),
+                        props_name,
+                        self.file_path.clone(),
+                        span_start,
+                        span_end,
+                        DetectionRule::FcAnnotation,
+                    )
+                    .with_props_type_args(type_args)
+                    .with_doc(description, tags)
+                    .with_param_defaults(init_params.map(|p| self.extract_param_defaults(p)).unwrap_or_default()),
                 )
             }
             TSType::TSParenthesizedType(p) => {
@@ -132,7 +139,7 @@ impl<'src> SourceDataCollector<'src> {
         name: &str,
     ) -> Option<ComponentMapping> {
         let init = decl.init.as_ref()?;
-        let call = match unwrap_as_expression(init) {
+        let call = match peel_expr(init) {
             Expression::CallExpression(ce) => ce,
             _ => return None,
         };
@@ -161,10 +168,17 @@ impl<'src> SourceDataCollector<'src> {
         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
 
         Some(
-            ComponentMapping::new(name.to_owned(), props_name, self.file_path.clone(), decl.span.start, decl.span.end)
-                .with_props_type_args(type_args)
-                .with_doc(description, tags)
-                .with_param_defaults(param_defaults),
+            ComponentMapping::new(
+                name.to_owned(),
+                props_name,
+                self.file_path.clone(),
+                decl.span.start,
+                decl.span.end,
+                DetectionRule::ForwardRef,
+            )
+            .with_props_type_args(type_args)
+            .with_doc(description, tags)
+            .with_param_defaults(param_defaults),
         )
     }
 
@@ -175,7 +189,7 @@ impl<'src> SourceDataCollector<'src> {
         name: &str,
     ) -> Option<ComponentMapping> {
         let init = decl.init.as_ref()?;
-        let call = match unwrap_as_expression(init) {
+        let call = match peel_expr(init) {
             Expression::CallExpression(ce) => ce,
             _ => return None,
         };
@@ -198,6 +212,7 @@ impl<'src> SourceDataCollector<'src> {
                                 self.file_path.clone(),
                                 decl.span.start,
                                 decl.span.end,
+                                DetectionRule::HocWrapper,
                             )
                             .with_props_type_args(type_args)
                             .with_doc(description, tags),
@@ -229,10 +244,17 @@ impl<'src> SourceDataCollector<'src> {
         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
 
         Some(
-            ComponentMapping::new(name.to_owned(), props_name, self.file_path.clone(), decl.span.start, decl.span.end)
-                .with_props_type_args(type_args)
-                .with_doc(description, tags)
-                .with_param_defaults(param_defaults),
+            ComponentMapping::new(
+                name.to_owned(),
+                props_name,
+                self.file_path.clone(),
+                decl.span.start,
+                decl.span.end,
+                DetectionRule::HocWrapper,
+            )
+            .with_props_type_args(type_args)
+            .with_doc(description, tags)
+            .with_param_defaults(param_defaults),
         )
     }
 
@@ -279,10 +301,17 @@ impl<'src> SourceDataCollector<'src> {
         let props_type_args: Vec<String> = props_args.iter().map(|a| a.to_raw_string()).collect();
 
         Some(
-            ComponentMapping::new(name.to_owned(), props_name, self.file_path.clone(), decl.span.start, decl.span.end)
-                .with_props_type_args(props_type_args)
-                .with_doc(self.find_jsdoc(decl.span.start), BTreeMap::new())
-                .with_param_defaults(rustc_hash::FxHashMap::default()),
+            ComponentMapping::new(
+                name.to_owned(),
+                props_name,
+                self.file_path.clone(),
+                decl.span.start,
+                decl.span.end,
+                DetectionRule::ForwardRefExoticDecl,
+            )
+            .with_props_type_args(props_type_args)
+            .with_doc(self.find_jsdoc(decl.span.start), BTreeMap::new())
+            .with_param_defaults(rustc_hash::FxHashMap::default()),
         )
     }
 
@@ -320,10 +349,17 @@ impl<'src> SourceDataCollector<'src> {
         let (description, tags) = self.find_jsdoc_with_tags(func.span.start);
         let param_defaults = self.extract_param_defaults(&func.params);
         self.data.component_mappings.push(
-            ComponentMapping::new(name, props_name, self.file_path.clone(), func.span.start, func.span.end)
-                .with_props_type_args(type_args)
-                .with_doc(description, tags)
-                .with_param_defaults(param_defaults),
+            ComponentMapping::new(
+                name,
+                props_name,
+                self.file_path.clone(),
+                func.span.start,
+                func.span.end,
+                DetectionRule::AnonymousDefaultExport,
+            )
+            .with_props_type_args(type_args)
+            .with_doc(description, tags)
+            .with_param_defaults(param_defaults),
         );
     }
 
@@ -360,6 +396,7 @@ impl<'src> SourceDataCollector<'src> {
                 self.file_path.clone(),
                 class.span.start,
                 class.span.end,
+                DetectionRule::ClassComponent,
             )
             .with_props_type_args(props_type_args)
             .with_doc(description, tags)
@@ -438,7 +475,7 @@ impl<'src> SourceDataCollector<'src> {
         name: &str,
     ) -> bool {
         let Some(init) = decl.init.as_ref() else { return false };
-        let inner_name = match unwrap_as_expression(init) {
+        let inner_name = match peel_expr(init) {
             Expression::CallExpression(call) => match call.arguments.first() {
                 Some(Argument::Identifier(id)) => id.name.as_str(),
                 _ => return false,
