@@ -188,23 +188,80 @@ const CASES: &[Case] = &[
         expect: &[],
     },
     Case {
-        shape: "wrapper call whose props type resolves to nothing",
+        shape: "wrapper call whose props live in an uninstalled package",
         source: r#"
             import type { MissingProps } from "./missing";
             export const Ghost = wrap<HTMLDivElement, MissingProps>("div");
         "#,
+        expect: &[("Ghost", &[])],
+    },
+    Case {
+        shape: "generic call that is a context, store, label or hook",
+        source: r#"
+            import { createContext } from "react";
+            interface ButtonProps { label?: string }
+            interface BearState { bears: number }
+            export const ButtonContext = createContext<ButtonProps>(defaultButton);
+            export const MadeContext = createContext<ButtonProps>(makeDefault());
+            export const MaybeContext = createContext<ButtonProps | undefined>(undefined);
+            export const Bears = create<BearState>((set) => ({ bears: 0 }));
+            export const ButtonLabel = makeLabel<ButtonProps>("button");
+            export const ButtonSchema = z.object<ButtonProps>(shape);
+            export const UseButton = makeHook<ButtonProps>(fetcher);
+        "#,
         expect: &[],
     },
     Case {
-        shape: "async and untyped functions",
+        shape: "typed helpers and higher-order calls that never render",
+        source: r#"
+            interface User { first: string }
+            export const FormatName = (u: User) => u.first;
+            export function FullName(u: User): string { return u.first; }
+            export function* Saga(u: User) { yield u; }
+            export const Search = debounce((q: User) => q.first, 100);
+            export const Picked = createSelector((u: User) => u.first);
+            export const Memoized = memo((u: User) => u.first);
+        "#,
+        expect: &[],
+    },
+    Case {
+        shape: "a component passed to a call that is not a wrapper",
+        source: r#"
+            interface CardProps { title?: string }
+            export function Card(props: CardProps) { return <div />; }
+            export const CardName = getDisplayName(Card);
+            export const MemoCard = memo(Card);
+        "#,
+        expect: &[("Card", &["title"]), ("MemoCard", &["title"])],
+    },
+    Case {
+        shape: "untyped and non-PascalCase functions",
         source: r#"
             interface P { label?: string }
-            export const Load = async (props: P) => null;
             export const Untyped = (props) => <div />;
             export const Sum = (a: number, b: number) => a + b;
             export const helper = (props: P) => props.label;
         "#,
         expect: &[],
+    },
+    Case {
+        shape: "async server component",
+        source: r#"
+            interface P { label?: string }
+            export const Load = async (props: P) => <div>{props.label}</div>;
+            export async function Page(props: P): Promise<JSX.Element> { return <main />; }
+        "#,
+        expect: &[("Load", &["label"]), ("Page", &["label"])],
+    },
+    Case {
+        shape: "components that render without JSX",
+        source: r#"
+            import { createElement } from "react";
+            interface P { children?: string }
+            export const Passthrough = ({ children }: P) => children;
+            export const Created = (props: P) => createElement("div", props);
+        "#,
+        expect: &[("Created", &["children"]), ("Passthrough", &["children"])],
     },
 ];
 

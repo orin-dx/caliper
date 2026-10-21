@@ -840,7 +840,100 @@ fn typed_arrow_and_function_expression_components_are_detected() {
         .iter()
         .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule))
         .collect();
-    assert_eq!(found, vec![("A", "AProps", TypedFunctionExpression), ("B", "BProps", TypedFunctionExpression)]);
+    // C is an async server component: its declared `Promise<JSX.Element>` return is the evidence.
+    assert_eq!(
+        found,
+        vec![
+            ("A", "AProps", TypedFunctionExpression),
+            ("B", "BProps", TypedFunctionExpression),
+            ("C", "CProps", TypedFunctionExpression)
+        ]
+    );
+}
+
+#[test]
+fn typed_functions_that_never_render_are_declined_with_the_reason() {
+    let source = r#"
+        interface User { first: string; last: string }
+        export const FormatName = (u: User) => `${u.first} ${u.last}`;
+        export const ToDto = (u: User): { id: string } => ({ id: u.first });
+        export function FullName(u: User): string { return u.first; }
+        export function* Saga(u: User) { yield u; }
+        export const Search = debounce((q: User) => q.first, 100);
+        export const Selector = createSelector((u: User) => u.first);
+    "#;
+    let data = parse_file(Utf8Path::new("/test/helpers.tsx"), source);
+    assert_eq!(
+        data.component_mappings.iter().map(|m| m.component_name.as_str()).collect::<Vec<_>>(),
+        Vec::<&str>::new()
+    );
+    let mut reasons: Vec<String> = data
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::SkippedCandidate)
+        .map(|d| d.message.clone())
+        .collect();
+    reasons.sort();
+    assert_eq!(
+        reasons,
+        vec![
+            "'FormatName' takes a typed props parameter but never renders: no JSX, element, hook call, or returned null, children or component call",
+            "'FullName' takes a typed props parameter but declares a return type that is not an element",
+            "'Saga' takes a typed props parameter but is a generator",
+            "'Search' wraps a typed function that never renders: no JSX, element, hook call, or returned null, children or component call",
+            "'Selector' wraps a typed function that never renders: no JSX, element, hook call, or returned null, children or component call",
+            "'ToDto' takes a typed props parameter but declares a return type that is not an element",
+        ]
+    );
+}
+
+#[test]
+fn components_that_render_without_jsx_are_still_detected() {
+    let source = r#"
+        import { createElement, cloneElement } from "react";
+        interface P { children?: any; el?: any }
+        export const Passthrough = ({ children }: P) => children;
+        export function Slot(props: P) { return cloneElement(props.el, {}); }
+        export const Factory = (props: P) => createElement("div", props);
+        export function Hidden(props: P) { if (!props.el) return null; return props.children; }
+    "#;
+    let data = parse_file(Utf8Path::new("/test/no_jsx.tsx"), source);
+    let mut names: Vec<&str> = data.component_mappings.iter().map(|m| m.component_name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["Factory", "Hidden", "Passthrough", "Slot"]);
+}
+
+#[test]
+fn a_component_passed_to_a_non_wrapper_call_keeps_its_name_and_the_call_is_not_a_component() {
+    let source = r#"
+        import { memo } from "react";
+        interface CardProps { title?: string }
+        export function Card(props: CardProps) { return <div />; }
+        export const MemoCard = memo(Card);
+        export const CardName = getDisplayName(Card);
+        function InnerPill(props: CardProps) { return <span />; }
+        export const Pill = withTheme(InnerPill);
+    "#;
+    let data = parse_file(Utf8Path::new("/test/alias.tsx"), source);
+    let mut names: Vec<&str> = data.component_mappings.iter().map(|m| m.component_name.as_str()).collect();
+    names.sort_unstable();
+    // `Card` is exported, so its alias does not hide it; `InnerPill` is not, so `Pill` replaces it.
+    assert_eq!(names, vec!["Card", "MemoCard", "Pill"]);
+    assert!(data.diagnostics.iter().any(
+        |d| d.message == "'CardName' passes component 'Card' to a call that does not look like a component wrapper"
+    ));
+}
+
+#[test]
+fn a_declared_function_with_an_element_return_type_is_a_component() {
+    let source = r#"
+        interface ButtonProps { label?: string }
+        export declare function Button(props: ButtonProps): JSX.Element;
+        export declare function format(props: ButtonProps): string;
+        export declare function Format(props: ButtonProps): string;
+    "#;
+    let data = parse_file(Utf8Path::new("/test/button.d.ts"), source);
+    assert_eq!(data.component_mappings.iter().map(|m| m.component_name.as_str()).collect::<Vec<_>>(), vec!["Button"]);
 }
 
 #[test]

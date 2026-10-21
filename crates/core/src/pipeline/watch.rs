@@ -263,12 +263,7 @@ impl WatchSession {
             }
         }
 
-        for ((entry, diags), mapping) in results.into_iter().zip(&affected_mappings) {
-            if let Some(note) = super::unresolved_wrapper_guess(mapping, &entry) {
-                diagnostics.extend(diags);
-                diagnostics.push(note);
-                continue;
-            }
+        for (entry, diags) in results {
             // Disambiguate against whatever's left in the cache after this
             // file's own stale keys were just evicted above — mirrors Phase
             // 5's bare-then-disambiguated rule (extract()'s one-shot path),

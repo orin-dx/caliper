@@ -7,6 +7,7 @@ use oxc_ast::ast::*;
 
 use crate::types::{ComponentMapping, DetectionRule, DiagnosticCode};
 
+use super::evidence::{renders, FunctionShape};
 use super::{is_pascal_case, SourceDataCollector};
 
 /// Peel any wrapping `as X` casts, `satisfies X` checks or `!` assertions down to the real
@@ -182,20 +183,24 @@ impl<'src> SourceDataCollector<'src> {
         )
     }
 
-    /// Try to detect: `const Button = ({ variant }: ButtonProps) => ...` and the `function` expression form. Async
-    /// and generator functions cannot be components, and a first parameter that is not a named type (a primitive,
-    /// a literal) is not a props object.
+    /// Try to detect: `const Button = ({ variant }: ButtonProps) => ...` and the `function` expression form. The
+    /// function must show it renders (see `evidence`): a typed first parameter alone also describes helpers such as
+    /// `FormatName = (u: User) => string`. A first parameter that is not a named type is not a props object.
     pub(super) fn try_typed_function_expression<'a>(
         &mut self,
         decl: &VariableDeclarator<'a>,
         name: &str,
     ) -> Option<ComponentMapping> {
-        let params = match peel_expr(decl.init.as_ref()?) {
-            Expression::ArrowFunctionExpression(afe) if !afe.r#async => &*afe.params,
-            Expression::FunctionExpression(fe) if !fe.r#async && !fe.generator => &*fe.params,
+        let (params, shape) = match peel_expr(decl.init.as_ref()?) {
+            Expression::ArrowFunctionExpression(afe) => (&*afe.params, FunctionShape::of_arrow(afe)),
+            Expression::FunctionExpression(fe) => (&*fe.params, FunctionShape::of_function(fe)),
             _ => return None,
         };
         let type_ann = params.items.first()?.type_annotation.as_ref()?;
+        if let Err(reason) = renders(&shape) {
+            self.decline_reason = Some(format!("'{name}' takes a typed props parameter but {reason}"));
+            return None;
+        }
         let (props_name, type_args) = self.extract_type_name_from_type(&type_ann.type_annotation)?;
         let param_defaults = self.extract_param_defaults(params);
         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
@@ -255,9 +260,11 @@ impl<'src> SourceDataCollector<'src> {
             return None;
         }
 
-        let (fn_name, params) = match first_arg {
-            Argument::FunctionExpression(fe) => (fe.id.as_ref().map(|id| id.name.as_str()), &fe.params),
-            Argument::ArrowFunctionExpression(afe) => (None, &afe.params),
+        let (fn_name, params, shape) = match first_arg {
+            Argument::FunctionExpression(fe) => {
+                (fe.id.as_ref().map(|id| id.name.as_str()), &fe.params, FunctionShape::of_function(fe))
+            }
+            Argument::ArrowFunctionExpression(afe) => (None, &afe.params, FunctionShape::of_arrow(afe)),
             _ => return None,
         };
 
@@ -270,6 +277,11 @@ impl<'src> SourceDataCollector<'src> {
 
         let first_param = params.items.first()?;
         let type_ann = first_param.type_annotation.as_ref()?;
+        // `debounce((q: Row) => …)` and `createSelector((s: State) => …)` have the same shape as `memo(…)`.
+        if let Err(reason) = renders(&shape) {
+            self.decline_reason = Some(format!("'{name}' wraps a typed function that {reason}"));
+            return None;
+        }
         let (props_name, type_args) = self.extract_type_name_from_type(&type_ann.type_annotation)?;
 
         let param_defaults = self.extract_param_defaults(params);
@@ -507,18 +519,28 @@ impl<'src> SourceDataCollector<'src> {
         name: &str,
     ) -> bool {
         let Some(init) = decl.init.as_ref() else { return false };
-        let inner_name = match peel_expr(init) {
+        let (inner_name, call) = match peel_expr(init) {
             Expression::CallExpression(call) => match call.arguments.first() {
-                Some(Argument::Identifier(id)) => id.name.as_str(),
+                Some(Argument::Identifier(id)) => (id.name.as_str(), Some(&**call)),
                 _ => return false,
             },
-            Expression::Identifier(id) => id.name.as_str(),
+            Expression::Identifier(id) => (id.name.as_str(), None),
             _ => return false,
         };
 
         let Some(base) = self.data.component_mappings.iter().find(|m| m.component_name == inner_name) else {
             return false;
         };
+        // `getDisplayName(Card)` has the same shape as `memo(Card)` but returns a string; only a call that follows the
+        // component-wrapper conventions produces a component.
+        if let Some(call) = call {
+            if !is_component_wrapper_call(call) {
+                self.decline_reason = Some(format!(
+                    "'{name}' passes component '{inner_name}' to a call that does not look like a component wrapper"
+                ));
+                return false;
+            }
+        }
         let mut alias = base.clone();
         alias.component_name = name.to_owned();
         self.data.component_mappings.push(alias);
@@ -536,4 +558,23 @@ impl<'src> SourceDataCollector<'src> {
             _ => None,
         }
     }
+}
+
+/// Whether a call wrapping a component returns a component, by React's own wrappers and the ecosystem's conventions:
+/// `memo`, anything named like `forwardRef`, `withX(...)` higher-order components, `createXComponent(...)` factories,
+/// `observer`, and curried wrappers such as `connect(...)(Component)` or `styled(...)(Component)`.
+pub(super) fn is_component_wrapper_call(call: &CallExpression<'_>) -> bool {
+    // `(forwardRef as forwardRefType)(X)` is React Aria's spelling of `forwardRef(X)`.
+    let callee = match peel_expr(&call.callee) {
+        Expression::Identifier(id) => id.name.as_str(),
+        Expression::StaticMemberExpression(m) => m.property.name.as_str(),
+        Expression::CallExpression(_) => return true,
+        _ => return false,
+    };
+    let lower = callee.to_ascii_lowercase();
+    callee == "memo"
+        || callee == "observer"
+        || lower.contains("forwardref")
+        || callee.contains("Component")
+        || (callee.len() > 4 && callee.starts_with("with") && callee[4..].starts_with(|c: char| c.is_ascii_uppercase()))
 }

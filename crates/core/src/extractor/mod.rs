@@ -25,6 +25,7 @@ use crate::types::{
 mod alias;
 mod component;
 mod defaults;
+mod evidence;
 mod interface;
 mod jsdoc;
 mod visit;
@@ -217,6 +218,8 @@ pub(super) struct SourceDataCollector<'src> {
     /// `export { local as exported }` without a source: the index into `data.exports` and the `local` name, so
     /// `finish()` can recognize a re-exported import once every import has been seen.
     pub(super) pending_local_exports: Vec<(usize, String)>,
+    /// Why the current declarator's detector chain declined a candidate, used as the skip diagnostic's message.
+    pub(super) decline_reason: Option<String>,
 }
 
 impl<'src> SourceDataCollector<'src> {
@@ -234,6 +237,7 @@ impl<'src> SourceDataCollector<'src> {
             aliased_away: FxHashSet::default(),
             pending_wrappers: Vec::new(),
             pending_local_exports: Vec::new(),
+            decline_reason: None,
         }
     }
 
@@ -265,8 +269,20 @@ impl<'src> SourceDataCollector<'src> {
         // Filtered by original identifier first, before any displayName rename
         // below can change what identifier a mapping currently answers to.
         if !self.aliased_away.is_empty() {
-            let aliased_away = &self.aliased_away;
-            self.data.component_mappings.retain(|m| !aliased_away.contains(m.component_name.as_str()));
+            // An exported base is public under its own name too (`export function Card`, `export const MemoCard =
+            // memo(Card)`); only an implementation-only base is hidden behind its alias.
+            let exported: rustc_hash::FxHashSet<&str> = self
+                .data
+                .exports
+                .iter()
+                .filter_map(|e| match e {
+                    crate::types::LexedExport::LocalDeclaration { name, .. } => Some(name.as_str()),
+                    _ => None,
+                })
+                .collect();
+            let hidden: FxHashSet<CompactString> =
+                self.aliased_away.iter().filter(|n| !exported.contains(n.as_str())).cloned().collect();
+            self.data.component_mappings.retain(|m| !hidden.contains(m.component_name.as_str()));
         }
         for (obj_name, display_name) in self.pending_display_name_renames.drain(..) {
             if let Some(mapping) = self.data.component_mappings.iter_mut().find(|m| m.component_name == obj_name) {
