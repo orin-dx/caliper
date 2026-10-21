@@ -341,8 +341,7 @@ impl<'src> SourceDataCollector<'src> {
             _ => return None,
         };
 
-        // Convert args to strings for ComponentMapping (resolver will re-parse)
-        let props_type_args: Vec<String> = props_args.iter().map(|a| a.to_raw_string()).collect();
+        let props_type_args = props_args;
 
         Some(
             ComponentMapping::new(

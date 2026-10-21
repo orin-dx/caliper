@@ -52,18 +52,23 @@ pub(super) fn resolve_extends_ref(
                 // expand directly to HtmlAttributes based on the first type arg.
                 let bare = name.as_str().strip_prefix("React.").unwrap_or(name.as_str());
                 if matches!(bare, "ComponentPropsWithoutRef" | "ComponentPropsWithRef" | "ComponentProps") {
-                    if let Some(raw_arg) = type_args.first() {
-                        let inner = raw_arg.trim().trim_matches('"').trim_matches('\'');
-                        if !inner.is_empty() {
+                    match type_args.first() {
+                        // `ComponentProps<"button">`: an intrinsic element's attributes.
+                        Some(CollectedType::StringLiteral(tag)) => {
                             let layer = InheritedLayer {
                                 type_name: name.to_string(),
                                 file_name: resolve_react_types_file(iface_file, ctx),
                                 omitted: vec![],
-                                html_element: Some(inner.to_lowercase()),
+                                html_element: Some(tag.to_lowercase().to_string()),
                                 total_props: 0,
                             };
                             return (ResolvedChain::empty(), Some(layer));
                         }
+                        // `ComponentProps<typeof Button>`: that component's own props.
+                        Some(CollectedType::TypeOf(component)) => {
+                            return (component_props_of(component, iface_file, mapping, ctx, state, depth), None);
+                        }
+                        _ => {}
                     }
                 }
                 // Other non-HTML builtins (PropsWithChildren, ElementRef, etc.)
@@ -94,6 +99,48 @@ pub(super) fn resolve_extends_ref(
             let chain =
                 resolve_props_chain(local_name.as_str(), type_args, &consuming_file, mapping, ctx, state, depth);
             (chain, None)
+        }
+    }
+}
+
+/// The props of the component bound to `name` as seen from `file` (`typeof Button`), found through the component
+/// mappings, with a warning when no detected component has that name.
+fn component_props_of(
+    name: &str,
+    file: &Utf8Path,
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> ResolvedChain {
+    let (canonical_file, canonical_name) = resolve_to_canonical(name, file, ctx, &mut state.diagnostics)
+        .unwrap_or_else(|| (file.to_owned(), name.to_owned()));
+    let target = ctx
+        .global
+        .component_mappings
+        .iter()
+        .find(|m| m.file_path == canonical_file && m.component_name == canonical_name);
+    match target {
+        Some(target) => resolve_props_chain(
+            target.props_type_name.as_str(),
+            &target.props_type_args,
+            &target.file_path,
+            mapping,
+            ctx,
+            state,
+            depth + 1,
+        ),
+        None => {
+            state.diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticSeverity::Warning,
+                    DiagnosticCode::UnresolvableImport,
+                    format!("Cannot find the component '{name}' whose props are referenced from '{file}'"),
+                )
+                .with_file(file.to_string())
+                .with_help("ComponentProps<typeof X> needs X to be a component detected in the project or its installed types."),
+            );
+            ResolvedChain::empty_with_compose(format!("ComponentProps<typeof {name}>"))
         }
     }
 }

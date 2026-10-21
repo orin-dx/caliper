@@ -456,9 +456,7 @@ expression: value
                 "args": []
               },
               {
-                "kind": "named",
-                "name": "React.CSSProperties",
-                "args": []
+                "kind": "cssProperties"
               }
             ]
           },
@@ -1745,9 +1743,7 @@ expression: value
                 "args": []
               },
               {
-                "kind": "named",
-                "name": "React.CSSProperties",
-                "args": []
+                "kind": "cssProperties"
               }
             ]
           },

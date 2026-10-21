@@ -1611,6 +1611,68 @@ fn test_barrel_that_imports_then_exports_a_name_is_followed() {
     assert_eq!(output.components["Only"].props.keys().collect::<Vec<_>>(), vec!["other", "size", "unstyled"]);
 }
 
+// Type arguments travel as structured types; each case here was silently wrong while they travelled as display text.
+#[test]
+fn test_structured_type_arguments_resolve_exactly() {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "a.tsx",
+        "import type { FC, ComponentPropsWithoutRef } from \"react\";\n\
+         interface Base { T: string; number: boolean; other: number }\n\
+         interface QuotedKey<T> extends Pick<Base, \"T\"> { own: T }\n\
+         export function Quoted(props: QuotedKey<number>) { return null }\n\
+         type Infinity = { x: string };\n\
+         interface Box<T> { value: T }\n\
+         export function Inf(props: Box<Infinity>) { return null }\n\
+         export function Fn(props: Box<(a: string) => void>) { return null }\n\
+         export function Arr(props: Box<(\"x\" | \"y\")[]>) { return null }\n\
+         interface O1 { a?: string; b?: number }\n\
+         export interface Req extends Required<O1> { own?: boolean }\n\
+         export function R(props: Req) { return null }\n\
+         interface ButtonProps { variant?: string; size?: number }\n\
+         export function Button(props: ButtonProps) { return <button /> }\n\
+         export interface Wrapped extends ComponentPropsWithoutRef<typeof Button> { own?: boolean }\n\
+         export function W(props: Wrapped) { return null }\n\
+         type Wrap<T> = { inner: T };\n\
+         export const Nested: FC<Box<Wrap<{ b: string }>>> = () => null;\n",
+    );
+    let dir = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![dir],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+
+    let output = extract(&options);
+
+    let props = |component: &str| -> Vec<(String, String, bool)> {
+        output.components[component]
+            .props
+            .iter()
+            .map(|(name, p)| (name.clone(), p.prop_type.raw_string(), p.required))
+            .collect()
+    };
+    let p = |n: &str, t: &str, r: bool| (n.to_owned(), t.to_owned(), r);
+    // The key "T" is a string, not the type parameter T.
+    assert_eq!(props("Quoted"), vec![p("T", "string", true), p("own", "number", true)]);
+    // A type named Infinity is that type, not the number.
+    assert_eq!(props("Inf"), vec![p("value", "{ x: string }", true)]);
+    assert_eq!(props("Fn"), vec![p("value", "(a: string) => void", true)]);
+    assert!(matches!(output.components["Arr"].props["value"].prop_type, PropType::Array(_)));
+    // Required<O1> makes O1's props required.
+    assert_eq!(props("R"), vec![p("a", "string", true), p("b", "number", true), p("own", "boolean", false)]);
+    // ComponentPropsWithoutRef<typeof Button> is Button's props, not an element called "typeof button".
+    assert_eq!(props("W"), vec![p("own", "boolean", false), p("size", "number", false), p("variant", "string", false)]);
+    assert!(output.components["W"].inheritance.is_empty());
+    // Distinct nested object arguments are distinct visits, not a cycle.
+    assert!(
+        !output.diagnostics.iter().any(|d| d.code == DiagnosticCode::CircularReference),
+        "diagnostics: {:?}",
+        output.diagnostics
+    );
+}
+
 // ── test_overlapping_src_dirs_two_directories_deduplicates_without_a_duplicate_listing ─
 //
 // Corrected finding: the insert-return check above only catches a genuine

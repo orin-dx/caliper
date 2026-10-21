@@ -1217,8 +1217,14 @@ fn test_two_distinct_partial_extends_targets_both_resolve() {
             file_path: file_path.clone(),
             props: vec![],
             extends: vec![
-                ExtendsRef::SameFile { name: "Partial".into(), type_args: vec!["RowHeights".into()] },
-                ExtendsRef::SameFile { name: "Partial".into(), type_args: vec!["ColumnWidths".into()] },
+                ExtendsRef::SameFile {
+                    name: "Partial".into(),
+                    type_args: vec![CollectedType::Named { name: "RowHeights".into(), args: vec![] }],
+                },
+                ExtendsRef::SameFile {
+                    name: "Partial".into(),
+                    type_args: vec![CollectedType::Named { name: "ColumnWidths".into(), args: vec![] }],
+                },
             ],
             description: String::new(),
             tags: BTreeMap::new(),
@@ -1563,7 +1569,10 @@ fn test_generic_type_alias_substitution() {
         0,
         crate::types::DetectionRule::FunctionDeclaration,
     )
-    .with_props_type_args(vec!["Base".to_string(), "Overrides".to_string()]);
+    .with_props_type_args(vec![
+        CollectedType::Named { name: "Base".into(), args: vec![] },
+        CollectedType::Named { name: "Overrides".into(), args: vec![] },
+    ]);
 
     let (entry, _diagnostics) = resolve_component(&mapping, &ctx);
 
@@ -2633,30 +2642,4 @@ fn ts_lib_paths_keep_the_files_found_and_name_only_the_missing_one() {
 fn ts_lib_paths_are_empty_and_silent_without_typescript() {
     let tmp = tempfile::TempDir::new().unwrap();
     assert_eq!(lib_paths_from(tmp.path()), TsLibs::default());
-}
-
-#[test]
-fn parse_generic_reference_splits_top_level_arguments_only() {
-    use super::collected::parse_generic_reference;
-    let shape = |text: &str| -> Option<(String, Vec<String>)> {
-        match parse_generic_reference(text)? {
-            CollectedType::Named { name, args } => Some((
-                name.to_string(),
-                args.into_iter()
-                    .map(|a| if let CollectedType::Raw(raw) = a { raw } else { String::from("<not raw>") })
-                    .collect(),
-            )),
-            _ => None,
-        }
-    };
-    let expect =
-        |name: &str, args: &[&str]| Some((name.to_owned(), args.iter().map(|a| (*a).to_owned()).collect::<Vec<_>>()));
-    assert_eq!(shape("Gen<number>"), expect("Gen", &["number"]));
-    assert_eq!(shape("Assign<A<B, C>, \"x,y\">"), expect("Assign", &["A<B, C>", "\"x,y\""]));
-    assert_eq!(shape("Ns.Gen<{ a: 1; b: 2 }, [1, 2]>"), expect("Ns.Gen", &["{ a: 1; b: 2 }", "[1, 2]"]));
-    assert_eq!(shape("Plain"), None);
-    assert_eq!(shape("Gen<>"), None);
-    assert_eq!(shape("Gen<A"), None);
-    assert_eq!(shape("Gen<A>>"), None);
-    assert_eq!(shape("A | Gen<B>"), None);
 }
