@@ -129,7 +129,9 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
             line: None,
             column: None,
             help: Some("Reduce nested parenthesized/object/conditional types in this file.".into()),
-            code: DiagnosticCode::ExcessiveNesting, affects: Vec::new(), });
+            code: DiagnosticCode::ExcessiveNesting,
+            affects: Vec::new(),
+        });
         return data;
     }
 
