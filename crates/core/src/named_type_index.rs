@@ -17,16 +17,20 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use compact_str::CompactString;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
+
+use crate::path_key::PathKey;
 
 use crate::types::{CollectedInterface, CollectedTypeAlias, GlobalSourceData, SourceData, TypeName};
 
 #[derive(Clone, Default)]
 pub(crate) struct NamedTypeIndex {
-    interfaces: FxHashMap<Utf8PathBuf, FxHashMap<CompactString, CollectedInterface>>,
-    type_aliases: FxHashMap<Utf8PathBuf, FxHashMap<CompactString, CollectedTypeAlias>>,
-    type_alias_params: FxHashMap<Utf8PathBuf, FxHashMap<CompactString, Vec<TypeName>>>,
-    interface_type_params: FxHashMap<Utf8PathBuf, FxHashMap<CompactString, Vec<TypeName>>>,
+    interfaces: FxHashMap<PathKey, FxHashMap<CompactString, CollectedInterface>>,
+    type_aliases: FxHashMap<PathKey, FxHashMap<CompactString, CollectedTypeAlias>>,
+    type_alias_params: FxHashMap<PathKey, FxHashMap<CompactString, Vec<TypeName>>>,
+    interface_type_params: FxHashMap<PathKey, FxHashMap<CompactString, Vec<TypeName>>>,
+    /// Files declaring `React.`-qualified names (`@types/react`), the only ones a qualified fallback can match.
+    react_namespaced: FxHashSet<PathKey>,
 }
 
 /// What `lookup_ambient` found at a given ambient lib file, mirroring the
@@ -53,6 +57,7 @@ impl NamedTypeIndex {
             type_aliases: FxHashMap::default(),
             type_alias_params: FxHashMap::default(),
             interface_type_params: FxHashMap::default(),
+            react_namespaced: FxHashSet::default(),
         };
         index.insert_flat_maps(
             &global.interfaces,
@@ -75,10 +80,11 @@ impl NamedTypeIndex {
     /// (which resolves every component in one run, not just the few affected
     /// by a single edit).
     pub(crate) fn remove_file(&mut self, file: &Utf8Path) {
-        self.interfaces.remove(file);
-        self.type_aliases.remove(file);
-        self.type_alias_params.remove(file);
-        self.interface_type_params.remove(file);
+        self.interfaces.remove(file.as_str());
+        self.type_aliases.remove(file.as_str());
+        self.type_alias_params.remove(file.as_str());
+        self.interface_type_params.remove(file.as_str());
+        self.react_namespaced.remove(file.as_str());
     }
 
     /// Insert one freshly re-parsed file's own (not yet merged) interfaces/
@@ -111,7 +117,10 @@ impl NamedTypeIndex {
     ) {
         for (key, iface) in interfaces {
             let Some((file, name)) = key.rsplit_once(':') else { continue };
-            let file = Utf8PathBuf::from(file);
+            let file = PathKey::from(Utf8Path::new(file));
+            if name.starts_with("React.") {
+                self.react_namespaced.insert(file.clone());
+            }
             self.interfaces.entry(file.clone()).or_default().insert(CompactString::from(name), iface.clone());
             if let Some(params) = interface_type_params.get(key) {
                 self.interface_type_params.entry(file).or_default().insert(CompactString::from(name), params.clone());
@@ -120,7 +129,10 @@ impl NamedTypeIndex {
 
         for (key, alias) in type_aliases {
             let Some((file, name)) = key.rsplit_once(':') else { continue };
-            let file = Utf8PathBuf::from(file);
+            let file = PathKey::from(Utf8Path::new(file));
+            if name.starts_with("React.") {
+                self.react_namespaced.insert(file.clone());
+            }
             self.type_aliases.entry(file.clone()).or_default().insert(CompactString::from(name), alias.clone());
             if let Some(params) = type_alias_params.get(key) {
                 self.type_alias_params.entry(file).or_default().insert(CompactString::from(name), params.clone());
@@ -135,8 +147,10 @@ impl NamedTypeIndex {
     /// way — a plain `import type { HTMLAttributes } from "react"` binds the
     /// bare name.
     pub(crate) fn lookup_interface(&self, file: &Utf8Path, name: &str) -> Option<&CollectedInterface> {
-        let per_file = self.interfaces.get(file)?;
-        per_file.get(name).or_else(|| per_file.get(format!("React.{name}").as_str()))
+        let per_file = self.interfaces.get(file.as_str())?;
+        per_file.get(name).or_else(|| {
+            self.react_namespaced.contains(file.as_str()).then(|| per_file.get(format!("React.{name}").as_str()))?
+        })
     }
 
     /// Same as `lookup_interface`, for type aliases. Returns the matched name
@@ -147,9 +161,12 @@ impl NamedTypeIndex {
         file: &Utf8Path,
         name: &str,
     ) -> Option<(CompactString, &CollectedTypeAlias)> {
-        let per_file = self.type_aliases.get(file)?;
+        let per_file = self.type_aliases.get(file.as_str())?;
         if let Some(alias) = per_file.get(name) {
             return Some((CompactString::from(name), alias));
+        }
+        if !self.react_namespaced.contains(file.as_str()) {
+            return None;
         }
         let qualified = format!("React.{name}");
         per_file.get(qualified.as_str()).map(|alias| (CompactString::from(qualified), alias))
@@ -164,7 +181,7 @@ impl NamedTypeIndex {
     }
 
     pub(crate) fn lookup_type_alias_params(&self, file: &Utf8Path, name: &str) -> Option<&Vec<TypeName>> {
-        self.type_alias_params.get(file)?.get(name)
+        self.type_alias_params.get(file.as_str())?.get(name)
     }
 
     /// Declared generic type parameters for an interface the caller already
@@ -179,7 +196,7 @@ impl NamedTypeIndex {
     }
 
     fn lookup_interface_type_params(&self, file: &Utf8Path, name: &str) -> Option<&Vec<TypeName>> {
-        self.interface_type_params.get(file)?.get(name)
+        self.interface_type_params.get(file.as_str())?.get(name)
     }
 
     /// Same as `lookup_interface`, but also falls back to TypeScript's own
@@ -192,8 +209,9 @@ impl NamedTypeIndex {
         name: &str,
         ambient_global_files: &[Utf8PathBuf],
     ) -> Option<&CollectedInterface> {
-        self.lookup_interface(file, name)
-            .or_else(|| ambient_global_files.iter().find_map(|lib_file| self.interfaces.get(lib_file)?.get(name)))
+        self.lookup_interface(file, name).or_else(|| {
+            ambient_global_files.iter().find_map(|lib_file| self.interfaces.get(lib_file.as_str())?.get(name))
+        })
     }
 
     /// Look up a name directly on TypeScript's own ambient lib files, by bare
@@ -202,10 +220,10 @@ impl NamedTypeIndex {
     /// other resolution path; see the original call site's doc comment for why.
     pub(crate) fn lookup_ambient(&self, ambient_global_files: &[Utf8PathBuf], name: &str) -> Option<AmbientMatch<'_>> {
         for lib_file in ambient_global_files {
-            if self.interfaces.get(lib_file).and_then(|m| m.get(name)).is_some() {
+            if self.interfaces.get(lib_file.as_str()).and_then(|m| m.get(name)).is_some() {
                 return Some(AmbientMatch::Interface);
             }
-            if let Some(alias) = self.type_aliases.get(lib_file).and_then(|m| m.get(name)) {
+            if let Some(alias) = self.type_aliases.get(lib_file.as_str()).and_then(|m| m.get(name)) {
                 return Some(AmbientMatch::TypeAlias(alias));
             }
         }
@@ -218,7 +236,7 @@ impl NamedTypeIndex {
     /// `@types/react` lookup, which tries both forms itself in a specific
     /// priority order).
     pub(crate) fn lookup_interface_exact(&self, file: &Utf8Path, name: &str) -> Option<&CollectedInterface> {
-        self.interfaces.get(file)?.get(name)
+        self.interfaces.get(file.as_str())?.get(name)
     }
 
     /// Same as `lookup_interface_exact`, for type aliases — no bare/`React.`-
@@ -228,7 +246,7 @@ impl NamedTypeIndex {
     /// an exact key can use this to fetch the matching alias without
     /// re-deriving a fallback that can't actually diverge.
     pub(crate) fn lookup_type_alias_exact(&self, file: &Utf8Path, name: &str) -> Option<&CollectedTypeAlias> {
-        self.type_aliases.get(file)?.get(name)
+        self.type_aliases.get(file.as_str())?.get(name)
     }
 }
 
