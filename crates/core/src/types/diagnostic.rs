@@ -102,6 +102,12 @@ pub enum DiagnosticCode {
     /// Two source files export an enum with the same name. The public `enums` map is keyed by bare name, so only the
     /// one from the lexicographically first file path is kept.
     DuplicateEnumName,
+    /// A type references itself, directly or through other types; resolution stopped at the cycle. Distinct from
+    /// `MaxDepthExceeded`, which means the nesting was merely too deep.
+    CircularReference,
+    /// `@types/react` or a TypeScript `lib.*.d.ts` file the run needs could not be found, as opposed to a type or
+    /// import in the user's own code that failed to resolve.
+    MissingTypeLibrary,
 }
 
 #[cfg(test)]

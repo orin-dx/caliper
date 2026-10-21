@@ -91,3 +91,26 @@ fn source_data_round_trips_through_msgpack() {
     let decoded: SourceData = rmp_serde::from_slice(&rmp_serde::to_vec(&original).unwrap()).unwrap();
     assert_eq!(serde_json::to_value(&decoded).unwrap(), serde_json::to_value(&original).unwrap());
 }
+
+#[test]
+fn a_blob_from_the_previous_schema_version_is_rejected() {
+    let dir = std::env::temp_dir().join(format!("caliper-golden-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let cache_dir = camino::Utf8PathBuf::from_path_buf(dir.join("cache")).unwrap();
+    let source_path = camino::Utf8PathBuf::from_path_buf(dir.join("button.d.ts")).unwrap();
+    std::fs::write(&source_path, FIXTURE).unwrap();
+
+    let writer = super::DtsCache::load_from_disk(Some(&cache_dir));
+    writer.insert(&source_path, FIXTURE, fixture());
+    assert!(writer.save_to_disk().is_none());
+    assert!(super::DtsCache::load_from_disk(Some(&cache_dir)).get(&source_path, FIXTURE).is_some());
+
+    // Same data file, manifest rewritten as the previous schema version wrote it.
+    let previous = serde_json::json!({ "schema": u64::from(CACHE_SCHEMA_VERSION - 1), "entry_count": 1u64 });
+    std::fs::write(cache_dir.join("manifest.json"), serde_json::to_string(&previous).unwrap()).unwrap();
+    let reloaded = super::DtsCache::load_from_disk(Some(&cache_dir));
+    let loaded = reloaded.get(&source_path, FIXTURE).is_some();
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    assert!(!loaded, "entries written under schema {} must not load", CACHE_SCHEMA_VERSION - 1);
+}

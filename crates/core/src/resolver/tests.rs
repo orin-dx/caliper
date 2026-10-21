@@ -2136,7 +2136,7 @@ fn test_self_referential_extends_emits_diagnostic_instead_of_silent_default() {
         diagnostics
     );
     assert_eq!(cycle_diag.unwrap().severity, DiagnosticSeverity::Info);
-    assert_eq!(cycle_diag.unwrap().code, DiagnosticCode::MaxDepthExceeded);
+    assert_eq!(cycle_diag.unwrap().code, DiagnosticCode::CircularReference);
     // give_up's other observable effect: the cycle target ends up in composes.
     assert!(
         entry.composes.contains(&"LoopProps".to_string()),
@@ -2326,7 +2326,7 @@ fn self_referential_type_alias_used_directly_as_a_field_type_is_caught_immediate
     // depth>MAX_DEPTH path, which already uses this same code) — there's
     // no dedicated circular-reference code at the type level, matching
     // the chain-level cycle case's own choice of code.
-    assert_eq!(cycle_diag.unwrap().code, DiagnosticCode::MaxDepthExceeded);
+    assert_eq!(cycle_diag.unwrap().code, DiagnosticCode::CircularReference);
 
     let x = entry.props.get("x").expect("expected prop 'x' to still be present, degraded to Opaque");
     assert!(matches!(x.prop_type, PropType::Opaque(_)), "expected 'x' to degrade to Opaque, got {:?}", x.prop_type);
@@ -2672,7 +2672,7 @@ fn ts_lib_paths_report_typescript_7_without_its_platform_package() {
                  Install with optional dependencies enabled (no --no-optional / --omit=optional)."
                     .into()
             ),
-            code: DiagnosticCode::UnresolvableImport,
+            code: DiagnosticCode::MissingTypeLibrary,
         })
     );
 }

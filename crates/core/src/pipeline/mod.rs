@@ -374,7 +374,7 @@ pub(crate) fn extract_with_global(
                     line: None,
                     column: None,
                     help: Some("Check that @types/react is installed. Falling back to curated attributes.".into()),
-                    code: DiagnosticCode::UnresolvableImport,
+                    code: DiagnosticCode::MissingTypeLibrary,
                 });
             }
         }
