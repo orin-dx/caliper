@@ -111,17 +111,12 @@ impl<'src> SourceDataCollector<'src> {
                 }
                 let (props_name, type_args) = self.extract_props_arg(&tr.type_arguments)?;
                 let (description, tags) = self.find_jsdoc_with_tags(span_start);
-                Some(ComponentMapping {
-                    component_name: name.to_owned(),
-                    props_type_name: props_name,
-                    props_type_args: type_args,
-                    file_path: self.file_path.clone(),
-                    description,
-                    tags,
-                    span_start,
-                    span_end,
-                    param_defaults: init_params.map(|p| self.extract_param_defaults(p)).unwrap_or_default(),
-                })
+                Some(
+                    ComponentMapping::new(name.to_owned(), props_name, self.file_path.clone(), span_start, span_end)
+                        .with_props_type_args(type_args)
+                        .with_doc(description, tags)
+                        .with_param_defaults(init_params.map(|p| self.extract_param_defaults(p)).unwrap_or_default()),
+                )
             }
             TSType::TSParenthesizedType(p) => {
                 self.extract_props_from_type_annotation(&p.type_annotation, name, span_start, span_end, init_params)
@@ -165,17 +160,12 @@ impl<'src> SourceDataCollector<'src> {
         let param_defaults = render_params.map(|p| self.extract_param_defaults(p)).unwrap_or_default();
         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
 
-        Some(ComponentMapping {
-            component_name: name.to_owned(),
-            props_type_name: props_name,
-            props_type_args: type_args,
-            file_path: self.file_path.clone(),
-            description,
-            tags,
-            span_start: decl.span.start,
-            span_end: decl.span.end,
-            param_defaults,
-        })
+        Some(
+            ComponentMapping::new(name.to_owned(), props_name, self.file_path.clone(), decl.span.start, decl.span.end)
+                .with_props_type_args(type_args)
+                .with_doc(description, tags)
+                .with_param_defaults(param_defaults),
+        )
     }
 
     /// Try to detect: `const Button = anyHOC(function Button(props: ButtonProps) {...})`
@@ -201,17 +191,17 @@ impl<'src> SourceDataCollector<'src> {
                     if type_params.params.len() >= 2 {
                         let (props_name, type_args) = self.extract_type_name_from_type(&type_params.params[1])?;
                         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
-                        return Some(ComponentMapping {
-                            component_name: name.to_owned(),
-                            props_type_name: props_name,
-                            props_type_args: type_args,
-                            file_path: self.file_path.clone(),
-                            description,
-                            tags,
-                            span_start: decl.span.start,
-                            span_end: decl.span.end,
-                            param_defaults: Default::default(),
-                        });
+                        return Some(
+                            ComponentMapping::new(
+                                name.to_owned(),
+                                props_name,
+                                self.file_path.clone(),
+                                decl.span.start,
+                                decl.span.end,
+                            )
+                            .with_props_type_args(type_args)
+                            .with_doc(description, tags),
+                        );
                     }
                 }
             }
@@ -238,17 +228,12 @@ impl<'src> SourceDataCollector<'src> {
         let param_defaults = self.extract_param_defaults(params);
         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
 
-        Some(ComponentMapping {
-            component_name: name.to_owned(),
-            props_type_name: props_name,
-            props_type_args: type_args,
-            file_path: self.file_path.clone(),
-            description,
-            tags,
-            span_start: decl.span.start,
-            span_end: decl.span.end,
-            param_defaults,
-        })
+        Some(
+            ComponentMapping::new(name.to_owned(), props_name, self.file_path.clone(), decl.span.start, decl.span.end)
+                .with_props_type_args(type_args)
+                .with_doc(description, tags)
+                .with_param_defaults(param_defaults),
+        )
     }
 
     /// Try to detect: `declare const Button: React.ForwardRefExoticComponent<ButtonProps & RefAttributes<E>>`
@@ -293,17 +278,12 @@ impl<'src> SourceDataCollector<'src> {
         // Convert args to strings for ComponentMapping (resolver will re-parse)
         let props_type_args: Vec<String> = props_args.iter().map(|a| a.to_raw_string()).collect();
 
-        Some(ComponentMapping {
-            component_name: name.to_owned(),
-            props_type_name: props_name,
-            props_type_args,
-            file_path: self.file_path.clone(),
-            description: self.find_jsdoc(decl.span.start),
-            tags: BTreeMap::new(),
-            span_start: decl.span.start,
-            span_end: decl.span.end,
-            param_defaults: rustc_hash::FxHashMap::default(),
-        })
+        Some(
+            ComponentMapping::new(name.to_owned(), props_name, self.file_path.clone(), decl.span.start, decl.span.end)
+                .with_props_type_args(props_type_args)
+                .with_doc(self.find_jsdoc(decl.span.start), BTreeMap::new())
+                .with_param_defaults(rustc_hash::FxHashMap::default()),
+        )
     }
 
     /// Try to detect: `export default function(props: Props) { ... }` — an
@@ -339,17 +319,12 @@ impl<'src> SourceDataCollector<'src> {
 
         let (description, tags) = self.find_jsdoc_with_tags(func.span.start);
         let param_defaults = self.extract_param_defaults(&func.params);
-        self.data.component_mappings.push(ComponentMapping {
-            component_name: name,
-            props_type_name: props_name,
-            props_type_args: type_args,
-            file_path: self.file_path.clone(),
-            description,
-            tags,
-            span_start: func.span.start,
-            span_end: func.span.end,
-            param_defaults,
-        });
+        self.data.component_mappings.push(
+            ComponentMapping::new(name, props_name, self.file_path.clone(), func.span.start, func.span.end)
+                .with_props_type_args(type_args)
+                .with_doc(description, tags)
+                .with_param_defaults(param_defaults),
+        );
     }
 
     /// True when `class`'s `extends` clause is `Component`/`PureComponent`
@@ -378,17 +353,18 @@ impl<'src> SourceDataCollector<'src> {
         let props_type = type_args.params.first()?;
         let (props_name, props_type_args) = self.extract_type_name_from_type(props_type)?;
         let (description, tags) = self.find_jsdoc_with_tags(class.span.start);
-        Some(ComponentMapping {
-            component_name: name.to_owned(),
-            props_type_name: props_name,
-            props_type_args,
-            file_path: self.file_path.clone(),
-            description,
-            tags,
-            span_start: class.span.start,
-            span_end: class.span.end,
-            param_defaults: rustc_hash::FxHashMap::default(),
-        })
+        Some(
+            ComponentMapping::new(
+                name.to_owned(),
+                props_name,
+                self.file_path.clone(),
+                class.span.start,
+                class.span.end,
+            )
+            .with_props_type_args(props_type_args)
+            .with_doc(description, tags)
+            .with_param_defaults(rustc_hash::FxHashMap::default()),
+        )
     }
 
     /// Try to detect: `const Button = class extends React.Component<Props> { ... }`

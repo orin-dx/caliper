@@ -734,6 +734,52 @@ pub struct ComponentMapping {
     pub param_defaults: FxHashMap<std::string::String, RawDefault>,
 }
 
+impl ComponentMapping {
+    /// A mapping with no type arguments, documentation or parameter defaults; add them with the `with_*` methods.
+    pub fn new(
+        component_name: impl Into<std::string::String>,
+        props_type_name: TypeName,
+        file_path: Utf8PathBuf,
+        span_start: u32,
+        span_end: u32,
+    ) -> Self {
+        Self {
+            component_name: component_name.into(),
+            props_type_name,
+            props_type_args: Vec::new(),
+            file_path,
+            description: std::string::String::new(),
+            tags: BTreeMap::new(),
+            span_start,
+            span_end,
+            param_defaults: FxHashMap::default(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_props_type_args(mut self, props_type_args: Vec<std::string::String>) -> Self {
+        self.props_type_args = props_type_args;
+        self
+    }
+
+    #[must_use]
+    pub fn with_doc(
+        mut self,
+        description: std::string::String,
+        tags: BTreeMap<std::string::String, std::string::String>,
+    ) -> Self {
+        self.description = description;
+        self.tags = tags;
+        self
+    }
+
+    #[must_use]
+    pub fn with_param_defaults(mut self, param_defaults: FxHashMap<std::string::String, RawDefault>) -> Self {
+        self.param_defaults = param_defaults;
+        self
+    }
+}
+
 // ─── Import/Export Types ───────────────────────────────────────────────────────
 
 /// An import binding found in a source file.

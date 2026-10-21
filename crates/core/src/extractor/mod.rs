@@ -235,16 +235,12 @@ impl<'src> SourceDataCollector<'src> {
     /// component-detector chains in `visit.rs` when a shape matches a known
     /// pattern but is missing/malformed pieces the pattern requires.
     pub(super) fn record_skip(&mut self, code: DiagnosticCode, message: impl Into<String>, span: Span) {
-        let _ = span; // no line/column conversion helper exists yet; kept for future use and call-site documentation
-        self.data.diagnostics.push(Diagnostic {
-            severity: DiagnosticSeverity::Info,
-            message: message.into(),
-            file: Some(self.file_path.to_string()),
-            line: None,
-            column: None,
-            help: None,
-            code,
-        });
+        let (line, column) = line_and_column(self.source, span.start);
+        self.data.diagnostics.push(
+            Diagnostic::new(DiagnosticSeverity::Info, code, message)
+                .with_file(self.file_path.to_string())
+                .with_position(line, column),
+        );
     }
 
     pub(super) fn scoped_key(&self, name: &str) -> String {
@@ -816,6 +812,18 @@ pub(super) fn declaration_name<'a>(decl: &Declaration<'a>) -> Option<&'a str> {
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
+
+/// One-based line and column (in characters) of a byte offset, clamped to the end of the source.
+fn line_and_column(source: &str, offset: u32) -> (u32, u32) {
+    let mut end = (offset as usize).min(source.len());
+    while !source.is_char_boundary(end) {
+        end -= 1;
+    }
+    let before = &source[..end];
+    let line = before.bytes().filter(|b| *b == b'\n').count() + 1;
+    let column = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
+    (line as u32, column as u32)
+}
 
 #[cfg(test)]
 mod tests;

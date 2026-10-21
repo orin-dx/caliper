@@ -911,8 +911,8 @@ expression: value
       "severity": "info",
       "message": "'Comp' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)",
       "file": "[ROOT]/fixtures/shadcn/button.tsx",
-      "line": null,
-      "column": null,
+      "line": 42,
+      "column": 11,
       "help": null,
       "code": "SKIPPED_CANDIDATE"
     }

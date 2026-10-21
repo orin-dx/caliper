@@ -293,17 +293,18 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                             {
                                 let (description, tags) = self.find_jsdoc_with_tags(func.span.start);
                                 let param_defaults = self.extract_param_defaults(&func.params);
-                                self.data.component_mappings.push(ComponentMapping {
-                                    component_name: name.to_owned(),
-                                    props_type_name: props_name,
-                                    props_type_args: type_args,
-                                    file_path: self.file_path.clone(),
-                                    description,
-                                    tags,
-                                    span_start: func.span.start,
-                                    span_end: func.span.end,
-                                    param_defaults,
-                                });
+                                self.data.component_mappings.push(
+                                    ComponentMapping::new(
+                                        name.to_owned(),
+                                        props_name,
+                                        self.file_path.clone(),
+                                        func.span.start,
+                                        func.span.end,
+                                    )
+                                    .with_props_type_args(type_args)
+                                    .with_doc(description, tags)
+                                    .with_param_defaults(param_defaults),
+                                );
                             } else {
                                 self.record_skip(
                                     DiagnosticCode::SkippedCandidate,
