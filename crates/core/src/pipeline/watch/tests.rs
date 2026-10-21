@@ -118,7 +118,7 @@ fn snapshot_stats_components_extracted_reflects_the_real_component_count() {
 
     let options = PipelineOptions { src_dirs: vec![dir], ..Default::default() };
     let session = WatchSession::new(options);
-    let _ = session.initialize();
+    let _ignored = session.initialize();
 
     let snap = session.snapshot();
     assert_eq!(snap.components.len(), 2);
@@ -132,7 +132,7 @@ fn snapshot_stats_components_extracted_reflects_the_real_component_count() {
 #[test]
 fn snapshot_surfaces_update_file_diagnostics() {
     let session = WatchSession::new(empty_options());
-    let _ = session.initialize();
+    let _ignored = session.initialize();
 
     let missing = camino::Utf8PathBuf::from("/nonexistent/does-not-exist.tsx");
     let update = session.update_file(&missing);
@@ -155,7 +155,7 @@ fn update_file_replaces_previous_diagnostics_for_same_file() {
     let path = camino::Utf8Path::from_path(tmp.path()).expect("utf8 path").join("widget.tsx");
 
     let session = WatchSession::new(empty_options());
-    let _ = session.initialize();
+    let _ignored = session.initialize();
 
     // File doesn't exist yet — update_file should record an IoError for it.
     session.update_file(&path);
@@ -191,7 +191,7 @@ const FIXED: &str = "export function Widget() { return null; }\n";
 fn update_file_reports_a_syntax_error_exactly_as_a_cold_extract_does() {
     let (_tmp, widget, options) = widget_project(FIXED);
     let session = WatchSession::new(options.clone());
-    let _ = session.initialize();
+    let _ignored = session.initialize();
 
     std::fs::write(&widget, BROKEN).expect("break Widget.tsx");
     let update = session.update_file(&widget);
@@ -207,7 +207,7 @@ fn update_file_reports_a_syntax_error_exactly_as_a_cold_extract_does() {
 fn fixing_a_syntax_error_clears_it_from_the_update_and_the_snapshot() {
     let (_tmp, widget, options) = widget_project(BROKEN);
     let session = WatchSession::new(options);
-    let _ = session.initialize();
+    let _ignored = session.initialize();
 
     std::fs::write(&widget, FIXED).expect("fix Widget.tsx");
     let update = session.update_file(&widget);
@@ -241,7 +241,7 @@ fn a_panic_during_incremental_resolve_degrades_to_a_diagnostic_not_a_crash() {
 
     let options = PipelineOptions { src_dirs: vec![dir], ..Default::default() };
     let session = WatchSession::new(options);
-    let _ = session.initialize();
+    let _ignored = session.initialize();
 
     // Must not panic the test process — that's the whole point.
     let update = session.update_file(&other_path);
@@ -373,7 +373,7 @@ fn update_file_still_resolves_ambient_globals_after_the_first_incremental_change
 
     let options = PipelineOptions { src_dirs: vec![dir], ..Default::default() };
     let session = WatchSession::new(options);
-    let _ = session.initialize();
+    let _ignored = session.initialize();
 
     // Re-save Foo.tsx itself (content unchanged) — this exercises the
     // exact path a real edit takes: re-parse, remove_file + merge back
@@ -536,7 +536,7 @@ fn session_recovers_after_a_contained_panic_and_serves_unrelated_files_normally(
 
     let options = PipelineOptions { src_dirs: vec![dir], ..Default::default() };
     let session = WatchSession::new(options);
-    let _ = session.initialize();
+    let _ignored = session.initialize();
 
     // Must not panic the test process.
     let boom_update = session.update_file(&panicking_path);
@@ -627,7 +627,7 @@ fn update_file_with_a_non_canonical_path_still_finds_the_canonical_entry() {
 
     let options = PipelineOptions { src_dirs: vec![real_dir], ..Default::default() };
     let session = WatchSession::new(options);
-    let _ = session.initialize();
+    let _ignored = session.initialize();
 
     // Reference the changed file via its non-canonical (symlinked) path.
     let non_canonical_path = link_dir.join("Button.tsx");
@@ -697,7 +697,7 @@ fn update_file_after_an_atomic_replace_reflects_the_new_content_not_a_deletion()
 
     let options = PipelineOptions { src_dirs: vec![dir.clone()], ..Default::default() };
     let session = WatchSession::new(options);
-    let _ = session.initialize();
+    let _ignored = session.initialize();
 
     // Atomic replace: write the new content to a same-directory temp file,
     // then rename it over the original path — the pattern editors (and
@@ -750,7 +750,7 @@ fn deleting_a_file_surfaces_io_error_and_a_dependent_stops_resolving_against_it(
 
     let options = PipelineOptions { src_dirs: vec![dir], ..Default::default() };
     let session = WatchSession::new(options);
-    let _ = session.initialize();
+    let _ignored = session.initialize();
 
     // Sanity: Consumer resolves BaseProps' 'x' field before the deletion.
     let snap_before = session.snapshot();
@@ -808,7 +808,7 @@ fn update_file_with_non_utf8_content_surfaces_io_error_and_skips_that_files_own_
 
     let options = PipelineOptions { src_dirs: vec![dir], ..Default::default() };
     let session = WatchSession::new(options);
-    let _ = session.initialize();
+    let _ignored = session.initialize();
 
     // Overwrite with invalid UTF-8 bytes directly (std::fs::write accepts any
     // AsRef<[u8]>, unlike a &str write, which couldn't express this at all).
@@ -846,13 +846,13 @@ fn renaming_a_component_between_edits_evicts_its_old_cache_key() {
 
     let options = PipelineOptions { src_dirs: vec![dir], ..Default::default() };
     let session = WatchSession::new(options);
-    let _ = session.initialize();
+    let _ignored = session.initialize();
     assert!(session.component_cache.get("Card").is_some(), "sanity check: Card should be cached after initialize()");
 
     // Rename Card -> Panel within the same file.
     std::fs::write(file_path.as_std_path(), "export function Panel(props: { label: string }) { return null; }\n")
         .expect("rewrite Widget.tsx");
-    let _ = session.update_file(&file_path);
+    let _ignored = session.update_file(&file_path);
 
     assert!(
         session.component_cache.get("Panel").is_some(),
@@ -895,7 +895,7 @@ fn editing_a_disambiguated_component_updates_its_own_key_not_the_bare_one() {
 
     let options = PipelineOptions { src_dirs: vec![dir], ..Default::default() };
     let session = WatchSession::new(options);
-    let _ = session.initialize();
+    let _ignored = session.initialize();
 
     let bare = session.component_cache.get("Button").expect("expected a bare 'Button' entry after initialize()");
     assert_eq!(bare.file_path, a_path, "expected A.tsx to hold the bare key (sorts first)");
@@ -910,7 +910,7 @@ fn editing_a_disambiguated_component_updates_its_own_key_not_the_bare_one() {
     // Edit B.tsx only — A.tsx is untouched.
     std::fs::write(b_path.as_std_path(), "export function Button(props: { b: string; c: string }) { return null; }\n")
         .expect("rewrite B.tsx");
-    let _ = session.update_file(&b_path);
+    let _ignored = session.update_file(&b_path);
 
     // A's bare entry must be untouched by B's edit.
     let bare_after = session.component_cache.get("Button").expect("expected the bare 'Button' entry to survive");

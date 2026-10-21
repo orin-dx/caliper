@@ -111,7 +111,7 @@ fn spawn_keyboard_thread(session: Arc<WatchSession>, exit_code: Arc<AtomicI32>) 
             return;
         }
         let quit = read_keys(crossterm::event::read, |key| handle_key(key, &session, &exit_code));
-        let _ = crossterm::terminal::disable_raw_mode();
+        crossterm::terminal::disable_raw_mode().ok();
         match quit {
             // watchexec has no graceful-quit handle reachable from this thread, so this hard-exits, with the tracked
             // code so a session that quit on an unresolved error still fails the shell.
@@ -131,7 +131,7 @@ struct RestoreTerminal;
 
 impl Drop for RestoreTerminal {
     fn drop(&mut self) {
-        let _ = crossterm::terminal::disable_raw_mode();
+        crossterm::terminal::disable_raw_mode().ok();
     }
 }
 
@@ -272,7 +272,7 @@ mod tests {
         let widget = src.path().join("Widget.tsx");
         std::fs::write(&widget, WIDGET).unwrap();
         let session = session_over(&src, &scratch);
-        let _ = session.initialize();
+        let _ignored = session.initialize();
 
         std::fs::write(&widget, "export function Widget(props: { label: string; size: number }) { return null; }\n")
             .unwrap();
@@ -289,7 +289,7 @@ mod tests {
     fn a_non_typescript_event_changes_nothing() {
         let (src, scratch) = (TempDir::new().unwrap(), TempDir::new().unwrap());
         let session = session_over(&src, &scratch);
-        let _ = session.initialize();
+        let _ignored = session.initialize();
         let out = scratch.path().join("out.json");
         let exit_code = AtomicI32::new(7);
 
@@ -305,7 +305,7 @@ mod tests {
         let widget = src.path().join("Widget.tsx");
         std::fs::write(&widget, WIDGET).unwrap();
         let session = session_over(&src, &scratch);
-        let _ = session.initialize();
+        let _ignored = session.initialize();
         let exit_code = AtomicI32::new(0);
 
         // An unreadable file is an error-severity diagnostic that stays in the session's snapshot.
@@ -340,7 +340,7 @@ mod tests {
     fn ctrl_c_quits_with_the_tracked_exit_code_but_a_bare_c_does_not() {
         let (src, scratch) = (TempDir::new().unwrap(), TempDir::new().unwrap());
         let session = session_over(&src, &scratch);
-        let _ = session.initialize();
+        let _ignored = session.initialize();
         let exit_code = AtomicI32::new(2);
 
         assert_eq!(handle_key(key('c'), &session, &exit_code), None);
@@ -396,7 +396,7 @@ mod tests {
     fn q_quits_with_the_tracked_exit_code_and_other_keys_keep_running() {
         let (src, scratch) = (TempDir::new().unwrap(), TempDir::new().unwrap());
         let session = session_over(&src, &scratch);
-        let _ = session.initialize();
+        let _ignored = session.initialize();
         let exit_code = AtomicI32::new(2);
 
         assert_eq!(handle_key(key('q'), &session, &exit_code), Some(2));
@@ -408,7 +408,7 @@ mod tests {
     fn r_refreshes_the_tracked_exit_code_from_the_session() {
         let (src, scratch) = (TempDir::new().unwrap(), TempDir::new().unwrap());
         let session = session_over(&src, &scratch);
-        let _ = session.initialize();
+        let _ignored = session.initialize();
         // An unreadable file leaves an error-severity diagnostic in the session.
         handle_change(&session, &src.path().join("Missing.tsx"), true, None, &AtomicI32::new(0));
         let exit_code = AtomicI32::new(0);

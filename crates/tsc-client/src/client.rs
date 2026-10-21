@@ -62,11 +62,11 @@ impl Shared {
                     };
                     // A dropped receiver means the caller already gave up (e.g. timed
                     // out) — nothing left to deliver to.
-                    let _ = tx.send(result);
+                    tx.send(result).ok();
                 }
             }
             Ok(IncomingMessage::Notification(notification)) => {
-                let _ = notif_tx.send(Notification { method: notification.method, params: notification.params });
+                notif_tx.send(Notification { method: notification.method, params: notification.params }).ok();
             }
             Err(source) => {
                 // A malformed *body* doesn't desync the stream — the declared
@@ -83,7 +83,7 @@ impl Shared {
         let ids: Vec<u64> = self.pending.iter().map(|entry| *entry.key()).collect();
         for id in ids {
             if let Some((_, tx)) = self.pending.remove(&id) {
-                let _ = tx.send(Err(err.clone()));
+                tx.send(Err(err.clone())).ok();
             }
         }
     }

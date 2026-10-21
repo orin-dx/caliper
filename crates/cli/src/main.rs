@@ -1,4 +1,6 @@
 #![recursion_limit = "256"]
+// stdout carries the command payload (JSON, tables); stderr and diagnostics still go through output.rs.
+#![allow(clippy::print_stdout)]
 
 mod commands;
 mod config;

@@ -1,3 +1,11 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stdout,
+    clippy::print_stderr,
+    clippy::let_underscore_must_use
+)]
 //! Process-level tests for `watch`: signals, exit codes and idling can only be observed on the real binary.
 
 #![cfg(unix)]

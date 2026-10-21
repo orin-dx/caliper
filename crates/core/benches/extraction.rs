@@ -1,3 +1,11 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stdout,
+    clippy::print_stderr,
+    clippy::let_underscore_must_use
+)]
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 fn fixture_dir(fixture: &str) -> camino::Utf8PathBuf {
@@ -50,7 +58,7 @@ fn incremental_update_bench(c: &mut Criterion) {
         let changed = camino::Utf8PathBuf::from_path_buf(changed_file).expect("valid utf8 path");
 
         let session = caliper_docgen_core::pipeline::WatchSession::new(options);
-        let _ = session.initialize();
+        let _ignored = session.initialize();
 
         group.bench_with_input(BenchmarkId::from_parameter(fixture), &changed, |b, changed| {
             b.iter(|| session.update_file(changed));

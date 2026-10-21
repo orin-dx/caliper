@@ -11,14 +11,14 @@ use crate::types::{ComponentEntry, ExtractionOutput, PropType};
 /// Render a single component's prop table into TOON format.
 pub fn render_component_toon(entry: &ComponentEntry) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "component:{}:", entry.display_name);
-    let _ = writeln!(out, "  filePath: {}", entry.file_path);
+    writeln!(out, "component:{}:", entry.display_name).ok();
+    writeln!(out, "  filePath: {}", entry.file_path).ok();
     if !entry.description.trim().is_empty() {
-        let _ = writeln!(out, "  description: {}", entry.description.replace('\n', " "));
+        writeln!(out, "  description: {}", entry.description.replace('\n', " ")).ok();
     }
 
     if !entry.props.is_empty() {
-        let _ = writeln!(out, "  props[{}] {{name,required,type,default,description}}:", entry.props.len());
+        writeln!(out, "  props[{}] {{name,required,type,default,description}}:", entry.props.len()).ok();
         for (prop_name, prop) in &entry.props {
             let req_str = if prop.required { "true" } else { "false" };
             let type_str = format_type_compact(&prop.prop_type);
@@ -26,7 +26,7 @@ pub fn render_component_toon(entry: &ComponentEntry) -> String {
             let desc_str = prop.description.replace('\n', " ");
 
             // Format as CSV line: escape strings containing commas or quotes if needed
-            let _ = writeln!(
+            writeln!(
                 out,
                 "    {},{},{},{},{}",
                 escape_toon_val(prop_name),
@@ -34,21 +34,23 @@ pub fn render_component_toon(entry: &ComponentEntry) -> String {
                 escape_toon_val(&type_str),
                 escape_toon_val(default_str),
                 escape_toon_val(&desc_str)
-            );
+            )
+            .ok();
         }
     }
 
     if !entry.inheritance.is_empty() {
-        let _ = writeln!(out, "  inheritance[{}] {{typeName,htmlElement,totalProps}}:", entry.inheritance.len());
+        writeln!(out, "  inheritance[{}] {{typeName,htmlElement,totalProps}}:", entry.inheritance.len()).ok();
         for layer in &entry.inheritance {
             let elem_str = layer.html_element.as_deref().unwrap_or("none");
-            let _ = writeln!(
+            writeln!(
                 out,
                 "    {},{},{}",
                 escape_toon_val(&layer.type_name),
                 escape_toon_val(elem_str),
                 layer.total_props
-            );
+            )
+            .ok();
         }
     }
 
@@ -59,34 +61,35 @@ pub fn render_component_toon(entry: &ComponentEntry) -> String {
 pub fn render_output_toon(output: &ExtractionOutput) -> String {
     let mut out = String::new();
     if !output.components.is_empty() {
-        let _ = writeln!(out, "docgenComponents[{}]:", output.components.len());
+        writeln!(out, "docgenComponents[{}]:", output.components.len()).ok();
         for entry in output.components.values() {
             let comp_toon = render_component_toon(entry);
             for line in comp_toon.lines() {
-                let _ = writeln!(out, "  {line}");
+                writeln!(out, "  {line}").ok();
             }
         }
     }
 
     if !output.diagnostics.is_empty() {
-        let _ = writeln!(out, "diagnostics[{}]:", output.diagnostics.len());
+        writeln!(out, "diagnostics[{}]:", output.diagnostics.len()).ok();
         for diag in &output.diagnostics {
             let file_str = diag.file.as_deref().unwrap_or("unknown");
-            let _ = writeln!(out, "  [{:?}]: {} ({})", diag.severity, diag.message, file_str);
+            writeln!(out, "  [{:?}]: {} ({})", diag.severity, diag.message, file_str).ok();
             if let Some(help) = &diag.help {
-                let _ = writeln!(out, "    help: {help}");
+                writeln!(out, "    help: {help}").ok();
             }
         }
     }
 
-    let _ = writeln!(
+    writeln!(
         out,
         "stats: extracted={}, parsed={}, cacheHits={}, durationMs={}",
         output.stats.components_extracted,
         output.stats.files_parsed,
         output.stats.dts_cache_hits,
         output.stats.duration_ms
-    );
+    )
+    .ok();
 
     out
 }

@@ -1,3 +1,11 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stdout,
+    clippy::print_stderr,
+    clippy::let_underscore_must_use
+)]
 //! Process-level tests for the `lsp` subcommand: drive the real binary's
 //! stdin/stdout, not just its pure helper functions. `src/commands/lsp.rs`'s
 //! own unit tests only assert `check_content_length`/`read_content_length`

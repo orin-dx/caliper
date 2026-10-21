@@ -24,9 +24,18 @@ categories = ["development-tools", "command-line-utilities"]
 # #[napi] macros generate the FFI glue without user-visible unsafe).
 [workspace.lints.rust]
 unsafe_code = "deny"
+unused_must_use = "deny"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+map_err_ignore = "deny"
+let_underscore_must_use = "deny"
 
 [workspace.dependencies]
 # OXC — all main crates move in lockstep; resolver has separate versioning
@@ -76,7 +85,6 @@ napi-derive       = "3"
 # Dev
 criterion         = "0.8"
 insta             = { version = "1.48", features = ["json", "redactions"] }
-pretty_assertions = "1.4"
 tempfile          = "3.20"
 rstest            = "0.27"
 trycmd            = "1.2"

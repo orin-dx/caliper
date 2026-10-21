@@ -16,11 +16,11 @@ pub fn write_atomic(path: &str, contents: &str) -> std::io::Result<()> {
     tmp_name.push(".tmp");
     let tmp_path = dir.join(tmp_name);
     if let Err(e) = std::fs::write(&tmp_path, contents) {
-        let _ = std::fs::remove_file(&tmp_path);
+        std::fs::remove_file(&tmp_path).ok();
         return Err(e);
     }
     if let Err(e) = std::fs::rename(&tmp_path, target) {
-        let _ = std::fs::remove_file(&tmp_path);
+        std::fs::remove_file(&tmp_path).ok();
         return Err(e);
     }
     Ok(())
@@ -34,7 +34,7 @@ pub fn print_summary(output: &caliper_docgen_core::types::ExtractionOutput, quie
         return;
     }
     // A closed stderr isn't worth failing a run over.
-    let _ = write_summary(&mut std::io::stderr().lock(), output);
+    write_summary(&mut std::io::stderr().lock(), output).ok();
 }
 
 fn write_summary(
@@ -70,7 +70,7 @@ fn write_summary(
 
 /// Human-readable diagnostic list. Always written to stderr — see [`print_summary`].
 pub fn print_diagnostics(diagnostics: &[caliper_docgen_core::types::Diagnostic]) {
-    let _ = write_diagnostics(&mut std::io::stderr().lock(), diagnostics);
+    write_diagnostics(&mut std::io::stderr().lock(), diagnostics).ok();
 }
 
 fn write_diagnostics(

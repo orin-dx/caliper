@@ -1,3 +1,11 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stdout,
+    clippy::print_stderr,
+    clippy::let_underscore_must_use
+)]
 //! Manual smoke check against the real `typescript@next` nightly — not a `cargo test`
 //! (CI has no reason to depend on an unstable nightly build), but a one-off run to
 //! confirm the fake-tsc harness's assumptions about wire behavior (framing, exit
