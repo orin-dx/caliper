@@ -699,15 +699,9 @@ impl<'src> SourceDataCollector<'src> {
     ) -> Option<(CompactString, Vec<CollectedType>)> {
         match ty {
             TSType::TSTypeReference(tr) => {
+                // `Required<P>`, `Readonly<P>` and `PropsWithChildren<P>` stay as written: the resolver applies them
+                // (required flags, an added `children`), which unwrapping them here used to throw away.
                 let name = self.extract_type_ref_name(tr);
-                // Unwrap transparent wrappers
-                if matches!(name.as_str(), "PropsWithChildren" | "Readonly" | "Required") {
-                    if let Some(tp) = &tr.type_arguments {
-                        if let Some(inner) = tp.params.first() {
-                            return self.extract_type_name_from_type(inner);
-                        }
-                    }
-                }
                 let args = self.extract_type_args(&tr.type_arguments);
                 Some((name.into(), args))
             }

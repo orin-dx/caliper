@@ -924,6 +924,44 @@ fn a_component_passed_to_a_non_wrapper_call_keeps_its_name_and_the_call_is_not_a
 }
 
 #[test]
+fn anonymous_default_exports_are_named_after_their_file() {
+    let cases = [
+        ("/test/chip.tsx", "interface ChipProps { a?: string }\nexport default (props: ChipProps) => <span />;\n"),
+        (
+            "/test/badge.tsx",
+            "import { memo } from 'react';\ninterface BadgeProps { a?: string }\nexport default memo(function Badge(props: BadgeProps) { return <b />; });\n",
+        ),
+        (
+            "/test/field.tsx",
+            "import { forwardRef } from 'react';\ninterface FieldProps { a?: string }\nexport default forwardRef<HTMLInputElement, FieldProps>((props, ref) => <input ref={ref} />);\n",
+        ),
+        (
+            "/test/panel.tsx",
+            "import { Component } from 'react';\ninterface PanelProps { a?: string }\nexport default class extends Component<PanelProps> { render() { return <div />; } }\n",
+        ),
+    ];
+    let found: Vec<(String, String)> = cases
+        .iter()
+        .flat_map(|(path, source)| {
+            parse_file(Utf8Path::new(path), source)
+                .component_mappings
+                .into_iter()
+                .map(|m| (m.component_name, m.props_type_name.to_string()))
+        })
+        .collect();
+    let pair = |n: &str, p: &str| (n.to_owned(), p.to_owned());
+    assert_eq!(
+        found,
+        vec![
+            pair("Chip", "ChipProps"),
+            pair("Badge", "BadgeProps"),
+            pair("Field", "FieldProps"),
+            pair("Panel", "PanelProps")
+        ]
+    );
+}
+
+#[test]
 fn a_declared_function_with_an_element_return_type_is_a_component() {
     let source = r#"
         interface ButtonProps { label?: string }

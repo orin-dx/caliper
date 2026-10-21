@@ -278,7 +278,20 @@ pub(super) fn synthesize_utility_alias(
         "Required" if !args.is_empty() => {
             Some(CollectedTypeAlias::Required { base: args[0].clone(), file_path: file_path.to_owned() })
         }
-        "Readonly" | "PropsWithChildren" | "PropsWithRef" if !args.is_empty() => {
+        // `PropsWithChildren<P>` is `P & { children?: ReactNode }`.
+        "PropsWithChildren" if !args.is_empty() => Some(CollectedTypeAlias::Intersection {
+            members: vec![
+                args[0].clone(),
+                CollectedType::Object(vec![CollectedObjectField {
+                    name: "children".into(),
+                    collected_type: CollectedType::Named { name: "React.ReactNode".into(), args: vec![] },
+                    required: false,
+                    description: String::new(),
+                }]),
+            ],
+            file_path: file_path.to_owned(),
+        }),
+        "Readonly" | "PropsWithRef" if !args.is_empty() => {
             Some(CollectedTypeAlias::Passthrough { target: args[0].clone(), file_path: file_path.to_owned() })
         }
         _ => None,
