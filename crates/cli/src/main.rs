@@ -80,14 +80,6 @@ pub struct ExtractArgs {
     #[arg(value_enum)]
     pub format: OutputFormat,
 
-    /// Disable cross-package type resolution
-    #[arg(long)]
-    pub no_cross_package: bool,
-
-    /// React version override [default: auto-detect]
-    #[arg(long)]
-    pub react_version: Option<String>,
-
     /// Cache directory
     #[arg(long)]
     pub cache_dir: Option<String>,

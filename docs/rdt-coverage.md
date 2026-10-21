@@ -381,7 +381,7 @@ No fixture ships a real static `defaultProps` assignment today — `fixtures/blu
 
 ## Note: React 19 `ref`-as-prop — investigated, not a real gap
 
-`ReactVersion::ref_as_prop`/`implicit_children` (`react_types.rs`) exist as fields, are correctly plumbed from the `--react-version`/`docgen.config.ts` CLI surface down to `PipelineOptions.react_version` (tested), and are then never read by anything in `crates/core`. That looked like a real gap — the original spec's worry was that `function Button({ ref, ...props }: ButtonProps)` (React 19's plain-prop `ref`, no `forwardRef`) wouldn't be recognized.
+A `ReactVersion` option (since removed, because nothing in `crates/core` ever read it) was plumbed from the CLI down to `PipelineOptions`. That looked like a real gap — the original spec's worry was that `function Button({ ref, ...props }: ButtonProps)` (React 19's plain-prop `ref`, no `forwardRef`) wouldn't be recognized.
 
 Tested directly against both real shapes:
 

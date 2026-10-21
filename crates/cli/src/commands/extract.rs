@@ -17,8 +17,6 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
     });
     let options = build_options(BuildOptionsArgs {
         src: &args.src,
-        no_cross_package: args.no_cross_package,
-        react_version: args.react_version.as_deref(),
         cache_dir: args.cache_dir.as_deref(),
         html_attributes,
         config_path,
