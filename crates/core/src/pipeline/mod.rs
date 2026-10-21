@@ -496,7 +496,8 @@ pub(crate) fn extract_with_global(
         diagnostics.extend(diags);
     }
 
-    let enums = collect_public_enums(&global);
+    let (enums, enum_diagnostics) = collect_public_enums(&global);
+    diagnostics.extend(enum_diagnostics);
 
     // Persist cache for the next run.
     // Arc::try_unwrap succeeds because all rayon workers have finished; fallback
@@ -572,31 +573,46 @@ fn canonicalize_first_src_dir(src_dirs: &[Utf8PathBuf]) -> Option<Utf8PathBuf> {
 }
 
 /// Collect enum entries that are exported from their source files.
-fn collect_public_enums(global: &GlobalSourceData) -> std::collections::BTreeMap<String, Vec<EnumEntry>> {
+fn collect_public_enums(
+    global: &GlobalSourceData,
+) -> (std::collections::BTreeMap<String, Vec<EnumEntry>>, Vec<Diagnostic>) {
     let mut result = std::collections::BTreeMap::new();
+    let mut origin: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
+    let mut diagnostics = Vec::new();
 
-    for (scoped_key, entries) in &global.enums {
-        // scoped_key = "{file_path}:{name}"
-        if let Some((file_path_str, name)) = scoped_key.split_once(':') {
-            let file_path = Utf8Path::new(file_path_str);
-            let is_exported = global
-                .re_export_map
-                .get(file_path)
-                .map(|exports| {
-                    exports.iter().any(|e| match e {
-                        LexedExport::LocalDeclaration { name: n, .. } => n == name,
-                        _ => false,
-                    })
-                })
-                .unwrap_or(false);
+    // Sorted so a name shared by two files resolves the same way on every run and in every input order.
+    let mut keys: Vec<&String> = global.enums.keys().collect();
+    keys.sort();
 
-            if is_exported {
-                result.insert(name.to_owned(), entries.clone());
-            }
+    for scoped_key in keys {
+        // scoped_key = "{file_path}:{name}"; split from the right because a Windows path contains `:` too.
+        let Some((file_path_str, name)) = scoped_key.rsplit_once(':') else { continue };
+        let file_path = Utf8Path::new(file_path_str);
+        let is_exported = global.re_export_map.get(file_path).is_some_and(|exports| {
+            exports.iter().any(|e| matches!(e, LexedExport::LocalDeclaration { name: n, .. } if n == name))
+        });
+        if !is_exported {
+            continue;
         }
+        if let Some(kept) = origin.get(name) {
+            diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Warning,
+                message: format!(
+                    "Enum `{name}` is exported from both {kept} and {file_path_str}; only the first is listed."
+                ),
+                file: Some(file_path_str.to_owned()),
+                line: None,
+                column: None,
+                help: Some("Rename one of the enums; the public enum map is keyed by bare name.".into()),
+                code: DiagnosticCode::DuplicateEnumName,
+            });
+            continue;
+        }
+        origin.insert(name, file_path_str);
+        result.insert(name.to_owned(), global.enums[scoped_key].clone());
     }
 
-    result
+    (result, diagnostics)
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

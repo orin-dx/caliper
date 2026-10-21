@@ -192,13 +192,18 @@ impl ResolutionContext {
         };
 
         let mut enum_bare_index: FxHashMap<CompactString, CompactString> = FxHashMap::default();
-        for key in global.enums.keys() {
+        // Sorted so a bare name shared by several files binds to the same one regardless of hash order.
+        let mut enum_keys: Vec<&String> = global.enums.keys().collect();
+        enum_keys.sort();
+        for key in enum_keys {
             let bare = key.rsplit_once(':').map(|(_, name)| name).unwrap_or(key.as_str());
             enum_bare_index.entry(CompactString::from(bare)).or_insert_with(|| CompactString::from(key.as_str()));
         }
 
         let mut const_array_bare_index: FxHashMap<CompactString, CompactString> = FxHashMap::default();
-        for key in global.const_arrays.keys() {
+        let mut const_array_keys: Vec<&String> = global.const_arrays.keys().collect();
+        const_array_keys.sort();
+        for key in const_array_keys {
             let bare = key.rsplit_once(':').map(|(_, name)| name).unwrap_or(key.as_str());
             const_array_bare_index
                 .entry(CompactString::from(bare))
