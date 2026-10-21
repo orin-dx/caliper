@@ -60,9 +60,15 @@ expression: value
                 "name": "Record",
                 "args": [
                   {
-                    "kind": "named",
-                    "name": "Selectors",
-                    "args": []
+                    "kind": "literalUnion",
+                    "members": [
+                      "root",
+                      "inner",
+                      "label",
+                      "section",
+                      "loader"
+                    ],
+                    "hasDefault": false
                   },
                   {
                     "kind": "string"
@@ -872,9 +878,18 @@ expression: value
                 "name": "Record",
                 "args": [
                   {
-                    "kind": "named",
-                    "name": "Selectors",
-                    "args": []
+                    "kind": "literalUnion",
+                    "members": [
+                      "root",
+                      "wrapper",
+                      "input",
+                      "section",
+                      "label",
+                      "description",
+                      "error",
+                      "required"
+                    ],
+                    "hasDefault": false
                   },
                   {
                     "kind": "string"

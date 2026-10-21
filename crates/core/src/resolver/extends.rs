@@ -7,7 +7,7 @@ use crate::types::*;
 use crate::pipeline::HtmlAttributeMode;
 
 use super::chain::{resolve_interface_chain, resolve_props_chain};
-use super::import::resolve_to_canonical;
+use super::import::{resolve_import_specifier, resolve_to_canonical};
 use super::react::resolve_react_types_file;
 use super::{ResolutionContext, ResolvedChain};
 
@@ -78,13 +78,21 @@ pub(super) fn resolve_extends_ref(
             (chain, None)
         }
 
-        ExtendsRef::Imported { local_name, type_args, .. } => {
-            // Follow barrel re-exports to the declaring file; resolving the name from the barrel itself would look for
-            // a declaration the barrel only re-exports.
-            let (canonical_file, canonical_name) =
-                resolve_to_canonical(local_name.as_str(), iface_file, ctx, &mut state.diagnostics)
-                    .unwrap_or_else(|| (iface_file.to_owned(), local_name.to_string()));
-            let chain = resolve_props_chain(&canonical_name, type_args, &canonical_file, mapping, ctx, state, depth);
+        ExtendsRef::Imported { local_name, type_args, source_specifier } => {
+            // `type_args` were written in `iface_file`, so the lookup keeps that file as its consuming file;
+            // `resolve_props_chain` follows the import, including barrel re-exports, from there. Only a name with no
+            // import binding at all falls back to resolving the recorded specifier directly.
+            let bound = resolve_to_canonical(local_name.as_str(), iface_file, ctx, &mut state.diagnostics).is_some();
+            let consuming_file = if bound {
+                iface_file.to_owned()
+            } else {
+                source_specifier
+                    .as_deref()
+                    .and_then(|spec| resolve_import_specifier(spec, iface_file, ctx, &mut state.diagnostics))
+                    .unwrap_or_else(|| iface_file.to_owned())
+            };
+            let chain =
+                resolve_props_chain(local_name.as_str(), type_args, &consuming_file, mapping, ctx, state, depth);
             (chain, None)
         }
     }

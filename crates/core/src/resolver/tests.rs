@@ -1996,9 +1996,9 @@ fn test_keyof_opaque_emits_diagnostic() {
 fn test_complex_raw_fallback_opaque_emits_diagnostic() {
     let ctx = empty_ctx();
     let mut state = ResolveState::default();
-    // Not an identifier, not a literal, not a recognized keyword — falls to
+    // Not an identifier, not a literal, not a recognized keyword, not a union, array or generic reference — falls to
     // the final Raw-fallback Opaque branch.
-    let ct = CollectedType::Raw("A<B> | C".into());
+    let ct = CollectedType::Raw("{ a: string }".into());
     let result = super::collected::resolve_collected_type(&ct, Utf8Path::new("/test/button.tsx"), &ctx, &mut state, 0);
     assert!(matches!(result, PropType::Opaque(_)));
     assert!(!state.diagnostics.is_empty(), "expected a diagnostic for an unparsable Raw fallback, got none");

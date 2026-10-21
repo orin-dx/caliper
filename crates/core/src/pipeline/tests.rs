@@ -1532,6 +1532,79 @@ fn test_utility_types_with_generic_bases_and_keyof_keys_resolve_exactly() {
     assert_eq!(props("C5"), vec!["a", "c"]);
 }
 
+// A generic interface's type arguments must reach its members, directly and through its own extends clause.
+#[test]
+fn test_generic_interface_type_arguments_are_substituted_into_props() {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "a.tsx",
+        "import type { FC } from \"react\";\n\
+         interface Box<T> { value: T; other: string }\n\
+         interface Wide<T> extends Box<T[]> { more: T }\n\
+         export const A: FC<Box<string>> = () => null;\n\
+         export function B(props: Box<number>) { return null }\n\
+         export const C: FC<Box<\"a\" | \"b\">> = () => null;\n\
+         export function D(props: Wide<boolean>) { return null }\n",
+    );
+    let dir = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![dir],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+
+    let output = extract(&options);
+
+    let kinds = |component: &str| -> Vec<(String, String)> {
+        output.components[component]
+            .props
+            .iter()
+            .map(|(name, prop)| (name.clone(), prop.prop_type.raw_string()))
+            .collect()
+    };
+    let pair = |a: &str, b: &str| (a.to_owned(), b.to_owned());
+    assert_eq!(kinds("A"), vec![pair("other", "string"), pair("value", "string")]);
+    assert_eq!(kinds("B"), vec![pair("other", "string"), pair("value", "number")]);
+    assert_eq!(kinds("C"), vec![pair("other", "string"), pair("value", "\"a\" | \"b\"")]);
+    assert_eq!(kinds("D"), vec![pair("more", "boolean"), pair("other", "string"), pair("value", "boolean[]")]);
+}
+
+// Barrels often import a name and then export it, instead of writing `export … from`; both must be followed.
+#[test]
+fn test_barrel_that_imports_then_exports_a_name_is_followed() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("system")).unwrap();
+    fs::create_dir_all(tmp.path().join("components")).unwrap();
+    write_file(
+        &tmp,
+        "system/shared.ts",
+        "export interface UnstyledProp { unstyled?: boolean }\nexport interface Other { other?: string }\n",
+    );
+    write_file(
+        &tmp,
+        "system/index.ts",
+        "import type { UnstyledProp, Other as Renamed } from \"./shared\";\nexport type { UnstyledProp, Renamed as Other };\n",
+    );
+    write_file(
+        &tmp,
+        "components/only.tsx",
+        "import type { UnstyledProp, Other } from \"../system\";\n\
+         export interface OnlyProps extends UnstyledProp, Other { size?: number }\n\
+         export function Only(props: OnlyProps) { return null; }\n",
+    );
+    let dir = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![dir],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+
+    let output = extract(&options);
+
+    assert_eq!(output.components["Only"].props.keys().collect::<Vec<_>>(), vec!["other", "size", "unstyled"]);
+}
+
 // ── test_overlapping_src_dirs_two_directories_deduplicates_without_a_duplicate_listing ─
 //
 // Corrected finding: the insert-return check above only catches a genuine

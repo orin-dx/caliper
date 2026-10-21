@@ -203,12 +203,41 @@ pub(super) fn resolve_props_chain(
     ResolvedChain::empty_with_compose(type_name.to_owned())
 }
 
-/// Resolve an interface to a chain of props.
+/// Replace every identifier token in `text` that names a declared type parameter with the matching argument text.
+fn substitute_identifiers(text: &str, params: &[TypeName], args: &[String]) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.char_indices().peekable();
+    while let Some((start, c)) = chars.next() {
+        if c.is_alphabetic() || c == '_' || c == '$' {
+            let mut end = start + c.len_utf8();
+            while let Some(&(i, next)) = chars.peek() {
+                if next.is_alphanumeric() || next == '_' || next == '$' {
+                    end = i + next.len_utf8();
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            let word = &text[start..end];
+            match params.iter().position(|p| p.as_str() == word).and_then(|i| args.get(i)) {
+                Some(arg) => out.push_str(arg),
+                None => out.push_str(word),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Resolve an interface to a chain of props. `type_args` are the call site's arguments for the interface's declared type
+/// parameters (`Box<string>` for `interface Box<T>`); they replace the parameters in its members and in its own extends
+/// clause.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_interface_chain(
     iface: &CollectedInterface,
-    _type_args: &[String],
-    _consuming_file: &Utf8Path,
+    type_args: &[String],
+    consuming_file: &Utf8Path,
     mapping: &ComponentMapping,
     ctx: &ResolutionContext,
     state: &mut ResolveState,
@@ -219,9 +248,18 @@ pub(super) fn resolve_interface_chain(
     // A generic interface's own declared type parameters (`interface Foo<TData>`)
     // are expected, unexpandable placeholders wherever referenced in its body —
     // not unresolvable types. Register them so `resolve_named` doesn't warn.
-    if let Some(params) = ctx.named_types.lookup_interface_type_params_for(iface) {
+    let declared_params = ctx.named_types.lookup_interface_type_params_for(iface);
+    if let Some(params) = declared_params {
         state.in_scope_type_params.extend(params.iter().cloned());
     }
+    // Supplied arguments replace the parameters; with none supplied the parameters stay placeholders.
+    let substitution = match declared_params {
+        Some(params) if !params.is_empty() && !type_args.is_empty() => {
+            let args: Vec<CollectedType> = type_args.iter().map(|a| super::collected::parse_type_text(a)).collect();
+            Some((params, super::substitute::build_substitution(params, &args, consuming_file, &mut state.diagnostics)))
+        }
+        _ => None,
+    };
 
     // ── Resolve extends first — parent props come before own props ────────────
     // Each extends entry gets its own cloned `visited` set (same pattern as
@@ -236,6 +274,14 @@ pub(super) fn resolve_interface_chain(
     // (a parent's own extends chain looping back on itself) while letting
     // sibling branches independently reach the same shared ancestor.
     for extends_ref in &iface.extends {
+        let substituted;
+        let extends_ref = match &substitution {
+            Some((params, _)) => {
+                substituted = extends_ref.map_type_args(|arg| substitute_identifiers(arg, params, type_args));
+                &substituted
+            }
+            None => extends_ref,
+        };
         let mut branch_state = ResolveState {
             visited: state.visited.clone(),
             named_in_progress: state.named_in_progress.clone(),
@@ -264,7 +310,13 @@ pub(super) fn resolve_interface_chain(
     let parent = PropParent { name: iface.name.to_string(), file_name: iface.file_path.to_string() };
 
     for raw_prop in &iface.props {
-        let prop_type = resolve_collected_type(&raw_prop.collected_type, &iface.file_path, ctx, state, depth);
+        let prop_type = match &substitution {
+            Some((_, subst)) => {
+                let collected = super::substitute::substitute_type(&raw_prop.collected_type, subst);
+                resolve_collected_type(&collected, &iface.file_path, ctx, state, depth)
+            }
+            None => resolve_collected_type(&raw_prop.collected_type, &iface.file_path, ctx, state, depth),
+        };
 
         // Default value: code default takes precedence over JSDoc @default.
         let code_default = mapping.param_defaults.get(&raw_prop.name);

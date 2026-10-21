@@ -214,6 +214,9 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) aliased_away: FxHashSet<CompactString>,
     /// Wrapper-call candidates, promoted to mappings in `finish()` once the whole file has been seen.
     pub(super) pending_wrappers: Vec<wrapper::PendingWrapper>,
+    /// `export { local as exported }` without a source: the index into `data.exports` and the `local` name, so
+    /// `finish()` can recognize a re-exported import once every import has been seen.
+    pub(super) pending_local_exports: Vec<(usize, String)>,
 }
 
 impl<'src> SourceDataCollector<'src> {
@@ -230,6 +233,7 @@ impl<'src> SourceDataCollector<'src> {
             pending_display_name_renames: Vec::new(),
             aliased_away: FxHashSet::default(),
             pending_wrappers: Vec::new(),
+            pending_local_exports: Vec::new(),
         }
     }
 
@@ -257,6 +261,7 @@ impl<'src> SourceDataCollector<'src> {
 
     fn finish(mut self) -> SourceData {
         self.promote_wrapper_calls();
+        self.promote_reexported_imports();
         // Filtered by original identifier first, before any displayName rename
         // below can change what identifier a mapping currently answers to.
         if !self.aliased_away.is_empty() {
@@ -269,6 +274,26 @@ impl<'src> SourceDataCollector<'src> {
             }
         }
         self.data
+    }
+
+    /// `import { A } from "./a"; export { A }` re-exports `A` exactly like `export { A } from "./a"`; barrels use both
+    /// spellings, and only the second names a source file to follow.
+    fn promote_reexported_imports(&mut self) {
+        for (index, local) in std::mem::take(&mut self.pending_local_exports) {
+            let Some(binding) = self.data.imports.iter().find(|imp| imp.local_name.as_str() == local) else { continue };
+            if binding.exported_name.as_str() == "*" {
+                continue;
+            }
+            let crate::types::LexedExport::LocalDeclaration { name, is_type_only } = &self.data.exports[index] else {
+                continue;
+            };
+            self.data.exports[index] = crate::types::LexedExport::ReExportNamed {
+                local_name: name.clone(),
+                source_name: binding.exported_name.to_string(),
+                source_specifier: binding.specifier.clone(),
+                is_type_only: *is_type_only || binding.is_type_only,
+            };
+        }
     }
 
     // ─── Import source specifier lookup ──────────────────────────────────────

@@ -124,6 +124,16 @@ const CASES: &[Case] = &[
         expect: &[("A", &["own", "shared"])],
     },
     Case {
+        shape: "props extended through a barrel that imports then exports",
+        source: r#"
+            import { forwardRef } from "react";
+            import type { Imported } from "./barrel2";
+            interface P extends Imported { own?: string }
+            export const A = forwardRef<HTMLDivElement, P>((props, ref) => <div ref={ref} />);
+        "#,
+        expect: &[("A", &["imported", "own"])],
+    },
+    Case {
         shape: "Pick with a generic base",
         source: r#"
             interface Gen<T> { x: T; y: string }
@@ -139,6 +149,15 @@ const CASES: &[Case] = &[
             export function A(props: Omit<Base, keyof Other>) { return null; }
         "#,
         expect: &[("A", &["a"])],
+    },
+    Case {
+        shape: "generic interface with its own extends clause",
+        source: r#"
+            interface Box<T> { value: T }
+            interface Wide<T> extends Box<T[]> { more: T }
+            export function A(props: Wide<boolean>) { return null; }
+        "#,
+        expect: &[("A", &["more", "value"])],
     },
     // ── near misses that are not components ──────────────────────────────────
     Case {
@@ -193,6 +212,8 @@ const CASES: &[Case] = &[
 const SUPPORT: &[(&str, &str)] = &[
     ("barrel/index.ts", "export type { Shared } from \"./shared\";\n"),
     ("barrel/shared.ts", "export interface Shared { shared?: string }\n"),
+    ("barrel2/index.ts", "import type { Imported } from \"./shared\";\nexport type { Imported };\n"),
+    ("barrel2/shared.ts", "export interface Imported { imported?: string }\n"),
 ];
 
 fn run(case: &Case) -> BTreeMap<String, Vec<String>> {
@@ -204,7 +225,11 @@ fn run(case: &Case) -> BTreeMap<String, Vec<String>> {
         std::fs::write(path, body).unwrap();
     }
     // `./barrel` in the case source resolves from the case file's directory.
-    std::fs::write(root.join("case.tsx"), case.source.replace("\"./barrel\"", "\"./barrel/index\"")).unwrap();
+    std::fs::write(
+        root.join("case.tsx"),
+        case.source.replace("\"./barrel\"", "\"./barrel/index\"").replace("\"./barrel2\"", "\"./barrel2/index\""),
+    )
+    .unwrap();
     let options =
         PipelineOptions { src_dirs: vec![root.clone()], cache_dir: Some(root.join(".cache")), ..Default::default() };
     extract(&options)
