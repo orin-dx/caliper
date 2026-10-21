@@ -11,9 +11,20 @@ install-tools:
     cargo install cargo-semver-checks --locked
     rustup component add llvm-tools-preview
 
-# Check the public Rust API of the core crate for SemVer breaks against the last published version.
+# Check the public Rust API of the core crate for SemVer breaks against the last published version. The version only
+# moves in the release PR, so a break is accepted when a pending minor or major changeset covers the crate.
 semver:
-    cargo semver-checks check-release -p caliper-docgen-core
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if cargo semver-checks check-release -p caliper-docgen-core; then
+        exit 0
+    fi
+    if grep -qsE '^cargo/caliper-docgen-core: (minor|major)$' .changeset/*.md; then
+        echo "breaking API changes are covered by a pending minor or major changeset for caliper-docgen-core"
+        exit 0
+    fi
+    echo "breaking API changes need a minor or major changeset for cargo/caliper-docgen-core" >&2
+    exit 1
 
 # Build with the minimum supported Rust version declared in Cargo.toml.
 msrv:
