@@ -216,7 +216,7 @@ export function Comp(props: CompProps) { return null; }
     };
     let output = caliper_docgen_core::pipeline::extract(&options);
 
-    let rdt_json = serialize_rdt(&output);
+    let rdt_json = serialize_rdt(&output).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&rdt_json).unwrap();
     let composes = parsed["Comp"]["composes"].as_array().expect("expected a composes array in RDT output");
     assert!(!composes.is_empty(), "expected the unresolvable Weird<'x'> member to appear in RDT's composes field");
@@ -326,7 +326,7 @@ fn serialize_rdt_emits_composes_exactly() {
         stats: Default::default(),
     };
 
-    let rdt_json = serialize_rdt(&output);
+    let rdt_json = serialize_rdt(&output).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&rdt_json).unwrap();
     assert_eq!(parsed["Widget"]["composes"], serde_json::json!(["BaseA", "BaseB"]));
 }
@@ -380,7 +380,7 @@ fn serialize_rdt_omits_undocumented_children_but_keeps_documented_ones() {
         stats: Default::default(),
     };
 
-    let parsed: serde_json::Value = serde_json::from_str(&serialize_rdt(&output)).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&serialize_rdt(&output).unwrap()).unwrap();
     let prop_names = |component: &str| -> Vec<String> {
         let mut names: Vec<String> = parsed[component]["props"].as_object().unwrap().keys().cloned().collect();
         names.sort();
@@ -419,7 +419,7 @@ fn serialize_storybook_emits_exact_docgen_blocks() {
         stats: Default::default(),
     };
 
-    let parsed: serde_json::Value = serde_json::from_str(&serialize_storybook(&output)).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&serialize_storybook(&output).unwrap()).unwrap();
 
     assert_eq!(
         parsed,
@@ -536,7 +536,7 @@ export function Comp(props: Props) { return null; }
         comp.composes
     );
 
-    let rdt_json = serialize_rdt(&output);
+    let rdt_json = serialize_rdt(&output).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&rdt_json).unwrap();
     assert_eq!(parsed["Comp"]["composes"], serde_json::json!(["\"a\" | \"b\""]));
 }
