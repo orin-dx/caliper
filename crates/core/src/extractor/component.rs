@@ -182,6 +182,38 @@ impl<'src> SourceDataCollector<'src> {
         )
     }
 
+    /// Try to detect: `const Button = ({ variant }: ButtonProps) => ...` and the `function` expression form. Async
+    /// and generator functions cannot be components, and a first parameter that is not a named type (a primitive,
+    /// a literal) is not a props object.
+    pub(super) fn try_typed_function_expression<'a>(
+        &mut self,
+        decl: &VariableDeclarator<'a>,
+        name: &str,
+    ) -> Option<ComponentMapping> {
+        let params = match peel_expr(decl.init.as_ref()?) {
+            Expression::ArrowFunctionExpression(afe) if !afe.r#async => &*afe.params,
+            Expression::FunctionExpression(fe) if !fe.r#async && !fe.generator => &*fe.params,
+            _ => return None,
+        };
+        let type_ann = params.items.first()?.type_annotation.as_ref()?;
+        let (props_name, type_args) = self.extract_type_name_from_type(&type_ann.type_annotation)?;
+        let param_defaults = self.extract_param_defaults(params);
+        let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
+        Some(
+            ComponentMapping::new(
+                name.to_owned(),
+                props_name,
+                self.file_path.clone(),
+                decl.span.start,
+                decl.span.end,
+                DetectionRule::TypedFunctionExpression,
+            )
+            .with_props_type_args(type_args)
+            .with_doc(description, tags)
+            .with_param_defaults(param_defaults),
+        )
+    }
+
     /// Try to detect: `const Button = anyHOC(function Button(props: ButtonProps) {...})`
     pub(super) fn try_hoc_wrapped<'a>(
         &mut self,
