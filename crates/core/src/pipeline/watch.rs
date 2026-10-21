@@ -4,9 +4,8 @@ use std::time::Instant;
 use arc_swap::ArcSwap;
 use camino::{Utf8Path, Utf8PathBuf};
 use dashmap::DashMap;
-use rayon::prelude::*;
 
-use crate::resolver::{resolve_component, ResolutionContext};
+use crate::resolver::ResolutionContext;
 use crate::types::*;
 
 use super::super::types::{ComponentMapping, GlobalSourceData};
@@ -41,19 +40,15 @@ fn canonicalize_best_effort(path: &Utf8Path) -> Utf8PathBuf {
 /// Stateful session for incremental watch-mode extraction.
 ///
 /// `global`, `reverse_deps`, and `component_cache` are updated atomically /
-/// concurrently on each file change. `reverse_deps` is rebuilt in full on
-/// structural changes (new file, deleted file) via a new `WatchSession` — it
-/// does not track incremental import-graph edits within a session.
+/// concurrently on each file change. `reverse_deps` is rebuilt from the merged
+/// import graph after every edit, so an import added or removed by an edit
+/// takes effect for the next one.
 pub struct WatchSession {
     pub options: PipelineOptions,
     /// Current merged source data — swapped atomically via `ArcSwap`.
     pub global: ArcSwap<GlobalSourceData>,
-    /// Reverse-dependency graph built at initialisation time — swapped
-    /// atomically via `ArcSwap` so `initialize()` can populate it from the
-    /// first fully-merged `global` (it doesn't exist yet at `new()`).
+    /// Reverse-dependency graph, rebuilt from the merged `global` by `initialize()` and again by every `update_file`.
     pub reverse_deps: ArcSwap<ReverseDeps>,
-    /// Per-file SourceData cache (avoids re-reading files that haven't changed).
-    pub source_cache: DashMap<Utf8PathBuf, SourceData>,
     /// Latest resolved component entries, keyed by display name.
     pub component_cache: DashMap<String, ComponentEntry>,
     /// Latest diagnostics per file, replaced (not appended) on each re-update so a
@@ -87,7 +82,6 @@ impl WatchSession {
             options,
             global: ArcSwap::new(Arc::new(GlobalSourceData::default())),
             reverse_deps: ArcSwap::new(Arc::new(ReverseDeps { inner: Default::default() })),
-            source_cache: DashMap::new(),
             component_cache: DashMap::new(),
             diagnostics: DashMap::new(),
             ambient_global_files: std::sync::OnceLock::new(),
@@ -113,11 +107,7 @@ impl WatchSession {
         // Full-mode/ambient-lib.d.ts merges entirely: the cold `output` below
         // was correct (it came from a real extract() call), but the `global`
         // this session persists for every subsequent update_file() was not.
-        let (output, global, per_file_data) = super::extract_with_global(&self.options, true);
-
-        for (path, data) in per_file_data {
-            self.source_cache.insert(path, data);
-        }
+        let (output, global, _per_file_data) = super::extract_with_global(&self.options, true);
 
         self.ambient_global_files.set(crate::resolver::compute_ambient_global_files(&self.options)).ok();
         self.reverse_deps.store(Arc::new(ReverseDeps::build(&global)));
@@ -140,14 +130,13 @@ impl WatchSession {
         let components: std::collections::BTreeMap<String, ComponentEntry> =
             self.component_cache.iter().map(|r| (r.key().clone(), r.value().clone())).collect();
         let global = self.global.load();
-        let enums: std::collections::BTreeMap<String, Vec<EnumEntry>> =
-            global.enums.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let (enums, enum_diagnostics) = super::collect_public_enums(&global);
 
         // DashMap iteration order is arbitrary — sort by path for deterministic output.
         let mut by_path: Vec<(Utf8PathBuf, Vec<Diagnostic>)> =
             self.diagnostics.iter().map(|r| (r.key().clone(), r.value().clone())).collect();
         by_path.sort_by(|a, b| a.0.cmp(&b.0));
-        let diagnostics: Vec<Diagnostic> = by_path.into_iter().flat_map(|(_, ds)| ds).collect();
+        let diagnostics: Vec<Diagnostic> = by_path.into_iter().flat_map(|(_, ds)| ds).chain(enum_diagnostics).collect();
 
         // Only `components_extracted` is populated here — the other ExtractionStats
         // fields (files_parsed, dts_cache_hits, duration_ms, tier1/tier3/opaque
@@ -187,7 +176,6 @@ impl WatchSession {
         let mut new_data = crate::extractor::parse_file(changed, &source);
         // Drained here as in the cold path's merge, so both paths cache and merge the same `SourceData`.
         let parse_diagnostics = std::mem::take(&mut new_data.diagnostics);
-        self.source_cache.insert(changed.to_owned(), new_data.clone());
 
         // 2. Patch GlobalSourceData atomically using rcu (read-copy-update).
         // rcu retries if the pointer was swapped by a concurrent update_file call,
@@ -218,7 +206,9 @@ impl WatchSession {
             guard.clone()
         };
 
-        // 3. Find all transitively affected files via the reverse dep graph.
+        // 3. Find all transitively affected files via the reverse dep graph, rebuilt from the post-edit imports so an
+        // edge this edit added (or removed) is already reflected.
+        self.reverse_deps.store(Arc::new(ReverseDeps::build(&new_global)));
         let affected = self.reverse_deps.load().affected(changed);
 
         // 4. Re-resolve affected components.
@@ -236,40 +226,7 @@ impl WatchSession {
             ambient_global_files,
             named_types,
         );
-        // Wrapped in `contain_panic` for the same reason as the one-shot `extract()`
-        // path (pipeline/mod.rs) — one component's resolution panicking must degrade
-        // to a per-component diagnostic instead of poisoning this `.collect()` and
-        // losing every other affected component's re-resolution for this file change.
-        let results: Vec<(ComponentEntry, Vec<Diagnostic>)> = affected_mappings
-            .par_iter()
-            .copied()
-            .map(|m| {
-                let label = format!("resolve:{}", m.component_name);
-                crate::panic_guard::contain_panic(&label, || {
-                    #[cfg(test)]
-                    if m.component_name == super::RESOLVE_PANIC_TEST_SENTINEL {
-                        panic!("simulated resolve-phase panic (test-only sentinel)");
-                    }
-
-                    resolve_component(m, &ctx)
-                })
-                .unwrap_or_else(|diag| {
-                    let stub = ComponentEntry {
-                        display_name: m.component_name.clone(),
-                        file_path: m.file_path.clone(),
-                        description: String::new(),
-                        props: Default::default(),
-                        inheritance: vec![],
-                        notable_inherited: Default::default(),
-                        discriminant_prop: None,
-                        composes: vec![],
-                        tags: Default::default(),
-                        methods: vec![],
-                    };
-                    (stub, vec![diag])
-                })
-            })
-            .collect();
+        let results = super::resolve_guarded(&affected_mappings, &ctx);
 
         // A failed read (deletion, permission error, non-UTF8 content) must
         // NOT evict this file's cache entries — SPEC-PIPELINE-001's AC-019
@@ -306,7 +263,12 @@ impl WatchSession {
             }
         }
 
-        for (entry, diags) in results {
+        for ((entry, diags), mapping) in results.into_iter().zip(&affected_mappings) {
+            if let Some(note) = super::unresolved_wrapper_guess(mapping, &entry) {
+                diagnostics.extend(diags);
+                diagnostics.push(note);
+                continue;
+            }
             // Disambiguate against whatever's left in the cache after this
             // file's own stale keys were just evicted above — mirrors Phase
             // 5's bare-then-disambiguated rule (extract()'s one-shot path),
