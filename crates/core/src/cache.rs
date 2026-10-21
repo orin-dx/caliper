@@ -240,6 +240,9 @@ fn write_atomic(dir: &Utf8Path, name: &str, bytes: &[u8]) -> Result<(), String> 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+mod golden;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::types::SourceData;
