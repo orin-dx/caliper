@@ -324,29 +324,32 @@ impl Revision {
         };
         next.assemble(options);
 
-        let updated_components: Vec<(String, ComponentEntry)> = fresh_ids
+        // Updated: every key whose component this revision re-resolved, plus every kept component whose key moved (a
+        // same-named component elsewhere appeared or disappeared, so the bare and disambiguated keys swapped).
+        let fresh: FxHashSet<&ComponentId> = fresh_ids.iter().collect();
+        let mut updated_keys: Vec<&String> = next
+            .keys
             .iter()
-            .filter_map(|id| {
-                Some((next.keys.get(id)?.clone(), next.output.components.get(next.keys.get(id)?)?.clone()))
-            })
+            .filter(|(id, key)| fresh.contains(id) || self.keys.get(*id) != Some(*key))
+            .map(|(_, key)| key)
+            .collect();
+        updated_keys.sort();
+        updated_keys.dedup();
+        let updated_components: Vec<(String, ComponentEntry)> = updated_keys
+            .into_iter()
+            .filter_map(|key| Some((key.clone(), next.output.components.get(key)?.clone())))
             .collect();
         let removed_keys: Vec<String> =
             self.output.components.keys().filter(|key| !next.output.components.contains_key(*key)).cloned().collect();
         let mut affected_files: Vec<Utf8PathBuf> = fresh_ids.iter().map(|id| id.file.clone()).collect();
         affected_files.sort();
         affected_files.dedup();
-        // The changed file's own diagnostics and those of every re-resolved component.
-        let updated: FxHashSet<&str> = updated_components.iter().map(|(key, _)| key.as_str()).collect();
-        let diagnostics: Vec<Diagnostic> = next
-            .output
-            .diagnostics
-            .iter()
-            .filter(|d| {
-                d.file.as_deref() == Some(changed.as_str())
-                    || d.affects.iter().any(|key| updated.contains(key.as_str()))
-            })
-            .cloned()
-            .collect();
+        let before: FxHashSet<&Diagnostic> = self.output.diagnostics.iter().collect();
+        let after: FxHashSet<&Diagnostic> = next.output.diagnostics.iter().collect();
+        let diagnostics: Vec<Diagnostic> =
+            next.output.diagnostics.iter().filter(|d| !before.contains(d)).cloned().collect();
+        let removed_diagnostics: Vec<Diagnostic> =
+            self.output.diagnostics.iter().filter(|d| !after.contains(d)).cloned().collect();
         let update = IncrementalUpdate {
             revision: next.id,
             updated_components: updated_components.iter().map(|(_, entry)| entry.clone()).collect(),
@@ -354,6 +357,7 @@ impl Revision {
             removed_keys,
             affected_files,
             diagnostics,
+            removed_diagnostics,
             duration_ms: start.elapsed().as_millis() as u64,
         };
         Some((next, update))

@@ -142,6 +142,8 @@ export interface IncrementalUpdate {
   updatedKeys: string[]
   /** Output keys that no longer exist: the component was renamed, deleted, or stopped being a component. */
   removedKeys: string[]
+  /** Diagnostics this revision no longer has; `diagnostics` holds the ones it added. */
+  removedDiagnostics: Diagnostic[]
   affectedFiles: string[]
   diagnostics: Diagnostic[]
   durationMs: number
