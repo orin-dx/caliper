@@ -76,11 +76,13 @@ RDT also emits any exported symbol that has a JSDoc comment but no props. We don
 | --- | --- |
 | Where | `microsoft/TypeScript` `main` (`7.1.0-dev`). typescript-go closed on 2026-08-20 |
 | Timeline | Beta 2026-10-06, RC 2026-11-10, stable 2026-11-24 ([#63703](https://github.com/microsoft/TypeScript/issues/63703)) |
-| Get it | `npm i typescript@next`. 7.0.x has no API |
+| Get it | `npm i typescript@beta` (`7.1.0-beta`, published 2026-10-06) or `@next`. 7.0.x (`latest`) has no API |
 | Launch | `tsc --api --async --cwd <dir>`: JSON-RPC with LSP-style `Content-Length` framing, handled concurrently. Without `--async`: msgpack over stdio, strictly serial. `--pipe` uses a socket |
-| Stability | JS entry points are `typescript/unstable/*`. The protocol has no version handshake, so pin the build |
+| Stability | The beta's JS entry points are `typescript/sync`, `/async`, `/proto` and `/ast/*` (the `unstable/*` names are gone). The protocol has no version handshake, so pin the build |
 | Positions | UTF-16 code units. OXC offsets are UTF-8 bytes |
 | Surface | 157 methods on 2026-09-19, mostly with TS 6 checker names |
+
+**Beta re-probe (2026-10-21, `7.1.0-beta`).** `crates/tsc-client`'s smoke example spawned the beta's `bin/tsc --api`, completed the `initialize` round trip (`caseSensitivity`, `currentDirectory`) and shut down cleanly with exit status 0, so framing and shutdown behave as the fake-tsc harness assumes. `TSC_PACKAGE_DIR=<dir> cargo run -p caliper-docgen-tsc-client --example smoke_real_tsc` repeats it against any installed `typescript`. The beta's `proto.generated.d.ts` still exposes every checker call the algorithm uses: `getTypeAtLocation`, `getTypeOfSymbol`, `getDeclaredTypeOfSymbol`, `getSignaturesOfType`, `getResolvedSignature`, `getReturnTypeOfSignature`, `getBaseTypes` and `getPropertiesOfType`. Not yet re-run on the beta: the 13-component parity run below and discovery over a whole project.
 
 **Churn.** About 20 commits touched the protocol definition (`proto.go`) between 2026-08-20 and 2026-09-18. `updateSnapshot`, project IDs and `createProgram` params were reshaped on 09-17 and 09-18. Every call the algorithm uses ran unchanged on the 09-20 and 09-26 nightlies. Re-verify on the beta.
 

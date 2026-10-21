@@ -61,24 +61,31 @@ Confirmed by the October 2026 audits and benchmarks.
 
 ## Progress
 
-| Item                                                                      | State  | PR  |
-| ------------------------------------------------------------------------- | ------ | --- |
-| 0.1 Sibling `tests.rs`                                                    | merged | #48 |
-| 0.2 Architecture tests                                                    | merged | #50 |
-| 0.3 Lints and dependency hygiene                                          | merged | #49 |
-| 0.4 SemVer and MSRV CI (MSRV raised to 1.97)                              | open   | #52 |
-| 0.5 Cache byte-layout guard (proptest and fuzz deferred)                  | open   | #53 |
-| 1.1 Parenthesized and `!` wrappers                                        | open   | #54 |
-| 1.3 Deterministic same-name enums                                         | open   | #56 |
-| 1.4 Unreadable files reported                                             | open   | #57 |
-| 1.5 Split diagnostic codes                                                | open   | #58 |
-| 2.2 Mapping and diagnostic builders, positions on skips                   | open   | #59 |
-| 2.6 Multi-hop barrel cause and fix (extends clause)                       | open   | #63 |
-| 3.1 `DetectionRule` on mappings (`Detection` type deferred)               | open   | #60 |
-| 3.2 Typed arrow and function expressions                                  | open   | #61 |
-| 3.4 Wrapper calls by shape (same-file; callee analysis not needed so far) | open   | #62 |
+| Item                                                                                          | State  | PR       |
+| --------------------------------------------------------------------------------------------- | ------ | -------- |
+| 0.1 Sibling `tests.rs`                                                                        | merged | #48      |
+| 0.2 Architecture tests                                                                        | merged | #50      |
+| 0.3 Lints and dependency hygiene                                                              | merged | #49      |
+| 0.4 SemVer and MSRV CI (MSRV raised to 1.97; a break passes when a minor changeset covers it) | open   | #52      |
+| 0.5 Cache byte-layout guard (proptest and fuzz deferred)                                      | open   | #53      |
+| 0.6 Per-shape recall table                                                                    | open   | #68      |
+| 1.1 Parenthesized and `!` wrappers                                                            | open   | #54      |
+| 1.2 Eight dead options removed (deleted, not wired)                                           | open   | #66      |
+| 1.3 Deterministic same-name enums                                                             | open   | #56      |
+| 1.4 Unreadable files reported                                                                 | open   | #57      |
+| 1.5 Split diagnostic codes                                                                    | open   | #58      |
+| 1.6 Watch mode agrees with `extract()`                                                        | open   | #67      |
+| 2.2 Mapping and diagnostic builders, positions on skips                                       | open   | #59      |
+| 2.4 `Pick` and `Omit` with generic bases and `keyof` (no `UtilityKind` yet)                   | open   | #65      |
+| 2.6 Multi-hop barrels: extends clause, and import-then-export                                 | open   | #63, #69 |
+| 3.1 `DetectionRule` on mappings (`Detection` type deferred)                                   | open   | #60      |
+| 3.2 Typed arrow and function expressions                                                      | open   | #61      |
+| 3.3 Generic interface arguments substituted (RC3)                                             | open   | #69      |
+| 3.4 Wrapper calls by shape (same-file; callee analysis not needed so far)                     | open   | #62      |
+| 4.1 TypeScript 7.1.0-beta re-probe                                                            | open   | #70      |
+| 4.2 ADR 0007                                                                                  | open   | #70      |
 
-Not started: 0.6, 0.7, 1.2, 1.6, 2.1, 2.3 to 2.5, 2.7, 3.3, 3.5, 3.6, Phases 4 and 5, Track R. Measured recall after #63 (against react-docgen-typescript, own props): Mantine 93%, Chakra 92%, Ant Design 97%, shadcn/ui 98%, react-spectrum 99%.
+Not started: 2.1 (structured type arguments; a text parser stands in), 2.3, 2.5, 2.7, 3.5, 3.6, 4.3 to 4.5, Phase 5, Track R, 0.7's guides. Measured recall after #69 (against react-docgen-typescript, own props, five source-only mirrors): components found Mantine 93%, Chakra 92%, Ant Design 97%, shadcn/ui 98%, react-spectrum 99%; share of its props reported 92%, 85%, 95%, 94%, 97%. What remains needs the checker: calls with no type argument, and props a callee adds (Mantine's `component` and `renderRoot`).
 
 ## Phases
 
