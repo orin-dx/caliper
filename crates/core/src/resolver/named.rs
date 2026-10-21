@@ -84,15 +84,18 @@ fn resolve_named_uncycled(
 
     match matched {
         Some(super::precedence::SourceOrKnownMatch::TypeAlias { matched_key, alias }) => {
-            // A generic alias's own declared type parameters (`type Foo<TData> = ...`)
-            // are expected, unexpandable placeholders wherever referenced in its body —
-            // not unresolvable types. Register them so step 7 below doesn't warn.
-            // Substituting the call site's arguments here is correct but costs a third of the run on Mantine without a
-            // resolution cache, so it waits for that cache.
-            if let Some(params) = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key) {
-                state.in_scope_type_params.extend(params.iter().cloned());
+            // The call site's arguments replace the alias's declared parameters (`type Foo<TData> = ...` used as
+            // `Foo<string>`). Parameters left unfilled stay expected, unexpandable placeholders, not unresolvable
+            // types, so they are registered for step 7 below.
+            let Some(params) = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key) else {
+                return resolve_type_alias_type(&alias, ctx, state, depth);
+            };
+            state.in_scope_type_params.extend(params.iter().cloned());
+            if args.is_empty() {
+                return resolve_type_alias_type(&alias, ctx, state, depth);
             }
-            return resolve_type_alias_type(&alias, ctx, state, depth);
+            let subst = super::substitute::build_substitution(params, args, consuming_file, &mut state.diagnostics);
+            return resolve_type_alias_type(&super::substitute::substitute_alias(&alias, &subst), ctx, state, depth);
         }
         Some(super::precedence::SourceOrKnownMatch::Interface(_)) => {
             // At the prop-TYPE level (not chain level), an interface name is returned as Named.
