@@ -184,7 +184,7 @@ pub enum DiagnosticCode {
     UnresolvableImport, GenericArgumentMismatch, OpaqueType, MaxDepthExceeded,
     Unknown, JsDocDefaultMismatch, ComputedDefault, IndexedAccessOpaque,
     TemplateLiteralOpaque, DiscriminatedUnion, IoError, ExcessiveNesting,
-    ParseError, InternalPanic, SkippedCandidate, ComponentKeyCollision, DuplicateEnumName,
+    ParseError, InternalPanic, SkippedCandidate, ComponentKeyCollision, DuplicateEnumName, CircularReference, MissingTypeLibrary,
 }
 ```
 

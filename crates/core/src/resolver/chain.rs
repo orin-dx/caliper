@@ -49,7 +49,7 @@ pub(super) fn resolve_props_chain(
                 line: None,
                 column: None,
                 help: Some("This type (directly or indirectly) extends or references itself.".into()),
-                code: DiagnosticCode::MaxDepthExceeded,
+                code: DiagnosticCode::CircularReference,
             }),
             state,
         );

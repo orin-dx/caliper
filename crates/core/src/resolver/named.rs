@@ -46,7 +46,7 @@ pub(super) fn resolve_named(
             line: None,
             column: None,
             help: Some("This type (directly or indirectly) references itself.".into()),
-            code: DiagnosticCode::MaxDepthExceeded,
+            code: DiagnosticCode::CircularReference,
         });
         return OpaqueDetail::new(name.to_string(), OpaqueReason::DepthExceeded);
     }
