@@ -1500,6 +1500,39 @@ fn test_props_extended_through_a_reexporting_barrel_resolve() {
     assert_eq!(output.components["Only"].props.keys().collect::<Vec<_>>(), vec!["size", "unstyled"]);
 }
 
+// Utility types in an extends clause or as the props type itself must honor a generic base and a `keyof` key set.
+#[test]
+fn test_utility_types_with_generic_bases_and_keyof_keys_resolve_exactly() {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "a.tsx",
+        "interface Gen<T> { x: T; y: string }\n\
+         interface Base { a: number; b: number; c: number }\n\
+         interface Other { b: number }\n\
+         export interface P1 extends Pick<Gen<number>, \"x\"> { own: boolean }\n\
+         export interface P2 extends Omit<Base, keyof Other> { own: boolean }\n\
+         export function C1(props: P1) { return null }\n\
+         export function C2(props: P2) { return null }\n\
+         export function C4(props: Pick<Gen<number>, \"x\">) { return null }\n\
+         export function C5(props: Omit<Base, keyof Other>) { return null }\n",
+    );
+    let dir = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![dir],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+
+    let output = extract(&options);
+
+    let props = |name: &str| -> Vec<&str> { output.components[name].props.keys().map(String::as_str).collect() };
+    assert_eq!(props("C1"), vec!["own", "x"]);
+    assert_eq!(props("C2"), vec!["a", "c", "own"]);
+    assert_eq!(props("C4"), vec!["x"]);
+    assert_eq!(props("C5"), vec!["a", "c"]);
+}
+
 // ── test_overlapping_src_dirs_two_directories_deduplicates_without_a_duplicate_listing ─
 //
 // Corrected finding: the insert-return check above only catches a genuine
