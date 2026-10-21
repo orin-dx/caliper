@@ -27,13 +27,9 @@ pub(super) fn resolve_named(
     state: &mut ResolveState,
     depth: u8,
 ) -> PropType {
-    let visit_key: CompactString = format!(
-        "{}:{}<{}>",
-        consuming_file,
-        name,
-        args.iter().map(|a| a.to_raw_string()).collect::<Vec<_>>().join(",")
-    )
-    .into();
+    // Structural arguments: their display form abbreviates object types to `{ ... }`, which collided distinct
+    // instantiations into a false cycle.
+    let visit_key: CompactString = format!("{}:{}<{:?}>", consuming_file, name, args).into();
 
     if !state.named_in_progress.insert(visit_key.clone()) {
         state.diagnostics.push(Diagnostic {
@@ -90,6 +86,8 @@ fn resolve_named_uncycled(
             // A generic alias's own declared type parameters (`type Foo<TData> = ...`)
             // are expected, unexpandable placeholders wherever referenced in its body —
             // not unresolvable types. Register them so step 7 below doesn't warn.
+            // Substituting the call site's arguments here is correct but costs a third of the run on Mantine without a
+            // resolution cache, so it waits for that cache.
             if let Some(params) = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key) {
                 state.in_scope_type_params.extend(params.iter().cloned());
             }

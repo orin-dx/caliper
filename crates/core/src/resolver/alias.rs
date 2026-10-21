@@ -32,38 +32,16 @@ pub(super) fn resolve_type_alias_chain(
             resolve_base_as_chain(target, file_path, mapping, ctx, state, depth)
         }
 
-        CollectedTypeAlias::Omit { base, omitted_keys, omitted_keys_of, file_path } => {
-            // Resolve the base type first, then remove omitted keys.
+        CollectedTypeAlias::Omit { base, keys, file_path } => {
             let mut chain = resolve_base_as_chain(base, file_path, mapping, ctx, state, depth);
-
-            let mut all_omitted: Vec<String> = omitted_keys.clone();
-            if let Some(keys_of) = omitted_keys_of {
-                // `Omit<Base, keyof Other>` — `Other`'s key set isn't known statically.
-                // Purely structural, not type inference: resolve `Other` as its own
-                // props chain (the same machinery used for `base` above) and take its
-                // field names as the omitted set.
-                //
-                // Branch on a cloned `visited` set (same pattern as `resolve_union_alias`'s
-                // discriminant probe below): `Other` is very often *also* resolved for real
-                // elsewhere in the same alias (e.g. the `& U` half of `Omit<T, keyof U> & U`).
-                // Sharing the main cycle-detection set would mark it visited here and make
-                // that later, legitimate resolution come back empty.
-                let mut branch_state = ResolveState {
-                    visited: state.visited.clone(),
-                    named_in_progress: state.named_in_progress.clone(),
-                    diagnostics: vec![],
-                    in_scope_type_params: state.in_scope_type_params.clone(),
-                };
-                let other_chain = resolve_base_as_chain(keys_of, file_path, mapping, ctx, &mut branch_state, depth);
-                state.diagnostics.extend(branch_state.diagnostics);
-                all_omitted.extend(other_chain.props.into_iter().map(|p| p.name));
-            }
-
-            let omitted_set: FxHashSet<&str> = all_omitted.iter().map(|k| k.as_str()).collect();
+            let Some(omitted) = resolve_key_set_or_warn("Omit", keys, file_path, mapping, ctx, state, depth) else {
+                return chain;
+            };
+            let omitted_set: FxHashSet<&str> = omitted.iter().map(String::as_str).collect();
             chain.props.retain(|p| !omitted_set.contains(p.name.as_str()));
             // Record omitted keys in the relevant inheritance layer.
             for layer in &mut chain.inheritance {
-                for key in &all_omitted {
+                for key in &omitted {
                     if !layer.omitted.contains(key) {
                         layer.omitted.push(key.clone());
                     }
@@ -72,9 +50,13 @@ pub(super) fn resolve_type_alias_chain(
             chain
         }
 
-        CollectedTypeAlias::Pick { base, picked_keys, file_path } => {
+        CollectedTypeAlias::Pick { base, keys, file_path } => {
             let mut chain = resolve_base_as_chain(base, file_path, mapping, ctx, state, depth);
-            let picked_set: FxHashSet<&str> = picked_keys.iter().map(|k| k.as_str()).collect();
+            let Some(picked) = resolve_key_set_or_warn("Pick", keys, file_path, mapping, ctx, state, depth) else {
+                chain.props.clear();
+                return chain;
+            };
+            let picked_set: FxHashSet<&str> = picked.iter().map(String::as_str).collect();
             chain.props.retain(|p| picked_set.contains(p.name.as_str()));
             chain
         }
@@ -287,15 +269,10 @@ pub(super) fn resolve_union_alias(
         .iter()
         .filter_map(|m| {
             if let CollectedType::Named { name, .. } = m {
-                let mut branch_state = ResolveState {
-                    visited: state.visited.clone(),
-                    named_in_progress: state.named_in_progress.clone(),
-                    diagnostics: vec![],
-                    in_scope_type_params: state.in_scope_type_params.clone(),
-                };
+                let mut branch_state = state.branch();
                 let chain =
                     resolve_props_chain(name.as_str(), &[], file_path, mapping, ctx, &mut branch_state, depth + 1);
-                state.diagnostics.extend(branch_state.diagnostics);
+                state.absorb(branch_state);
                 Some((name.as_str(), chain.props))
             } else {
                 None
@@ -466,5 +443,107 @@ pub(super) fn resolve_type_alias_type(
             // At the type level, just forward to the base type.
             resolve_collected_type(base, file_path, ctx, state, depth + 1)
         }
+    }
+}
+
+/// The key set a `Pick`/`Omit` key expression denotes, or a warning and `None` when it can't be known statically.
+#[allow(clippy::too_many_arguments)]
+fn resolve_key_set_or_warn(
+    utility: &str,
+    keys: &CollectedType,
+    file: &Utf8Path,
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> Option<Vec<String>> {
+    let resolved = resolve_key_set(keys, file, mapping, ctx, state, depth);
+    if resolved.is_none() {
+        let what = if utility == "Omit" { "nothing is omitted" } else { "no props are picked" };
+        state.diagnostics.push(
+            Diagnostic::new(
+                DiagnosticSeverity::Warning,
+                DiagnosticCode::OpaqueType,
+                format!("Cannot determine the keys of {utility}<…, {}> in '{file}', so {what}", keys.to_raw_string()),
+            )
+            .with_file(file.to_string()),
+        );
+    }
+    resolved
+}
+
+/// Literals, unions, `keyof X`, a key alias (`type Keys = "a" | "b"`), `Exclude`/`Extract` of key sets, and an
+/// argument substituted from another file. `None` for anything else, which only the checker could evaluate.
+fn resolve_key_set(
+    keys: &CollectedType,
+    file: &Utf8Path,
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> Option<Vec<String>> {
+    if depth > super::MAX_DEPTH {
+        return None;
+    }
+    match keys {
+        CollectedType::StringLiteral(s) => Some(vec![s.to_string()]),
+        CollectedType::NumberLiteral(n) => Some(vec![n.to_string()]),
+        CollectedType::Never => Some(vec![]),
+        CollectedType::Union(members) => {
+            let mut all = Vec::new();
+            for member in members {
+                all.extend(resolve_key_set(member, file, mapping, ctx, state, depth + 1)?);
+            }
+            Some(all)
+        }
+        CollectedType::AtFile { file, inner } => resolve_key_set(inner, file, mapping, ctx, state, depth + 1),
+        CollectedType::KeyOf(target) => {
+            // A fresh cycle set: reading a type's keys is a separate question from the props walk that called it, which
+            // has usually just visited the same type (`Omit<Base, keyof Base>` resolves `Base` first). Sharing the set
+            // made `keyof Base` look circular and come back empty. Depth still bounds the recursion.
+            let mut branch_state = state.detached();
+            let chain = resolve_base_as_chain(target, file, mapping, ctx, &mut branch_state, depth + 1);
+            state.absorb(branch_state);
+            Some(chain.props.into_iter().map(|p| p.name).collect())
+        }
+        CollectedType::Named { name, args } if (name == "Exclude" || name == "Extract") && args.len() == 2 => {
+            let from = resolve_key_set(&args[0], file, mapping, ctx, state, depth + 1)?;
+            let by: FxHashSet<String> =
+                resolve_key_set(&args[1], file, mapping, ctx, state, depth + 1)?.into_iter().collect();
+            let keep_members = name == "Extract";
+            Some(from.into_iter().filter(|k| by.contains(k) == keep_members).collect())
+        }
+        // An unfilled type parameter (`Omit<T, "style" | PropsToOmit>` with no argument for `PropsToOmit`) contributes
+        // no keys; its default is unknown to the extractor and is almost always `never`.
+        CollectedType::Named { name, args } if args.is_empty() && state.in_scope_type_params.contains(name) => {
+            Some(vec![])
+        }
+        CollectedType::Named { name, args } => {
+            let (canonical_file, _, matched) =
+                super::precedence::resolve_source_defined_or_known(name, &[], file, ctx, state);
+            let Some(super::precedence::SourceOrKnownMatch::TypeAlias { matched_key, alias }) = matched else {
+                return None;
+            };
+            let alias = super::substitute::apply_generic_args(
+                alias,
+                (&canonical_file, &matched_key),
+                args,
+                file,
+                ctx,
+                &mut state.diagnostics,
+            );
+            match &alias {
+                CollectedTypeAlias::LiteralUnion { members, .. } => Some(members.clone()),
+                CollectedTypeAlias::Union { members, file_path } => {
+                    let union = CollectedType::Union(members.clone());
+                    resolve_key_set(&union, file_path, mapping, ctx, state, depth + 1)
+                }
+                CollectedTypeAlias::Passthrough { target, file_path } => {
+                    resolve_key_set(target, file_path, mapping, ctx, state, depth + 1)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
     }
 }

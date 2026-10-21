@@ -577,10 +577,9 @@ fn test_type_alias_omit() {
     let alias = data.type_aliases.get("/test/types.ts:PartialProps");
     assert!(alias.is_some(), "PartialProps alias not collected");
     match alias.unwrap() {
-        CollectedTypeAlias::Omit { base, omitted_keys, .. } => {
+        CollectedTypeAlias::Omit { base, keys, .. } => {
             assert_eq!(base.to_raw_string(), "FullProps");
-            assert!(omitted_keys.contains(&"b".to_owned()));
-            assert!(omitted_keys.contains(&"c".to_owned()));
+            assert_eq!(keys.as_string_union_keys(), vec!["b".to_owned(), "c".to_owned()]);
         }
         other => panic!("Expected Omit, got {:?}", other),
     }
@@ -1149,23 +1148,22 @@ fn malformed_omit_type_alias_is_skipped_end_to_end() {
 }
 
 #[test]
-fn omit_with_unresolvable_base_type_is_skipped_end_to_end() {
+fn omit_with_a_literal_base_is_collected_structurally_for_the_resolver_to_report() {
+    // The base is kept as written; whether it can supply props is the resolver's call, which reports a literal base
+    // when it is used as props ("cannot be used as a component's props base").
     let source = r#"
         type BadOmit2 = Omit<"not a type reference", 'a' | 'b'>;
     "#;
     let path = Utf8Path::new("/test/malformed_omit2.ts");
     let data = parse_file(path, source);
 
-    let scoped_key = format!("{}:BadOmit2", path);
-    assert!(
-        !data.type_aliases.contains_key(&scoped_key),
-        "Omit<> whose base isn't a resolvable type reference must not be collected, got keys {:?}",
-        data.type_aliases.keys().collect::<Vec<_>>()
-    );
-    let diag =
-        data.diagnostics.iter().find(|d| d.code == DiagnosticCode::SkippedCandidate && d.message.contains("BadOmit2"));
-    assert!(diag.is_some(), "expected a SkippedCandidate diagnostic naming BadOmit2, got {:?}", data.diagnostics);
-    assert_eq!(diag.unwrap().severity, DiagnosticSeverity::Info);
+    match data.type_aliases.get(&format!("{}:BadOmit2", path)) {
+        Some(CollectedTypeAlias::Omit { base, keys, .. }) => {
+            assert!(matches!(base, CollectedType::StringLiteral(s) if s == "not a type reference"));
+            assert_eq!(keys.as_string_union_keys(), vec!["a".to_owned(), "b".to_owned()]);
+        }
+        other => panic!("expected an Omit alias, got {other:?}"),
+    }
 }
 
 #[test]

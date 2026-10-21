@@ -56,7 +56,7 @@ pub enum CollectedType {
     TypeOf(CompactString),
 
     // ── `keyof X` — the union of X's own key names. Fully resolved only when
-    // consumed by `Omit`'s key argument (`CollectedTypeAlias::Omit::omitted_keys_of`
+    // consumed by `Omit`'s key argument (`CollectedTypeAlias::Omit::keys`
     // resolves X as a props chain and reads its field names); standalone usage
     // degrades to `PropType::Opaque` since we don't (yet) have a general
     // type-to-key-names resolver outside the chain machinery.
@@ -122,7 +122,7 @@ impl CollectedType {
     /// Extract literal string keys from a type shaped like `'a' | 'b'` or a bare
     /// `'a'`. Used for `Pick`/`Omit`'s key argument. Returns an empty vec for
     /// anything else — notably `keyof T`, which can't be read as a string list
-    /// (see `CollectedTypeAlias::Omit::omitted_keys_of`, which resolves the
+    /// (see `CollectedTypeAlias::Omit::keys`, which resolves the
     /// operand as a props chain instead).
     pub fn as_string_union_keys(&self) -> Vec<std::string::String> {
         match self {
@@ -655,20 +655,17 @@ impl ExtendsRef {
 /// A collected type alias.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CollectedTypeAlias {
+    /// `Omit<Base, Keys>`. `keys` is the key expression as written (`"a" | "b"`, `keyof Other`, a `Keys` alias,
+    /// `Exclude<…>`); the resolver turns it into a key set, so an alias or a substituted parameter works too.
     Omit {
         base: CollectedType,
-        omitted_keys: Vec<std::string::String>,
-        /// `Omit<Base, keyof Other>` — `Other`'s key names aren't known statically
-        /// (unlike a literal `'a' | 'b'` union), so the operand is kept structured
-        /// here for the resolver to expand: resolve `Other` as its own props chain
-        /// and treat its field names as additional omitted keys. `None` for the
-        /// literal-union case (the common one, captured in `omitted_keys` instead).
-        omitted_keys_of: Option<Box<CollectedType>>,
+        keys: CollectedType,
         file_path: Utf8PathBuf,
     },
+    /// `Pick<Base, Keys>`, with `keys` resolved the same way as `Omit`'s.
     Pick {
         base: CollectedType,
-        picked_keys: Vec<std::string::String>,
+        keys: CollectedType,
         file_path: Utf8PathBuf,
     },
     Partial {

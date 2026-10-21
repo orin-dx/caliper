@@ -86,6 +86,11 @@ pub(super) fn resolve_props_chain(
 
     match matched {
         Some(super::precedence::SourceOrKnownMatch::TypeAlias { matched_key, alias }) => {
+            // As for interfaces and for aliases in a prop position: parameters left unfilled by the call site are
+            // placeholders in the body, not unresolvable types.
+            if let Some(params) = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key) {
+                state.in_scope_type_params.extend(params.iter().skip(type_args.len()).cloned());
+            }
             let alias = super::substitute::apply_generic_args(
                 alias,
                 (&canonical_file, &matched_key),
@@ -214,15 +219,10 @@ pub(super) fn resolve_interface_chain(
             }
             None => extends_ref,
         };
-        let mut branch_state = ResolveState {
-            visited: state.visited.clone(),
-            named_in_progress: state.named_in_progress.clone(),
-            diagnostics: vec![],
-            in_scope_type_params: state.in_scope_type_params.clone(),
-        };
+        let mut branch_state = state.branch();
         let (parent_chain, maybe_layer) =
             resolve_extends_ref(extends_ref, &iface.file_path, mapping, ctx, &mut branch_state, depth + 1);
-        state.diagnostics.extend(branch_state.diagnostics);
+        state.absorb(branch_state);
         if let Some(layer) = maybe_layer {
             chain.inheritance.push(layer);
         }
