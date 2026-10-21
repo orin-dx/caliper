@@ -320,6 +320,16 @@ impl<'src> SourceDataCollector<'src> {
         self.data.imports.iter().find(|imp| imp.local_name.as_str() == local_name).map(|imp| imp.specifier.clone())
     }
 
+    /// Whether `name` here can be React's (imported from React) or a global (not imported at all): an element-like
+    /// type name imported from another module is that module's type.
+    pub(super) fn may_be_react(&self, name: &str) -> bool {
+        self.data
+            .imports
+            .iter()
+            .find(|imp| imp.local_name.as_str() == name)
+            .is_none_or(|imp| imp.specifier == "react" || imp.specifier.starts_with("react/"))
+    }
+
     // ─── ExtendsRef classification ────────────────────────────────────────────
 
     pub(super) fn classify_extends(&self, name: &str, type_args: Vec<CollectedType>) -> ExtendsRef {
