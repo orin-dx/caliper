@@ -340,7 +340,7 @@ fn missing_lib_diagnostic(missing: &[&str], ts_dir: &std::path::Path) -> Diagnos
              with optional dependencies enabled (no --no-optional / --omit=optional)."
                 .into(),
         ),
-        code: DiagnosticCode::UnresolvableImport,
+        code: DiagnosticCode::MissingTypeLibrary,
     }
 }
 
