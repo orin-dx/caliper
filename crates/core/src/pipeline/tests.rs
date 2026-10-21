@@ -2149,3 +2149,26 @@ fn stats_count_every_dts_file_through_the_cache_and_its_hits() {
     assert_eq!((first.dts_files_parsed, first.dts_cache_hits), (1, 0));
     assert_eq!((second.dts_files_parsed, second.dts_cache_hits), (1, 1));
 }
+
+#[test]
+fn a_generic_alias_in_prop_position_takes_the_call_sites_arguments() {
+    let tmp = TempDir::new().unwrap();
+    write_file(&tmp, "style.ts", "export type StyleProp<Value> = Value | Value[];\nexport type Maybe<T> = T | null;\n");
+    write_file(
+        &tmp,
+        "Box.tsx",
+        "import type { StyleProp, Maybe } from './style';\ntype Size = 'sm' | 'lg';\nexport function Box(props: { size: StyleProp<Size>; label: Maybe<string> }) { return null; }\n",
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+
+    let output = extract(&options);
+
+    let props = &output.components["Box"].props;
+    let size = PropType::LiteralUnion { members: vec!["sm".into(), "lg".into()], has_default: false };
+    assert_eq!(props["size"].prop_type, PropType::Union(vec![size.clone(), PropType::Array(Box::new(size))]));
+    assert_eq!(props["label"].prop_type, PropType::Union(vec![PropType::String, PropType::Null]));
+}
