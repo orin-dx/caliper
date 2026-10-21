@@ -299,11 +299,15 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                             if let Err(reason) =
                                 super::evidence::renders(&super::evidence::FunctionShape::of_function(func))
                             {
-                                self.record_skip(
-                                    DiagnosticCode::SkippedCandidate,
-                                    format!("'{name}' takes a typed props parameter but {reason}"),
-                                    func.span,
-                                );
+                                // A `declare function` with a non-element return type is an API declaration, not a
+                                // component that failed to qualify: lib.dom.d.ts alone declares dozens of them.
+                                if func.r#type == FunctionType::FunctionDeclaration {
+                                    self.record_skip(
+                                        DiagnosticCode::SkippedCandidate,
+                                        format!("'{name}' takes a typed props parameter but {reason}"),
+                                        func.span,
+                                    );
+                                }
                             } else if let Some((props_name, type_args)) =
                                 self.extract_type_name_from_type(&type_ann.type_annotation)
                             {

@@ -1089,7 +1089,9 @@ export function Component(props: { value: NeverDeclared }) { return null; }
         ..Default::default()
     };
 
-    crate::resolver::reset_follow_reexports_call_count();
+    // Canonical form: resolved import paths are canonicalized, so the scope must be too.
+    let scope = Utf8PathBuf::from_path_buf(fs::canonicalize(tmp.path()).unwrap()).unwrap();
+    crate::resolver::reset_follow_reexports_call_count(&scope);
     let output = extract(&options);
     let calls = crate::resolver::follow_reexports_call_count();
 

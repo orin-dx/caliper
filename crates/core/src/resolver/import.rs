@@ -18,18 +18,19 @@ const MAX_REEXPORT_DEPTH: u8 = 8;
 /// (linear in graph size) instead of just checking wall-clock time — the
 /// per-call work here is cheap enough, and oxc_resolver's own path cache
 /// absorbing enough of the redundant filesystem cost, that wall-clock alone
-/// doesn't reliably distinguish "linear" from "branching_factor^depth".
+/// doesn't reliably distinguish "linear" from "branching_factor^depth". Only calls for files under the scoped directory
+/// count, so resolution in tests running in parallel does not inflate the number.
 #[cfg(test)]
-static FOLLOW_REEXPORTS_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static FOLLOW_REEXPORTS_CALLS: std::sync::Mutex<Option<(Utf8PathBuf, usize)>> = std::sync::Mutex::new(None);
 
 #[cfg(test)]
-pub(crate) fn reset_follow_reexports_call_count() {
-    FOLLOW_REEXPORTS_CALLS.store(0, std::sync::atomic::Ordering::Relaxed);
+pub(crate) fn reset_follow_reexports_call_count(scope: &Utf8Path) {
+    *FOLLOW_REEXPORTS_CALLS.lock().unwrap_or_else(|p| p.into_inner()) = Some((scope.to_owned(), 0));
 }
 
 #[cfg(test)]
 pub(crate) fn follow_reexports_call_count() -> usize {
-    FOLLOW_REEXPORTS_CALLS.load(std::sync::atomic::Ordering::Relaxed)
+    FOLLOW_REEXPORTS_CALLS.lock().unwrap_or_else(|p| p.into_inner()).as_ref().map_or(0, |(_, n)| *n)
 }
 
 /// Resolve `name` to its canonical `(file_path, name)` pair.
@@ -80,7 +81,11 @@ fn follow_reexports(
     depth: u8,
 ) -> (Utf8PathBuf, String) {
     #[cfg(test)]
-    FOLLOW_REEXPORTS_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if let Some((scope, count)) = FOLLOW_REEXPORTS_CALLS.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+        if file.starts_with(&*scope) {
+            *count += 1;
+        }
+    }
 
     if depth >= MAX_REEXPORT_DEPTH || ctx.named_types.is_declared_at(&file, &name) {
         return (file, name);

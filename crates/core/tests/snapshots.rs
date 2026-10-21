@@ -36,7 +36,15 @@ fn run_fixture(library: &str) -> serde_json::Value {
     let dir = fixture_dir(library);
     let tsconfig = workspace_root().join("fixtures").join("tsconfig.json");
 
-    let options = PipelineOptions { src_dirs: vec![dir], tsconfig_path: Some(tsconfig), ..Default::default() };
+    // A fresh cache per run: the default directory persists across builds, so a stale entry could stand in for the
+    // current extractor's output and let a regression through.
+    let cache = tempfile::TempDir::new().expect("temp cache dir");
+    let options = PipelineOptions {
+        src_dirs: vec![dir],
+        tsconfig_path: Some(tsconfig),
+        cache_dir: Some(Utf8PathBuf::from_path_buf(cache.path().to_owned()).expect("UTF-8 temp path")),
+        ..Default::default()
+    };
 
     let output = extract(&options);
 
