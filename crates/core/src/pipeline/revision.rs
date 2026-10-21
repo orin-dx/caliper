@@ -43,7 +43,7 @@ pub(crate) struct Resolved {
 impl Resolved {
     /// Whether this resolution can differ after `change`.
     fn affected_by(&self, change: &Change<'_>) -> bool {
-        self.depends_on.files.contains(change.file)
+        self.depends_on.files.contains(change.file.as_str())
             || (change.created && self.depends_on.resolves_modules)
             || change.bare_names.iter().any(|name| self.depends_on.bare_names.contains(name.as_str()))
     }

@@ -233,7 +233,7 @@ pub(super) fn resolve_guarded(
                 };
                 // A panicked resolution re-runs on any edit to its own file.
                 let mut deps = crate::resolver::Dependencies::default();
-                deps.files.insert(mapping.file_path.clone());
+                deps.files.insert(crate::path_key::PathKey::from(mapping.file_path.as_path()));
                 (stub, vec![diag], deps)
             })
         })

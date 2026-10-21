@@ -99,7 +99,7 @@ fn follow_reexports(
     if !visited.insert((file.clone(), CompactString::from(name.as_str()))) {
         return (file, name);
     }
-    match ctx.import_map.resolve_reexport_chain(&file, &name, &ctx.global) {
+    match ctx.import_map.resolve_reexport_chain(&file, &name) {
         Some(ReExportStep::Named { source_specifier, source_name }) => {
             let Some(next_file) = resolve_import_specifier(&source_specifier, &file, ctx, diagnostics) else {
                 return (file, name);
@@ -188,6 +188,17 @@ pub(super) enum AmbientGlobalLookup<'g> {
     TypeAlias(&'g CollectedTypeAlias),
 }
 
+/// What a specifier resolves to from one directory.
+#[derive(Clone)]
+pub(crate) enum ModuleResolution {
+    /// A package's type declarations, outside the project.
+    PackageTypes(Utf8PathBuf),
+    /// A file of the project, or a module resolved by path.
+    File(Utf8PathBuf),
+    /// The resolver's error.
+    Unresolved(String),
+}
+
 /// Use `oxc_resolver` to turn an import specifier into an absolute file path.
 pub(super) fn resolve_import_specifier(
     specifier: &str,
@@ -197,7 +208,37 @@ pub(super) fn resolve_import_specifier(
 ) -> Option<Utf8PathBuf> {
     super::deps::record_module_resolution();
     let from_dir = from_file.parent()?;
+    let key = (Box::from(from_dir.as_str()), Box::from(specifier));
+    let resolution = match ctx.module_resolutions.get(&key) {
+        Some(cached) => cached.clone(),
+        None => {
+            let resolution = resolve_module(specifier, from_dir, ctx);
+            ctx.module_resolutions.insert(key, resolution.clone());
+            resolution
+        }
+    };
+    match resolution {
+        ModuleResolution::PackageTypes(path) => Some(path),
+        ModuleResolution::File(path) => {
+            super::deps::record(&path);
+            Some(path)
+        }
+        ModuleResolution::Unresolved(error) => {
+            diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticSeverity::Warning,
+                    DiagnosticCode::UnresolvableImport,
+                    format!("Cannot resolve '{}' from '{}'", specifier, from_file),
+                )
+                .with_file(from_file.to_string())
+                .with_help(format!("Resolution error: {}", error)),
+            );
+            None
+        }
+    }
+}
 
+fn resolve_module(specifier: &str, from_dir: &Utf8Path, ctx: &ResolutionContext) -> ModuleResolution {
     // Bare package specifiers (not relative/absolute) need real TypeScript
     // declaration resolution: prefer a real .d.ts over whatever JS entry point
     // the package's own "main"/"exports" happens to point to, and fall back to
@@ -208,28 +249,18 @@ pub(super) fn resolve_import_specifier(
     // be found there.
     if !specifier.starts_with('.') && !specifier.starts_with('/') {
         if let Some(path) = super::react::resolve_package_types_file(&ctx.oxc_resolver, from_dir, specifier) {
-            return Utf8PathBuf::from_path_buf(std::path::PathBuf::from(path)).ok();
+            return match Utf8PathBuf::from_path_buf(std::path::PathBuf::from(path)) {
+                Ok(path) => ModuleResolution::PackageTypes(path),
+                Err(path) => ModuleResolution::Unresolved(format!("non-UTF-8 path {}", path.display())),
+            };
         }
     }
 
     match ctx.oxc_resolver.resolve(from_dir.as_std_path(), specifier) {
-        Ok(resolved) => {
-            let resolved = Utf8PathBuf::from_path_buf(resolved.path().to_owned()).ok()?;
-            super::deps::record(&resolved);
-            Some(resolved)
-        }
-        Err(e) => {
-            diagnostics.push(Diagnostic {
-                severity: DiagnosticSeverity::Warning,
-                message: format!("Cannot resolve '{}' from '{}'", specifier, from_file),
-                file: Some(from_file.to_string()),
-                line: None,
-                column: None,
-                help: Some(format!("Resolution error: {}", e)),
-                code: DiagnosticCode::UnresolvableImport,
-                affects: Vec::new(),
-            });
-            None
-        }
+        Ok(resolved) => match Utf8PathBuf::from_path_buf(resolved.path().to_owned()) {
+            Ok(path) => ModuleResolution::File(path),
+            Err(path) => ModuleResolution::Unresolved(format!("non-UTF-8 path {}", path.display())),
+        },
+        Err(e) => ModuleResolution::Unresolved(e.to_string()),
     }
 }

@@ -4,10 +4,11 @@
 //! canonical name does it refer to?"  Actual path resolution (specifier → absolute
 //! path) is left to the caller via `oxc_resolver`.
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use compact_str::CompactString;
 use rustc_hash::FxHashMap;
 
+use crate::path_key::PathKey;
 use crate::types::{GlobalSourceData, LexedExport};
 
 // ─── Public Types ─────────────────────────────────────────────────────────────
@@ -43,7 +44,9 @@ pub struct ImportResolutionMap {
     /// borrow `&Utf8Path` directly instead of cloning the whole path per call.
     /// Note: we store the specifier string, not the resolved file path.
     /// The resolver calls `oxc_resolver` to turn specifiers into absolute paths.
-    bindings: FxHashMap<Utf8PathBuf, FxHashMap<CompactString, ImportRef>>,
+    bindings: FxHashMap<PathKey, FxHashMap<CompactString, ImportRef>>,
+    /// `global.re_export_map`, keyed for string-hashed lookups during barrel walks.
+    re_exports: FxHashMap<PathKey, Vec<LexedExport>>,
 }
 
 impl ImportResolutionMap {
@@ -52,10 +55,10 @@ impl ImportResolutionMap {
     ///
     /// No I/O — pure data transformation.
     pub fn build(global: &GlobalSourceData) -> Self {
-        let mut bindings: FxHashMap<Utf8PathBuf, FxHashMap<CompactString, ImportRef>> = FxHashMap::default();
+        let mut bindings: FxHashMap<PathKey, FxHashMap<CompactString, ImportRef>> = FxHashMap::default();
 
         for (file_path, import_bindings) in &global.import_map {
-            let per_file = bindings.entry(file_path.clone()).or_default();
+            let per_file = bindings.entry(PathKey::from(file_path.as_path())).or_default();
             for binding in import_bindings {
                 per_file.insert(
                     binding.local_name.clone(),
@@ -68,14 +71,19 @@ impl ImportResolutionMap {
             }
         }
 
-        Self { bindings }
+        let re_exports = global
+            .re_export_map
+            .iter()
+            .map(|(file_path, exports)| (PathKey::from(file_path.as_path()), exports.clone()))
+            .collect();
+        Self { bindings, re_exports }
     }
 
     /// Given a file and a local name used in that file, return where it was imported from.
     ///
     /// Returns `None` if the name is locally defined (not imported).
     pub fn find_import(&self, file: &Utf8Path, local_name: &str) -> Option<&ImportRef> {
-        self.bindings.get(file)?.get(local_name)
+        self.bindings.get(file.as_str())?.get(local_name)
     }
 
     /// Walk one step of the re-export chain for `barrel_file`.
@@ -83,13 +91,8 @@ impl ImportResolutionMap {
     /// - If a `ReExportNamed` entry matches `exported_name`, returns `Named { .. }`.
     /// - If no named match is found but there are `ReExportAll` entries, returns `Wildcards(..)`.
     /// - Returns `None` if the barrel file has no relevant re-exports.
-    pub fn resolve_reexport_chain(
-        &self,
-        barrel_file: &Utf8Path,
-        exported_name: &str,
-        global: &GlobalSourceData,
-    ) -> Option<ReExportStep> {
-        let exports = global.re_export_map.get(barrel_file)?;
+    pub fn resolve_reexport_chain(&self, barrel_file: &Utf8Path, exported_name: &str) -> Option<ReExportStep> {
+        let exports = self.re_exports.get(barrel_file.as_str())?;
 
         let mut wildcard_specifiers: Vec<String> = Vec::new();
 
@@ -217,7 +220,7 @@ mod tests {
 
         let map = ImportResolutionMap::build(&global);
 
-        match map.resolve_reexport_chain(&barrel, "Bar", &global) {
+        match map.resolve_reexport_chain(&barrel, "Bar") {
             Some(ReExportStep::Named { source_specifier, source_name }) => {
                 assert_eq!(source_specifier, "./foo");
                 assert_eq!(source_name, "Foo");
@@ -244,7 +247,7 @@ mod tests {
         );
 
         let map = ImportResolutionMap::build(&global);
-        assert!(map.resolve_reexport_chain(&barrel, "Baz", &global).is_none());
+        assert!(map.resolve_reexport_chain(&barrel, "Baz").is_none());
     }
 
     #[test]
@@ -262,7 +265,7 @@ mod tests {
         let map = ImportResolutionMap::build(&global);
 
         // resolve_reexport_chain for any name should return Wildcards
-        match map.resolve_reexport_chain(&barrel, "AnyName", &global) {
+        match map.resolve_reexport_chain(&barrel, "AnyName") {
             Some(ReExportStep::Wildcards(specs)) => {
                 assert_eq!(specs, vec!["./types"]);
             }
@@ -293,7 +296,7 @@ mod tests {
 
         let map = ImportResolutionMap::build(&global);
 
-        match map.resolve_reexport_chain(&barrel, "Target", &global) {
+        match map.resolve_reexport_chain(&barrel, "Target") {
             Some(ReExportStep::Named { source_specifier, source_name }) => {
                 assert_eq!(source_specifier, "./target");
                 assert_eq!(source_name, "Target");
@@ -308,7 +311,7 @@ mod tests {
         let global = make_global(vec![], vec![]);
         let map = ImportResolutionMap::build(&global);
 
-        assert!(map.resolve_reexport_chain(&barrel, "Anything", &global).is_none());
+        assert!(map.resolve_reexport_chain(&barrel, "Anything").is_none());
     }
 
     #[test]
