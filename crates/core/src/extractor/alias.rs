@@ -33,17 +33,9 @@ impl<'src> SourceDataCollector<'src> {
                             );
                             return None;
                         }
-                        let Some((base_name, base_args)) = self.extract_type_name_from_type(&tp.params[0]) else {
-                            self.record_skip(
-                                DiagnosticCode::SkippedCandidate,
-                                format!("'{_name}': Omit<>'s base type argument is not a recognizable type reference"),
-                                tp.params[0].span(),
-                            );
-                            return None;
-                        };
-                        let base = CollectedType::Named { name: base_name, args: base_args };
-                        let (omitted_keys, omitted_keys_of) = self.collect_omit_keys(&tp.params[1]);
-                        Some(CollectedTypeAlias::Omit { base, omitted_keys, omitted_keys_of, file_path: fp })
+                        let base = self.ts_type_to_collected(&tp.params[0]);
+                        let keys = self.ts_type_to_collected(&tp.params[1]);
+                        Some(CollectedTypeAlias::Omit { base, keys, file_path: fp })
                     }
                     "Pick" => {
                         let Some(tp) = tr.type_arguments.as_ref() else {
@@ -62,17 +54,9 @@ impl<'src> SourceDataCollector<'src> {
                             );
                             return None;
                         }
-                        let Some((base_name, base_args)) = self.extract_type_name_from_type(&tp.params[0]) else {
-                            self.record_skip(
-                                DiagnosticCode::SkippedCandidate,
-                                format!("'{_name}': Pick<>'s base type argument is not a recognizable type reference"),
-                                tp.params[0].span(),
-                            );
-                            return None;
-                        };
-                        let base = CollectedType::Named { name: base_name, args: base_args };
-                        let picked_keys = self.collect_string_union_keys(&tp.params[1]);
-                        Some(CollectedTypeAlias::Pick { base, picked_keys, file_path: fp })
+                        let base = self.ts_type_to_collected(&tp.params[0]);
+                        let keys = self.ts_type_to_collected(&tp.params[1]);
+                        Some(CollectedTypeAlias::Pick { base, keys, file_path: fp })
                     }
                     "Partial" => {
                         let Some(tp) = tr.type_arguments.as_ref() else {
@@ -230,30 +214,6 @@ impl<'src> SourceDataCollector<'src> {
             // catch-all only ever runs for shapes with no such semantics, where a
             // transparent Passthrough is exactly correct.
             _ => Some(CollectedTypeAlias::Passthrough { target: self.ts_type_to_collected(ty), file_path: fp }),
-        }
-    }
-
-    /// Collect the string literal keys from a type like `'key1' | 'key2'`.
-    pub(super) fn collect_string_union_keys<'a>(&self, ty: &TSType<'a>) -> Vec<String> {
-        match ty {
-            TSType::TSLiteralType(lit) => match &lit.literal {
-                TSLiteral::StringLiteral(s) => vec![s.value.as_str().to_owned()],
-                _ => vec![],
-            },
-            TSType::TSUnionType(u) => u.types.iter().flat_map(|t| self.collect_string_union_keys(t)).collect(),
-            _ => vec![],
-        }
-    }
-
-    /// Classify `Omit<_, Keys>`'s second type argument: a literal key union
-    /// (`'a' | 'b'`), or `keyof SomeType` — in the latter case the key set can't
-    /// be known until `SomeType` is resolved, so the operand is captured
-    /// structurally for the resolver to expand later (see
-    /// `CollectedTypeAlias::Omit::omitted_keys_of`).
-    pub(super) fn collect_omit_keys<'a>(&mut self, ty: &TSType<'a>) -> (Vec<String>, Option<Box<CollectedType>>) {
-        match self.ts_type_to_collected(ty) {
-            CollectedType::KeyOf(inner) => (vec![], Some(inner)),
-            other => (other.as_string_union_keys(), None),
         }
     }
 }

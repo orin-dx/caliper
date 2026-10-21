@@ -42,6 +42,30 @@ pub(crate) struct ResolveState {
     pub(crate) in_scope_type_params: FxHashSet<CompactString>,
 }
 
+impl ResolveState {
+    /// A state for an independent sibling branch (an extends entry, a union member): same cycle sets and in-scope
+    /// parameters, its own diagnostics. Merge it back with `absorb`.
+    pub(crate) fn branch(&self) -> ResolveState {
+        ResolveState {
+            visited: self.visited.clone(),
+            named_in_progress: self.named_in_progress.clone(),
+            diagnostics: Vec::new(),
+            in_scope_type_params: self.in_scope_type_params.clone(),
+        }
+    }
+
+    /// A state that shares only the in-scope parameters: for a separate question asked mid-walk, such as the keys
+    /// of a type, whose cycle sets must not be the caller's.
+    pub(crate) fn detached(&self) -> ResolveState {
+        ResolveState { in_scope_type_params: self.in_scope_type_params.clone(), ..Self::default() }
+    }
+
+    /// Take a branch's diagnostics. Its cycle sets and in-scope additions stay with the branch.
+    pub(crate) fn absorb(&mut self, branch: ResolveState) {
+        self.diagnostics.extend(branch.diagnostics);
+    }
+}
+
 // ─── GlobalSourceData ─────────────────────────────────────────────────────────
 
 /// Merged source data from all files — the shared resolution context.

@@ -216,15 +216,14 @@ pub(super) fn substitute_type(ct: &CollectedType, subst: &Substitution) -> Colle
 /// Recursively replace parameter references inside a `CollectedTypeAlias` body.
 fn substitute_alias(alias: &CollectedTypeAlias, subst: &Substitution) -> CollectedTypeAlias {
     match alias {
-        CollectedTypeAlias::Omit { base, omitted_keys, omitted_keys_of, file_path } => CollectedTypeAlias::Omit {
+        CollectedTypeAlias::Omit { base, keys, file_path } => CollectedTypeAlias::Omit {
             base: substitute_type(base, subst),
-            omitted_keys: omitted_keys.clone(),
-            omitted_keys_of: omitted_keys_of.as_ref().map(|ct| Box::new(substitute_type(ct, subst))),
+            keys: substitute_type(keys, subst),
             file_path: file_path.clone(),
         },
-        CollectedTypeAlias::Pick { base, picked_keys, file_path } => CollectedTypeAlias::Pick {
+        CollectedTypeAlias::Pick { base, keys, file_path } => CollectedTypeAlias::Pick {
             base: substitute_type(base, subst),
-            picked_keys: picked_keys.clone(),
+            keys: substitute_type(keys, subst),
             file_path: file_path.clone(),
         },
         CollectedTypeAlias::Partial { base, file_path } => {
@@ -263,21 +262,14 @@ pub(super) fn synthesize_utility_alias(
     file_path: &Utf8Path,
 ) -> Option<CollectedTypeAlias> {
     match name {
-        "Omit" if args.len() >= 2 => {
-            let (omitted_keys, omitted_keys_of) = match &args[1] {
-                CollectedType::KeyOf(inner) => (vec![], Some(inner.clone())),
-                other => (other.as_string_union_keys(), None),
-            };
-            Some(CollectedTypeAlias::Omit {
-                base: args[0].clone(),
-                omitted_keys,
-                omitted_keys_of,
-                file_path: file_path.to_owned(),
-            })
-        }
+        "Omit" if args.len() >= 2 => Some(CollectedTypeAlias::Omit {
+            base: args[0].clone(),
+            keys: args[1].clone(),
+            file_path: file_path.to_owned(),
+        }),
         "Pick" if args.len() >= 2 => Some(CollectedTypeAlias::Pick {
             base: args[0].clone(),
-            picked_keys: args[1].as_string_union_keys(),
+            keys: args[1].clone(),
             file_path: file_path.to_owned(),
         }),
         "Partial" if !args.is_empty() => {

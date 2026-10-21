@@ -1673,6 +1673,53 @@ fn test_structured_type_arguments_resolve_exactly() {
     );
 }
 
+// Pick/Omit key sets resolve from any key expression: literals, unions, aliases, Exclude, keyof and parameters.
+#[test]
+fn test_key_sets_resolve_exactly() {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "a.tsx",
+        "interface Base { a: string; b: number; c: boolean }\n\
+         interface Other { b: number }\n\
+         type Keys = \"a\" | \"b\";\n\
+         type More = \"c\";\n\
+         export interface Picked extends Pick<Base, Keys> { own?: boolean }\n\
+         export function P1(props: Picked) { return null }\n\
+         export function P2(props: Omit<Base, Keys>) { return null }\n\
+         export function P3(props: Omit<Base, \"a\" | More>) { return null }\n\
+         export function P4(props: Omit<Base, Exclude<keyof Base, \"a\">>) { return null }\n\
+         type MyOmit<T, K extends keyof T> = Omit<T, K>;\n\
+         export function P5(props: MyOmit<Base, \"b\">) { return null }\n\
+         interface Extra { d?: string }\n\
+         export function P6(props: Omit<Base & Extra, \"a\">) { return null }\n\
+         export function P8(props: Omit<Base, Unknowable<Base>>) { return null }\n",
+    );
+    let dir = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![dir],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+
+    let output = extract(&options);
+
+    let names = |c: &str| -> Vec<&str> { output.components[c].props.keys().map(String::as_str).collect() };
+    assert_eq!(names("P1"), vec!["a", "b", "own"]);
+    assert_eq!(names("P2"), vec!["c"]);
+    assert_eq!(names("P3"), vec!["b"]);
+    assert_eq!(names("P4"), vec!["a"]);
+    assert_eq!(names("P5"), vec!["a", "c"]);
+    assert_eq!(names("P6"), vec!["b", "c", "d"]);
+    // An unknowable key set omits nothing and says so.
+    assert_eq!(names("P8"), vec!["a", "b", "c"]);
+    assert!(
+        output.diagnostics.iter().any(|d| d.message.starts_with("Cannot determine the keys of Omit<")),
+        "diagnostics: {:?}",
+        output.diagnostics
+    );
+}
+
 // ── test_overlapping_src_dirs_two_directories_deduplicates_without_a_duplicate_listing ─
 //
 // Corrected finding: the insert-return check above only catches a genuine
