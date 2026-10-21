@@ -1089,7 +1089,9 @@ export function Component(props: { value: NeverDeclared }) { return null; }
         ..Default::default()
     };
 
-    crate::resolver::reset_follow_reexports_call_count();
+    // Canonical form: resolved import paths are canonicalized, so the scope must be too.
+    let scope = Utf8PathBuf::from_path_buf(fs::canonicalize(tmp.path()).unwrap()).unwrap();
+    crate::resolver::reset_follow_reexports_call_count(&scope);
     let output = extract(&options);
     let calls = crate::resolver::follow_reexports_call_count();
 
@@ -1441,7 +1443,7 @@ fn test_unreadable_dts_file_is_reported_not_cached_as_empty() {
 
 // A wrapper-call guess whose props resolve to nothing is reported, not listed as an empty component.
 #[test]
-fn test_wrapper_call_components_with_no_resolved_props_are_omitted_with_a_diagnostic() {
+fn test_wrapper_call_components_whose_props_cannot_be_resolved_are_kept_with_the_reason() {
     let tmp = TempDir::new().unwrap();
     write_file(
         &tmp,
@@ -1461,15 +1463,19 @@ fn test_wrapper_call_components_with_no_resolved_props_are_omitted_with_a_diagno
 
     let output = extract(&options);
 
-    assert_eq!(output.components.keys().collect::<Vec<_>>(), vec!["Real"]);
+    // Ghost's props live in a package that is not installed, as with Chakra's `@ark-ui` types in a source-only
+    // checkout: it is still a component, and the unresolvable import says why its props are missing.
+    assert_eq!(output.components.keys().collect::<Vec<_>>(), vec!["Ghost", "Real"]);
     assert_eq!(output.components["Real"].props.keys().collect::<Vec<_>>(), vec!["label"]);
-    let skipped: Vec<&str> = output
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::SkippedCandidate && d.message.contains("Ghost"))
-        .map(|d| d.message.as_str())
-        .collect();
-    assert_eq!(skipped.len(), 1, "diagnostics: {:?}", output.diagnostics);
+    assert!(output.components["Ghost"].props.is_empty());
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::UnresolvableImport && d.message.contains("MissingProps")),
+        "diagnostics: {:?}",
+        output.diagnostics
+    );
 }
 
 // An interface may extend a type that is only reachable through a barrel file that re-exports it from a sibling.

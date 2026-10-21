@@ -228,6 +228,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             }
             if self.is_tsx {
                 if let Some(name) = self.extract_pascal_name(declarator) {
+                    self.decline_reason = None;
                     if let Some(mapping) = self
                         .try_fc_annotation(declarator, &name)
                         .or_else(|| self.try_forward_ref(declarator, &name))
@@ -250,14 +251,13 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                         && !self.try_rename_identifier_wrapped_component(declarator, &name)
                         && !self.try_record_wrapper_call(declarator, &name)
                     {
-                        self.record_skip(
-                            DiagnosticCode::SkippedCandidate,
+                        let message = self.decline_reason.take().unwrap_or_else(|| {
                             format!(
                                 "'{name}' is a PascalCase binding but matched no known component pattern \
                                  (FC annotation, forwardRef, HOC wrapper, or identifier alias)"
-                            ),
-                            declarator.span,
-                        );
+                            )
+                        });
+                        self.record_skip(DiagnosticCode::SkippedCandidate, message, declarator.span);
                     }
                 }
             }
@@ -291,10 +291,24 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         if self.is_tsx {
             if let Some(id) = &func.id {
                 let name = id.name.as_str();
-                if is_pascal_case(name) && func.r#type == FunctionType::FunctionDeclaration {
+                let declaration =
+                    matches!(func.r#type, FunctionType::FunctionDeclaration | FunctionType::TSDeclareFunction);
+                if is_pascal_case(name) && declaration {
                     if let Some(first_param) = func.params.items.first() {
                         if let Some(type_ann) = &first_param.type_annotation {
-                            if let Some((props_name, type_args)) =
+                            if let Err(reason) =
+                                super::evidence::renders(&super::evidence::FunctionShape::of_function(func))
+                            {
+                                // A `declare function` with a non-element return type is an API declaration, not a
+                                // component that failed to qualify: lib.dom.d.ts alone declares dozens of them.
+                                if func.r#type == FunctionType::FunctionDeclaration {
+                                    self.record_skip(
+                                        DiagnosticCode::SkippedCandidate,
+                                        format!("'{name}' takes a typed props parameter but {reason}"),
+                                        func.span,
+                                    );
+                                }
+                            } else if let Some((props_name, type_args)) =
                                 self.extract_type_name_from_type(&type_ann.type_annotation)
                             {
                                 let (description, tags) = self.find_jsdoc_with_tags(func.span.start);

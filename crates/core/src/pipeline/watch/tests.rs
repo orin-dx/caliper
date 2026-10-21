@@ -1016,7 +1016,7 @@ fn an_edit_gives_the_same_visible_output_as_a_cold_extract_of_the_edited_project
 }
 
 #[test]
-fn a_wrapper_call_guess_with_no_props_is_omitted_by_update_file_like_extract() {
+fn a_wrapper_component_with_unresolvable_props_is_kept_by_update_file_like_extract() {
     let (tmp, options) =
         write_project(&[("Widgets.tsx", "export const Real = wrap<HTMLDivElement, { label?: string }>(\"div\");\n")]);
     let session = WatchSession::new(options.clone());
@@ -1030,10 +1030,6 @@ fn a_wrapper_call_guess_with_no_props_is_omitted_by_update_file_like_extract() {
     .unwrap();
     let update = session.update_file(&root.join("Widgets.tsx"));
 
-    assert!(
-        update.updated_components.is_empty(),
-        "got {:?}",
-        update.updated_components.iter().map(|c| &c.display_name).collect::<Vec<_>>()
-    );
+    assert_eq!(update.updated_components.iter().map(|c| c.display_name.as_str()).collect::<Vec<_>>(), vec!["Ghost"]);
     assert_eq!(visible(&session.snapshot()), visible(&crate::pipeline::extract(&options)));
 }
