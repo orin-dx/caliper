@@ -11,7 +11,7 @@ use compact_str::CompactString;
 use oxc_allocator::{Allocator, Box as OxcBox};
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
-use oxc_parser::Parser;
+use oxc_parser::{ParseOptions, Parser};
 use oxc_span::{SourceType, Span};
 use rustc_hash::FxHashSet;
 
@@ -134,7 +134,9 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
 
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(path).unwrap_or_default();
-    let ret = Parser::new(&allocator, source, source_type).parse();
+    // Parentheses carry no meaning here, and a `ParenthesizedExpression` node would hide the wrapper call beneath it.
+    let options = ParseOptions { preserve_parens: false, ..ParseOptions::default() };
+    let ret = Parser::new(&allocator, source, source_type).with_options(options).parse();
 
     // .d.ts declaration files use the same React.FC / ForwardRefExoticComponent patterns as .tsx
     let is_tsx = source_type.is_jsx() || source_type.is_typescript_definition();
