@@ -24,7 +24,7 @@ This is the orchestration layer: it owns nothing about _how_ a component is pars
 `Revision::next(changed)`:
 
 1. Ignores a path discovery would not include (outside every source directory, excluded, not TypeScript): `discover::is_source_file`.
-2. Re-parses `changed` into copies of the previous global data and named-type index. A missing file is a deletion; any other read error keeps the file's previous declarations and records an `IoError`.
+2. Re-parses `changed` into copies of the previous global data and named-type index. A missing file is a deletion; any other read error (permissions, invalid UTF-8) declares nothing and records an `IoError`, exactly as a cold run does.
 3. Re-resolves the components that are new, live in `changed`, or whose recorded dependencies the change touches (below). Every other component keeps its previous `Arc<Resolved>`.
 4. Calls `assemble()`, then reports `updated_keys` and `removed_keys` against the previous revision's output.
 

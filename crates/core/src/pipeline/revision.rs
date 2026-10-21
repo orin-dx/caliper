@@ -257,23 +257,22 @@ impl Revision {
         named_types.remove_file(changed);
         file_diagnostics.remove(changed);
 
-        let created = match std::fs::read_to_string(changed) {
+        let read = match std::fs::read_to_string(changed) {
+            Ok(source) => Some((source, None)),
             // Deleted: its declarations and diagnostics leave with it.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            // Unreadable (permissions, invalid UTF-8): declares nothing, exactly as in a cold run.
+            Err(e) => Some((String::new(), Some(Diagnostic::io_read_error(changed, &e)))),
+        };
+        let created = match read {
+            None => {
                 files.remove(changed);
                 false
             }
-            Err(e) => {
-                // Unreadable for another reason (permissions, an editor's partial write): keep what it last declared.
-                let previous = self.global_data_for(changed);
-                named_types.merge_file(&previous);
-                global.merge(changed, previous);
-                file_diagnostics.insert(changed.to_owned(), vec![Diagnostic::io_read_error(changed, &e)]);
-                false
-            }
-            Ok(source) => {
+            Some((source, io_diag)) => {
                 let mut data = crate::extractor::parse_file(changed, &source);
-                let mut diags = std::mem::take(&mut data.diagnostics);
+                let mut diags: Vec<Diagnostic> = io_diag.into_iter().collect();
+                diags.append(&mut data.diagnostics);
                 diags.extend(options.plugins.run_on_file_extracted(changed, &mut data));
                 if !diags.is_empty() {
                     file_diagnostics.insert(changed.to_owned(), diags);
@@ -351,61 +350,6 @@ impl Revision {
             duration_ms: start.elapsed().as_millis() as u64,
         };
         Some((next, update))
-    }
-
-    /// What `file` last contributed to `global`, rebuilt from the merged maps. Used only to keep an unreadable file's
-    /// declarations in place.
-    fn global_data_for(&self, file: &Utf8Path) -> SourceData {
-        let prefix = format!("{file}:");
-        let pick = |key: &String| key.starts_with(&prefix);
-        SourceData {
-            interfaces: self
-                .global
-                .interfaces
-                .iter()
-                .filter(|(k, _)| pick(k))
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
-            type_aliases: self
-                .global
-                .type_aliases
-                .iter()
-                .filter(|(k, _)| pick(k))
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
-            type_alias_params: self
-                .global
-                .type_alias_params
-                .iter()
-                .filter(|(k, _)| pick(k))
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
-            interface_type_params: self
-                .global
-                .interface_type_params
-                .iter()
-                .filter(|(k, _)| pick(k))
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
-            enums: self.global.enums.iter().filter(|(k, _)| pick(k)).map(|(k, v)| (k.clone(), v.clone())).collect(),
-            const_arrays: self
-                .global
-                .const_arrays
-                .iter()
-                .filter(|(k, _)| pick(k))
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
-            component_mappings: self
-                .global
-                .component_mappings
-                .iter()
-                .filter(|m| m.file_path == file)
-                .cloned()
-                .collect(),
-            imports: self.global.import_map.get(file).cloned().unwrap_or_default(),
-            exports: self.global.re_export_map.get(file).cloned().unwrap_or_default(),
-            diagnostics: Vec::new(),
-        }
     }
 
     /// Build the public output from the revision: components keyed with the same disambiguation rule everywhere,
