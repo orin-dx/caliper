@@ -185,8 +185,7 @@ impl DtsCache {
             line: None,
             column: None,
             help: Some("Check that the cache directory is writable. Extraction still succeeded; only caching for the next run was affected.".into()),
-            code: DiagnosticCode::IoError,
-        })
+            code: DiagnosticCode::IoError, affects: Vec::new(), })
     }
 
     fn try_save(&self) -> Result<(), String> {

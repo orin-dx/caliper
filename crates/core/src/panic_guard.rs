@@ -28,6 +28,7 @@ pub fn contain_panic<T>(label: &str, f: impl FnOnce() -> T) -> Result<T, Diagnos
             column: None,
             help: Some("This is an internal bug — please file a report with the input that triggered it.".into()),
             code: DiagnosticCode::InternalPanic,
+            affects: Vec::new(),
         }),
     }
 }

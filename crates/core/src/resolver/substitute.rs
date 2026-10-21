@@ -58,8 +58,7 @@ pub(super) fn build_substitution<'a>(
             line: None,
             column: None,
             help: Some("Check the call site supplies a type argument for every declared type parameter.".into()),
-            code: DiagnosticCode::GenericArgumentMismatch,
-        });
+            code: DiagnosticCode::GenericArgumentMismatch, affects: Vec::new(), });
     }
     params
         .iter()

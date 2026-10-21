@@ -78,6 +78,9 @@ pub fn render_output_toon(output: &ExtractionOutput) -> String {
             if let Some(help) = &diag.help {
                 writeln!(out, "    help: {help}").ok();
             }
+            if !diag.affects.is_empty() {
+                writeln!(out, "    affects: {}", diag.affects.join(", ")).ok();
+            }
         }
     }
 
@@ -226,6 +229,7 @@ mod tests {
             column: None,
             code: crate::types::DiagnosticCode::UnresolvableImport,
             help: Some("Check import path".into()),
+            affects: Vec::new(),
         });
 
         let toon = render_output_toon(&output);

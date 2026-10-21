@@ -36,6 +36,7 @@ pub(super) fn discover_files(
                         column: None,
                         help: Some("Check file/directory permissions and for broken symlinks under this path.".into()),
                         code: DiagnosticCode::IoError,
+                        affects: Vec::new(),
                     });
                     continue;
                 }
@@ -67,6 +68,7 @@ pub(super) fn discover_files(
                     column: None,
                     help: Some("Rename the file to use valid UTF-8 characters in its path.".into()),
                     code: DiagnosticCode::IoError,
+                    affects: Vec::new(),
                 });
             }
         }

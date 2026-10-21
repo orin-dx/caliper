@@ -3,7 +3,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 /// A non-fatal issue discovered during extraction.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Diagnostic {
     pub severity: DiagnosticSeverity,
@@ -13,6 +13,10 @@ pub struct Diagnostic {
     pub column: Option<u32>,
     pub help: Option<String>,
     pub code: DiagnosticCode,
+    /// Output keys of the components whose resolution reported this diagnostic, sorted. Empty for diagnostics about a
+    /// file or the run as a whole. Identical diagnostics from many components are reported once, listing them all.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub affects: Vec<String>,
 }
 
 impl fmt::Display for Diagnostic {
@@ -29,7 +33,16 @@ impl std::error::Error for Diagnostic {}
 impl Diagnostic {
     /// A diagnostic with no file, position or help; add them with the `with_*` methods.
     pub fn new(severity: DiagnosticSeverity, code: DiagnosticCode, message: impl Into<String>) -> Diagnostic {
-        Diagnostic { severity, message: message.into(), file: None, line: None, column: None, help: None, code }
+        Diagnostic {
+            severity,
+            message: message.into(),
+            file: None,
+            line: None,
+            column: None,
+            help: None,
+            code,
+            affects: Vec::new(),
+        }
     }
 
     #[must_use]
@@ -62,12 +75,13 @@ impl Diagnostic {
             column: None,
             help: Some("Check file permissions and that the file exists.".into()),
             code: DiagnosticCode::IoError,
+            affects: Vec::new(),
         }
     }
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DiagnosticSeverity {
     Error,
@@ -77,7 +91,7 @@ pub enum DiagnosticSeverity {
 
 /// Machine-readable diagnostic codes for programmatic consumers.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DiagnosticCode {
     UnresolvableImport,
@@ -163,6 +177,7 @@ mod tests {
             column: None,
             help: None,
             code: DiagnosticCode::InternalPanic,
+            affects: Vec::new(),
         };
         let json = serde_json::to_string(&diagnostic).unwrap();
         assert!(json.contains("\"INTERNAL_PANIC\""), "expected INTERNAL_PANIC in {json}");

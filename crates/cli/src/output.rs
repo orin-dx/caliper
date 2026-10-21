@@ -111,9 +111,11 @@ fn group_diagnostics(diagnostics: &[caliper_docgen_core::types::Diagnostic]) -> 
     let mut groups: Vec<(&caliper_docgen_core::types::DiagnosticCode, &str, DiagnosticGroup)> = Vec::new();
     for d in diagnostics {
         let subject = extract_subject(&d.message);
+        // A deduplicated diagnostic stands for one occurrence per component it affects.
+        let occurrences = d.affects.len().max(1);
         match groups.iter_mut().find(|(code, s, _)| *code == &d.code && *s == subject) {
             Some((_, _, group)) => {
-                group.count += 1;
+                group.count += occurrences;
                 if !group.files_seen.contains(&d.file.as_deref()) {
                     group.files_seen.push(d.file.as_deref());
                 }
@@ -121,7 +123,7 @@ fn group_diagnostics(diagnostics: &[caliper_docgen_core::types::Diagnostic]) -> 
             None => groups.push((
                 &d.code,
                 subject,
-                DiagnosticGroup { representative: d, count: 1, files_seen: vec![d.file.as_deref()] },
+                DiagnosticGroup { representative: d, count: occurrences, files_seen: vec![d.file.as_deref()] },
             )),
         }
     }

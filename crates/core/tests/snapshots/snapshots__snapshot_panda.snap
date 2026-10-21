@@ -391,16 +391,10 @@ expression: value
       "line": null,
       "column": null,
       "help": "Resolution error: Cannot find module '../styled-system/types'",
-      "code": "UNRESOLVABLE_IMPORT"
-    },
-    {
-      "severity": "warning",
-      "message": "Cannot resolve '../styled-system/types' from '[ROOT]/fixtures/panda/button.tsx'",
-      "file": "[ROOT]/fixtures/panda/button.tsx",
-      "line": null,
-      "column": null,
-      "help": "Resolution error: Cannot find module '../styled-system/types'",
-      "code": "UNRESOLVABLE_IMPORT"
+      "code": "UNRESOLVABLE_IMPORT",
+      "affects": [
+        "Button"
+      ]
     }
   ],
   "stats": {

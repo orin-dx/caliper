@@ -63,6 +63,7 @@ pub(super) fn max_depth_diagnostic(what: &str, file: &Utf8Path) -> Diagnostic {
         column: None,
         help: Some("This may indicate a circular type reference.".into()),
         code: DiagnosticCode::MaxDepthExceeded,
+        affects: Vec::new(),
     }
 }
 
@@ -335,6 +336,7 @@ fn missing_lib_diagnostic(missing: &[&str], ts_dir: &std::path::Path) -> Diagnos
                 .into(),
         ),
         code: DiagnosticCode::MissingTypeLibrary,
+        affects: Vec::new(),
     }
 }
 

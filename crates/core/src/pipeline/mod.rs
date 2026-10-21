@@ -273,6 +273,7 @@ pub(super) fn collect_public_enums(
                 column: None,
                 help: Some("Rename one of the enums; the public enum map is keyed by bare name.".into()),
                 code: DiagnosticCode::DuplicateEnumName,
+                affects: Vec::new(),
             });
             continue;
         }

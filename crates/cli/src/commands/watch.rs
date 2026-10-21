@@ -187,6 +187,7 @@ fn write_snapshot(path: &str, snapshot: &ExtractionOutput) -> Option<Diagnostic>
         column: None,
         help: Some("Check that the output path's parent directory exists and is writable.".into()),
         code: DiagnosticCode::IoError,
+        affects: Vec::new(),
     })
 }
 
@@ -286,6 +287,7 @@ mod tests {
                 column: None,
                 help: None,
                 code: DiagnosticCode::Unknown,
+                affects: Vec::new(),
             }],
             ..empty_output()
         };

@@ -50,8 +50,7 @@ pub(super) fn resolve_props_chain(
                 line: None,
                 column: None,
                 help: Some("This type (directly or indirectly) extends or references itself.".into()),
-                code: DiagnosticCode::CircularReference,
-            }),
+                code: DiagnosticCode::CircularReference, affects: Vec::new(), }),
             state,
         );
     }
@@ -164,6 +163,7 @@ pub(super) fn resolve_props_chain(
             "Type may be in an unresolvable cross-package location. Check that the package is installed.".into(),
         ),
         code: DiagnosticCode::UnresolvableImport,
+        affects: Vec::new(),
     });
     ResolvedChain::empty_with_compose(type_name.to_owned())
 }
@@ -270,6 +270,7 @@ pub(super) fn resolve_interface_chain(
                     column: None,
                     help: Some("Update the JSDoc @default to match the code default.".into()),
                     code: DiagnosticCode::JsDocDefaultMismatch,
+                    affects: Vec::new(),
                 });
                 Some(DefaultValue { value: code.value.clone(), computed: code.computed })
             }

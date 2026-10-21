@@ -111,6 +111,7 @@ pub(super) fn resolve_type_alias_chain(
                 column: None,
                 help: Some("Check that this type resolves to an object-like shape.".into()),
                 code: DiagnosticCode::OpaqueType,
+                affects: Vec::new(),
             };
             ResolvedChain::give_up(display, Some(diag), state)
         }
@@ -243,6 +244,7 @@ pub(super) fn resolve_base_as_chain(
                 column: None,
                 help: Some("Check that this member of the props type resolves to an object-like shape.".into()),
                 code: DiagnosticCode::OpaqueType,
+                affects: Vec::new(),
             });
             // `composes` (react-docgen's own mechanism for "props come from this type,
             // named instead of flattened") records the raw expression we just diagnosed,
@@ -368,6 +370,7 @@ pub(super) fn resolve_union_alias(
             column: None,
             help: None,
             code: DiagnosticCode::DiscriminatedUnion,
+            affects: Vec::new(),
         });
     }
 
