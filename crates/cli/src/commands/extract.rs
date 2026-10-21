@@ -52,8 +52,8 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
 
         let json = match args.format {
             crate::OutputFormat::Canonical => serde_json::to_string_pretty(&output).into_diagnostic()?,
-            crate::OutputFormat::Rdt => serialize_rdt(&output),
-            crate::OutputFormat::Storybook => serialize_storybook(&output),
+            crate::OutputFormat::Rdt => serialize_rdt(&output).into_diagnostic()?,
+            crate::OutputFormat::Storybook => serialize_storybook(&output).into_diagnostic()?,
             crate::OutputFormat::Toon => caliper_docgen_core::toon::render_output_toon(&output),
         };
 
@@ -97,7 +97,7 @@ fn rdt_omits(prop: &caliper_docgen_core::types::ParsedProp) -> bool {
 
 /// `methods` is always `[]` — this tool doesn't extract class methods, and RDT
 /// consumers (Storybook's docgen addon) only ever read it for class components.
-pub fn serialize_rdt(output: &caliper_docgen_core::types::ExtractionOutput) -> String {
+pub fn serialize_rdt(output: &caliper_docgen_core::types::ExtractionOutput) -> serde_json::Result<String> {
     let mut map = serde_json::Map::new();
     for (name, entry) in &output.components {
         let props: serde_json::Map<String, serde_json::Value> = entry
@@ -128,10 +128,10 @@ pub fn serialize_rdt(output: &caliper_docgen_core::types::ExtractionOutput) -> S
             }),
         );
     }
-    serde_json::to_string_pretty(&serde_json::Value::Object(map)).unwrap_or_default()
+    serde_json::to_string_pretty(&serde_json::Value::Object(map))
 }
 
-pub fn serialize_storybook(output: &caliper_docgen_core::types::ExtractionOutput) -> String {
+pub fn serialize_storybook(output: &caliper_docgen_core::types::ExtractionOutput) -> serde_json::Result<String> {
     let mut map = serde_json::Map::new();
     for (name, entry) in &output.components {
         let props: serde_json::Map<String, serde_json::Value> = entry
@@ -158,7 +158,7 @@ pub fn serialize_storybook(output: &caliper_docgen_core::types::ExtractionOutput
             }),
         );
     }
-    serde_json::to_string_pretty(&serde_json::Value::Object(map)).unwrap_or_default()
+    serde_json::to_string_pretty(&serde_json::Value::Object(map))
 }
 
 #[cfg(test)]

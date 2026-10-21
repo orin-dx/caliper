@@ -1423,6 +1423,23 @@ fn test_enum_scoped_keys_split_on_the_last_colon() {
     assert!(diagnostics.is_empty());
 }
 
+// An unreadable declaration file must surface as an IoError and leave no empty entry in the parse cache.
+#[test]
+fn test_unreadable_dts_file_is_reported_not_cached_as_empty() {
+    let tmp = TempDir::new().unwrap();
+    let missing = Utf8PathBuf::from_path_buf(tmp.path().join("react/index.d.ts")).unwrap();
+    let cache = DtsCache::load_from_disk(None);
+    let mut global = GlobalSourceData::default();
+    let mut diagnostics = Vec::new();
+
+    merge_cached_dts_file(&missing, &cache, &mut global, &mut diagnostics);
+
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, DiagnosticCode::IoError);
+    assert_eq!(diagnostics[0].file.as_deref(), Some(missing.as_str()));
+    assert!(cache.get(&missing, "").is_none(), "an empty parse must not be cached under the unreadable path");
+}
+
 // ── test_overlapping_src_dirs_two_directories_deduplicates_without_a_duplicate_listing ─
 //
 // Corrected finding: the insert-return check above only catches a genuine
