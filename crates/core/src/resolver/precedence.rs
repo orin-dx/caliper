@@ -43,6 +43,7 @@ pub(super) fn resolve_source_defined_or_known<'g>(
     ctx: &'g ResolutionContext,
     state: &mut ResolveState,
 ) -> (Utf8PathBuf, String, Option<SourceOrKnownMatch<'g>>) {
+    super::deps::record(consuming_file);
     let (canonical_file, canonical_name) = resolve_to_canonical(name, consuming_file, ctx, &mut state.diagnostics)
         .unwrap_or_else(|| (consuming_file.to_owned(), name.to_owned()));
 

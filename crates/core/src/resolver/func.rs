@@ -88,6 +88,7 @@ pub(super) fn resolve_typeof(
     // `typeof X` — look for X in global.enums (for cva() results), via the
     // precomputed bare-name index (O(1) instead of a linear scan over every
     // enum/cva/tv/recipe entry in the project with a per-candidate allocation).
+    super::deps::record_bare_name(name);
     let found_enum = ctx.enum_bare_index.get(name.as_str()).and_then(|key| ctx.global.enums.get(key.as_str()));
 
     if found_enum.is_some() {

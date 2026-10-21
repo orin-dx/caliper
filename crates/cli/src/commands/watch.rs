@@ -307,7 +307,9 @@ mod tests {
         let exit_code = AtomicI32::new(0);
 
         // An unreadable file is an error-severity diagnostic that stays in the session's snapshot.
-        handle_change(&session, &src.path().join("Missing.tsx"), true, None, &exit_code);
+        let bad = src.path().join("Bad.tsx");
+        std::fs::write(&bad, [0xff, 0xfe, 0xfd]).unwrap();
+        handle_change(&session, &bad, true, None, &exit_code);
         assert_eq!(exit_code.load(Ordering::Relaxed), 2);
 
         handle_change(&session, &widget, true, None, &exit_code);
@@ -408,7 +410,9 @@ mod tests {
         let session = session_over(&src, &scratch);
         let _ignored = session.initialize();
         // An unreadable file leaves an error-severity diagnostic in the session.
-        handle_change(&session, &src.path().join("Missing.tsx"), true, None, &AtomicI32::new(0));
+        let bad = src.path().join("Bad.tsx");
+        std::fs::write(&bad, [0xff, 0xfe, 0xfd]).unwrap();
+        handle_change(&session, &bad, true, None, &AtomicI32::new(0));
         let exit_code = AtomicI32::new(0);
 
         assert_eq!(handle_key(key('r'), &session, &exit_code), None);

@@ -80,15 +80,13 @@ fn concurrent_initialize_no_double_init() {
 fn initialize_recovers_from_a_poisoned_lock_instead_of_panicking() {
     let session = WatchSession::new(empty_options());
 
-    // Poison the lock the same way an uncontained panic elsewhere inside
-    // initialize() could, before panic containment landed on the call
-    // sites initialize() reaches (Task 3/4/5).
+    // Poison the writer lock the way an uncontained panic during a revision build would.
     let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _guard = session.initialized.lock().unwrap();
-        panic!("simulated panic while holding the init lock");
+        let _guard = session.writer.lock().unwrap();
+        panic!("simulated panic while holding the writer lock");
     }));
     assert!(poisoned.is_err(), "the panic should have unwound past the lock guard");
-    assert!(session.initialized.is_poisoned(), "the lock should now be poisoned");
+    assert!(session.writer.is_poisoned(), "the lock should now be poisoned");
 
     // Must recover instead of propagating a second panic via .expect(...).
     let output = session.initialize();
@@ -129,44 +127,24 @@ fn snapshot_stats_components_extracted_reflects_the_real_component_count() {
     );
 }
 
-#[test]
-fn snapshot_surfaces_update_file_diagnostics() {
-    let session = WatchSession::new(empty_options());
-    let _ignored = session.initialize();
-
-    let missing = camino::Utf8PathBuf::from("/nonexistent/does-not-exist.tsx");
-    let update = session.update_file(&missing);
-    assert!(
-        update.diagnostics.iter().any(|d| d.code == crate::types::DiagnosticCode::IoError),
-        "expected an IoError diagnostic from update_file, got {:?}",
-        update.diagnostics
-    );
-
-    let snap = session.snapshot();
-    assert!(
-        !snap.diagnostics.is_empty(),
-        "snapshot() should surface diagnostics recorded by update_file, not hardcode empty"
-    );
+/// The session's snapshot must equal what a cold `extract()` of the same files returns. Stats carry timings, so they
+/// are left out.
+fn assert_matches_cold(session: &WatchSession) {
+    let watched = session.snapshot();
+    let cold = crate::pipeline::extract(&session.options);
+    assert_eq!(watched.components, cold.components);
+    assert_eq!(watched.enums, cold.enums);
+    assert_eq!(watched.diagnostics, cold.diagnostics);
 }
 
 #[test]
-fn update_file_replaces_previous_diagnostics_for_same_file() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let path = camino::Utf8Path::from_path(tmp.path()).expect("utf8 path").join("widget.tsx");
-
+fn a_path_outside_every_source_directory_changes_nothing() {
     let session = WatchSession::new(empty_options());
     let _ignored = session.initialize();
 
-    // File doesn't exist yet — update_file should record an IoError for it.
-    session.update_file(&path);
-    assert!(!session.snapshot().diagnostics.is_empty());
-
-    // Same path now reads successfully — the stale IoError for this path
-    // should be cleared, not accumulated alongside the new (empty) result.
-    std::fs::write(path.as_std_path(), FIXED).expect("write fixture");
-    let update = session.update_file(&path);
-    assert!(update.diagnostics.is_empty());
-    assert!(session.snapshot().diagnostics.is_empty(), "fixed file's stale diagnostic should be cleared, not linger");
+    let update = session.update_file(camino::Utf8Path::new("/nonexistent/does-not-exist.tsx"));
+    assert!(update.updated_keys.is_empty() && update.removed_keys.is_empty() && update.diagnostics.is_empty());
+    assert!(session.snapshot().diagnostics.is_empty());
 }
 
 /// A src dir holding `Widget.tsx` and the options over it; the DTS cache lives beside it, outside the watched tree.
@@ -306,10 +284,6 @@ fn update_file_reflects_the_edited_files_new_content_not_its_pre_edit_content() 
 
 #[test]
 fn update_file_re_resolves_files_that_import_the_changed_file() {
-    // Adversarial review finding: ReverseDeps::build was never called, so
-    // reverse_deps stayed permanently empty and update_file's BFS
-    // dependent-propagation only ever found the changed file itself —
-    // never files that import it.
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = camino::Utf8Path::from_path(tmp.path()).expect("utf8 path").to_owned();
     let base_path = dir.join("Base.tsx");
@@ -503,12 +477,7 @@ fn initialize_called_twice_does_not_rerun_extraction_or_replay_diagnostics() {
         count_after_first,
         "second initialize() call must not re-parse/re-extract"
     );
-    assert_eq!(second.components.len(), first.components.len());
-    assert!(
-        second.diagnostics.is_empty(),
-        "second call's diagnostics must be empty regardless of the first call's, got {:?}",
-        second.diagnostics
-    );
+    assert_eq!(second, first, "a second initialize() returns the current snapshot unchanged");
 }
 
 // ── SPEC-PIPELINE-001 AC-016b: after a contained panic in one
@@ -569,25 +538,9 @@ fn session_recovers_after_a_contained_panic_and_serves_unrelated_files_normally(
     );
 }
 
-// ── SPEC-PIPELINE-001 AC-017: update_file() with a non-canonical path
-// (e.g. a symlinked directory segment reported unresolved) still finds
-// the canonical entry via reverse_deps.
-//
-// A prior version of this test only asserted that the CHANGED file's own
-// component reappeared after the update — but `ReverseDeps::affected()`
-// seeds its BFS with `changed` itself (mod.rs's `affected()` pushes
-// `changed` onto the queue before ever consulting the reverse-dep map),
-// so the changed file is *always* present in the affected set regardless
-// of whether it was canonicalized correctly. That assertion passed even
-// with `canonicalize_best_effort` deleted entirely, because `merge()`
-// also stores the new data under whatever path `changed` happens to be —
-// canonical or not — so the changed file's own mapping and the (trivial,
-// self-seeded) affected set always matched. `canonicalize_best_effort`
-// only matters for a file that TRANSITIVELY IMPORTS the changed file:
-// `reverse_deps.inner` is keyed by the canonical paths `discover_files`
-// reported at `initialize()` time, so looking it up with a non-canonical
-// key finds nothing. This version adds a second file that imports from
-// the symlinked one, so the assertion can actually fail without the fix.
+// ── SPEC-PIPELINE-001 AC-017: update_file() with a non-canonical path (a symlinked directory segment) still matches
+// the canonical paths discovery recorded. The changed file's own component would reappear either way; only a dependent
+// in another file shows whether the path matched its recorded dependency.
 
 #[test]
 fn update_file_with_a_non_canonical_path_still_finds_the_canonical_entry() {
@@ -641,7 +594,7 @@ fn update_file_with_a_non_canonical_path_still_finds_the_canonical_entry() {
     assert!(
         update.updated_components.iter().any(|c| c.display_name == "Consumer"),
         "Consumer.tsx transitively imports from the non-canonically-referenced file and must also be \
-         re-resolved — this fails without canonicalize_best_effort, since reverse_deps is keyed by the \
+         re-resolved — this fails without canonicalize_best_effort, since recorded dependencies use the \
          canonical path discover_files reported at initialize() time, got {:?}",
         update.updated_components
     );
@@ -726,13 +679,10 @@ fn update_file_after_an_atomic_replace_reflects_the_new_content_not_a_deletion()
     assert!(widget_snap.props.contains_key("b"), "snapshot should also reflect the replaced content");
 }
 
-// ── SPEC-PIPELINE-001 AC-019: deleting a file surfaces an IoError for
-// that file, its own stale components linger until a new session (a
-// documented gap), and a dependent's re-resolution no longer resolves
-// against the deleted file's declaration.
+// ── SPEC-PIPELINE-001 AC-019: deleting a file removes its components and re-resolves its dependents.
 
 #[test]
-fn deleting_a_file_surfaces_io_error_and_a_dependent_stops_resolving_against_it() {
+fn deleting_a_file_removes_its_components_and_re_resolves_dependents() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = camino::Utf8Path::from_path(tmp.path()).expect("utf8 path").to_owned();
     let f_path = dir.join("Base.tsx");
@@ -751,47 +701,24 @@ fn deleting_a_file_surfaces_io_error_and_a_dependent_stops_resolving_against_it(
     let options = PipelineOptions { src_dirs: vec![dir], ..Default::default() };
     let session = WatchSession::new(options);
     let _ignored = session.initialize();
-
-    // Sanity: Consumer resolves BaseProps' 'x' field before the deletion.
-    let snap_before = session.snapshot();
-    let consumer_before = snap_before.components.get("Consumer").expect("expected Consumer before deletion");
-    assert!(
-        consumer_before.props.contains_key("x"),
-        "sanity check: Consumer should resolve 'x' via Base before deletion"
-    );
+    assert!(session.snapshot().components["Consumer"].props.contains_key("x"), "sanity: Consumer resolves 'x'");
 
     std::fs::remove_file(f_path.as_std_path()).expect("delete Base.tsx");
-    let f_update = session.update_file(&f_path);
-    assert!(
-        f_update.diagnostics.iter().any(|d| d.code == crate::types::DiagnosticCode::IoError),
-        "expected an IoError diagnostic for the deleted file, got {:?}",
-        f_update.diagnostics
-    );
+    let update = session.update_file(&f_path);
+    assert_eq!(update.removed_keys, vec!["Base".to_string()]);
+    assert_eq!(update.updated_keys, vec!["Consumer".to_string()]);
 
-    // Base's own stale component lingers in the snapshot — documented gap,
-    // not pruned until a new WatchSession is constructed.
-    let snap_after_delete = session.snapshot();
+    let snap = session.snapshot();
+    assert_eq!(snap.components.keys().collect::<Vec<_>>(), vec!["Consumer"]);
     assert!(
-        snap_after_delete.components.contains_key("Base"),
-        "Base's stale component should still be present (the documented staleness gap), got {:?}",
-        snap_after_delete.components.keys().collect::<Vec<_>>()
+        !matches!(
+            snap.components["Consumer"].props.get("x").map(|p| &p.prop_type),
+            Some(crate::types::PropType::String)
+        ),
+        "Consumer must not still resolve 'x' against the deleted declaration, got {:?}",
+        snap.components["Consumer"].props.get("x")
     );
-
-    // Consumer's re-resolution must no longer resolve as if Base still existed:
-    // either a diagnostic naming the unresolvable reference, or an opaque/absent 'x' prop.
-    let g_update = session.update_file(&g_path);
-    let consumer_after = g_update
-        .updated_components
-        .iter()
-        .find(|c| c.display_name == "Consumer")
-        .expect("expected Consumer re-resolved");
-    let x_still_resolved =
-        matches!(consumer_after.props.get("x").map(|p| &p.prop_type), Some(crate::types::PropType::String));
-    assert!(
-        !x_still_resolved,
-        "Consumer's 'x' prop must not still resolve to String as if Base's declaration still existed, got {:?}",
-        consumer_after.props.get("x")
-    );
+    assert_matches_cold(&session);
 }
 
 // ── SPEC-PIPELINE-001 AC-024: update_file() on a file whose on-disk
@@ -799,9 +726,10 @@ fn deleting_a_file_surfaces_io_error_and_a_dependent_stops_resolving_against_it(
 // surfaces an IoError and does not re-resolve that file's own component.
 
 #[test]
-fn update_file_with_non_utf8_content_surfaces_io_error_and_skips_that_files_own_component() {
+fn update_file_with_non_utf8_content_surfaces_io_error_and_removes_that_files_own_component() {
+    // Canonical, so the component's recorded file path can actually match (macOS temp dirs live under a symlink).
     let tmp = tempfile::tempdir().expect("tempdir");
-    let dir = camino::Utf8Path::from_path(tmp.path()).expect("utf8 path").to_owned();
+    let dir = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().expect("canonicalize")).expect("utf8 path");
     let file_path = dir.join("Bad.tsx");
     std::fs::write(file_path.as_std_path(), "export function Bad(props: { x: string }) { return null; }\n")
         .expect("write Bad.tsx");
@@ -809,12 +737,11 @@ fn update_file_with_non_utf8_content_surfaces_io_error_and_skips_that_files_own_
     let options = PipelineOptions { src_dirs: vec![dir], ..Default::default() };
     let session = WatchSession::new(options);
     let _ignored = session.initialize();
+    assert_eq!(session.snapshot().components["Bad"].file_path, file_path, "sanity: the paths compare equal");
 
-    // Overwrite with invalid UTF-8 bytes directly (std::fs::write accepts any
-    // AsRef<[u8]>, unlike a &str write, which couldn't express this at all).
     std::fs::write(file_path.as_std_path(), [0x42, 0xFF, 0xFE, 0x00, 0xFF]).expect("write invalid utf8 bytes");
-
     let update = session.update_file(&file_path);
+
     assert!(
         update
             .diagnostics
@@ -823,21 +750,12 @@ fn update_file_with_non_utf8_content_surfaces_io_error_and_skips_that_files_own_
         "expected an IoError diagnostic naming Bad.tsx, got {:?}",
         update.diagnostics
     );
-    assert!(
-        !update.updated_components.iter().any(|c| c.file_path == file_path),
-        "the changed file's own component must not be re-resolved successfully after an unreadable-content \
-         error, got {:?}",
-        update.updated_components
-    );
+    assert_eq!((update.updated_keys, update.removed_keys), (vec![], vec!["Bad".to_string()]));
+    assert_matches_cold(&session);
 }
 
-// ── component_cache staleness, manifestation 1: a component renamed
-// between edits (same file) left its OLD name's key behind forever,
-// since the old code only ever inserted under the new display_name,
-// never removing whatever key the file previously held.
-
 #[test]
-fn renaming_a_component_between_edits_evicts_its_old_cache_key() {
+fn renaming_a_component_between_edits_removes_its_old_key() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = camino::Utf8Path::from_path(tmp.path()).expect("utf8 path").to_owned();
     let file_path = dir.join("Widget.tsx");
@@ -847,31 +765,18 @@ fn renaming_a_component_between_edits_evicts_its_old_cache_key() {
     let options = PipelineOptions { src_dirs: vec![dir], ..Default::default() };
     let session = WatchSession::new(options);
     let _ignored = session.initialize();
-    assert!(session.component_cache.get("Card").is_some(), "sanity check: Card should be cached after initialize()");
+    assert!(session.snapshot().components.contains_key("Card"), "sanity check: Card should exist after initialize()");
 
     // Rename Card -> Panel within the same file.
     std::fs::write(file_path.as_std_path(), "export function Panel(props: { label: string }) { return null; }\n")
         .expect("rewrite Widget.tsx");
-    let _ignored = session.update_file(&file_path);
+    let update = session.update_file(&file_path);
 
-    assert!(
-        session.component_cache.get("Panel").is_some(),
-        "expected the renamed component to be cached under its new name"
-    );
-    assert!(
-        session.component_cache.get("Card").is_none(),
-        "expected the old name's cache key to be evicted after the rename, but it's still present"
-    );
+    let keys: Vec<String> = session.snapshot().components.into_keys().collect();
+    assert_eq!(keys, vec!["Panel".to_string()]);
+    assert_eq!(update.updated_keys, vec!["Panel".to_string()]);
+    assert_eq!(update.removed_keys, vec!["Card".to_string()]);
 }
-
-// ── component_cache staleness, manifestation 2 (the more severe one): a
-// component that was disambiguated at cold initialize() time (because
-// another file already held its bare display_name) gets its content
-// silently corrupted on the next edit — the old code always wrote to the
-// BARE key regardless of which key the component actually held, so an
-// edited B.tsx's fresh content landed in A.tsx's bare-keyed cache entry,
-// while B's own disambiguated key kept A's — no, B's own — STALE
-// pre-edit content forever.
 
 #[test]
 fn editing_a_disambiguated_component_updates_its_own_key_not_the_bare_one() {
@@ -897,36 +802,25 @@ fn editing_a_disambiguated_component_updates_its_own_key_not_the_bare_one() {
     let session = WatchSession::new(options);
     let _ignored = session.initialize();
 
-    let bare = session.component_cache.get("Button").expect("expected a bare 'Button' entry after initialize()");
-    assert_eq!(bare.file_path, a_path, "expected A.tsx to hold the bare key (sorts first)");
-    drop(bare);
+    let before = session.snapshot().components;
+    assert_eq!(before["Button"].file_path, a_path, "expected A.tsx to hold the bare key (sorts first)");
     let disambiguated_key = format!("Button ({b_path})");
     assert!(
-        session.component_cache.get(&disambiguated_key).is_some(),
+        before.contains_key(&disambiguated_key),
         "expected B.tsx's Button to be disambiguated, got keys {:?}",
-        session.component_cache.iter().map(|r| r.key().clone()).collect::<Vec<_>>()
+        before.keys().collect::<Vec<_>>()
     );
 
     // Edit B.tsx only — A.tsx is untouched.
     std::fs::write(b_path.as_std_path(), "export function Button(props: { b: string; c: string }) { return null; }\n")
         .expect("rewrite B.tsx");
-    let _ignored = session.update_file(&b_path);
+    let update = session.update_file(&b_path);
+    assert_eq!(update.updated_keys, vec![disambiguated_key.clone()]);
 
-    // A's bare entry must be untouched by B's edit.
-    let bare_after = session.component_cache.get("Button").expect("expected the bare 'Button' entry to survive");
-    assert_eq!(bare_after.file_path, a_path, "A's bare entry must not be overwritten by B's edit");
-    assert!(bare_after.props.contains_key("a"), "A's own props must be unaffected by B's edit");
-
-    // B's disambiguated entry must reflect the NEW content, not linger stale.
-    let b_after = session
-        .component_cache
-        .get(&disambiguated_key)
-        .expect("expected B's disambiguated entry to still exist under the same key");
-    assert!(
-        b_after.props.contains_key("c"),
-        "expected B's disambiguated entry to reflect the edit, got props {:?}",
-        b_after.props.keys().collect::<Vec<_>>()
-    );
+    let after = session.snapshot().components;
+    assert_eq!(after["Button"].file_path, a_path, "A's bare entry must not be overwritten by B's edit");
+    assert_eq!(after["Button"].props.keys().collect::<Vec<_>>(), vec!["a"]);
+    assert_eq!(after[&disambiguated_key].props.keys().collect::<Vec<_>>(), vec!["b", "c"]);
 }
 
 // ── parity with the one-shot extract() path ─────────────────────────────────
@@ -1032,4 +926,138 @@ fn a_wrapper_component_with_unresolvable_props_is_kept_by_update_file_like_extra
 
     assert_eq!(update.updated_components.iter().map(|c| c.display_name.as_str()).collect::<Vec<_>>(), vec!["Ghost"]);
     assert_eq!(visible(&session.snapshot()), visible(&crate::pipeline::extract(&options)));
+}
+
+/// One step of a watch session: write or delete each file, then report every touched path to `update_file`.
+enum Step<'s> {
+    Write(&'s str, &'s str),
+    WriteBytes(&'s str, &'s [u8]),
+    Delete(&'s str),
+}
+
+#[test]
+fn every_kind_of_change_leaves_the_snapshot_equal_to_a_cold_extract() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().expect("canonicalize")).expect("utf8");
+    let src = root.join("src");
+    std::fs::create_dir_all(src.join("button")).expect("create src/button");
+    let options =
+        PipelineOptions { src_dirs: vec![src.clone()], cache_dir: Some(root.join("cache")), ..Default::default() };
+    let files: &[(&str, &str)] = &[
+        ("shared.ts", "export interface SharedProps { size: 'sm' | 'lg'; }\n"),
+        ("index.ts", "export type { SharedProps } from './shared';\n"),
+        ("button/Button.tsx", "import type { SharedProps } from '../index';\nexport function Button(props: SharedProps) { return null; }\n"),
+        ("Card.tsx", "export function Card(props: { title: string }) { return null; }\n"),
+        ("sizes.ts", "export const SIZES = ['sm', 'lg'] as const;\n"),
+        (
+            "Chip.tsx",
+            "import { SIZES } from './sizes';\nimport type { Later } from './later';\nexport function Chip(props: { size: (typeof SIZES)[number]; later?: Later }) { return null; }\n",
+        ),
+    ];
+    for (name, body) in files {
+        std::fs::write(src.join(name), body).expect("write fixture");
+    }
+    let session = WatchSession::new(options);
+    let _ignored = session.initialize();
+    assert_matches_cold(&session);
+
+    let steps: Vec<(&str, Vec<Step<'_>>)> = vec![
+        (
+            "edit a dependency two hops away",
+            vec![Step::Write(
+                "shared.ts",
+                "export interface SharedProps { size: 'sm' | 'md' | 'lg'; tone?: string; }\n",
+            )],
+        ),
+        (
+            "edit the barrel",
+            vec![Step::Write(
+                "index.ts",
+                "export type { SharedProps } from './shared';\nexport type Extra = { id: string };\n",
+            )],
+        ),
+        (
+            "edit a component's own file",
+            vec![Step::Write(
+                "Card.tsx",
+                "export function Card(props: { title: string; footer?: string }) { return null; }\n",
+            )],
+        ),
+        (
+            "rename a component",
+            vec![Step::Write("Card.tsx", "export function Panel(props: { title: string }) { return null; }\n")],
+        ),
+        (
+            "create a component that collides with another name",
+            vec![Step::Write("button/Panel.tsx", "export function Panel(props: { open: boolean }) { return null; }\n")],
+        ),
+        (
+            "excluded story file",
+            vec![Step::Write("Card.stories.tsx", "export function Story(props: { x: number }) { return null; }\n")],
+        ),
+        ("stop being a component", vec![Step::Write("button/Panel.tsx", "export const panelHeight = 4;\n")]),
+        ("break a file", vec![Step::Write("Card.tsx", "export const = ;\n")]),
+        ("make a file unreadable", vec![Step::WriteBytes("Card.tsx", &[0x42, 0xFF, 0xFE])]),
+        ("fix it", vec![Step::Write("Card.tsx", "export function Card(props: { title: string }) { return null; }\n")]),
+        ("delete a dependency", vec![Step::Delete("shared.ts")]),
+        ("restore it", vec![Step::Write("shared.ts", "export interface SharedProps { size: 'sm'; }\n")]),
+        (
+            "edit a const array read by bare name",
+            vec![Step::Write("sizes.ts", "export const SIZES = ['sm', 'md', 'lg'] as const;\n")],
+        ),
+        (
+            "create the module an import was missing",
+            vec![Step::Write("later.ts", "export interface Later { id: string; }\n")],
+        ),
+        (
+            "move a file",
+            vec![
+                Step::Delete("Card.tsx"),
+                Step::Write("button/Card.tsx", "export function Card(props: { title: string }) { return null; }\n"),
+            ],
+        ),
+    ];
+    for (what, changes) in steps {
+        let mut touched = Vec::new();
+        for change in &changes {
+            match change {
+                Step::Write(name, body) => {
+                    std::fs::write(src.join(name), body).expect("write");
+                    touched.push(src.join(name));
+                }
+                Step::WriteBytes(name, bytes) => {
+                    std::fs::write(src.join(name), bytes).expect("write");
+                    touched.push(src.join(name));
+                }
+                Step::Delete(name) => {
+                    std::fs::remove_file(src.join(name)).expect("delete");
+                    touched.push(src.join(name));
+                }
+            }
+        }
+        for path in &touched {
+            let _ignored = session.update_file(path);
+        }
+        let watched = session.snapshot();
+        let cold = crate::pipeline::extract(&session.options);
+        assert_eq!(watched.components, cold.components, "components after: {what}");
+        assert_eq!(watched.enums, cold.enums, "enums after: {what}");
+        assert_eq!(watched.diagnostics, cold.diagnostics, "diagnostics after: {what}");
+    }
+}
+
+#[test]
+fn an_update_reports_the_keys_it_changed_and_removed() {
+    let (_tmp, widget, options) = widget_project("export function Widget(props: { a: string }) { return null; }\n");
+    let session = WatchSession::new(options);
+    let _ignored = session.initialize();
+
+    std::fs::write(&widget, "export function Gadget(props: { a: string }) { return null; }\n").expect("rename");
+    let first = session.update_file(&widget);
+    assert_eq!((first.updated_keys, first.removed_keys), (vec!["Gadget".to_string()], vec!["Widget".to_string()]));
+
+    std::fs::write(&widget, "export const gadget = 1;\n").expect("stop being a component");
+    let second = session.update_file(&widget);
+    assert_eq!((second.updated_keys, second.removed_keys), (vec![], vec!["Gadget".to_string()]));
+    assert!(second.revision > first.revision, "revisions increase: {} then {}", first.revision, second.revision);
 }

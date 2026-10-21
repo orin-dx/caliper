@@ -117,6 +117,7 @@ pub(super) fn resolve_indexed_access(
     // `[number]` means "the union of every element's type", which for a
     // `const`-asserted array of literals is exactly the array's own values.
     if let (CollectedType::TypeOf(name), CollectedType::Number) = (obj, key) {
+        super::deps::record_bare_name(name);
         if let Some(values) =
             ctx.const_array_bare_index.get(name.as_str()).and_then(|k| ctx.global.const_arrays.get(k.as_str()))
         {
