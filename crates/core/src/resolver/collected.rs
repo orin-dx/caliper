@@ -146,6 +146,8 @@ pub fn resolve_collected_type(
                 && !trimmed.contains('<')
             {
                 PropType::Named { name: trimmed.into(), args: vec![] }
+            } else if let Some(reference) = parse_generic_reference(trimmed) {
+                resolve_collected_type(&reference, consuming_file, ctx, state, depth + 1)
             } else {
                 let diag = opaque_diagnostic("an unparsable raw type expression", ct, consuming_file);
                 OpaqueDetail::give_up(state, s.clone(), OpaqueReason::UnsupportedExpression, diag)
@@ -173,4 +175,47 @@ fn opaque_diagnostic(what: &str, ct: &CollectedType, file: &Utf8Path) -> Diagnos
         help: None,
         code: DiagnosticCode::OpaqueType,
     }
+}
+
+/// Split `Name<A, B<C>>` into a `Named` reference with `Raw` arguments, or `None` when `text` is not exactly one
+/// generic reference. Type arguments reach the resolver as display strings (roadmap item 2.1 replaces that); this keeps
+/// a nested generic from degrading to an opaque type in the meantime.
+pub(super) fn parse_generic_reference(text: &str) -> Option<CollectedType> {
+    let text = text.trim();
+    let open = text.find('<')?;
+    let name = text[..open].trim();
+    let inner = text[open + 1..].strip_suffix('>')?;
+    if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '$' | '.')) {
+        return None;
+    }
+    let mut args = Vec::new();
+    let (mut depth, mut quote, mut start) = (0i32, None, 0usize);
+    for (i, c) in inner.char_indices() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '<' | '(' | '[' | '{') => depth += 1,
+            (None, '>' | ')' | ']' | '}') => depth -= 1,
+            (None, ',') if depth == 0 => {
+                args.push(inner[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+        if depth < 0 {
+            return None;
+        }
+    }
+    if depth != 0 || quote.is_some() {
+        return None;
+    }
+    args.push(inner[start..].trim());
+    if args.iter().any(|a| a.is_empty()) {
+        return None;
+    }
+    Some(CollectedType::Named {
+        name: name.into(),
+        args: args.into_iter().map(|a| CollectedType::Raw(a.to_owned())).collect(),
+    })
 }

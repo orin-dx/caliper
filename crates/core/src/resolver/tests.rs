@@ -2634,3 +2634,29 @@ fn ts_lib_paths_are_empty_and_silent_without_typescript() {
     let tmp = tempfile::TempDir::new().unwrap();
     assert_eq!(lib_paths_from(tmp.path()), TsLibs::default());
 }
+
+#[test]
+fn parse_generic_reference_splits_top_level_arguments_only() {
+    use super::collected::parse_generic_reference;
+    let shape = |text: &str| -> Option<(String, Vec<String>)> {
+        match parse_generic_reference(text)? {
+            CollectedType::Named { name, args } => Some((
+                name.to_string(),
+                args.into_iter()
+                    .map(|a| if let CollectedType::Raw(raw) = a { raw } else { String::from("<not raw>") })
+                    .collect(),
+            )),
+            _ => None,
+        }
+    };
+    let expect =
+        |name: &str, args: &[&str]| Some((name.to_owned(), args.iter().map(|a| (*a).to_owned()).collect::<Vec<_>>()));
+    assert_eq!(shape("Gen<number>"), expect("Gen", &["number"]));
+    assert_eq!(shape("Assign<A<B, C>, \"x,y\">"), expect("Assign", &["A<B, C>", "\"x,y\""]));
+    assert_eq!(shape("Ns.Gen<{ a: 1; b: 2 }, [1, 2]>"), expect("Ns.Gen", &["{ a: 1; b: 2 }", "[1, 2]"]));
+    assert_eq!(shape("Plain"), None);
+    assert_eq!(shape("Gen<>"), None);
+    assert_eq!(shape("Gen<A"), None);
+    assert_eq!(shape("Gen<A>>"), None);
+    assert_eq!(shape("A | Gen<B>"), None);
+}

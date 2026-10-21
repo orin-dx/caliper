@@ -63,34 +63,37 @@ pub(super) fn resolve_props_chain(
     // have non-empty type_args. Route through alias resolver (same logic as
     // `type X = Pick<T,K>`) instead of the step-1 silent no-op.
     if !type_args.is_empty() {
+        let base_of = |raw: &str| {
+            super::collected::parse_generic_reference(raw)
+                .unwrap_or_else(|| CollectedType::Named { name: raw.into(), args: vec![] })
+        };
         let synthetic = match type_name_bare {
-            // Guard: skip if the base type is itself generic (contains '<').
-            // Raw string type_args can't represent nested generics reliably.
-            "Pick" if type_args.len() >= 2 && !type_args[0].contains('<') => {
-                let base = CollectedType::Named { name: type_args[0].as_str().into(), args: vec![] };
-                Some(CollectedTypeAlias::Pick {
-                    base,
-                    picked_keys: parse_string_union_keys(&type_args[1]),
-                    file_path: consuming_file.to_owned(),
-                })
-            }
-            "Omit" if type_args.len() >= 2 && !type_args[0].contains('<') => {
-                let base = CollectedType::Named { name: type_args[0].as_str().into(), args: vec![] };
+            "Pick" if type_args.len() >= 2 => Some(CollectedTypeAlias::Pick {
+                base: base_of(&type_args[0]),
+                picked_keys: parse_string_union_keys(&type_args[1]),
+                file_path: consuming_file.to_owned(),
+            }),
+            "Omit" if type_args.len() >= 2 => {
+                // `Omit<Base, keyof Other>`: the omitted keys are Other's own field names, known only to the resolver.
+                let keyof_operand = type_args[1].trim().strip_prefix("keyof ").map(|operand| base_of(operand.trim()));
                 Some(CollectedTypeAlias::Omit {
-                    base,
-                    omitted_keys: parse_string_union_keys(&type_args[1]),
-                    omitted_keys_of: None,
+                    base: base_of(&type_args[0]),
+                    omitted_keys: if keyof_operand.is_some() {
+                        Vec::new()
+                    } else {
+                        parse_string_union_keys(&type_args[1])
+                    },
+                    omitted_keys_of: keyof_operand.map(Box::new),
                     file_path: consuming_file.to_owned(),
                 })
             }
-            "Partial" if !type_args.is_empty() && !type_args[0].contains('<') => {
-                let base = CollectedType::Named { name: type_args[0].as_str().into(), args: vec![] };
-                Some(CollectedTypeAlias::Partial { base, file_path: consuming_file.to_owned() })
+            "Partial" => {
+                Some(CollectedTypeAlias::Partial { base: base_of(&type_args[0]), file_path: consuming_file.to_owned() })
             }
-            "Readonly" if !type_args.is_empty() && !type_args[0].contains('<') => {
-                let base = CollectedType::Named { name: type_args[0].as_str().into(), args: vec![] };
-                Some(CollectedTypeAlias::Passthrough { target: base, file_path: consuming_file.to_owned() })
-            }
+            "Readonly" => Some(CollectedTypeAlias::Passthrough {
+                target: base_of(&type_args[0]),
+                file_path: consuming_file.to_owned(),
+            }),
             _ => None,
         };
         if let Some(alias) = synthetic {
@@ -172,6 +175,12 @@ pub(super) fn resolve_props_chain(
     // Terminal React types (ReactNode, Ref, FC, etc.) that survived both are not
     // prop providers — add to composes and stop.
     if react_types::is_react_builtin(type_name_bare, &ctx.extra_builtins) {
+        return ResolvedChain::empty_with_compose(type_name.to_owned());
+    }
+
+    // HTML attribute interfaces (`InputHTMLAttributes`, ...) are terminal in curated mode, like the builtins above: the
+    // element's notable attributes come from the inheritance layer, not from expanding the interface.
+    if react_types::html_element_for(type_name_bare).is_some() {
         return ResolvedChain::empty_with_compose(type_name.to_owned());
     }
 

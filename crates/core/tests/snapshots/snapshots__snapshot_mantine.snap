@@ -1921,7 +1921,9 @@ expression: value
       "inheritance": [],
       "notableInherited": {},
       "discriminantProp": null,
-      "composes": [],
+      "composes": [
+        "React.InputHTMLAttributes"
+      ],
       "tags": {},
       "methods": []
     }
