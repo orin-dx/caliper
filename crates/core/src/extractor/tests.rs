@@ -776,6 +776,24 @@ fn test_forward_ref_explicit_generics_survives_as_cast() {
 }
 
 #[test]
+fn test_wrappers_that_do_not_change_the_value_are_peeled() {
+    // Parentheses and a trailing `!` are value-preserving, so they must not hide the wrapper call.
+    let source = r#"
+        import { forwardRef, memo } from "react";
+        interface AProps { a: string }
+        interface BProps { b: string }
+        interface CProps { c: string }
+        export const A = (forwardRef<HTMLDivElement, AProps>((props, ref) => <div ref={ref} />));
+        export const B = forwardRef<HTMLDivElement, BProps>((props, ref) => <div ref={ref} />)!;
+        export const C = (memo(forwardRef<HTMLDivElement, CProps>((props, ref) => <div ref={ref} />)) as unknown)!;
+    "#;
+    let data = parse_file(Utf8Path::new("/test/wrapped.tsx"), source);
+    let found: Vec<(&str, &str)> =
+        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.props_type_name.as_str())).collect();
+    assert_eq!(found, vec![("A", "AProps"), ("B", "BProps"), ("C", "CProps")]);
+}
+
+#[test]
 fn test_memo_forward_ref_detected() {
     let source = r#"
         import React, { memo, forwardRef } from "react";

@@ -9,7 +9,7 @@ use crate::types::{ComponentMapping, DiagnosticCode};
 
 use super::{is_pascal_case, SourceDataCollector};
 
-/// Peel any wrapping `as X` casts or `satisfies X` checks down to the real
+/// Peel any wrapping `as X` casts, `satisfies X` checks or `!` assertions down to the real
 /// expression underneath. Needed because component libraries commonly cast a
 /// forwardRef/HOC call to a hand-rolled wrapper type instead of relying on
 /// `@types/react`'s own generics (Fluent UI's own source notes this is
@@ -22,6 +22,7 @@ fn unwrap_as_expression<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> 
         expr = match expr {
             Expression::TSAsExpression(as_expr) => &as_expr.expression,
             Expression::TSSatisfiesExpression(sat_expr) => &sat_expr.expression,
+            Expression::TSNonNullExpression(non_null) => &non_null.expression,
             _ => return expr,
         };
     }
