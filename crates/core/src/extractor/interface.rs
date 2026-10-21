@@ -313,17 +313,12 @@ impl<'src> SourceDataCollector<'src> {
 
             let (description, tags) = self.find_jsdoc_with_tags(span_start);
             let param_defaults = self.extract_param_defaults(params);
-            self.data.component_mappings.push(ComponentMapping {
-                component_name: key_name,
-                props_type_name: props_name,
-                props_type_args: type_args,
-                file_path: self.file_path.clone(),
-                description,
-                tags,
-                span_start,
-                span_end,
-                param_defaults,
-            });
+            self.data.component_mappings.push(
+                ComponentMapping::new(key_name, props_name, self.file_path.clone(), span_start, span_end)
+                    .with_props_type_args(type_args)
+                    .with_doc(description, tags)
+                    .with_param_defaults(param_defaults),
+            );
         }
     }
 }

@@ -919,6 +919,26 @@ fn record_skip_pushes_an_info_diagnostic_with_the_given_code() {
     assert_eq!(diag.file.as_deref(), Some("/test/skip.tsx"));
 }
 
+#[test]
+fn skipped_candidates_carry_the_line_and_column_of_the_declaration() {
+    let source = "import x from \"y\";\n\n  const Opaque = makeThing();\n";
+    let data = parse_file(Utf8Path::new("/test/skip.tsx"), source);
+    let skipped: Vec<(Option<u32>, Option<u32>)> = data
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::SkippedCandidate)
+        .map(|d| (d.line, d.column))
+        .collect();
+    assert_eq!(skipped, vec![(Some(3), Some(9))]);
+}
+
+#[test]
+fn line_and_column_counts_characters_and_clamps_past_the_end() {
+    assert_eq!(line_and_column("ab\ncd", 4), (2, 2));
+    assert_eq!(line_and_column("é\nx", 3), (2, 1));
+    assert_eq!(line_and_column("abc", 99), (1, 4));
+}
+
 // ── SPEC-EXTRACTOR-001 AC-009: a type alias built from Omit/Pick/Partial/
 // Required/Readonly with malformed type arguments is skipped, end to end
 // through real parsing — the test above only proves record_skip() itself
