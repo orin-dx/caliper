@@ -59,6 +59,27 @@ Confirmed by the October 2026 audits and benchmarks.
 | Options | two near-identical mappers (CLI, NAPI), already drifted | one `OptionsSpec` with `TryFrom` and a typed error in core | Fixes D3; NAPI returns `InvalidArg` |
 | Watch state | three locks; `global` deep-cloned per save | one locked state with per-file `Arc` data; callee dependency edges | Parity with `extract()`; keeps the incremental edge |
 
+## Progress
+
+| Item                                                                      | State  | PR  |
+| ------------------------------------------------------------------------- | ------ | --- |
+| 0.1 Sibling `tests.rs`                                                    | merged | #48 |
+| 0.2 Architecture tests                                                    | merged | #50 |
+| 0.3 Lints and dependency hygiene                                          | merged | #49 |
+| 0.4 SemVer and MSRV CI (MSRV raised to 1.97)                              | open   | #52 |
+| 0.5 Cache byte-layout guard (proptest and fuzz deferred)                  | open   | #53 |
+| 1.1 Parenthesized and `!` wrappers                                        | open   | #54 |
+| 1.3 Deterministic same-name enums                                         | open   | #56 |
+| 1.4 Unreadable files reported                                             | open   | #57 |
+| 1.5 Split diagnostic codes                                                | open   | #58 |
+| 2.2 Mapping and diagnostic builders, positions on skips                   | open   | #59 |
+| 2.6 Multi-hop barrel cause and fix (extends clause)                       | open   | #63 |
+| 3.1 `DetectionRule` on mappings (`Detection` type deferred)               | open   | #60 |
+| 3.2 Typed arrow and function expressions                                  | open   | #61 |
+| 3.4 Wrapper calls by shape (same-file; callee analysis not needed so far) | open   | #62 |
+
+Not started: 0.6, 0.7, 1.2, 1.6, 2.1, 2.3 to 2.5, 2.7, 3.3, 3.5, 3.6, Phases 4 and 5, Track R. Measured recall after #63 (against react-docgen-typescript, own props): Mantine 93%, Chakra 92%, Ant Design 97%, shadcn/ui 98%, react-spectrum 99%.
+
 ## Phases
 
 Each item is sized to one PR. Size: S under a day, M one to three days, L more. "Needs" lists hard dependencies.
