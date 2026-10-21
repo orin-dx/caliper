@@ -738,6 +738,9 @@ pub enum DetectionRule {
     AnonymousDefaultExport,
     /// `Object.assign(Root, { Item })` or a static property attached to a component.
     AttachedSubComponent,
+    /// `const Button = (props: Props) => ...` or `const Button = function (props: Props) {}`: a PascalCase binding
+    /// whose initializer is a synchronous function with a props-typed first parameter.
+    TypedFunctionExpression,
 }
 
 /// A component → prop type mapping.

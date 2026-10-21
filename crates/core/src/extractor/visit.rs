@@ -231,6 +231,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                         .or_else(|| self.try_forward_ref(declarator, &name))
                         .or_else(|| self.try_hoc_wrapped(declarator, &name))
                         .or_else(|| self.try_class_expression_wrapped(declarator, &name))
+                        .or_else(|| self.try_typed_function_expression(declarator, &name))
                     {
                         self.data.component_mappings.push(mapping);
                         continue;
