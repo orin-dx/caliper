@@ -143,6 +143,37 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: just verify-install ${{ matrix.pm }}
 
+  semver:
+    name: SemVer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: rust
+        run: echo "version=$(sed -n 's/^rust = "\(.*\)"/\1/p' .prototools)" >> "$GITHUB_OUTPUT"
+      - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: just,cargo-semver-checks
+      - run: just semver
+
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: rust
+        run: echo "version=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+      - run: cargo check --workspace --exclude caliper-docgen-napi --locked
+
   audit:
     name: Audit
     runs-on: ubuntu-latest
@@ -168,7 +199,7 @@ jobs:
   # The one check to require in branch protection.
   ci:
     name: CI
-    needs: [lint, test-rust, test-ts, coverage, install, audit, changesets]
+    needs: [lint, test-rust, test-ts, coverage, install, semver, msrv, audit, changesets]
     if: always()
     runs-on: ubuntu-latest
     steps:

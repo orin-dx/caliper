@@ -31,12 +31,17 @@ updates:
       default-days: 7
     open-pull-requests-limit: 5
     groups:
+      # oxc_resolver is versioned separately from the lockstep oxc_* crates, so it gets its own PR.
+      oxc-resolver:
+        applies-to: version-updates
+        patterns: ["oxc_resolver"]
       # The oxc_* crates are released in lockstep and their minor releases
       # carry breaking API changes; keeping them in one PR means the
       # extractor and resolver are updated together or not at all.
       oxc:
         applies-to: version-updates
         patterns: ["oxc_*"]
+        exclude-patterns: ["oxc_resolver"]
       routine-cargo:
         applies-to: version-updates
         patterns: ["*"]
