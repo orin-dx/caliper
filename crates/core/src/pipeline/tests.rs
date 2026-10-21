@@ -1473,6 +1473,33 @@ fn test_wrapper_call_components_with_no_resolved_props_are_omitted_with_a_diagno
     assert_eq!(skipped.len(), 1, "diagnostics: {:?}", output.diagnostics);
 }
 
+// An interface may extend a type that is only reachable through a barrel file that re-exports it from a sibling.
+#[test]
+fn test_props_extended_through_a_reexporting_barrel_resolve() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("system")).unwrap();
+    fs::create_dir_all(tmp.path().join("components")).unwrap();
+    write_file(&tmp, "system/shared.ts", "export interface UnstyledProp { unstyled?: boolean }\n");
+    write_file(&tmp, "system/index.ts", "export type { UnstyledProp } from \"./shared\";\n");
+    write_file(
+        &tmp,
+        "components/only.tsx",
+        "import type { UnstyledProp } from \"../system\";\n\
+         export interface OnlyProps extends UnstyledProp { size?: number }\n\
+         export function Only(props: OnlyProps) { return null; }\n",
+    );
+    let dir = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![dir],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+
+    let output = extract(&options);
+
+    assert_eq!(output.components["Only"].props.keys().collect::<Vec<_>>(), vec!["size", "unstyled"]);
+}
+
 // ── test_overlapping_src_dirs_two_directories_deduplicates_without_a_duplicate_listing ─
 //
 // Corrected finding: the insert-return check above only catches a genuine
