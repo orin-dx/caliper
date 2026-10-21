@@ -717,6 +717,29 @@ pub struct RawDefault {
     pub source: DefaultSource,
 }
 
+/// The extractor rule that recognized a component. Carried so a mapping can be explained and, later, so rules can be
+/// ranked by how likely they are to be wrong. Append new variants last: the cache encodes them by position.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DetectionRule {
+    /// `const Button: FC<Props> = ...`
+    FcAnnotation,
+    /// `forwardRef<El, Props>(...)` or a render function typed through a `ForwardRefComponent<Props>` annotation.
+    ForwardRef,
+    /// `declare const Button: ForwardRefExoticComponent<Props & RefAttributes<El>>`
+    ForwardRefExoticDecl,
+    /// `memo(...)`, `observer(...)` or any call whose first argument is a function with a typed props parameter.
+    HocWrapper,
+    /// `class Button extends Component<Props>`
+    ClassComponent,
+    /// `function Button(props: Props) {}`
+    FunctionDeclaration,
+    /// `export default function (props: Props) {}`, named after the file.
+    AnonymousDefaultExport,
+    /// `Object.assign(Root, { Item })` or a static property attached to a component.
+    AttachedSubComponent,
+}
+
 /// A component → prop type mapping.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComponentMapping {
@@ -732,19 +755,22 @@ pub struct ComponentMapping {
     /// Default values extracted from parameter destructuring or defaultProps.
     /// Key = prop name. Populated only for implementation files (.tsx/.ts), not .d.ts.
     pub param_defaults: FxHashMap<std::string::String, RawDefault>,
+    /// Which extractor rule matched.
+    pub rule: DetectionRule,
 }
 
 impl ComponentMapping {
     /// A mapping with no type arguments, documentation or parameter defaults; add them with the `with_*` methods.
     pub fn new(
-        component_name: impl Into<std::string::String>,
+        component_name: std::string::String,
         props_type_name: TypeName,
         file_path: Utf8PathBuf,
         span_start: u32,
         span_end: u32,
+        rule: DetectionRule,
     ) -> Self {
         Self {
-            component_name: component_name.into(),
+            component_name,
             props_type_name,
             props_type_args: Vec::new(),
             file_path,
@@ -753,6 +779,7 @@ impl ComponentMapping {
             span_start,
             span_end,
             param_defaults: FxHashMap::default(),
+            rule,
         }
     }
 

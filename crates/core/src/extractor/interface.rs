@@ -3,7 +3,7 @@
 use oxc_ast::ast::*;
 use rustc_hash::FxHashMap;
 
-use crate::types::{ComponentMapping, DefaultSource, DiagnosticCode, EnumEntry, EnumValue, RawDefault};
+use crate::types::{ComponentMapping, DefaultSource, DetectionRule, DiagnosticCode, EnumEntry, EnumValue, RawDefault};
 
 use super::{is_pascal_case, SourceDataCollector};
 
@@ -314,10 +314,17 @@ impl<'src> SourceDataCollector<'src> {
             let (description, tags) = self.find_jsdoc_with_tags(span_start);
             let param_defaults = self.extract_param_defaults(params);
             self.data.component_mappings.push(
-                ComponentMapping::new(key_name, props_name, self.file_path.clone(), span_start, span_end)
-                    .with_props_type_args(type_args)
-                    .with_doc(description, tags)
-                    .with_param_defaults(param_defaults),
+                ComponentMapping::new(
+                    key_name,
+                    props_name,
+                    self.file_path.clone(),
+                    span_start,
+                    span_end,
+                    DetectionRule::AttachedSubComponent,
+                )
+                .with_props_type_args(type_args)
+                .with_doc(description, tags)
+                .with_param_defaults(param_defaults),
             );
         }
     }

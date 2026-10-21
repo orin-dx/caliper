@@ -66,17 +66,14 @@ fn test_simple_interface_resolution() {
     );
 
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
-    let mapping = ComponentMapping {
-        component_name: "Button".into(),
-        props_type_name: "ButtonProps".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Button".into(),
+        "ButtonProps".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, diagnostics) = resolve_component(&mapping, &ctx);
     // The unresolvable import diagnostic fires because ButtonProps is in the same file
@@ -154,17 +151,14 @@ fn test_extends_clause_prefers_project_defined_sx_props_over_known_shortcut() {
     );
 
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
-    let mapping = ComponentMapping {
-        component_name: "ThemeButton".into(),
-        props_type_name: "ThemeButtonProps".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "ThemeButton".into(),
+        "ThemeButtonProps".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, _diagnostics) = resolve_component(&mapping, &ctx);
 
@@ -228,17 +222,14 @@ fn test_field_typed_as_project_defined_sx_props_is_not_replaced_by_known_shortcu
     );
 
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
-    let mapping = ComponentMapping {
-        component_name: "Widget".into(),
-        props_type_name: "WidgetProps".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Widget".into(),
+        "WidgetProps".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, _diagnostics) = resolve_component(&mapping, &ctx);
 
@@ -539,17 +530,15 @@ fn test_default_value_jsdoc_mismatch_emits_diagnostic() {
         RawDefault { value: "\"default\"".into(), computed: false, source: DefaultSource::Destructuring },
     );
 
-    let mapping = ComponentMapping {
-        component_name: "Button".into(),
-        props_type_name: "ButtonProps".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults,
-    };
+    let mapping = ComponentMapping::new(
+        "Button".into(),
+        "ButtonProps".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    )
+    .with_param_defaults(param_defaults);
 
     let (entry, diagnostics) = resolve_component(&mapping, &ctx);
     let variant_prop = entry.props.get("variant").expect("variant prop");
@@ -710,17 +699,14 @@ fn test_discriminant_detected_through_intersection_wrapped_union() {
     );
 
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
-    let mapping = ComponentMapping {
-        component_name: "DayPicker".into(),
-        props_type_name: "DayPickerProps".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "DayPicker".into(),
+        "DayPickerProps".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, _diagnostics) = resolve_component(&mapping, &ctx);
 
@@ -837,17 +823,14 @@ fn test_repeated_discriminant_values_decline_gracefully_but_still_merge_types() 
     );
 
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
-    let mapping = ComponentMapping {
-        component_name: "DayPicker".into(),
-        props_type_name: "DayPickerProps".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "DayPicker".into(),
+        "DayPickerProps".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, _diagnostics) = resolve_component(&mapping, &ctx);
 
@@ -892,17 +875,14 @@ fn test_extends_builtin_html_attrs_creates_inherited_layer() {
     );
 
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
-    let mapping = ComponentMapping {
-        component_name: "Button".into(),
-        props_type_name: "ButtonProps".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Button".into(),
+        "ButtonProps".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, _diagnostics) = resolve_component(&mapping, &ctx);
     assert!(
@@ -962,17 +942,14 @@ fn test_html_attribute_mode_curated_does_not_expand_real_button_attrs() {
     );
 
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
-    let mapping = ComponentMapping {
-        component_name: "Button".into(),
-        props_type_name: "ButtonProps".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Button".into(),
+        "ButtonProps".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, _diagnostics) = resolve_component(&mapping, &ctx);
     assert!(
@@ -1033,17 +1010,14 @@ fn test_html_attribute_mode_full_expands_real_button_attrs() {
 
     let options = PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Full, ..Default::default() };
     let ctx = ResolutionContext::new(Arc::new(global), &options);
-    let mapping = ComponentMapping {
-        component_name: "Button".into(),
-        props_type_name: "ButtonProps".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Button".into(),
+        "ButtonProps".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, _diagnostics) = resolve_component(&mapping, &ctx);
     assert!(
@@ -1080,17 +1054,14 @@ fn test_html_attribute_mode_none_suppresses_notable_inherited() {
 
     let options = PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::None, ..Default::default() };
     let ctx = ResolutionContext::new(Arc::new(global), &options);
-    let mapping = ComponentMapping {
-        component_name: "Button".into(),
-        props_type_name: "ButtonProps".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Button".into(),
+        "ButtonProps".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, _diagnostics) = resolve_component(&mapping, &ctx);
     assert!(
@@ -1148,17 +1119,14 @@ fn test_component_props_without_ref_in_intersection_alias() {
     );
 
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
-    let mapping = ComponentMapping {
-        component_name: "Button".into(),
-        props_type_name: "ButtonProps".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Button".into(),
+        "ButtonProps".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, diagnostics) = resolve_component(&mapping, &ctx);
 
@@ -1258,17 +1226,14 @@ fn test_two_distinct_partial_extends_targets_both_resolve() {
     );
 
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
-    let mapping = ComponentMapping {
-        component_name: "Table".into(),
-        props_type_name: "TableProps".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Table".into(),
+        "TableProps".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, _diagnostics) = resolve_component(&mapping, &ctx);
 
@@ -1382,17 +1347,14 @@ fn test_union_alias_members_resolve_relative_to_alias_own_file_not_caller() {
     );
 
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
-    let mapping = ComponentMapping {
-        component_name: "Widget".into(),
-        props_type_name: "WidgetProps".into(),
-        props_type_args: vec![],
-        file_path: consumer_file.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Widget".into(),
+        "WidgetProps".into(),
+        consumer_file.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, diagnostics) = resolve_component(&mapping, &ctx);
 
@@ -1461,17 +1423,14 @@ fn test_generic_interface_own_type_params_suppress_diagnostic() {
     global.interface_type_params.insert(format!("{}:WidgetProps", file_path), vec!["TData".into(), "TValue".into()]);
 
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
-    let mapping = ComponentMapping {
-        component_name: "Widget".into(),
-        props_type_name: "WidgetProps".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Widget".into(),
+        "WidgetProps".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, diagnostics) = resolve_component(&mapping, &ctx);
 
@@ -1596,17 +1555,15 @@ fn test_generic_type_alias_substitution() {
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
 
     // A component whose props type is `Assign<Base, Overrides>` directly.
-    let mapping = ComponentMapping {
-        component_name: "Widget".into(),
-        props_type_name: "Assign".into(),
-        props_type_args: vec!["Base".to_string(), "Overrides".to_string()],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Widget".into(),
+        "Assign".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    )
+    .with_props_type_args(vec!["Base".to_string(), "Overrides".to_string()]);
 
     let (entry, _diagnostics) = resolve_component(&mapping, &ctx);
 
@@ -1914,17 +1871,14 @@ fn test_unhandled_intersection_member_gets_diagnostic_not_silent_drop() {
     let ctx = empty_ctx();
     let mut state = ResolveState::default();
     let file_path = Utf8PathBuf::from("/test/foo.tsx");
-    let mapping = ComponentMapping {
-        component_name: "Foo".into(),
-        props_type_name: "FooProps".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Foo".into(),
+        "FooProps".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     // type FooProps = SomeGeneric["variant"] & { asChild?: boolean }
     let base = CollectedType::Intersection(vec![
@@ -1979,17 +1933,14 @@ fn test_known_opaque_result_emits_diagnostic_at_chain_level() {
     let ctx = empty_ctx();
     let mut state = ResolveState::default();
     let file_path = Utf8PathBuf::from("/test/box.tsx");
-    let mapping = ComponentMapping {
-        component_name: "Box".into(),
-        props_type_name: "ThemingProps".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Box".into(),
+        "ThemingProps".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let chain = super::chain::resolve_props_chain("ThemingProps", &[], &file_path, &mapping, &ctx, &mut state, 0);
 
@@ -2109,17 +2060,14 @@ fn test_self_referential_extends_emits_diagnostic_instead_of_silent_default() {
     );
 
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
-    let mapping = ComponentMapping {
-        component_name: "Loop".into(),
-        props_type_name: "LoopProps".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Loop".into(),
+        "LoopProps".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, diagnostics) = resolve_component(&mapping, &ctx);
 
@@ -2226,17 +2174,14 @@ fn diamond_inheritance_does_not_falsely_report_a_cycle() {
     );
 
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
-    let mapping = ComponentMapping {
-        component_name: "Diamond".into(),
-        props_type_name: "C".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Diamond".into(),
+        "C".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, diagnostics) = resolve_component(&mapping, &ctx);
 
@@ -2300,17 +2245,14 @@ fn self_referential_type_alias_used_directly_as_a_field_type_is_caught_immediate
     );
 
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
-    let mapping = ComponentMapping {
-        component_name: "Widget".into(),
-        props_type_name: "Props".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Widget".into(),
+        "Props".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, diagnostics) = resolve_component(&mapping, &ctx);
 
@@ -2397,17 +2339,14 @@ fn two_unrelated_fields_sharing_the_same_type_are_not_falsely_flagged_as_a_cycle
     );
 
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
-    let mapping = ComponentMapping {
-        component_name: "Widget".into(),
-        props_type_name: "Props".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Widget".into(),
+        "Props".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, diagnostics) = resolve_component(&mapping, &ctx);
 
@@ -2460,17 +2399,14 @@ fn test_non_cyclic_depth_exhaustion_emits_max_depth_diagnostic() {
     }
 
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
-    let mapping = ComponentMapping {
-        component_name: "Deep".into(),
-        props_type_name: "Level0".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Deep".into(),
+        "Level0".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (entry, diagnostics) = resolve_component(&mapping, &ctx);
 
@@ -2513,17 +2449,14 @@ fn test_literal_union_as_props_base_emits_diagnostic_instead_of_silent_default()
     );
 
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
-    let mapping = ComponentMapping {
-        component_name: "Widget".into(),
-        props_type_name: "Props".into(),
-        props_type_args: vec![],
-        file_path: file_path.clone(),
-        description: String::new(),
-        tags: BTreeMap::new(),
-        span_start: 0,
-        span_end: 0,
-        param_defaults: FxHashMap::default(),
-    };
+    let mapping = ComponentMapping::new(
+        "Widget".into(),
+        "Props".into(),
+        file_path.clone(),
+        0,
+        0,
+        crate::types::DetectionRule::FunctionDeclaration,
+    );
 
     let (_entry, diagnostics) = resolve_component(&mapping, &ctx);
 

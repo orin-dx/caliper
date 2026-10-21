@@ -5,8 +5,8 @@ use oxc_ast_visit::{walk, Visit};
 use oxc_syntax::scope::ScopeFlags;
 
 use crate::types::{
-    CollectedInterface, ComponentMapping, DiagnosticCode, EnumEntry, EnumValue, ExtendsRef, ImportBinding, LexedExport,
-    RawProp, TypeName,
+    CollectedInterface, ComponentMapping, DetectionRule, DiagnosticCode, EnumEntry, EnumValue, ExtendsRef,
+    ImportBinding, LexedExport, RawProp, TypeName,
 };
 
 use super::{declaration_name, is_pascal_case, SourceDataCollector};
@@ -300,6 +300,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                                         self.file_path.clone(),
                                         func.span.start,
                                         func.span.end,
+                                        DetectionRule::FunctionDeclaration,
                                     )
                                     .with_props_type_args(type_args)
                                     .with_doc(description, tags)
