@@ -215,7 +215,7 @@ pub(super) fn substitute_type(ct: &CollectedType, subst: &Substitution) -> Colle
 }
 
 /// Recursively replace parameter references inside a `CollectedTypeAlias` body.
-fn substitute_alias(alias: &CollectedTypeAlias, subst: &Substitution) -> CollectedTypeAlias {
+pub(super) fn substitute_alias(alias: &CollectedTypeAlias, subst: &Substitution) -> CollectedTypeAlias {
     match alias {
         CollectedTypeAlias::Omit { base, keys, file_path } => CollectedTypeAlias::Omit {
             base: substitute_type(base, subst),
