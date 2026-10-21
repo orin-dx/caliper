@@ -42,18 +42,8 @@ export declare function initializeSession(sessionId: number, options: JsExtractO
 export interface JsExtractOptions {
   srcDirs: Array<string>
   exclude?: Array<string>
-  reactVersion?: 'react18' | 'react19'
-  crossPackage?: boolean
-  pandacssOutdir?: string
-  variantFunctions?: Array<string>
   htmlAttributes?: 'curated' | 'full' | 'none'
   tsconfigPath?: string
   extraBuiltins?: Array<string>
-  vanillaExtract?: boolean
   cacheDir?: string
-  resolveComplexTypes?: boolean
-  /** JSON: Record<string, string[]> */
-  extraPathsJson?: string
-  /** JSON: Record<string, {kind: ...}> */
-  knownTypeOverridesJson?: string
 }

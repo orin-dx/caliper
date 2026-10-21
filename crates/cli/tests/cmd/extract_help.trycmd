@@ -22,12 +22,6 @@ Options:
           
           [default: canonical]
 
-      --no-cross-package
-          Disable cross-package type resolution
-
-      --react-version <REACT_VERSION>
-          React version override [default: auto-detect]
-
       --cache-dir <CACHE_DIR>
           Cache directory
 
@@ -45,13 +39,13 @@ Options:
           Extra type names to treat as recognized/builtin (no "unknown type"
           warning) — e.g. a library-specific type this tool doesn't already know
 
-  -v, --verbose...
-          Verbose output (repeat for more: -v, -vv)
-
   -j, --json
           Machine-readable JSON output: the canonical schema, compact, always to
           stdout, ignoring --out/--format (which govern the human/RDT/Storybook
           paths below), and suppresses the human-readable summary/diagnostics
+
+  -v, --verbose...
+          Verbose output (repeat for more: -v, -vv)
 
   -q, --quiet
           Suppress all non-error output

@@ -4,31 +4,23 @@ use serde::Deserialize;
 
 /// The JSON-facing shape of `docgen.config.ts`'s default export.
 ///
-/// A deliberate subset of `PipelineOptions` — everything except the fields that
-/// need complex map/object values (`extraPaths`, `knownTypeOverrides`), which
-/// aren't supported via config file yet. `deny_unknown_fields` means a config
-/// using one of those (or a typo'd key) gets a clear error naming the field, not
-/// a silently-ignored setting — same reasoning as this module's existing "found
-/// but unsupported" hard error above.
+/// `deny_unknown_fields` means a config naming an option this tool does not have (or a typo'd key) gets a clear error
+/// naming the field, not a silently-ignored setting — same reasoning as this module's existing "found but
+/// unsupported" hard error above.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DocgenConfigSchema {
     src_dirs: Option<Vec<String>>,
     exclude_patterns: Option<Vec<String>>,
     exclude_prefixes: Option<Vec<String>>,
-    react_version: Option<String>,
-    cross_package: Option<bool>,
-    pandacss_outdir: Option<String>,
-    variant_functions: Option<Vec<String>>,
     html_attributes: Option<String>,
     tsconfig_path: Option<String>,
-    vanilla_extract: Option<bool>,
     cache_dir: Option<String>,
     extra_builtins: Option<Vec<String>>,
 }
 
 impl DocgenConfigSchema {
-    /// `Err` names the bad `reactVersion` or `htmlAttributes` value — a typo must not silently fall back to a default
+    /// `Err` names the bad `htmlAttributes` value — a typo must not silently fall back to a default
     /// (non-negotiable #6: never fail silently).
     fn into_pipeline_options(self) -> Result<PipelineOptions, String> {
         let mut opts = PipelineOptions::default();
@@ -41,28 +33,12 @@ impl DocgenConfigSchema {
         if let Some(prefixes) = self.exclude_prefixes {
             opts.exclude_prefixes = prefixes;
         }
-        if let Some(v) = self.react_version.as_deref() {
-            opts.react_version = caliper_docgen_core::react_types::parse_react_version(v)
-                .map_err(|bad| format!("reactVersion is '{bad}', expected \"react18\" or \"react19\""))?;
-        }
-        if let Some(cross_package) = self.cross_package {
-            opts.cross_package = cross_package;
-        }
-        if let Some(dir) = self.pandacss_outdir {
-            opts.pandacss_outdir = Some(dir.into());
-        }
-        if let Some(fns) = self.variant_functions {
-            opts.variant_functions = fns;
-        }
         if let Some(mode) = self.html_attributes.as_deref() {
             opts.html_attributes = HtmlAttributeMode::parse(mode)
                 .map_err(|bad| format!("htmlAttributes is '{bad}', expected \"curated\", \"full\" or \"none\""))?;
         }
         if let Some(path) = self.tsconfig_path {
             opts.tsconfig_path = Some(path.into());
-        }
-        if let Some(vanilla_extract) = self.vanilla_extract {
-            opts.vanilla_extract = vanilla_extract;
         }
         if let Some(dir) = self.cache_dir {
             opts.cache_dir = Some(dir.into());
@@ -187,8 +163,6 @@ pub fn try_load_config(path: &std::path::Path) -> Result<Option<PipelineOptions>
 /// `too-many-arguments-threshold` of 6 (see `.clippy.toml`).
 pub struct BuildOptionsArgs<'a> {
     pub src: &'a [String],
-    pub no_cross_package: bool,
-    pub react_version: Option<&'a str>,
     pub cache_dir: Option<&'a str>,
     pub html_attributes: Option<&'a str>,
     pub config_path: Option<&'a str>,
@@ -206,18 +180,6 @@ pub fn build_options(args: BuildOptionsArgs) -> Result<PipelineOptions> {
 
     if !args.src.is_empty() {
         opts.src_dirs = args.src.iter().map(|s| s.into()).collect();
-    }
-    if args.no_cross_package {
-        opts.cross_package = false;
-    }
-    if let Some(v) = args.react_version {
-        opts.react_version = caliper_docgen_core::react_types::parse_react_version(v).map_err(|bad| {
-            miette::miette!(
-                help = "Expected \"react18\" or \"react19\".",
-                "--react-version is '{}', which isn't a recognized value",
-                bad
-            )
-        })?;
     }
     if let Some(dir) = args.cache_dir {
         opts.cache_dir = Some(dir.into());

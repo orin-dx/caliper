@@ -6,8 +6,6 @@ use crate::output::print_component;
 pub fn cmd_inspect(args: crate::InspectArgs, config_path: Option<&str>) -> Result<i32> {
     let options = build_options(BuildOptionsArgs {
         src: &args.src,
-        no_cross_package: false,
-        react_version: None,
         cache_dir: None,
         html_attributes: None,
         config_path,

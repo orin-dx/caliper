@@ -8,7 +8,6 @@ const RESOLVED_VIRTUAL_ID = `\0${VIRTUAL_ID}`
 export interface CaliperDocgenOptions {
   srcDirs: string[]
   exclude?: string[]
-  reactVersion?: 'react18' | 'react19'
   skipHtmlProps?: boolean
 }
 
@@ -51,7 +50,6 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
     return {
       srcDirs: resolvedSrcDirs,
       exclude: options.exclude,
-      reactVersion: options.reactVersion,
       htmlAttributes: options.skipHtmlProps ? ('none' as const) : undefined,
     }
   }

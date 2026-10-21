@@ -30,8 +30,6 @@ fn start_session(
 
     let options = build_options(BuildOptionsArgs {
         src: &args.src,
-        no_cross_package: false,
-        react_version: None,
         cache_dir: None,
         html_attributes: None,
         config_path,

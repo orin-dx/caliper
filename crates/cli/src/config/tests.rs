@@ -4,20 +4,14 @@ use super::*;
 fn config_schema_maps_recognized_fields_onto_pipeline_options() {
     let json = r#"{
         "srcDirs": ["app/components"],
-        "crossPackage": false,
         "htmlAttributes": "full",
-        "reactVersion": "react18",
         "extraBuiltins": ["MyCustomType", "AnotherType"]
     }"#;
     let schema: DocgenConfigSchema = serde_json::from_str(json).expect("valid config JSON");
-    let opts = schema.into_pipeline_options().expect("valid reactVersion");
+    let opts = schema.into_pipeline_options().expect("valid config");
 
     assert_eq!(opts.src_dirs, vec![camino::Utf8PathBuf::from("app/components")]);
-    assert!(!opts.cross_package);
     assert_eq!(opts.html_attributes, HtmlAttributeMode::Full);
-    // react18: children implicit, ref requires forwardRef.
-    assert!(opts.react_version.implicit_children);
-    assert!(!opts.react_version.ref_as_prop);
     let extra_builtins: std::collections::BTreeSet<String> =
         opts.extra_builtins.iter().map(|s| s.to_string()).collect();
     assert_eq!(extra_builtins, ["AnotherType", "MyCustomType"].into_iter().map(String::from).collect());
@@ -33,13 +27,15 @@ fn config_schema_rejects_unknown_fields() {
 }
 
 #[test]
-fn config_schema_rejects_a_typo_d_react_version_instead_of_defaulting() {
-    // Adversarial review finding: a typo'd reactVersion silently defaulted
-    // to react19 with no error at all.
-    let json = r#"{ "reactVersion": "react20" }"#;
-    let schema: DocgenConfigSchema = serde_json::from_str(json).expect("valid config JSON");
-    let err = schema.into_pipeline_options().expect_err("react20 is not a recognized reactVersion");
-    assert!(err.contains("react20"), "expected the bad value named in the error, got: {err}");
+fn config_schema_rejects_options_that_were_removed_for_doing_nothing() {
+    // These were accepted and ignored before; a config still naming one must now say so instead of looking honored.
+    for key in
+        ["reactVersion", "crossPackage", "pandacssOutdir", "variantFunctions", "vanillaExtract", "resolveComplexTypes"]
+    {
+        let json = format!(r#"{{ "{key}": null }}"#);
+        let err = serde_json::from_str::<DocgenConfigSchema>(&json).expect_err("a removed option must be rejected");
+        assert!(err.to_string().contains(key), "expected the error to name `{key}`, got: {err}");
+    }
 }
 
 #[test]
@@ -54,20 +50,15 @@ fn config_schema_rejects_a_typo_d_html_attributes_instead_of_defaulting() {
 #[test]
 fn config_schema_defaults_are_used_when_a_field_is_absent() {
     let schema: DocgenConfigSchema = serde_json::from_str("{}").expect("empty object is valid");
-    let opts = schema.into_pipeline_options().expect("no reactVersion means no validation to fail");
+    let opts = schema.into_pipeline_options().expect("an empty config has nothing to validate");
     let defaults = PipelineOptions::default();
 
     // Every field the schema maps, so one that starts defaulting differently is caught.
     assert_eq!(opts.src_dirs, defaults.src_dirs);
     assert_eq!(opts.exclude_patterns, defaults.exclude_patterns);
     assert_eq!(opts.exclude_prefixes, defaults.exclude_prefixes);
-    assert_eq!(opts.react_version, defaults.react_version);
-    assert_eq!(opts.cross_package, defaults.cross_package);
-    assert_eq!(opts.pandacss_outdir, defaults.pandacss_outdir);
-    assert_eq!(opts.variant_functions, defaults.variant_functions);
     assert_eq!(opts.html_attributes, defaults.html_attributes);
     assert_eq!(opts.tsconfig_path, defaults.tsconfig_path);
-    assert_eq!(opts.vanilla_extract, defaults.vanilla_extract);
     assert_eq!(opts.cache_dir, defaults.cache_dir);
     assert_eq!(opts.extra_builtins, defaults.extra_builtins);
 }
@@ -89,7 +80,6 @@ fn try_load_config_maps_a_real_docgen_config_ts_file() {
 export default {
   srcDirs: ["src/components"],
   htmlAttributes: "full",
-  crossPackage: false,
 };
 "#,
     )
@@ -100,7 +90,6 @@ export default {
 
     assert_eq!(opts.src_dirs, vec![camino::Utf8PathBuf::from("src/components")]);
     assert_eq!(opts.html_attributes, HtmlAttributeMode::Full);
-    assert!(!opts.cross_package);
 }
 
 #[test]
@@ -197,8 +186,6 @@ fn build_options_maps_extra_builtins_cli_flag() {
     let extra_builtins = vec!["Foo".to_string(), "Bar".to_string()];
     let opts = build_options(BuildOptionsArgs {
         src: &[],
-        no_cross_package: false,
-        react_version: None,
         cache_dir: None,
         html_attributes: None,
         config_path: None,
@@ -232,8 +219,6 @@ export default {
     let extra_builtins = vec!["FromCli".to_string()];
     let opts = build_options(BuildOptionsArgs {
         src: &[],
-        no_cross_package: false,
-        react_version: None,
         cache_dir: None,
         html_attributes: None,
         config_path: Some(config_path.to_str().unwrap()),
@@ -255,8 +240,6 @@ export default {
 fn build_options_propagates_a_config_load_failure_as_err() {
     let result = build_options(BuildOptionsArgs {
         src: &[],
-        no_cross_package: false,
-        react_version: None,
         cache_dir: None,
         html_attributes: None,
         config_path: Some("/nonexistent-parent-dir-xyz/docgen.config.ts"),
@@ -265,55 +248,25 @@ fn build_options_propagates_a_config_load_failure_as_err() {
     assert!(result.is_err(), "expected build_options to return Err for a failing --config path");
 }
 
-// ── SPEC-CLI-001a AC-021: --react-version accepted by clap (a plain
-// Option<String>, not a value_enum) but rejected by build_options because
-// it's neither "react18" nor "react19" — distinct from AC-020's clap-level
-// exit 2, this is build_options's own Err, exit 1.
-
-#[test]
-fn build_options_rejects_an_unrecognized_react_version_value() {
-    let err = build_options(BuildOptionsArgs {
-        src: &[],
-        no_cross_package: false,
-        react_version: Some("react17"),
-        cache_dir: None,
-        html_attributes: None,
-        config_path: None,
-        extra_builtins: &[],
-    })
-    .expect_err("expected an Err for an unrecognized --react-version value");
-    let message = format!("{err:?}");
-    assert!(message.contains("react17"), "expected the error to name the bad value, got {message}");
-}
-
 #[test]
 fn config_schema_maps_every_field_onto_pipeline_options() {
     let json = r#"{
         "srcDirs": ["a", "b"],
         "excludePatterns": ["**/*.stories.tsx"],
         "excludePrefixes": ["Internal"],
-        "reactVersion": "react19",
-        "crossPackage": false,
-        "pandacssOutdir": "styled-system",
-        "variantFunctions": ["cva", "tv"],
         "htmlAttributes": "none",
         "tsconfigPath": "tsconfig.app.json",
-        "vanillaExtract": true,
         "cacheDir": ".cache/docgen",
         "extraBuiltins": ["Custom"]
     }"#;
     let schema: DocgenConfigSchema = serde_json::from_str(json).expect("valid config JSON");
-    let opts = schema.into_pipeline_options().expect("valid reactVersion");
+    let opts = schema.into_pipeline_options().expect("valid config");
 
     assert_eq!(opts.src_dirs, vec![camino::Utf8PathBuf::from("a"), camino::Utf8PathBuf::from("b")]);
     assert_eq!(opts.exclude_patterns, vec!["**/*.stories.tsx".to_owned()]);
     assert_eq!(opts.exclude_prefixes, vec!["Internal".to_owned()]);
-    assert!(!opts.cross_package);
-    assert_eq!(opts.pandacss_outdir, Some(camino::Utf8PathBuf::from("styled-system")));
-    assert_eq!(opts.variant_functions, vec!["cva".to_owned(), "tv".to_owned()]);
     assert_eq!(opts.html_attributes, HtmlAttributeMode::None);
     assert_eq!(opts.tsconfig_path, Some(camino::Utf8PathBuf::from("tsconfig.app.json")));
-    assert!(opts.vanilla_extract);
     assert_eq!(opts.cache_dir, Some(camino::Utf8PathBuf::from(".cache/docgen")));
     assert_eq!(opts.extra_builtins.iter().map(|s| s.to_string()).collect::<Vec<_>>(), vec!["Custom".to_owned()]);
 }
@@ -330,15 +283,7 @@ fn html_attributes_mode_names_map_onto_pipeline_options() {
 }
 
 fn no_flags<'a>() -> BuildOptionsArgs<'a> {
-    BuildOptionsArgs {
-        src: &[],
-        no_cross_package: false,
-        react_version: None,
-        cache_dir: None,
-        html_attributes: None,
-        config_path: None,
-        extra_builtins: &[],
-    }
+    BuildOptionsArgs { src: &[], cache_dir: None, html_attributes: None, config_path: None, extra_builtins: &[] }
 }
 
 #[test]
@@ -347,8 +292,6 @@ fn build_options_applies_cli_flags_over_the_defaults() {
     let extra_builtins = ["Custom".to_owned()];
     let opts = build_options(BuildOptionsArgs {
         src: &src,
-        no_cross_package: true,
-        react_version: Some("react18"),
         cache_dir: Some("cache"),
         html_attributes: Some("full"),
         extra_builtins: &extra_builtins,
@@ -357,8 +300,6 @@ fn build_options_applies_cli_flags_over_the_defaults() {
     .unwrap();
 
     assert_eq!(opts.src_dirs, vec![camino::Utf8PathBuf::from("app"), camino::Utf8PathBuf::from("lib")]);
-    assert!(!opts.cross_package);
-    assert!(opts.react_version.implicit_children);
     assert_eq!(opts.cache_dir, Some(camino::Utf8PathBuf::from("cache")));
     assert_eq!(opts.html_attributes, HtmlAttributeMode::Full);
     assert_eq!(opts.extra_builtins.iter().map(|s| s.to_string()).collect::<Vec<_>>(), vec!["Custom".to_owned()]);
@@ -370,13 +311,6 @@ fn build_options_maps_the_remaining_html_attribute_flag_values() {
         let opts = build_options(BuildOptionsArgs { html_attributes: Some(flag), ..no_flags() }).unwrap();
         assert_eq!(opts.html_attributes, expected, "--html-attributes {flag}");
     }
-}
-
-#[test]
-fn build_options_rejects_an_unrecognized_react_version_naming_the_value() {
-    let err = build_options(BuildOptionsArgs { react_version: Some("react17"), ..no_flags() })
-        .expect_err("react17 is not a supported --react-version");
-    assert_eq!(err.to_string(), "--react-version is 'react17', which isn't a recognized value");
 }
 
 #[test]
@@ -420,21 +354,6 @@ fn a_config_of_the_wrong_shape_is_an_error_naming_the_file() {
         err.to_string()
             .starts_with(&format!("docgen.config.ts at {} doesn't match the expected shape: ", path.display())),
         "{err}"
-    );
-}
-
-#[test]
-fn a_config_with_an_unrecognized_react_version_is_an_error_naming_the_file_and_value() {
-    let (_tmp, path) = write_config("export default { reactVersion: 'react20' };\n");
-
-    let err = try_load_config(&path).expect_err("react20 is not a supported reactVersion");
-
-    assert_eq!(
-        err.to_string(),
-        format!(
-            "docgen.config.ts at {}: reactVersion is 'react20', expected \"react18\" or \"react19\"",
-            path.display()
-        )
     );
 }
 
