@@ -320,7 +320,7 @@ impl<'src> SourceDataCollector<'src> {
 
     // ─── ExtendsRef classification ────────────────────────────────────────────
 
-    pub(super) fn classify_extends(&self, name: &str, type_args: Vec<String>) -> ExtendsRef {
+    pub(super) fn classify_extends(&self, name: &str, type_args: Vec<CollectedType>) -> ExtendsRef {
         // Strip "React." prefix for lookup in builtin tables
         let lookup_name = name.strip_prefix("React.").unwrap_or(name);
 
@@ -333,8 +333,7 @@ impl<'src> SourceDataCollector<'src> {
         // static result (None for SVGAttributes/SVGProps, a generic "div"
         // fallback for HTMLProps) whenever it's one this crate recognizes.
         if matches!(lookup_name, "SVGAttributes" | "SVGProps" | "HTMLProps") {
-            if let Some(element) = type_args.first().and_then(|arg| crate::react_types::html_element_from_type_arg(arg))
-            {
+            if let Some(element) = type_args.first().and_then(crate::react_types::html_element_from_collected) {
                 return ExtendsRef::Builtin { name: name.into(), element: Some(element.to_owned()), type_args };
             }
         }
@@ -368,14 +367,14 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
-    // ─── TSTypeParameterInstantiation → Vec<String> ──────────────────────────
+    // ─── TSTypeParameterInstantiation → Vec<CollectedType> ───────────────────
 
     pub(super) fn extract_type_args<'a>(
         &mut self,
         type_params: &Option<OxcBox<'a, TSTypeParameterInstantiation<'a>>>,
-    ) -> Vec<String> {
+    ) -> Vec<CollectedType> {
         match type_params {
-            Some(tp) => tp.params.iter().map(|p| self.ts_type_to_collected_at_depth(p, 0).to_raw_string()).collect(),
+            Some(tp) => tp.params.iter().map(|p| self.ts_type_to_collected_at_depth(p, 0)).collect(),
             None => vec![],
         }
     }
@@ -685,7 +684,7 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn extract_props_arg<'a>(
         &mut self,
         type_params: &Option<OxcBox<'a, TSTypeParameterInstantiation<'a>>>,
-    ) -> Option<(CompactString, Vec<String>)> {
+    ) -> Option<(CompactString, Vec<CollectedType>)> {
         let tp = type_params.as_ref()?;
         let first = tp.params.first()?;
         self.extract_type_name_from_type(first)
@@ -694,7 +693,10 @@ impl<'src> SourceDataCollector<'src> {
     /// Get the (name, type_args) of a TSType if it's a simple named reference.
     ///
     /// Unwraps single-layer wrappers like `PropsWithChildren<P>` and `Readonly<P>`.
-    pub(super) fn extract_type_name_from_type<'a>(&mut self, ty: &TSType<'a>) -> Option<(CompactString, Vec<String>)> {
+    pub(super) fn extract_type_name_from_type<'a>(
+        &mut self,
+        ty: &TSType<'a>,
+    ) -> Option<(CompactString, Vec<CollectedType>)> {
         match ty {
             TSType::TSTypeReference(tr) => {
                 let name = self.extract_type_ref_name(tr);

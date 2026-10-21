@@ -41,10 +41,7 @@ impl<'src> SourceDataCollector<'src> {
                             );
                             return None;
                         };
-                        let base = CollectedType::Named {
-                            name: base_name,
-                            args: base_args.into_iter().map(CollectedType::Raw).collect(),
-                        };
+                        let base = CollectedType::Named { name: base_name, args: base_args };
                         let (omitted_keys, omitted_keys_of) = self.collect_omit_keys(&tp.params[1]);
                         Some(CollectedTypeAlias::Omit { base, omitted_keys, omitted_keys_of, file_path: fp })
                     }
@@ -73,10 +70,7 @@ impl<'src> SourceDataCollector<'src> {
                             );
                             return None;
                         };
-                        let base = CollectedType::Named {
-                            name: base_name,
-                            args: base_args.into_iter().map(CollectedType::Raw).collect(),
-                        };
+                        let base = CollectedType::Named { name: base_name, args: base_args };
                         let picked_keys = self.collect_string_union_keys(&tp.params[1]);
                         Some(CollectedTypeAlias::Pick { base, picked_keys, file_path: fp })
                     }
@@ -105,10 +99,7 @@ impl<'src> SourceDataCollector<'src> {
                             );
                             return None;
                         };
-                        let base = CollectedType::Named {
-                            name: base_name,
-                            args: base_args.into_iter().map(CollectedType::Raw).collect(),
-                        };
+                        let base = CollectedType::Named { name: base_name, args: base_args };
                         Some(CollectedTypeAlias::Partial { base, file_path: fp })
                     }
                     "Required" => {
@@ -136,10 +127,7 @@ impl<'src> SourceDataCollector<'src> {
                             );
                             return None;
                         };
-                        let base = CollectedType::Named {
-                            name: base_name,
-                            args: base_args.into_iter().map(CollectedType::Raw).collect(),
-                        };
+                        let base = CollectedType::Named { name: base_name, args: base_args };
                         Some(CollectedTypeAlias::Required { base, file_path: fp })
                     }
                     "Readonly" => {
@@ -167,10 +155,7 @@ impl<'src> SourceDataCollector<'src> {
                             );
                             return None;
                         };
-                        let target = CollectedType::Named {
-                            name: base_name,
-                            args: base_args.into_iter().map(CollectedType::Raw).collect(),
-                        };
+                        let target = CollectedType::Named { name: base_name, args: base_args };
                         Some(CollectedTypeAlias::Passthrough { target, file_path: fp })
                     }
                     _ => {

@@ -83,7 +83,7 @@ pub(super) fn build_substitution<'a>(
 pub(super) fn apply_generic_args(
     alias: CollectedTypeAlias,
     declared_at: (&Utf8Path, &str),
-    type_args: &[String],
+    type_args: &[CollectedType],
     consuming_file: &Utf8Path,
     ctx: &ResolutionContext,
     diagnostics: &mut Vec<Diagnostic>,
@@ -95,8 +95,7 @@ pub(super) fn apply_generic_args(
     if params.is_empty() || type_args.is_empty() {
         return alias;
     }
-    let args: Vec<CollectedType> = type_args.iter().map(|a| raw_arg_to_collected_type(a)).collect();
-    let subst = build_substitution(params, &args, consuming_file, diagnostics);
+    let subst = build_substitution(params, type_args, consuming_file, diagnostics);
     substitute_alias(&alias, &subst)
 }
 
@@ -131,18 +130,6 @@ pub(super) fn generic_alias_with_structured_args(
     // is declared).
     let subst = build_substitution(params, args, consuming_file, diagnostics);
     Some(substitute_alias(alias, &subst))
-}
-
-/// Turn a raw (already-stringified) call-site type argument into a `CollectedType`
-/// suitable for structural substitution. Call-site type args currently arrive as
-/// display strings (`ComponentMapping`/`ExtendsRef` — see the `type_args: &[String]`
-/// parameter on `resolve_props_chain`), so this recognizes the same simple shapes
-/// `resolve_collected_type`'s `Raw` fallback already does (plain identifiers, quoted
-/// string literals) rather than re-parsing arbitrary TypeScript syntax. Anything more
-/// complex is preserved as `Raw` — a pre-existing, documented limitation (see
-/// chain.rs's step-0.5 comment), not a regression introduced here.
-fn raw_arg_to_collected_type(s: &str) -> CollectedType {
-    super::collected::parse_type_text(s)
 }
 
 /// Recursively replace parameter references inside a `CollectedType`.
@@ -296,7 +283,10 @@ pub(super) fn synthesize_utility_alias(
         "Partial" if !args.is_empty() => {
             Some(CollectedTypeAlias::Partial { base: args[0].clone(), file_path: file_path.to_owned() })
         }
-        "Readonly" if !args.is_empty() => {
+        "Required" if !args.is_empty() => {
+            Some(CollectedTypeAlias::Required { base: args[0].clone(), file_path: file_path.to_owned() })
+        }
+        "Readonly" | "PropsWithChildren" | "PropsWithRef" if !args.is_empty() => {
             Some(CollectedTypeAlias::Passthrough { target: args[0].clone(), file_path: file_path.to_owned() })
         }
         _ => None,

@@ -20,7 +20,7 @@ use super::SourceDataCollector;
 /// One type argument of a candidate wrapper call.
 pub(crate) struct WrapperTypeArg {
     /// The reference name and its stringified type arguments, when the argument is a plain type reference.
-    reference: Option<(TypeName, Vec<String>)>,
+    reference: Option<(TypeName, Vec<CollectedType>)>,
 }
 
 /// A wrapper call waiting for the rest of the file to be seen.
@@ -175,7 +175,7 @@ impl<'src> SourceDataCollector<'src> {
 
     /// Pick the props type from a wrapper call's type arguments, last first (the props usually follow the element).
     /// The third field says whether the props came from a factory payload.
-    fn select_wrapper_props(&self, type_args: &[WrapperTypeArg]) -> Option<(TypeName, Vec<String>, bool)> {
+    fn select_wrapper_props(&self, type_args: &[WrapperTypeArg]) -> Option<(TypeName, Vec<CollectedType>, bool)> {
         for arg in type_args.iter().rev() {
             let Some((name, args)) = &arg.reference else { continue };
             if is_element_type(name) {

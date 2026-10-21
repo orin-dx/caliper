@@ -19,7 +19,7 @@ use super::{ResolutionContext, ResolvedChain, MAX_DEPTH};
 #[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_props_chain(
     type_name: &str,
-    type_args: &[String],
+    type_args: &[CollectedType],
     consuming_file: &Utf8Path,
     mapping: &ComponentMapping,
     ctx: &ResolutionContext,
@@ -34,8 +34,9 @@ pub(super) fn resolve_props_chain(
     // Cycle detection — scoped by file so same type name in different files is OK.
     // Must include type_args: distinct instantiations of the same generic alias
     // (e.g. `Partial<RowHeights>` vs `Partial<ColumnWidths>` in the same interface's
-    // extends list) are not the same visit and must not collide on the bare name alone.
-    let visit_key: CompactString = format!("{}:{}<{}>", consuming_file, type_name, type_args.join(",")).into();
+    // extends list) are not the same visit and must not collide on the bare name alone. The arguments are keyed by
+    // structure: their display form abbreviates object types to `{ ... }`, so distinct instantiations collided.
+    let visit_key: CompactString = format!("{}:{}<{:?}>", consuming_file, type_name, type_args).into();
     if !state.visited.insert(visit_key) {
         return ResolvedChain::give_up(
             type_name.to_owned(),
@@ -59,46 +60,10 @@ pub(super) fn resolve_props_chain(
     let type_name_bare = type_name.strip_prefix("React.").unwrap_or(type_name);
 
     // ── Step 0.5: Inline utility type in extends position ─────────────────────
-    // Pick/Omit/Partial/Readonly appearing directly in `extends Pick<T,K>`
-    // have non-empty type_args. Route through alias resolver (same logic as
-    // `type X = Pick<T,K>`) instead of the step-1 silent no-op.
-    if !type_args.is_empty() {
-        let base_of = |raw: &str| {
-            super::collected::parse_generic_reference(raw)
-                .unwrap_or_else(|| CollectedType::Named { name: raw.into(), args: vec![] })
-        };
-        let synthetic = match type_name_bare {
-            "Pick" if type_args.len() >= 2 => Some(CollectedTypeAlias::Pick {
-                base: base_of(&type_args[0]),
-                picked_keys: parse_string_union_keys(&type_args[1]),
-                file_path: consuming_file.to_owned(),
-            }),
-            "Omit" if type_args.len() >= 2 => {
-                // `Omit<Base, keyof Other>`: the omitted keys are Other's own field names, known only to the resolver.
-                let keyof_operand = type_args[1].trim().strip_prefix("keyof ").map(|operand| base_of(operand.trim()));
-                Some(CollectedTypeAlias::Omit {
-                    base: base_of(&type_args[0]),
-                    omitted_keys: if keyof_operand.is_some() {
-                        Vec::new()
-                    } else {
-                        parse_string_union_keys(&type_args[1])
-                    },
-                    omitted_keys_of: keyof_operand.map(Box::new),
-                    file_path: consuming_file.to_owned(),
-                })
-            }
-            "Partial" => {
-                Some(CollectedTypeAlias::Partial { base: base_of(&type_args[0]), file_path: consuming_file.to_owned() })
-            }
-            "Readonly" => Some(CollectedTypeAlias::Passthrough {
-                target: base_of(&type_args[0]),
-                file_path: consuming_file.to_owned(),
-            }),
-            _ => None,
-        };
-        if let Some(alias) = synthetic {
-            return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
-        }
+    // `extends Pick<T, K>` (and Omit, Partial, Required, Readonly) resolves through the same alias logic as
+    // `type X = Pick<T, K>`, on the structured arguments, instead of the step-1 silent no-op.
+    if let Some(alias) = super::substitute::synthesize_utility_alias(type_name_bare, type_args, consuming_file) {
+        return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
     }
 
     // ── Step 1: TypeScript built-in utility types — silent no-op ─────────────
@@ -113,13 +78,8 @@ pub(super) fn resolve_props_chain(
     // sequence independently and check known patterns first, silently
     // replacing project-defined types (e.g. a project's own `interface
     // SxProps`) with the hardcoded library shortcut. Fixed: P0-1.
-    let resolved_args: Vec<PropType> = type_args
-        .iter()
-        .map(|a| {
-            let ct = CollectedType::Raw(a.clone());
-            resolve_collected_type(&ct, consuming_file, ctx, state, depth + 1)
-        })
-        .collect();
+    let resolved_args: Vec<PropType> =
+        type_args.iter().map(|a| resolve_collected_type(a, consuming_file, ctx, state, depth + 1)).collect();
 
     let (canonical_file, canonical_name, matched) =
         super::precedence::resolve_source_defined_or_known(type_name_bare, &resolved_args, consuming_file, ctx, state);
@@ -203,40 +163,13 @@ pub(super) fn resolve_props_chain(
     ResolvedChain::empty_with_compose(type_name.to_owned())
 }
 
-/// Replace every identifier token in `text` that names a declared type parameter with the matching argument text.
-fn substitute_identifiers(text: &str, params: &[TypeName], args: &[String]) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.char_indices().peekable();
-    while let Some((start, c)) = chars.next() {
-        if c.is_alphabetic() || c == '_' || c == '$' {
-            let mut end = start + c.len_utf8();
-            while let Some(&(i, next)) = chars.peek() {
-                if next.is_alphanumeric() || next == '_' || next == '$' {
-                    end = i + next.len_utf8();
-                    chars.next();
-                } else {
-                    break;
-                }
-            }
-            let word = &text[start..end];
-            match params.iter().position(|p| p.as_str() == word).and_then(|i| args.get(i)) {
-                Some(arg) => out.push_str(arg),
-                None => out.push_str(word),
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
 /// Resolve an interface to a chain of props. `type_args` are the call site's arguments for the interface's declared type
 /// parameters (`Box<string>` for `interface Box<T>`); they replace the parameters in its members and in its own extends
 /// clause.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_interface_chain(
     iface: &CollectedInterface,
-    type_args: &[String],
+    type_args: &[CollectedType],
     consuming_file: &Utf8Path,
     mapping: &ComponentMapping,
     ctx: &ResolutionContext,
@@ -255,8 +188,7 @@ pub(super) fn resolve_interface_chain(
     // Supplied arguments replace the parameters; with none supplied the parameters stay placeholders.
     let substitution = match declared_params {
         Some(params) if !params.is_empty() && !type_args.is_empty() => {
-            let args: Vec<CollectedType> = type_args.iter().map(|a| super::collected::parse_type_text(a)).collect();
-            Some((params, super::substitute::build_substitution(params, &args, consuming_file, &mut state.diagnostics)))
+            Some(super::substitute::build_substitution(params, type_args, consuming_file, &mut state.diagnostics))
         }
         _ => None,
     };
@@ -276,8 +208,8 @@ pub(super) fn resolve_interface_chain(
     for extends_ref in &iface.extends {
         let substituted;
         let extends_ref = match &substitution {
-            Some((params, _)) => {
-                substituted = extends_ref.map_type_args(|arg| substitute_identifiers(arg, params, type_args));
+            Some(subst) => {
+                substituted = extends_ref.map_type_args(|arg| super::substitute::substitute_type(arg, subst));
                 &substituted
             }
             None => extends_ref,
@@ -311,7 +243,7 @@ pub(super) fn resolve_interface_chain(
 
     for raw_prop in &iface.props {
         let prop_type = match &substitution {
-            Some((_, subst)) => {
+            Some(subst) => {
                 let collected = super::substitute::substitute_type(&raw_prop.collected_type, subst);
                 resolve_collected_type(&collected, &iface.file_path, ctx, state, depth)
             }
@@ -418,9 +350,4 @@ pub(super) fn find_discriminant_prop(members: &[(&str, Vec<ParsedProp>)]) -> Opt
     }
 
     None
-}
-
-/// Parse a TypeScript string union like `'disabled' | 'type' | 'form'` into individual key strings.
-fn parse_string_union_keys(raw: &str) -> Vec<String> {
-    raw.split('|').map(|s| s.trim().trim_matches('\'').trim_matches('"').to_owned()).filter(|s| !s.is_empty()).collect()
 }

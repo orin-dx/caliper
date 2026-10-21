@@ -138,20 +138,12 @@ pub fn resolve_collected_type(
                 "unknown" => return PropType::Unknown,
                 _ => {}
             }
-            // Simple identifier → Named type reference.
-            if !trimmed.is_empty()
-                && !trimmed.contains(' ')
-                && !trimmed.contains('|')
-                && !trimmed.contains('&')
-                && !trimmed.contains('<')
-            {
+            // A plain identifier (possibly qualified) names a type; any other text is syntax the extractor did not
+            // structure, so it degrades with a diagnostic instead of becoming a `Named` type called `[string]`.
+            let is_identifier = trimmed.starts_with(|c: char| c.is_alphabetic() || c == '_' || c == '$')
+                && trimmed.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '$' | '.'));
+            if is_identifier {
                 PropType::Named { name: trimmed.into(), args: vec![] }
-            } else if let parsed @ (CollectedType::Named { .. }
-            | CollectedType::Union(_)
-            | CollectedType::Intersection(_)
-            | CollectedType::Array(_)) = parse_type_text(trimmed)
-            {
-                resolve_collected_type(&parsed, consuming_file, ctx, state, depth + 1)
             } else {
                 let diag = opaque_diagnostic("an unparsable raw type expression", ct, consuming_file);
                 OpaqueDetail::give_up(state, s.clone(), OpaqueReason::UnsupportedExpression, diag)
@@ -179,115 +171,4 @@ fn opaque_diagnostic(what: &str, ct: &CollectedType, file: &Utf8Path) -> Diagnos
         help: None,
         code: DiagnosticCode::OpaqueType,
     }
-}
-
-/// Split `Name<A, B<C>>` into a `Named` reference with `Raw` arguments, or `None` when `text` is not exactly one
-/// generic reference. Type arguments reach the resolver as display strings (roadmap item 2.1 replaces that); this keeps
-/// a nested generic from degrading to an opaque type in the meantime.
-pub(super) fn parse_generic_reference(text: &str) -> Option<CollectedType> {
-    let text = text.trim();
-    let open = text.find('<')?;
-    let name = text[..open].trim();
-    let inner = text[open + 1..].strip_suffix('>')?;
-    if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '$' | '.')) {
-        return None;
-    }
-    let mut args = Vec::new();
-    let (mut depth, mut quote, mut start) = (0i32, None, 0usize);
-    for (i, c) in inner.char_indices() {
-        match (quote, c) {
-            (Some(q), c) if c == q => quote = None,
-            (Some(_), _) => {}
-            (None, '"' | '\'') => quote = Some(c),
-            (None, '<' | '(' | '[' | '{') => depth += 1,
-            (None, '>' | ')' | ']' | '}') => depth -= 1,
-            (None, ',') if depth == 0 => {
-                args.push(inner[start..i].trim());
-                start = i + 1;
-            }
-            _ => {}
-        }
-        if depth < 0 {
-            return None;
-        }
-    }
-    if depth != 0 || quote.is_some() {
-        return None;
-    }
-    args.push(inner[start..].trim());
-    if args.iter().any(|a| a.is_empty()) {
-        return None;
-    }
-    Some(CollectedType::Named {
-        name: name.into(),
-        args: args.into_iter().map(|a| CollectedType::Raw(a.to_owned())).collect(),
-    })
-}
-
-/// Split `text` on `separator` at bracket depth zero, outside quotes.
-fn split_top_level(text: &str, separator: char) -> Vec<&str> {
-    let (mut parts, mut depth, mut quote, mut start) = (Vec::new(), 0i32, None, 0usize);
-    for (i, c) in text.char_indices() {
-        match (quote, c) {
-            (Some(q), c) if c == q => quote = None,
-            (Some(_), _) => {}
-            (None, '"' | '\'') => quote = Some(c),
-            (None, '<' | '(' | '[' | '{') => depth += 1,
-            (None, '>' | ')' | ']' | '}') => depth -= 1,
-            (None, c) if c == separator && depth == 0 => {
-                parts.push(&text[start..i]);
-                start = i + c.len_utf8();
-            }
-            _ => {}
-        }
-    }
-    parts.push(&text[start..]);
-    parts
-}
-
-/// Rebuild a `CollectedType` from the display text a call-site type argument arrives as: unions, intersections,
-/// arrays, literals, primitives and generic references. Anything else stays `Raw`. A stopgap for the stringified
-/// type arguments (roadmap item 2.1 replaces them with structured ones).
-pub(super) fn parse_type_text(text: &str) -> CollectedType {
-    let text = text.trim();
-    if text.is_empty() {
-        return CollectedType::Raw(String::new());
-    }
-    let members = split_top_level(text, '|');
-    if members.len() > 1 {
-        return CollectedType::Union(members.into_iter().map(parse_type_text).collect());
-    }
-    let members = split_top_level(text, '&');
-    if members.len() > 1 {
-        return CollectedType::Intersection(members.into_iter().map(parse_type_text).collect());
-    }
-    if let Some(inner) = text.strip_suffix("[]") {
-        return CollectedType::Array(Box::new(parse_type_text(inner)));
-    }
-    let quoted = |q: char| text.len() >= 2 && text.starts_with(q) && text.ends_with(q);
-    if quoted('"') || quoted('\'') {
-        return CollectedType::StringLiteral(text[1..text.len() - 1].into());
-    }
-    match text {
-        "string" => return CollectedType::String,
-        "number" => return CollectedType::Number,
-        "boolean" => return CollectedType::Boolean,
-        "null" => return CollectedType::Null,
-        "undefined" => return CollectedType::Undefined,
-        "never" => return CollectedType::Never,
-        "void" => return CollectedType::Void,
-        "any" => return CollectedType::Any,
-        "unknown" => return CollectedType::Unknown,
-        _ => {}
-    }
-    if let Ok(number) = text.parse::<f64>() {
-        return CollectedType::NumberLiteral(number);
-    }
-    if let Some(reference) = parse_generic_reference(text) {
-        return reference;
-    }
-    if text.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '$' | '.')) {
-        return CollectedType::Named { name: text.into(), args: Vec::new() };
-    }
-    CollectedType::Raw(text.to_owned())
 }

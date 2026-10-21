@@ -613,11 +613,11 @@ pub struct RawProp {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ExtendsRef {
     /// interface Foo extends Bar — Bar defined in SAME file
-    SameFile { name: TypeName, type_args: Vec<std::string::String> },
+    SameFile { name: TypeName, type_args: Vec<CollectedType> },
     /// interface Foo extends Bar — Bar came from an import
     Imported {
         local_name: TypeName,
-        type_args: Vec<std::string::String>,
+        type_args: Vec<CollectedType>,
         /// The import specifier this name came from, if determinable
         source_specifier: Option<std::string::String>,
     },
@@ -627,15 +627,15 @@ pub enum ExtendsRef {
         name: TypeName,
         /// Resolved HTML element: "button", "input", etc.
         element: Option<std::string::String>,
-        type_args: Vec<std::string::String>,
+        type_args: Vec<CollectedType>,
     },
 }
 
 impl ExtendsRef {
     /// This reference with each type argument rewritten by `f`.
     #[must_use]
-    pub fn map_type_args(&self, f: impl Fn(&str) -> std::string::String) -> ExtendsRef {
-        let map = |args: &[std::string::String]| args.iter().map(|a| f(a)).collect();
+    pub fn map_type_args(&self, f: impl Fn(&CollectedType) -> CollectedType) -> ExtendsRef {
+        let map = |args: &[CollectedType]| args.iter().map(&f).collect();
         match self {
             ExtendsRef::SameFile { name, type_args } => {
                 ExtendsRef::SameFile { name: name.clone(), type_args: map(type_args) }
@@ -772,7 +772,7 @@ pub enum DetectionRule {
 pub struct ComponentMapping {
     pub component_name: std::string::String,
     pub props_type_name: TypeName,
-    pub props_type_args: Vec<std::string::String>,
+    pub props_type_args: Vec<CollectedType>,
     pub file_path: Utf8PathBuf,
     pub description: std::string::String,
     pub tags: BTreeMap<std::string::String, std::string::String>,
@@ -811,7 +811,7 @@ impl ComponentMapping {
     }
 
     #[must_use]
-    pub fn with_props_type_args(mut self, props_type_args: Vec<std::string::String>) -> Self {
+    pub fn with_props_type_args(mut self, props_type_args: Vec<CollectedType>) -> Self {
         self.props_type_args = props_type_args;
         self
     }

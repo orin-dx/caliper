@@ -38,6 +38,16 @@ pub fn html_element_for(type_name: &str) -> Option<&'static str> {
 /// anything not in this list rather than guessing at a tag name that's wrong
 /// (e.g. `HTMLAnchorElement`'s real tag is `a`, not a naive strip-and-lowercase
 /// of the interface name).
+/// The element named by a structured type argument such as `HTMLDivElement` or `globalThis.HTMLAnchorElement`.
+pub fn html_element_from_collected(type_arg: &crate::types::CollectedType) -> Option<&'static str> {
+    match type_arg {
+        crate::types::CollectedType::Named { name, .. } => {
+            html_element_from_type_arg(name.rsplit('.').next().unwrap_or(name.as_str()))
+        }
+        _ => None,
+    }
+}
+
 pub fn html_element_from_type_arg(type_arg: &str) -> Option<&'static str> {
     match type_arg {
         "HTMLAnchorElement" => Some("a"),

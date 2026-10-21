@@ -172,8 +172,7 @@ pub(super) fn resolve_base_as_chain(
                 return resolve_type_alias_chain(&alias, file_path, mapping, ctx, state, depth + 1);
             }
 
-            let raw_args: Vec<String> = args.iter().map(|a| a.to_raw_string()).collect();
-            resolve_props_chain(name.as_str(), &raw_args, file_path, mapping, ctx, state, depth + 1)
+            resolve_props_chain(name.as_str(), args, file_path, mapping, ctx, state, depth + 1)
         }
         // Generic-alias substitution marker (see resolver/substitute.rs and the
         // `CollectedType::AtFile` doc comment): `inner` was written in `file`, not
