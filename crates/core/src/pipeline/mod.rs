@@ -542,7 +542,14 @@ fn merge_cached_dts_file(
     global: &mut GlobalSourceData,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let source = std::fs::read_to_string(path).unwrap_or_default();
+    // An unreadable file is reported and skipped; parsing "" instead would cache an empty result under this path.
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => {
+            diagnostics.push(Diagnostic::io_read_error(path, &error));
+            return;
+        }
+    };
     let mut data = match cache.get(path, &source) {
         Some(cached) => cached,
         None => {
