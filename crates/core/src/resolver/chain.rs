@@ -63,13 +63,18 @@ pub(super) fn resolve_props_chain(
     // ── Step 0.5: Inline utility type in extends position ─────────────────────
     // `extends Pick<T, K>` (and Omit, Partial, Required, Readonly) resolves through the same alias logic as
     // `type X = Pick<T, K>`, on the structured arguments, instead of the step-1 silent no-op.
-    if let Some(alias) = super::substitute::synthesize_utility_alias(type_name_bare, type_args, consuming_file) {
-        return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
+    // A project's own `Partial` or `Required`, or one imported from a package, is that declaration (step 2), not
+    // TypeScript's global.
+    let ts_lib = super::may_be_ts_lib_type(type_name, consuming_file, ctx);
+    if super::may_be_utility(type_name, consuming_file, ctx) {
+        if let Some(alias) = super::substitute::synthesize_utility_alias(type_name_bare, type_args, consuming_file) {
+            return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
+        }
     }
 
     // ── Step 1: TypeScript built-in utility types — silent no-op ─────────────
     // Not prop providers; suppress false "unresolvable" warnings.
-    if super::is_ts_utility_type(type_name_bare) {
+    if ts_lib && super::is_ts_utility_type(type_name_bare) {
         return ResolvedChain::empty();
     }
 
@@ -140,7 +145,13 @@ pub(super) fn resolve_props_chain(
     // ── Step 2.5: React builtin check (after source and known patterns) ──────
     // Terminal React types (ReactNode, Ref, FC, etc.) that survived both are not
     // prop providers — add to composes and stop.
+    // A builtin name bound elsewhere reaches here only when that binding didn't resolve (a re-export of React's type, a
+    // package not installed); React's meaning is then a reported guess.
     if react_types::is_react_builtin(type_name_bare, &ctx.extra_builtins) {
+        if !ctx.extra_builtins.contains(type_name_bare) && !super::may_be_react_builtin(type_name, consuming_file, ctx)
+        {
+            state.diagnostics.push(super::builtin_fallback_diagnostic(type_name, consuming_file, ctx));
+        }
         return ResolvedChain::empty_with_compose(type_name.to_owned());
     }
 

@@ -69,7 +69,10 @@ fn resolve_named_uncycled(
 
     // ── 1. React builtin check ────────────────────────────────────────────────
     let lookup_name = name.strip_prefix("React.").unwrap_or(name.as_str());
-    if react_types::is_react_builtin(lookup_name, &ctx.extra_builtins) {
+    // React's meaning only for React's binding: a project's own `ReactNode` or `Ref` resolves as declared below.
+    if react_types::is_react_builtin(lookup_name, &ctx.extra_builtins)
+        && (ctx.extra_builtins.contains(lookup_name) || super::may_be_react_builtin(name, consuming_file, ctx))
+    {
         return react_type_to_prop_type(name.as_str(), args, consuming_file, ctx, state, depth);
     }
 
@@ -127,6 +130,13 @@ fn resolve_named_uncycled(
             };
         }
         None => {}
+    }
+
+    // A builtin name bound elsewhere whose binding didn't resolve (a re-export of React's type, a package not
+    // installed): React's meaning is then a reported guess.
+    if react_types::is_react_builtin(lookup_name, &ctx.extra_builtins) {
+        state.diagnostics.push(super::builtin_fallback_diagnostic(name, consuming_file, ctx));
+        return react_type_to_prop_type(name.as_str(), args, consuming_file, ctx, state, depth);
     }
 
     // ── 6. Silent no-op for well-known unresolvable types ────────────────────

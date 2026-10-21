@@ -2172,3 +2172,67 @@ fn a_generic_alias_in_prop_position_takes_the_call_sites_arguments() {
     assert_eq!(props["size"].prop_type, PropType::Union(vec![size.clone(), PropType::Array(Box::new(size))]));
     assert_eq!(props["label"].prop_type, PropType::Union(vec![PropType::String, PropType::Null]));
 }
+
+fn extract_one(files: &[(&str, &str)]) -> ExtractionOutput {
+    let tmp = TempDir::new().unwrap();
+    for (name, body) in files {
+        write_file(&tmp, name, body);
+    }
+    extract(&PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    })
+}
+
+#[test]
+fn a_project_declaration_named_like_a_builtin_is_that_declaration() {
+    let output = extract_one(&[(
+        "Card.tsx",
+        "interface ReactNode { id: string }\ntype CSSProperties = 'compact' | 'wide';\n\
+         interface Partial { size: number }\ninterface Required { name: string }\n\
+         export function Card(props: { node: ReactNode; style: CSSProperties }) { return null; }\n\
+         interface PanelProps extends Partial, Required { title: string }\n\
+         export function Panel(props: PanelProps) { return null; }\n",
+    )]);
+
+    let card = &output.components["Card"].props;
+    assert_eq!(card["node"].prop_type, PropType::Named { name: "ReactNode".into(), args: vec![] });
+    assert_eq!(
+        card["style"].prop_type,
+        PropType::LiteralUnion { members: vec!["compact".into(), "wide".into()], has_default: false }
+    );
+    let mut panel: Vec<&str> = output.components["Panel"].props.keys().map(String::as_str).collect();
+    panel.sort_unstable();
+    assert_eq!(panel, vec!["name", "size", "title"]);
+}
+
+#[test]
+fn react_builtins_keep_their_meaning_when_imported_from_react_or_unbound() {
+    let output = extract_one(&[(
+        "Card.tsx",
+        "import type { ReactNode } from 'react';\n\
+         export function Card(props: { a: ReactNode; b: React.ReactNode }) { return null; }\n",
+    )]);
+
+    let card = &output.components["Card"].props;
+    assert_eq!((&card["a"].prop_type, &card["b"].prop_type), (&PropType::ReactNode, &PropType::ReactNode));
+}
+
+#[test]
+fn a_builtin_name_whose_binding_does_not_resolve_falls_back_to_react_with_a_report() {
+    let output = extract_one(&[
+        ("types.ts", "export type { ReactNode } from 'react';\n"),
+        ("Card.tsx", "import type { ReactNode } from './types';\nexport function Card(props: { a: ReactNode }) { return null; }\n"),
+    ]);
+
+    assert_eq!(output.components["Card"].props["a"].prop_type, PropType::ReactNode);
+    let fallback: Vec<&str> = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("treated as React's 'ReactNode'"))
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(fallback.len(), 1, "{:#?}", output.diagnostics);
+    assert!(fallback[0].contains("is imported from './types'"), "{}", fallback[0]);
+}

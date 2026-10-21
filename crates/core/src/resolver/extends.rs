@@ -22,7 +22,19 @@ pub(super) fn resolve_extends_ref(
     depth: u8,
 ) -> (ResolvedChain, Option<InheritedLayer>) {
     match extends_ref {
+        // The extractor names builtins by spelling before it has seen the whole file; a project's own declaration, or
+        // one imported from another package, resolves as that declaration when it can be found.
+        ExtendsRef::Builtin { name, type_args, .. }
+            if !super::may_be_react_builtin(name, iface_file, ctx)
+                && super::declaration_resolves(name, iface_file, ctx) =>
+        {
+            (resolve_props_chain(name.as_str(), type_args, iface_file, mapping, ctx, state, depth), None)
+        }
         ExtendsRef::Builtin { name, element, type_args } => {
+            // Bound elsewhere but not found (a package not installed): React's meaning is a reported guess.
+            if !super::may_be_react_builtin(name, iface_file, ctx) {
+                state.diagnostics.push(super::builtin_fallback_diagnostic(name, iface_file, ctx));
+            }
             // HTML element attrs. In Curated/None mode the actual props aren't
             // resolved here (they'd live in @types/react) — we just record an
             // InheritedLayer, and resolve_component synthesizes a curated subset
