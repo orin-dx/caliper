@@ -433,9 +433,175 @@ impl PropType {
     }
 }
 
+/// Streams each variant as a map with `kind` first, then its fields in a fixed order. Building a `serde_json::Value`
+/// per node first made serialization the largest cost of a run at scale, and left the key order to whether a
+/// dependency happened to enable serde_json's `preserve_order`.
 impl serde::Serialize for PropType {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.to_tagged_value().serialize(serializer)
+        use serde::ser::SerializeMap;
+
+        let mut map = serializer.serialize_map(None)?;
+        let unit_kind: Option<&str> = match self {
+            PropType::String => Some("string"),
+            PropType::Number => Some("number"),
+            PropType::Boolean => Some("boolean"),
+            PropType::Null => Some("null"),
+            PropType::Undefined => Some("undefined"),
+            PropType::Any => Some("any"),
+            PropType::Never => Some("never"),
+            PropType::Unknown => Some("unknown"),
+            PropType::Void => Some("void"),
+            PropType::ReactNode => Some("reactNode"),
+            PropType::CssProperties => Some("cssProperties"),
+            PropType::ElementType => Some("elementType"),
+            PropType::SxProps => Some("sxProps"),
+            _ => None,
+        };
+        if let Some(kind) = unit_kind {
+            map.serialize_entry("kind", kind)?;
+            return map.end();
+        }
+        match self {
+            // Newtype/tuple variants get a real field name instead of a positional "0" key.
+            PropType::StringLiteral(value) => {
+                map.serialize_entry("kind", "stringLiteral")?;
+                map.serialize_entry("value", value)?;
+            }
+            PropType::NumberLiteral(n) => {
+                map.serialize_entry("kind", "numberLiteral")?;
+                // JSON numbers cannot hold NaN or Infinity (serde_json would write `null`, which reads back as 0), so
+                // those are tagged as strings; see `from_tagged_value`.
+                if n.is_finite() {
+                    map.serialize_entry("value", n)?;
+                } else if n.is_nan() {
+                    map.serialize_entry("value", "NaN")?;
+                } else if *n > 0.0 {
+                    map.serialize_entry("value", "Infinity")?;
+                } else {
+                    map.serialize_entry("value", "-Infinity")?;
+                }
+            }
+            PropType::BoolLiteral(value) => {
+                map.serialize_entry("kind", "boolLiteral")?;
+                map.serialize_entry("value", value)?;
+            }
+            PropType::Union(members) => {
+                map.serialize_entry("kind", "union")?;
+                map.serialize_entry("members", members)?;
+            }
+            PropType::Intersection(members) => {
+                map.serialize_entry("kind", "intersection")?;
+                map.serialize_entry("members", members)?;
+            }
+            PropType::Array(inner) => {
+                map.serialize_entry("kind", "array")?;
+                map.serialize_entry("element", inner)?;
+            }
+            PropType::Tuple(members) => {
+                map.serialize_entry("kind", "tuple")?;
+                map.serialize_entry("elements", members)?;
+            }
+            PropType::Object(fields) => {
+                map.serialize_entry("kind", "object")?;
+                map.serialize_entry("fields", &WireFields(fields))?;
+            }
+            // Struct variants: fields merge directly with kind.
+            PropType::Named { name, args } => {
+                map.serialize_entry("kind", "named")?;
+                map.serialize_entry("name", name.as_str())?;
+                map.serialize_entry("args", args)?;
+            }
+            PropType::EventHandler { event_type, param_name } => {
+                map.serialize_entry("kind", "eventHandler")?;
+                map.serialize_entry("eventType", event_type)?;
+                map.serialize_entry("paramName", param_name)?;
+            }
+            PropType::Ref { element } => {
+                map.serialize_entry("kind", "ref")?;
+                map.serialize_entry("element", element)?;
+            }
+            PropType::HtmlAttributes { element, omitted } => {
+                map.serialize_entry("kind", "htmlAttributes")?;
+                map.serialize_entry("element", element)?;
+                map.serialize_entry("omitted", omitted)?;
+            }
+            PropType::LiteralUnion { members, has_default } => {
+                map.serialize_entry("kind", "literalUnion")?;
+                map.serialize_entry("members", members)?;
+                map.serialize_entry("hasDefault", has_default)?;
+            }
+            PropType::Opaque(OpaqueDetail { raw, reason }) => {
+                map.serialize_entry("kind", "opaque")?;
+                map.serialize_entry("raw", raw)?;
+                map.serialize_entry("reason", &WireReason(reason))?;
+            }
+            _ => {}
+        }
+        map.end()
+    }
+}
+
+/// An object type's fields as `{ name, propType, required, description }`.
+struct WireFields<'a>(&'a [ObjectField]);
+
+impl serde::Serialize for WireFields<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::{SerializeMap, SerializeSeq};
+
+        struct Field<'a>(&'a ObjectField);
+        impl serde::Serialize for Field<'_> {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                let mut map = serializer.serialize_map(Some(4))?;
+                map.serialize_entry("name", &self.0.name)?;
+                map.serialize_entry("propType", &self.0.prop_type)?;
+                map.serialize_entry("required", &self.0.required)?;
+                map.serialize_entry("description", &self.0.description)?;
+                map.end()
+            }
+        }
+
+        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+        for field in self.0 {
+            seq.serialize_element(&Field(field))?;
+        }
+        seq.end()
+    }
+}
+
+/// An `OpaqueReason` as `{ type, ...fields }`.
+struct WireReason<'a>(&'a OpaqueReason);
+
+impl serde::Serialize for WireReason<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+
+        let mut map = serializer.serialize_map(None)?;
+        match self.0 {
+            OpaqueReason::ConditionalType => map.serialize_entry("type", "conditionalType")?,
+            OpaqueReason::MappedType => map.serialize_entry("type", "mappedType")?,
+            OpaqueReason::ModuleAugmentation => map.serialize_entry("type", "moduleAugmentation")?,
+            OpaqueReason::RuntimeDependent { function_name } => {
+                map.serialize_entry("type", "runtimeDependent")?;
+                map.serialize_entry("functionName", function_name)?;
+            }
+            OpaqueReason::UnresolvableImport { specifier } => {
+                map.serialize_entry("type", "unresolvableImport")?;
+                map.serialize_entry("specifier", specifier)?;
+            }
+            OpaqueReason::PandaCodegenMissing => map.serialize_entry("type", "pandaCodegenMissing")?,
+            OpaqueReason::DepthExceeded => map.serialize_entry("type", "depthExceeded")?,
+            OpaqueReason::IndexedAccess { expression } => {
+                map.serialize_entry("type", "indexedAccess")?;
+                map.serialize_entry("expression", expression)?;
+            }
+            OpaqueReason::TemplateLiteral { expression } => {
+                map.serialize_entry("type", "templateLiteral")?;
+                map.serialize_entry("expression", expression)?;
+            }
+            OpaqueReason::MultiParamFunction => map.serialize_entry("type", "multiParamFunction")?,
+            OpaqueReason::UnsupportedExpression => map.serialize_entry("type", "unsupportedExpression")?,
+        }
+        map.end()
     }
 }
 
@@ -448,126 +614,6 @@ impl<'de> serde::Deserialize<'de> for PropType {
 }
 
 impl PropType {
-    fn to_tagged_value(&self) -> serde_json::Value {
-        match self {
-            // Unit variants (primitives)
-            PropType::String => serde_json::json!({"kind": "string"}),
-            PropType::Number => serde_json::json!({"kind": "number"}),
-            PropType::Boolean => serde_json::json!({"kind": "boolean"}),
-            PropType::Null => serde_json::json!({"kind": "null"}),
-            PropType::Undefined => serde_json::json!({"kind": "undefined"}),
-            PropType::Any => serde_json::json!({"kind": "any"}),
-            PropType::Never => serde_json::json!({"kind": "never"}),
-            PropType::Unknown => serde_json::json!({"kind": "unknown"}),
-            PropType::Void => serde_json::json!({"kind": "void"}),
-            PropType::ReactNode => serde_json::json!({"kind": "reactNode"}),
-            PropType::CssProperties => serde_json::json!({"kind": "cssProperties"}),
-            PropType::ElementType => serde_json::json!({"kind": "elementType"}),
-            PropType::SxProps => serde_json::json!({"kind": "sxProps"}),
-            // Newtype/tuple variants — give each a real field name instead of a
-            // positional "0" key, matching the struct-style variants below.
-            PropType::StringLiteral(s) => serde_json::json!({"kind": "stringLiteral", "value": s}),
-            PropType::NumberLiteral(n) => {
-                // `serde_json::Number` cannot represent NaN/Infinity (they'd
-                // silently become JSON `null`, then round-trip back as `0.0`
-                // — see `from_tagged_value` below). Tag non-finite values as
-                // strings instead so the read side can tell them apart from a
-                // genuinely-absent value.
-                let value = if n.is_finite() {
-                    serde_json::json!(n)
-                } else if n.is_nan() {
-                    serde_json::json!("NaN")
-                } else if *n > 0.0 {
-                    serde_json::json!("Infinity")
-                } else {
-                    serde_json::json!("-Infinity")
-                };
-                serde_json::json!({"kind": "numberLiteral", "value": value})
-            }
-            PropType::BoolLiteral(b) => serde_json::json!({"kind": "boolLiteral", "value": b}),
-            PropType::Union(members) => serde_json::json!({
-                "kind": "union",
-                "members": members.iter().map(|m| m.to_tagged_value()).collect::<Vec<_>>()
-            }),
-            PropType::Intersection(members) => serde_json::json!({
-                "kind": "intersection",
-                "members": members.iter().map(|m| m.to_tagged_value()).collect::<Vec<_>>()
-            }),
-            PropType::Array(inner) => serde_json::json!({
-                "kind": "array",
-                "element": inner.to_tagged_value()
-            }),
-            PropType::Tuple(members) => serde_json::json!({
-                "kind": "tuple",
-                "elements": members.iter().map(|m| m.to_tagged_value()).collect::<Vec<_>>()
-            }),
-            PropType::Object(fields) => serde_json::json!({
-                "kind": "object",
-                "fields": fields.iter().map(|f| serde_json::json!({
-                    "name": f.name,
-                    "propType": f.prop_type.to_tagged_value(),
-                    "required": f.required,
-                    "description": f.description,
-                })).collect::<Vec<_>>()
-            }),
-            // Struct variants — fields merge directly with kind
-            PropType::Named { name, args } => serde_json::json!({
-                "kind": "named",
-                "name": name.as_str(),
-                "args": args.iter().map(|a| a.to_tagged_value()).collect::<Vec<_>>()
-            }),
-            PropType::EventHandler { event_type, param_name } => serde_json::json!({
-                "kind": "eventHandler",
-                "eventType": event_type,
-                "paramName": param_name
-            }),
-            PropType::Ref { element } => serde_json::json!({
-                "kind": "ref",
-                "element": element
-            }),
-            PropType::HtmlAttributes { element, omitted } => serde_json::json!({
-                "kind": "htmlAttributes",
-                "element": element,
-                "omitted": omitted
-            }),
-            PropType::LiteralUnion { members, has_default } => serde_json::json!({
-                "kind": "literalUnion",
-                "members": members,
-                "hasDefault": has_default
-            }),
-            PropType::Opaque(OpaqueDetail { raw, reason }) => {
-                let reason_val = match reason {
-                    OpaqueReason::ConditionalType => serde_json::json!({"type": "conditionalType"}),
-                    OpaqueReason::MappedType => serde_json::json!({"type": "mappedType"}),
-                    OpaqueReason::ModuleAugmentation => {
-                        serde_json::json!({"type": "moduleAugmentation"})
-                    }
-                    OpaqueReason::RuntimeDependent { function_name } => {
-                        serde_json::json!({"type": "runtimeDependent", "functionName": function_name})
-                    }
-                    OpaqueReason::UnresolvableImport { specifier } => {
-                        serde_json::json!({"type": "unresolvableImport", "specifier": specifier})
-                    }
-                    OpaqueReason::PandaCodegenMissing => {
-                        serde_json::json!({"type": "pandaCodegenMissing"})
-                    }
-                    OpaqueReason::DepthExceeded => serde_json::json!({"type": "depthExceeded"}),
-                    OpaqueReason::IndexedAccess { expression } => {
-                        serde_json::json!({"type": "indexedAccess", "expression": expression})
-                    }
-                    OpaqueReason::TemplateLiteral { expression } => {
-                        serde_json::json!({"type": "templateLiteral", "expression": expression})
-                    }
-                    OpaqueReason::MultiParamFunction => serde_json::json!({"type": "multiParamFunction"}),
-                    OpaqueReason::UnsupportedExpression => {
-                        serde_json::json!({"type": "unsupportedExpression"})
-                    }
-                };
-                serde_json::json!({"kind": "opaque", "raw": raw, "reason": reason_val})
-            }
-        }
-    }
-
     fn from_tagged_value(v: &serde_json::Value) -> Result<Self, std::string::String> {
         let kind = v
             .get("kind")

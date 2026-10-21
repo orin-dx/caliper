@@ -1,5 +1,126 @@
 use super::*;
 
+/// The wire shape built as a `serde_json::Value`, as `Serialize` did before it streamed; tests check the two agree.
+fn to_tagged_value(pt: &PropType) -> serde_json::Value {
+    match pt {
+        // Unit variants (primitives)
+        PropType::String => serde_json::json!({"kind": "string"}),
+        PropType::Number => serde_json::json!({"kind": "number"}),
+        PropType::Boolean => serde_json::json!({"kind": "boolean"}),
+        PropType::Null => serde_json::json!({"kind": "null"}),
+        PropType::Undefined => serde_json::json!({"kind": "undefined"}),
+        PropType::Any => serde_json::json!({"kind": "any"}),
+        PropType::Never => serde_json::json!({"kind": "never"}),
+        PropType::Unknown => serde_json::json!({"kind": "unknown"}),
+        PropType::Void => serde_json::json!({"kind": "void"}),
+        PropType::ReactNode => serde_json::json!({"kind": "reactNode"}),
+        PropType::CssProperties => serde_json::json!({"kind": "cssProperties"}),
+        PropType::ElementType => serde_json::json!({"kind": "elementType"}),
+        PropType::SxProps => serde_json::json!({"kind": "sxProps"}),
+        // Newtype/tuple variants — give each a real field name instead of a
+        // positional "0" key, matching the struct-style variants below.
+        PropType::StringLiteral(s) => serde_json::json!({"kind": "stringLiteral", "value": s}),
+        PropType::NumberLiteral(n) => {
+            // `serde_json::Number` cannot represent NaN/Infinity (they'd
+            // silently become JSON `null`, then round-trip back as `0.0`
+            // — see `from_tagged_value` below). Tag non-finite values as
+            // strings instead so the read side can tell them apart from a
+            // genuinely-absent value.
+            let value = if n.is_finite() {
+                serde_json::json!(n)
+            } else if n.is_nan() {
+                serde_json::json!("NaN")
+            } else if *n > 0.0 {
+                serde_json::json!("Infinity")
+            } else {
+                serde_json::json!("-Infinity")
+            };
+            serde_json::json!({"kind": "numberLiteral", "value": value})
+        }
+        PropType::BoolLiteral(b) => serde_json::json!({"kind": "boolLiteral", "value": b}),
+        PropType::Union(members) => serde_json::json!({
+            "kind": "union",
+            "members": members.iter().map(|m| to_tagged_value(m)).collect::<Vec<_>>()
+        }),
+        PropType::Intersection(members) => serde_json::json!({
+            "kind": "intersection",
+            "members": members.iter().map(|m| to_tagged_value(m)).collect::<Vec<_>>()
+        }),
+        PropType::Array(inner) => serde_json::json!({
+            "kind": "array",
+            "element": to_tagged_value(inner)
+        }),
+        PropType::Tuple(members) => serde_json::json!({
+            "kind": "tuple",
+            "elements": members.iter().map(|m| to_tagged_value(m)).collect::<Vec<_>>()
+        }),
+        PropType::Object(fields) => serde_json::json!({
+            "kind": "object",
+            "fields": fields.iter().map(|f| serde_json::json!({
+                "name": f.name,
+                "propType": to_tagged_value(&f.prop_type),
+                "required": f.required,
+                "description": f.description,
+            })).collect::<Vec<_>>()
+        }),
+        // Struct variants — fields merge directly with kind
+        PropType::Named { name, args } => serde_json::json!({
+            "kind": "named",
+            "name": name.as_str(),
+            "args": args.iter().map(|a| to_tagged_value(a)).collect::<Vec<_>>()
+        }),
+        PropType::EventHandler { event_type, param_name } => serde_json::json!({
+            "kind": "eventHandler",
+            "eventType": event_type,
+            "paramName": param_name
+        }),
+        PropType::Ref { element } => serde_json::json!({
+            "kind": "ref",
+            "element": element
+        }),
+        PropType::HtmlAttributes { element, omitted } => serde_json::json!({
+            "kind": "htmlAttributes",
+            "element": element,
+            "omitted": omitted
+        }),
+        PropType::LiteralUnion { members, has_default } => serde_json::json!({
+            "kind": "literalUnion",
+            "members": members,
+            "hasDefault": has_default
+        }),
+        PropType::Opaque(OpaqueDetail { raw, reason }) => {
+            let reason_val = match reason {
+                OpaqueReason::ConditionalType => serde_json::json!({"type": "conditionalType"}),
+                OpaqueReason::MappedType => serde_json::json!({"type": "mappedType"}),
+                OpaqueReason::ModuleAugmentation => {
+                    serde_json::json!({"type": "moduleAugmentation"})
+                }
+                OpaqueReason::RuntimeDependent { function_name } => {
+                    serde_json::json!({"type": "runtimeDependent", "functionName": function_name})
+                }
+                OpaqueReason::UnresolvableImport { specifier } => {
+                    serde_json::json!({"type": "unresolvableImport", "specifier": specifier})
+                }
+                OpaqueReason::PandaCodegenMissing => {
+                    serde_json::json!({"type": "pandaCodegenMissing"})
+                }
+                OpaqueReason::DepthExceeded => serde_json::json!({"type": "depthExceeded"}),
+                OpaqueReason::IndexedAccess { expression } => {
+                    serde_json::json!({"type": "indexedAccess", "expression": expression})
+                }
+                OpaqueReason::TemplateLiteral { expression } => {
+                    serde_json::json!({"type": "templateLiteral", "expression": expression})
+                }
+                OpaqueReason::MultiParamFunction => serde_json::json!({"type": "multiParamFunction"}),
+                OpaqueReason::UnsupportedExpression => {
+                    serde_json::json!({"type": "unsupportedExpression"})
+                }
+            };
+            serde_json::json!({"kind": "opaque", "raw": raw, "reason": reason_val})
+        }
+    }
+}
+
 #[test]
 fn tuple_raw_string_renders_real_elements_not_a_placeholder() {
     let ty = PropType::Tuple(vec![PropType::Number, PropType::Number]);
@@ -125,7 +246,7 @@ mod opaque_detail_tests {
     #[test]
     fn opaque_round_trips_through_the_tagged_json_wire_format() {
         let pt = OpaqueDetail::new("A<B> | C", OpaqueReason::UnsupportedExpression);
-        let json = pt.to_tagged_value();
+        let json = to_tagged_value(&pt);
         let restored = PropType::from_tagged_value(&json).expect("should deserialize");
         assert_eq!(pt, restored);
     }
@@ -328,7 +449,7 @@ mod prop_type_composite_roundtrip_tests {
         // The wire form actually used when the reason is embedded in an Opaque PropType.
         // OpaqueDetail::new returns PropType::Opaque(..) directly, not a bare OpaqueDetail.
         let pt = OpaqueDetail::new("raw", reason);
-        let wire = pt.to_tagged_value();
+        let wire = to_tagged_value(&pt);
         let wire_reason = wire.get("reason").expect("expected a 'reason' field in the tagged Opaque JSON");
 
         assert_ne!(
@@ -538,5 +659,81 @@ mod is_literal_union_tests {
     fn two_member_literal_union_is_still_treated_as_an_enum() {
         let pt = PropType::LiteralUnion { members: vec!["a".to_string(), "b".to_string()], has_default: false };
         assert!(pt.is_literal_union());
+    }
+}
+
+mod streaming_serialize_tests {
+    use super::*;
+
+    /// Every variant, every `OpaqueReason`, and the non-finite numbers.
+    fn every_shape() -> Vec<PropType> {
+        let reasons = vec![
+            OpaqueReason::ConditionalType,
+            OpaqueReason::MappedType,
+            OpaqueReason::ModuleAugmentation,
+            OpaqueReason::RuntimeDependent { function_name: "cva".into() },
+            OpaqueReason::UnresolvableImport { specifier: "./missing".into() },
+            OpaqueReason::PandaCodegenMissing,
+            OpaqueReason::DepthExceeded,
+            OpaqueReason::IndexedAccess { expression: "T[\"k\"]".into() },
+            OpaqueReason::TemplateLiteral { expression: "`a-${B}`".into() },
+            OpaqueReason::MultiParamFunction,
+            OpaqueReason::UnsupportedExpression,
+        ];
+        let mut shapes = vec![
+            PropType::String,
+            PropType::Number,
+            PropType::Boolean,
+            PropType::Null,
+            PropType::Undefined,
+            PropType::Any,
+            PropType::Never,
+            PropType::Unknown,
+            PropType::Void,
+            PropType::ReactNode,
+            PropType::CssProperties,
+            PropType::ElementType,
+            PropType::SxProps,
+            PropType::StringLiteral("a \"quoted\" value".into()),
+            PropType::NumberLiteral(1.5),
+            PropType::NumberLiteral(2.0),
+            PropType::NumberLiteral(f64::NAN),
+            PropType::NumberLiteral(f64::INFINITY),
+            PropType::NumberLiteral(f64::NEG_INFINITY),
+            PropType::BoolLiteral(true),
+            PropType::Union(vec![PropType::String, PropType::Null]),
+            PropType::Intersection(vec![PropType::Number, PropType::Unknown]),
+            PropType::Array(Box::new(PropType::Boolean)),
+            PropType::Tuple(vec![PropType::Number, PropType::String]),
+            PropType::Tuple(vec![]),
+            PropType::Object(vec![ObjectField {
+                name: "x".into(),
+                prop_type: PropType::Union(vec![PropType::String, PropType::Number]),
+                required: true,
+                description: "The x.".into(),
+            }]),
+            PropType::Named { name: "Box".into(), args: vec![PropType::StringLiteral("div".into())] },
+            PropType::EventHandler { event_type: "MouseEvent".into(), param_name: Some("event".into()) },
+            PropType::EventHandler { event_type: "MouseEvent".into(), param_name: None },
+            PropType::Ref { element: Some("HTMLDivElement".into()) },
+            PropType::Ref { element: None },
+            PropType::HtmlAttributes { element: "button".into(), omitted: vec!["type".into()] },
+            PropType::LiteralUnion { members: vec!["sm".into(), "lg".into()], has_default: true },
+        ];
+        shapes.extend(reasons.into_iter().map(|reason| OpaqueDetail::new("Raw<T>", reason)));
+        shapes
+    }
+
+    #[test]
+    fn streamed_bytes_equal_the_value_built_wire_shape_for_every_variant() {
+        for shape in every_shape() {
+            let streamed = serde_json::to_string(&shape).expect("serialize");
+            let reference = serde_json::to_string(&to_tagged_value(&shape)).expect("serialize value");
+            assert_eq!(streamed, reference, "{shape:?}");
+            assert_eq!(
+                PropType::from_tagged_value(&serde_json::from_str(&streamed).unwrap()).map(|p| format!("{p:?}")),
+                Ok(format!("{shape:?}"))
+            );
+        }
     }
 }
