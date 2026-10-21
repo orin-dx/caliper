@@ -123,6 +123,7 @@ impl WatchSession {
                 removed_keys: Vec::new(),
                 affected_files: Vec::new(),
                 diagnostics: Vec::new(),
+                removed_diagnostics: Vec::new(),
                 duration_ms: 0,
             },
         }

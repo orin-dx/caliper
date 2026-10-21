@@ -222,12 +222,14 @@ fn a_panic_during_incremental_resolve_degrades_to_a_diagnostic_not_a_crash() {
     let _ignored = session.initialize();
 
     // Must not panic the test process — that's the whole point.
-    let update = session.update_file(&other_path);
+    let _ignored = session.update_file(&other_path);
 
+    // The cold run already reported this panic, so the update adds nothing; the session still holds it.
+    let snapshot = session.snapshot();
     assert!(
-        update.diagnostics.iter().any(|d| d.code == crate::types::DiagnosticCode::InternalPanic),
+        snapshot.diagnostics.iter().any(|d| d.code == crate::types::DiagnosticCode::InternalPanic),
         "expected an InternalPanic diagnostic, got {:?}",
-        update.diagnostics
+        snapshot.diagnostics
     );
 }
 
@@ -508,8 +510,8 @@ fn session_recovers_after_a_contained_panic_and_serves_unrelated_files_normally(
     let _ignored = session.initialize();
 
     // Must not panic the test process.
-    let boom_update = session.update_file(&panicking_path);
-    assert!(boom_update.diagnostics.iter().any(|d| d.code == crate::types::DiagnosticCode::InternalPanic));
+    let _ignored = session.update_file(&panicking_path);
+    assert!(session.snapshot().diagnostics.iter().any(|d| d.code == crate::types::DiagnosticCode::InternalPanic));
 
     // Session must still be usable afterward.
     std::fs::write(
@@ -928,6 +930,40 @@ fn a_wrapper_component_with_unresolvable_props_is_kept_by_update_file_like_extra
     assert_eq!(visible(&session.snapshot()), visible(&crate::pipeline::extract(&options)));
 }
 
+/// A client's copy of the output, kept current by applying `IncrementalUpdate`s as the contract documents.
+struct Applied {
+    components: std::collections::BTreeMap<String, crate::types::ComponentEntry>,
+    diagnostics: Vec<crate::types::Diagnostic>,
+}
+
+impl Applied {
+    fn from(output: crate::types::ExtractionOutput) -> Applied {
+        Applied { components: output.components, diagnostics: output.diagnostics }
+    }
+
+    fn apply(&mut self, update: crate::pipeline::IncrementalUpdate) {
+        for key in &update.removed_keys {
+            self.components.remove(key);
+        }
+        for (key, entry) in update.updated_keys.into_iter().zip(update.updated_components) {
+            self.components.insert(key, entry);
+        }
+        self.diagnostics.retain(|d| !update.removed_diagnostics.contains(d));
+        self.diagnostics.extend(update.diagnostics);
+    }
+
+    fn diagnostics(&self) -> Vec<String> {
+        sorted_json(&self.diagnostics)
+    }
+}
+
+/// Diagnostics as a sorted list of their JSON, to compare as sets.
+fn sorted_json(diagnostics: &[crate::types::Diagnostic]) -> Vec<String> {
+    let mut json: Vec<String> = diagnostics.iter().map(|d| serde_json::to_string(d).unwrap_or_default()).collect();
+    json.sort();
+    json
+}
+
 /// One step of a watch session: write or delete each file, then report every touched path to `update_file`.
 enum Step<'s> {
     Write(&'s str, &'s str),
@@ -960,6 +996,8 @@ fn every_kind_of_change_leaves_the_snapshot_equal_to_a_cold_extract() {
     let session = WatchSession::new(options);
     let _ignored = session.initialize();
     assert_matches_cold(&session);
+    // What a client holds after applying every update in order, starting from the first snapshot.
+    let mut applied = Applied::from(session.snapshot());
 
     let steps: Vec<(&str, Vec<Step<'_>>)> = vec![
         (
@@ -1016,6 +1054,13 @@ fn every_kind_of_change_leaves_the_snapshot_equal_to_a_cold_extract() {
                 Step::Write("button/Card.tsx", "export function Card(props: { title: string }) { return null; }\n"),
             ],
         ),
+        (
+            "collide with the moved component from a file that sorts first",
+            vec![Step::Write("Abc.tsx", "export function Card(props: { early: boolean }) { return null; }\n")],
+        ),
+        ("delete the component holding the bare key", vec![Step::Delete("Abc.tsx")]),
+        ("collide again, then fix the broken file's diagnostic", vec![Step::Write("Abc.tsx", "export const = ;\n")]),
+        ("fix it", vec![Step::Write("Abc.tsx", "export function Card(props: { early: boolean }) { return null; }\n")]),
     ];
     for (what, changes) in steps {
         let mut touched = Vec::new();
@@ -1036,9 +1081,15 @@ fn every_kind_of_change_leaves_the_snapshot_equal_to_a_cold_extract() {
             }
         }
         for path in &touched {
-            let _ignored = session.update_file(path);
+            applied.apply(session.update_file(path));
         }
         let watched = session.snapshot();
+        assert_eq!(applied.components, watched.components, "components rebuilt from updates after: {what}");
+        assert_eq!(
+            applied.diagnostics(),
+            sorted_json(&watched.diagnostics),
+            "diagnostics rebuilt from updates after: {what}"
+        );
         let cold = crate::pipeline::extract(&session.options);
         assert_eq!(watched.components, cold.components, "components after: {what}");
         assert_eq!(watched.enums, cold.enums, "enums after: {what}");
