@@ -194,6 +194,7 @@ fn diag(severity: DiagnosticSeverity, code: DiagnosticCode, message: &str, file:
         column: None,
         help: None,
         code,
+        affects: Vec::new(),
     }
 }
 
@@ -272,6 +273,20 @@ fn groups_same_code_and_subject_same_file_without_file_count() {
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(lines[0].contains("(×3)"), "{}", lines[0]);
     assert!(!lines[0].contains("files"), "{}", lines[0]);
+}
+
+#[test]
+fn a_deduplicated_diagnostic_counts_once_per_affected_component() {
+    let mut d = diag(
+        DiagnosticSeverity::Warning,
+        DiagnosticCode::OpaqueType,
+        "Cannot resolve type 'Date' in 'a.ts' — it will appear as opaque",
+        Some("a.ts"),
+    );
+    d.affects = vec!["Button".into(), "Card".into(), "Panel".into()];
+    let lines = format_diagnostics(&[d]);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].ends_with("(×3)"), "{}", lines[0]);
 }
 
 #[test]

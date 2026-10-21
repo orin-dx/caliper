@@ -56,7 +56,7 @@ impl ExtractionOutput {
 }
 
 /// Explicit worst-first rank for `DiagnosticSeverity` — `Error` > `Warning` > `Info`.
-fn severity_rank(severity: &DiagnosticSeverity) -> u8 {
+pub(crate) fn severity_rank(severity: &DiagnosticSeverity) -> u8 {
     match severity {
         DiagnosticSeverity::Error => 2,
         DiagnosticSeverity::Warning => 1,
@@ -757,7 +757,7 @@ pub enum OpaqueReason {
     PandaCodegenMissing,
     /// Maximum resolution depth exceeded (circular or too deep)
     DepthExceeded,
-    /// Indexed access type (Type["key"]) — enable typescript-go to resolve.
+    /// Indexed access type (Type["key"]) the static resolver could not follow.
     IndexedAccess { expression: std::string::String },
     /// Template literal type — partially or fully unresolvable.
     TemplateLiteral { expression: std::string::String },

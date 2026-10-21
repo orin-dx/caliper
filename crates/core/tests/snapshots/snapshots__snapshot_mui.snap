@@ -1854,7 +1854,10 @@ expression: value
       "line": null,
       "column": null,
       "help": null,
-      "code": "DISCRIMINATED_UNION"
+      "code": "DISCRIMINATED_UNION",
+      "affects": [
+        "TextField"
+      ]
     }
   ],
   "stats": {

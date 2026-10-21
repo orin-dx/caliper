@@ -176,8 +176,9 @@ pub(super) fn resolve_indexed_access(
         file: Some(consuming_file.to_string()),
         line: None,
         column: None,
-        help: Some("Enable typescript-go to resolve indexed access types.".into()),
+        help: Some("Declare the prop's type directly, or index a type declared in the project.".into()),
         code: DiagnosticCode::IndexedAccessOpaque,
+        affects: Vec::new(),
     };
     OpaqueDetail::give_up(state, expression.clone(), OpaqueReason::IndexedAccess { expression }, diagnostic)
 }

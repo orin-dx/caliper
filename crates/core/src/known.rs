@@ -57,6 +57,7 @@ pub fn push_known_opaque_diagnostic(
         column: None,
         help: None,
         code: DiagnosticCode::OpaqueType,
+        affects: Vec::new(),
     });
 }
 

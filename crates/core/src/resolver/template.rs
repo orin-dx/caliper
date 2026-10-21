@@ -33,8 +33,9 @@ pub(super) fn resolve_template_literal(
         file: Some(consuming_file.to_string()),
         line: None,
         column: None,
-        help: Some("Enable typescript-go or add explicit string literal union for template literal types.".into()),
+        help: Some("Declare the prop as an explicit string-literal union to document its values.".into()),
         code: DiagnosticCode::TemplateLiteralOpaque,
+        affects: Vec::new(),
     };
     OpaqueDetail::give_up(state, raw.clone(), OpaqueReason::TemplateLiteral { expression: raw }, diagnostic)
 }

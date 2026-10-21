@@ -110,6 +110,8 @@ export interface Diagnostic {
   column: number | null
   help: string | null
   code: string
+  /** Keys of the components whose resolution reported this diagnostic; absent for file- and run-level ones. */
+  affects?: string[]
 }
 
 export interface ExtractionStats {

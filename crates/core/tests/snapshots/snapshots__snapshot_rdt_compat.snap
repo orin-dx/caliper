@@ -1584,7 +1584,10 @@ expression: value
       "line": null,
       "column": null,
       "help": null,
-      "code": "DISCRIMINATED_UNION"
+      "code": "DISCRIMINATED_UNION",
+      "affects": [
+        "Accordion"
+      ]
     },
     {
       "severity": "info",
@@ -1593,7 +1596,10 @@ expression: value
       "line": null,
       "column": null,
       "help": null,
-      "code": "OPAQUE_TYPE"
+      "code": "OPAQUE_TYPE",
+      "affects": [
+        "TypeSampler"
+      ]
     }
   ],
   "stats": {

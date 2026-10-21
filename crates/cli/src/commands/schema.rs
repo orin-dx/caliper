@@ -75,7 +75,8 @@ fn schema_value() -> serde_json::Value {
                         "line": { "type": ["integer", "null"] },
                         "column": { "type": ["integer", "null"] },
                         "help": { "type": ["string", "null"] },
-                        "code": { "type": "string" }
+                        "code": { "type": "string" },
+                        "affects": { "type": "array", "items": { "type": "string" } }
                     }
                 }
             },
@@ -182,6 +183,7 @@ mod tests {
                 column: Some(4),
                 help: Some("try this".into()),
                 code: DiagnosticCode::OpaqueType,
+                affects: Vec::new(),
             }],
             stats: ExtractionStats {
                 components_extracted: 1,

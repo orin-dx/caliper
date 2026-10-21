@@ -170,5 +170,6 @@ fn opaque_diagnostic(what: &str, ct: &CollectedType, file: &Utf8Path) -> Diagnos
         column: None,
         help: None,
         code: DiagnosticCode::OpaqueType,
+        affects: Vec::new(),
     }
 }
