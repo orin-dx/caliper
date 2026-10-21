@@ -631,6 +631,27 @@ pub enum ExtendsRef {
     },
 }
 
+impl ExtendsRef {
+    /// This reference with each type argument rewritten by `f`.
+    #[must_use]
+    pub fn map_type_args(&self, f: impl Fn(&str) -> std::string::String) -> ExtendsRef {
+        let map = |args: &[std::string::String]| args.iter().map(|a| f(a)).collect();
+        match self {
+            ExtendsRef::SameFile { name, type_args } => {
+                ExtendsRef::SameFile { name: name.clone(), type_args: map(type_args) }
+            }
+            ExtendsRef::Imported { local_name, type_args, source_specifier } => ExtendsRef::Imported {
+                local_name: local_name.clone(),
+                type_args: map(type_args),
+                source_specifier: source_specifier.clone(),
+            },
+            ExtendsRef::Builtin { name, element, type_args } => {
+                ExtendsRef::Builtin { name: name.clone(), element: element.clone(), type_args: map(type_args) }
+            }
+        }
+    }
+}
+
 /// A collected type alias.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CollectedTypeAlias {

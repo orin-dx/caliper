@@ -142,19 +142,7 @@ pub(super) fn generic_alias_with_structured_args(
 /// complex is preserved as `Raw` — a pre-existing, documented limitation (see
 /// chain.rs's step-0.5 comment), not a regression introduced here.
 fn raw_arg_to_collected_type(s: &str) -> CollectedType {
-    let trimmed = s.trim();
-    if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
-        return CollectedType::StringLiteral(trimmed[1..trimmed.len() - 1].into());
-    }
-    if trimmed.len() >= 2 && trimmed.starts_with('\'') && trimmed.ends_with('\'') {
-        return CollectedType::StringLiteral(trimmed[1..trimmed.len() - 1].into());
-    }
-    let is_simple_identifier = !trimmed.is_empty() && !trimmed.contains([' ', '|', '&', '<', '"', '\'']);
-    if is_simple_identifier {
-        CollectedType::Named { name: trimmed.into(), args: vec![] }
-    } else {
-        CollectedType::Raw(trimmed.to_owned())
-    }
+    super::collected::parse_type_text(s)
 }
 
 /// Recursively replace parameter references inside a `CollectedType`.

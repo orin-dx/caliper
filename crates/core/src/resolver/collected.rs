@@ -146,8 +146,12 @@ pub fn resolve_collected_type(
                 && !trimmed.contains('<')
             {
                 PropType::Named { name: trimmed.into(), args: vec![] }
-            } else if let Some(reference) = parse_generic_reference(trimmed) {
-                resolve_collected_type(&reference, consuming_file, ctx, state, depth + 1)
+            } else if let parsed @ (CollectedType::Named { .. }
+            | CollectedType::Union(_)
+            | CollectedType::Intersection(_)
+            | CollectedType::Array(_)) = parse_type_text(trimmed)
+            {
+                resolve_collected_type(&parsed, consuming_file, ctx, state, depth + 1)
             } else {
                 let diag = opaque_diagnostic("an unparsable raw type expression", ct, consuming_file);
                 OpaqueDetail::give_up(state, s.clone(), OpaqueReason::UnsupportedExpression, diag)
@@ -218,4 +222,72 @@ pub(super) fn parse_generic_reference(text: &str) -> Option<CollectedType> {
         name: name.into(),
         args: args.into_iter().map(|a| CollectedType::Raw(a.to_owned())).collect(),
     })
+}
+
+/// Split `text` on `separator` at bracket depth zero, outside quotes.
+fn split_top_level(text: &str, separator: char) -> Vec<&str> {
+    let (mut parts, mut depth, mut quote, mut start) = (Vec::new(), 0i32, None, 0usize);
+    for (i, c) in text.char_indices() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '<' | '(' | '[' | '{') => depth += 1,
+            (None, '>' | ')' | ']' | '}') => depth -= 1,
+            (None, c) if c == separator && depth == 0 => {
+                parts.push(&text[start..i]);
+                start = i + c.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(&text[start..]);
+    parts
+}
+
+/// Rebuild a `CollectedType` from the display text a call-site type argument arrives as: unions, intersections,
+/// arrays, literals, primitives and generic references. Anything else stays `Raw`. A stopgap for the stringified
+/// type arguments (roadmap item 2.1 replaces them with structured ones).
+pub(super) fn parse_type_text(text: &str) -> CollectedType {
+    let text = text.trim();
+    if text.is_empty() {
+        return CollectedType::Raw(String::new());
+    }
+    let members = split_top_level(text, '|');
+    if members.len() > 1 {
+        return CollectedType::Union(members.into_iter().map(parse_type_text).collect());
+    }
+    let members = split_top_level(text, '&');
+    if members.len() > 1 {
+        return CollectedType::Intersection(members.into_iter().map(parse_type_text).collect());
+    }
+    if let Some(inner) = text.strip_suffix("[]") {
+        return CollectedType::Array(Box::new(parse_type_text(inner)));
+    }
+    let quoted = |q: char| text.len() >= 2 && text.starts_with(q) && text.ends_with(q);
+    if quoted('"') || quoted('\'') {
+        return CollectedType::StringLiteral(text[1..text.len() - 1].into());
+    }
+    match text {
+        "string" => return CollectedType::String,
+        "number" => return CollectedType::Number,
+        "boolean" => return CollectedType::Boolean,
+        "null" => return CollectedType::Null,
+        "undefined" => return CollectedType::Undefined,
+        "never" => return CollectedType::Never,
+        "void" => return CollectedType::Void,
+        "any" => return CollectedType::Any,
+        "unknown" => return CollectedType::Unknown,
+        _ => {}
+    }
+    if let Ok(number) = text.parse::<f64>() {
+        return CollectedType::NumberLiteral(number);
+    }
+    if let Some(reference) = parse_generic_reference(text) {
+        return reference;
+    }
+    if text.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '$' | '.')) {
+        return CollectedType::Named { name: text.into(), args: Vec::new() };
+    }
+    CollectedType::Raw(text.to_owned())
 }

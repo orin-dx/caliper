@@ -61,6 +61,8 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     /// `export { Foo }`: local specifiers, no source.
     fn visit_export_named_declaration(&mut self, node: &ExportNamedDeclaration<'a>) {
         for spec in &node.specifiers {
+            // Recorded as a local declaration for now; `finish()` turns it into a re-export when `local` is an import.
+            self.pending_local_exports.push((self.data.exports.len(), spec.local.name().as_str().to_owned()));
             self.data.exports.push(LexedExport::LocalDeclaration {
                 name: spec.exported.name().as_str().to_owned(),
                 is_type_only: node.export_kind.is_type() || spec.export_kind.is_type(),
