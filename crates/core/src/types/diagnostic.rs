@@ -27,6 +27,31 @@ impl fmt::Display for Diagnostic {
 impl std::error::Error for Diagnostic {}
 
 impl Diagnostic {
+    /// A diagnostic with no file, position or help; add them with the `with_*` methods.
+    pub fn new(severity: DiagnosticSeverity, code: DiagnosticCode, message: impl Into<String>) -> Diagnostic {
+        Diagnostic { severity, message: message.into(), file: None, line: None, column: None, help: None, code }
+    }
+
+    #[must_use]
+    pub fn with_file(mut self, file: impl Into<String>) -> Diagnostic {
+        self.file = Some(file.into());
+        self
+    }
+
+    /// One-based line and column.
+    #[must_use]
+    pub fn with_position(mut self, line: u32, column: u32) -> Diagnostic {
+        self.line = Some(line);
+        self.column = Some(column);
+        self
+    }
+
+    #[must_use]
+    pub fn with_help(mut self, help: impl Into<String>) -> Diagnostic {
+        self.help = Some(help.into());
+        self
+    }
+
     /// A file could not be read from disk (permission error, race with deletion, etc).
     pub fn io_read_error(path: &camino::Utf8Path, error: &std::io::Error) -> Diagnostic {
         Diagnostic {
