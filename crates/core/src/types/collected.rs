@@ -95,7 +95,7 @@ pub enum CollectedType {
         return_type: Box<CollectedType>,
     },
 
-    // ── Conditional: T extends U ? X : Y — cannot resolve statically, tag for typescript-go
+    // ── Conditional: T extends U ? X : Y — cannot resolve statically
     Conditional {
         check: Box<CollectedType>,
         extends_type: Box<CollectedType>,

@@ -59,6 +59,7 @@ fn exit_code_is_two_when_any_diagnostic_is_error_severity() {
             column: None,
             help: None,
             code: crate::types::diagnostic::DiagnosticCode::Unknown,
+            affects: Vec::new(),
         }],
         stats: ExtractionStats::default(),
     };
@@ -79,6 +80,7 @@ fn exit_code_is_one_only_when_strict_and_a_warning_is_present() {
             column: None,
             help: None,
             code: crate::types::diagnostic::DiagnosticCode::Unknown,
+            affects: Vec::new(),
         }],
         stats: ExtractionStats::default(),
     };
@@ -103,6 +105,7 @@ mod opaque_detail_tests {
             column: None,
             help: None,
             code: DiagnosticCode::OpaqueType,
+            affects: Vec::new(),
         };
 
         let pt = OpaqueDetail::give_up(&mut state, "SomeType", OpaqueReason::DepthExceeded, diagnostic.clone());
@@ -357,6 +360,7 @@ mod serde_key_casing_tests {
             column: None,
             help: None,
             code: DiagnosticCode::Unknown,
+            affects: Vec::new(),
         };
         let v = serde_json::to_value(&d).expect("serialize");
         assert_eq!(v["severity"], "error", "expected camelCase 'error', got {:?}", v["severity"]);

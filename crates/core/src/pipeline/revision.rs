@@ -17,6 +17,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::cache::DtsCache;
 use crate::named_type_index::NamedTypeIndex;
 use crate::resolver::{Dependencies, ResolutionContext};
+use crate::types::output::severity_rank;
 use crate::types::*;
 
 use super::discover::{discover_files, is_source_file, should_skip};
@@ -334,12 +335,18 @@ impl Revision {
         let mut affected_files: Vec<Utf8PathBuf> = fresh_ids.iter().map(|id| id.file.clone()).collect();
         affected_files.sort();
         affected_files.dedup();
-        let mut diagnostics: Vec<Diagnostic> = next.file_diagnostics.get(changed).cloned().unwrap_or_default();
-        for id in &fresh_ids {
-            if let Some(r) = next.resolved.get(id) {
-                diagnostics.extend(r.diagnostics.iter().cloned());
-            }
-        }
+        // The changed file's own diagnostics and those of every re-resolved component.
+        let updated: FxHashSet<&str> = updated_components.iter().map(|(key, _)| key.as_str()).collect();
+        let diagnostics: Vec<Diagnostic> = next
+            .output
+            .diagnostics
+            .iter()
+            .filter(|d| {
+                d.file.as_deref() == Some(changed.as_str())
+                    || d.affects.iter().any(|key| updated.contains(key.as_str()))
+            })
+            .cloned()
+            .collect();
         let update = IncrementalUpdate {
             revision: next.id,
             updated_components: updated_components.iter().map(|(_, entry)| entry.clone()).collect(),
@@ -355,11 +362,12 @@ impl Revision {
     /// Build the public output from the revision: components keyed with the same disambiguation rule everywhere,
     /// plugin hooks applied, diagnostics in a stable order, public enums.
     fn assemble(&mut self, options: &PipelineOptions) {
-        let mut diagnostics: Vec<Diagnostic> = self.head_diagnostics.clone();
+        let mut diagnostics = DiagnosticSet::default();
+        diagnostics.extend(self.head_diagnostics.iter().cloned(), None);
         for diags in self.file_diagnostics.values() {
-            diagnostics.extend(diags.iter().cloned());
+            diagnostics.extend(diags.iter().cloned(), None);
         }
-        diagnostics.extend(self.lib_diagnostics.iter().cloned());
+        diagnostics.extend(self.lib_diagnostics.iter().cloned(), None);
 
         let mut components = BTreeMap::new();
         let mut keys = FxHashMap::default();
@@ -372,10 +380,10 @@ impl Revision {
             *count += 1;
             // The first occurrence of a name keeps it bare; later ones take their file path, which is unique per file.
             let key = if *count == 1 { base_name } else { format!("{} ({})", base_name, entry.file_path) };
-            diagnostics.extend(options.plugins.run_on_component_resolved(&mut entry));
+            diagnostics.extend(options.plugins.run_on_component_resolved(&mut entry), Some(&key));
             let new_file_path = entry.file_path.clone();
             if let Some(previous) = components.insert(key.clone(), entry) {
-                diagnostics.push(
+                diagnostics.add(
                     Diagnostic::new(
                         DiagnosticSeverity::Warning,
                         DiagnosticCode::ComponentKeyCollision,
@@ -390,21 +398,22 @@ impl Revision {
                          later one is kept in the output. Check for overlapping src_dirs or a genuine duplicate \
                          declaration.",
                     ),
+                    None,
                 );
             }
+            diagnostics.extend(resolved.diagnostics.iter().cloned(), Some(&key));
             keys.insert(id, key);
-            diagnostics.extend(resolved.diagnostics.iter().cloned());
         }
 
         let (enums, enum_diagnostics) = collect_public_enums(&self.global);
-        diagnostics.extend(enum_diagnostics);
-        diagnostics.extend(self.tail_diagnostics.iter().cloned());
+        diagnostics.extend(enum_diagnostics, None);
+        diagnostics.extend(self.tail_diagnostics.iter().cloned(), None);
 
         let components_extracted = components.len() as u32;
         self.output = Arc::new(ExtractionOutput {
             components,
             enums,
-            diagnostics,
+            diagnostics: diagnostics.finish(),
             stats: ExtractionStats {
                 components_extracted,
                 files_parsed: self.files.len() as u32,
@@ -414,6 +423,54 @@ impl Revision {
             },
         });
         self.keys = keys;
+    }
+}
+
+/// Diagnostics merged by identity: an identical diagnostic reported while resolving many components is kept once,
+/// listing those components in `affects`.
+#[derive(Default)]
+struct DiagnosticSet {
+    index: FxHashMap<Diagnostic, usize>,
+    items: Vec<Diagnostic>,
+}
+
+impl DiagnosticSet {
+    fn add(&mut self, diagnostic: Diagnostic, component: Option<&str>) {
+        let at = match self.index.get(&diagnostic) {
+            Some(&at) => at,
+            None => {
+                self.index.insert(diagnostic.clone(), self.items.len());
+                self.items.push(diagnostic);
+                self.items.len() - 1
+            }
+        };
+        if let Some(key) = component {
+            self.items[at].affects.push(key.to_owned());
+        }
+    }
+
+    fn extend(&mut self, diagnostics: impl IntoIterator<Item = Diagnostic>, component: Option<&str>) {
+        for diagnostic in diagnostics {
+            self.add(diagnostic, component);
+        }
+    }
+
+    /// The diagnostics by file, position and message; run-wide ones (no file) first.
+    fn finish(self) -> Vec<Diagnostic> {
+        let mut items = self.items;
+        for diagnostic in &mut items {
+            diagnostic.affects.sort();
+            diagnostic.affects.dedup();
+        }
+        // Severity by explicit rank, worst first, and code by name: neither enum's declaration order is an ordering.
+        items.sort_by(|a, b| {
+            (&a.file, a.line, a.column, &a.message)
+                .cmp(&(&b.file, b.line, b.column, &b.message))
+                .then_with(|| severity_rank(&b.severity).cmp(&severity_rank(&a.severity)))
+                .then_with(|| format!("{:?}", a.code).cmp(&format!("{:?}", b.code)))
+                .then_with(|| a.help.cmp(&b.help))
+        });
+        items
     }
 }
 

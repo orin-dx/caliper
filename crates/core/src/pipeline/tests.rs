@@ -1273,10 +1273,11 @@ fn a_panicking_plugin_hook_degrades_to_a_diagnostic_and_other_work_still_complet
 
     let panic_diagnostics: Vec<_> =
         output.diagnostics.iter().filter(|d| d.code == DiagnosticCode::InternalPanic).collect();
+    // The identical panic from both components is one diagnostic listing both.
     assert_eq!(
-        panic_diagnostics.len(),
-        2,
-        "expected one InternalPanic diagnostic per component resolution, got {:?}",
+        panic_diagnostics.iter().map(|d| d.affects.clone()).collect::<Vec<_>>(),
+        vec![vec!["Button".to_string(), "Card".to_string()]],
+        "got {:?}",
         output.diagnostics
     );
     assert!(
@@ -2080,4 +2081,49 @@ fn test_exclude_patterns_empty_string_excludes_everything() {
 
     assert!(files.is_empty(), "an empty-string pattern should exclude every file, got {files:?}");
     assert!(diagnostics.is_empty());
+}
+
+#[test]
+fn a_diagnostic_shared_by_many_components_is_reported_once_listing_them() {
+    let tmp = TempDir::new().unwrap();
+    write_file(&tmp, "shared.ts", "import type { X } from './missing';\nexport interface Shared { x: X }\n");
+    for name in ["Button", "Card"] {
+        write_file(
+            &tmp,
+            &format!("{name}.tsx"),
+            &format!(
+                "import type {{ Shared }} from './shared';\nexport function {name}(props: Shared) {{ return null; }}\n"
+            ),
+        );
+    }
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+
+    let output = extract(&options);
+
+    let summary: Vec<(DiagnosticCode, String, Vec<String>)> = output
+        .diagnostics
+        .iter()
+        .map(|d| {
+            (
+                d.code.clone(),
+                d.file.as_deref().unwrap_or("").rsplit('/').next().unwrap_or("").to_owned(),
+                d.affects.clone(),
+            )
+        })
+        .collect();
+    let both = vec!["Button".to_string(), "Card".to_string()];
+    assert_eq!(
+        summary,
+        // The missing module, then the type it would have provided: each once, listing both components.
+        vec![
+            (DiagnosticCode::UnresolvableImport, "shared.ts".to_string(), both.clone()),
+            (DiagnosticCode::UnresolvableImport, "shared.ts".to_string(), both),
+        ],
+        "{:#?}",
+        output.diagnostics
+    );
 }

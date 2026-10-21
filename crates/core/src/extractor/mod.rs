@@ -129,8 +129,7 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
             line: None,
             column: None,
             help: Some("Reduce nested parenthesized/object/conditional types in this file.".into()),
-            code: DiagnosticCode::ExcessiveNesting,
-        });
+            code: DiagnosticCode::ExcessiveNesting, affects: Vec::new(), });
         return data;
     }
 
@@ -155,6 +154,7 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
             column: None,
             help: None,
             code: DiagnosticCode::ParseError,
+            affects: Vec::new(),
         });
     }
 
@@ -399,6 +399,7 @@ impl<'src> SourceDataCollector<'src> {
                 column: None,
                 help: Some("This may indicate a deeply chained conditional or mapped type.".into()),
                 code: DiagnosticCode::MaxDepthExceeded,
+                affects: Vec::new(),
             });
             let raw = self.source[span.start as usize..span.end as usize].to_owned();
             return CollectedType::Raw(raw);

@@ -1629,6 +1629,7 @@ fn resolved_chain_give_up_pushes_diagnostic_and_populates_composes() {
         column: None,
         help: None,
         code: DiagnosticCode::MaxDepthExceeded,
+        affects: Vec::new(),
     };
 
     let chain = ResolvedChain::give_up("SomeUnresolved".to_string(), Some(diag.clone()), &mut state);
@@ -2615,6 +2616,7 @@ fn ts_lib_paths_report_typescript_7_without_its_platform_package() {
                     .into()
             ),
             code: DiagnosticCode::MissingTypeLibrary,
+            affects: Vec::new(),
         })
     );
 }

@@ -227,6 +227,7 @@ pub(super) fn resolve_import_specifier(
                 column: None,
                 help: Some(format!("Resolution error: {}", e)),
                 code: DiagnosticCode::UnresolvableImport,
+                affects: Vec::new(),
             });
             None
         }

@@ -43,6 +43,7 @@ pub(super) fn resolve_named(
             column: None,
             help: Some("This type (directly or indirectly) references itself.".into()),
             code: DiagnosticCode::CircularReference,
+            affects: Vec::new(),
         });
         return OpaqueDetail::new(name.to_string(), OpaqueReason::DepthExceeded);
     }
@@ -195,6 +196,7 @@ fn resolve_named_uncycled(
         column: None,
         help: Some("Check that the package is installed and its types are resolvable.".into()),
         code: DiagnosticCode::UnresolvableImport,
+        affects: Vec::new(),
     });
     PropType::Named { name: name.clone(), args: resolved_args }
 }

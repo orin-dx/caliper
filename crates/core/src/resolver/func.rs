@@ -75,6 +75,7 @@ pub(super) fn resolve_function_type(
         column: None,
         help: None,
         code: DiagnosticCode::OpaqueType,
+        affects: Vec::new(),
     };
     OpaqueDetail::give_up(state, raw, OpaqueReason::MultiParamFunction, diagnostic)
 }
@@ -105,6 +106,7 @@ pub(super) fn resolve_typeof(
         column: None,
         help: None,
         code: DiagnosticCode::OpaqueType,
+        affects: Vec::new(),
     });
 
     PropType::Named { name: name.clone(), args: vec![] }

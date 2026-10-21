@@ -183,6 +183,12 @@ $ caliper-docgen schema
           },
           "code": {
             "type": "string"
+          },
+          "affects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       }

@@ -174,6 +174,7 @@ pub struct Diagnostic {
     pub column: Option<u32>,
     pub help: Option<String>,
     pub code: DiagnosticCode,
+    pub affects: Vec<String>, // omitted from JSON when empty
 }
 
 #[non_exhaustive]
@@ -189,6 +190,8 @@ pub enum DiagnosticCode {
 ```
 
 Both enums are `#[non_exhaustive]` and derive `Serialize`/`Deserialize` normally — no manual impl here, because neither is recursive. `DiagnosticSeverity` serializes `camelCase`; `DiagnosticCode` serializes `SCREAMING_SNAKE_CASE` (verified by the `internal_panic_code_serializes_as_screaming_snake_case` and `skipped_candidate_code_serializes_screaming_snake_case` tests).
+
+**A diagnostic's identity is all of its fields except `affects`.** `Revision::assemble` merges identical diagnostics into one and lists, in `affects`, the output keys of every component whose resolution reported it (sorted). File- and run-level diagnostics (parse errors, missing source directories) have no `affects`. The output's `diagnostics` are sorted by file, line, column and message, then severity by explicit rank, so a watch snapshot and a cold extract list them identically. Before this, one conditional type in Mantine was reported 13,358 times.
 
 **`DiagnosticCode::Unknown` is intentional dead code, not a gap.** Its doc comment (diagnostic.rs:65-70) states it: reserved headroom for external consumers constructing their own `Diagnostic` outside the extraction pipeline (e.g. a wrapping tool). Nothing in `crates/core` or `crates/cli` is expected to construct it, and it shows up in this crate's own tests only as a placeholder value (`output.rs` tests build `Diagnostic { code: DiagnosticCode::Unknown, .. }` when the specific code doesn't matter to the assertion). Do not "clean this up" by removing it as unused — that's the entire point of it existing.
 
