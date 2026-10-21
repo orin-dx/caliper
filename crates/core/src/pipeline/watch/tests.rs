@@ -928,3 +928,112 @@ fn editing_a_disambiguated_component_updates_its_own_key_not_the_bare_one() {
         b_after.props.keys().collect::<Vec<_>>()
     );
 }
+
+// ── parity with the one-shot extract() path ─────────────────────────────────
+
+fn write_project(files: &[(&str, &str)]) -> (tempfile::TempDir, PipelineOptions) {
+    let tmp = tempfile::TempDir::new().unwrap();
+    for (name, body) in files {
+        let path = tmp.path().join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(std::fs::canonicalize(tmp.path()).unwrap()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join(".cache")).unwrap()),
+        ..Default::default()
+    };
+    (tmp, options)
+}
+
+/// The parts of an output a consumer sees, as JSON: components and public enums.
+fn visible(output: &crate::types::ExtractionOutput) -> serde_json::Value {
+    serde_json::json!({ "components": output.components, "enums": output.enums })
+}
+
+#[test]
+fn snapshot_lists_public_enums_under_their_bare_names_like_extract() {
+    let (_tmp, options) =
+        write_project(&[("Size.ts", "export enum Size { Small = \"sm\" }\nenum Hidden { A = \"a\" }\n")]);
+    let cold = crate::pipeline::extract(&options);
+    let session = WatchSession::new(options);
+    let _initial = session.initialize();
+
+    assert_eq!(cold.enums.keys().collect::<Vec<_>>(), vec!["Size"]);
+    assert_eq!(visible(&session.snapshot()), visible(&cold));
+}
+
+#[test]
+fn a_new_import_edge_added_by_an_edit_makes_the_importer_re_resolve_on_later_edits() {
+    let (tmp, options) = write_project(&[
+        ("types.ts", "export interface BaseProps { a?: string }\n"),
+        (
+            "Button.tsx",
+            "export interface OwnProps { own?: string }\nexport function Button(props: OwnProps) { return null }\n",
+        ),
+    ]);
+    let session = WatchSession::new(options);
+    let _initial = session.initialize();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(tmp.path()).unwrap()).unwrap();
+
+    // Edit 1: Button starts extending a type imported from types.ts, a dependency edge that did not exist at init.
+    std::fs::write(
+        root.join("Button.tsx"),
+        "import type { BaseProps } from \"./types\";\nexport interface OwnProps extends BaseProps { own?: string }\nexport function Button(props: OwnProps) { return null }\n",
+    )
+    .unwrap();
+    let _update = session.update_file(&root.join("Button.tsx"));
+
+    // Edit 2: change only the dependency. Button must be re-resolved with the new props.
+    std::fs::write(root.join("types.ts"), "export interface BaseProps { a?: string; b?: number }\n").unwrap();
+    let update = session.update_file(&root.join("types.ts"));
+
+    let button = update.updated_components.iter().find(|c| c.display_name == "Button").expect("Button re-resolved");
+    assert_eq!(button.props.keys().collect::<Vec<_>>(), vec!["a", "b", "own"]);
+}
+
+#[test]
+fn an_edit_gives_the_same_visible_output_as_a_cold_extract_of_the_edited_project() {
+    let (tmp, options) = write_project(&[
+        (
+            "Button.tsx",
+            "export interface ButtonProps { label?: string }\nexport function Button(props: ButtonProps) { return null }\n",
+        ),
+        ("Size.ts", "export enum Size { Small = \"sm\" }\n"),
+    ]);
+    let session = WatchSession::new(options.clone());
+    let _initial = session.initialize();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(tmp.path()).unwrap()).unwrap();
+
+    std::fs::write(
+        root.join("Button.tsx"),
+        "export interface ButtonProps { label?: string; size?: number }\nexport function Button(props: ButtonProps) { return null }\n",
+    )
+    .unwrap();
+    let _update = session.update_file(&root.join("Button.tsx"));
+
+    assert_eq!(visible(&session.snapshot()), visible(&crate::pipeline::extract(&options)));
+}
+
+#[test]
+fn a_wrapper_call_guess_with_no_props_is_omitted_by_update_file_like_extract() {
+    let (tmp, options) =
+        write_project(&[("Widgets.tsx", "export const Real = wrap<HTMLDivElement, { label?: string }>(\"div\");\n")]);
+    let session = WatchSession::new(options.clone());
+    let _initial = session.initialize();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(tmp.path()).unwrap()).unwrap();
+
+    std::fs::write(
+        root.join("Widgets.tsx"),
+        "import type { MissingProps } from \"./missing\";\nexport const Ghost = wrap<HTMLDivElement, MissingProps>(\"div\");\n",
+    )
+    .unwrap();
+    let update = session.update_file(&root.join("Widgets.tsx"));
+
+    assert!(
+        update.updated_components.is_empty(),
+        "got {:?}",
+        update.updated_components.iter().map(|c| &c.display_name).collect::<Vec<_>>()
+    );
+    assert_eq!(visible(&session.snapshot()), visible(&crate::pipeline::extract(&options)));
+}

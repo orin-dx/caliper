@@ -19,7 +19,7 @@ This is the orchestration layer: it owns nothing about _how_ a component is pars
 
 ## Watch mode's incremental model
 
-`WatchSession` (`pipeline/watch.rs`) keeps `global` (`ArcSwap<GlobalSourceData>`), `reverse_deps` (`ArcSwap<ReverseDeps>`), a per-file `source_cache: DashMap`, and `component_cache: DashMap<String, ComponentEntry>` alive across many `update_file()` calls. `initialize()` runs one full cold `extract_with_global(options, true)` — the `true` means "also hand back each file's own `SourceData`" so the session can seed `source_cache` without a second parse pass. `initialize()` is idempotent under a `Mutex<bool>` guard, with `.unwrap_or_else(|p| p.into_inner())` recovering from a poisoned lock rather than propagating a second panic (ADR 0005, "defense in depth").
+`WatchSession` (`pipeline/watch.rs`) keeps `global` (`ArcSwap<GlobalSourceData>`), `reverse_deps` (`ArcSwap<ReverseDeps>`), and `component_cache: DashMap<String, ComponentEntry>` alive across many `update_file()` calls. `initialize()` runs one full cold `extract_with_global(options, true)`. `initialize()` is idempotent under a `Mutex<bool>` guard, with `.unwrap_or_else(|p| p.into_inner())` recovering from a poisoned lock rather than propagating a second panic (ADR 0005, "defense in depth").
 
 `update_file(changed)` does _not_ rerun the 6-phase pipeline. It:
 
@@ -44,7 +44,6 @@ pub struct WatchSession {
     pub options: PipelineOptions,
     pub global: ArcSwap<GlobalSourceData>,
     pub reverse_deps: ArcSwap<ReverseDeps>,
-    pub source_cache: DashMap<Utf8PathBuf, SourceData>,
     pub component_cache: DashMap<String, ComponentEntry>,
     pub diagnostics: DashMap<Utf8PathBuf, Vec<Diagnostic>>,
     ambient_global_files: std::sync::OnceLock<Vec<Utf8PathBuf>>,

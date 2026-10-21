@@ -371,62 +371,17 @@ pub(crate) fn extract_with_global(
         .filter(|m| !should_skip(&m.component_name, &options.exclude_prefixes))
         .collect();
 
-    // The whole closure body is wrapped in `contain_panic` so one component's
-    // resolution panicking degrades to a per-component diagnostic instead of
-    // poisoning the entire `.collect()` and crashing the whole extraction
-    // run for every component.
     let ctx = Arc::new(ResolutionContext::new(global.clone(), options));
-    let results: Vec<(ComponentEntry, Vec<Diagnostic>)> = mappings
-        .par_iter()
-        .copied()
-        .map(|mapping| {
-            let label = format!("resolve:{}", mapping.component_name);
-            crate::panic_guard::contain_panic(&label, || {
-                #[cfg(test)]
-                if mapping.component_name == RESOLVE_PANIC_TEST_SENTINEL {
-                    panic!("simulated resolve-phase panic (test-only sentinel)");
-                }
-
-                resolve_component(mapping, &ctx)
-            })
-            .unwrap_or_else(|diag| {
-                let stub = ComponentEntry {
-                    display_name: mapping.component_name.clone(),
-                    file_path: mapping.file_path.clone(),
-                    description: String::new(),
-                    props: Default::default(),
-                    inheritance: vec![],
-                    notable_inherited: Default::default(),
-                    discriminant_prop: None,
-                    composes: vec![],
-                    tags: Default::default(),
-                    methods: vec![],
-                };
-                (stub, vec![diag])
-            })
-        })
-        .collect();
+    let results = resolve_guarded(&mappings, &ctx);
 
     // Phase 5: Collect output.
     let mut components = std::collections::BTreeMap::new();
     let mut seen_names: std::collections::HashMap<String, u32> = Default::default();
 
     for ((entry, diags), mapping) in results.into_iter().zip(&mappings) {
-        // A wrapper call is only a guess at a component; if its props resolve to nothing, listing an empty
-        // component would be noise, so report the miss instead.
-        if mapping.rule == DetectionRule::WrapperTypeArgument && entry.props.is_empty() {
+        if let Some(note) = unresolved_wrapper_guess(mapping, &entry) {
             diagnostics.extend(diags);
-            diagnostics.push(
-                Diagnostic::new(
-                    DiagnosticSeverity::Info,
-                    DiagnosticCode::SkippedCandidate,
-                    format!(
-                        "'{}' looks like a component built by a wrapper call, but its props type '{}' resolved to no props",
-                        entry.display_name, mapping.props_type_name
-                    ),
-                )
-                .with_file(entry.file_path.to_string()),
-            );
+            diagnostics.push(note);
             continue;
         }
         let base_name = entry.display_name.clone();
@@ -562,8 +517,66 @@ fn canonicalize_first_src_dir(src_dirs: &[Utf8PathBuf]) -> Option<Utf8PathBuf> {
     src_dirs.first().and_then(|dir| std::fs::canonicalize(dir).ok()).and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
 }
 
+/// Resolve `mappings` in parallel. The whole closure body is wrapped in `contain_panic` so one component's resolution
+/// panicking degrades to a per-component diagnostic instead of poisoning the `.collect()` and losing every other
+/// component. Shared by `extract()` and `WatchSession::update_file` so the two cannot drift.
+pub(super) fn resolve_guarded(
+    mappings: &[&ComponentMapping],
+    ctx: &ResolutionContext,
+) -> Vec<(ComponentEntry, Vec<Diagnostic>)> {
+    mappings
+        .par_iter()
+        .copied()
+        .map(|mapping| {
+            let label = format!("resolve:{}", mapping.component_name);
+            crate::panic_guard::contain_panic(&label, || {
+                #[cfg(test)]
+                if mapping.component_name == RESOLVE_PANIC_TEST_SENTINEL {
+                    panic!("simulated resolve-phase panic (test-only sentinel)");
+                }
+
+                resolve_component(mapping, ctx)
+            })
+            .unwrap_or_else(|diag| {
+                let stub = ComponentEntry {
+                    display_name: mapping.component_name.clone(),
+                    file_path: mapping.file_path.clone(),
+                    description: String::new(),
+                    props: Default::default(),
+                    inheritance: vec![],
+                    notable_inherited: Default::default(),
+                    discriminant_prop: None,
+                    composes: vec![],
+                    tags: Default::default(),
+                    methods: vec![],
+                };
+                (stub, vec![diag])
+            })
+        })
+        .collect()
+}
+
+/// A wrapper call is only a guess at a component; if its props resolve to nothing, listing an empty component would be
+/// noise, so the caller drops it and reports this note instead.
+pub(super) fn unresolved_wrapper_guess(mapping: &ComponentMapping, entry: &ComponentEntry) -> Option<Diagnostic> {
+    if mapping.rule != DetectionRule::WrapperTypeArgument || !entry.props.is_empty() {
+        return None;
+    }
+    Some(
+        Diagnostic::new(
+            DiagnosticSeverity::Info,
+            DiagnosticCode::SkippedCandidate,
+            format!(
+                "'{}' looks like a component built by a wrapper call, but its props type '{}' resolved to no props",
+                entry.display_name, mapping.props_type_name
+            ),
+        )
+        .with_file(entry.file_path.to_string()),
+    )
+}
+
 /// Collect enum entries that are exported from their source files.
-fn collect_public_enums(
+pub(super) fn collect_public_enums(
     global: &GlobalSourceData,
 ) -> (std::collections::BTreeMap<String, Vec<EnumEntry>>, Vec<Diagnostic>) {
     let mut result = std::collections::BTreeMap::new();
