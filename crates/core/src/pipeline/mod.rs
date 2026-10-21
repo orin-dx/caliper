@@ -445,7 +445,24 @@ pub(crate) fn extract_with_global(
     let mut components = std::collections::BTreeMap::new();
     let mut seen_names: std::collections::HashMap<String, u32> = Default::default();
 
-    for (entry, diags) in results {
+    for ((entry, diags), mapping) in results.into_iter().zip(&mappings) {
+        // A wrapper call is only a guess at a component; if its props resolve to nothing, listing an empty
+        // component would be noise, so report the miss instead.
+        if mapping.rule == DetectionRule::WrapperTypeArgument && entry.props.is_empty() {
+            diagnostics.extend(diags);
+            diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticSeverity::Info,
+                    DiagnosticCode::SkippedCandidate,
+                    format!(
+                        "'{}' looks like a component built by a wrapper call, but its props type '{}' resolved to no props",
+                        entry.display_name, mapping.props_type_name
+                    ),
+                )
+                .with_file(entry.file_path.to_string()),
+            );
+            continue;
+        }
         let base_name = entry.display_name.clone();
         let count = seen_names.entry(base_name.clone()).or_insert(0);
         *count += 1;

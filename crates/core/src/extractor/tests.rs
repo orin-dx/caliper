@@ -844,6 +844,45 @@ fn typed_arrow_and_function_expression_components_are_detected() {
 }
 
 #[test]
+fn wrapper_calls_carrying_props_in_a_type_argument_are_detected_by_shape() {
+    use crate::types::DetectionRule::WrapperTypeArgument;
+    let source = r#"
+        import { factory, withContext, makeThing, createContext } from "./lib";
+        import type { RemoteProps, RemoteFactory } from "./remote";
+        interface ButtonProps { label: string }
+        interface ItemProps { item: string }
+        export const Button = factory<ButtonFactory>((_props, ref) => <button ref={ref} />);
+        export const Item = withContext<HTMLDivElement, ItemProps>("div", "item");
+        export const Remote = withContext<HTMLDivElement, RemoteProps>("div");
+        export const Late = factory<LateFactory>(() => null);
+        type LateFactory = Factory<{ props: ItemProps; ref: HTMLDivElement }>;
+        type ButtonFactory = Factory<{ props: ButtonProps; ref: HTMLButtonElement; stylesNames: "root" }>;
+
+        export const Theme = createContext<ButtonProps>({ label: "" });
+        export const Element = makeThing<HTMLDivElement>("div");
+        export const Unknown = makeThing<RemoteFactory>("div");
+        export const Constant = makeThing<ButtonProps>(42);
+        export const Nothing = makeThing<ButtonProps>();
+    "#;
+    let data = parse_file(Utf8Path::new("/test/wrappers.tsx"), source);
+    let mut found: Vec<(&str, &str, crate::types::DetectionRule)> = data
+        .component_mappings
+        .iter()
+        .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule))
+        .collect();
+    found.sort_by_key(|(name, _, _)| *name);
+    assert_eq!(
+        found,
+        vec![
+            ("Button", "ButtonProps", WrapperTypeArgument),
+            ("Item", "ItemProps", WrapperTypeArgument),
+            ("Late", "ItemProps", WrapperTypeArgument),
+            ("Remote", "RemoteProps", WrapperTypeArgument),
+        ]
+    );
+}
+
+#[test]
 fn test_memo_forward_ref_detected() {
     let source = r#"
         import React, { memo, forwardRef } from "react";

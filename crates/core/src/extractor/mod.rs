@@ -28,6 +28,7 @@ mod defaults;
 mod interface;
 mod jsdoc;
 mod visit;
+mod wrapper;
 
 // ─── Entry Point ─────────────────────────────────────────────────────────────
 
@@ -211,6 +212,8 @@ pub(super) struct SourceDataCollector<'src> {
     /// aliased, the original is implementation detail, not a second public
     /// component; filtered out of the final `component_mappings` in `finish()`.
     pub(super) aliased_away: FxHashSet<CompactString>,
+    /// Wrapper-call candidates, promoted to mappings in `finish()` once the whole file has been seen.
+    pub(super) pending_wrappers: Vec<wrapper::PendingWrapper>,
 }
 
 impl<'src> SourceDataCollector<'src> {
@@ -226,6 +229,7 @@ impl<'src> SourceDataCollector<'src> {
             namespace_stack: Vec::new(),
             pending_display_name_renames: Vec::new(),
             aliased_away: FxHashSet::default(),
+            pending_wrappers: Vec::new(),
         }
     }
 
@@ -252,6 +256,7 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     fn finish(mut self) -> SourceData {
+        self.promote_wrapper_calls();
         // Filtered by original identifier first, before any displayName rename
         // below can change what identifier a mapping currently answers to.
         if !self.aliased_away.is_empty() {
