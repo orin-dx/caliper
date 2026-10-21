@@ -86,6 +86,81 @@ pub(super) fn unresolved_location_note(
     }
 }
 
+/// What a name used in `file` is bound to, for deciding whether it may take a builtin meaning: a project-local
+/// `ReactNode` or `Partial`, or one imported from some other package, is that declaration, not React's or TypeScript's.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum NameBinding {
+    /// Declared in `file`.
+    Local,
+    /// Imported in `file` (for a qualified name, its namespace is) from this specifier.
+    Imported(String),
+    /// Neither: a global, such as TypeScript's lib types or React's ambient namespace.
+    Unbound,
+}
+
+pub(super) fn name_binding(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> NameBinding {
+    deps::record(file);
+    let head = name.split('.').next().unwrap_or(name);
+    if head == name && ctx.named_types.is_declared_at(file, name) {
+        return NameBinding::Local;
+    }
+    match ctx.import_map.find_import(file, head) {
+        Some(import) => NameBinding::Imported(import.specifier.clone()),
+        None => NameBinding::Unbound,
+    }
+}
+
+/// Whether `name` in `file` can be React's own type: imported from React, or not bound at all.
+pub(super) fn may_be_react_builtin(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> bool {
+    match name_binding(name, file, ctx) {
+        NameBinding::Local => false,
+        NameBinding::Imported(specifier) => {
+            specifier == "react" || specifier.starts_with("react/") || specifier == "@types/react"
+        }
+        NameBinding::Unbound => true,
+    }
+}
+
+/// Reports that a builtin name bound to something else was given React's meaning because that binding didn't resolve.
+pub(super) fn builtin_fallback_diagnostic(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> Diagnostic {
+    let bound_to = match name_binding(name, file, ctx) {
+        NameBinding::Imported(specifier) => format!("imported from '{specifier}'"),
+        NameBinding::Local => "declared in this file".to_owned(),
+        NameBinding::Unbound => "unbound".to_owned(),
+    };
+    Diagnostic::new(
+        DiagnosticSeverity::Info,
+        DiagnosticCode::UnresolvableImport,
+        format!("'{name}' in '{file}' is {bound_to}, which could not be resolved; treated as React's '{name}'"),
+    )
+    .with_file(file.to_string())
+    .with_help("If it is a different type, make its declaration resolvable from this file.")
+}
+
+/// Whether `name` in `file` can be the utility `synthesize_utility_alias` would build for it: React's own helpers
+/// (`PropsWithChildren`, `PropsWithRef`) need React's binding, TypeScript's (`Omit`, `Partial`, ...) need none.
+pub(super) fn may_be_utility(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> bool {
+    let bare = name.strip_prefix("React.").unwrap_or(name);
+    if matches!(bare, "PropsWithChildren" | "PropsWithRef") {
+        may_be_react_builtin(name, file, ctx)
+    } else {
+        may_be_ts_lib_type(name, file, ctx)
+    }
+}
+
+/// Whether `name`, as bound in `file`, leads to a declaration the index holds.
+pub(super) fn declaration_resolves(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> bool {
+    let mut ignored = Vec::new();
+    import::resolve_to_canonical(name, file, ctx, &mut ignored).is_some_and(|(canonical_file, canonical_name)| {
+        ctx.named_types.is_declared_at(&canonical_file, &canonical_name)
+    }) || ctx.named_types.is_declared_at(file, name)
+}
+
+/// Whether `name` in `file` can be one of TypeScript's lib types, which are globals and never imported.
+pub(super) fn may_be_ts_lib_type(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> bool {
+    name_binding(name, file, ctx) == NameBinding::Unbound
+}
+
 /// TypeScript's own generic utility types — never prop providers, and expanding
 /// them structurally needs a type checker we don't have. `Omit`/`Pick`/`Partial`/
 /// `Readonly` get real structural handling as alias shapes (see resolver/alias.rs);

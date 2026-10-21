@@ -135,8 +135,10 @@ pub(super) fn resolve_base_as_chain(
             // the string-based `resolve_props_chain` path below, so nested generics and
             // `keyof` operands survive structurally instead of being flattened to a
             // single opaque display string first.
-            if let Some(alias) = super::substitute::synthesize_utility_alias(name.as_str(), args, file_path) {
-                return resolve_type_alias_chain(&alias, file_path, mapping, ctx, state, depth);
+            if super::may_be_utility(name.as_str(), file_path, ctx) {
+                if let Some(alias) = super::substitute::synthesize_utility_alias(name.as_str(), args, file_path) {
+                    return resolve_type_alias_chain(&alias, file_path, mapping, ctx, state, depth);
+                }
             }
 
             // A user-defined generic alias referenced with structured (possibly
