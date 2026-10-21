@@ -138,7 +138,7 @@ The module updates through HMR as components change. The plugin and the `caliper
 | Discriminated unions          | `variant: 'filled' \| 'outlined' \| 'standard'`                   |
 | JSDoc tags                    | `@description`, `@default`, `@deprecated`, `@internal`            |
 
-Not recognized yet: components declared through a factory call, such as Mantine's `factory<ButtonFactory>()`. Props that come from packages that aren't installed stay unresolved and are reported as warnings. [`docs/edge-cases.md`](docs/edge-cases.md) has the measured gaps.
+Components declared through a generic wrapper call, such as Mantine's `factory<ButtonFactory>()`, are recognized from their type arguments. Not recognized yet: wrapper calls with no type argument, such as `lazy()`. Props that come from packages that aren't installed stay unresolved and are reported as warnings. [`docs/edge-cases.md`](docs/edge-cases.md) has the measured gaps.
 
 ## Documentation
 
