@@ -23,6 +23,19 @@ import docgen from 'virtual:caliper-docgen'
 docgen.components['Button'].props
 ```
 
+On every change the virtual module reloads with the same output a fresh extraction would give, including removed components, enums and diagnostics. To apply changes yourself, listen for the update event:
+
+```ts
+import.meta.hot?.on(
+  'caliper-docgen:update',
+  ({ revision, updatedKeys, updatedComponents, removedKeys, diagnostics }) => {
+    // Delete removedKeys, then set updatedKeys[i] to updatedComponents[i]. Ignore a revision older than one applied.
+  },
+)
+```
+
+In `vite build --watch`, a change to any file under `srcDirs` triggers a rebuild, even one no bundle module imports. A build fails if extraction fails.
+
 Extraction runs on OXC through [`caliper-docgen-napi`](https://www.npmjs.com/package/caliper-docgen-napi), so a single-file update takes about 2ms. Requires Vite 7 or 8. The module uses the canonical output format, not the `react-docgen-typescript` shape.
 
 Docs and benchmarks: [orin-dx.com/tools/caliper](https://orin-dx.com/tools/caliper/). Source: [github.com/orin-dx/caliper](https://github.com/orin-dx/caliper).

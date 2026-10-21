@@ -222,9 +222,8 @@ pub async fn extract_file_incremental(
     .map_err(|e| napi::Error::from_reason(e.to_string()))?
 }
 
-/// Initialize a watch session with a full cold extraction.
-/// Returns JSON string of ExtractionOutput.
-/// Call this after create_session(), in configureServer.
+/// The session's current output as a JSON string of ExtractionOutput, running the cold extraction first if the
+/// session has none. Every change applied through `extract_file_incremental` is reflected.
 #[napi]
 pub async fn initialize_session(session_id: u32, options: JsExtractOptions) -> napi::Result<String> {
     tokio::task::spawn_blocking(move || {
