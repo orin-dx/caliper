@@ -77,6 +77,12 @@ impl WatchSession {
         output
     }
 
+    /// The published revision's number: 0 before `initialize`, then one higher for every change that produced a new
+    /// revision. An update that leaves it unchanged changed nothing.
+    pub fn revision(&self) -> u64 {
+        self.current.load().as_ref().map_or(0, |revision| revision.id)
+    }
+
     /// The current output: exactly what a cold `extract()` of the same files would return. Empty before `initialize`.
     pub fn snapshot(&self) -> ExtractionOutput {
         match self.current.load_full() {

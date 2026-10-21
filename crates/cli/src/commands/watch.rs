@@ -70,18 +70,38 @@ fn start_session(
         print_diagnostics(&first.diagnostics);
     }
 
-    let exit_code = Arc::new(AtomicI32::new(watch_exit_code(&first)));
+    let exit_code = Arc::new(AtomicI32::new(0));
+    publish(&first, args.out.as_deref(), &exit_code);
     Ok((options, session, exit_code))
 }
 
-/// `Some(exit code)` when `key` quits. Raw mode turns off ISIG, so Ctrl-C arrives here as a key, not SIGINT. `r` only
-/// refreshes the tracked exit code: past its first call `initialize()` returns the current snapshot.
-fn handle_key(key: KeyEvent, session: &WatchSession, exit_code: &AtomicI32) -> Option<i32> {
+/// Tracks the exit code from the whole `snapshot` and rewrites `--out` with it.
+fn publish(snapshot: &ExtractionOutput, out: Option<&str>, exit_code: &AtomicI32) {
+    exit_code.store(watch_exit_code(snapshot), Ordering::Relaxed);
+    if let Some(failure) = out.and_then(|out| write_snapshot(out, snapshot)) {
+        print_diagnostics(&[failure]);
+    }
+}
+
+/// `Some(exit code)` when `key` quits. Raw mode turns off ISIG, so Ctrl-C arrives here as a key, not SIGINT. `r`
+/// extracts everything again, for changes the watcher cannot see (`tsconfig.json`, `package.json`, `node_modules`).
+fn handle_key(
+    key: KeyEvent,
+    session: &WatchSession,
+    quiet: bool,
+    out: Option<&str>,
+    exit_code: &AtomicI32,
+) -> Option<i32> {
     match key.code {
         KeyCode::Char('q') => Some(exit_code.load(Ordering::Relaxed)),
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(exit_code.load(Ordering::Relaxed)),
         KeyCode::Char('r') => {
-            exit_code.store(watch_exit_code(&session.initialize()), Ordering::Relaxed);
+            let output = session.rebuild();
+            if !quiet {
+                print_summary(&output, quiet);
+                print_diagnostics(&output.diagnostics);
+            }
+            publish(&output, out, exit_code);
             None
         }
         _ => None,
@@ -102,13 +122,35 @@ fn read_keys(
     }
 }
 
-fn spawn_keyboard_thread(session: Arc<WatchSession>, exit_code: Arc<AtomicI32>) {
+/// Raw mode is for reading single keys, but it also turns off output processing, so every `\n` printed during the
+/// session would leave the cursor in its column. Turn output processing back on; input stays raw.
+#[cfg(unix)]
+fn keep_output_processing() -> std::io::Result<()> {
+    use rustix::termios::{tcgetattr, tcsetattr, OptionalActions, OutputModes};
+
+    let stdin = std::io::stdin();
+    let mut termios = tcgetattr(&stdin)?;
+    termios.output_modes |= OutputModes::OPOST | OutputModes::ONLCR;
+    tcsetattr(&stdin, OptionalActions::Now, &termios)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn keep_output_processing() -> std::io::Result<()> {
+    Ok(())
+}
+
+fn spawn_keyboard_thread(session: Arc<WatchSession>, quiet: bool, out: Option<String>, exit_code: Arc<AtomicI32>) {
     std::thread::spawn(move || {
         if let Err(error) = crossterm::terminal::enable_raw_mode() {
             tracing::warn!("key shortcuts unavailable: {error}");
             return;
         }
-        let quit = read_keys(crossterm::event::read, |key| handle_key(key, &session, &exit_code));
+        if let Err(error) = keep_output_processing() {
+            tracing::warn!("output lines may not start at column 0: {error}");
+        }
+        let quit =
+            read_keys(crossterm::event::read, |key| handle_key(key, &session, quiet, out.as_deref(), &exit_code));
         crossterm::terminal::disable_raw_mode().ok();
         match quit {
             // watchexec has no graceful-quit handle reachable from this thread, so this hard-exits, with the tracked
@@ -148,30 +190,31 @@ fn write_snapshot(path: &str, snapshot: &ExtractionOutput) -> Option<Diagnostic>
     })
 }
 
-/// One file-change event: re-resolves a TypeScript `path`, tracks the exit code, prints the delta, rewrites `--out`.
+/// One file-change event: applies `path` to the session, prints the delta, tracks the exit code and rewrites `--out`.
+/// An event that produced no new revision (a non-source file, an excluded story) changes nothing.
 fn handle_change(session: &WatchSession, path: &Path, quiet: bool, out: Option<&str>, exit_code: &AtomicI32) {
-    if !matches!(path.extension().and_then(|e| e.to_str()), Some("ts" | "tsx")) {
-        return;
-    }
     let Ok(path) = camino::Utf8PathBuf::from_path_buf(path.to_owned()) else { return };
 
+    let before = session.revision();
     let update = session.update_file(&path);
-    // The cumulative snapshot, not this event's delta: a clean update to one file must not reset the exit code while
-    // an earlier file in the session still has an unresolved error.
-    let snapshot = session.snapshot();
-    exit_code.store(watch_exit_code(&snapshot), Ordering::Relaxed);
+    if update.revision == before {
+        return;
+    }
 
     if !quiet {
         use owo_colors::OwoColorize;
-        let names: Vec<_> = update.updated_components.iter().map(|c| c.display_name.as_str()).collect();
-        if !names.is_empty() {
-            println!("  {}  {}", path.file_name().unwrap_or("?").dimmed(), names.join(", ").bold());
+        let file = path.file_name().unwrap_or("?");
+        if !update.updated_keys.is_empty() {
+            println!("  {}  {}", file.dimmed(), update.updated_keys.join(", ").bold());
+        }
+        if !update.removed_keys.is_empty() {
+            println!("  {}  removed {}", file.dimmed(), update.removed_keys.join(", "));
         }
         print_diagnostics(&update.diagnostics);
     }
-    if let Some(failure) = out.and_then(|out| write_snapshot(out, &snapshot)) {
-        print_diagnostics(&[failure]);
-    }
+    // The cumulative snapshot, not this event's delta: a clean update to one file must not reset the exit code while
+    // an earlier file in the session still has an unresolved error.
+    publish(&session.snapshot(), out, exit_code);
 }
 
 pub fn cmd_watch(args: crate::WatchArgs, quiet: bool, config_path: Option<&str>) -> Result<i32> {
@@ -181,7 +224,7 @@ pub fn cmd_watch(args: crate::WatchArgs, quiet: bool, config_path: Option<&str>)
 
     let _restore_terminal = interactive.then_some(RestoreTerminal);
     if interactive {
-        spawn_keyboard_thread(session.clone(), exit_code.clone());
+        spawn_keyboard_thread(session.clone(), quiet, args.out.clone(), exit_code.clone());
     }
 
     // watchexec's constructor is synchronous even though its event loop is async.
@@ -298,6 +341,37 @@ mod tests {
     }
 
     #[test]
+    fn an_excluded_file_event_changes_nothing() {
+        let (src, scratch) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+        let session = session_over(&src, &scratch);
+        let _ignored = session.initialize();
+        let out = scratch.path().join("out.json");
+        let story = src.path().join("Widget.stories.tsx");
+        std::fs::write(&story, WIDGET).unwrap();
+
+        handle_change(&session, &story, true, out.to_str(), &AtomicI32::new(7));
+
+        assert!(!out.exists(), "an excluded file must not rewrite --out");
+        assert_eq!(session.revision(), 1);
+    }
+
+    #[test]
+    fn a_deleted_file_is_removed_from_out() {
+        let (src, scratch) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+        let widget = src.path().join("Widget.tsx");
+        std::fs::write(&widget, WIDGET).unwrap();
+        let session = session_over(&src, &scratch);
+        let _ignored = session.initialize();
+        let out = scratch.path().join("out.json");
+
+        std::fs::remove_file(&widget).unwrap();
+        handle_change(&session, &widget, true, out.to_str(), &AtomicI32::new(7));
+
+        let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        assert_eq!(written["components"], serde_json::json!({}));
+    }
+
+    #[test]
     fn a_clean_change_does_not_reset_the_exit_code_of_an_earlier_error() {
         let (src, scratch) = (TempDir::new().unwrap(), TempDir::new().unwrap());
         let widget = src.path().join("Widget.tsx");
@@ -343,8 +417,11 @@ mod tests {
         let _ignored = session.initialize();
         let exit_code = AtomicI32::new(2);
 
-        assert_eq!(handle_key(key('c'), &session, &exit_code), None);
-        assert_eq!(handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL), &session, &exit_code), Some(2));
+        assert_eq!(handle_key(key('c'), &session, true, None, &exit_code), None);
+        assert_eq!(
+            handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL), &session, true, None, &exit_code),
+            Some(2)
+        );
     }
 
     #[test]
@@ -399,23 +476,26 @@ mod tests {
         let _ignored = session.initialize();
         let exit_code = AtomicI32::new(2);
 
-        assert_eq!(handle_key(key('q'), &session, &exit_code), Some(2));
-        assert_eq!(handle_key(key('x'), &session, &exit_code), None);
+        assert_eq!(handle_key(key('q'), &session, true, None, &exit_code), Some(2));
+        assert_eq!(handle_key(key('x'), &session, true, None, &exit_code), None);
         assert_eq!(exit_code.load(Ordering::Relaxed), 2);
     }
 
     #[test]
-    fn r_refreshes_the_tracked_exit_code_from_the_session() {
+    fn r_extracts_again_and_rewrites_out() {
         let (src, scratch) = (TempDir::new().unwrap(), TempDir::new().unwrap());
         let session = session_over(&src, &scratch);
         let _ignored = session.initialize();
-        // An unreadable file leaves an error-severity diagnostic in the session.
-        let bad = src.path().join("Bad.tsx");
-        std::fs::write(&bad, [0xff, 0xfe, 0xfd]).unwrap();
-        handle_change(&session, &bad, true, None, &AtomicI32::new(0));
+        let out = scratch.path().join("out.json");
         let exit_code = AtomicI32::new(0);
+        // Changes no event reported: a new component and an unreadable file.
+        std::fs::write(src.path().join("Widget.tsx"), WIDGET).unwrap();
+        std::fs::write(src.path().join("Bad.tsx"), [0xff, 0xfe, 0xfd]).unwrap();
 
-        assert_eq!(handle_key(key('r'), &session, &exit_code), None);
+        assert_eq!(handle_key(key('r'), &session, true, out.to_str(), &exit_code), None);
+
+        let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        assert_eq!(prop_names(&written, "Widget"), vec!["label"]);
         assert_eq!(exit_code.load(Ordering::Relaxed), 2);
     }
 
@@ -425,7 +505,8 @@ mod tests {
             let src = TempDir::new().unwrap();
             std::fs::write(src.path().join("Widget.tsx"), WIDGET).unwrap();
             let dir = src.path().to_str().unwrap().to_owned();
-            let args = crate::WatchArgs { src: vec![dir.clone()], out: None };
+            let out = src.path().join("out.json");
+            let args = crate::WatchArgs { src: vec![dir.clone()], out: Some(out.to_str().unwrap().to_owned()) };
 
             let (options, session, exit_code) = start_session(&args, quiet, false, None).unwrap();
 
@@ -433,6 +514,8 @@ mod tests {
             let components: Vec<String> = session.snapshot().components.keys().cloned().collect();
             assert_eq!(components, vec!["Widget".to_owned()]);
             assert_eq!(exit_code.load(Ordering::Relaxed), 0);
+            let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+            assert_eq!(prop_names(&written, "Widget"), vec!["label"], "--out is written before the first change");
         }
     }
 }
