@@ -87,6 +87,7 @@ fn follow_reexports(
         }
     }
 
+    super::deps::record(&file);
     if depth >= MAX_REEXPORT_DEPTH || ctx.named_types.is_declared_at(&file, &name) {
         return (file, name);
     }
@@ -131,6 +132,7 @@ pub(super) fn lookup_interface<'g>(
     canonical_file: &str,
     canonical_name: &str,
 ) -> Option<&'g CollectedInterface> {
+    super::deps::record(Utf8Path::new(canonical_file));
     ctx.named_types.lookup_interface(Utf8Path::new(canonical_file), canonical_name)
 }
 
@@ -143,6 +145,7 @@ pub(super) fn lookup_type_alias<'g>(
     canonical_file: &str,
     canonical_name: &str,
 ) -> Option<(CompactString, &'g CollectedTypeAlias)> {
+    super::deps::record(Utf8Path::new(canonical_file));
     ctx.named_types.lookup_type_alias(Utf8Path::new(canonical_file), canonical_name)
 }
 
@@ -156,6 +159,7 @@ pub(super) fn lookup_interface_including_ambient<'g>(
     canonical_file: &str,
     canonical_name: &str,
 ) -> Option<&'g CollectedInterface> {
+    super::deps::record(Utf8Path::new(canonical_file));
     ctx.named_types.lookup_interface_including_ambient(
         Utf8Path::new(canonical_file),
         canonical_name,
@@ -191,6 +195,7 @@ pub(super) fn resolve_import_specifier(
     ctx: &ResolutionContext,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Utf8PathBuf> {
+    super::deps::record_module_resolution();
     let from_dir = from_file.parent()?;
 
     // Bare package specifiers (not relative/absolute) need real TypeScript
@@ -208,7 +213,11 @@ pub(super) fn resolve_import_specifier(
     }
 
     match ctx.oxc_resolver.resolve(from_dir.as_std_path(), specifier) {
-        Ok(resolved) => Utf8PathBuf::from_path_buf(resolved.path().to_owned()).ok(),
+        Ok(resolved) => {
+            let resolved = Utf8PathBuf::from_path_buf(resolved.path().to_owned()).ok()?;
+            super::deps::record(&resolved);
+            Some(resolved)
+        }
         Err(e) => {
             diagnostics.push(Diagnostic {
                 severity: DiagnosticSeverity::Warning,

@@ -122,6 +122,7 @@ pub(super) fn resolve_named_to_string_literals(
 
     let scoped_key = format!("{}:{}", canonical_file, canonical_name);
 
+    super::deps::record(&canonical_file);
     if let Some(alias) = ctx.global.type_aliases.get(&scoped_key) {
         match alias {
             CollectedTypeAlias::LiteralUnion { members, .. } => {

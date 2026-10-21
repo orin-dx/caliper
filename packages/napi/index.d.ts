@@ -132,7 +132,14 @@ export interface ExtractionOutput {
 }
 
 export interface IncrementalUpdate {
+  /** The session revision this update produced; drop an update older than one already applied. */
+  revision: number
+  /** Components re-resolved by this change, in the same order as `updatedKeys`. */
   updatedComponents: ComponentEntry[]
+  /** The output key each updated component is published under: a bare name, or `Name (file)` when disambiguated. */
+  updatedKeys: string[]
+  /** Output keys that no longer exist: the component was renamed, deleted, or stopped being a component. */
+  removedKeys: string[]
   affectedFiles: string[]
   diagnostics: Diagnostic[]
   durationMs: number

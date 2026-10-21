@@ -26,6 +26,8 @@ use crate::types::*;
 mod alias;
 mod chain;
 mod collected;
+mod deps;
+pub(crate) use deps::Dependencies;
 mod extends;
 mod func;
 mod html;
@@ -149,23 +151,15 @@ pub struct ResolutionContext {
 }
 
 impl ResolutionContext {
+    #[cfg(test)]
     pub fn new(global: Arc<GlobalSourceData>, options: &PipelineOptions) -> Self {
         let named_types = Arc::new(crate::named_type_index::NamedTypeIndex::build(&global));
         Self::build(global, options, compute_ambient_global_files(options), named_types)
     }
 
-    /// Same as `new`, but for a caller that already knows the answer to
-    /// `compute_ambient_global_files` (skips its filesystem walk — see
-    /// `WatchSession::update_file`) and already maintains its own
-    /// incrementally-patched `NamedTypeIndex` rather than wanting one freshly
-    /// rebuilt from the whole (possibly large) merged `global` on every call.
-    /// A full rebuild here is proportionate for `new`'s one-shot, resolve-
-    /// every-component-in-the-project caller, which amortizes it across many
-    /// lookups — but `WatchSession::update_file` runs once per file save and
-    /// typically re-resolves only the handful of components a single edit
-    /// actually affects, so paying a whole-project index rebuild on every
-    /// keystroke-adjacent save measurably regressed watch-mode latency (see
-    /// `NamedTypeIndex::remove_file`'s doc comment).
+    /// A context over an index and ambient file list the caller already holds. A watch revision patches its
+    /// `NamedTypeIndex` per edited file; rebuilding it from the whole merged `global` on every save measurably
+    /// regressed watch latency (see `NamedTypeIndex::remove_file`).
     pub fn new_with_cached_ambient_global_files(
         global: Arc<GlobalSourceData>,
         options: &PipelineOptions,
@@ -345,6 +339,17 @@ fn missing_lib_diagnostic(missing: &[&str], ts_dir: &std::path::Path) -> Diagnos
 }
 
 // ─── Entry Point ─────────────────────────────────────────────────────────────
+
+/// `resolve_component`, plus what its resolution depended on. Watch mode re-resolves a component when one of those
+/// changes.
+pub(crate) fn resolve_component_tracked(
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+) -> (ComponentEntry, Vec<Diagnostic>, Dependencies) {
+    let ((entry, diagnostics), mut deps) = deps::recording(|| resolve_component(mapping, ctx));
+    deps.files.insert(mapping.file_path.clone());
+    (entry, diagnostics, deps)
+}
 
 /// Resolve a `ComponentMapping` to a complete `ComponentEntry`.
 ///

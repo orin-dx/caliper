@@ -1,4 +1,4 @@
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 
@@ -41,30 +41,11 @@ pub(super) fn discover_files(
                 }
             };
             let path = entry.path();
-            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if !matches!(ext, "ts" | "tsx") {
+            if !is_typescript(path) {
                 continue;
             }
-
-            // Excludes apply to the path inside the source directory: a project checked out under `my.test.repo/` or
-            // `~/node_modules-backup/` must not lose every file.
             let relative = path.strip_prefix(dir.as_std_path()).unwrap_or(path);
-            let relative_str = relative.to_str().unwrap_or("");
-            let file_name = relative.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            let in_component = |name: &str| relative.components().any(|c| c.as_os_str() == name);
-
-            // Built-in excludes — skip node_modules sub-dirs only when not intentionally targeting them.
-            if file_name.contains(".stories.")
-                || file_name.contains(".test.")
-                || file_name.contains(".spec.")
-                || in_component("__snapshots__")
-                || (!dir_is_in_node_modules && in_component("node_modules"))
-            {
-                continue;
-            }
-
-            // User-supplied excludes.
-            if extra_excludes.iter().any(|p| relative_str.contains(p.as_str())) {
+            if excluded(relative, dir_is_in_node_modules, extra_excludes) {
                 continue;
             }
 
@@ -99,6 +80,39 @@ pub(super) fn discover_files(
     files.sort();
     files.dedup();
     (files, diagnostics)
+}
+
+fn is_typescript(path: &std::path::Path) -> bool {
+    matches!(path.extension().and_then(|e| e.to_str()), Some("ts" | "tsx"))
+}
+
+/// Excludes apply to the path inside the source directory: a project checked out under `my.test.repo/` or
+/// `~/node_modules-backup/` must not lose every file. `node_modules` is skipped only when the source directory is not
+/// itself inside one.
+fn excluded(relative: &std::path::Path, dir_is_in_node_modules: bool, extra_excludes: &[String]) -> bool {
+    let relative_str = relative.to_str().unwrap_or("");
+    let file_name = relative.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let in_component = |name: &str| relative.components().any(|c| c.as_os_str() == name);
+    file_name.contains(".stories.")
+        || file_name.contains(".test.")
+        || file_name.contains(".spec.")
+        || in_component("__snapshots__")
+        || (!dir_is_in_node_modules && in_component("node_modules"))
+        || extra_excludes.iter().any(|p| relative_str.contains(p.as_str()))
+}
+
+/// Whether discovery would include `path`: TypeScript, under a source directory, and not excluded. Watch mode asks
+/// this of every changed path so an edit to an excluded file (a story, a test) never adds a component.
+pub(super) fn is_source_file(path: &Utf8Path, src_dirs: &[Utf8PathBuf], extra_excludes: &[String]) -> bool {
+    if !is_typescript(path.as_std_path()) {
+        return false;
+    }
+    src_dirs.iter().any(|dir| {
+        let dir = dir.canonicalize_utf8().unwrap_or_else(|_| dir.clone());
+        path.strip_prefix(&dir).is_ok_and(|relative| {
+            !excluded(relative.as_std_path(), dir.as_str().contains("node_modules"), extra_excludes)
+        })
+    })
 }
 
 pub(super) fn should_skip(name: &str, exclude_prefixes: &[String]) -> bool {

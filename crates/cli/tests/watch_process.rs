@@ -218,7 +218,7 @@ fn a_termination_signal_ends_a_clean_session_with_exit_code_0(#[case] signal: &s
 fn a_termination_signal_reports_the_exit_code_of_an_unresolved_error() {
     let mut watch = Watch::start();
     watch.wait_until_watching();
-    std::fs::remove_file(watch.widget()).unwrap();
+    std::fs::write(watch.widget(), [0xff, 0xfe, 0xfd]).unwrap();
     watch.expect_line("Failed to read");
 
     watch.signal("TERM");

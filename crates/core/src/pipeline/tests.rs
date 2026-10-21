@@ -1,3 +1,4 @@
+use super::discover::discover_files;
 use super::*;
 use std::fs;
 use tempfile::TempDir;
@@ -1154,31 +1155,6 @@ fn test_pipeline_options_default() {
     assert_eq!(opts.html_attributes, HtmlAttributeMode::Curated);
     assert!(opts.exclude_patterns.is_empty() && opts.exclude_prefixes.is_empty() && opts.extra_builtins.is_empty());
     assert_eq!((opts.tsconfig_path, opts.cache_dir), (None, None));
-}
-
-// ── test_reverse_deps_bfs ─────────────────────────────────────────────────
-
-#[test]
-fn test_reverse_deps_bfs() {
-    // Construct a dependency graph:
-    //   a.ts  ← b.ts  ← c.ts
-    // If a.ts changes, b.ts and c.ts are affected.
-    let mut inner: FxHashMap<Utf8PathBuf, Vec<Utf8PathBuf>> = Default::default();
-    let a = Utf8PathBuf::from("/project/a.ts");
-    let b = Utf8PathBuf::from("/project/b.ts");
-    let c = Utf8PathBuf::from("/project/c.ts");
-
-    // b.ts imports a.ts → a is reverse-depended-on by b
-    inner.entry(a.clone()).or_default().push(b.clone());
-    // c.ts imports b.ts
-    inner.entry(b.clone()).or_default().push(c.clone());
-
-    let rev = ReverseDeps { inner };
-    let affected = rev.affected(&a);
-
-    assert!(affected.contains(&a), "changed file should be in affected set");
-    assert!(affected.contains(&b), "direct importer should be affected");
-    assert!(affected.contains(&c), "transitive importer should be affected");
 }
 
 // ── test_watch_session_update ─────────────────────────────────────────────

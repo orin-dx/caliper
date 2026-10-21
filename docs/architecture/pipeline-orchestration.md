@@ -1,53 +1,56 @@
 # Pipeline orchestration
 
-**Source:** `crates/core/src/pipeline/mod.rs`, `crates/core/src/pipeline/discover.rs`, `crates/core/src/pipeline/watch.rs`, `crates/core/src/cache.rs`, `crates/core/src/import_map.rs`, `crates/core/src/panic_guard.rs`, `crates/core/src/plugin.rs`
+**Source:** `crates/core/src/pipeline/mod.rs`, `crates/core/src/pipeline/revision.rs`, `crates/core/src/pipeline/discover.rs`, `crates/core/src/pipeline/watch.rs`, `crates/core/src/resolver/deps.rs`, `crates/core/src/cache.rs`, `crates/core/src/import_map.rs`, `crates/core/src/panic_guard.rs`, `crates/core/src/plugin.rs`
 
 This is the orchestration layer: it owns nothing about _how_ a component is parsed or resolved (that's `extractor/` and `resolver/`), only _when_ and _in what order_ files get discovered, parsed, merged, and resolved, and how failures at any step degrade instead of propagating.
 
 ## The 6-phase data flow
 
-`extract_with_global()` (`pipeline/mod.rs:223`) is the single implementation shared by both `extract()` (cold, one-shot) and `WatchSession::initialize()` (the first run inside a watch session). Every phase below runs exactly once per call:
+`Revision::cold()` (`pipeline/revision.rs`) is the single implementation behind `extract()`, `WatchSession::initialize()` and `WatchSession::rebuild()`. Every phase below runs exactly once per call:
 
 - **Phase 0 — validate.** Checks `options.src_dirs` isn't empty and that at least one entry exists on disk. Sequential, trivial cost. Exists specifically so a typo'd `--src` produces an `Error` diagnostic instead of a silent zero-component, zero-diagnostic run (AGENTS.md non-negotiable #6).
 - **Phase 1 — discover.** `discover_files()` walks `src_dirs` via the `ignore` crate, filters to `.ts`/`.tsx`, applies built-in and user excludes, canonicalizes each path, then sorts and dedups. Sequential — it's I/O-bound directory walking, not CPU work worth parallelizing, and the final sort is required for the determinism invariant below.
 - **Phase 2 — parse (parallel).** `src_files.par_iter().map(...)` via rayon. Each file either hits the `.d.ts` cache or gets parsed fresh by `extractor::parse_file`. This is the phase worth parallelizing: OXC parsing is pure CPU work, one file is fully independent of another, and this is typically the dominant cost of a run. Every closure body is wrapped in `panic_guard::contain_panic`.
 - **Phase 3 — merge (+3.5/3.6), sequential.** Each file's `SourceData` (plus any plugin `on_file_extracted` mutation) is folded into one `GlobalSourceData` via hash-map insertions. This phase is sequential specifically because it's cheap (hash-map inserts, not real work) and because `GlobalSourceData` is a single shared structure being built incrementally — parallelizing it would require synchronization that costs more than the merge itself. Phase 3.5 (Full HTML-attribute mode) and Phase 3.6 (ambient TS lib files) extend the same merge with `@types/react` and `lib.es5.d.ts`/`lib.dom.d.ts`, both going through `merge_cached_dts_file` so their diagnostics aren't dropped (see Invariant 3).
 - **Phase 4 — resolve (parallel).** `mappings.par_iter().map(|m| resolve_component(m, &ctx))`, again via rayon, again each closure wrapped in `contain_panic`. `ResolutionContext` wraps `Arc<GlobalSourceData>` so every thread reads the same immutable snapshot; per this crate's `AGENTS.md`, all resolver inputs must be owned or `Arc`-wrapped since rayon may run this on any thread.
-- **Phase 5 — collect/dedup/serialize.** Sequential fold of `(ComponentEntry, Vec<Diagnostic>)` pairs into the output `BTreeMap`, running the display-name collision/disambiguation logic (Invariant 1) and each plugin's `on_component_resolved` hook, then persisting the DTS cache and building `ExtractionStats`.
+- **Phase 5 — assemble.** `Revision::assemble()` folds the resolved components into the output `BTreeMap` in `(file, position)` order, running the display-name disambiguation (Invariant 1) and each plugin's `on_component_resolved` hook, then builds enums, diagnostics and `ExtractionStats`. Watch revisions call the same function, so a watch snapshot and a cold extract cannot disagree on keys, hook output or diagnostic order.
 
 **Why parallel exactly at phases 2 and 4, nowhere else:** those are the only two phases doing embarrassingly-parallel, side-effect-free-per-item CPU work over an already-known-size collection. Discovery is I/O-walk-bound: merge and collect both build one shared structure incrementally, which is cheaper done sequentially than synchronized.
 
 ## Watch mode's incremental model
 
-`WatchSession` (`pipeline/watch.rs`) keeps `global` (`ArcSwap<GlobalSourceData>`), `reverse_deps` (`ArcSwap<ReverseDeps>`), and `component_cache: DashMap<String, ComponentEntry>` alive across many `update_file()` calls. `initialize()` runs one full cold `extract_with_global(options, true)`. `initialize()` is idempotent under a `Mutex<bool>` guard, with `.unwrap_or_else(|p| p.into_inner())` recovering from a poisoned lock rather than propagating a second panic (ADR 0005, "defense in depth").
+`WatchSession` (`pipeline/watch.rs`) holds one immutable `Revision` in an `ArcSwapOption` and a writer `Mutex`. `initialize()` builds the first revision with `Revision::cold()` and is idempotent; `rebuild()` replaces it with a fresh cold one. `update_file(changed)` takes the writer lock, builds the next revision with `Revision::next()`, and publishes it with one atomic store. Readers (`snapshot()`) never wait on the writer and always see one complete revision.
 
-`update_file(changed)` does _not_ rerun the 6-phase pipeline. It:
+`Revision::next(changed)`:
 
-1. Re-parses only `changed`.
-2. Patches `global` via `ArcSwap::rcu` (read-copy-update) — `remove_file` then `merge`, retried automatically if another `update_file` call raced the swap.
-3. Looks up `reverse_deps.affected(changed)` — a BFS over the reverse import graph — to find every file transitively affected by this one change.
-4. Re-resolves only the `ComponentMapping`s belonging to affected files, in parallel, against the freshly-swapped `global`.
-5. Replaces (not appends) this file's diagnostics in a `DashMap<Utf8PathBuf, Vec<Diagnostic>>`, so a since-fixed error doesn't linger in `snapshot()` forever.
+1. Ignores a path discovery would not include (outside every source directory, excluded, not TypeScript): `discover::is_source_file`.
+2. Re-parses `changed` into copies of the previous global data and named-type index. A missing file is a deletion; any other read error keeps the file's previous declarations and records an `IoError`.
+3. Re-resolves the components that are new, live in `changed`, or whose recorded dependencies the change touches (below). Every other component keeps its previous `Arc<Resolved>`.
+4. Calls `assemble()`, then reports `updated_keys` and `removed_keys` against the previous revision's output.
 
-`ReverseDeps` is built once at `initialize()` time from `global.import_map`, by string-appending each relative import specifier onto its consuming file's parent directory and probing `.ts`/`.tsx`/`/index.ts`/`/index.tsx` suffixes with no filesystem I/O (an approximation, not a real resolve). **It is never rebuilt within a session** — see Known Gaps below.
+Each resolution records what it read (`resolver/deps.rs`, a thread-local recorder scoped to one `resolve_component` call):
+
+| Dependency | Recorded by | Re-resolves when |
+| --- | --- | --- |
+| A source file | interface, alias and template lookups, re-export walks, resolved import targets, the consuming file | that file is edited, created or deleted |
+| A bare enum or const-array name | `typeof X` and `(typeof X)[number]` lookups through the project-wide bare-name indexes | the changed file declared that name before or after the change |
+| Module resolution | `resolve_import_specifier` | a new source file appears (it can redirect or satisfy a specifier) |
 
 ## Key types (verbatim)
 
 ```rust
-pub struct ReverseDeps {
-    pub(super) inner: FxHashMap<Utf8PathBuf, Vec<Utf8PathBuf>>,
+pub struct WatchSession {
+    pub options: PipelineOptions,
+    current: ArcSwapOption<Revision>,
+    writer: Mutex<()>,
 }
 ```
 
 ```rust
-pub struct WatchSession {
-    pub options: PipelineOptions,
-    pub global: ArcSwap<GlobalSourceData>,
-    pub reverse_deps: ArcSwap<ReverseDeps>,
-    pub component_cache: DashMap<String, ComponentEntry>,
-    pub diagnostics: DashMap<Utf8PathBuf, Vec<Diagnostic>>,
-    ambient_global_files: std::sync::OnceLock<Vec<Utf8PathBuf>>,
-    initialized: Mutex<bool>,
+pub(crate) struct Dependencies {
+    pub(crate) files: FxHashSet<Utf8PathBuf>,
+    pub(crate) bare_names: FxHashSet<CompactString>,
+    pub(crate) resolves_modules: bool,
 }
 ```
 
@@ -73,13 +76,13 @@ pub trait DocgenPlugin: Send + Sync {
 
 4. **Discovery output is deterministic across OS/filesystem: sorted, deduplicated, and canonicalized.** This is load-bearing for two independent reasons: diagnostic ordering and dedup-winner-selection in Phase 5 are reproducible only because rayon's `.collect()` on a `par_iter()` preserves input order and the sequential merge/resolve phases iterate that same order; and `parent.fileName` in resolver output would otherwise differ depending on whether `--src` was given relative or absolute, or what the invocation cwd was.
 
-5. **`ReverseDeps` is built once, at `WatchSession::initialize()`, from a fully-merged `GlobalSourceData` — never partially, never mid-session.** `ReverseDeps::build` needs `global.import_map` to already reflect Phase 3.5/3.6's merges (ambient globals, `@types/react`) to be complete; building it from a hand-rolled partial `GlobalSourceData` (a bug this code carried previously — see the doc comment on `extract_with_global`) silently produced an incomplete reverse graph that `update_file`'s BFS then propagated changes through incorrectly.
+5. **A watch snapshot equals a cold `extract()` of the same files: components, enums and diagnostics, in the same order.** Stats carry timings and are excluded. Any resolver lookup that reads data outside the component's own mapping must record a dependency in `resolver/deps.rs`, or an edit to that data leaves the component stale. `every_kind_of_change_leaves_the_snapshot_equal_to_a_cold_extract` checks the equality after edits, renames, collisions, excluded files, syntax errors, deletions, moves, bare-name lookups and file creation; disabling any recorder fails it.
 
 6. **A cache-persistence failure (`DtsCache::save_to_disk`) must degrade to `DiagnosticSeverity::Info`, never `Warning`.** `Warning` would flip `docgen check --strict`'s exit code to 1 purely because the _next_ run will have to re-parse `.d.ts` files — extraction output for _this_ run is completely correct either way. This is a deliberate severity choice, not an oversight; the comment at `cache.rs:143-148` explicitly calls out this is the same class of spurious exit-code flip already fixed once elsewhere in the resolver.
 
 7. **Anything reachable from a rayon `.map()` closure or a `DocgenPlugin` hook call must be wrapped in `panic_guard::contain_panic`, individually, per item — not once around the whole batch.** The `.map()` closures at Phase 2 and Phase 4 wrap their _entire bodies_; `PluginRegistry::run_on_file_extracted`/`run_on_component_resolved` wrap _each individual plugin call_, not the surrounding loop, so one misbehaving plugin degrades only itself and every other registered plugin still runs (see `a_panicking_plugin_is_contained_and_tagged_with_its_name_others_still_run`). Violating the per-item granularity (e.g. wrapping the whole `.collect()` instead of each closure invocation) reintroduces the exact failure mode ADR 0005 was written to close: one bad file/plugin/component poisons the whole batch.
 
-8. **`update_file`'s `changed` path must be canonicalized the same way `discover_files` canonicalizes at cold-start, or the reverse-dependency lookup silently finds nothing.** `discover_files` resolves symlinks via the `ignore` walker (e.g. macOS's `/var` → `/private/var`), so every key already stored in `global`/`reverse_deps` is in that resolved form. A raw file-watcher-reported path that skips `canonicalize_best_effort` looks up the wrong key in `reverse_deps.affected()` and returns an empty affected-set with no error at all — not a crash, a silent under-update.
+8. **`update_file`'s `changed` path must be canonicalized the same way `discover_files` canonicalizes at cold-start.** `discover_files` resolves symlinks (e.g. macOS's `/var` → `/private/var`), so every file key and recorded dependency is in that form. A raw watcher path that skips `canonicalize_best_effort` matches no dependency and silently under-updates.
 
 ## Locked design decisions
 
@@ -99,12 +102,12 @@ Cross-referencing `docs/edge-cases.md` and `docs/root-cause-analysis.md` for pip
 - Empty `src_dirs` bypassing the "missing dirs" diagnostic due to a `!is_empty()` boolean-logic bug — now its own distinct diagnostic message.
 - Component-key collisions and overlapping-`src_dirs` duplication — see Invariants 1 and 2.
 - No panic-containment anywhere in the repo — closed by ADR 0005 / `panic_guard.rs`, covering rayon closures, plugin hooks, and (per the ADR) NAPI entry points.
-- `WatchSession::initialize()` previously hand-rebuilt `GlobalSourceData`, skipping Phase 3.5/3.6 merges — fixed by routing through the same `extract_with_global` the cold path uses (see Invariant 5 and the doc comment at `pipeline/mod.rs:212-222`).
+- Watch mode re-resolved by a string-built reverse import graph that missed barrels, `../` imports and new import edges, kept deleted files' components, ignored excludes and produced different keys and diagnostics from a cold run. Replaced by revisions assembled by the cold path's code and recorded dependencies (Invariant 5).
 - Phase 3.5/3.6 dropping parse diagnostics on direct `global.merge()` calls — see Invariant 3.
 
 **Still open** (deliberately deferred, not oversights):
 
 - **DTS cache mtime+size staleness on coarse-resolution filesystems** (`docs/edge-cases.md` P0-2, `docs/root-cause-analysis.md` line 140). An edit landing in the same tick as a prior write _and_ producing an identical file length is served a stale cache hit. Scoped to `.d.ts` files only; not recommended for immediate action per the root-cause doc — see the Locked Design Decisions entry above for what a future fix should look like if ever revisited.
-- **`ReverseDeps` is not incrementally updated within a watch session.** Only structural changes (a new `WatchSession`, i.e. restarting) rebuild it; adding or removing an import inside an existing file during a session leaves the reverse graph stale for that edge until the session restarts. This is stated directly in the `WatchSession` doc comment (`watch.rs:41-46`) as a known limitation, not derived from the edge-cases audit.
+- **Watch mode does not observe `tsconfig.json`, `package.json` or `node_modules` changes.** They change module resolution for every component; restart the session (or call `rebuild()`) after editing them.
 - **`watch --out` write failures are silently discarded** and writes are non-atomic (`docs/edge-cases.md` line 72-73; `docs/root-cause-analysis.md` line 139). This is CLI-layer (`cli/commands/watch.rs`), outside this subsystem's scope (`crates/core` non-negotiable #6 doesn't reach the CLI), but it directly affects how trustworthy `WatchSession`'s output is once it leaves this module.
 - **LSP `Content-Length` header has no upper bound before allocation** (`docs/edge-cases.md` P1-2) — CLI-layer (`cli/commands/lsp.rs`), noted here only because it's adjacent to watch-mode's session lifecycle, not because it's part of this subsystem.
