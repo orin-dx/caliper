@@ -16,7 +16,7 @@ use super::{is_pascal_case, SourceDataCollector};
 /// "required due to lack of distributive union to support unions on
 /// @types/react"); `satisfies` (TS 4.9+) is the modern equivalent of the same
 /// pattern and must be peeled the same way.
-fn peel_expr<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
+pub(super) fn peel_expr<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
     let mut expr = expr;
     loop {
         expr = match expr {

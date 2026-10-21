@@ -244,7 +244,10 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     // no-initializer declarations (`declare var Date: DateConstructor`) —
                     // those are ambient type-only bindings handled by Pattern 5 below
                     // (or legitimately not components at all), not failed candidates.
-                    if declarator.init.is_some() && !self.try_rename_identifier_wrapped_component(declarator, &name) {
+                    if declarator.init.is_some()
+                        && !self.try_rename_identifier_wrapped_component(declarator, &name)
+                        && !self.try_record_wrapper_call(declarator, &name)
+                    {
                         self.record_skip(
                             DiagnosticCode::SkippedCandidate,
                             format!(

@@ -1440,6 +1440,39 @@ fn test_unreadable_dts_file_is_reported_not_cached_as_empty() {
     assert!(cache.get(&missing, "").is_none(), "an empty parse must not be cached under the unreadable path");
 }
 
+// A wrapper-call guess whose props resolve to nothing is reported, not listed as an empty component.
+#[test]
+fn test_wrapper_call_components_with_no_resolved_props_are_omitted_with_a_diagnostic() {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "Widgets.tsx",
+        "import { wrap } from \"./lib\";\n\
+         import type { MissingProps } from \"./missing\";\n\
+         interface RealProps { label?: string }\n\
+         export const Real = wrap<HTMLDivElement, RealProps>(\"div\");\n\
+         export const Ghost = wrap<HTMLDivElement, MissingProps>(\"div\");\n",
+    );
+    let dir = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![dir],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+
+    let output = extract(&options);
+
+    assert_eq!(output.components.keys().collect::<Vec<_>>(), vec!["Real"]);
+    assert_eq!(output.components["Real"].props.keys().collect::<Vec<_>>(), vec!["label"]);
+    let skipped: Vec<&str> = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::SkippedCandidate && d.message.contains("Ghost"))
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(skipped.len(), 1, "diagnostics: {:?}", output.diagnostics);
+}
+
 // ── test_overlapping_src_dirs_two_directories_deduplicates_without_a_duplicate_listing ─
 //
 // Corrected finding: the insert-return check above only catches a genuine
