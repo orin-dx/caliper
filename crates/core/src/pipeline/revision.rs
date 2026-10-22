@@ -171,7 +171,7 @@ impl Revision {
         // look them up like any other interface instead of only recording an InheritedLayer.
         if options.html_attributes == HtmlAttributeMode::Full {
             let from_dir = canonicalize_first_src_dir(&options.src_dirs).unwrap_or_else(|| Utf8PathBuf::from("."));
-            match crate::resolver::resolve_package_dts_path(&from_dir, "react") {
+            match crate::resolver::resolve_package_dts_path(&from_dir, "react", options) {
                 Some(react_dts_path) => {
                     let react_dts_path = Utf8PathBuf::from(react_dts_path);
                     merge_cached_dts_file(&react_dts_path, &cache, &mut global, &mut lib_diagnostics);

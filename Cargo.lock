@@ -229,6 +229,7 @@ dependencies = [
  "dashmap",
  "ignore",
  "insta",
+ "json-strip-comments",
  "oxc_allocator",
  "oxc_ast",
  "oxc_ast_visit",

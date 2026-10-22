@@ -30,6 +30,7 @@ arc-swap.workspace         = true
 camino.workspace           = true
 serde.workspace            = true
 serde_json.workspace       = true
+json-strip-comments.workspace = true
 rmp-serde.workspace        = true
 rayon.workspace            = true
 ignore.workspace           = true

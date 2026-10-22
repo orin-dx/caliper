@@ -208,11 +208,12 @@ pub(super) fn resolve_import_specifier(
 ) -> Option<Utf8PathBuf> {
     super::deps::record_module_resolution();
     let from_dir = from_file.parent()?;
+    // Every file of a directory shares its nearest tsconfig, so the directory is as good a key as the file.
     let key = (Box::from(from_dir.as_str()), Box::from(specifier));
     let resolution = match ctx.module_resolutions.get(&key) {
         Some(cached) => cached.clone(),
         None => {
-            let resolution = resolve_module(specifier, from_dir, ctx);
+            let resolution = resolve_module(specifier, from_file, ctx);
             ctx.module_resolutions.insert(key, resolution.clone());
             resolution
         }
@@ -238,7 +239,8 @@ pub(super) fn resolve_import_specifier(
     }
 }
 
-fn resolve_module(specifier: &str, from_dir: &Utf8Path, ctx: &ResolutionContext) -> ModuleResolution {
+/// Resolve `specifier` as imported by `from_file`; the file, not its directory, is what finds the nearest tsconfig.
+fn resolve_module(specifier: &str, from_file: &Utf8Path, ctx: &ResolutionContext) -> ModuleResolution {
     // Bare package specifiers (not relative/absolute) need real TypeScript
     // declaration resolution: prefer a real .d.ts over whatever JS entry point
     // the package's own "main"/"exports" happens to point to, and fall back to
@@ -248,7 +250,13 @@ fn resolve_module(specifier: &str, from_dir: &Utf8Path, ctx: &ResolutionContext)
     // `index.js`, and a named type-only import like `HTMLAttributes` can never
     // be found there.
     if !specifier.starts_with('.') && !specifier.starts_with('/') {
-        if let Some(path) = super::react::resolve_package_types_file(&ctx.oxc_resolver, from_dir, specifier) {
+        let types = super::react::resolve_package_types_file(
+            &ctx.oxc_resolver,
+            &ctx.types_first_resolver,
+            from_file,
+            specifier,
+        );
+        if let Some(path) = types {
             return match Utf8PathBuf::from_path_buf(std::path::PathBuf::from(path)) {
                 Ok(path) => ModuleResolution::PackageTypes(path),
                 Err(path) => ModuleResolution::Unresolved(format!("non-UTF-8 path {}", path.display())),
@@ -256,7 +264,7 @@ fn resolve_module(specifier: &str, from_dir: &Utf8Path, ctx: &ResolutionContext)
         }
     }
 
-    match ctx.oxc_resolver.resolve(from_dir.as_std_path(), specifier) {
+    match ctx.oxc_resolver.resolve_file(from_file.as_std_path(), specifier) {
         Ok(resolved) => match Utf8PathBuf::from_path_buf(resolved.path().to_owned()) {
             Ok(path) => ModuleResolution::File(path),
             Err(path) => ModuleResolution::Unresolved(format!("non-UTF-8 path {}", path.display())),
