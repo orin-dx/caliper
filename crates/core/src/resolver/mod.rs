@@ -15,7 +15,7 @@ use std::sync::Arc;
 #[allow(unused_imports)]
 use camino::{Utf8Path, Utf8PathBuf};
 use compact_str::CompactString;
-use oxc_resolver::{AliasValue, ResolveOptions, Resolver};
+use oxc_resolver::{ResolveOptions, Resolver, TsconfigDiscovery, TsconfigOptions, TsconfigReferences};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::import_map::ImportResolutionMap;
@@ -229,6 +229,8 @@ pub struct ResolutionContext {
     /// (a real native/DOM global like `Date`) doesn't resolve via the normal
     /// same-file lookup — see `import::lookup_interface`/`lookup_type_alias`.
     pub ambient_global_files: Vec<Utf8PathBuf>,
+    /// Why the configured tsconfig could not be used, if it could not.
+    pub(crate) tsconfig_diagnostic: Option<Diagnostic>,
 }
 
 impl ResolutionContext {
@@ -256,15 +258,34 @@ impl ResolutionContext {
         ambient_global_files: Vec<Utf8PathBuf>,
         named_types: Arc<crate::named_type_index::NamedTypeIndex>,
     ) -> Self {
-        let alias: Vec<(String, Vec<AliasValue>)> = react::read_tsconfig_paths(options.tsconfig_path.as_deref());
-
+        // The resolver reads the tsconfig itself: comments, `extends`, `baseUrl` and `paths` wildcards as TypeScript
+        // reads them.
         let resolve_options = ResolveOptions {
             condition_names: vec!["types".into(), "import".into(), "require".into(), "default".into()],
             main_fields: vec!["types".into(), "typings".into(), "module".into(), "main".into()],
             extensions: vec![".ts".into(), ".tsx".into(), ".d.ts".into(), ".js".into()],
-            alias,
+            tsconfig: options.tsconfig_path.as_ref().map(|path| {
+                TsconfigDiscovery::Manual(TsconfigOptions {
+                    config_file: path.as_std_path().to_owned(),
+                    references: TsconfigReferences::Auto,
+                })
+            }),
             ..ResolveOptions::default()
         };
+        let oxc_resolver = Resolver::new(resolve_options);
+        // A tsconfig that can't be read or parsed would otherwise fail every aliased import one by one.
+        let tsconfig_diagnostic = options.tsconfig_path.as_ref().and_then(|path| {
+            let error = oxc_resolver.resolve_tsconfig(path.as_std_path()).err()?;
+            Some(
+                Diagnostic::new(
+                    DiagnosticSeverity::Warning,
+                    DiagnosticCode::IoError,
+                    format!("Could not use the tsconfig '{path}': {error}"),
+                )
+                .with_file(path.to_string())
+                .with_help("Its `paths` aliases are not applied; imports that rely on them will not resolve."),
+            )
+        });
 
         let mut enum_bare_index: FxHashMap<CompactString, CompactString> = FxHashMap::default();
         // Sorted so a bare name shared by several files binds to the same one regardless of hash order.
@@ -289,7 +310,8 @@ impl ResolutionContext {
             import_map: Arc::new(ImportResolutionMap::build(&global)),
             named_types,
             global,
-            oxc_resolver: Arc::new(Resolver::new(resolve_options)),
+            oxc_resolver: Arc::new(oxc_resolver),
+            tsconfig_diagnostic,
             extra_builtins: options.extra_builtins.clone(),
             enum_bare_index,
             const_array_bare_index,

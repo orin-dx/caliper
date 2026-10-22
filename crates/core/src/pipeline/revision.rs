@@ -205,6 +205,7 @@ impl Revision {
             ambient_global_files.clone(),
             named_types.clone(),
         );
+        lib_diagnostics.extend(ctx.tsconfig_diagnostic.clone());
         let resolved = resolve_all(&component_ids(&global, options), &ctx);
         let files = Arc::new(src_files.into_iter().collect());
 

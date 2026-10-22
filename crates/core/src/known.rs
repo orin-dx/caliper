@@ -111,8 +111,8 @@ pub fn resolve_known(
         }
 
         // ── React Aria ───────────────────────────────────────────────────────
-        // RenderProps<ButtonRenderProps> → simplify to scalar className/style
-        "RenderProps" => Some(KnownPatternResult::Props(render_props())),
+        // RenderProps<ButtonRenderProps> → className, style and children, each a value or a function of the state
+        "RenderProps" => Some(KnownPatternResult::Props(render_props(args))),
         // SlotProps → { slot?: string | null }
         "SlotProps" => Some(KnownPatternResult::Props(vec![slot_prop()])),
 
@@ -229,17 +229,30 @@ fn resolve_cva_variant_props(
     }
 }
 
-fn render_props() -> Vec<ParsedProp> {
-    // React Aria RenderProps<T> → simplify to these two props
-    // Omit the function overload — noise for docgen
+/// React Aria's `RenderProps<T>`: `className`, `style` and `children` each take a value or a function of the render
+/// state `T`.
+fn render_props(args: &[PropType]) -> Vec<ParsedProp> {
+    let state = args.first().map_or_else(|| "RenderProps".to_owned(), PropType::raw_string);
+    let or_function = |value: PropType| {
+        PropType::Union(vec![
+            value,
+            PropType::EventHandler { event_type: state.clone(), param_name: Some("values".into()) },
+        ])
+    };
     vec![
-        simple_prop("className", PropType::String, false, "CSS class name. Accepts a function receiving render state."),
+        simple_prop(
+            "className",
+            or_function(PropType::String),
+            false,
+            "CSS class name, or a function of the render state.",
+        ),
         simple_prop(
             "style",
-            PropType::CssProperties,
+            or_function(PropType::CssProperties),
             false,
-            "Inline styles. Accepts a function receiving render state.",
+            "Inline styles, or a function of the render state.",
         ),
+        simple_prop("children", or_function(PropType::ReactNode), false, "Content, or a function of the render state."),
     ]
 }
 
