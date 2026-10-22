@@ -2,8 +2,14 @@
 /// mid-write failure (disk full, permission revoked) can never leave `path`
 /// truncated or half-written. Returns the `io::Error` on failure instead of
 /// swallowing it — callers must report it, not discard the `Result`.
+///
+/// A target that exists but is not a regular file (`/dev/null`, a FIFO, `/dev/stdout`) is written in place: renaming
+/// over it would replace the device with a file, and its directory is often not writable.
 pub fn write_atomic(path: &str, contents: &str) -> std::io::Result<()> {
     let target = std::path::Path::new(path);
+    if std::fs::metadata(target).is_ok_and(|m| !m.is_file() && !m.is_dir()) {
+        return std::fs::write(target, contents);
+    }
     let dir = match target.parent() {
         Some(p) if !p.as_os_str().is_empty() => p,
         _ => std::path::Path::new("."),

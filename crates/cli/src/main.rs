@@ -17,6 +17,10 @@ use commands::lsp::cmd_lsp;
 use commands::schema::cmd_schema;
 use commands::watch::cmd_watch;
 
+// Resolution allocates from every rayon worker at once, and the system allocator serializes them (macOS most of all).
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[derive(Parser)]
 #[command(
     name = "caliper-docgen",

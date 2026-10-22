@@ -3,8 +3,6 @@
 //! Orchestrates: file discovery → parallel parse → global merge → parallel resolve → output.
 //! Also manages DTS cache and incremental watch-mode state.
 
-use std::sync::Arc;
-
 use camino::{Utf8Path, Utf8PathBuf};
 use rayon::prelude::*;
 use rustc_hash::FxHashSet;
@@ -134,7 +132,33 @@ pub struct IncrementalUpdate {
 /// `PropType`'s hand-written `Serialize` (see ADR 0002) happens once here,
 /// not in every downstream crate.
 pub fn extraction_output_to_json(output: &ExtractionOutput) -> Result<String, serde_json::Error> {
-    serde_json::to_string(output)
+    let mut json = Vec::new();
+    write_extraction_output_json(output, &mut json)?;
+    String::from_utf8(json).map_err(|e| serde_json::Error::io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
+}
+
+/// Write an [`ExtractionOutput`] as compact JSON, byte-identical to `serde_json::to_writer(writer, output)`, with the
+/// components serialized in parallel: on a large project they are most of the bytes.
+pub fn write_extraction_output_json(
+    output: &ExtractionOutput,
+    writer: impl std::io::Write,
+) -> Result<(), serde_json::Error> {
+    // Destructured so a new field fails to compile here instead of going missing from the JSON.
+    let ExtractionOutput { components, enums, diagnostics, stats } = output;
+    let components = components
+        .par_iter()
+        .map(|(key, entry)| Ok((key.as_str(), serde_json::value::to_raw_value(entry)?)))
+        .collect::<Result<std::collections::BTreeMap<_, _>, serde_json::Error>>()?;
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Fields<'a> {
+        components: std::collections::BTreeMap<&'a str, Box<serde_json::value::RawValue>>,
+        enums: &'a std::collections::BTreeMap<String, Vec<EnumEntry>>,
+        diagnostics: &'a [Diagnostic],
+        stats: &'a ExtractionStats,
+    }
+    serde_json::to_writer(writer, &Fields { components, enums, diagnostics, stats })
 }
 
 /// Serialize an [`IncrementalUpdate`] to a JSON string (same reason as above).
@@ -146,8 +170,7 @@ pub fn incremental_update_to_json(update: &IncrementalUpdate) -> Result<String, 
 
 /// Stateless extraction — suitable for CLI and NAPI cold runs.
 pub fn extract(options: &PipelineOptions) -> ExtractionOutput {
-    let revision = revision::Revision::cold(options, 0);
-    Arc::try_unwrap(revision.output).unwrap_or_else(|shared| (*shared).clone())
+    revision::Revision::cold_output(options)
 }
 
 // ─── Helper functions ─────────────────────────────────────────────────────────

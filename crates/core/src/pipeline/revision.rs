@@ -41,6 +41,14 @@ pub(crate) struct Resolved {
 }
 
 impl Resolved {
+    /// The entry and diagnostics, moved out when nothing else shares this resolution.
+    fn into_parts(shared: Arc<Resolved>) -> (ComponentEntry, Vec<Diagnostic>) {
+        match Arc::try_unwrap(shared) {
+            Ok(resolved) => (resolved.entry, resolved.diagnostics),
+            Err(shared) => (shared.entry.clone(), shared.diagnostics.clone()),
+        }
+    }
+
     /// Whether this resolution can differ after `change`.
     fn affected_by(&self, change: &Change<'_>) -> bool {
         self.depends_on.files.contains(change.file.as_str())
@@ -127,6 +135,28 @@ fn resolve_all(
 impl Revision {
     /// Discover, parse, merge, resolve and assemble every source file.
     pub(crate) fn cold(options: &PipelineOptions, id: u64) -> Revision {
+        let mut revision = Revision::resolve_cold(options, id);
+        let (output, keys) = revision
+            .assemble(options, |id| revision.resolved.get(id).map(|r| (r.entry.clone(), r.diagnostics.clone())));
+        revision.output = Arc::new(output);
+        revision.keys = keys;
+        revision
+    }
+
+    /// The output of a cold run that is never updated, so each entry moves into it instead of being copied.
+    pub(crate) fn cold_output(options: &PipelineOptions) -> ExtractionOutput {
+        let mut revision = Revision::resolve_cold(options, 0);
+        let mut resolved = std::mem::take(&mut revision.resolved);
+        let (output, _) = revision.assemble(options, |id| resolved.remove(id).map(Resolved::into_parts));
+        // Freeing the parsed project takes milliseconds on a large one, and the caller only wants the output.
+        let spawned = std::thread::Builder::new().name("caliper-drop".into()).spawn(move || drop(revision));
+        // A failed spawn drops the closure, and the revision with it, right here; the output is unaffected.
+        drop(spawned);
+        output
+    }
+
+    /// Everything [`Revision::cold`] does except assembling the output.
+    fn resolve_cold(options: &PipelineOptions, id: u64) -> Revision {
         let start = Instant::now();
         let mut head_diagnostics = source_dir_diagnostics(options);
 
@@ -217,7 +247,7 @@ impl Revision {
         .into_iter()
         .collect();
 
-        let mut revision = Revision {
+        Revision {
             id,
             global,
             named_types,
@@ -230,13 +260,10 @@ impl Revision {
             files,
             dts_files_parsed,
             dts_cache_hits,
-            duration_ms: 0,
+            duration_ms: start.elapsed().as_millis() as u64,
             output: Arc::new(empty_output()),
             keys: FxHashMap::default(),
-        };
-        revision.duration_ms = start.elapsed().as_millis() as u64;
-        revision.assemble(options);
-        revision
+        }
     }
 
     /// The revision after `changed` was edited, created or deleted, and the delta from this one. `None` when the path
@@ -322,7 +349,10 @@ impl Revision {
             output: Arc::new(empty_output()),
             keys: FxHashMap::default(),
         };
-        next.assemble(options);
+        let (output, keys) =
+            next.assemble(options, |id| next.resolved.get(id).map(|r| (r.entry.clone(), r.diagnostics.clone())));
+        next.output = Arc::new(output);
+        next.keys = keys;
 
         // Updated: every key whose component this revision re-resolved, plus every kept component whose key moved (a
         // same-named component elsewhere appeared or disappeared, so the bare and disambiguated keys swapped).
@@ -363,9 +393,14 @@ impl Revision {
         Some((next, update))
     }
 
-    /// Build the public output from the revision: components keyed with the same disambiguation rule everywhere,
-    /// plugin hooks applied, diagnostics in a stable order, public enums.
-    fn assemble(&mut self, options: &PipelineOptions) {
+    /// Build the public output from the revision, and the key each component was published under: components keyed
+    /// with the same disambiguation rule everywhere, plugin hooks applied, diagnostics in a stable order, public
+    /// enums. `take` yields a component's resolved entry and diagnostics, copied or moved out.
+    fn assemble(
+        &self,
+        options: &PipelineOptions,
+        mut take: impl FnMut(&ComponentId) -> Option<(ComponentEntry, Vec<Diagnostic>)>,
+    ) -> (ExtractionOutput, FxHashMap<ComponentId, String>) {
         let mut diagnostics = DiagnosticSet::default();
         diagnostics.extend(self.head_diagnostics.iter().cloned(), None);
         for diags in self.file_diagnostics.values() {
@@ -377,8 +412,7 @@ impl Revision {
         let mut keys = FxHashMap::default();
         let mut seen_names: FxHashMap<String, u32> = FxHashMap::default();
         for (id, _) in component_ids(&self.global, options) {
-            let Some(resolved) = self.resolved.get(&id) else { continue };
-            let mut entry = resolved.entry.clone();
+            let Some((mut entry, resolved_diagnostics)) = take(&id) else { continue };
             let base_name = entry.display_name.clone();
             let count = seen_names.entry(base_name.clone()).or_insert(0);
             *count += 1;
@@ -405,7 +439,7 @@ impl Revision {
                     None,
                 );
             }
-            diagnostics.extend(resolved.diagnostics.iter().cloned(), Some(&key));
+            diagnostics.extend(resolved_diagnostics, Some(&key));
             keys.insert(id, key);
         }
 
@@ -414,7 +448,7 @@ impl Revision {
         diagnostics.extend(self.tail_diagnostics.iter().cloned(), None);
 
         let components_extracted = components.len() as u32;
-        self.output = Arc::new(ExtractionOutput {
+        let output = ExtractionOutput {
             components,
             enums,
             diagnostics: diagnostics.finish(),
@@ -426,8 +460,8 @@ impl Revision {
                 duration_ms: self.duration_ms,
                 ..Default::default()
             },
-        });
-        self.keys = keys;
+        };
+        (output, keys)
     }
 }
 

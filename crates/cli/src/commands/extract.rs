@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use miette::{IntoDiagnostic, Result, WrapErr};
 
 use crate::config::{build_options, BuildOptionsArgs};
@@ -41,7 +43,9 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
 
     // --json ignores --out/--format — see ExtractArgs::json's doc comment.
     if args.json {
-        println!("{}", serde_json::to_string(&output).into_diagnostic()?);
+        let mut stdout = std::io::BufWriter::with_capacity(1 << 16, std::io::stdout().lock());
+        caliper_docgen_core::pipeline::write_extraction_output_json(&output, &mut stdout).into_diagnostic()?;
+        writeln!(stdout).and_then(|()| stdout.flush()).into_diagnostic()?;
     } else {
         if !quiet {
             print_summary(&output, quiet);
@@ -63,7 +67,11 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
 
     // Must run regardless of --json — this is the one thing CI actually
     // depends on the exit code for.
-    Ok(output.exit_code(false))
+    let exit_code = output.exit_code(false);
+    // The process ends right after this, and freeing a large project's output one allocation at a time is slower
+    // than letting the OS reclaim it.
+    std::mem::forget(output);
+    Ok(exit_code)
 }
 
 /// RDT's type-name convention for literal unions: `{"name": "enum", "value": [...]}`
