@@ -110,6 +110,9 @@ impl From<SerializableCacheKey> for CacheKey {
 /// Maximum number of cached `.d.ts` entries allowed in memory/on disk.
 const MAX_CACHE_ENTRIES: usize = 5000;
 
+/// The largest cache file loaded. A cache holding TypeScript's lib files, the largest entries, measures about 3 MB.
+const MAX_CACHE_FILE_BYTES: u64 = 256 * 1024 * 1024;
+
 /// Thread-safe DTS parse-result cache.
 ///
 /// Keyed by `(path, content_hash)` — if the file's content hasn't changed,
@@ -171,7 +174,17 @@ impl DtsCache {
     fn try_load(dir: &Utf8Path) -> Result<DashMap<CacheKey, SourceData>, LoadFailure> {
         use serde::Deserialize as _;
 
-        let bytes = match std::fs::read(dir.join(DATA_FILE).as_std_path()) {
+        // Checked before reading, so a cache file that isn't ours (or a corrupt one) can't make a run allocate it all.
+        let path = dir.join(DATA_FILE);
+        if let Ok(meta) = std::fs::metadata(path.as_std_path()) {
+            if meta.len() > MAX_CACHE_FILE_BYTES {
+                return Err(LoadFailure::Unreadable(format!(
+                    "it is {} bytes, over the {MAX_CACHE_FILE_BYTES}-byte limit",
+                    meta.len()
+                )));
+            }
+        }
+        let bytes = match std::fs::read(path.as_std_path()) {
             Ok(bytes) => bytes,
             Err(error) if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => {
                 return Err(LoadFailure::Absent)
@@ -459,6 +472,28 @@ mod tests {
 
         assert!(cache.get(&file, content).is_none());
         assert_eq!(cache.load_diagnostic(), None);
+    }
+
+    #[test]
+    fn a_cache_file_over_the_size_limit_is_reported_without_being_read() {
+        let (cache_dir, file, content) = saved_cache("oversized");
+        // Sparse: the length is set without writing the bytes.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(cache_dir.join(DATA_FILE).as_std_path())
+            .unwrap()
+            .set_len(MAX_CACHE_FILE_BYTES + 1)
+            .unwrap();
+
+        let cache = DtsCache::load_from_disk(Some(&cache_dir));
+
+        assert!(cache.get(&file, content).is_none());
+        let diagnostic = cache.load_diagnostic().expect("a diagnostic");
+        assert!(
+            diagnostic.message.ends_with(&format!("over the {MAX_CACHE_FILE_BYTES}-byte limit")),
+            "{}",
+            diagnostic.message
+        );
     }
 
     #[test]
