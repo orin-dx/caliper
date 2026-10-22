@@ -15,6 +15,17 @@ This is called from inside a rayon `.map()` over every discovered component, in 
 - `ResolutionContext` holds `Arc<GlobalSourceData>`, `Arc<ImportResolutionMap>`, `Arc<Resolver>` (the `oxc_resolver` instance) — cheap to clone, shared read-only across every worker thread.
 - `ResolveState` (`types/global.rs:19`) is constructed fresh per `resolve_component` call via `ResolveState::default()` and threaded through every recursive call by `&mut` reference. It is **never** shared across components and carries no `Arc` — it's pure per-call mutable scratch state (visited-set, diagnostics accumulator, in-scope type params). If a future change tried to hoist `ResolveState` up to be shared across the rayon `.map()` (e.g. to dedupe diagnostics), that would silently corrupt cycle detection across unrelated components — the visited-set has no per-component reset mechanism, and two components racing on the same shared set would each see the other's visited entries and wrongly short-circuit.
 
+## Module resolution
+
+Every resolver of a run comes from `ModuleResolvers::new` (`resolver/mod.rs`), so the pipeline's `@types/react` lookup and the resolver find the same files. It resolves the way TypeScript does for the project:
+
+- **tsconfig:** the configured one; otherwise `oxc_resolver` finds the nearest `tsconfig.json` above each importing file. That only works through `resolve_file`/`resolve_dts`, which take the importing file, not its directory.
+- **`customConditions`** of the governing tsconfig (configured, or nearest above the first source directory), following `extends`, are added to the conditions. `oxc_resolver` does not read them, and workspaces such as React Spectrum's reach their packages' TypeScript sources only through them.
+- **Extensions:** `.d.mts`/`.d.cts` resolve, and an import written as `./button.js` finds `button.ts`.
+- **Declarations for a package** (`react::resolve_package_types_file`): `resolve_dts`, then a retry with only the `types` and custom conditions (`types_first`, for a package listing `"import"` before `"types"`), then `@types/<name>`. A declaration path that does not exist counts as none, so an unbuilt workspace package is reported as unresolved instead of resolving to a missing file.
+
+**Invariant:** never build an `oxc_resolver::Resolver` for module resolution outside `ModuleResolvers`; a second configuration would resolve the same import to a different file.
+
 ## The three-tier data model this resolver operates on
 
 - `CollectedType` / `CollectedTypeAlias` — what the extractor produced: structural, not yet resolved, may reference cross-file names.

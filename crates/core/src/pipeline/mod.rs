@@ -77,7 +77,8 @@ pub struct PipelineOptions {
     pub exclude_prefixes: Vec<String>,
     /// How much of an inherited HTML element's attributes to expose.
     pub html_attributes: HtmlAttributeMode,
-    /// Path to tsconfig.json (auto-detected if None).
+    /// Path to the tsconfig that governs module resolution. When unset, each importing file uses the nearest
+    /// `tsconfig.json` above it, and the one above the first source directory supplies `customConditions`.
     pub tsconfig_path: Option<Utf8PathBuf>,
     /// Additional builtin type names beyond the React standard set.
     pub extra_builtins: FxHashSet<compact_str::CompactString>,
