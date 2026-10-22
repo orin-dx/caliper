@@ -1,7 +1,7 @@
 //! React builtin type mapping and related helpers.
 
 use camino::Utf8Path;
-use oxc_resolver::{AliasValue, Resolver};
+use oxc_resolver::Resolver;
 
 use crate::types::*;
 
@@ -146,65 +146,6 @@ pub(super) fn resolve_package_types_file(
 /// pass through unchanged.
 fn mangle_scoped_package_name(name: &str) -> String {
     name.strip_prefix('@').map_or_else(|| name.to_owned(), |rest| rest.replacen('/', "__", 1))
-}
-
-/// Read `compilerOptions.paths` from a tsconfig.json and convert to `oxc_resolver`
-/// alias format: `Vec<(pattern, Vec<AliasValue>)>`.
-pub(super) fn read_tsconfig_paths(tsconfig: Option<&camino::Utf8Path>) -> Vec<(String, Vec<AliasValue>)> {
-    let Some(path) = tsconfig else { return vec![] };
-    let Ok(content) = std::fs::read_to_string(path.as_std_path()) else { return vec![] };
-    let stripped = strip_json_comments(&content);
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&stripped) else {
-        return vec![];
-    };
-
-    let base_url = value["compilerOptions"]["baseUrl"].as_str().map(|b| path.parent().unwrap_or(path).join(b));
-
-    let paths = match value["compilerOptions"]["paths"].as_object() {
-        Some(p) => p,
-        None => return vec![],
-    };
-
-    paths
-        .iter()
-        .filter_map(|(pattern, targets)| {
-            let resolved: Vec<AliasValue> = targets
-                .as_array()?
-                .iter()
-                .filter_map(|t| t.as_str())
-                .map(|t| {
-                    // Remove trailing wildcards: "@lib/*" → "@lib/"
-                    let t = t.trim_end_matches("/*").trim_end_matches('*');
-                    let resolved_path =
-                        if let Some(base) = &base_url { base.join(t) } else { path.parent().unwrap_or(path).join(t) };
-                    AliasValue::Path(resolved_path.as_std_path().to_string_lossy().into_owned())
-                })
-                .collect();
-
-            let pattern_clean = pattern.trim_end_matches("/*").to_owned();
-            Some((pattern_clean, resolved))
-        })
-        .collect()
-}
-
-/// Minimal JSON comment stripper for tsconfig files.
-/// Handles single-line `//` comments; does NOT handle block `/* */` comments.
-pub(super) fn strip_json_comments(s: &str) -> String {
-    s.lines()
-        .map(|line| {
-            if let Some(idx) = line.find("//") {
-                // Only strip if the `//` is not inside a string.
-                // Heuristic: count unescaped `"` before idx — if even, we're outside a string.
-                let before = &line[..idx];
-                let quote_count = before.chars().filter(|&c| c == '"').count();
-                if quote_count % 2 == 0 {
-                    return &line[..idx];
-                }
-            }
-            line
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 #[cfg(test)]

@@ -2260,3 +2260,61 @@ fn parallel_json_writer_matches_serde_json_byte_for_byte() {
 
     assert_eq!(extraction_output_to_json(&output).unwrap(), serde_json::to_string(&output).unwrap());
 }
+
+/// A project with `src/ui/types.ts` and a Button importing it through the `@ui/*` alias, and `tsconfig` written as given.
+fn aliased_project(tsconfig: &[(&str, &str)]) -> (TempDir, PipelineOptions) {
+    let tmp = TempDir::new().unwrap();
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+    std::fs::create_dir_all(root.join("src/ui")).unwrap();
+    std::fs::write(root.join("src/ui/types.ts"), "export interface ButtonProps { label: string }\n").unwrap();
+    std::fs::write(
+        root.join("src/Button.tsx"),
+        "import type { ButtonProps } from '@ui/types';\nexport function Button(props: ButtonProps) { return null; }\n",
+    )
+    .unwrap();
+    for (name, body) in tsconfig {
+        std::fs::write(root.join(name), body).unwrap();
+    }
+    let options = PipelineOptions {
+        src_dirs: vec![root.join("src")],
+        cache_dir: Some(root.join("cache")),
+        tsconfig_path: Some(root.join(tsconfig[0].0)),
+        ..Default::default()
+    };
+    (tmp, options)
+}
+
+#[test]
+fn tsconfig_paths_resolve_through_block_comments_and_extends() {
+    let commented = [(
+        "tsconfig.json",
+        "/* project config */\n{\n  // aliases\n  \"compilerOptions\": { /* root */ \"baseUrl\": \".\", \"paths\": { \"@ui/*\": [\"src/ui/*\"] } }\n}\n",
+    )];
+    let extended = [
+        ("tsconfig.json", "{ \"extends\": \"./tsconfig.base.json\" }\n"),
+        (
+            "tsconfig.base.json",
+            "{ \"compilerOptions\": { \"baseUrl\": \".\", \"paths\": { \"@ui/*\": [\"src/ui/*\"] } } }\n",
+        ),
+    ];
+    for files in [&commented[..], &extended[..]] {
+        let (_tmp, options) = aliased_project(files);
+
+        let output = extract(&options);
+
+        let props: Vec<&String> = output.components["Button"].props.keys().collect();
+        assert_eq!(props, vec!["label"], "{}: {:#?}", files[0].1, output.diagnostics);
+    }
+}
+
+#[test]
+fn an_unusable_tsconfig_is_reported_once() {
+    let (_tmp, options) = aliased_project(&[("tsconfig.json", "{ \"compilerOptions\": ")]);
+
+    let output = extract(&options);
+
+    let reports: Vec<&Diagnostic> =
+        output.diagnostics.iter().filter(|d| d.message.starts_with("Could not use the tsconfig")).collect();
+    assert_eq!(reports.len(), 1, "{:#?}", output.diagnostics);
+    assert_eq!(reports[0].severity, DiagnosticSeverity::Warning);
+}
