@@ -226,6 +226,10 @@ pub struct ComponentEntry {
 }
 ```
 
+The Rust types hold props inline, but the canonical JSON does not (ADR 0009, `types/output/interned.rs`). `ExtractionOutput` serializes each distinct `ParsedProp` once, in a top-level `props` table keyed by id, and each component's `props` and `notableInherited` map a prop name to an id. An id is the FNV-1a 64 hash of the prop's compact JSON as 16 hex digits, so identical props share one entry and keep their id across watch revisions. `IncrementalUpdate` writes its `updatedComponents` the same way, with a `props` table holding every prop they refer to. A `ComponentEntry` serialized on its own (snapshot tests, `ExtractionOutput`'s `Deserialize` after expanding ids) still holds its props inline.
+
+**Invariant 6a:** two different props never share an id. `PropTable::add` compares the JSON of every prop added under an existing id and fails serialization on a mismatch, rather than letting one prop stand in for another.
+
 `detected_by` (`detectedBy` in JSON) is the extractor rule that recognized the component, so a consumer can tell an explicit declaration form (`functionDeclaration`, `forwardRef`, `fcAnnotation`, `classComponent`, ...) from an inference (`typedFunctionExpression`, `wrapperTypeArgument`). It is the grouping the per-rule precision sample uses (`docs/precision.md`).
 
 **Invariant 6:** `components`, `enums`, `props`, and `notable_inherited` are `BTreeMap`, not `FxHashMap` — this is AGENTS.md non-negotiable #2 (`FxHashMap` for internal maps, `BTreeMap` for JSON-output maps) applied at the type level. `ExtractionOutput` and everything nested inside it that's part of the JSON contract is output-facing, so it gets deterministic key order for free from `BTreeMap`'s iteration order — output diffing, snapshot tests, and any consumer that hashes or compares the JSON depend on this being stable across runs, not just correct.

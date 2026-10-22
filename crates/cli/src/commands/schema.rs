@@ -10,7 +10,28 @@ fn schema_value() -> serde_json::Value {
         "title": "ExtractionOutput",
         "description": "Output schema for caliper-docgen component prop extraction",
         "type": "object",
-        "required": ["components", "enums", "diagnostics", "stats"],
+        "required": ["components", "props", "enums", "diagnostics", "stats"],
+        "definitions": {
+            "propId": {
+                "description": "A prop's key in the top-level `props` table: the FNV-1a 64 hash of its compact JSON (ADR 0009)",
+                "type": "string",
+                "pattern": "^[0-9a-f]{16}$"
+            },
+            "prop": {
+                "type": "object",
+                "required": ["name", "required", "type"],
+                "properties": {
+                    "name": { "type": "string" },
+                    "required": { "type": "boolean" },
+                    "type": { "type": "object" },
+                    "description": { "type": ["string", "null"] },
+                    "defaultValue": { "type": ["object", "null"] },
+                    "tags": { "type": "object" },
+                    "parent": { "type": ["object", "null"] },
+                    "declarations": { "type": "array" }
+                }
+            }
+        },
         "properties": {
             "components": {
                 "type": "object",
@@ -22,21 +43,9 @@ fn schema_value() -> serde_json::Value {
                         "filePath": { "type": "string" },
                         "description": { "type": ["string", "null"] },
                         "props": {
+                            "description": "Prop name to prop id",
                             "type": "object",
-                            "additionalProperties": {
-                                "type": "object",
-                                "required": ["name", "required", "type"],
-                                "properties": {
-                                    "name": { "type": "string" },
-                                    "required": { "type": "boolean" },
-                                    "type": { "type": "object" },
-                                    "description": { "type": ["string", "null"] },
-                                    "defaultValue": { "type": ["object", "null"] },
-                                    "tags": { "type": "object" },
-                                    "parent": { "type": ["object", "null"] },
-                                    "declarations": { "type": "array" }
-                                }
-                            }
+                            "additionalProperties": { "$ref": "#/definitions/propId" }
                         },
                         "inheritance": {
                             "type": "array",
@@ -51,7 +60,11 @@ fn schema_value() -> serde_json::Value {
                                 }
                             }
                         },
-                        "notableInherited": { "type": "object" },
+                        "notableInherited": {
+                            "description": "Prop name to prop id",
+                            "type": "object",
+                            "additionalProperties": { "$ref": "#/definitions/propId" }
+                        },
                         "discriminantProp": { "type": ["string", "null"] },
                         "composes": {
                             "type": "array",
@@ -69,6 +82,11 @@ fn schema_value() -> serde_json::Value {
                         }
                     }
                 }
+            },
+            "props": {
+                "description": "Every distinct prop the components refer to, by id",
+                "type": "object",
+                "additionalProperties": { "$ref": "#/definitions/prop" }
             },
             "enums": { "type": "object" },
             "diagnostics": {
@@ -209,13 +227,15 @@ mod tests {
 
         let value = serde_json::to_value(&output).expect("ExtractionOutput must serialize");
         let mut real_fields: Vec<String> = Vec::new();
-        for key in ["components", "diagnostics", "stats"] {
+        for key in ["components", "props", "diagnostics", "stats"] {
             assert!(value.get(key).is_some(), "fixture is missing top-level key {key}");
         }
+        real_fields.extend(value.as_object().expect("output is an object").keys().cloned());
         if let Some(obj) = value["components"]["Button"].as_object() {
             real_fields.extend(obj.keys().cloned());
         }
-        if let Some(obj) = value["components"]["Button"]["props"]["variant"].as_object() {
+        let variant_id = value["components"]["Button"]["props"]["variant"].as_str().expect("props hold ids");
+        if let Some(obj) = value["props"][variant_id].as_object() {
             real_fields.extend(obj.keys().cloned());
         }
         if let Some(obj) = value["components"]["Button"]["inheritance"][0].as_object() {
@@ -244,7 +264,7 @@ mod tests {
         assert_ne!(button["composes"], serde_json::json!([]), "composes must be non-empty");
         assert_ne!(button["tags"], serde_json::json!({}), "component tags must be non-empty");
 
-        let variant = &button["props"]["variant"];
+        let variant = &value["props"][variant_id];
         assert_ne!(variant["tags"], serde_json::json!({}), "prop tags must be non-empty");
         assert_ne!(variant["declarations"], serde_json::json!([]), "declarations must be non-empty");
         assert!(!variant["parent"].is_null(), "parent must be non-null");

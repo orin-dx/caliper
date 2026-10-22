@@ -7,10 +7,61 @@ $ caliper-docgen schema
   "type": "object",
   "required": [
     "components",
+    "props",
     "enums",
     "diagnostics",
     "stats"
   ],
+  "definitions": {
+    "propId": {
+      "description": "A prop's key in the top-level `props` table: the FNV-1a 64 hash of its compact JSON (ADR 0009)",
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "prop": {
+      "type": "object",
+      "required": [
+        "name",
+        "required",
+        "type"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "type": {
+          "type": "object"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaultValue": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "tags": {
+          "type": "object"
+        },
+        "parent": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "declarations": {
+          "type": "array"
+        }
+      }
+    }
+  },
   "properties": {
     "components": {
       "type": "object",
@@ -35,49 +86,10 @@ $ caliper-docgen schema
             ]
           },
           "props": {
+            "description": "Prop name to prop id",
             "type": "object",
             "additionalProperties": {
-              "type": "object",
-              "required": [
-                "name",
-                "required",
-                "type"
-              ],
-              "properties": {
-                "name": {
-                  "type": "string"
-                },
-                "required": {
-                  "type": "boolean"
-                },
-                "type": {
-                  "type": "object"
-                },
-                "description": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "defaultValue": {
-                  "type": [
-                    "object",
-                    "null"
-                  ]
-                },
-                "tags": {
-                  "type": "object"
-                },
-                "parent": {
-                  "type": [
-                    "object",
-                    "null"
-                  ]
-                },
-                "declarations": {
-                  "type": "array"
-                }
-              }
+              "$ref": "#/definitions/propId"
             }
           },
           "inheritance": {
@@ -110,7 +122,11 @@ $ caliper-docgen schema
             }
           },
           "notableInherited": {
-            "type": "object"
+            "description": "Prop name to prop id",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/definitions/propId"
+            }
           },
           "discriminantProp": {
             "type": [
@@ -146,6 +162,13 @@ $ caliper-docgen schema
             ]
           }
         }
+      }
+    },
+    "props": {
+      "description": "Every distinct prop the components refer to, by id",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/prop"
       }
     },
     "enums": {

@@ -102,9 +102,8 @@ impl Default for PipelineOptions {
 
 // ─── Incremental watch types ──────────────────────────────────────────────────
 
-/// Result of processing a single file change in watch mode.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
+/// Result of processing a single file change in watch mode. Its JSON writes the updated components' props as ids, with
+/// a `props` table holding every prop they refer to (ADR 0009).
 pub struct IncrementalUpdate {
     /// The session revision this update produced; a consumer can drop an update older than one it already applied.
     pub revision: u64,
@@ -124,6 +123,39 @@ pub struct IncrementalUpdate {
     pub duration_ms: u64,
 }
 
+impl Serialize for IncrementalUpdate {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use crate::types::output::interned::{intern, InternedComponent};
+        use serde::ser::SerializeStruct;
+
+        let IncrementalUpdate {
+            revision,
+            updated_components,
+            updated_keys,
+            removed_keys,
+            affected_files,
+            diagnostics,
+            removed_diagnostics,
+            duration_ms,
+        } = self;
+        let entries: Vec<&ComponentEntry> = updated_components.iter().collect();
+        let (ids, props) = intern::<S::Error>(&entries)?;
+        let components: Vec<InternedComponent<'_>> =
+            entries.iter().zip(&ids).map(|(entry, ids)| InternedComponent { entry, ids }).collect();
+        let mut out = serializer.serialize_struct("IncrementalUpdate", 9)?;
+        out.serialize_field("revision", revision)?;
+        out.serialize_field("updatedComponents", &components)?;
+        out.serialize_field("props", &props)?;
+        out.serialize_field("updatedKeys", updated_keys)?;
+        out.serialize_field("removedKeys", removed_keys)?;
+        out.serialize_field("affectedFiles", affected_files)?;
+        out.serialize_field("diagnostics", diagnostics)?;
+        out.serialize_field("removedDiagnostics", removed_diagnostics)?;
+        out.serialize_field("durationMs", duration_ms)?;
+        out.end()
+    }
+}
+
 // ─── JSON serialization helpers ──────────────────────────────────────────────
 
 /// Serialize an [`ExtractionOutput`] to a JSON string.
@@ -137,28 +169,12 @@ pub fn extraction_output_to_json(output: &ExtractionOutput) -> Result<String, se
     String::from_utf8(json).map_err(|e| serde_json::Error::io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
 }
 
-/// Write an [`ExtractionOutput`] as compact JSON, byte-identical to `serde_json::to_writer(writer, output)`, with the
-/// components serialized in parallel: on a large project they are most of the bytes.
+/// Write an [`ExtractionOutput`] as compact JSON.
 pub fn write_extraction_output_json(
     output: &ExtractionOutput,
     writer: impl std::io::Write,
 ) -> Result<(), serde_json::Error> {
-    // Destructured so a new field fails to compile here instead of going missing from the JSON.
-    let ExtractionOutput { components, enums, diagnostics, stats } = output;
-    let components = components
-        .par_iter()
-        .map(|(key, entry)| Ok((key.as_str(), serde_json::value::to_raw_value(entry)?)))
-        .collect::<Result<std::collections::BTreeMap<_, _>, serde_json::Error>>()?;
-
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Fields<'a> {
-        components: std::collections::BTreeMap<&'a str, Box<serde_json::value::RawValue>>,
-        enums: &'a std::collections::BTreeMap<String, Vec<EnumEntry>>,
-        diagnostics: &'a [Diagnostic],
-        stats: &'a ExtractionStats,
-    }
-    serde_json::to_writer(writer, &Fields { components, enums, diagnostics, stats })
+    serde_json::to_writer(writer, output)
 }
 
 /// Serialize an [`IncrementalUpdate`] to a JSON string (same reason as above).

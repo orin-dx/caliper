@@ -24,6 +24,7 @@ const update = (revision: number, updated: string[], removed: string[] = [], des
   JSON.stringify({
     revision,
     updatedComponents: updated.map((name) => component(name, description)),
+    props: {},
     updatedKeys: updated,
     removedKeys: removed,
     affectedFiles: [],
@@ -200,6 +201,7 @@ describe('caliperDocgen', () => {
           revision: 2,
           updatedKeys: ['Panel'],
           updatedComponents: [component('Panel')],
+          props: {},
           removedKeys: ['Card'],
           diagnostics: [],
           removedDiagnostics: [],
