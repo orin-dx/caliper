@@ -193,7 +193,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "caliper-docgen"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "caliper-docgen-core",
  "camino",
@@ -221,7 +221,7 @@ dependencies = [
 
 [[package]]
 name = "caliper-docgen-core"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "arc-swap",
  "camino",
@@ -249,7 +249,7 @@ dependencies = [
 
 [[package]]
 name = "caliper-docgen-napi"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "caliper-docgen-core",
  "camino",
