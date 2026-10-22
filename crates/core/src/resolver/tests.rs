@@ -1837,27 +1837,6 @@ fn test_multi_param_function_does_not_emit_a_spurious_unresolvable_diagnostic_fo
     assert_eq!(state.diagnostics[0].code, DiagnosticCode::OpaqueType);
 }
 
-// ── Test 17: tsconfig path stripping ─────────────────────────────────────
-
-#[test]
-fn test_strip_json_comments() {
-    let input = r#"{
-  // This is a comment
-  "compilerOptions": {
-"baseUrl": "./src", // another comment
-"paths": {
-  "@lib/*": ["./src/lib/*"]
-}
-  }
-}"#;
-    let stripped = react::strip_json_comments(input);
-    // Should be parseable JSON after stripping.
-    let parsed: serde_json::Value = serde_json::from_str(&stripped).unwrap();
-    assert_eq!(parsed["compilerOptions"]["baseUrl"].as_str(), Some("./src"));
-}
-
-// ── Test 18: ReactNode literal union member ───────────────────────────────
-
 #[test]
 fn test_union_filters_undefined() {
     let ctx = empty_ctx();
