@@ -198,6 +198,7 @@ mod tests {
             composes: vec![],
             tags: Default::default(),
             methods: vec![],
+            detected_by: crate::types::DetectionRule::FunctionDeclaration,
         };
 
         let toon = render_component_toon(&entry);

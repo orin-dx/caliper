@@ -222,8 +222,11 @@ pub struct ComponentEntry {
     pub composes: Vec<String>,
     pub tags: BTreeMap<String, String>,
     pub methods: Vec<()>,
+    pub detected_by: DetectionRule,
 }
 ```
+
+`detected_by` (`detectedBy` in JSON) is the extractor rule that recognized the component, so a consumer can tell an explicit declaration form (`functionDeclaration`, `forwardRef`, `fcAnnotation`, `classComponent`, ...) from an inference (`typedFunctionExpression`, `wrapperTypeArgument`). It is the grouping the per-rule precision sample uses (`docs/precision.md`).
 
 **Invariant 6:** `components`, `enums`, `props`, and `notable_inherited` are `BTreeMap`, not `FxHashMap` — this is AGENTS.md non-negotiable #2 (`FxHashMap` for internal maps, `BTreeMap` for JSON-output maps) applied at the type level. `ExtractionOutput` and everything nested inside it that's part of the JSON contract is output-facing, so it gets deterministic key order for free from `BTreeMap`'s iteration order — output diffing, snapshot tests, and any consumer that hashes or compares the JSON depend on this being stable across runs, not just correct.
 

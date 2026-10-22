@@ -94,7 +94,21 @@ export interface ComponentEntry {
   composes: string[]
   tags: Record<string, string>
   methods: []
+  /** The rule that recognized the component; `typedFunctionExpression` and `wrapperTypeArgument` are inferred. */
+  detectedBy: DetectionRule
 }
+
+export type DetectionRule =
+  | 'fcAnnotation'
+  | 'forwardRef'
+  | 'forwardRefExoticDecl'
+  | 'hocWrapper'
+  | 'classComponent'
+  | 'functionDeclaration'
+  | 'anonymousDefaultExport'
+  | 'attachedSubComponent'
+  | 'typedFunctionExpression'
+  | 'wrapperTypeArgument'
 
 export interface EnumEntry {
   name: string

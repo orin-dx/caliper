@@ -314,6 +314,7 @@ fn serialize_rdt_emits_composes_exactly() {
         composes: vec!["BaseA".to_string(), "BaseB".to_string()],
         tags: Default::default(),
         methods: vec![],
+        detected_by: caliper_docgen_core::types::DetectionRule::FunctionDeclaration,
     };
     let mut components = std::collections::BTreeMap::new();
     components.insert("Widget".to_string(), entry);
@@ -360,6 +361,7 @@ fn component_with_props(name: &str, props: Vec<(&str, &str)>) -> caliper_docgen_
         composes: vec![],
         tags: Default::default(),
         methods: vec![],
+        detected_by: caliper_docgen_core::types::DetectionRule::FunctionDeclaration,
     }
 }
 

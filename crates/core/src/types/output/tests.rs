@@ -518,6 +518,7 @@ mod serde_key_casing_tests {
             composes: vec![],
             tags: Default::default(),
             methods: vec![],
+            detected_by: crate::types::DetectionRule::FunctionDeclaration,
         };
 
         let v = serde_json::to_value(&entry).expect("serialize");
@@ -580,6 +581,7 @@ mod component_entry_roundtrip_tests {
             composes: vec!["Base".to_string()],
             tags: Default::default(),
             methods: vec![],
+            detected_by: crate::types::DetectionRule::FunctionDeclaration,
         };
 
         let json = serde_json::to_value(&original).expect("serialize");

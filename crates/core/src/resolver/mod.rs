@@ -444,6 +444,7 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
             composes: chain.composes,
             tags: mapping.tags.clone(),
             methods: vec![],
+            detected_by: mapping.rule,
         },
         state.diagnostics,
     )

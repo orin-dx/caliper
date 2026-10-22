@@ -159,7 +159,8 @@ expression: value
       "discriminantProp": "type",
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRef"
     },
     "Avatar": {
       "displayName": "Avatar",
@@ -232,7 +233,8 @@ expression: value
       "discriminantProp": null,
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "hocWrapper"
     },
     "Badge": {
       "displayName": "Badge",
@@ -279,7 +281,8 @@ expression: value
       "discriminantProp": null,
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "fcAnnotation"
     },
     "Box": {
       "displayName": "Box",
@@ -447,7 +450,8 @@ expression: value
       "discriminantProp": null,
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRef"
     },
     "Card": {
       "displayName": "Card",
@@ -661,7 +665,8 @@ expression: value
         "see": "https://example.com/components/card",
         "since": "1.0.0"
       },
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRef"
     },
     "Chip": {
       "displayName": "Chip",
@@ -717,7 +722,8 @@ expression: value
       "discriminantProp": null,
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "fcAnnotation"
     },
     "Icon": {
       "displayName": "Icon",
@@ -911,7 +917,8 @@ expression: value
       "discriminantProp": null,
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRef"
     },
     "IconButton": {
       "displayName": "IconButton",
@@ -1038,7 +1045,8 @@ expression: value
       "discriminantProp": null,
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRef"
     },
     "Select": {
       "displayName": "Select",
@@ -1215,7 +1223,8 @@ expression: value
       "discriminantProp": null,
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRef"
     },
     "Toast": {
       "displayName": "Toast",
@@ -1252,7 +1261,8 @@ expression: value
       "discriminantProp": null,
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRef"
     },
     "Toggle": {
       "displayName": "Toggle",
@@ -1325,7 +1335,8 @@ expression: value
       "discriminantProp": null,
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRef"
     },
     "TypeSampler": {
       "displayName": "TypeSampler",
@@ -1572,7 +1583,8 @@ expression: value
       "discriminantProp": null,
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRef"
     }
   },
   "enums": {},

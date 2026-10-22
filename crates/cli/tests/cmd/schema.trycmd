@@ -129,6 +129,21 @@ $ caliper-docgen schema
           },
           "methods": {
             "type": "array"
+          },
+          "detectedBy": {
+            "type": "string",
+            "enum": [
+              "fcAnnotation",
+              "forwardRef",
+              "forwardRefExoticDecl",
+              "hocWrapper",
+              "classComponent",
+              "functionDeclaration",
+              "anonymousDefaultExport",
+              "attachedSubComponent",
+              "typedFunctionExpression",
+              "wrapperTypeArgument"
+            ]
           }
         }
       }
