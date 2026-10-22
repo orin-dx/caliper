@@ -58,7 +58,15 @@ fn schema_value() -> serde_json::Value {
                             "items": { "type": "string" }
                         },
                         "tags": { "type": "object" },
-                        "methods": { "type": "array" }
+                        "methods": { "type": "array" },
+                        "detectedBy": {
+                            "type": "string",
+                            "enum": [
+                                "fcAnnotation", "forwardRef", "forwardRefExoticDecl", "hocWrapper", "classComponent",
+                                "functionDeclaration", "anonymousDefaultExport", "attachedSubComponent",
+                                "typedFunctionExpression", "wrapperTypeArgument"
+                            ]
+                        }
                     }
                 }
             },
@@ -169,6 +177,7 @@ mod tests {
                 composes: vec!["SomeUnresolved".into()],
                 tags: BTreeMap::from([("deprecated".to_string(), String::new())]),
                 methods: vec![],
+                detected_by: caliper_docgen_core::types::DetectionRule::FunctionDeclaration,
             },
         );
 

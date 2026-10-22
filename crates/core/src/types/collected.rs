@@ -736,9 +736,11 @@ pub struct RawDefault {
 }
 
 /// The extractor rule that recognized a component. Carried so a mapping can be explained and, later, so rules can be
-/// ranked by how likely they are to be wrong. Append new variants last: the cache encodes them by position.
+/// ranked by how likely they are to be wrong. The cache encodes variants by their serialized name, so renaming one
+/// changes the cache's bytes and needs a `CACHE_SCHEMA_VERSION` bump.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum DetectionRule {
     /// `const Button: FC<Props> = ...`
     FcAnnotation,

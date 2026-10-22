@@ -817,7 +817,8 @@ expression: value
       "discriminantProp": null,
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRefExoticDecl"
     },
     "TextInput": {
       "displayName": "TextInput",
@@ -1951,7 +1952,8 @@ expression: value
         "React.InputHTMLAttributes"
       ],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRefExoticDecl"
     }
   },
   "enums": {},

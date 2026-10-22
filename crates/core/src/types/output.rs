@@ -105,6 +105,9 @@ pub struct ComponentEntry {
     pub tags: BTreeMap<String, String>,
     /// Always empty for functional components; present for RDT compat
     pub methods: Vec<()>,
+    /// The extractor rule that recognized this component. `typedFunctionExpression` and `wrapperTypeArgument` are
+    /// inferred from a function's shape and what it returns; the others are explicit declaration forms.
+    pub detected_by: crate::types::DetectionRule,
 }
 
 impl ComponentEntry {

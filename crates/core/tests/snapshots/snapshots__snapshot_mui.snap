@@ -946,7 +946,8 @@ expression: value
       "discriminantProp": null,
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRefExoticDecl"
     },
     "TextField": {
       "displayName": "TextField",
@@ -1842,7 +1843,8 @@ expression: value
       "discriminantProp": "variant",
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRefExoticDecl"
     }
   },
   "enums": {},

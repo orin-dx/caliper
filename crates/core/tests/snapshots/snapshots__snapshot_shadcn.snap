@@ -177,7 +177,8 @@ expression: value
       "discriminantProp": null,
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "functionDeclaration"
     },
     "Button": {
       "displayName": "Button",
@@ -528,7 +529,8 @@ expression: value
       "discriminantProp": null,
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRef"
     },
     "Input": {
       "displayName": "Input",
@@ -827,7 +829,8 @@ expression: value
       "discriminantProp": null,
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRef"
     }
   },
   "enums": {

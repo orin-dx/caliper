@@ -286,7 +286,8 @@ expression: value
       "discriminantProp": null,
       "composes": [],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRefExoticDecl"
     }
   },
   "enums": {},

@@ -746,7 +746,8 @@ expression: value
         "React.CSSProperties"
       ],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRefExoticDecl"
     },
     "ButtonGroup": {
       "displayName": "ButtonGroup",
@@ -982,7 +983,8 @@ expression: value
         "React.CSSProperties"
       ],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRefExoticDecl"
     },
     "Input": {
       "displayName": "Input",
@@ -1802,7 +1804,8 @@ expression: value
         "React.CSSProperties"
       ],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRefExoticDecl"
     },
     "InputGroup": {
       "displayName": "InputGroup",
@@ -2078,7 +2081,8 @@ expression: value
         "React.CSSProperties"
       ],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRefExoticDecl"
     },
     "InputLeftAddon": {
       "displayName": "InputLeftAddon",
@@ -2314,7 +2318,8 @@ expression: value
         "React.CSSProperties"
       ],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRefExoticDecl"
     },
     "InputLeftElement": {
       "displayName": "InputLeftElement",
@@ -2570,7 +2575,8 @@ expression: value
         "React.CSSProperties"
       ],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRefExoticDecl"
     },
     "InputRightAddon": {
       "displayName": "InputRightAddon",
@@ -2806,7 +2812,8 @@ expression: value
         "React.CSSProperties"
       ],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRefExoticDecl"
     },
     "InputRightElement": {
       "displayName": "InputRightElement",
@@ -3062,7 +3069,8 @@ expression: value
         "React.CSSProperties"
       ],
       "tags": {},
-      "methods": []
+      "methods": [],
+      "detectedBy": "forwardRefExoticDecl"
     }
   },
   "enums": {},
