@@ -95,11 +95,12 @@ describe.skipIf(!shouldRun)('caliperDocgen (integration, real native binding)', 
     expect(data.components).toHaveProperty('Button')
     const button = data.components.Button
     expect(Object.keys(button.props).toSorted()).toEqual(['label', 'onClick', 'variant'])
-    expect(button.props.label.required).toBe(true)
-    expect(button.props.variant.required).toBe(false)
+    const prop = (name: string) => data.props[button.props[name]]
+    expect(prop('label').required).toBe(true)
+    expect(prop('variant').required).toBe(false)
     // The NAPI boundary's ParsedProp.defaultValue.value carries the prop's
     // source-text literal verbatim, quotes included — not a bare JS string.
-    expect(button.props.variant.defaultValue?.value).toBe('"primary"')
+    expect(prop('variant').defaultValue?.value).toBe('"primary"')
   })
 
   it('re-extracts real prop changes via a direct hotUpdate call against the real binding', async () => {
@@ -144,9 +145,11 @@ export function Button({ label, disabled = false }: ButtonProps) {
 
     const updateEvent = hotSend.find((e) => e.event === 'caliper-docgen:update')
     expect(updateEvent).toBeDefined()
-    const updated = (updateEvent!.data as any).updatedComponents[0]
+    const payload = updateEvent!.data as any
+    const updated = payload.updatedComponents[0]
     expect(updated.displayName).toBe('Button')
     expect(Object.keys(updated.props).toSorted()).toEqual(['disabled', 'label'])
+    expect(payload.props[updated.props.disabled].defaultValue?.value).toBe('false')
 
     const data = await loadVirtualModule(server)
     expect(Object.keys(data.components.Button.props).toSorted()).toEqual(['disabled', 'label'])

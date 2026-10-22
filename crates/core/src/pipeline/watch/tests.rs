@@ -1112,3 +1112,61 @@ fn an_update_reports_the_keys_it_changed_and_removed() {
     assert_eq!((second.updated_keys, second.removed_keys), (vec![], vec!["Gadget".to_string()]));
     assert!(second.revision > first.revision, "revisions increase: {} then {}", first.revision, second.revision);
 }
+
+/// The prop ids a canonical component JSON refers to.
+fn referenced_ids(components: &[&serde_json::Value]) -> std::collections::BTreeSet<String> {
+    components
+        .iter()
+        .flat_map(|c| [&c["props"], &c["notableInherited"]])
+        .flat_map(|ids| ids.as_object().unwrap().values().map(|id| id.as_str().unwrap().to_owned()))
+        .collect()
+}
+
+/// What a client does with an update's JSON: drop removed keys, set updated ones, merge the update's props, then drop
+/// props no component refers to any more.
+fn apply_canonical_update(output: &mut serde_json::Value, update: &serde_json::Value) {
+    let components = output["components"].as_object_mut().unwrap();
+    for key in update["removedKeys"].as_array().unwrap() {
+        components.remove(key.as_str().unwrap());
+    }
+    let updated = update["updatedKeys"].as_array().unwrap().iter().zip(update["updatedComponents"].as_array().unwrap());
+    for (key, component) in updated {
+        components.insert(key.as_str().unwrap().to_owned(), component.clone());
+    }
+    let referenced = referenced_ids(&components.values().collect::<Vec<_>>());
+    let table = output["props"].as_object_mut().unwrap();
+    table.extend(update["props"].as_object().unwrap().clone());
+    table.retain(|id, _| referenced.contains(id));
+}
+
+#[test]
+fn an_updates_props_are_exactly_the_ones_its_components_refer_to_and_applying_it_matches_the_session() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().expect("canonicalize")).expect("utf8");
+    let base = dir.join("Base.tsx");
+    std::fs::write(&base, "export interface BaseProps { label: string; size?: 'sm' | 'lg'; }\n").expect("write Base");
+    for name in ["Button", "Chip"] {
+        let source = format!(
+            "import {{ BaseProps }} from './Base';\n\
+             export function {name}(props: BaseProps & {{ only{name}?: boolean }}) {{ return null; }}\n"
+        );
+        std::fs::write(dir.join(format!("{name}.tsx")), source).expect("write component");
+    }
+    let session = WatchSession::new(PipelineOptions { src_dirs: vec![dir], ..Default::default() });
+    let mut client = serde_json::to_value(session.initialize()).unwrap();
+    let label = |output: &serde_json::Value, key: &str| output["components"][key]["props"]["label"].clone();
+    assert_eq!(label(&client, "Button"), label(&client, "Chip"), "an inherited prop has one id: {client:#}");
+
+    std::fs::write(&base, "export interface BaseProps { label: string; tone?: 'info' | 'warn'; }\n")
+        .expect("edit Base");
+    let update = serde_json::to_value(session.update_file(&base)).unwrap();
+
+    assert_eq!(update["updatedKeys"], serde_json::json!(["Button", "Chip"]));
+    let carried: std::collections::BTreeSet<String> = update["props"].as_object().unwrap().keys().cloned().collect();
+    assert_eq!(carried, referenced_ids(&update["updatedComponents"].as_array().unwrap().iter().collect::<Vec<_>>()));
+
+    apply_canonical_update(&mut client, &update);
+    let session_now = serde_json::to_value(session.snapshot()).unwrap();
+    assert_eq!(client["components"], session_now["components"]);
+    assert_eq!(client["props"], session_now["props"]);
+}

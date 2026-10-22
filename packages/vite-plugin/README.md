@@ -20,7 +20,8 @@ export default defineConfig({
 ```ts
 import docgen from 'virtual:caliper-docgen'
 
-docgen.components['Button'].props
+// A component maps each prop name to an id; each distinct prop is written once, in `docgen.props`.
+const label = docgen.props[docgen.components['Button'].props.label]
 ```
 
 On every change the virtual module reloads with the same output a fresh extraction would give, including removed components, enums and diagnostics. To apply changes yourself, listen for the update event:
@@ -28,9 +29,10 @@ On every change the virtual module reloads with the same output a fresh extracti
 ```ts
 import.meta.hot?.on(
   'caliper-docgen:update',
-  ({ updatedKeys, updatedComponents, removedKeys, diagnostics, removedDiagnostics }) => {
+  ({ updatedKeys, updatedComponents, props, removedKeys, diagnostics, removedDiagnostics }) => {
     // Events arrive in revision order, each a delta from the one before: delete removedKeys, set updatedKeys[i] to
-    // updatedComponents[i], drop removedDiagnostics and add diagnostics.
+    // updatedComponents[i], merge props into docgen.props, drop removedDiagnostics and add diagnostics. Props no
+    // component refers to any more can be dropped.
   },
 )
 ```

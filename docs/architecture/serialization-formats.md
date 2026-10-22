@@ -2,7 +2,7 @@
 
 **Source:** `crates/cli/src/commands/extract.rs` (`serialize_rdt`, `serialize_storybook`, `rdt_type_json`), `crates/core/src/toon.rs` (whole module), `crates/cli/src/commands/schema.rs` (`schema_value`, `cmd_schema`, its drift test), `crates/core/src/types/output.rs` (`PropType::is_literal_union`), `crates/core/src/resolver/mod.rs` (`ResolvedChain::give_up`, `empty_with_compose`)
 
-This tool's canonical, lossless representation is `ExtractionOutput` — the `serde`-derived struct tree in `crates/core/src/types/`. Everything in this document is a _consumer-facing projection_ of that canonical form: three formats reshape it for specific downstream tools (`--format rdt`, `--format storybook`, `--format toon`), and one (`schema.rs`) describes its shape for external validators. None of the four is the source of truth; `ExtractionOutput` is.
+This tool's canonical, lossless representation is `ExtractionOutput` — the struct tree in `crates/core/src/types/`, whose JSON writes each distinct prop once and refers to it by id (ADR 0009; see `types-and-output-contract.md`). Everything in this document is a _consumer-facing projection_ of that canonical form: three formats reshape it for specific downstream tools (`--format rdt`, `--format storybook`, `--format toon`), and one (`schema.rs`) describes its shape for external validators. None of the four is the source of truth; `ExtractionOutput` is.
 
 ## Where this code lives, and why that's not a AGENTS.md violation
 

@@ -16,14 +16,17 @@ export interface CaliperDocgenOptions {
 
 /**
  * What `caliper-docgen:update` carries to the client. Events arrive in `revision` order; each is a delta from the one
- * before. Delete `removedKeys`, set `updatedKeys[i]` to `updatedComponents[i]`, drop `removedDiagnostics` and add
- * `diagnostics`, and the client holds the same output the virtual module serves.
+ * before. Delete `removedKeys`, set `updatedKeys[i]` to `updatedComponents[i]`, merge `props` into the output's
+ * `props`, drop `removedDiagnostics` and add `diagnostics`, and the client holds the same output the virtual module
+ * serves, less any props no component refers to any more.
  */
 export interface CaliperDocgenUpdate {
   file: string
   revision: number
   updatedKeys: string[]
   updatedComponents: IncrementalUpdate['updatedComponents']
+  /** Every prop `updatedComponents` refer to, by id. */
+  props: IncrementalUpdate['props']
   removedKeys: string[]
   /** Diagnostics this revision added. */
   diagnostics: IncrementalUpdate['diagnostics']
@@ -209,6 +212,7 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
           revision: applied.revision,
           updatedKeys: applied.updatedKeys,
           updatedComponents: applied.updatedComponents,
+          props: applied.props,
           removedKeys: applied.removedKeys,
           diagnostics: applied.diagnostics,
           removedDiagnostics: applied.removedDiagnostics,
