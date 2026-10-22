@@ -146,6 +146,16 @@ fn write_atomic_surfaces_error_when_parent_dir_is_missing() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn write_atomic_writes_a_device_in_place_instead_of_renaming_over_it() {
+    use std::os::unix::fs::FileTypeExt;
+
+    write_atomic("/dev/null", "{}").expect("/dev/null accepts writes; its directory does not accept a temp file");
+    let kind = std::fs::metadata("/dev/null").expect("/dev/null exists").file_type();
+    assert!(kind.is_char_device(), "/dev/null must still be the device, got {kind:?}");
+}
+
 #[test]
 fn write_atomic_cleans_up_temp_file_when_rename_fails() {
     let dir = std::env::temp_dir().join(format!("rdt-out-atomic-rename-fail-{}", std::process::id()));
