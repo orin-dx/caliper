@@ -860,6 +860,11 @@ fn typed_functions_that_never_render_are_declined_with_the_reason() {
         export function* Saga(u: User) { yield u; }
         export const Search = debounce((q: User) => q.first, 100);
         export const Selector = createSelector((u: User) => u.first);
+        export function Label(u: User) { const unused = <b>{u.first}</b>; return u.first; }
+        export function Columns(u: User) { return { title: <b>{u.first}</b> }; }
+        export function OnLater(u: User) { setTimeout(() => <i />); return u.last; }
+        import type { ReactNode } from "./my-types";
+        export function Typed(u: User): ReactNode { return u.first; }
     "#;
     let data = parse_file(Utf8Path::new("/test/helpers.tsx"), source);
     assert_eq!(
@@ -876,14 +881,36 @@ fn typed_functions_that_never_render_are_declined_with_the_reason() {
     assert_eq!(
         reasons,
         vec![
-            "'FormatName' takes a typed props parameter but never renders: no JSX, element, hook call, or returned null, children or component call",
-            "'FullName' takes a typed props parameter but declares a return type that is not an element",
+            "'Columns' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call",
+            "'FormatName' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call",
+            "'FullName' takes a typed props parameter but declares a return type that is not React's element type",
+            "'Label' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call",
+            "'OnLater' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call",
             "'Saga' takes a typed props parameter but is a generator",
-            "'Search' wraps a typed function that never renders: no JSX, element, hook call, or returned null, children or component call",
-            "'Selector' wraps a typed function that never renders: no JSX, element, hook call, or returned null, children or component call",
-            "'ToDto' takes a typed props parameter but declares a return type that is not an element",
+            "'Search' wraps a typed function that never returns an element: no returned JSX, element, null, children or component call, and no hook call",
+            "'Selector' wraps a typed function that never returns an element: no returned JSX, element, null, children or component call, and no hook call",
+            "'ToDto' takes a typed props parameter but declares a return type that is not React's element type",
+            "'Typed' takes a typed props parameter but declares a return type that is not React's element type",
         ]
     );
+}
+
+#[test]
+fn components_whose_returned_value_holds_an_element_are_detected() {
+    let source = r#"
+        import type { ReactNode } from "react";
+        interface P { items: string[]; open?: boolean }
+        export function Held({ items }: P) { const content = <ul>{items}</ul>; return content; }
+        export function Mapped({ items }: P) { return items.map((i) => <li key={i}>{i}</li>); }
+        export function Branch({ open }: P) { if (!open) { return null; } return open ? <div /> : <span />; }
+        export function Guarded({ open }: P) { return open && <div />; }
+        export function Annotated(p: P): ReactNode { return p.items[0]; }
+        export function Qualified(p: P): React.ReactNode { return p.items[0]; }
+    "#;
+    let data = parse_file(Utf8Path::new("/test/shapes.tsx"), source);
+    let mut names: Vec<&str> = data.component_mappings.iter().map(|m| m.component_name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["Annotated", "Branch", "Guarded", "Held", "Mapped", "Qualified"]);
 }
 
 #[test]

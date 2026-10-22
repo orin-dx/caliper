@@ -14,7 +14,7 @@ use oxc_span::Span;
 
 use crate::types::{CollectedType, CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode, TypeName};
 
-use super::evidence::{renders, FunctionShape};
+use super::evidence::{renders, FunctionShape, ReactBinding};
 use super::SourceDataCollector;
 
 /// One type argument of a candidate wrapper call.
@@ -72,7 +72,11 @@ enum ArgumentEvidence {
 /// (`withRootProvider<P>(Ark.Root)`), or a wrapped component (`polymorphic<P>(forwardRef(...))`). A tag string alone
 /// also describes `makeLabel<P>("button")`, and a lowercase value describes a context default or a store, so neither
 /// counts.
-fn component_argument_evidence(callee: &str, call: &CallExpression<'_>) -> Result<ArgumentEvidence, &'static str> {
+fn component_argument_evidence(
+    callee: &str,
+    call: &CallExpression<'_>,
+    react: ReactBinding<'_>,
+) -> Result<ArgumentEvidence, &'static str> {
     if callee.rsplit('.').next() == Some("createContext") {
         return Err("creates a context");
     }
@@ -82,12 +86,12 @@ fn component_argument_evidence(callee: &str, call: &CallExpression<'_>) -> Resul
     let element_type_arg = || call.type_arguments.as_ref().is_some_and(|a| a.params.iter().any(is_element_type_arg));
     let sufficient = |r: Result<(), &'static str>| r.map(|()| ArgumentEvidence::Sufficient);
     match first {
-        Expression::ArrowFunctionExpression(f) => {
-            sufficient(renders(&FunctionShape::of_arrow(f)).map_err(|_why| "is given a function that never renders"))
-        }
-        Expression::FunctionExpression(f) => {
-            sufficient(renders(&FunctionShape::of_function(f)).map_err(|_why| "is given a function that never renders"))
-        }
+        Expression::ArrowFunctionExpression(f) => sufficient(
+            renders(&FunctionShape::of_arrow(f), react).map_err(|_why| "is given a function that never renders"),
+        ),
+        Expression::FunctionExpression(f) => sufficient(
+            renders(&FunctionShape::of_function(f), react).map_err(|_why| "is given a function that never renders"),
+        ),
         Expression::StringLiteral(_) if element_type_arg() => Ok(ArgumentEvidence::Sufficient),
         Expression::StringLiteral(_) => Ok(ArgumentEvidence::TagNeedsPayload),
         Expression::Identifier(id) if is_component_reference(id.name.as_str()) => Ok(ArgumentEvidence::Sufficient),
@@ -108,7 +112,7 @@ impl<'src> SourceDataCollector<'src> {
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
         let Some(type_arguments) = call.type_arguments.as_ref() else { return false };
         let Some(callee) = self.extract_callee_name(call) else { return false };
-        let needs_payload = match component_argument_evidence(&callee, call) {
+        let needs_payload = match component_argument_evidence(&callee, call, &|n| self.may_be_react(n)) {
             Ok(ArgumentEvidence::Sufficient) => false,
             Ok(ArgumentEvidence::TagNeedsPayload) => true,
             Err(reason) => {
