@@ -61,23 +61,14 @@ In `Cargo.toml`, change:
 
 ```toml
 [workspace]
-members = [
-    "crates/core",
-    "crates/napi",
-    "crates/cli",
-    "packages/rolldown-plugin",
-]
+members = ["crates/core", "crates/napi", "crates/cli", "packages/rolldown-plugin"]
 ```
 
 To:
 
 ```toml
 [workspace]
-members = [
-    "crates/core",
-    "crates/napi",
-    "crates/cli",
-]
+members = ["crates/core", "crates/napi", "crates/cli"]
 ```
 
 - [ ] **Step 3: Remove from Moon workspace**
@@ -132,21 +123,13 @@ mv crates/napi crates/binding
 Change:
 
 ```toml
-members = [
-    "crates/core",
-    "crates/napi",
-    "crates/cli",
-]
+members = ["crates/core", "crates/napi", "crates/cli"]
 ```
 
 To:
 
 ```toml
-members = [
-    "crates/core",
-    "crates/binding",
-    "crates/cli",
-]
+members = ["crates/core", "crates/binding", "crates/cli"]
 ```
 
 The path inside `crates/binding/Cargo.toml` has `oxc-react-docgen-core = { path = "../core" }` — this relative path is still correct after the rename, no change needed there.
