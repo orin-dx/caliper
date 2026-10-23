@@ -39,7 +39,6 @@ criterion.workspace        = true
 insta.workspace            = true
 tempfile.workspace          = true
 rstest.workspace            = true
-trybuild                    = "1"
 
 [[bench]]
 name = "extraction"
