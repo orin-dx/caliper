@@ -40,6 +40,12 @@ With `PipelineOptions::load_dependencies`, `ResolutionContext::with_dependencies
 
 **Invariant:** never merge layer data into the project's `GlobalSourceData`; that would emit dependency components and enums and let dependency names shadow project names in bare-name lookups.
 
+## Wrapper callees (`resolver/callee.rs`)
+
+A `wrapperTypeArgument` component's props come from the type argument the extractor selected (`extractor/wrapper.rs`), plus what its callee's result type adds. The extractor records every generic function's result in `SourceData::function_results`: the return annotation, or the type its only top-level `return … as T` asserts. `callee::result_props` binds the callee's type parameters to the call's type arguments, follows aliases to the first React component type (`NamedExoticComponent<P>`, `FC<P>`, a call signature, …) and adds P's inline object members (`{ component?: any; renderRoot?: … }`) that the component doesn't already have. Other members of P (`Payload['props']`, `RefAttributes<…>`) are left to the selection, so this never warns. The callee's file is a recorded dependency, so editing the factory re-resolves the components it builds; `follow_reexports` treats a recorded function as a declaration, so `export *` barrels reach it.
+
+**Gap:** a result type asserted through an alias declared inside the function body (Mantine's `polymorphicFactory`) is not reachable.
+
 ## The three-tier data model this resolver operates on
 
 - `CollectedType` / `CollectedTypeAlias` — what the extractor produced: structural, not yet resolved, may reference cross-file names.
