@@ -4,7 +4,6 @@
 
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import * as napi from 'caliper-docgen-napi'
 import type { RdtComponentDoc } from 'caliper-docgen-napi'
 import {
   STORY_FILE_TEST_REGEXP,
@@ -48,18 +47,20 @@ function tagLists(tags: Record<string, string>): Record<string, string[]> | unde
 
 export function createDocgenProvider(
   options: CaliperStorybookOptions = {},
-  binding: SessionBinding = napi,
+  binding?: SessionBinding,
 ): DocgenMiddleware {
   const cwd = process.cwd()
-  const session = new DocgenSession(
-    {
-      srcDirs: (options.srcDirs ?? ['src']).map((dir) => resolve(cwd, dir)),
-      exclude: options.exclude,
-      tsconfigPath: options.tsconfigPath && resolve(cwd, options.tsconfigPath),
-      skipHtmlProps: options.skipHtmlProps,
-    },
-    binding,
-  )
+  const sessionOptions = {
+    srcDirs: (options.srcDirs ?? ['src']).map((dir) => resolve(cwd, dir)),
+    exclude: options.exclude,
+    tsconfigPath: options.tsconfigPath && resolve(cwd, options.tsconfigPath),
+    skipHtmlProps: options.skipHtmlProps,
+  }
+  // The native binding loads on the first story request, not when Storybook starts the worker.
+  let sessionPromise: Promise<DocgenSession> | undefined
+  const getSession = () =>
+    (sessionPromise ??= (async () =>
+      new DocgenSession(sessionOptions, binding ?? (await import('caliper-docgen-napi'))))())
   const resolveMeta = createMetaComponentResolver()
   const fallback = options.fallback ?? 'degraded'
   let extractArgTypes: Promise<ExtractArgTypes> | undefined
@@ -73,6 +74,7 @@ export function createDocgenProvider(
     if (!('component' in resolution)) throw new Error(`meta.component: ${resolution.reason}`)
     const { path, exportName } = resolution.component
     if (!path) throw new Error(`no file for the import of ${exportName}`)
+    const session = await getSession()
     await session.fresh()
     const key = session.keyOf(path, exportName)
     if (!key) throw new Error(`caliper-docgen found no component ${exportName} in ${path}`)
@@ -80,7 +82,8 @@ export function createDocgenProvider(
     return { key, path }
   }
 
-  function docgen(key: string): RdtComponentDoc {
+  async function docgen(key: string): Promise<RdtComponentDoc> {
+    const session = await getSession()
     const doc = session.docgenInfo(key)
     if (!doc) throw new Error(`${key} left the session`)
     return doc
@@ -97,7 +100,7 @@ export function createDocgenProvider(
   ): Promise<Subcomponent> {
     try {
       const { key, path } = await component(csf, storyPath, componentName)
-      const doc = docgen(key)
+      const doc = await docgen(key)
       const { description, summary, jsDocTags } = extractComponentDescription(
         undefined,
         doc.description || undefined,
@@ -119,7 +122,7 @@ export function createDocgenProvider(
     const code = await readFile(storyPath, 'utf8')
     const csf = loadCsf(code, { fileName: storyPath, makeTitle: () => entry.title }).parse()
     const { key } = await component(csf, storyPath)
-    const doc = docgen(key)
+    const doc = await docgen(key)
     const { description, summary, jsDocTags } = extractComponentDescription(
       extractDescription(csf._metaStatement) || undefined,
       doc.description || undefined,
