@@ -1,0 +1,13 @@
+<task-notification>
+<task-id>aad4d80ab9390c78d</task-id>
+<tool-use-id>toolu_011svqWGVWsEyAauDd7GbG6N</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/aad4d80ab9390c78d.output</output-file>
+<status>completed</status>
+<summary>Agent "Storybook integration package" stopped at its 200-turn limit (partial result; SendMessage to task-id to continue)</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>NOTE: this agent stopped at its 200-turn limit before finishing. The text below is PARTIAL output; treat it as incomplete. Send the agent a message (SendMessage) to let it continue from where it stopped.
+
+Fixing the lint findings: renaming `argTypes.ts` to kebab-case, making preset hooks synchronous, async fs, and merging imports.</result>
+<usage><subagent_tokens>325524</subagent_tokens><tool_uses>275</tool_uses><duration_ms>2015726</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-aad4d80ab9390c78d</worktreePath><worktreeBranch>worktree-agent-aad4d80ab9390c78d</worktreeBranch></worktree>
+</task-notification>
