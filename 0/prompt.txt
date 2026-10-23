@@ -1,0 +1,60 @@
+<task-notification>
+<task-id>ad2ad47f8a70be1d0</task-id>
+<tool-use-id>toolu_01Eeg8dFxcpBgBPwmFdCGSYV</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/ad2ad47f8a70be1d0.output</output-file>
+<status>completed</status>
+<summary>Agent "Hardening, gates and docs" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I opened four stacked PRs off `main`, each based on the one before. Tests and lint pass on each, with two things not verified yet: the new scorecard workflow hasn't run in Actions, and one terminal test flaked once.
+
+| PR | Branch | Base | Commit |
+|---|---|---|---|
+| [#111](https://github.com/orin-dx/caliper/pull/111) | `feat/watch-rebuild-on-config` | `main` | `cb8416c6` |
+| [#114](https://github.com/orin-dx/caliper/pull/114) | `feat/session-ensure-fresh` | #111 | `b757514b` |
+| [#116](https://github.com/orin-dx/caliper/pull/116) | `ci/size-normalized-gates` | #114 | `f1a5ed83` |
+| [#118](https://github.com/orin-dx/caliper/pull/118) | `docs/status-and-ts7` | #116 | `db74ef6f` |
+
+**#111 – watch mode rebuilds on config changes.** Editing a tsconfig, jsconfig, `package.json` or lockfile in or above a source directory now rebuilds the session. The update lists every component that changed. The CLI watcher and the Vite plugin (dev server and `build --watch`) watch those files. Core and the NAPI binding gain functions to list these files and to ask whether a path is one. A changeset is included.
+
+**#114 – `ensureFresh` for hosts with no file watcher, such as a Storybook worker.**
+- **How it works:** `WatchSession::ensure_fresh()` in core, and `ensureFresh(sessionId)` in NAPI, check what the session read: source files, the directories they live in, and config files. A config change rebuilds the session. Created, deleted and edited files are applied as one update. When nothing changed, the revision stays the same.
+- **Detecting changes:** it compares modification time and size. For anything modified in the last 2 seconds it also compares a hash of the contents, because some filesystems record times too coarsely to tell two edits apart.
+- **Cost:** sessions that never call it pay nothing.
+- **Tests:**
+  - an edit, a new file and a deletion each produce the same update as `update_file`, and the result matches a fresh full extraction;
+  - a tsconfig change gives the same update as `update_file`;
+  - nothing changed, and before initialization;
+  - the binding's error for an unknown session and its exact JSON;
+  - turning off directory rescanning makes the new-file test fail.
+- **Results:** the workspace suite passed 729/729, binding 16/16, TS unit 41/41, integration 5/5, and `just lint doc-check machete typos` was clean. On the first run, one terminal-signal test (`a_signal_restores_the_terminal_mode_the_session_changed`) failed. It passed on the rerun, and this PR doesn't touch it.
+
+**#116 – reproducible performance scorecard and CI gates.**
+- **Script:** `scripts/scorecard.py` (Python stdlib) fetches the five corpora at pinned commits. For each it records lines of code, components, props, unresolved types, wall time, the tool's own reported time, and peak memory. `scripts/scorecard-rdt.mjs` times react-docgen-typescript on the same files.
+- **Workflow:** `scorecard.yml` runs weekly and by hand. It builds main and the branch in the same job and times them alternately. It fails if the branch is more than 1.1× slower than main on any corpus, or less than 10× faster than react-docgen-typescript.
+- **Scaling test:** rather than gating on the size model, it fails if extracting two copies of Mantine takes more than 2.2× as long as one. The model (t ≈ 6.4 ms + 0.13 ms/kLOC + 3.8 ms/kprop) is reported but not gated: it was within 2× on every corpus but ranged from 0.45× to 1.6×, so a gate on it would flake.
+- **No committed baseline:** react-docgen-typescript takes 1 to 2 s per corpus, so CI times it live.
+- **Local results:** 34–81 ms per corpus, 17–39× faster than react-docgen-typescript, scaling 1.77×, all gates pass. Documented in `docs/performance.md`.
+
+**#118 – stale docs.**
+- **`STATUS.md` and `ARCHITECTURE.md`:** the cross-package claim was wrong. Main only reads `@types/react`, TypeScript's lib files and files inside source directories. Test counts, recall, precision and speed figures are updated.
+- **`docs/type-checker-integration.md`:** checked against the 7.1 beta package. The beta was planned for 2026-10-06 but published to npm on 2026-10-20. The doc now has all the launch flags and entry points, the msgpack caveats, and 177 API methods (up from 157).
+- **ADR 0006:** left unchanged. Its `typescript/unstable` wording was right for the nightly it cites, and the ADR rules forbid editing history.
+- **ADR 0007:** left unchanged. Its decisions are not yet implemented rather than outdated. The one stale line ("`update_file` must notify") is now covered in the integration doc, which names both update paths.
+- **README speed claim:** I wrote 17–39× (median 22×), not "about 31×". That's what the reproducible scorecard measures; the earlier 29–42× in #107 timed react-docgen-typescript with dependencies installed. The README also says the comparison with dependencies installed isn't like for like until dependency loading lands.
+
+**Open issues:**
+- The scorecard workflow hasn't run in Actions. A manual run only becomes possible once the file is on `main`.
+- The shadcn and spectrum source directories differ from the old unrecorded mirrors. Even the whole spectrum repo gives 7.4k props, against 32.8k in #107, so the old figure can't be reproduced.
+- The terminal-signal test flake above.
+- Merge in order #111 → #114 → #116 → #118, and retarget each child to `main` when its parent merges.
+
+**Paths changed:**
+- #111: `crates/core/src/pipeline/{watch.rs,revision.rs,watch/tests.rs}`, `crates/cli/src/commands/watch.rs`, `crates/binding/src/lib.rs`, `packages/vite-plugin/{src/index.ts,tests/unit/plugin.test.ts,README.md}`, `packages/napi/{binding.d.ts,index.js}`, `docs/architecture/{pipeline-orchestration,cli-commands}.md`, `.changeset/watch-rebuild-on-config.md`
+- #114: `crates/core/src/pipeline/{discover.rs,revision.rs,watch.rs,watch/tests.rs}`, `crates/binding/src/lib.rs`, `packages/napi/{binding.d.ts,index.js}`, `docs/architecture/{napi-binding,pipeline-orchestration}.md`, `.changeset/session-ensure-fresh.md`
+- #116: `scripts/scorecard.py`, `scripts/scorecard-rdt.mjs`, `.github/workflows/scorecard.yml`, `docs/performance.md`, `docs/benchmarks.md`, `.gitignore`
+- #118: `docs/STATUS.md`, `ARCHITECTURE.md`, `README.md`, `docs/type-checker-integration.md`
+
+result: Stacked PRs #111 → #114 → #116 → #118 are open; tests and lint pass, the scorecard workflow hasn't run in Actions, and one terminal test flaked once</result>
+<usage><subagent_tokens>309034</subagent_tokens><tool_uses>261</tool_uses><duration_ms>2178743</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-ad2ad47f8a70be1d0</worktreePath><worktreeBranch>worktree-agent-ad2ad47f8a70be1d0</worktreeBranch></worktree>
+</task-notification>
