@@ -1,0 +1,61 @@
+<task-notification>
+<task-id>aad4d80ab9390c78d</task-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/aad4d80ab9390c78d.output</output-file>
+<status>completed</status>
+<summary>Agent "Storybook integration package" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I built all four PRs in the Storybook chain, and CI passes on every one; none is merged.
+
+## PRs
+
+| PR | Branch | Base | Head | CI |
+| --- | --- | --- | --- | --- |
+| [#108](https://github.com/orin-dx/caliper/pull/108) | `spike/napi-in-worker-threads` | `main` | `bc5db28e` | pass |
+| [#117](https://github.com/orin-dx/caliper/pull/117) | `feat/storybook-provider` | #108 | `2e2dcd8a` | pass |
+| [#119](https://github.com/orin-dx/caliper/pull/119) | `feat/storybook-vite-docgen` | #117 | `9977d7b9` | pass |
+| [#120](https://github.com/orin-dx/caliper/pull/120) | `chore/remove-storybook-format` | #119 | `487b9466` | pass |
+
+- **#108:** the native binding runs extraction and sessions inside worker threads, including several workers at once and a new worker after earlier ones exit.
+- **#117:** adds the package `caliper-docgen-storybook`, a Storybook 11 addon. It answers each story's argTypes from a caliper session and hands anything it can't document to React's own docgen.
+  - It finds the component behind `meta.component` and `meta.subcomponents` the way Storybook does, and matches a component imported through an index file by its export name.
+  - It converts with `@storybook/react`'s own argTypes converter, so controls and summaries follow Storybook's rules.
+  - Before each answer it checks every source file's modification time and size, so answers always include saved edits.
+  - Two supporting changes: a new NAPI function returns a session's components in react-docgen-typescript's shape, and three output fixes came from diffing against React's docgen (enum `raw`, undocumented `children` kept, `() =&gt; void` callbacks).
+- **#119:** the Vite plugin gains an `injectDocgenInfo` option for Storybook 10, or Storybook 11 with the docgen server off. It attaches each component's docs to the component itself, and an edit to a shared types file refreshes every affected component through hot reload.
+- **#120:** removes `--format storybook`, with a breaking (minor) changeset.
+
+Each PR has tests, changesets and passing lint and test runs; #117 and #119 also ran the integration suite on a freshly built binding.
+
+Mid-way, two CI runs failed and I fixed them:
+- **#117:** the provider loaded the native binding as soon as it was imported, which broke unit tests on CI where no binary is built. It now loads on the first request.
+- **#120:** the `extract --help` snapshot still listed the removed format.
+
+## What works end to end
+- **Storybook 11 with the addon:** a real `storybook build` on a four-component example produced its docgen files from caliper; React's engine data is absent, which confirms caliper answered.
+- **Storybook with the docgen server off, plus the Vite plugin:** a real `storybook build` bundled docs for all five components: a named export, a default export, a forwardRef, and two components in one file.
+
+## Measurements against React's docgen (react-component-meta)
+
+| | caliper | react-component-meta |
+| --- | --- | --- |
+| First request | 33–43 ms | 504 ms |
+| Later requests (average of 20) | 0.36–0.60 ms | 0.65–1.47 ms |
+| Request after an edit | 3.9 ms, edit included | edit not seen (it relies on Storybook's file tracking) |
+
+- **argTypes match:** 19 of 26 are identical. Five of the seven differences are string defaults, where caliper prints `"md"` and React prints the source text `'md'`. The other two are types React's checker prints differently: `MouseEvent&lt;HTMLButtonElement, MouseEvent&gt;`, and optional fields with `| undefined` added.
+- **Cost of the per-request file check:** about 52 ms for 8,800 files.
+
+## Open issues
+- **Quote style of string defaults** is the main remaining mismatch with React's docgen. caliper's extractor always rewrites string defaults with double quotes; keeping the source text would change caliper's main output format, so I left it.
+- **Extractor bug:** a JSDoc comment on a one-line `function X(props: { a: string; … })` gets attached to the first prop instead of the component.
+- **Render-prop text:** a function prop with one parameter that returns a ReactNode is printed as `=&gt; void`.
+- **Index-file matching** works only when exactly one component has that export name. An anonymous default export can't receive docs in the Vite plugin mode.
+- **Large repos:** the file check is a full scan per request (concurrent requests share one scan). File-watch events would make it cheaper.
+- **React underneath:** when caliper answers, React's provider is not called, so React's extra engine data is absent from the output.
+
+The test project and benchmark scripts are in `/Users/gabe/.claude/jobs/ba6a68d6/tmp/sb-e2e` and `/Users/gabe/.claude/jobs/ba6a68d6/tmp/bench`.
+
+result: four stacked Storybook PRs, all CI green: #108 worker threads, #117 Storybook 11 provider (first answer 33–43 ms vs 504 ms, 19 of 26 argTypes identical), #119 Vite `__docgenInfo` mode, #120 removes `--format storybook`</result>
+<usage><subagent_tokens>438976</subagent_tokens><tool_uses>373</tool_uses><duration_ms>3040763</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-aad4d80ab9390c78d</worktreePath><worktreeBranch>worktree-agent-aad4d80ab9390c78d</worktreeBranch></worktree>
+</task-notification>
