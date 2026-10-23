@@ -31,7 +31,8 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 /// 16: `LexedExport::LocalDeclaration` gained `declared_as`.
 /// 17: component mappings record whether they are exported.
 /// 18: generic functions' result types, and the callee of a wrapper-built component.
-const CACHE_SCHEMA_VERSION: u32 = 18;
+/// 19: a mapped type records its key variable and `?` modifier.
+const CACHE_SCHEMA_VERSION: u32 = 19;
 
 const DATA_FILE: &str = "dts.msgpack";
 

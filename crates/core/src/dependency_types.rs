@@ -156,9 +156,11 @@ fn type_refs(ty: &CollectedType, out: &mut FxHashSet<CompactString>) {
                 type_refs(part, out);
             }
         }
-        CollectedType::Mapped { key_type, value_type } => {
+        CollectedType::Mapped { param, key_type, value_type, .. } => {
             type_refs(key_type, out);
-            type_refs(value_type, out);
+            let mut inner = FxHashSet::default();
+            type_refs(value_type, &mut inner);
+            out.extend(inner.into_iter().filter(|name| name != param));
         }
         CollectedType::String
         | CollectedType::Number

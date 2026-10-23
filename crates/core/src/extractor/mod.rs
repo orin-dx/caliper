@@ -573,7 +573,12 @@ impl<'src> SourceDataCollector<'src> {
                     .as_ref()
                     .map(|ta| self.ts_type_to_collected_at_depth(ta, depth + 1))
                     .unwrap_or(CollectedType::Unknown);
-                CollectedType::Mapped { key_type: Box::new(key_type), value_type: Box::new(value_type) }
+                CollectedType::Mapped {
+                    param: m.key.name.as_str().into(),
+                    key_type: Box::new(key_type),
+                    value_type: Box::new(value_type),
+                    optional: m.optional.map(|modifier| modifier != TSMappedTypeModifierOperator::Minus),
+                }
             }
 
             TSType::TSParenthesizedType(p) => {

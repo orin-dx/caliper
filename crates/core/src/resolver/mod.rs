@@ -28,6 +28,7 @@ mod callee;
 mod chain;
 mod collected;
 mod deps;
+mod evaluate;
 pub(crate) use deps::Dependencies;
 mod extends;
 mod func;

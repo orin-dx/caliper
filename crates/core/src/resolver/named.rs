@@ -107,7 +107,16 @@ fn resolve_named_uncycled(
             };
             let unevaluated = state.named_unevaluated || expanded.holds_unevaluated_type();
             state.named_unevaluated = outer_named_unevaluated || unevaluated;
-            return alias_display(name, args, expanded, unevaluated);
+            // An argument the evaluator can read (`Variant["size"]`) shows as what it reads, as TypeScript prints it.
+            let args: Vec<CollectedType> = args
+                .iter()
+                .map(|arg| match arg {
+                    CollectedType::IndexedAccess { .. } => super::evaluate::reduce(arg, consuming_file, ctx, depth)
+                        .map_or_else(|| arg.clone(), |(reduced, _)| reduced),
+                    _ => arg.clone(),
+                })
+                .collect();
+            return alias_display(name, &args, expanded, unevaluated);
         }
         Some(super::precedence::SourceOrKnownMatch::Interface(_)) => {
             // At the prop-TYPE level (not chain level), an interface name is returned as Named.

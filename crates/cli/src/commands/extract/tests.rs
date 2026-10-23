@@ -203,7 +203,7 @@ fn rdt_output_includes_composes() {
     std::fs::write(
         tmp.path().join("Comp.tsx"),
         r#"
-export type Weird<T> = T extends string ? { a: string } : { b: number };
+export type Weird<T> = T extends { kind: infer K } ? { a: K } : { b: number };
 export type CompProps = Weird<'x'> & { c: boolean };
 export function Comp(props: CompProps) { return null; }
 "#,
