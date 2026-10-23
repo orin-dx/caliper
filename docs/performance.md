@@ -62,6 +62,23 @@ Scaling: one copy of mantine 26 ms, two copies 46 ms (1.77×).
 
 RDT's component and prop counts are not comparable with Caliper's here: without dependencies it reports every exported function and expands what it can of `@types/react`. Recall and precision against RDT are in `docs/precision.md` and `docs/projects/architecture-roadmap.md`.
 
+## Dependency loading against RDT, 2026-10-23
+
+Whether `--load-dependencies` can become the default (ADR 0010). The five repos with their dependencies installed, RDT run on the same component files through each repo's sources (`skipLibCheck`, dependencies resolvable), Caliper in RDT's format with `--html-attributes full`. The 20 fixture libraries can't answer this: they are single copied files with no installed packages.
+
+| Corpus | RDT props Caliper reports, off → on | Unresolved warnings, off → on | Shared props whose type text changed: agree → disagree / disagree → agree | Wall ms, off → on | Peak RSS MiB, off → on |
+| --- | --- | --- | --- | --- | --- |
+| mantine | 21.8% → 21.8% | 16 → 12 | 1 / 0 | 52 → 56 | 105 → 108 |
+| chakra | 0.1% → 62.4% | 325 → 27 | 0 / 0 | 43 → 497 | 82 → 1,341 |
+| shadcn | 0.2% → 4.5% | 829 → 265 | 6 / 2 | 67 → 104 | 104 → 176 |
+| antd | 59.2% → 72.3% | 116 → 53 | 4 / 1 | 61 → 70 | 110 → 126 |
+| spectrum | 97.1% → 97.1% | 174 → 166 | 0 / 0 | 116 → 121 | 191 → 215 |
+
+- **Accuracy passes.** Coverage of RDT's props rises and unresolved names fall; of about 59,000 props both modes report, 11 stop matching RDT's text. All 11 are a named object or union type from a package that now prints expanded (`{ type: "file"; … }` for `FileUIPart`), which is how a project-declared object alias already prints (#104); RDT prints the name.
+- **Chakra's cost blocks the default.** Loaded dependencies let each of Chakra's 600 components reach its own ~705-prop style system: 398,000 props, 497 ms and 1.3 GB (RDT: 637,000 props, 27 s, 2.7 GB). `--collapse-inherited-props all` cuts that to 5,515 props but still 281 ms and 835 MiB, so most of the cost is not the listed props.
+
+RDT (`withCustomConfig`, `shouldExtractLiteralValuesFromEnum`, `shouldRemoveUndefinedFromOptional`) took 1.6 to 27 s and 0.6 to 2.7 GB per repo. The fixture harness also gained the switch: `CALIPER_LOAD_DEPENDENCIES=1 pnpm --filter caliper-docgen-validate run:ours`, then `parity.ts caliper-docgen`.
+
 ## Running it
 
 ```bash
