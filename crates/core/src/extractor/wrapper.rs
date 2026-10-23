@@ -129,10 +129,7 @@ impl<'src> SourceDataCollector<'src> {
             .iter()
             .map(|ty| WrapperTypeArg { reference: self.extract_type_name_from_type(ty) })
             .collect();
-        let callee = WrapperCallee {
-            name: callee.as_str().into(),
-            type_args: type_arguments.params.iter().map(|ty| self.ts_type_to_collected(ty)).collect(),
-        };
+        let Some(callee) = self.wrapper_callee(call) else { return false };
         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
         self.pending_wrappers.push(PendingWrapper {
             name: name.to_owned(),
@@ -199,6 +196,17 @@ impl<'src> SourceDataCollector<'src> {
                 .with_wrapper_callee(pending.callee),
             );
         }
+    }
+
+    /// The callee of a generic call that builds a component, and its type arguments, for the props its result type
+    /// adds (`resolver::callee`). `None` for a call without type arguments.
+    pub(super) fn wrapper_callee<'a>(&mut self, call: &CallExpression<'a>) -> Option<WrapperCallee> {
+        let type_arguments = call.type_arguments.as_ref()?;
+        let name = self.extract_callee_name(call)?;
+        Some(WrapperCallee {
+            name: name.as_str().into(),
+            type_args: type_arguments.params.iter().map(|ty| self.ts_type_to_collected(ty)).collect(),
+        })
     }
 
     /// Record what a generic function declaration returns: its return annotation, or the type its one top-level
