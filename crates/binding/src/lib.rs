@@ -98,6 +98,9 @@ pub struct JsExtractOptions {
     pub cache_dir: Option<String>,
     /// Load the dependency type declarations project types reference (off by default).
     pub load_dependencies: Option<bool>,
+    /// Which inherited sources of more than 30 props to list as one layer (default `'dependencies'`).
+    #[napi(ts_type = "'dependencies' | 'all' | 'none'")]
+    pub collapse_inherited_props: Option<String>,
 }
 
 // ─── TryFrom<JsExtractOptions> for PipelineOptions ────────────────────────────
@@ -131,6 +134,12 @@ impl TryFrom<JsExtractOptions> for PipelineOptions {
         }
         if let Some(load) = js.load_dependencies {
             opts.load_dependencies = load;
+        }
+        if let Some(mode) = js.collapse_inherited_props.as_deref() {
+            opts.collapse_inherited_props = caliper_docgen_core::pipeline::CollapseInheritedProps::parse(mode)
+                .map_err(|bad| {
+                    format!("collapseInheritedProps is '{bad}', expected \"dependencies\", \"all\" or \"none\"")
+                })?;
         }
 
         Ok(opts)
@@ -292,6 +301,7 @@ mod tests {
             extra_builtins: None,
             cache_dir: None,
             load_dependencies: None,
+            collapse_inherited_props: None,
         }
     }
 
@@ -311,6 +321,32 @@ mod tests {
         let mut js = base_options();
         js.load_dependencies = Some(true);
         assert!(PipelineOptions::try_from(js).expect("should convert").load_dependencies);
+    }
+
+    #[test]
+    fn collapse_inherited_props_names_map_onto_pipeline_options_and_a_bad_one_is_an_error() {
+        use caliper_docgen_core::pipeline::CollapseInheritedProps;
+
+        assert_eq!(
+            PipelineOptions::try_from(base_options()).expect("should convert").collapse_inherited_props,
+            CollapseInheritedProps::Dependencies
+        );
+        for (name, expected) in [
+            ("dependencies", CollapseInheritedProps::Dependencies),
+            ("all", CollapseInheritedProps::All),
+            ("none", CollapseInheritedProps::None),
+        ] {
+            let mut js = base_options();
+            js.collapse_inherited_props = Some(name.into());
+            let opts = PipelineOptions::try_from(js).expect("should convert");
+            assert_eq!(opts.collapse_inherited_props, expected, "{name}");
+        }
+        let mut js = base_options();
+        js.collapse_inherited_props = Some("some".into());
+        assert_eq!(
+            PipelineOptions::try_from(js).expect_err("a typo must not fall back to the default"),
+            "collapseInheritedProps is 'some', expected \"dependencies\", \"all\" or \"none\""
+        );
     }
 
     #[test]

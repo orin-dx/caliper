@@ -51,6 +51,15 @@ Options:
   -v, --verbose...
           Verbose output (repeat for more: -v, -vv)
 
+      --collapse-inherited-props <COLLAPSE_INHERITED_PROPS>
+          Which inherited sources of more than 30 props to list as one inherited
+          layer instead of prop by prop
+
+          Possible values:
+          - dependencies: Sources from loaded dependencies (default)
+          - all:          Dependency and project sources
+          - none:         List every prop
+
   -q, --quiet
           Suppress all non-error output
 

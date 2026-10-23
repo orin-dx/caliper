@@ -14,6 +14,7 @@ pub fn cmd_check(args: crate::CheckArgs, quiet: bool, config_path: Option<&str>)
         config_path,
         extra_builtins: &[],
         load_dependencies: args.load_dependencies,
+        collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
     let output = caliper_docgen_core::pipeline::extract(&options);
 
@@ -38,6 +39,7 @@ mod tests {
             strict: false,
             json: true,
             load_dependencies: false,
+            collapse_inherited_props: None,
         };
         let code = cmd_check(args, true, None).expect("cmd_check itself should not error");
         assert_eq!(code, 2, "expected exit code 2 for a nonexistent src dir even in --json mode");
@@ -56,7 +58,13 @@ mod tests {
         )
         .unwrap();
         let dir = camino::Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
-        let args = crate::CheckArgs { src: vec![dir.to_string()], strict: false, json: true, load_dependencies: false };
+        let args = crate::CheckArgs {
+            src: vec![dir.to_string()],
+            strict: false,
+            json: true,
+            load_dependencies: false,
+            collapse_inherited_props: None,
+        };
         let code = cmd_check(args, true, None).expect("cmd_check should not error");
         assert_eq!(code, 0, "expected exit code 0 for a clean run");
     }
@@ -82,7 +90,13 @@ mod tests {
     #[test]
     fn strict_mode_with_warning_only_diagnostics_returns_exit_code_one() {
         let (_tmp, dir) = warning_only_fixture();
-        let args = crate::CheckArgs { src: vec![dir.to_string()], strict: true, json: true, load_dependencies: false };
+        let args = crate::CheckArgs {
+            src: vec![dir.to_string()],
+            strict: true,
+            json: true,
+            load_dependencies: false,
+            collapse_inherited_props: None,
+        };
         let code = cmd_check(args, true, None).expect("cmd_check should not error");
         assert_eq!(code, 1, "expected exit code 1 for --strict with warning-only diagnostics");
     }
@@ -93,7 +107,13 @@ mod tests {
     #[test]
     fn non_strict_mode_with_warning_only_diagnostics_returns_exit_code_zero() {
         let (_tmp, dir) = warning_only_fixture();
-        let args = crate::CheckArgs { src: vec![dir.to_string()], strict: false, json: true, load_dependencies: false };
+        let args = crate::CheckArgs {
+            src: vec![dir.to_string()],
+            strict: false,
+            json: true,
+            load_dependencies: false,
+            collapse_inherited_props: None,
+        };
         let code = cmd_check(args, true, None).expect("cmd_check should not error");
         assert_eq!(code, 0, "expected exit code 0 without --strict for warning-only diagnostics");
     }
@@ -117,7 +137,13 @@ mod tests {
         std::fs::write(tmp.path().join("Bad.tsx"), "export interface BrokenProps {\n    label: string;\n").unwrap();
 
         let dir = camino::Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
-        let args = crate::CheckArgs { src: vec![dir.to_string()], strict: true, json: true, load_dependencies: false };
+        let args = crate::CheckArgs {
+            src: vec![dir.to_string()],
+            strict: true,
+            json: true,
+            load_dependencies: false,
+            collapse_inherited_props: None,
+        };
         let code = cmd_check(args, true, None).expect("cmd_check should not error");
         assert_eq!(code, 2, "expected exit code 2 — the Error must outrank the Warning even with --strict");
     }

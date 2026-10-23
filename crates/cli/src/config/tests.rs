@@ -191,6 +191,7 @@ fn build_options_maps_extra_builtins_cli_flag() {
         config_path: None,
         extra_builtins: &extra_builtins,
         load_dependencies: false,
+        collapse_inherited_props: None,
     })
     .expect("build_options should succeed with no config file");
 
@@ -225,6 +226,7 @@ export default {
         config_path: Some(config_path.to_str().unwrap()),
         extra_builtins: &extra_builtins,
         load_dependencies: false,
+        collapse_inherited_props: None,
     })
     .expect("build_options should succeed");
 
@@ -247,6 +249,7 @@ fn build_options_propagates_a_config_load_failure_as_err() {
         config_path: Some("/nonexistent-parent-dir-xyz/docgen.config.ts"),
         extra_builtins: &[],
         load_dependencies: false,
+        collapse_inherited_props: None,
     });
     assert!(result.is_err(), "expected build_options to return Err for a failing --config path");
 }
@@ -293,6 +296,7 @@ fn no_flags<'a>() -> BuildOptionsArgs<'a> {
         config_path: None,
         extra_builtins: &[],
         load_dependencies: false,
+        collapse_inherited_props: None,
     }
 }
 
@@ -338,6 +342,25 @@ fn load_dependencies_comes_from_the_config_and_the_flag_turns_it_on() {
     }
     assert!(!build_options(no_flags()).unwrap().load_dependencies);
     assert!(build_options(BuildOptionsArgs { load_dependencies: true, ..no_flags() }).unwrap().load_dependencies);
+}
+
+#[test]
+fn collapse_inherited_props_comes_from_the_config_or_the_flag_and_names_a_bad_value() {
+    for (json, expected) in [
+        ("{}", CollapseInheritedProps::Dependencies),
+        (r#"{ "collapseInheritedProps": "all" }"#, CollapseInheritedProps::All),
+        (r#"{ "collapseInheritedProps": "none" }"#, CollapseInheritedProps::None),
+    ] {
+        let schema: DocgenConfigSchema = serde_json::from_str(json).expect("valid config JSON");
+        assert_eq!(schema.into_pipeline_options().unwrap().collapse_inherited_props, expected, "{json}");
+    }
+    let schema: DocgenConfigSchema = serde_json::from_str(r#"{ "collapseInheritedProps": "some" }"#).unwrap();
+    assert_eq!(
+        schema.into_pipeline_options().unwrap_err(),
+        "collapseInheritedProps is 'some', expected \"dependencies\", \"all\" or \"none\""
+    );
+    let flag = BuildOptionsArgs { collapse_inherited_props: Some(CollapseInheritedProps::None), ..no_flags() };
+    assert_eq!(build_options(flag).unwrap().collapse_inherited_props, CollapseInheritedProps::None);
 }
 
 #[test]
