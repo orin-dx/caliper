@@ -3,7 +3,7 @@
   "entries": [
     {
       "package": "cargo/caliper-docgen",
-      "targetVersion": "0.2.1",
+      "targetVersion": "0.3.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -12,7 +12,7 @@
     },
     {
       "package": "cargo/caliper-docgen-core",
-      "targetVersion": "0.2.1",
+      "targetVersion": "0.3.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -21,7 +21,7 @@
     },
     {
       "package": "cargo/caliper-docgen-napi",
-      "targetVersion": "0.2.1",
+      "targetVersion": "0.3.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -30,7 +30,7 @@
     },
     {
       "package": "npm/caliper-docgen",
-      "targetVersion": "0.2.1",
+      "targetVersion": "0.3.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -39,7 +39,7 @@
     },
     {
       "package": "npm/caliper-docgen-napi",
-      "targetVersion": "0.2.1",
+      "targetVersion": "0.3.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -48,7 +48,7 @@
     },
     {
       "package": "npm/caliper-docgen-vite-plugin",
-      "targetVersion": "0.2.1",
+      "targetVersion": "0.3.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -56,5 +56,5 @@
       ]
     }
   ],
-  "digest": "391f0c14b801835e8f04b7847c43682bace9364868f68ed4428e98dd1e175633"
+  "digest": "df0836a988b9b92760adbdd13567c94350a156dbbe23ddb2779ba56c6a794153"
 }
