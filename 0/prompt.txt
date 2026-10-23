@@ -1,0 +1,55 @@
+<task-notification>
+<task-id>af0f4556df8c16e76</task-id>
+<tool-use-id>toolu_01R8ViwUYNDd3qRBsibsKTHD</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/af0f4556df8c16e76.output</output-file>
+<status>completed</status>
+<summary>Agent "Type-text fixes as stacked PRs" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I opened two stacked PRs and dropped the generic-defaults fix, because it didn't improve agreement with RDT. Together the two PRs raise exact matches against RDT from 7,939 to 14,011 of 26,463 props (30.0% → 52.9%).
+
+The stack runs #101 → #103 → #104. Both PRs are non-draft, and each has its measurements and snapshot notes in its description.
+
+### PR 1: #103, function types
+- **Link:** https://github.com/orin-dx/caliper/pull/103
+- **Branch / base:** `fix/function-type-text` → `feat/component-props-of-typeof` (#101)
+- **Commit:** `e7d416d1`
+- **What it fixes:**
+  - Callbacks keep their return type: "callback return type lost" went from 261 to 2.
+  - The made-up `(e: void)` parameter is gone (191 → 0).
+  - Handler types are no longer wrapped as a parameter (60 → 0).
+- **Measured:** exact 7,939 → 8,008; exact plus formatting-only 8,307 → 8,712 (31.4% → 32.9%). No exact match regressed.
+- **Corpus counts:** unchanged on all five installed corpora.
+- **Snapshots:** 8 changed. Handler props now print as `React.FocusEventHandler&lt;HTMLInputElement&gt;` and similar, and the mui `sx` and react_aria render callbacks get their real return types. The cache golden moves to schema 15.
+- **Breaking:** `EventHandler` (`kind: "eventHandler"`) becomes `Function` (`kind: "function"`), and `MultiParamFunction` is removed.
+
+### PR 2: generic defaults, dropped
+- Built and measured: exact moved by only +3, and 5 props that matched exactly stopped matching.
+- The regressions are Mantine components cast to a generic signature, where RDT keeps the parameter name (`Value[]` became `string[]`), plus a substituted conditional left as text like `false extends true ? …`.
+- The work is commit `87646dcc` on the local branch `fix/generic-defaults`, not pushed. It includes the extractor change, substitution and tests, and would need cache schema 16.
+
+### PR 3: #104, alias display
+- **Link:** https://github.com/orin-dx/caliper/pull/104
+- **Branch / base:** `fix/alias-display` → `fix/function-type-text`
+- **Commit:** `6178a4bb`
+- **What it fixes:** an alias whose expansion contains an unevaluated conditional or mapped type now prints as its name with its arguments as written, e.g. `StyleProp&lt;MantineSpacing&gt;`. Nested cases work too: once `MantineBreakpoint` keeps its name, `StyleProp&lt;…&gt;` does as well. Literal unions and objects still expand, so enum controls are unchanged.
+- **Measured:** exact 8,008 → 14,011 (30.3% → 52.9%); exact plus formatting-only 32.9% → 55.6%. "Alias expanded" fell from 15,868 to 2,429.
+- **Why "other" rose to 8,278:** every prop that moved there was already a mismatch. Most now read `StyleProp&lt;React.CSSProperties["maxWidth"]&gt;` where RDT prints `StyleProp&lt;MaxWidth&lt;string | number&gt;&gt;`. No exact match regressed.
+- **Corpus counts and time:** prop and component counts are unchanged, and timing is unchanged.
+- **Snapshots:** none changed, because no fixture has this kind of alias; a new end-to-end test asserts the exact text instead. The cache shape is unchanged.
+
+### Checks
+- Each PR: `cargo nextest run --workspace --exclude caliper-docgen-napi -E 'not test(parsed_prop_bare_struct_literal)'` passes (731 tests on PR 1, 732 on PR 3).
+- `just lint doc-check machete typos` is clean on both.
+- The `watch_process` tests fail inside the sandbox because they need a terminal, so I ran the suite outside it.
+- Two `tsc-client` timing tests failed once in a full run but passed when run alone.
+- Each PR has one changeset: `.changeset/function-types.md` and `.changeset/alias-display.md`.
+
+### Left undone
+- The remaining gap after PR 3 is argument text: we print an alias's arguments as written in source, and RDT prints TypeScript's evaluation of them. Closing it needs the type checker.
+- An empty object prints as `{  }` where RDT has `{}`. It affects one Mantine prop shape (233 props), and fixing it alone wouldn't make them exact.
+- For generic components, RDT shows the parameter's constraint (`Multiple` → `boolean`) rather than its default. That could be a follow-up if you want it.
+
+result: Opened #103 (function types) and #104 (alias names) on top of #101; together they raise exact agreement with RDT from 30.0% to 52.9%, and the generic-defaults fix was dropped for not improving it.</result>
+<usage><subagent_tokens>239521</subagent_tokens><tool_uses>253</tool_uses><duration_ms>1793626</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-af0f4556df8c16e76</worktreePath><worktreeBranch>worktree-agent-af0f4556df8c16e76</worktreeBranch></worktree>
+</task-notification>
