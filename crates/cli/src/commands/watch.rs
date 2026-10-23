@@ -169,6 +169,15 @@ fn ends_session(signal: Signal) -> bool {
     matches!(signal, Signal::Interrupt | Signal::Terminate | Signal::Hangup | Signal::Quit)
 }
 
+/// inotify reports opening and reading a file, and applying a change reads it: acting on those reads would apply the
+/// file again, endlessly.
+fn is_read(event: &watchexec_events::Event) -> bool {
+    use watchexec_events::filekind::FileEventKind;
+    use watchexec_events::Tag;
+
+    event.tags.iter().any(|tag| matches!(tag, Tag::FileEventKind(FileEventKind::Access(_))))
+}
+
 /// Puts the terminal back in cooked mode when the session ends, however it ends.
 struct RestoreTerminal;
 
@@ -251,7 +260,7 @@ pub fn cmd_watch(args: crate::WatchArgs, quiet: bool, config_path: Option<&str>)
                 action.quit();
                 return action;
             }
-            for event in action.events.iter() {
+            for event in action.events.iter().filter(|event| !is_read(event)) {
                 for (path, _) in event.paths() {
                     handle_change(&session, path, quiet, args.out.as_deref(), &handler_exit_code);
                 }
@@ -316,6 +325,19 @@ mod tests {
 
     fn prop_names(written: &serde_json::Value, component: &str) -> Vec<String> {
         written["components"][component]["props"].as_object().unwrap().keys().cloned().collect()
+    }
+
+    #[test]
+    fn only_access_events_are_reads() {
+        use watchexec_events::filekind::{AccessKind, AccessMode, DataChange, FileEventKind, ModifyKind};
+        use watchexec_events::{Event, Tag};
+
+        let event = |kind| Event { tags: vec![Tag::FileEventKind(kind)], metadata: Default::default() };
+
+        assert!(is_read(&event(FileEventKind::Access(AccessKind::Open(AccessMode::Any)))));
+        assert!(is_read(&event(FileEventKind::Access(AccessKind::Close(AccessMode::Read)))));
+        assert!(!is_read(&event(FileEventKind::Modify(ModifyKind::Data(DataChange::Content)))));
+        assert!(!is_read(&Event::default()));
     }
 
     #[test]
