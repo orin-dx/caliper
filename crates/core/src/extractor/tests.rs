@@ -681,6 +681,30 @@ fn an_exported_namespace_import_is_a_namespace_reexport() {
 }
 
 #[test]
+fn a_local_export_alias_records_the_declarations_own_name() {
+    let source = r#"
+        declare const DialogContent: unknown;
+        interface DialogContentProps { a: string }
+        export { DialogContent as Content, DialogContent, type DialogContentProps };
+        export interface Own { b: string }
+    "#;
+    let data = parse_file(Utf8Path::new("/test/index.d.ts"), source);
+
+    let locals: Vec<(&str, Option<&str>)> = data
+        .exports
+        .iter()
+        .filter_map(|e| match e {
+            LexedExport::LocalDeclaration { name, declared_as, .. } => Some((name.as_str(), declared_as.as_deref())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        locals,
+        [("Content", Some("DialogContent")), ("DialogContent", None), ("DialogContentProps", None), ("Own", None)]
+    );
+}
+
+#[test]
 fn every_export_form_lands_in_the_right_lexed_export_variant() {
     // Exact sets, not presence: a specifier list misclassified as a re-export would pass a presence check.
     let source = r#"
@@ -700,7 +724,7 @@ fn every_export_form_lands_in_the_right_lexed_export_variant() {
         .exports
         .iter()
         .filter_map(|e| match e {
-            LexedExport::LocalDeclaration { name, is_type_only } => Some((name.as_str(), *is_type_only)),
+            LexedExport::LocalDeclaration { name, is_type_only, .. } => Some((name.as_str(), *is_type_only)),
             _ => None,
         })
         .collect();

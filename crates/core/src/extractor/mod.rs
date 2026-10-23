@@ -300,7 +300,8 @@ impl<'src> SourceDataCollector<'src> {
     fn promote_reexported_imports(&mut self) {
         for (index, local) in std::mem::take(&mut self.pending_local_exports) {
             let Some(binding) = self.data.imports.iter().find(|imp| imp.local_name.as_str() == local) else { continue };
-            let crate::types::LexedExport::LocalDeclaration { name, is_type_only } = &self.data.exports[index] else {
+            let crate::types::LexedExport::LocalDeclaration { name, is_type_only, .. } = &self.data.exports[index]
+            else {
                 continue;
             };
             if binding.exported_name.as_str() == "*" {

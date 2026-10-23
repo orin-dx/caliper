@@ -871,8 +871,13 @@ pub enum LexedExport {
     ReExportAll { source_specifier: std::string::String, is_type_only: bool },
     /// `export * as Ns from "./types"`
     ReExportNamespace { namespace: std::string::String, source_specifier: std::string::String },
-    /// `export interface Foo { }` / `export type Bar = ...` / `export const X`
-    LocalDeclaration { name: std::string::String, is_type_only: bool },
+    /// `export interface Foo { }` / `export type Bar = ...` / `export const X` / `export { Base as Foo }`
+    LocalDeclaration {
+        name: std::string::String,
+        is_type_only: bool,
+        /// The declaration's own name when it is exported under another (`Base` in `export { Base as Foo }`).
+        declared_as: Option<std::string::String>,
+    },
 }
 
 #[cfg(test)]
