@@ -1,5 +1,7 @@
 //! Props chain resolution — the recursive core of prop resolution.
 
+use std::sync::Arc;
+
 use camino::Utf8Path;
 use compact_str::CompactString;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -37,7 +39,7 @@ pub(super) fn resolve_props_chain(
     // extends list) are not the same visit and must not collide on the bare name alone. The arguments are keyed by
     // structure: their display form abbreviates object types to `{ ... }`, so distinct instantiations collided.
     let visit_key: CompactString = format!("{}:{}<{:?}>", consuming_file, type_name, type_args).into();
-    if !state.visited.insert(visit_key) {
+    if !state.visit(visit_key) {
         return ResolvedChain::give_up(
             type_name.to_owned(),
             Some(Diagnostic {
@@ -106,7 +108,7 @@ pub(super) fn resolve_props_chain(
             // As for interfaces and for aliases in a prop position: parameters left unfilled by the call site are
             // placeholders in the body, not unresolvable types.
             if let Some(params) = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key) {
-                state.in_scope_type_params.extend(params.iter().skip(type_args.len()).cloned());
+                state.add_type_params(params.iter().skip(type_args.len()));
             }
             let alias = super::substitute::apply_generic_args(
                 alias,
@@ -123,7 +125,9 @@ pub(super) fn resolve_props_chain(
         }
         Some(super::precedence::SourceOrKnownMatch::Known(result)) => {
             return match result {
-                KnownPatternResult::Props(props) => ResolvedChain { props, ..ResolvedChain::empty() },
+                KnownPatternResult::Props(props) => {
+                    ResolvedChain { props: props.into_iter().map(Arc::new).collect(), ..ResolvedChain::empty() }
+                }
                 KnownPatternResult::Type(PropType::HtmlAttributes { element, omitted }) => {
                     let layer = InheritedLayer {
                         type_name: type_name.to_owned(),
@@ -195,8 +199,31 @@ pub(super) fn resolve_props_chain(
 /// Resolve an interface to a chain of props. `type_args` are the call site's arguments for the interface's declared type
 /// parameters (`Box<string>` for `interface Box<T>`); they replace the parameters in its members and in its own extends
 /// clause.
+///
+/// A non-generic interface's chain is resolved once per run and shared by every component whose state would resolve it
+/// the same way (`resolver::memo`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_interface_chain(
+    iface: &CollectedInterface,
+    type_args: &[CollectedType],
+    consuming_file: &Utf8Path,
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> ResolvedChain {
+    let generic = !type_args.is_empty()
+        || ctx.named_types.lookup_interface_type_params_for(iface).is_some_and(|params| !params.is_empty());
+    if generic {
+        return resolve_interface_chain_uncached(iface, type_args, consuming_file, mapping, ctx, state, depth);
+    }
+    ctx.interface_chains.get_or_resolve(&iface.scoped_key, depth, state, mapping, |state| {
+        resolve_interface_chain_uncached(iface, type_args, consuming_file, mapping, ctx, state, depth)
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_interface_chain_uncached(
     iface: &CollectedInterface,
     type_args: &[CollectedType],
     consuming_file: &Utf8Path,
@@ -212,7 +239,7 @@ pub(super) fn resolve_interface_chain(
     // not unresolvable types. Register them so `resolve_named` doesn't warn.
     let declared_params = ctx.named_types.lookup_interface_type_params_for(iface);
     if let Some(params) = declared_params {
-        state.in_scope_type_params.extend(params.iter().cloned());
+        state.add_type_params(params.iter());
     }
     // Supplied arguments replace the parameters; with none supplied the parameters stay placeholders.
     let substitution = match declared_params {
@@ -275,7 +302,7 @@ pub(super) fn resolve_interface_chain(
         };
 
         // Default value: code default takes precedence over JSDoc @default.
-        let code_default = mapping.param_defaults.get(&raw_prop.name);
+        let code_default = state.param_default(mapping, &raw_prop.name);
         let jsdoc_default =
             raw_prop.tags.get("default").or_else(|| raw_prop.tags.get("defaultValue")).map(|s| s.trim());
 
@@ -308,7 +335,7 @@ pub(super) fn resolve_interface_chain(
             Some(_) | None => raw_prop.description.clone(),
         };
 
-        chain.props.push(ParsedProp::new(
+        chain.props.push(Arc::new(ParsedProp::new(
             raw_prop.name.clone(),
             prop_type,
             raw_prop.required,
@@ -317,14 +344,14 @@ pub(super) fn resolve_interface_chain(
             raw_prop.tags.clone(),
             Some(parent.clone()),
             vec![parent.clone()],
-        ));
+        )));
     }
 
     chain
 }
 
 /// Find a discriminant prop — a prop that has a distinct string literal type across all members.
-pub(super) fn find_discriminant_prop(members: &[(&str, Vec<ParsedProp>)]) -> Option<String> {
+pub(super) fn find_discriminant_prop(members: &[(&str, Vec<Arc<ParsedProp>>)]) -> Option<String> {
     if members.is_empty() {
         return None;
     }

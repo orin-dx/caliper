@@ -1,12 +1,14 @@
 //! Global resolution context — merged source data from all parsed files.
 
+use std::sync::Arc;
+
 use camino::{Utf8Path, Utf8PathBuf};
 use compact_str::CompactString;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::collected::{
     CollectedInterface, CollectedTypeAlias, ComponentMapping, EnumEntry, EnumValue, ImportBinding, LexedExport,
-    SourceData, TypeName,
+    RawDefault, SourceData, TypeName,
 };
 use super::diagnostic::Diagnostic;
 
@@ -43,6 +45,45 @@ pub(crate) struct ResolveState {
     /// Set when an alias is shown by its name because its expansion holds a type the resolver can't evaluate, so an
     /// alias whose expansion contains that one is shown by name too — see `resolver::named::alias_display`.
     pub(crate) named_unevaluated: bool,
+    /// What resolution read from this state while an interface chain is being recorded for reuse, `None` otherwise —
+    /// see `resolver::memo`. Every read of the three sets above goes through the methods below so none is missed.
+    pub(crate) reads: Option<Box<StateReads>>,
+}
+
+/// The reads a recorded resolution made, so another component's state can be checked to give the same answers.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct StateReads {
+    /// Cycle-set keys looked up, each with whether it was already there. The keys are long and every enclosing
+    /// recording keeps them again, so they are shared.
+    pub(crate) visited: Vec<(Arc<str>, bool)>,
+    /// `named_in_progress` keys looked up, each with whether it was already there.
+    pub(crate) named: Vec<(Arc<str>, bool)>,
+    /// In-scope type parameter names looked up, each with whether it was in scope.
+    pub(crate) in_scope: Vec<(CompactString, bool)>,
+    /// Prop names whose component default was looked up, with the default found.
+    pub(crate) defaults: Vec<(CompactString, Option<(std::string::String, bool)>)>,
+    /// Cycle-set keys this state itself added (a branch's own additions are dropped with the branch).
+    pub(crate) visited_added: Vec<Arc<str>>,
+    /// In-scope type parameters this state itself added.
+    pub(crate) in_scope_added: Vec<CompactString>,
+}
+
+impl StateReads {
+    /// Take `other`'s lookups. `with_effects` also takes its additions, for reads made on this same state; a branch's
+    /// additions die with it. `with_cycle_sets` is false for a detached state, whose cycle sets started empty instead of
+    /// from this one, so its lookups say nothing about this state.
+    pub(crate) fn append(&mut self, other: &StateReads, with_cycle_sets: bool, with_effects: bool) {
+        if with_cycle_sets {
+            self.visited.extend(other.visited.iter().cloned());
+            self.named.extend(other.named.iter().cloned());
+        }
+        self.in_scope.extend(other.in_scope.iter().cloned());
+        self.defaults.extend(other.defaults.iter().cloned());
+        if with_effects {
+            self.visited_added.extend(other.visited_added.iter().cloned());
+            self.in_scope_added.extend(other.in_scope_added.iter().cloned());
+        }
+    }
 }
 
 impl ResolveState {
@@ -55,20 +96,89 @@ impl ResolveState {
             diagnostics: Vec::new(),
             in_scope_type_params: self.in_scope_type_params.clone(),
             named_unevaluated: false,
+            reads: self.reads.as_ref().map(|_| Box::default()),
         }
     }
 
     /// A state that shares only the in-scope parameters: for a separate question asked mid-walk, such as the keys
-    /// of a type, whose cycle sets must not be the caller's.
+    /// of a type, whose cycle sets must not be the caller's. Merge it back with `absorb_detached`.
     pub(crate) fn detached(&self) -> ResolveState {
-        ResolveState { in_scope_type_params: self.in_scope_type_params.clone(), ..Self::default() }
+        ResolveState {
+            in_scope_type_params: self.in_scope_type_params.clone(),
+            reads: self.reads.as_ref().map(|_| Box::default()),
+            ..Self::default()
+        }
     }
 
     /// Take a branch's diagnostics and whether it named an unevaluated alias. Its cycle sets and in-scope additions
     /// stay with the branch.
     pub(crate) fn absorb(&mut self, branch: ResolveState) {
+        self.absorb_reads(&branch, true);
         self.diagnostics.extend(branch.diagnostics);
         self.named_unevaluated |= branch.named_unevaluated;
+    }
+
+    /// `absorb` for a `detached` state.
+    pub(crate) fn absorb_detached(&mut self, detached: ResolveState) {
+        self.absorb_reads(&detached, false);
+        self.diagnostics.extend(detached.diagnostics);
+        self.named_unevaluated |= detached.named_unevaluated;
+    }
+
+    fn absorb_reads(&mut self, other: &ResolveState, same_cycle_sets: bool) {
+        if let (Some(reads), Some(theirs)) = (self.reads.as_mut(), other.reads.as_ref()) {
+            reads.append(theirs, same_cycle_sets, false);
+        }
+    }
+
+    /// Enter `key` into the cycle set; false if it was already there.
+    pub(crate) fn visit(&mut self, key: CompactString) -> bool {
+        let Some(reads) = self.reads.as_mut() else { return self.visited.insert(key) };
+        let shared: Arc<str> = Arc::from(key.as_str());
+        let inserted = self.visited.insert(key);
+        if inserted {
+            reads.visited_added.push(Arc::clone(&shared));
+        }
+        reads.visited.push((shared, !inserted));
+        inserted
+    }
+
+    /// Enter `key` into `named_in_progress`; false if it was already there.
+    pub(crate) fn enter_named(&mut self, key: CompactString) -> bool {
+        let Some(reads) = self.reads.as_mut() else { return self.named_in_progress.insert(key) };
+        let shared: Arc<str> = Arc::from(key.as_str());
+        let inserted = self.named_in_progress.insert(key);
+        reads.named.push((shared, !inserted));
+        inserted
+    }
+
+    /// Whether `name` is a type parameter in scope.
+    pub(crate) fn has_type_param(&mut self, name: &str) -> bool {
+        let found = self.in_scope_type_params.contains(name);
+        if let Some(reads) = self.reads.as_mut() {
+            reads.in_scope.push((CompactString::from(name), found));
+        }
+        found
+    }
+
+    /// Bring type parameters into scope.
+    pub(crate) fn add_type_params<'p>(&mut self, names: impl IntoIterator<Item = &'p CompactString>) {
+        for name in names {
+            if self.in_scope_type_params.insert(name.clone()) {
+                if let Some(reads) = self.reads.as_mut() {
+                    reads.in_scope_added.push(name.clone());
+                }
+            }
+        }
+    }
+
+    /// The component's default for prop `name`.
+    pub(crate) fn param_default<'m>(&mut self, mapping: &'m ComponentMapping, name: &str) -> Option<&'m RawDefault> {
+        let found = mapping.param_defaults.get(name);
+        if let Some(reads) = self.reads.as_mut() {
+            reads.defaults.push((CompactString::from(name), found.map(|d| (d.value.clone(), d.computed))));
+        }
+        found
     }
 }
 

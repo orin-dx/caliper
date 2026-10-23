@@ -32,6 +32,7 @@ mod extends;
 mod func;
 mod html;
 mod import;
+mod memo;
 mod named;
 mod precedence;
 mod primitives;
@@ -233,6 +234,8 @@ pub struct ResolutionContext {
     pub ambient_global_files: Vec<Utf8PathBuf>,
     /// Why the configured tsconfig could not be used, if it could not.
     pub(crate) tsconfig_diagnostic: Option<Diagnostic>,
+    /// Interface chains already resolved this run, shared by the components that inherit them.
+    pub(crate) interface_chains: memo::InterfaceChains,
 }
 
 impl ResolutionContext {
@@ -307,6 +310,7 @@ impl ResolutionContext {
             html_attributes: options.html_attributes,
             ambient_global_files,
             module_resolutions: Default::default(),
+            interface_chains: Default::default(),
         }
     }
 }
@@ -565,13 +569,13 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
     );
 
     // Build props BTreeMap — own props win over inherited props with same name.
-    let mut props: BTreeMap<String, ParsedProp> = BTreeMap::new();
+    let mut props: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
     for prop in chain.props {
         props.entry(prop.name.clone()).or_insert(prop);
     }
 
     // Populate notable_inherited from HTML element layers and non-HTML inherited layers.
-    let mut notable_inherited: BTreeMap<String, ParsedProp> = BTreeMap::new();
+    let mut notable_inherited: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
     for layer in &chain.inheritance {
         if let Some(ref element) = layer.html_element {
             // Curated-mode synthesis only: Full mode already merged the real
@@ -593,7 +597,7 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
                 let prop_type = html::infer_html_attr_prop_type(attr_name);
                 notable_inherited.insert(
                     attr_name.to_string(),
-                    ParsedProp::new(
+                    Arc::new(ParsedProp::new(
                         attr_name.to_string(),
                         prop_type,
                         false,
@@ -605,7 +609,7 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
                             file_name: "node_modules/@types/react/index.d.ts".to_string(),
                         }),
                         vec![],
-                    ),
+                    )),
                 );
             }
         } else {
@@ -641,14 +645,16 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
 
 // ─── Intermediate Resolution Result ──────────────────────────────────────────
 
-/// Result of resolving a props chain (including extends).
+/// Result of resolving a props chain (including extends). Props are shared: a parent's props move into every chain
+/// that inherits them, and into the component, without being copied.
+#[derive(Clone)]
 struct ResolvedChain {
     /// Resolved props (may include inherited props).
-    props: Vec<ParsedProp>,
+    props: Vec<Arc<ParsedProp>>,
     /// Inheritance layers, outermost first.
     inheritance: Vec<InheritedLayer>,
     /// Inherited props keyed by name — for notable_inherited population.
-    inherited_by_name: FxHashMap<String, ParsedProp>,
+    inherited_by_name: FxHashMap<String, Arc<ParsedProp>>,
     /// Type names that could not be resolved.
     composes: Vec<String>,
     /// Discriminant prop name if this is a discriminated union.
@@ -696,7 +702,7 @@ impl ResolvedChain {
 
         for prop in parent.props {
             if !existing.contains(&prop.name) {
-                self.props.push(prop.clone());
+                self.props.push(Arc::clone(&prop));
             }
             // Always populate inherited_by_name so notable lookup works.
             self.inherited_by_name.entry(prop.name.clone()).or_insert(prop);

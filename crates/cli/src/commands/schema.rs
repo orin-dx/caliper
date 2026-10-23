@@ -151,7 +151,7 @@ mod tests {
         let mut props = BTreeMap::new();
         props.insert(
             "variant".to_string(),
-            ParsedProp::new(
+            std::sync::Arc::new(ParsedProp::new(
                 "variant".into(),
                 PropType::String,
                 true,
@@ -160,7 +160,7 @@ mod tests {
                 BTreeMap::from([("since".to_string(), "1.0".to_string())]),
                 Some(PropParent { name: "ButtonProps".into(), file_name: "Button.tsx".into() }),
                 vec![PropParent { name: "ButtonProps".into(), file_name: "Button.tsx".into() }],
-            ),
+            )),
         );
 
         let mut components = BTreeMap::new();
@@ -180,7 +180,7 @@ mod tests {
                 }],
                 notable_inherited: BTreeMap::from([(
                     "onClick".to_string(),
-                    ParsedProp::new(
+                    std::sync::Arc::new(ParsedProp::new(
                         "onClick".into(),
                         PropType::Named { name: "MouseEventHandler".into(), args: vec![] },
                         false,
@@ -189,7 +189,7 @@ mod tests {
                         BTreeMap::new(),
                         None,
                         vec![],
-                    ),
+                    )),
                 )]),
                 discriminant_prop: Some("variant".into()),
                 composes: vec!["SomeUnresolved".into()],

@@ -3,6 +3,7 @@
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use super::collected::{EnumEntry, TypeName};
 use super::diagnostic::{Diagnostic, DiagnosticSeverity};
@@ -93,12 +94,13 @@ pub struct ComponentEntry {
     pub file_path: Utf8PathBuf,
     /// Component-level JSDoc description
     pub description: String,
-    /// Resolved props, keyed by prop name
-    pub props: BTreeMap<String, ParsedProp>,
+    /// Resolved props, keyed by prop name. Shared: components that inherit one interface hold the same prop, so change
+    /// one through `Arc::make_mut`, which copies it first when another component holds it too.
+    pub props: BTreeMap<String, Arc<ParsedProp>>,
     /// Full resolved inheritance chain, outermost first.
     pub inheritance: Vec<InheritedLayer>,
-    /// Curated notable props from inherited layers (not in self.props).
-    pub notable_inherited: BTreeMap<String, ParsedProp>,
+    /// Curated notable props from inherited layers (not in self.props), shared like `props`.
+    pub notable_inherited: BTreeMap<String, Arc<ParsedProp>>,
     /// If props type is a discriminated union, the name of the discriminant prop (e.g. "variant").
     pub discriminant_prop: Option<String>,
     /// Type names that could not be resolved (react-docgen compat)

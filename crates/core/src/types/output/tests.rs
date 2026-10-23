@@ -538,7 +538,7 @@ mod serde_key_casing_tests {
             vec![],
         );
         let mut props = BTreeMap::new();
-        props.insert("label".to_string(), prop);
+        props.insert("label".to_string(), std::sync::Arc::new(prop));
 
         let entry = ComponentEntry {
             display_name: "Widget".to_string(),
@@ -601,7 +601,7 @@ mod component_entry_roundtrip_tests {
             vec![],
         );
         let mut props = BTreeMap::new();
-        props.insert("label".to_string(), prop);
+        props.insert("label".to_string(), std::sync::Arc::new(prop));
 
         let original = ComponentEntry {
             display_name: "Widget".to_string(),

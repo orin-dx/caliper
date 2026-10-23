@@ -582,6 +582,8 @@ fn test_discriminated_union_detection() {
             )],
         ),
     ];
+    let members: Vec<(&str, Vec<std::sync::Arc<ParsedProp>>)> =
+        members.into_iter().map(|(name, props)| (name, props.into_iter().map(std::sync::Arc::new).collect())).collect();
     let discriminant = chain::find_discriminant_prop(&members);
     assert_eq!(discriminant, Some("variant".to_string()));
 }
@@ -2592,4 +2594,122 @@ fn ts_lib_paths_keep_the_files_found_and_name_only_the_missing_one() {
 fn ts_lib_paths_are_empty_and_silent_without_typescript() {
     let tmp = tempfile::TempDir::new().unwrap();
     assert_eq!(lib_paths_from(tmp.path()), TsLibs::default());
+}
+
+// ── interface chains resolved once per run (`memo`) ─────────────────────────
+
+const SHARED_BASE: &str = r#"
+import type { Tone } from "./tone";
+export interface Base {
+  /** shared tone */
+  tone?: Tone;
+  size?: number;
+  broken?: NotDeclaredAnywhere;
+}
+"#;
+
+const SHARED_COMPONENTS: &str = r#"
+import type { Base } from "./base";
+interface AProps extends Base { a?: string }
+interface BProps extends Base { b?: string }
+interface CProps extends Base { c?: string }
+export function A(props: AProps) { return null; }
+export function B(props: BProps) { return null; }
+export function C({ tone = "b" }: CProps) { return null; }
+"#;
+
+/// A context over real files in a temp dir, so imports resolve as in a run.
+fn parsed_ctx(dir: &Utf8Path, files: &[(&str, &str)]) -> ResolutionContext {
+    let mut global = GlobalSourceData::default();
+    for (name, source) in files {
+        let path = dir.join(name);
+        std::fs::write(&path, source).unwrap();
+        global.merge(&path, crate::extractor::parse_file(&path, source));
+    }
+    ResolutionContext::new(Arc::new(global), &PipelineOptions::default())
+}
+
+/// Resolve `components` in order on one context, asserting each gives exactly what it gives on a context of its own:
+/// entry, dependencies, and each distinct diagnostic in the order first reported (a reused chain reports each once).
+fn resolve_shared(
+    dir: &Utf8Path,
+    files: &[(&str, &str)],
+    components: &[&str],
+) -> (ResolutionContext, BTreeMap<String, (ComponentEntry, Vec<Diagnostic>, deps::Dependencies)>) {
+    let shared = parsed_ctx(dir, files);
+    let mapping = |ctx: &ResolutionContext, name: &str| {
+        ctx.global.component_mappings.iter().find(|m| m.component_name == name).unwrap().clone()
+    };
+    let mut results = BTreeMap::new();
+    for name in components {
+        let fresh = parsed_ctx(dir, files);
+        let alone = resolve_component_tracked(&mapping(&fresh, name), &fresh);
+        let reused = resolve_component_tracked(&mapping(&shared, name), &shared);
+        assert_eq!(serde_json::to_value(&reused.0).unwrap(), serde_json::to_value(&alone.0).unwrap(), "{name}");
+        let firsts = |diagnostics: &[Diagnostic]| {
+            let mut seen = FxHashSet::default();
+            diagnostics.iter().filter(|d| seen.insert(*d)).cloned().collect::<Vec<_>>()
+        };
+        assert_eq!(firsts(&reused.1), firsts(&alone.1), "{name}: diagnostics");
+        assert_eq!(reused.2, alone.2, "{name}: dependencies");
+        results.insert((*name).to_owned(), reused);
+    }
+    (shared, results)
+}
+
+fn canonical_temp_dir() -> (tempfile::TempDir, Utf8PathBuf) {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let dir = Utf8PathBuf::from_path_buf(std::fs::canonicalize(tmp.path()).unwrap()).unwrap();
+    (tmp, dir)
+}
+
+#[test]
+fn a_shared_interface_chain_resolves_like_a_fresh_one_for_every_component() {
+    let (_tmp, dir) = canonical_temp_dir();
+    let tone = "export type Tone = \"a\" | \"b\";\n";
+    let files = [("tone.ts", tone), ("base.ts", SHARED_BASE), ("Comp.tsx", SHARED_COMPONENTS)];
+    let (shared, results) = resolve_shared(&dir, &files, &["A", "B", "C"]);
+
+    for (name, (_, diagnostics, deps)) in &results {
+        let unresolved: Vec<_> = diagnostics.iter().filter(|d| d.message.contains("NotDeclaredAnywhere")).collect();
+        assert_eq!(unresolved.len(), 1, "{name}: {diagnostics:?}");
+        // Only Base's chain reads tone.ts, so a component that reuses it must still depend on it.
+        assert!(deps.files.contains(dir.join("tone.ts").as_str()), "{name}: {deps:?}");
+    }
+
+    // B reuses A's recording of Base; C's default for `tone` makes it resolve Base again.
+    let comp = |name: &str| format!("{dir}/Comp.tsx:{name}");
+    let expected: FxHashMap<String, usize> =
+        [(format!("{dir}/base.ts:Base"), 2), (comp("AProps"), 1), (comp("BProps"), 1), (comp("CProps"), 1)]
+            .into_iter()
+            .collect();
+    assert_eq!(memo::recording_counts(&shared.interface_chains), expected);
+
+    let prop = |component: &str, name: &str| &results[component].0.props[name];
+    assert!(Arc::ptr_eq(prop("A", "tone"), prop("B", "tone")));
+    assert!(Arc::ptr_eq(prop("A", "size"), prop("B", "size")));
+    assert!(!Arc::ptr_eq(prop("A", "tone"), prop("C", "tone")));
+    let default_of = |component: &str| prop(component, "tone").default_value.as_ref().map(|d| d.value.clone());
+    assert_eq!((default_of("A"), default_of("B"), default_of("C")), (None, None, Some("\"b\"".to_owned())));
+}
+
+#[test]
+fn an_interface_chain_cut_short_by_a_cycle_is_not_reused_where_the_cycle_is_not_open() {
+    // P reaches Base through Loop, so Base's own `extends Loop` closes a cycle there; Q reaches Base at the same depth
+    // through Z, where Loop has not been entered, so Base's chain takes Loop's props.
+    let (_tmp, dir) = canonical_temp_dir();
+    let source = r#"
+interface Base extends Loop { b?: string }
+interface Loop extends Base { l?: string }
+interface X extends Loop {}
+interface Z extends Base { z?: string }
+interface Y extends Z {}
+export function P(props: X) { return null; }
+export function Q(props: Y) { return null; }
+"#;
+    let (shared, results) = resolve_shared(&dir, &[("Comp.tsx", source)], &["P", "Q"]);
+
+    let names = |component: &str| results[component].0.props.keys().map(String::as_str).collect::<Vec<_>>();
+    assert_eq!((names("P"), names("Q")), (vec!["b", "l"], vec!["b", "l", "z"]));
+    assert_eq!(memo::recording_counts(&shared.interface_chains)[&format!("{dir}/Comp.tsx:Base")], 2);
 }

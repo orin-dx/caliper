@@ -402,6 +402,48 @@ export function FromQuieter(props: Quieter) { return null; }
     assert_eq!(y.parent.as_ref().map(|p| p.name.as_str()), Some("Base"));
 }
 
+struct RedescribeButtonTone;
+
+impl crate::plugin::DocgenPlugin for RedescribeButtonTone {
+    fn name(&self) -> &str {
+        "redescribe-button-tone"
+    }
+
+    fn on_component_resolved(&self, entry: &mut ComponentEntry) {
+        if entry.display_name == "Button" {
+            if let Some(tone) = entry.props.get_mut("tone") {
+                std::sync::Arc::make_mut(tone).description = "Button's tone".into();
+            }
+        }
+    }
+}
+
+#[test]
+fn a_plugin_changing_an_inherited_prop_changes_it_for_that_component_only() {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "Comp.tsx",
+        r#"
+interface Base { /** shared tone */ tone?: string }
+interface ButtonProps extends Base { a?: string }
+interface ChipProps extends Base { b?: string }
+export function Button(props: ButtonProps) { return null; }
+export function Chip(props: ChipProps) { return null; }
+"#,
+    );
+    let mut options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    options.plugins.register(RedescribeButtonTone);
+    let output = extract(&options);
+
+    let description = |component: &str| output.components[component].props["tone"].description.as_str();
+    assert_eq!((description("Button"), description("Chip")), ("Button's tone", "shared tone"));
+}
+
 // ── literal-union alias props: bare members, never pre-quoted ────────────
 
 #[test]
