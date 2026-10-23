@@ -378,6 +378,35 @@ fn test_display_name_update() {
 }
 
 #[test]
+fn a_generic_functions_result_is_its_return_annotation_or_its_one_asserted_return() {
+    let source = r#"
+        export function annotated<P>(render: unknown): React.FC<P> { return render as any; }
+        export function asserted<P, R>(render: unknown) {
+            const component = render;
+            return component as unknown as Box<P, R>;
+        }
+        export function unasserted<P>(render: P) { return render; }
+        export function twice<P>(flag: boolean) { return 1 as Box<P>; return 2 as Box<P>; }
+        export function plain(render: unknown) { return render as Box<string>; }
+    "#;
+    let data = parse_file(Utf8Path::new("/test/factory.ts"), source);
+
+    let mut results: Vec<(&str, Vec<&str>, String)> = data
+        .function_results
+        .iter()
+        .map(|(key, result)| {
+            let name = key.rsplit_once(':').unwrap().1;
+            (name, result.type_params.iter().map(|p| p.as_str()).collect(), result.result.to_raw_string())
+        })
+        .collect();
+    results.sort();
+    assert_eq!(
+        results,
+        [("annotated", vec!["P"], "React.FC<P>".to_owned()), ("asserted", vec!["P", "R"], "Box<P, R>".to_owned())]
+    );
+}
+
+#[test]
 fn string_defaults_keep_their_source_quotes() {
     let source = r#"
         export function Button({ size = 'md', tone = "neutral", label = `Go` }: { size?: string; tone?: string; label?: string }) {

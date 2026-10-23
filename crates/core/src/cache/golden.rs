@@ -42,6 +42,12 @@ export function Card(props: Alias) {
 }
 
 const Opaque = makeThing();
+
+export function make<P>(render: (props: P) => null) {
+  return render as unknown as React.FC<P & { as?: string }>;
+}
+
+export const Panel = make<PanelProps>((props) => <div />);
 "#;
 
 fn fixture() -> SourceData {
@@ -61,6 +67,7 @@ fn fixture_populates_every_source_data_field() {
         imports,
         exports,
         diagnostics,
+        function_results,
     } = fixture();
     let fields = [
         ("interfaces", interfaces.is_empty()),
@@ -73,6 +80,7 @@ fn fixture_populates_every_source_data_field() {
         ("imports", imports.is_empty()),
         ("exports", exports.is_empty()),
         ("diagnostics", diagnostics.is_empty()),
+        ("function_results", function_results.is_empty()),
     ];
     let empty: Vec<&str> = fields.iter().filter(|(_, is_empty)| *is_empty).map(|(name, _)| *name).collect();
     assert_eq!(empty, Vec::<&str>::new(), "extend FIXTURE so the golden bytes cover these fields");

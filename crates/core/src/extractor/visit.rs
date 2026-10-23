@@ -306,6 +306,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     }
 
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
+        self.record_function_result(func);
         // Pattern 4: `function Button(props: ButtonProps) { ... }`
         if self.is_tsx {
             if let Some(id) = &func.id {
