@@ -30,7 +30,8 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 /// Extractor changes that keep the shape are covered by `CacheHeader::fingerprint` instead.
 /// 16: `LexedExport::LocalDeclaration` gained `declared_as`.
 /// 17: component mappings record whether they are exported.
-const CACHE_SCHEMA_VERSION: u32 = 17;
+/// 18: generic functions' result types, and the callee of a wrapper-built component.
+const CACHE_SCHEMA_VERSION: u32 = 18;
 
 const DATA_FILE: &str = "dts.msgpack";
 
