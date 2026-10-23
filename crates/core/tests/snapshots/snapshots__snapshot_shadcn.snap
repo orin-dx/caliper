@@ -178,7 +178,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "functionDeclaration"
+      "detectedBy": "functionDeclaration",
+      "exported": true
     },
     "Button": {
       "displayName": "Button",
@@ -530,7 +531,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "Input": {
       "displayName": "Input",
@@ -830,7 +832,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     }
   },
   "enums": {

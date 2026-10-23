@@ -1,12 +1,12 @@
-//! How each name is used in its file, so a function that only looks like a component is not reported as one: a helper
-//! that is only ever called (`IndexedAccess(type)`), or a render callback that takes a ref and is never rendered
-//! (`{render: TableDropIndicatorWrapper}`).
+//! How each name is used and exported in its file. A function that only looks like a component is not reported as one:
+//! a helper that is only ever called (`IndexedAccess(type)`), or a render callback that takes a ref and is never
+//! rendered (`{render: TableDropIndicatorWrapper}`). Every component records whether its module exports it.
 
 use compact_str::CompactString;
 use oxc_ast::ast::*;
 use oxc_span::Span;
 
-use crate::types::{DiagnosticCode, LexedExport};
+use crate::types::DiagnosticCode;
 
 use super::SourceDataCollector;
 
@@ -29,9 +29,68 @@ impl<'src> SourceDataCollector<'src> {
         self.uses_of(reference.name.as_str()).references += 1;
     }
 
-    /// An exported declaration (`export default function Name`) is used from outside the file, like a reference.
-    pub(super) fn record_exported_declaration(&mut self, name: &str) {
-        self.uses_of(name).references += 1;
+    /// A local name the module exports (`export function Name`, `export { Name as Other }`, `export default Name`).
+    pub(super) fn record_exported_local(&mut self, name: &str) {
+        self.exported_locals.insert(CompactString::from(name));
+    }
+
+    /// `Parent.Sub = Sub` or `Object.assign(Parent, { Sub: Sub })`.
+    pub(super) fn record_attached(&mut self, sub: &str, parent: &str) {
+        self.attached_to.push((CompactString::from(sub), CompactString::from(parent)));
+    }
+
+    /// `const Parent = Object.assign(Root, { Sub })`: `Parent` is the root under another name, with `Sub` attached.
+    pub(super) fn record_object_assign_declarator(&mut self, parent: &str, init: Option<&Expression<'_>>) {
+        let Some(Expression::CallExpression(call)) = init.map(super::component::peel_expr) else { return };
+        let Expression::StaticMemberExpression(callee) = &call.callee else { return };
+        if !matches!(&callee.object, Expression::Identifier(object) if object.name == "Object")
+            || callee.property.name != "assign"
+        {
+            return;
+        }
+        for argument in &call.arguments {
+            match argument.as_expression().map(super::component::peel_expr) {
+                Some(Expression::Identifier(root)) => self.record_attached(root.name.as_str(), parent),
+                Some(Expression::ObjectExpression(object)) => {
+                    for property in &object.properties {
+                        let ObjectPropertyKind::ObjectProperty(property) = property else { continue };
+                        if let Expression::Identifier(sub) = super::component::peel_expr(&property.value) {
+                            self.record_attached(sub.name.as_str(), parent);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// `Parent.Sub = Sub` at statement level.
+    pub(super) fn record_member_assignment(&mut self, statement: &ExpressionStatement<'_>) {
+        let Expression::AssignmentExpression(assignment) = &statement.expression else { return };
+        let AssignmentTarget::StaticMemberExpression(target) = &assignment.left else { return };
+        let (Expression::Identifier(parent), Expression::Identifier(sub)) =
+            (&target.object, super::component::peel_expr(&assignment.right))
+        else {
+            return;
+        };
+        self.record_attached(sub.name.as_str(), parent.name.as_str());
+    }
+
+    /// The names of the file's exported components: the exported locals, and any component attached to an exported
+    /// one, transitively.
+    pub(super) fn exported_components(&self) -> rustc_hash::FxHashSet<CompactString> {
+        let mut exported = self.exported_locals.clone();
+        loop {
+            let before = exported.len();
+            for (sub, parent) in &self.attached_to {
+                if exported.contains(parent) {
+                    exported.insert(sub.clone());
+                }
+            }
+            if exported.len() == before {
+                return exported;
+            }
+        }
     }
 
     pub(super) fn record_call(&mut self, call: &CallExpression<'_>) {
@@ -62,16 +121,7 @@ impl<'src> SourceDataCollector<'src> {
 
     /// Drop the component candidates that are not exported and are used only as functions: every reference is a call,
     /// or they take a second parameter (a ref) and are never rendered. Each is reported as a skipped candidate.
-    pub(super) fn drop_functions_used_only_as_functions(&mut self) {
-        let exported: rustc_hash::FxHashSet<&str> = self
-            .data
-            .exports
-            .iter()
-            .filter_map(|e| match e {
-                LexedExport::LocalDeclaration { name, .. } => Some(name.as_str()),
-                _ => None,
-            })
-            .collect();
+    pub(super) fn drop_functions_used_only_as_functions(&mut self, exported: &rustc_hash::FxHashSet<CompactString>) {
         let mut dropped: Vec<(String, String, Span)> = Vec::new();
         for mapping in &self.data.component_mappings {
             let name = mapping.component_name.as_str();

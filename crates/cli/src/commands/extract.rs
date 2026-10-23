@@ -54,8 +54,10 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
 
         let json = match args.format {
             crate::OutputFormat::Canonical => serde_json::to_string_pretty(&output).into_diagnostic()?,
-            crate::OutputFormat::Rdt => serialize_rdt(&output).into_diagnostic()?,
-            crate::OutputFormat::Storybook => serialize_storybook(&output).into_diagnostic()?,
+            crate::OutputFormat::Rdt => serialize_rdt(&output, args.include_unexported).into_diagnostic()?,
+            crate::OutputFormat::Storybook => {
+                serialize_storybook(&output, args.include_unexported).into_diagnostic()?
+            }
             crate::OutputFormat::Toon => caliper_docgen_core::toon::render_output_toon(&output),
         };
 
@@ -101,11 +103,22 @@ fn rdt_omits(prop: &caliper_docgen_core::types::ParsedProp) -> bool {
     prop.name == "children" && prop.description.is_empty()
 }
 
+/// The components a compatibility format writes: like react-docgen-typescript, only exported ones unless asked.
+fn compat_components(
+    output: &caliper_docgen_core::types::ExtractionOutput,
+    include_unexported: bool,
+) -> impl Iterator<Item = (&String, &caliper_docgen_core::types::ComponentEntry)> {
+    output.components.iter().filter(move |(_, entry)| include_unexported || entry.exported)
+}
+
 /// `methods` is always `[]` — this tool doesn't extract class methods, and RDT
 /// consumers (Storybook's docgen addon) only ever read it for class components.
-pub fn serialize_rdt(output: &caliper_docgen_core::types::ExtractionOutput) -> serde_json::Result<String> {
+pub fn serialize_rdt(
+    output: &caliper_docgen_core::types::ExtractionOutput,
+    include_unexported: bool,
+) -> serde_json::Result<String> {
     let mut map = serde_json::Map::new();
-    for (name, entry) in &output.components {
+    for (name, entry) in compat_components(output, include_unexported) {
         let props: serde_json::Map<String, serde_json::Value> = entry
             .props
             .iter()
@@ -137,9 +150,12 @@ pub fn serialize_rdt(output: &caliper_docgen_core::types::ExtractionOutput) -> s
     serde_json::to_string_pretty(&serde_json::Value::Object(map))
 }
 
-pub fn serialize_storybook(output: &caliper_docgen_core::types::ExtractionOutput) -> serde_json::Result<String> {
+pub fn serialize_storybook(
+    output: &caliper_docgen_core::types::ExtractionOutput,
+    include_unexported: bool,
+) -> serde_json::Result<String> {
     let mut map = serde_json::Map::new();
-    for (name, entry) in &output.components {
+    for (name, entry) in compat_components(output, include_unexported) {
         let props: serde_json::Map<String, serde_json::Value> = entry
             .props
             .iter()

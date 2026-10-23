@@ -1115,6 +1115,57 @@ fn functions_used_only_as_functions_are_not_components() {
 }
 
 #[test]
+fn a_component_is_exported_when_its_module_exports_it_or_attaches_it_to_an_export() {
+    let exports = |path: &str, source: &str| -> Vec<(String, bool)> {
+        let data = parse_file(Utf8Path::new(path), source);
+        let mut found: Vec<(String, bool)> =
+            data.component_mappings.iter().map(|m| (m.component_name.to_string(), m.exported)).collect();
+        found.sort_unstable();
+        found
+    };
+    let source = r#"
+        interface P { label: string }
+        export function Direct(props: P) { return <b />; }
+        export const Arrow = (props: P) => <i />;
+        function Renamed(props: P) { return <u />; }
+        export { Renamed as Public };
+        function Defaulted(props: P) { return <s />; }
+        export default Defaulted;
+        function Item(props: P) { return <li />; }
+        Direct.Item = Item;
+        function Header(props: P) { return <h1 />; }
+        export const Card = Object.assign((props: P) => <div />, { Header });
+        function MenuRoot(props: P) { return <ul />; }
+        function MenuItem(props: P) { return <li />; }
+        export const Menu = Object.assign(MenuRoot, { Item: MenuItem });
+        function Internal(props: P) { return <p />; }
+        function Orphan(props: P) { return <em />; }
+        Internal.Orphan = Orphan;
+        const shown = <><Internal label="x" /><Orphan label="y" /></>;
+    "#;
+    assert_eq!(
+        exports("/test/exports.tsx", source),
+        vec![
+            ("Arrow".to_string(), true),
+            ("Card".to_string(), true),
+            ("Defaulted".to_string(), true),
+            ("Direct".to_string(), true),
+            ("Header".to_string(), true),
+            ("Internal".to_string(), false),
+            ("Item".to_string(), true),
+            ("MenuItem".to_string(), true),
+            ("MenuRoot".to_string(), true),
+            ("Orphan".to_string(), false),
+            ("Renamed".to_string(), true),
+        ]
+    );
+    assert_eq!(
+        exports("/test/fancy-badge.tsx", "export default function (props: { tone: string }) { return <span />; }"),
+        vec![("FancyBadge".to_string(), true)]
+    );
+}
+
+#[test]
 fn test_memo_forward_ref_detected() {
     let source = r#"
         import React, { memo, forwardRef } from "react";

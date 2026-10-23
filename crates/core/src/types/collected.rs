@@ -783,6 +783,8 @@ pub struct ComponentMapping {
     pub param_defaults: FxHashMap<std::string::String, RawDefault>,
     /// Which extractor rule matched.
     pub rule: DetectionRule,
+    /// Whether its module exports it, directly or as a sub-component attached to an exported component.
+    pub exported: bool,
 }
 
 impl ComponentMapping {
@@ -806,6 +808,7 @@ impl ComponentMapping {
             span_end,
             param_defaults: FxHashMap::default(),
             rule,
+            exported: false,
         }
     }
 

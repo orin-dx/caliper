@@ -97,6 +97,11 @@ pub struct ExtractArgs {
     #[arg(long, value_delimiter = ',')]
     pub extra_builtins: Vec<String>,
 
+    /// Keep components their module doesn't export in `--format rdt` and `--format storybook`, which omit them by
+    /// default as react-docgen-typescript does. Canonical output always keeps them, marked `exported: false`.
+    #[arg(long)]
+    pub include_unexported: bool,
+
     /// Machine-readable JSON output: the canonical schema, compact, always to
     /// stdout, ignoring --out/--format (which govern the human/RDT/Storybook
     /// paths below), and suppresses the human-readable summary/diagnostics.

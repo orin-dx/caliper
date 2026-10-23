@@ -79,6 +79,10 @@ fn schema_value() -> serde_json::Value {
                                 "functionDeclaration", "anonymousDefaultExport", "attachedSubComponent",
                                 "typedFunctionExpression", "wrapperTypeArgument"
                             ]
+                        },
+                        "exported": {
+                            "description": "Whether its module exports it, directly or as a sub-component attached to an exported component",
+                            "type": "boolean"
                         }
                     }
                 }
@@ -196,6 +200,7 @@ mod tests {
                 tags: BTreeMap::from([("deprecated".to_string(), String::new())]),
                 methods: vec![],
                 detected_by: caliper_docgen_core::types::DetectionRule::FunctionDeclaration,
+                exported: true,
             },
         );
 

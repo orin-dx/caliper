@@ -818,7 +818,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRefExoticDecl"
+      "detectedBy": "forwardRefExoticDecl",
+      "exported": true
     },
     "TextInput": {
       "displayName": "TextInput",
@@ -1953,7 +1954,8 @@ expression: value
       ],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRefExoticDecl"
+      "detectedBy": "forwardRefExoticDecl",
+      "exported": true
     }
   },
   "enums": {},

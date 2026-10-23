@@ -104,6 +104,8 @@ export interface ComponentEntry {
   methods: []
   /** The rule that recognized the component; `typedFunctionExpression` and `wrapperTypeArgument` are inferred. */
   detectedBy: DetectionRule
+  /** Whether its module exports it, directly or as a sub-component attached to an exported component. */
+  exported: boolean
 }
 
 export type DetectionRule =

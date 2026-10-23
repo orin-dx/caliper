@@ -39,6 +39,12 @@ Options:
           Extra type names to treat as recognized/builtin (no "unknown type"
           warning) — e.g. a library-specific type this tool doesn't already know
 
+      --include-unexported
+          Keep components their module doesn't export in `--format rdt` and
+          `--format storybook`, which omit them by default as
+          react-docgen-typescript does. Canonical output always keeps them,
+          marked `exported: false`
+
   -j, --json
           Machine-readable JSON output: the canonical schema, compact, always to
           stdout, ignoring --out/--format (which govern the human/RDT/Storybook

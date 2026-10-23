@@ -160,7 +160,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "Avatar": {
       "displayName": "Avatar",
@@ -234,7 +235,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "hocWrapper"
+      "detectedBy": "hocWrapper",
+      "exported": true
     },
     "Badge": {
       "displayName": "Badge",
@@ -282,7 +284,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "fcAnnotation"
+      "detectedBy": "fcAnnotation",
+      "exported": true
     },
     "Box": {
       "displayName": "Box",
@@ -451,7 +454,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "Card": {
       "displayName": "Card",
@@ -666,7 +670,8 @@ expression: value
         "since": "1.0.0"
       },
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "Chip": {
       "displayName": "Chip",
@@ -723,7 +728,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "fcAnnotation"
+      "detectedBy": "fcAnnotation",
+      "exported": true
     },
     "Icon": {
       "displayName": "Icon",
@@ -918,7 +924,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "IconButton": {
       "displayName": "IconButton",
@@ -1046,7 +1053,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "Select": {
       "displayName": "Select",
@@ -1224,7 +1232,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "Toast": {
       "displayName": "Toast",
@@ -1262,7 +1271,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "Toggle": {
       "displayName": "Toggle",
@@ -1336,7 +1346,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "TypeSampler": {
       "displayName": "TypeSampler",
@@ -1584,7 +1595,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     }
   },
   "enums": {},

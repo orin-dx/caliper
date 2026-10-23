@@ -947,7 +947,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRefExoticDecl"
+      "detectedBy": "forwardRefExoticDecl",
+      "exported": true
     },
     "TextField": {
       "displayName": "TextField",
@@ -1844,7 +1845,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRefExoticDecl"
+      "detectedBy": "forwardRefExoticDecl",
+      "exported": true
     }
   },
   "enums": {},

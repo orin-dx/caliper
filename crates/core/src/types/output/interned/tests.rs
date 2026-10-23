@@ -32,6 +32,7 @@ fn component(name: &str, props: &[ParsedProp], notable: &[ParsedProp]) -> Compon
         tags: BTreeMap::new(),
         methods: vec![],
         detected_by: DetectionRule::FunctionDeclaration,
+        exported: true,
     }
 }
 
