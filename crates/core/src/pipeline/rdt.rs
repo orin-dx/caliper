@@ -54,7 +54,6 @@ fn component_doc(entry: &ComponentEntry, keep: impl Fn(&ParsedProp) -> bool) -> 
         .collect();
     serde_json::json!({
         "displayName": entry.display_name,
-        "filePath": entry.file_path,
         "props": serde_json::Value::Object(props),
         "description": entry.description,
         "methods": [],
@@ -64,13 +63,17 @@ fn component_doc(entry: &ComponentEntry, keep: impl Fn(&ParsedProp) -> bool) -> 
 }
 
 /// The components of `output` as RDT documents them, keyed as in the output, pretty-printed. Like RDT, only exported
-/// components unless `include_unexported`.
+/// components unless `include_unexported`, each with RDT's `filePath`, which `__docgenInfo` doesn't carry.
 pub fn serialize(output: &ExtractionOutput, include_unexported: bool) -> serde_json::Result<String> {
     let map: serde_json::Map<String, serde_json::Value> = output
         .components
         .iter()
         .filter(|(_, entry)| include_unexported || entry.exported)
-        .map(|(name, entry)| (name.clone(), component_doc(entry, |prop| !omits(prop))))
+        .map(|(name, entry)| {
+            let mut doc = component_doc(entry, |prop| !omits(prop));
+            doc["filePath"] = serde_json::json!(entry.file_path);
+            (name.clone(), doc)
+        })
         .collect();
     serde_json::to_string_pretty(&serde_json::Value::Object(map))
 }
