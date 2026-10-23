@@ -173,7 +173,11 @@ pub(super) fn resolve_base_as_chain(
             // Expand the object fields directly as own props.
             let mut chain = ResolvedChain::empty();
             for field in fields {
-                let prop_type = resolve_collected_type(&field.collected_type, file_path, ctx, state, depth);
+                let prop_type = if state.keys_only {
+                    PropType::Unknown
+                } else {
+                    resolve_collected_type(&field.collected_type, file_path, ctx, state, depth)
+                };
                 chain.props.push(Arc::new(ParsedProp::new(
                     field.name.clone(),
                     prop_type,
@@ -282,9 +286,20 @@ fn resolve_mapped_chain(
 ) -> ResolvedChain {
     let mut chain = ResolvedChain::empty();
     for key in keys {
-        let bound = FxHashMap::from_iter([(param.as_str(), CollectedType::StringLiteral(key.name.as_str().into()))]);
-        let value = super::substitute::substitute_type(value_type, &bound);
-        let prop_type = resolve_collected_type(&value, file_path, ctx, state, depth + 1);
+        // A `keyof` operand needs only the names (`ResolveState::keys_only`).
+        let prop_type = if state.keys_only {
+            PropType::Unknown
+        } else {
+            let bound =
+                FxHashMap::from_iter([(param.as_str(), CollectedType::StringLiteral(key.name.as_str().into()))]);
+            resolve_collected_type(
+                &super::substitute::substitute_type(value_type, &bound),
+                file_path,
+                ctx,
+                state,
+                depth + 1,
+            )
+        };
         chain.props.push(Arc::new(ParsedProp::new(
             key.name.clone(),
             prop_type,
@@ -315,7 +330,7 @@ fn resolve_intersection_chain(
     let mut layers: Vec<InheritedLayer> = Vec::new();
     for member in members {
         let mut member = resolve_base_as_chain(member, file_path, mapping, ctx, state, depth);
-        if !layers.is_empty() {
+        if !layers.is_empty() && !state.keys_only {
             let listed: FxHashSet<&str> = chain.props.iter().map(|prop| prop.name.as_str()).collect();
             for prop in member.props.iter_mut().filter(|prop| !listed.contains(prop.name.as_str())) {
                 for layer in &layers {
@@ -331,7 +346,7 @@ fn resolve_intersection_chain(
             .filter(|layer| layer.html_element.as_deref().is_some_and(|element| has_element(layer, element, ctx)))
             .cloned()
             .collect();
-        if !new_layers.is_empty() {
+        if !new_layers.is_empty() && !state.keys_only {
             let own: FxHashSet<&str> = member.props.iter().map(|prop| prop.name.as_str()).collect();
             for prop in chain.props.iter_mut().filter(|prop| !own.contains(prop.name.as_str())) {
                 for layer in &new_layers {
@@ -615,9 +630,13 @@ fn resolve_key_set(
         CollectedType::KeyOf(target) => {
             // A fresh cycle set: reading a type's keys is a separate question from the props walk that called it, which
             // has usually just visited the same type (`Omit<Base, keyof Base>` resolves `Base` first). Sharing the set
-            // made `keyof Base` look circular and come back empty. Depth still bounds the recursion.
-            let mut branch_state =
-                ResolveState { expand_all: state.expand_all || ctx.can_collapse(), ..state.detached() };
+            // made `keyof Base` look circular and come back empty. Depth still bounds the recursion. Only the names are
+            // read, so members' types are not resolved (`keys_only`).
+            let mut branch_state = ResolveState {
+                expand_all: state.expand_all || ctx.can_collapse(),
+                keys_only: true,
+                ..state.detached()
+            };
             let chain = resolve_base_as_chain(target, file, mapping, ctx, &mut branch_state, depth + 1);
             state.absorb_detached(branch_state);
             Some(chain.props.iter().map(|p| p.name.clone()).collect())

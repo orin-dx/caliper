@@ -34,7 +34,7 @@ fn known_fallback(
 ) -> ResolvedChain {
     let evaluated_to_nothing = chain.props.is_empty()
         && chain.inheritance.is_empty()
-        && (!chain.composes.is_empty() || !attempt.diagnostics.is_empty());
+        && (!chain.composes.is_empty() || !attempt.diagnostics.is_empty() || !attempt.shared_diagnostics.is_empty());
     if evaluated_to_nothing {
         let bare = type_name.strip_prefix("React.").unwrap_or(type_name);
         if let Some(result) = crate::known::resolve_known(bare, resolved_args, &ctx.global, &ctx.enum_bare_index) {
@@ -437,6 +437,22 @@ fn resolve_interface_chain_uncached(
     let parent = PropParent { name: iface.name.to_string(), file_name: iface.file_path.to_string() };
 
     for raw_prop in &iface.props {
+        // A `keyof` operand needs only the names; resolving each member's type cost Chakra's 705 style props per walk.
+        if state.keys_only {
+            let tags = Default::default();
+            let prop = ParsedProp::new(
+                raw_prop.name.clone(),
+                PropType::Unknown,
+                false,
+                None,
+                String::new(),
+                tags,
+                None,
+                vec![],
+            );
+            chain.props.push(Arc::new(prop));
+            continue;
+        }
         let prop_type = match &substitution {
             Some(subst) => {
                 let collected = super::substitute::substitute_type(&raw_prop.collected_type, subst);

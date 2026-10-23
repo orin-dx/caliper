@@ -39,13 +39,15 @@ pub(crate) struct InterfaceChains {
 /// One resolution of an interface chain and everything needed to decide whether another state would repeat it.
 struct Recording {
     chain: ResolvedChain,
+    /// Chunks of diagnostics the resolution reported, its own distinct ones first; replays share them.
+    shared: Vec<Arc<[Diagnostic]>>,
     /// The first read of each key, which is what the state held on entry, and the state's own additions.
     reads: StateReads,
-    diagnostics: Vec<Diagnostic>,
     named_unevaluated: bool,
     deps: Dependencies,
     /// `ResolveState::expand_all` while recording: a chain with collapsed sources must not answer an expanding state.
     expand_all: bool,
+    keys_only: bool,
 }
 
 /// Keep the first read of each key: what the state held on entry. A later read may see the resolution's own
@@ -66,6 +68,7 @@ impl Recording {
     fn applies_to(&self, state: &ResolveState, mapping: &ComponentMapping) -> bool {
         let reads = &self.reads;
         self.expand_all == state.expand_all
+            && self.keys_only == state.keys_only
             && reads.visited.iter().all(|(key, present)| state.visited.contains(&**key) == *present)
             && reads.named.iter().all(|(key, present)| state.named_in_progress.contains(&**key) == *present)
             && reads.in_scope.iter().all(|(name, present)| state.in_scope_type_params.contains(name) == *present)
@@ -82,7 +85,7 @@ impl Recording {
         }
         state.visited.extend(self.reads.visited_added.iter().map(|key| CompactString::from(&**key)));
         state.in_scope_type_params.extend(self.reads.in_scope_added.iter().cloned());
-        state.diagnostics.extend(self.diagnostics.iter().cloned());
+        state.shared_diagnostics.extend(self.shared.iter().cloned());
         state.named_unevaluated |= self.named_unevaluated;
         super::deps::replay(&self.deps);
         self.chain.clone()
@@ -100,7 +103,9 @@ impl InterfaceChains {
         mapping: &ComponentMapping,
         resolve: impl FnOnce(&mut ResolveState) -> ResolvedChain,
     ) -> ResolvedChain {
-        let map_key = (CompactString::from(key), depth);
+        // The modes never answer each other, so they must not compete for one key's recordings.
+        let mode = depth | (u8::from(state.expand_all) << 6) | (u8::from(state.keys_only) << 7);
+        let map_key = (CompactString::from(key), mode);
         let found = self
             .recordings
             .get(&map_key)
@@ -113,6 +118,7 @@ impl InterfaceChains {
         let enclosing = state.reads.replace(Box::default());
         let entry_unevaluated = std::mem::take(&mut state.named_unevaluated);
         let diagnostics_before = state.diagnostics.len();
+        let shared_before = state.shared_diagnostics.len();
         let (chain, deps) = super::deps::capturing(|| resolve(state));
         let mut reads = *state.reads.take().unwrap_or_default();
         reads.visited = first_reads(reads.visited);
@@ -126,16 +132,37 @@ impl InterfaceChains {
             enclosing.append(&reads, true, true);
         }
 
+        // This state shares the recording's chunks too, so the first component holds no copy of its own.
+        let own: Arc<[Diagnostic]> = distinct(&state.diagnostics[diagnostics_before..]).into();
+        state.diagnostics.truncate(diagnostics_before);
+        let mut seen: FxHashSet<*const Diagnostic> = FxHashSet::default();
+        let inner: Vec<Arc<[Diagnostic]>> = state.shared_diagnostics.drain(shared_before..).collect();
+        let shared: Vec<Arc<[Diagnostic]>> = std::iter::once(own)
+            .chain(inner)
+            .filter(|chunk| !chunk.is_empty() && seen.insert(chunk.as_ptr()))
+            .collect();
+        state.shared_diagnostics.extend(shared.iter().cloned());
         let recording = Recording {
             chain: chain.clone(),
-            diagnostics: distinct(&state.diagnostics[diagnostics_before..]),
+            shared,
             named_unevaluated,
             deps,
             reads,
             expand_all: state.expand_all,
+            keys_only: state.keys_only,
         };
         let mut recordings = self.recordings.entry(map_key).or_default();
-        if recordings.len() < RECORDINGS_PER_KEY {
+        let same = |r: &Recording| {
+            r.expand_all == recording.expand_all
+                && r.keys_only == recording.keys_only
+                && r.reads.visited == recording.reads.visited
+                && r.reads.named == recording.reads.named
+                && r.reads.in_scope == recording.reads.in_scope
+                && r.reads.defaults == recording.reads.defaults
+        };
+        // Components resolving the same chain concurrently record it several times; one copy is enough.
+        let duplicate = recordings.iter().any(|r| same(r));
+        if !duplicate && recordings.len() < RECORDINGS_PER_KEY {
             recordings.push(Arc::new(recording));
         }
         chain
