@@ -1364,3 +1364,28 @@ fn an_updates_props_are_exactly_the_ones_its_components_refer_to_and_applying_it
     assert_eq!(client["components"], session_now["components"]);
     assert_eq!(client["props"], session_now["props"]);
 }
+
+#[test]
+fn editing_a_file_a_shared_interface_chain_reads_re_resolves_every_component_that_shares_it() {
+    // One of Button and Chip reuses the other's resolution of Base; both must still follow tone.ts and match a cold run.
+    let (tmp, options) = write_project(&[
+        ("tone.ts", "export type Tone = 'info' | 'warn';\n"),
+        ("base.ts", "import type { Tone } from './tone';\nexport interface Base { tone?: Tone }\n"),
+        (
+            "Comp.tsx",
+            "import type { Base } from './base';\ninterface ButtonProps extends Base { a?: string }\n\
+             interface ChipProps extends Base { b?: string }\n\
+             export function Button(props: ButtonProps) { return null; }\n\
+             export function Chip(props: ChipProps) { return null; }\n",
+        ),
+    ]);
+    let session = WatchSession::new(options.clone());
+    let _initial = session.initialize();
+
+    let tone = Utf8PathBuf::from_path_buf(std::fs::canonicalize(tmp.path().join("tone.ts")).unwrap()).unwrap();
+    std::fs::write(&tone, "export type Tone = 'info' | 'warn' | 'error';\n").unwrap();
+    let update = session.update_file(&tone);
+
+    assert_eq!(update.updated_keys, vec!["Button".to_owned(), "Chip".to_owned()]);
+    assert_eq!(visible(&session.snapshot()), visible(&crate::pipeline::extract(&options)));
+}

@@ -486,6 +486,30 @@ describe('caliperDocgen', () => {
     })
   })
 
+  // ── loadDependencies ───────────────────────────────────────────────────────
+
+  describe('loadDependencies', () => {
+    it('forwards loadDependencies to the NAPI call', () => {
+      const p = caliperDocgen({ srcDirs: ['src'], loadDependencies: true })
+      ;(p.configResolved as Function)({ root: '/project' })
+      expect(napi.createSession).toHaveBeenCalledWith(expect.objectContaining({ loadDependencies: true }))
+    })
+
+    it('forwards collapseInheritedProps to the NAPI call', () => {
+      const p = caliperDocgen({ srcDirs: ['src'], loadDependencies: true, collapseInheritedProps: 'none' })
+      ;(p.configResolved as Function)({ root: '/project' })
+      expect(napi.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({ loadDependencies: true, collapseInheritedProps: 'none' }),
+      )
+    })
+
+    it('leaves loadDependencies unset when not passed', () => {
+      const p = caliperDocgen({ srcDirs: ['src'] })
+      ;(p.configResolved as Function)({ root: '/project' })
+      expect(napi.createSession).toHaveBeenCalledWith(expect.objectContaining({ loadDependencies: undefined }))
+    })
+  })
+
   // ── exclude pass-through ───────────────────────────────────────────────────
 
   describe('exclude options forwarding', () => {

@@ -236,7 +236,7 @@ One-line change, uses existing dep, eliminates heap allocation for the common ca
 
 ```toml
 # Cargo.toml
-json-strip-comments = "1"    # or serde_json5 = "0.1"
+json-strip-comments = "1" # or serde_json5 = "0.1"
 ```
 
 Remove the 20-line hand-written function from `resolver.rs`. This is in the wrong file regardless.

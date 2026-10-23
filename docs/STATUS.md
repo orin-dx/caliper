@@ -2,7 +2,9 @@
 
 **Updated:** 2026-09-28
 
-Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are fully tested. Config file loading, cross-package `.d.ts` resolution, watch mode, plugin architecture, TOON token-optimized output format, JSON schema export, LSP server scaffold, and bounded atomic DTS caching are all fully implemented and verified.
+Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are fully tested. Config file loading, watch mode, plugin architecture, TOON token-optimized output format, JSON schema export, LSP server scaffold, and bounded atomic DTS caching are all fully implemented and verified.
+
+Types imported from packages resolve only when they are React builtins, known shortcuts or reachable through `@types/react`; any other package type stays a named reference with an "unresolved type" warning. `--load-dependencies` (config `loadDependencies`, NAPI and Vite `loadDependencies`) loads the declarations those names point to, off by default while its output is checked against RDT (ADR 0010).
 
 ## Numbers
 
