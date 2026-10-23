@@ -22,12 +22,7 @@ Bootstrap the complete repository skeleton. No logic, no algorithms — just str
 
 ```toml
 [workspace]
-members = [
-    "crates/core",
-    "crates/napi",
-    "crates/cli",
-    "packages/rolldown-plugin",
-]
+members = ["crates/core", "crates/napi", "crates/cli", "packages/rolldown-plugin"]
 resolver = "2"
 
 [workspace.package]
@@ -39,60 +34,60 @@ license = "MIT"
 
 [workspace.dependencies]
 # OXC — pin all to same patch version
-oxc_allocator     = "0.60"
-oxc_parser        = "0.60"
-oxc_ast           = "0.60"
-oxc_span          = "0.60"
-oxc_module_lexer  = "0.60"
-oxc_resolver      = "2.0"
+oxc_allocator = "0.60"
+oxc_parser = "0.60"
+oxc_ast = "0.60"
+oxc_span = "0.60"
+oxc_module_lexer = "0.60"
+oxc_resolver = "2.0"
 
 # Core data
-compact_str       = { version = "0.8", features = ["serde"] }
-rustc-hash        = "2.1"
-dashmap           = "6.1"
-arc-swap          = "1.7"
-camino            = { version = "1.1", features = ["serde1"] }
-indexmap          = { version = "2.2", features = ["serde"] }
-dirs              = "5.0"
+compact_str = { version = "0.8", features = ["serde"] }
+rustc-hash = "2.1"
+dashmap = "6.1"
+arc-swap = "1.7"
+camino = { version = "1.1", features = ["serde1"] }
+indexmap = { version = "2.2", features = ["serde"] }
+dirs = "5.0"
 
 # Serde
-serde             = { version = "1.0", features = ["derive"] }
-serde_json        = "1.0"
-rmp-serde         = "1.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rmp-serde = "1.3"
 
 # Error handling
-thiserror         = "2.0"
-miette            = "7.2"
-anyhow            = "1.0"
+thiserror = "2.0"
+miette = "7.2"
+anyhow = "1.0"
 
 # Parallelism
-rayon             = "1.10"
-tokio             = { version = "1.40", features = ["rt-multi-thread", "process", "io-util", "sync", "macros"] }
+rayon = "1.10"
+tokio = { version = "1.40", features = ["rt-multi-thread", "process", "io-util", "sync", "macros"] }
 
 # File system
-ignore            = "0.4"
+ignore = "0.4"
 
 # LSP (Tier 4 scaffold — not implemented)
-lsp-types         = "0.95"
+lsp-types = "0.95"
 
 # CLI
-clap              = { version = "4.5", features = ["derive", "env", "wrap_help"] }
-clap_complete     = "4.5"
-clap_mangen       = "0.2"
-indicatif         = "0.17"
+clap = { version = "4.5", features = ["derive", "env", "wrap_help"] }
+clap_complete = "4.5"
+clap_mangen = "0.2"
+indicatif = "0.17"
 tracing-indicatif = "0.3"
-tracing           = "0.1"
+tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-owo-colors        = "4.1"
-watchexec         = "5.0"
+owo-colors = "4.1"
+watchexec = "5.0"
 
 # NAPI
-napi              = { version = "2.16", features = ["napi4"] }
-napi-derive       = "2.16"
+napi = { version = "2.16", features = ["napi4"] }
+napi-derive = "2.16"
 
 # Dev
-divan             = "0.1"
-insta             = { version = "1.42", features = ["json", "redactions"] }
+divan = "0.1"
+insta = { version = "1.42", features = ["json", "redactions"] }
 pretty_assertions = "1.4"
 
 [profile.release]
@@ -115,31 +110,31 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-oxc_allocator.workspace    = true
-oxc_parser.workspace       = true
-oxc_ast.workspace          = true
-oxc_span.workspace         = true
+oxc_allocator.workspace = true
+oxc_parser.workspace = true
+oxc_ast.workspace = true
+oxc_span.workspace = true
 oxc_module_lexer.workspace = true
-oxc_resolver.workspace     = true
-compact_str.workspace      = true
-rustc-hash.workspace       = true
-dashmap.workspace          = true
-arc-swap.workspace         = true
-camino.workspace           = true
-indexmap.workspace         = true
-dirs.workspace             = true
-serde.workspace            = true
-serde_json.workspace       = true
-rmp-serde.workspace        = true
-thiserror.workspace        = true
-miette.workspace           = true   # NO fancy feature — just structured errors
-rayon.workspace            = true
-tokio.workspace            = true
-ignore.workspace           = true
+oxc_resolver.workspace = true
+compact_str.workspace = true
+rustc-hash.workspace = true
+dashmap.workspace = true
+arc-swap.workspace = true
+camino.workspace = true
+indexmap.workspace = true
+dirs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rmp-serde.workspace = true
+thiserror.workspace = true
+miette.workspace = true # NO fancy feature — just structured errors
+rayon.workspace = true
+tokio.workspace = true
+ignore.workspace = true
 
 [dev-dependencies]
-divan.workspace            = true
-insta.workspace            = true
+divan.workspace = true
+insta.workspace = true
 pretty_assertions.workspace = true
 
 [[bench]]
@@ -160,9 +155,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 oxc-react-docgen-core = { path = "../core" }
-napi.workspace         = true
-napi-derive.workspace  = true
-serde_json.workspace   = true
+napi.workspace = true
+napi-derive.workspace = true
+serde_json.workspace = true
 
 [build-dependencies]
 napi-build = "1.0"
@@ -183,22 +178,22 @@ path = "src/main.rs"
 
 [dependencies]
 oxc-react-docgen-core = { path = "../core" }
-clap.workspace            = true
-clap_complete.workspace   = true
-clap_mangen.workspace     = true
-miette                    = { workspace = true, features = ["fancy"] }
-anyhow.workspace          = true
-indicatif.workspace        = true
+clap.workspace = true
+clap_complete.workspace = true
+clap_mangen.workspace = true
+miette = { workspace = true, features = ["fancy"] }
+anyhow.workspace = true
+indicatif.workspace = true
 tracing-indicatif.workspace = true
-tracing.workspace         = true
+tracing.workspace = true
 tracing-subscriber.workspace = true
-owo-colors.workspace      = true
-watchexec.workspace       = true
-serde_json.workspace      = true
-camino.workspace          = true
+owo-colors.workspace = true
+watchexec.workspace = true
+serde_json.workspace = true
+camino.workspace = true
 
 [dev-dependencies]
-insta.workspace           = true
+insta.workspace = true
 ```
 
 ### /crates/core/src/lib.rs (stub)

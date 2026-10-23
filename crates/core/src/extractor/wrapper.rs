@@ -143,10 +143,24 @@ impl<'src> SourceDataCollector<'src> {
             if self.data.component_mappings.iter().any(|m| m.component_name == pending.name) {
                 continue;
             }
-            let selected = self
-                .select_wrapper_props(&pending.type_args)
-                .filter(|(_, _, from_payload)| *from_payload || !pending.needs_payload);
-            let Some((props_name, props_args, _)) = selected else {
+            let selected = match self.select_wrapper_props(&pending.type_args) {
+                PropsSelection::Found { name, args, from_payload } if from_payload || !pending.needs_payload => {
+                    Some((name, args))
+                }
+                PropsSelection::UnusablePayload { alias } => {
+                    self.record_skip(
+                        DiagnosticCode::SkippedCandidate,
+                        format!(
+                            "'{}' is built from the factory payload '{alias}', whose `props` member is not a named type",
+                            pending.name
+                        ),
+                        pending.span,
+                    );
+                    continue;
+                }
+                PropsSelection::Found { .. } | PropsSelection::None => None,
+            };
+            let Some((props_name, props_args)) = selected else {
                 self.record_skip(
                     DiagnosticCode::SkippedCandidate,
                     format!(
@@ -178,41 +192,60 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     /// Pick the props type from a wrapper call's type arguments, last first (the props usually follow the element).
-    /// The third field says whether the props came from a factory payload.
-    fn select_wrapper_props(&self, type_args: &[WrapperTypeArg]) -> Option<(TypeName, Vec<CollectedType>, bool)> {
+    fn select_wrapper_props(&self, type_args: &[WrapperTypeArg]) -> PropsSelection {
         for arg in type_args.iter().rev() {
             let Some((name, args)) = &arg.reference else { continue };
             if is_element_type(name) {
                 continue;
             }
-            if let Some(props) = self.payload_props(name) {
-                return Some((props, Vec::new(), true));
+            // A factory payload is never itself the props type, even though it is declared in this file.
+            match self.payload_props(name) {
+                Some(Some((props, props_args))) => {
+                    return PropsSelection::Found { name: props, args: props_args, from_payload: true };
+                }
+                Some(None) => return PropsSelection::UnusablePayload { alias: name.clone() },
+                None => {}
             }
             let declared_here = self.data.interfaces.contains_key(&self.scoped_key(name))
                 || self.data.type_aliases.contains_key(&self.scoped_key(name));
             // A name from another file cannot be inspected here; only the props naming convention vouches for it.
             if declared_here || name.ends_with("Props") {
-                return Some((name.clone(), args.clone(), false));
+                return PropsSelection::Found { name: name.clone(), args: args.clone(), from_payload: false };
             }
         }
-        None
+        PropsSelection::None
     }
 
-    /// `type ButtonFactory = Anything<{ props: ButtonProps; ... }>` yields `ButtonProps`.
-    fn payload_props(&self, alias_name: &str) -> Option<TypeName> {
+    /// For an alias that is a factory payload (`type ButtonFactory = Anything<{ props: ButtonProps; ... }>`), the
+    /// props type and its arguments (`ButtonProps`, or `OverflowListProps` with `[any]`), or `None` when the `props`
+    /// member is not a named type. `None` outright when the alias is not a payload.
+    fn payload_props(&self, alias_name: &str) -> Option<Option<(TypeName, Vec<CollectedType>)>> {
         let CollectedTypeAlias::Passthrough { target: CollectedType::Named { args, .. }, .. } =
             self.data.type_aliases.get(&self.scoped_key(alias_name))?
         else {
             return None;
         };
-        args.iter().find_map(|arg| match arg {
-            CollectedType::Object(fields) => fields.iter().find_map(|field| match &field.collected_type {
-                CollectedType::Named { name, args } if field.name == PAYLOAD_PROPS_MEMBER && args.is_empty() => {
-                    Some(name.clone())
-                }
-                _ => None,
-            }),
+        let props_member = args.iter().find_map(|arg| match arg {
+            CollectedType::Object(fields) => fields.iter().find(|field| field.name == PAYLOAD_PROPS_MEMBER),
+            _ => None,
+        })?;
+        Some(match &props_member.collected_type {
+            CollectedType::Named { name, args } => Some((name.clone(), args.clone())),
             _ => None,
         })
     }
+}
+
+/// Where a wrapper call's props come from.
+enum PropsSelection {
+    Found {
+        name: TypeName,
+        args: Vec<CollectedType>,
+        from_payload: bool,
+    },
+    /// A factory payload whose `props` member names no type, so neither it nor the payload can be the props type.
+    UnusablePayload {
+        alias: TypeName,
+    },
+    None,
 }

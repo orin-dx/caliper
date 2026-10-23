@@ -95,9 +95,21 @@ expression: value
         "onBlur": {
           "name": "onBlur",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -112,9 +124,21 @@ expression: value
         "onClick": {
           "name": "onClick",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -129,9 +153,21 @@ expression: value
         "onFocus": {
           "name": "onFocus",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -178,7 +214,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "functionDeclaration"
+      "detectedBy": "functionDeclaration",
+      "exported": true
     },
     "Button": {
       "displayName": "Button",
@@ -398,9 +435,21 @@ expression: value
         "onBlur": {
           "name": "onBlur",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -415,9 +464,21 @@ expression: value
         "onClick": {
           "name": "onClick",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -432,9 +493,21 @@ expression: value
         "onFocus": {
           "name": "onFocus",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -449,9 +522,21 @@ expression: value
         "onKeyDown": {
           "name": "onKeyDown",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -466,9 +551,21 @@ expression: value
         "onKeyUp": {
           "name": "onKeyUp",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -530,7 +627,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "Input": {
       "displayName": "Input",
@@ -670,9 +768,21 @@ expression: value
         "onBlur": {
           "name": "onBlur",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -687,9 +797,21 @@ expression: value
         "onChange": {
           "name": "onChange",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -704,9 +826,21 @@ expression: value
         "onFocus": {
           "name": "onFocus",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -721,9 +855,21 @@ expression: value
         "onInput": {
           "name": "onInput",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -830,7 +976,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     }
   },
   "enums": {

@@ -4,7 +4,7 @@
 
 Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are fully tested. Config file loading, watch mode (including rebuilds on config changes and polling with `ensure_fresh`), plugin architecture, TOON token-optimized output format, JSON schema export, LSP server scaffold, and bounded atomic DTS caching are implemented and verified.
 
-**Types from other packages.** Imports resolve to any file under a source directory, `.d.ts` included, so a monorepo whose packages are all source directories resolves across them. From `node_modules`, only `@types/react` and TypeScript's own lib files are read. A prop whose type comes from any other installed package stays unresolved with an `UNRESOLVABLE_IMPORT` warning. Loading dependency declarations is in review behind `--load-dependencies` (#107, #109).
+**Types from other packages.** Imports resolve to any file under a source directory, `.d.ts` included, so a monorepo whose packages are all source directories resolves across them. By default, from `node_modules` only `@types/react` and TypeScript's own lib files are read, and a prop whose type comes from any other installed package stays a named reference with an `UNRESOLVABLE_IMPORT` warning. `--load-dependencies` (config, NAPI and Vite `loadDependencies`) loads the declarations those names point to; it is off by default while its output is checked against RDT (ADR 0010).
 
 ## Numbers
 
