@@ -208,6 +208,55 @@ export function Button({ label, disabled = false }: ButtonProps) {
     expect(code).toContain('displayName: "Button"')
   })
 
+  it('assigns __docgenInfo to each component in a production build with injectDocgenInfo', async () => {
+    const root = tempProject({
+      'src/Button.tsx':
+        "interface Props {\n  label: string\n  size?: 'sm' | 'lg'\n}\n\n/** Presses. */\nexport function Button(props: Props) {\n  return null\n}\n",
+      'index.js': "export { Button as default } from './src/Button.tsx'\n",
+    })
+
+    const result = (await build({
+      configFile: false,
+      root,
+      logLevel: 'silent',
+      build: {
+        write: false,
+        minify: false,
+        lib: { entry: path.join(root, 'index.js'), formats: ['es'], fileName: 'docs' },
+      },
+      plugins: [caliperDocgen({ srcDirs: ['src'], injectDocgenInfo: true })],
+    })) as any
+
+    const code: string = result[0].output[0].code
+    const { default: Button } = await import(`data:text/javascript,${encodeURIComponent(code)}`)
+    const parent = { name: 'Props', fileName: path.join(root, 'src/Button.tsx') }
+    expect(Button.__docgenInfo).toEqual({
+      displayName: 'Button',
+      description: 'Presses.',
+      props: {
+        label: {
+          name: 'label',
+          type: { name: 'string' },
+          required: true,
+          defaultValue: null,
+          description: '',
+          parent,
+        },
+        size: {
+          name: 'size',
+          type: { name: 'enum', raw: '"sm" | "lg"', value: [{ value: '"sm"' }, { value: '"lg"' }] },
+          required: false,
+          defaultValue: null,
+          description: '',
+          parent,
+        },
+      },
+      methods: [],
+      tags: {},
+      composes: [],
+    })
+  })
+
   it('closes the real NAPI session when the server closes', async () => {
     server = await createServer({
       configFile: false,

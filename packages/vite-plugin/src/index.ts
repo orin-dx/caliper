@@ -1,6 +1,8 @@
 import type { Plugin, ResolvedConfig, ViteDevServer, HotUpdateOptions, EnvironmentModuleNode } from 'vite'
 import * as napi from 'caliper-docgen-napi'
-import type { ExtractionOutput, IncrementalUpdate } from 'caliper-docgen-napi'
+import type { ExtractionOutput, IncrementalUpdate, RdtComponentDoc } from 'caliper-docgen-napi'
+import { ComponentFiles, docgenAssignments, invalidateDeclaringModules } from './docgen-info.js'
+import { updatePayload } from './update.js'
 
 const VIRTUAL_ID = 'virtual:caliper-docgen'
 const RESOLVED_VIRTUAL_ID = `\0${VIRTUAL_ID}`
@@ -12,6 +14,8 @@ export interface CaliperDocgenOptions {
   srcDirs: string[]
   exclude?: string[]
   skipHtmlProps?: boolean
+  /** Assign each component its react-docgen-typescript docs as `__docgenInfo`, for Storybook without a docgen server. */
+  injectDocgenInfo?: boolean
   /** Load the type declarations your props reference from installed packages. Off by default. */
   loadDependencies?: boolean
   /**
@@ -21,25 +25,7 @@ export interface CaliperDocgenOptions {
   collapseInheritedProps?: 'dependencies' | 'all' | 'none'
 }
 
-/**
- * What `caliper-docgen:update` carries to the client. Events arrive in `revision` order; each is a delta from the one
- * before. Delete `removedKeys`, set `updatedKeys[i]` to `updatedComponents[i]`, merge `props` into the output's
- * `props`, drop `removedDiagnostics` and add `diagnostics`, and the client holds the same output the virtual module
- * serves, less any props no component refers to any more.
- */
-export interface CaliperDocgenUpdate {
-  file: string
-  revision: number
-  updatedKeys: string[]
-  updatedComponents: IncrementalUpdate['updatedComponents']
-  /** Every prop `updatedComponents` refer to, by id. */
-  props: IncrementalUpdate['props']
-  removedKeys: string[]
-  /** Diagnostics this revision added. */
-  diagnostics: IncrementalUpdate['diagnostics']
-  /** Diagnostics this revision no longer has. */
-  removedDiagnostics: IncrementalUpdate['removedDiagnostics']
-}
+export type { CaliperDocgenUpdate } from './update.js'
 
 export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
   let sessionId: number
@@ -60,6 +46,7 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
   // `vite build --watch` changes applied before the next rebuild's load().
   let pendingWatchChanges: Promise<unknown>[] = []
   let extracted = false
+  const componentFiles = new ComponentFiles()
 
   function napiOptions() {
     return {
@@ -100,6 +87,7 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
     const update = JSON.parse(await napi.extractFileIncremental(file, sessionId, napiOptions())) as IncrementalUpdate
     if (update.revision <= latestRevision) return undefined
     latestRevision = update.revision
+    componentFiles.apply(update)
     return update
   }
 
@@ -144,7 +132,8 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
       // A watch rebuild reuses the session; its changes arrived through watchChange.
       if (extracted) return
       try {
-        await napi.initializeSession(sessionId, napiOptions())
+        const json = await napi.initializeSession(sessionId, napiOptions())
+        componentFiles.index(JSON.parse(json) as ExtractionOutput)
         extracted = true
       } catch (error) {
         this.error(`[caliper-docgen] extraction failed: ${String(error)}`)
@@ -178,6 +167,7 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
         .initializeSession(sessionId, napiOptions())
         .then((json) => {
           const output = JSON.parse(json) as ExtractionOutput
+          componentFiles.index(output)
           // environments.client.hot is Vite 6+ API; cast avoids typing fight across patch versions
           ;(server as any).environments?.client?.hot?.send('caliper-docgen:ready', { components: output.components })
         })
@@ -207,6 +197,7 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
             hot: { send(event: string, data?: unknown): void }
             moduleGraph?: {
               getModuleById(id: string): EnvironmentModuleNode | undefined
+              getModulesByFile(file: string): Set<EnvironmentModuleNode> | undefined
               invalidateModule(mod: EnvironmentModuleNode): void
             }
           }
@@ -227,27 +218,44 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
           return
         }
         if (!applied) return
-        const payload: CaliperDocgenUpdate = {
-          file: opts.file,
-          revision: applied.revision,
-          updatedKeys: applied.updatedKeys,
-          updatedComponents: applied.updatedComponents,
-          props: applied.props,
-          removedKeys: applied.removedKeys,
-          diagnostics: applied.diagnostics,
-          removedDiagnostics: applied.removedDiagnostics,
-        }
-        env.hot.send('caliper-docgen:update', payload)
+        env.hot.send('caliper-docgen:update', updatePayload(opts.file, applied))
         return applied
       })
       if (!update) return
 
+      // A component whose props changed through another file carries stale `__docgenInfo` until its module is
+      // transformed again.
+      const docgenModules =
+        options.injectDocgenInfo && env.moduleGraph
+          ? invalidateDeclaringModules(env.moduleGraph, update, opts.file)
+          : []
+
       // The virtual module serves the whole output, so its importers must reload it. Keeping `opts.modules` keeps
       // React Fast Refresh for the changed file; returning [] would suppress it.
       const virtual = env.moduleGraph?.getModuleById(RESOLVED_VIRTUAL_ID)
-      if (!virtual) return
-      env.moduleGraph!.invalidateModule(virtual)
-      return [...opts.modules, virtual]
+      if (virtual) env.moduleGraph!.invalidateModule(virtual)
+      if (!virtual && docgenModules.length === 0) return
+      return [...opts.modules, ...docgenModules, ...(virtual ? [virtual] : [])]
+    },
+
+    // After other plugins have compiled the module, so the assignments are plain JavaScript appended at the end and
+    // the existing source map stays valid.
+    transform: {
+      order: 'post',
+      async handler(code: string, id: string) {
+        if (!options.injectDocgenInfo) return
+        const [file = id] = id.split('?', 1)
+        if (!isSrcFile(file)) return
+        if (initPromise) await initPromise
+        // Changes still being applied land first, so a module transformed after a save carries the saved docs.
+        await inOrder(async () => {})
+        const keys = componentFiles.keysIn(file)
+        if (keys.length === 0) return
+        const docs = JSON.parse(napi.sessionDocgenInfo(sessionId, keys)) as Record<string, RdtComponentDoc>
+        const assignments = docgenAssignments(docs)
+        if (!assignments) return
+        return { code: `${code}\n${assignments}\n`, map: null }
+      },
     },
 
     resolveId(id: string) {
