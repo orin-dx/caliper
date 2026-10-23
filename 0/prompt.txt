@@ -1,0 +1,136 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+<tools-used-before-summary>Agent, Bash, Edit, EnterWorktree, Grep, Read, Skill, ToolSearch, WebSearch, Write</tools-used-before-summary>
+Summary:
+1. Primary Request and Intent:
+   - Original: "Where are we in this repo?" for the caliper repo (React prop extractor on OXC), then a sequence of related tasks.
+   - Get a proper release out under callisto 0.11 and fix everything blocking it. The release is done (0.2.1 published).
+   - Rename the crates and npm packages to match caliper and use `caliper-docgen*`, unscoped on npm.
+   - Relicense to FSL-1.1-MIT like callisto.
+   - Add package metadata and rewrite the READMEs (succinct, friendly, professional, free of AI slop, callisto/wisp-plugins style). Link https://orin-dx.com/tools/caliper/.
+   - Benchmark against large real projects, check accuracy and critical gaps, then research how to address the gaps by shape, not by library name, preserving the architecture and semantic models and the performance edge. Consider TypeScript 7.1 and its API.
+   - Review callisto's recent Rust architecture changes and rust best practices, coding patterns and crates, and fold everything into one comprehensive plan that advances the architecture and semantic models so the desired features can be delivered. The latest user message: "Can we incorporate everything into a comprehensive plan that advances our architecture and sematic models foward to better enable us to deliver the features we want?"
+
+2. Key Technical Concepts:
+   - caliper-docgen: OXC parse → `SourceData` (extractor) → `GlobalSourceData` (pipeline) → `ComponentEntry` (resolver) → `ExtractionOutput`.
+   - Detector chain in `crates/core/src/extractor/visit.rs:229-234`: first match wins, tries FC annotation, `forwardRef`, HOC wrapper, class expression. Unmatched PascalCase bindings get an Info `SKIPPED_CANDIDATE`.
+   - `ComponentMapping.props_type_args: Vec<String>` is stringly typed (D1).
+   - ADRs 0001 to 0006, notably 0002 (hand-written `PropType` serialization), 0003 (positional msgpack cache, `CACHE_SCHEMA_VERSION` 4), 0005 (panic containment), and 0006 (semantic backend as second resolver; `tsc --api`; `crates/tsc-client` exists but isn't wired into core, CLI or NAPI).
+   - Callisto: release-PR flow, intent schema v4, E157/E176/E180 behaviors, `cargo info` stdout parsing, npm staged publishing lag, and recovery via re-run failed jobs or dispatch with `release_source_sha`.
+   - Wrapper shapes: Mantine `factory`/`polymorphicFactory`/`genericFactory<Factory<{props: P}>>`, Chakra `withContext<El, P>` (props at type arg 1) and `withRootProvider<P>` (type arg 0), react-aria `createLeafComponent` (fn at arg 1).
+   - Semantic root causes RC1 to RC8: indexed access rejected as a props base (`resolver/alias.rs:245`), no object-literal member select, generic interface type args ignored (`chain.rs:201`), multi-hop barrels unexplained, `HTMLChakraProps` second arg unexpanded, `ElementProps` helper, source-order alias detection, `.ts` files not detected.
+   - RDT detects components via the checker (call signature whose first param is `props` or sole). react-docgen is syntactic and never reads type args.
+   - Callisto conventions: sibling `tests.rs`, architecture tripwire tests, `try_from` deserialization, no cargo features in shipped crates (#143), `docs/specs` and `docs/projects` layout.
+
+3. Files and Code Sections:
+   - `docs/projects/architecture-roadmap.md` (new, committed and pushed as PR #47): the comprehensive roadmap. It contains:
+     - principles;
+     - current state and defects D1 to D9;
+     - a target semantic model table;
+     - phases 0 to 5 plus Track R, with ids, sizes, dependencies and exit criteria;
+     - a dependency graph;
+     - a release shape table;
+     - quality gates;
+     - a decisions table (D1 to D7 and N1 to N3, with recommended defaults);
+     - risks;
+     - out of scope.
+     The release table row reads: "0.2.2 | Metadata, license, README rewrite (PR #45 merged; release PR #46 open) | Merging #46 publishes; the first release where package names already exist, so it tests the single-run publish".
+   - `/Users/gabe/.claude/jobs/ba6a68d6/tmp/research/report.md`: the research report (sections 1 to 11, including the risk review).
+   - `tmp/research/reader-{docs,code,shapes,prior-art,recon}.json`: reader findings.
+   - `tmp/bench/` scripts: `recall2.py`, `accuracy.py`, `final.py`, `patterns.py`, `samples.py`, `prep.sh`, `run-all.sh`, `rerun-caliper.sh`, `dump-all.sh`, `rdt-run.mjs`, `rdt-dump.mjs`, `rdg-run.mjs`, `test-share.py`, and others.
+   - `tmp/bench-results/` (`accuracy.md`, `summary.md`, dumps) and `tmp/bench-inputs/` (mirrored untrusted source).
+   - `tmp/drive-release.sh` and `.log`: the release re-run loop.
+   - `tmp/callisto/callisto`: the callisto 0.11.0 binary (macOS arm64).
+   - `.github/workflows/release.yml`: pins callisto 0.11.0; execute job has `CARGO_TERM_COLOR: never`.
+   - `crates/core/src/extractor/{visit.rs,component.rs,mod.rs}`, `resolver/{chain,alias,substitute,precedence}.rs`, `types/{collected,output,diagnostic}.rs`, `pipeline/{mod,watch}.rs`, `plugin.rs`, `known.rs`, `cache.rs`, `crates/cli/src/config.rs`: the code the audits examined. No changes were made to the Rust logic.
+   - `README.md`, `Cargo.toml`, `package.json` files, `LICENSE` (FSL-1.1-MIT), `.changeset/*`, `deny.toml`: edited in earlier merged PRs.
+
+4. Errors and fixes: summarized in the analysis above. All release failures are resolved (0.2.1 published, verified). Corrections issued to the user: withdrew the "July numbers don't reproduce" claim; acknowledged the exact-name matching artifact in the first accuracy comparison; corrected the roadmap's 0.2.2 status.
+
+5. Problem Solving:
+   - Solved: 0.2.1 release end-to-end; rename; license; metadata; READMEs; benchmark and accuracy analysis; research and risk review; callisto, Rust-practices, patterns and crates audits; the roadmap document.
+   - Still open: the factory/wrapper detection implementation, the D1 to D9 fixes, the test-file split, and the semantic backend work, all sequenced in the roadmap.
+
+6. All user messages:
+   - "Where are we in this repo?"
+   - "Last I remember we got blocked on callisto right?"
+   - "We should be commiting tool stuff so it doesn't get lost"
+   - "We should adapt to the latest callisto and attempt a proper release. We added a lot of features so read the callisto docs and the last 3 weeks of PRs"
+   - "Let's follow the plan, yes. Just move forward in versions to avoid problems"
+   - "The tokens are in the org"
+   - "Are you confident you configured Callisto properly?" (included `/rename caliper-release`)
+   - "Read the docs and code please"
+   - "Merged it"
+   - "Merged all the version bumps"
+   - "Yes" (wait for the refresh run and re-verify #22)
+   - "Merging 36, we'll release after"
+   - "The lunch for the release failed, so there's something we need to fix"
+   - "Merged"
+   - "What's next?"
+   - "We need to fix the crate and NPM package names to match caliper right?"
+   - "I think @orin-dx namespace"
+   - "Does anyone own that org?"
+   - "I own it"
+   - "Can we do caliper-docgen without the scope?"
+   - "merged it"
+   - "Merged and queued. waiting on release"
+   - "Updated both tokens"
+   - "It's set for the Org itself...wtf"
+   - "fix that"
+   - "It works for callisto obviously"
+   - "Updated it in the org settings"
+   - "Fixed the org secret access, rerun it"
+   - "Updated the token to bypass 2fa"
+   - "Shouldn't callisto and its action be doing this??? WTF"
+   - "We should not be chaning the workflows on publish. WTF."
+   - "How does the callisto repo do this and what are you doing wrong?"
+   - "yes" (push the tags and re-run)
+   - "This should now publish properly without manual intervention right?"
+   - "Our crates are not setup like the calisto ones. They're missing readmes, doc and repo links, etc right? The matadata is off"
+   - "go ahead"
+   - "Is the release not done? I don't see a caliper PR for the metadata changes"
+   - "We should be licensing this like we do callisto right?"
+   - "We should be using fsl mit"
+   - "Our readmes should be succint, friendly, professional and clear of AI slop, AI word salada and wordy prose. Be inspired by the callisto and wisp-plugins readme, architecture, etc"
+   - "Are the readmes super shallow and not useful enough for users?"
+   - "FYI our site is orin-dx.com and the tool page is: https://orin-dx.com/tools/caliper/"
+   - "I'm pointing it so you can link there too in the metada or anything else"
+   - "Why is caliper in the node harness so slow???"
+   - "We're running on a brand new M5 Max macbook pro now"
+   - "Let's run some extensive benchmarks against large projects too please"
+   - "But are we reporting the important props or is there critical gaps in the reported output?"
+   - "Why is it taking so many loops??? That is ridiculous"
+   - "Let's make any necessary updates to PR 45 so I can merged it"
+   - "Now lets take a look at the known gaps. how do we address them?"
+   - "Are they related to other v1 work or something we can tackle separately?"
+   - "Think of the patterns, not just the specific instance otherwise we'll continue to run into problems right?"
+   - "Let's do all of the research necessary to understand these. We want to have a good understanding to appropriately spec and plan. We want to maintain a good architecture and think of our semantic models right?"
+   - "Can any of these be resolved with Typescript 7.1 and its API?"
+   - "We should have a 7.1 beta now to test against too right? We want to keep our performance edge even as we address the issues at hand. Is RDT adopting TS 7.1? What are their perf numbers? Are we wasting our time with oxc if we always honestly need TS 7.1?"
+   - "We've made a bunch of rust architecture improvements to callisto in the last two weeks, including breaking up the tests into their own files. Can you take a look and see how that applies here too?"
+   - "Any other rust best practices that we could adopt?"
+   - "What about coding patterns, crates? Do we have anti-patterns we should address? Better patterns to adopt?"
+   - "Can we incorporate everything into a comprehensive plan that advances our architecture and sematic models foward to better enable us to deliver the features we want?"
+
+7. Pending Tasks:
+   - Open decisions D1 to D7 (and N1 to N3) await the user's confirmation. The roadmap lists recommended defaults.
+   - Merge release PR #46 (publishes 0.2.2). The user decides when. Watch the run and verify it publishes in a single run now that the package names exist.
+   - The user must yank `oxc-react-docgen-core` 0.2.0 from their account.
+   - Update the orin-dx.com/tools/caliper page (still says "built, unpublished" and uses the old command names). The site repo location is unknown.
+   - Docs guides (CLI, `docgen.config.ts`, output format, Vite plugin, Node API) not written.
+   - Correct the `docs/edge-cases.md` Mantine/Chakra figures (the roadmap's item 0.7 covers it).
+   - Run `cargo update -p yoke-derive`, set `yanked = "deny"`, and drop `pretty_assertions`.
+   - Diff the hand-written `release.yml` against what callisto 0.11 generates.
+   - File upstream callisto issues (verification window shorter than npm new-package lag; no tag-push credential input).
+   - Implementation of the roadmap phases (not started; no Rust code has been changed).
+
+8. Current Work:
+   Immediately before this summary request, I completed the comprehensive roadmap. I branched `docs/architecture-roadmap` from `origin/main`, wrote `docs/projects/architecture-roadmap.md` (216 lines), formatted it with oxfmt (check passed), corrected the 0.2.2 release-table row after confirming release PR #46 is still open, committed it ("docs(projects): add the architecture and semantic-model roadmap", with the Claude-Session trailer), pushed it, and opened draft PR #47 titled "docs(projects): architecture and semantic-model roadmap". The PR body says it folds the wrapper-detection research, the Rust pattern and dependency audits, and callisto's conventions into phased, PR-sized work, and asks for review of the decisions table before spec work starts. I had not yet reported the result to the user. The final summary message for the user (with the PR link https://github.com/orin-dx/caliper/pull/47, phase overview, and the decisions needing confirmation) is still to be delivered.
+
+9. Optional Next Step:
+   Report the roadmap to the user concisely: PR #47 (draft), the six principles, phases 0 to 5 plus Track R, the recommended defaults for D1 to D7 and N1 to N3, the correction that 0.2.2 awaits merging release PR #46, and a `needs input:` line asking them to confirm or amend the decisions. The user's last request was: "Can we incorporate everything into a comprehensive plan that advances our architecture and sematic models foward to better enable us to deliver the features we want?" After that, ask which PR to start with (the roadmap proposes Phase 0.1, moving inline tests to sibling `tests.rs`, first). Do not start implementation without the user's go-ahead.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/gabe/.claude/projects/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+The messages after this summary are the most recent messages from before compaction, kept verbatim. The summary was written without seeing them, so something it says has not happened yet may already have happened in them.
