@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>btjsuj0w0</task-id>
+<tool-use-id>toolu_012CAFxurRT3hqfXYJ5cu4XE</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/btjsuj0w0.output</output-file>
+<status>completed</status>
+<summary>Background command "rtk gh run watch 39808667033 --repo orin-dx/caliper --interval 20 --exit-status &gt; /dev/null 2&gt;&amp;1; gh run view 39808667033 --repo orin-dx/caliper --json status,conclusion,jobs --jq '"\(.status) \(.conclusion)", (.jobs[] | "  \(.name): \(.status) \(.conclusion)")'" completed (exit code 0)</summary>
+</task-notification>
