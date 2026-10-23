@@ -1,0 +1,51 @@
+name: Diag watch idle CPU
+
+on:
+  push:
+    branches: [scratch/watch-idle-diag]
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: rust
+        run: echo "version=$(sed -n 's/^rust = "\(.*\)"/\1/p' .prototools)" >> "$GITHUB_OUTPUT"
+      - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+      - run: sudo apt-get install -y strace >/dev/null
+      - run: cargo build -p caliper-docgen
+      - name: Measure
+        run: |
+          set -x
+          echo "TMPDIR=${TMPDIR:-unset}"
+          ls -la / /tmp | grep -Ei 'json|lock' || echo "no configs in / or /tmp"
+          src=$(mktemp -d)
+          printf 'export function Widget(props: { label: string }) { return null; }\n' > "$src/Widget.tsx"
+          ./target/debug/caliper-docgen watch "$src" < /dev/null > "$RUNNER_TEMP/watch.log" 2>&1 &
+          pid=$!
+          sleep 4
+          echo '// 1' >> "$src/Widget.tsx"
+          sleep 2
+          ticks() { awk '{print $14 + $15}' "/proc/$pid/stat"; }
+          echo "== idle, no churn (ticks per second, 100 = one core)"
+          for i in 1 2 3 4; do a=$(ticks); sleep 1; echo "$(( $(ticks) - a ))"; done
+          echo "== while other processes create and delete dirs in /tmp"
+          ( for i in $(seq 1 3000); do d=$(mktemp -d); rmdir "$d"; done ) &
+          churn=$!
+          for i in 1 2 3 4; do a=$(ticks); sleep 1; echo "$(( $(ticks) - a ))"; done
+          wait "$churn" || true
+          echo "== strace summary over 3s idle"
+          sudo timeout 3 strace -c -f -p "$pid" 2>&1 | head -25 || true
+          echo "== threads"
+          ls "/proc/$pid/task" | wc -l
+          for t in /proc/$pid/task/*; do echo "$(cat $t/comm) $(awk '{print $14+$15}' $t/stat)"; done | sort -k2 -n | tail -8
+          echo "== watch output"
+          cat "$RUNNER_TEMP/watch.log"
+          kill "$pid"
