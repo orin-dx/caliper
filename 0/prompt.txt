@@ -1,0 +1,53 @@
+We've been building a lot for caliper v1. I'd like you check what has been built over the last week and all of the outstanding PRs. Consider them in the context of our goals for the project, the stated architecture and semantic models. Also consider Rust best practices, performance and security, DX and maintainability.
+
+Give me a comprehensive report, including concerns, architectural issues, Rust semantic and best practices smells, bugs, etc. Be comprehensive. Come at this from a principal engineer lens worried about our v1 release and worried about proving the value of caliper over RDT
+
+---
+
+Claude has been pushing a hell of a lot of PRs and I'm worried that we're doing a lot of one-of cases chasing the numbers from RDT vs thinking through our oxc architecture and ts 7.1 plans on how to actually adopt things appropriately.
+
+Can you take a look at all of work. Do another round of analysis as before plus the concerns above?
+
+---
+
+This is what claude itself said:
+
+On AST and typing vs special cases: it's a mix. The core is structural, but a layer of name-based rules sits around it.
+
+Decided from structure:
+- What counts as a component: JSX, hooks or the shape of what it returns (#71), not library names.
+- Wrapper props: read from the call's type arguments and payload type, not from a list of wrapper names.
+- Type arguments and key sets: type arguments are typed values (the old string parsers are gone), and Pick/Omit keys are computed from those types.
+- Everything from this round (#75–#82) is general machinery and adds no special cases:
+  - watch revisions with recorded dependencies
+  - one entry per diagnostic
+  - the cache fingerprint
+  - the speed-ups
+  - streamed JSON output
+  - generic-alias substitution, which on its own cut leaked parameter names on Mantine from 25,624 to 72
+
+Still decided by name (a count of string-literal name checks per file):
+
+┌────────────────────────┬───────┬─────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│         Where          │ Count │                                             What it is                                              │
+├────────────────────────┼───────┼─────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ react_types.rs         │   218 │ React built-ins and HTML attribute tables                                                           │
+├────────────────────────┼───────┼─────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ known.rs               │    55 │ Shortcuts for libraries: SxProps, VariantProps, cva, tv, Panda                                      │
+├────────────────────────┼───────┼─────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ resolver/named.rs      │    14 │ A list of names to leave unexpanded silently, e.g. HTMLAttributes, or anything starting HTML and    │
+│                        │       │ ending Element                                                                                      │
+├────────────────────────┼───────┼─────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ extractor/component.rs │    13 │ Renaming wrappers spotted by callee name: memo, observer, names containing "forwardref" or          │
+│                        │       │ "Component", with[A-Z]                                                                              │
+├────────────────────────┼───────┼─────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Built-in utility types │     — │ Omit, Pick, Partial, Required, PropsWithChildren are each handled by name; mapped and conditional   │
+│                        │       │ types fall back to "opaque"                                                                         │
+└────────────────────────┴───────┴─────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+Some of this is fair, because there's no type checker: React and the TypeScript lib types are a fixed vocabulary. Most of it could be structural instead:
+1. The silence list becomes "the name is declared in a TypeScript lib or @types file". We already load those files.
+2. The wrapper-name rules become "the argument shows render evidence", which the generic wrapper path already does.
+3. The library shortcuts move behind the DocgenPlugin hook, so the core holds no library names.
+4. A small evaluator for keyof and mapped types over a known, finite set of keys replaces the per-name utility handling. It would also cover Record and many of the remaining opaque types.
+5. The React tables come from @types/react when it's installed.

@@ -1,0 +1,157 @@
+{
+  "cli_version": "0.12.1-nightly.202610230625.e04328a5d",
+  "checkpoint_id": "01M5N5T2YNV8NKXTD3CD11V169",
+  "session_id": "01a15ec1-334b-7552-b621-7b3ed8f3b160",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-23T20:04:33.273788Z",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "save_step_count": 2,
+  "files_touched": [
+    "README.md",
+    "packages/cli/npm/darwin-arm64/package.json",
+    "packages/cli/npm/darwin-x64/package.json",
+    "packages/cli/npm/linux-arm64-gnu/package.json",
+    "packages/cli/npm/linux-x64-gnu/package.json",
+    "packages/cli/npm/win32-x64-msvc/package.json",
+    "packages/cli/package.json",
+    "packages/napi/npm/darwin-arm64/package.json",
+    "packages/napi/npm/darwin-x64/package.json",
+    "packages/napi/npm/linux-arm64-gnu/package.json",
+    "packages/napi/npm/linux-x64-gnu/package.json",
+    "packages/napi/npm/win32-x64-msvc/package.json",
+    "packages/napi/package.json",
+    "packages/vite-plugin/package.json"
+  ],
+  "agent": "Codex",
+  "model": "gpt-6-sol",
+  "turn_id": "4d818cc67401",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 482213,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 5777408,
+    "output_tokens": 28752,
+    "api_call_count": 58,
+    "subagent_tokens_complete": true
+  },
+  "redaction": {
+    "replacements": 20,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 20,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Get a principal-engineer-level review of the last week's work and all open PRs for caliper v1 against its goals, architecture and semantic models, then specifically assess whether the recent PR flood is one-off cases chasing RDT numbers versus sound OXC/TypeScript 7.1 architecture.",
+    "outcome": "Delivered two review reports: the first ranked P0/P1 findings (wrapper false positives, non-atomic watch snapshots, lost initial diagnostics, stale Vite components); the second re-reviewed the 27-PR stack, credited structural progress, and flagged symbol-identity bugs, weak render evidence, a watch delta defect, an unresolved ADR 0007 backend merge contract, and the lack of a precision/RDT scorecard, with a recommendation to block a v1 readiness claim on these.",
+    "learnings": {
+      "repo": [
+        "PRs #52-#82 form a dependent stack, so green CI validates each head only against its parent branch; the final merge on main still needs its own CI and full corpus run.",
+        "Merging release PR #46 triggers the publish workflow, so it must be treated as a separate publishing decision from the feature stack.",
+        "Project rules require FxHashMap, no production unwrap(), and that degradation always produces a diagnostic; several paths (wrapper candidates, tsconfig alias parsing, silent named-type shortcuts) violate the diagnostic rule.",
+        "The TypeScript checker backend (#70) is only a beta probe and is not connected to core, CLI, or NAPI; ADR 0007 (structural entry wins on clash) conflicts with the integration design (checker props replace structural props).",
+        "Plugin hooks (DocgenPlugin) run after file extraction or after component resolution, so they cannot currently take over library type shortcuts that apply during resolution.",
+        "Vite/native integration tests skip when no local .node build exists, so CI's test-ts lane does not exercise the real binding and plugin together.",
+        "Docs are stale: benchmarks.md is dated July, STATUS.md September, and MIGRATING.md/benchmarks.md still use the old package name.",
+        "The RDT comparison mixes own-props vs any-props recall and source-only mirrors vs installed dependencies, so published recall figures are not directly comparable."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/extractor/wrapper.rs",
+          "line": 43,
+          "end_line": 120,
+          "finding": "Wrapper detection accepts a PascalCase binding when a generic call has a plausible first argument and picks props by local declaration or a 'Props' suffix, without checking the callee's return type; a rejected recorded candidate returns true and silently vanishes without a diagnostic."
+        },
+        {
+          "path": "crates/core/src/pipeline/watch.rs",
+          "line": 110,
+          "end_line": 150,
+          "finding": "initialize() seeds component_cache from cold output but never seeds self.diagnostics, so cold parse/IO diagnostics disappear from later snapshots (in the first-round review's code)."
+        },
+        {
+          "path": "crates/core/src/resolver/named.rs",
+          "line": 68,
+          "end_line": 79,
+          "finding": "Bare React builtin names (ReactNode, CSSProperties, Ref) are matched before source declaration lookup, so a project-local type with the same name is misclassified."
+        },
+        {
+          "path": "crates/core/src/resolver/chain.rs",
+          "line": 65,
+          "end_line": 83,
+          "finding": "TypeScript utility recognition (Partial, Required, etc.) happens before source lookup in the props chain, so a locally declared utility name can yield an empty chain."
+        },
+        {
+          "path": "crates/core/src/extractor/evidence.rs",
+          "line": 16,
+          "end_line": 157,
+          "finding": "Render evidence accepts JSX anywhere in a function body (including nested callbacks or unreturned), returned null, capitalized or use-prefixed calls, and return annotations matched by rightmost name without resolving the symbol."
+        },
+        {
+          "path": "crates/core/src/pipeline/revision.rs",
+          "line": 316,
+          "end_line": 361,
+          "finding": "Revision::next builds the incremental delta only from freshly resolved components, so a surviving duplicate-named component whose output key changes is omitted from updatedComponents and diagnostics have no explicit removals."
+        },
+        {
+          "path": "crates/core/src/resolver/react.rs",
+          "line": 153,
+          "end_line": 205,
+          "finding": "tsconfig alias parsing uses a hand-written line-comment stripper; block comments or parse/read failures yield no aliases and no diagnostic."
+        },
+        {
+          "path": "crates/core/src/cache.rs",
+          "line": 153,
+          "end_line": 189,
+          "finding": "DTS cache loader reads and deserializes the entire cache before applying any entry bound, a resource-exhaustion risk with malformed or oversized cache files."
+        },
+        {
+          "path": "crates/core/src/known.rs",
+          "line": 108,
+          "end_line": 137,
+          "finding": "React Aria RenderProps is mapped to scalar className and style props, omitting the function-valued form, which misdescribes accepted values without an opacity diagnostic."
+        },
+        {
+          "path": "crates/core/src/resolver/mod.rs",
+          "line": 142,
+          "end_line": 142,
+          "finding": "The resolver imports pipeline::HtmlAttributeMode, a layering back edge against the stated module direction (roadmap item 2.3)."
+        }
+      ],
+      "workflow": [
+        "Check delta/event contracts by applying every emitted incremental delta to the prior output and comparing with the full snapshot(), rather than only testing snapshot parity with cold extraction.",
+        "Treat RDT as a compatibility oracle but hand-label precision per library family; recall counts alone, or leaked-parameter-name counts, do not prove correctness.",
+        "Gate performance claims against the roadmap's regression threshold per PR (e.g. #82 moved Mantine 90 to 112 ms, +23% output) and measure on dependency-installed projects.",
+        "Large stacked PR queues should be landed in reviewable cohorts with CI run on the resulting main, and new heuristics frozen until gates show which gaps need them."
+      ]
+    },
+    "friction": [
+      "GitHub CLI was unavailable, so PR state had to be gathered through public sources and some PR coverage could not be verified.",
+      "Entire session-history search failed because the process could not read its saved macOS Keychain login, so retrospective analysis relied on Git and PR evidence.",
+      "The live PR query was slow and needed repeated waits.",
+      "The working tree already contained uncommitted changes (package.json and README edits) and several lower stacked PRs had queued or absent checks, complicating verification.",
+      "No fresh local build or benchmark was run, so performance and recall claims could only be taken from PR/roadmap reports."
+    ],
+    "open_items": [
+      "Implement a reproducible, versioned Caliper-vs-RDT scorecard (recall own/any, hand-labeled precision, prop type/required/default fields, diagnostics, wall time, peak RSS, watch parity), including dependency-installed runs; the `just recall` harness is not implemented.",
+      "Fix symbol-identity precedence in the resolver so bindings resolve before builtin name interpretation, with an explicit reported fallback.",
+      "Fix the watch delta (updatedComponents for key-moved survivors, diagnostic removals, cross-file ordering) and add apply-delta-equals-snapshot tests.",
+      "Settle ADR 0007 merge contract (component identity, field precedence, diagnostic retirement, provenance, trigger observability) and separate schemaVersion from backend/mode provenance before wiring the TypeScript 7.1 checker.",
+      "Design a version-aware type-resolution adapter before moving library shortcuts behind DocgenPlugin; add a bounded finite keyof/mapped-type evaluator with opaque diagnostics.",
+      "Add a hand-labeled precision gate and negative fixtures for wrapper/render-evidence detection and emit a diagnostic for rejected wrapper candidates; freeze new heuristics until then.",
+      "Add a built-native-addon Vite integration lane in CI, malformed-input/fuzz robustness gates, and a size bound on DTS cache loading.",
+      "Resolve #84's oxfmt lint failure, review #46's release manifest independently, and refresh stale docs (STATUS.md, benchmarks.md, MIGRATING.md, architecture notes).",
+      "Finish removing the resolver-to-pipeline back edge, replace the remaining std HashMap with FxHashMap in pipeline/mod.rs, and add large-project watch latency/memory gates."
+    ]
+  }
+}
