@@ -1,0 +1,11 @@
+<task-notification>
+<task-id>ab4ac40ed204251c7</task-id>
+<tool-use-id>toolu_01XkeDFCGHedKzabmAQdNEEe</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/ab4ac40ed204251c7.output</output-file>
+<status>completed</status>
+<summary>Agent "Audit crates and dependencies in caliper" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>This agent's report was delivered to you as a message from "ab4ac40ed204251c7" (its SubagentHandback call). Read it there; it is not repeated here.
+</result>
+<usage><subagent_tokens>89514</subagent_tokens><tool_uses>29</tool_uses><duration_ms>193855</duration_ms></usage>
+</task-notification>
