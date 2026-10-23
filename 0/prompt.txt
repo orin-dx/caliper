@@ -1,0 +1,80 @@
+<task-notification>
+<task-id>a75c51be5bf7193ae</task-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/a75c51be5bf7193ae.output</output-file>
+<status>completed</status>
+<summary>Agent "Dependency loader behind a flag" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I opened all three stacked PRs, non-draft, and CI passes on every check for each. Dependency loading is behind `--load-dependencies` (off by default), and with it off the output is byte-identical to the base.
+
+| PR | Branch | Base | Contents |
+|---|---|---|---|
+| [#106](https://github.com/orin-dx/caliper/pull/106) | `docs/adr-dependency-types` | `perf/shared-props` (#105) | ADRs 0010–0012 |
+| [#107](https://github.com/orin-dx/caliper/pull/107) | `feat/load-dependency-types` | `docs/adr-dependency-types` | Loader and dependency layer, precedence, value index, leak guards, watch demand diff, failure reasons in diagnostics, `loadDependencies` in Rust/CLI/config/NAPI/Vite, docs, `STATUS.md` correction, changeset |
+| [#109](https://github.com/orin-dx/caliper/pull/109) | `feat/collapse-inherited-props` | `feat/load-dependency-types` | `collapseInheritedProps: dependencies \| all \| none` (default `dependencies`, threshold 30) in every front end, docs, changeset |
+
+## Deviations
+- **Ported onto the landed stack, not copied from the experiment.** It uses #97's module resolvers (no second resolver), #101's `ComponentProps&lt;typeof X&gt;` handling and #105's interface memo (no `CALIPER_MEMO`). The env-var switch became a flag, and the stats env hook is gone.
+- **New: `export { DialogContent as Content }`.** The extractor dropped the local name behind this Radix-style alias, so those parts were reported as "not exported". Fixing it adds a field to a public extractor type, a breaking Rust API change noted in the changeset, and bumps the parse-cache schema to 16.
+- **Collapse is never applied** to a component's own props type, to the base of a `Pick`, or to a `keyof` operand. Collapsing those would drop props the code selects or counts by name.
+- **One regression found and fixed before pushing #109.** My first version skipped the shared-results cache under `Pick`/`keyof`, which made chakra 3× slower and 900 MB larger with identical output. The cache now keys on that case instead; `none` mode times the same as #107.
+
+## Flag off
+Output (timing fields zeroed) is identical to the base on all 5 corpora, 5 mirrors and 21 fixtures. Fixture snapshots are unchanged.
+
+## Flag on (#107)
+
+| Project | Props | Empty components | Unresolved-type warnings | Output MB |
+|---|---|---|---|---|
+| mantine | 19,506 → 19,506 | 10 → 10 | 12 → 8 | 3.52 → 3.52 |
+| chakra | 560 → 398,915 | 144 → 4 | 323 → 25 | 0.75 → 27.61 |
+| shadcn | 1,543 → 12,937 | 1,102 → 753 | 378 → 55 | 2.16 → 4.45 |
+| antd | 3,389 → 4,489 | 7 → 6 | 112 → 58 | 1.71 → 2.09 |
+| spectrum | 32,824 → 32,826 | 18 → 18 | 180 → 172 | 6.09 → 6.09 |
+
+- **Leaks:** none. Flag on has the same component and enum keys as flag off on every corpus, and no component comes from `node_modules`.
+- **Determinism:** identical output at 1, 4 and 18 threads, with a cold index and with a warm one, on all 5 corpora.
+
+**Time and memory** (mean ms / MB; load average 4–7 during the run):
+
+| Project | Off | On, cold index | On, warm index | RDT with dependencies | On vs RDT |
+|---|---|---|---|---|---|
+| mantine | 47 / 107 | 51 / 111 | 51 / 111 | 1,463 / 574 | 29× faster |
+| chakra | 31 / 72 | 390 / 1,283 | 391 / 1,285 | 16,601 / 1,683 | 42× faster |
+| shadcn | 47 / 85 | 93 / 180 | 86 / 172 | 3,166 / 1,253 | 37× faster |
+| antd | 38 / 82 | 48 / 102 | 47 / 101 | 1,833 / 1,076 | 39× faster |
+| spectrum | 80 / 166 | 91 / 195 | 88 / 191 | 2,537 / 989 | 29× faster |
+
+The on-disk index barely matters: a cold index costs 0–7 ms.
+
+**Watch edits:** with the flag on, importing a name the session hasn't loaded costs about 0–17 ms extra. Chakra is the exception: every edit takes about 300 ms, against 8–10 ms off, because of its 399k expanded props. After a props-changing edit to shadcn's `button.tsx`, the watch snapshot equals a cold extract with the flag off and on.
+
+## Collapse (#109)
+- **Default mode:** shadcn goes from 12,937 to 7,447 props (88 collapsed layers) and antd from 4,489 to 3,821.
+- **Chakra is unchanged by default:** its 399k props come from its own `styled-system` sources, which only `all` collapses. That matches ADR 0012 for a design system's own repository. With `all`, chakra drops to 5,541 props, 13.6 MB and 381 ms / 842 MB, against 438 ms / 1,271 MB for #107.
+- **Cost of the default on chakra:** about 8% time and 110 MB, because part of the shared-results cache splits even though nothing collapses there.
+- **Identity:** with collapse set to `none`, flag-on output is identical to #107's; flag off is identical to #107; the default mode is deterministic at 1/4/18 threads.
+
+## Correctness against RDT (seeded sample)
+- **Props now added:** shadcn gains 11,535, of which RDT also reports 11,287 and prints 5,429 with the same type after normalisation. antd gains 1,086; RDT reports 661 and 454 match.
+- **Props whose type changed match RDT less often:** shadcn 18 → 2 of 35, antd 5 → 2 of 20, mantine 1 → 0 of 4. Most of this is text, not meaning: we expand aliases RDT prints by name (`LucideIcon` becomes `ForwardRefExoticComponent&lt;…&gt;`; `OnValueChange` becomes its function type).
+- **Actually wrong:** `ChartLegendContent.onTimeUpdate` comes out as `(data: any, index: number, event: …) =&gt; void | string` where RDT has `ReactEventHandler&lt;SVGSVGElement&gt;`. recharts' own event handlers overwrite the DOM one.
+- **Unwrapped one level too far:** `z.infer&lt;schema&gt;` becomes `typeof schema["_output"]`.
+
+## Before turning the flag on by default
+1. **Chakra-style repositories:** decide whether the default collapse should also cover large project sources. With `dependencies`, chakra stays 12× slower than flag off and its output 27 MB.
+2. **Alias names:** print a type alias by name where RDT does. This is the main reason changed types match RDT less often.
+3. **Handler merging:** fix the recharts-style overwrite of DOM event handlers.
+4. **Watch:** it doesn't watch `package.json` or `node_modules`, so a reinstall needs `rebuild()`. The loaded dependency types also only grow within a session.
+5. **Collapse in watch mode:** its timings weren't measured separately. The notable-props list is the generic HTML one, so a style-props source keeps only names that happen to match it.
+
+## Checks run
+- Workspace tests: 771 pass, NAPI included; the terminal tests ran outside the sandbox.
+- vitest: 42 pass. Vite-on-native-binding integration: 5 pass.
+- `just lint doc-check machete typos` is clean.
+
+Measurement scripts are in `/Users/gabe/.claude/jobs/ba6a68d6/tmp/deps5/scripts/`. They are outside the repo and go when this job is deleted.
+
+result: PRs #106, #107 and #109 are open and stacked, with CI passing on all three; dependency loading ships off by default with byte-identical output when off, and enabled it is deterministic, leaks nothing and stays 29–42× faster than RDT.</result>
+<usage><subagent_tokens>440116</subagent_tokens><tool_uses>360</tool_uses><duration_ms>2835330</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-a75c51be5bf7193ae</worktreePath><worktreeBranch>worktree-agent-a75c51be5bf7193ae</worktreeBranch></worktree>
+</task-notification>
