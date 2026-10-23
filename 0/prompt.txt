@@ -1,0 +1,8 @@
+<task-notification>
+<task-id>a1f21337d00f5f7f9</task-id>
+<tool-use-id>toolu_01AXeRE8SjaxEYHYP3WmFQv6</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/a1f21337d00f5f7f9.output</output-file>
+<status>failed</status>
+<summary>Agent "Docs, DX and release surface" failed: Agent terminated early due to an API error: API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND) (error type server_error)</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+</task-notification>
