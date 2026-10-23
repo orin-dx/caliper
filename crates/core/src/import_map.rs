@@ -89,10 +89,13 @@ impl ImportResolutionMap {
     /// Walk one step of the re-export chain for `barrel_file`.
     ///
     /// - If a `ReExportNamed` entry matches `exported_name`, returns `Named { .. }`.
+    /// - A member of a re-exported namespace (`Menu.Root` where the barrel has `export * as Menu from "./menu"`)
+    ///   returns `Named` for the member in the namespace's module.
     /// - If no named match is found but there are `ReExportAll` entries, returns `Wildcards(..)`.
     /// - Returns `None` if the barrel file has no relevant re-exports.
     pub fn resolve_reexport_chain(&self, barrel_file: &Utf8Path, exported_name: &str) -> Option<ReExportStep> {
         let exports = self.re_exports.get(barrel_file.as_str())?;
+        let namespace_member = exported_name.split_once('.');
 
         let mut wildcard_specifiers: Vec<String> = Vec::new();
 
@@ -106,11 +109,18 @@ impl ImportResolutionMap {
                         });
                     }
                 }
+                LexedExport::ReExportNamespace { namespace, source_specifier } => {
+                    if let Some((_, member)) = namespace_member.filter(|(prefix, _)| prefix == namespace) {
+                        return Some(ReExportStep::Named {
+                            source_specifier: source_specifier.clone(),
+                            source_name: member.to_owned(),
+                        });
+                    }
+                }
                 LexedExport::ReExportAll { source_specifier, .. } => {
                     wildcard_specifiers.push(source_specifier.clone());
                 }
-                // Namespace re-exports and local declarations are not relevant here.
-                _ => {}
+                LexedExport::LocalDeclaration { .. } => {}
             }
         }
 

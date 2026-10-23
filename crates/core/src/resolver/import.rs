@@ -57,12 +57,16 @@ pub(super) fn resolve_to_canonical(
     // specifier instead.
     let (namespace, member) = name.split_once('.')?;
     let namespace_ref = ctx.import_map.find_import(consuming_file, namespace)?;
-    if namespace_ref.exported_name != "*" {
-        return None;
-    }
+    // A named import of a namespace (`import { Menu as MenuPrimitive } from "./ui"`, then `MenuPrimitive.Root`):
+    // the member's name in that module is `Menu.Root`, which a namespace re-export or declaration answers.
+    let member = if namespace_ref.exported_name == "*" {
+        member.to_owned()
+    } else {
+        format!("{}.{member}", namespace_ref.exported_name)
+    };
     let resolved_file = resolve_import_specifier(&namespace_ref.specifier, consuming_file, ctx, diagnostics)?;
     let mut visited = FxHashSet::default();
-    Some(follow_reexports(resolved_file, member.to_string(), ctx, diagnostics, &mut visited, 0))
+    Some(follow_reexports(resolved_file, member, ctx, diagnostics, &mut visited, 0))
 }
 
 /// A directly-imported name may land on a barrel file (`export { X } from
