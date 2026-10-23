@@ -2776,11 +2776,11 @@ fn without_custom_conditions_a_source_only_workspace_package_does_not_resolve() 
 }
 
 /// Mantine's shape, through two barrels: `factory<Payload>` returns `MantineComponent<Payload>`, a component type whose
-/// props add `component` and `renderRoot` to the payload's props. The wrapper-built component gets them; its own props
-/// win a name clash, and a callee with no known result adds nothing.
+/// props are the payload's props plus `component` and `renderRoot`. The wrapper-built component has those props, a name
+/// both declare intersects as in TypeScript, and a callee with no known result leaves the payload's props.
 #[test]
 fn a_wrapper_built_component_gets_the_props_its_callees_result_type_adds() {
-    let tmp = TempDir::new().unwrap();
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
     fs::create_dir_all(tmp.path().join("core/factory")).unwrap();
     write_file(&tmp, "core/factory/factory.tsx", CALLEE_FACTORY);
     write_file(
@@ -2830,9 +2830,10 @@ export const Typed = factory<ButtonFactory>((props: ButtonProps) => <button>{pro
             render_root.clone()
         ]
     );
+    // The payload's `component` and the result type's intersect, and `any` absorbs the intersection.
     assert_eq!(
         props("Link"),
-        [prop("component", "\"a\" | \"span\"", true, ""), prop("label", "string", true, ""), render_root]
+        [prop("component", "any", true, "Root element or component."), prop("label", "string", true, ""), render_root,]
     );
     assert_eq!(props("Plain"), [prop("label", "string", true, "")]);
     // A typed render function makes this a HOC-wrapper detection; the callee still adds its props.
