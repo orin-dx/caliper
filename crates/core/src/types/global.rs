@@ -45,6 +45,9 @@ pub(crate) struct ResolveState {
     /// Set when an alias is shown by its name because its expansion holds a type the resolver can't evaluate, so an
     /// alias whose expansion contains that one is shown by name too — see `resolver::named::alias_display`.
     pub(crate) named_unevaluated: bool,
+    /// Expand every source, collapsing none (ADR 0012): set while resolving `Pick`'s base or a `keyof` operand, whose
+    /// props are selected or counted by name. Interface chains are not shared while it is set.
+    pub(crate) expand_all: bool,
     /// What resolution read from this state while an interface chain is being recorded for reuse, `None` otherwise —
     /// see `resolver::memo`. Every read of the three sets above goes through the methods below so none is missed.
     pub(crate) reads: Option<Box<StateReads>>,
@@ -96,6 +99,7 @@ impl ResolveState {
             diagnostics: Vec::new(),
             in_scope_type_params: self.in_scope_type_params.clone(),
             named_unevaluated: false,
+            expand_all: self.expand_all,
             reads: self.reads.as_ref().map(|_| Box::default()),
         }
     }
@@ -105,6 +109,7 @@ impl ResolveState {
     pub(crate) fn detached(&self) -> ResolveState {
         ResolveState {
             in_scope_type_params: self.in_scope_type_params.clone(),
+            expand_all: self.expand_all,
             reads: self.reads.as_ref().map(|_| Box::default()),
             ..Self::default()
         }

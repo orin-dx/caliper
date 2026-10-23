@@ -40,6 +40,7 @@ pub(super) fn resolve_type_alias_chain(
             };
             let omitted_set: FxHashSet<&str> = omitted.iter().map(String::as_str).collect();
             chain.props.retain(|p| !omitted_set.contains(p.name.as_str()));
+            chain.notable.retain(|p| !omitted_set.contains(p.name.as_str()));
             // Record omitted keys in the relevant inheritance layer.
             for layer in &mut chain.inheritance {
                 for key in &omitted {
@@ -52,7 +53,10 @@ pub(super) fn resolve_type_alias_chain(
         }
 
         CollectedTypeAlias::Pick { base, keys, file_path } => {
+            let expand_all = state.expand_all;
+            state.expand_all = expand_all || ctx.can_collapse();
             let mut chain = resolve_base_as_chain(base, file_path, mapping, ctx, state, depth);
+            state.expand_all = expand_all;
             let Some(picked) = resolve_key_set_or_warn("Pick", keys, file_path, mapping, ctx, state, depth) else {
                 chain.props.clear();
                 return chain;
@@ -507,7 +511,8 @@ fn resolve_key_set(
             // A fresh cycle set: reading a type's keys is a separate question from the props walk that called it, which
             // has usually just visited the same type (`Omit<Base, keyof Base>` resolves `Base` first). Sharing the set
             // made `keyof Base` look circular and come back empty. Depth still bounds the recursion.
-            let mut branch_state = state.detached();
+            let mut branch_state =
+                ResolveState { expand_all: state.expand_all || ctx.can_collapse(), ..state.detached() };
             let chain = resolve_base_as_chain(target, file, mapping, ctx, &mut branch_state, depth + 1);
             state.absorb_detached(branch_state);
             Some(chain.props.iter().map(|p| p.name.clone()).collect())

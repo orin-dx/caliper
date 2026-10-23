@@ -44,6 +44,8 @@ struct Recording {
     diagnostics: Vec<Diagnostic>,
     named_unevaluated: bool,
     deps: Dependencies,
+    /// `ResolveState::expand_all` while recording: a chain with collapsed sources must not answer an expanding state.
+    expand_all: bool,
 }
 
 /// Keep the first read of each key: what the state held on entry. A later read may see the resolution's own
@@ -63,7 +65,8 @@ impl Recording {
     /// Whether `state` and `mapping` give the same answer to every read the recorded resolution made.
     fn applies_to(&self, state: &ResolveState, mapping: &ComponentMapping) -> bool {
         let reads = &self.reads;
-        reads.visited.iter().all(|(key, present)| state.visited.contains(&**key) == *present)
+        self.expand_all == state.expand_all
+            && reads.visited.iter().all(|(key, present)| state.visited.contains(&**key) == *present)
             && reads.named.iter().all(|(key, present)| state.named_in_progress.contains(&**key) == *present)
             && reads.in_scope.iter().all(|(name, present)| state.in_scope_type_params.contains(name) == *present)
             && reads.defaults.iter().all(|(name, found)| {
@@ -129,6 +132,7 @@ impl InterfaceChains {
             named_unevaluated,
             deps,
             reads,
+            expand_all: state.expand_all,
         };
         let mut recordings = self.recordings.entry(map_key).or_default();
         if recordings.len() < RECORDINGS_PER_KEY {

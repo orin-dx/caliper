@@ -347,3 +347,125 @@ fn watch_revisions_with_dependencies_match_a_cold_extract() {
         assert_eq!(watched.components["Badge"].props.keys().collect::<Vec<_>>(), expected, "after:\n{edit}");
     }
 }
+
+// ─── collapseInheritedProps (ADR 0012) ────────────────────────────────────────
+
+/// `big` declares `BigProps` (31 props, two of them notable), `SmallProps` (1) and `BigAlias` (31); the project declares
+/// `LocalBig` (31), and components inheriting each.
+fn collapse_project() -> (tempfile::TempDir, Utf8PathBuf) {
+    let many = |prefix: &str| (0..29).map(|i| format!("{prefix}{i}?: string; ")).collect::<String>();
+    let big = format!(
+        "export interface BigProps {{ {}onClick?: () => void; className?: string }}\n\
+         export interface SmallProps {{ only: string }}\nexport type BigAlias = {{ {}id?: string; style?: object }};\n",
+        many("p"),
+        many("q")
+    );
+    let local = format!("export interface LocalBig {{ {}l29?: string; l30?: string }}\n", many("l"));
+    let files = [
+        ("node_modules/big/package.json", r#"{ "name": "big", "version": "1.0.0", "types": "index.d.ts" }"#.to_owned()),
+        ("node_modules/big/index.d.ts", big),
+        ("src/local.ts", local),
+        (
+            "src/Big.tsx",
+            "import type { BigProps, SmallProps, BigAlias } from 'big';\nimport type { LocalBig } from './local';\n\
+             export interface FieldProps extends BigProps, SmallProps { own: number }\n\
+             export function Field(props: FieldProps) { return null; }\n\
+             export function Aliased(props: BigAlias & { own: number }) { return null; }\n\
+             export function Direct(props: BigProps) { return null; }\n\
+             export function Picked(props: Pick<BigProps, 'p0' | 'p1'>) { return null; }\n\
+             export function Keyed(props: Omit<LocalBig, keyof BigProps | 'l30'>) { return null; }\n\
+             export interface LocalField extends LocalBig { own: number }\n\
+             export function Local(props: LocalField) { return null; }\n\
+             export function OwnBig(props: LocalBig) { return null; }\n"
+                .to_owned(),
+        ),
+    ];
+    let files: Vec<(&str, &str)> = files.iter().map(|(p, b)| (*p, b.as_str())).collect();
+    project(&files)
+}
+
+fn with_collapse(root: &Utf8Path, mode: crate::pipeline::CollapseInheritedProps) -> crate::types::ExtractionOutput {
+    extract(&PipelineOptions { collapse_inherited_props: mode, ..options(root, true) })
+}
+
+fn keys<V>(map: &std::collections::BTreeMap<String, V>) -> Vec<&str> {
+    map.keys().map(String::as_str).collect()
+}
+
+fn layers(entry: &crate::types::ComponentEntry) -> Vec<(&str, u32, Option<&str>)> {
+    entry.inheritance.iter().map(|l| (l.type_name.as_str(), l.total_props, l.html_element.as_deref())).collect()
+}
+
+#[test]
+fn a_large_dependency_source_collapses_to_a_layer_and_its_notable_props() {
+    use crate::pipeline::CollapseInheritedProps;
+    let (_tmp, root) = collapse_project();
+
+    let output = with_collapse(&root, CollapseInheritedProps::Dependencies);
+
+    let field = &output.components["Field"];
+    assert_eq!(keys(&field.props), ["only", "own"]);
+    assert_eq!(layers(field), [("BigProps", 31, None)]);
+    assert_eq!(field.inheritance[0].file_name, root.join("node_modules/big/index.d.ts").as_str());
+    assert_eq!(keys(&field.notable_inherited), ["className", "onClick"]);
+    assert_eq!(field.notable_inherited["onClick"].prop_type.raw_string(), "() => void");
+
+    let aliased = &output.components["Aliased"];
+    assert_eq!(keys(&aliased.props), ["own"]);
+    assert_eq!(layers(aliased), [("BigAlias", 31, None)]);
+    assert_eq!(keys(&aliased.notable_inherited), ["id", "style"]);
+
+    // The component's own props type, a `Pick` from a large source and a `keyof` operand are never collapsed.
+    assert_eq!(output.components["Direct"].props.len(), 31);
+    assert_eq!(output.components["Direct"].inheritance, []);
+    assert_eq!(keys(&output.components["Picked"].props), ["p0", "p1"]);
+    let mut kept: Vec<String> = (0..30).map(|i| format!("l{i}")).collect();
+    kept.sort();
+    assert_eq!(keys(&output.components["Keyed"].props), kept);
+    // A project source stays expanded by default.
+    assert_eq!(output.components["Local"].props.len(), 32);
+    assert_eq!(output.components["Local"].inheritance, []);
+}
+
+#[test]
+fn all_collapses_inherited_project_sources_too_and_none_expands_everything() {
+    use crate::pipeline::CollapseInheritedProps;
+    let (_tmp, root) = collapse_project();
+
+    let all = with_collapse(&root, CollapseInheritedProps::All);
+    let none = with_collapse(&root, CollapseInheritedProps::None);
+    let default = with_collapse(&root, CollapseInheritedProps::Dependencies);
+
+    assert_eq!(keys(&all.components["Local"].props), ["own"]);
+    assert_eq!(layers(&all.components["Local"]), [("LocalBig", 31, None)]);
+    assert_eq!(keys(&all.components["Local"].notable_inherited), Vec::<&str>::new());
+    assert_eq!(all.components["OwnBig"].props.len(), 31, "the component's own props type");
+    assert_eq!(keys(&all.components["Field"].props), ["only", "own"]);
+
+    for name in ["Field", "Aliased", "Local", "Direct"] {
+        assert_eq!(none.components[name].inheritance, [], "{name}");
+        assert_eq!(none.components[name].notable_inherited.len(), 0, "{name}");
+    }
+    assert_eq!(none.components["Field"].props.len(), 33);
+    assert_eq!(none.components["Aliased"].props.len(), 32);
+    // Collapsing only hides props; whatever stays expanded matches a full expansion exactly.
+    for name in ["Direct", "Picked", "Keyed", "Local", "OwnBig"] {
+        assert_eq!(default.components[name], none.components[name], "{name}");
+    }
+    for (name, prop) in &default.components["Field"].props {
+        assert_eq!(prop, &none.components["Field"].props[name], "{name}");
+    }
+}
+
+/// Without loaded dependencies nothing is a dependency source, so the default collapses nothing.
+#[test]
+fn the_default_changes_nothing_without_loaded_dependencies() {
+    use crate::pipeline::CollapseInheritedProps;
+    let (_tmp, root) = collapse_project();
+    let off = |mode| {
+        let output = extract(&PipelineOptions { collapse_inherited_props: mode, ..options(&root, false) });
+        (output.components, output.enums, output.diagnostics)
+    };
+
+    assert_eq!(off(CollapseInheritedProps::Dependencies), off(CollapseInheritedProps::None));
+}

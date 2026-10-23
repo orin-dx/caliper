@@ -118,6 +118,23 @@ pub(super) fn resolve_props_chain(
                 ctx,
                 &mut state.diagnostics,
             );
+            if let CollectedTypeAlias::Passthrough { target: CollectedType::Object(fields), file_path } = &alias {
+                if ctx.collapses(file_path, fields.len(), depth, state) {
+                    let notable = fields
+                        .iter()
+                        .filter(|field| is_notable(&field.name))
+                        .map(|f| (f.name.as_str(), f.collected_type.clone(), f.required, f.description.as_str()));
+                    return collapsed_source(
+                        &canonical_name,
+                        file_path,
+                        fields.len(),
+                        notable.collect(),
+                        ctx,
+                        state,
+                        depth,
+                    );
+                }
+            }
             return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
         }
         Some(super::precedence::SourceOrKnownMatch::Interface(iface)) => {
@@ -197,6 +214,52 @@ pub(super) fn resolve_props_chain(
         affects: Vec::new(),
     });
     ResolvedChain::empty_with_compose(type_name.to_owned())
+}
+
+/// Whether a collapsed source keeps `name` as a notable prop: the element-independent curated attributes.
+fn is_notable(name: &str) -> bool {
+    react_types::notable_html_attrs("").contains(&name)
+}
+
+/// A source recorded as a layer instead of expanded (ADR 0012): `total` is how many props it declares; only `notable`
+/// fields are resolved.
+#[allow(clippy::too_many_arguments)]
+fn collapsed_source(
+    type_name: &str,
+    file: &Utf8Path,
+    total: usize,
+    notable: Vec<(&str, CollectedType, bool, &str)>,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> ResolvedChain {
+    let parent = PropParent { name: type_name.to_owned(), file_name: file.to_string() };
+    let notable = notable
+        .into_iter()
+        .map(|(name, ty, required, description)| {
+            let prop_type = resolve_collected_type(&ty, file, ctx, state, depth);
+            let (parents, parent) = (vec![parent.clone()], Some(parent.clone()));
+            let tags = Default::default();
+            Arc::new(ParsedProp::new(
+                name.to_owned(),
+                prop_type,
+                required,
+                None,
+                description.to_owned(),
+                tags,
+                parent,
+                parents,
+            ))
+        })
+        .collect();
+    let layer = InheritedLayer {
+        type_name: type_name.to_owned(),
+        file_name: file.to_string(),
+        omitted: vec![],
+        html_element: None,
+        total_props: u32::try_from(total).unwrap_or(u32::MAX),
+    };
+    ResolvedChain { inheritance: vec![layer], notable, ..ResolvedChain::empty() }
 }
 
 /// Resolve an interface to a chain of props. `type_args` are the call site's arguments for the interface's declared type
@@ -281,6 +344,21 @@ fn resolve_interface_chain_uncached(
             chain.inheritance.push(layer);
         }
         chain.merge_parent(parent_chain);
+    }
+
+    // Its parents are sources of their own, resolved above; only this interface's members collapse.
+    if ctx.collapses(&iface.file_path, iface.props.len(), depth, state) {
+        let notable = iface.props.iter().filter(|prop| is_notable(&prop.name)).map(|prop| {
+            let ty = match &substitution {
+                Some(subst) => super::substitute::substitute_type(&prop.collected_type, subst),
+                None => prop.collected_type.clone(),
+            };
+            (prop.name.as_str(), ty, prop.required, prop.description.as_str())
+        });
+        let collapsed =
+            collapsed_source(&iface.name, &iface.file_path, iface.props.len(), notable.collect(), ctx, state, depth);
+        chain.merge_parent(collapsed);
+        return chain;
     }
 
     // ── Resolve own props ────────────────────────────────────────────────────
