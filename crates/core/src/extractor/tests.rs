@@ -662,6 +662,25 @@ fn test_exports_collected() {
 }
 
 #[test]
+fn an_exported_namespace_import_is_a_namespace_reexport() {
+    let source = "import * as menu from './menu';\nimport * as unused from './unused';\nexport { menu as Menu };\n";
+    let data = parse_file(Utf8Path::new("/test/ui.ts"), source);
+
+    let namespaces: Vec<(&str, &str)> = data
+        .exports
+        .iter()
+        .filter_map(|e| match e {
+            LexedExport::ReExportNamespace { namespace, source_specifier } => {
+                Some((namespace.as_str(), source_specifier.as_str()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(namespaces, [("Menu", "./menu")]);
+    assert_eq!(data.exports.len(), 1, "{:?}", data.exports);
+}
+
+#[test]
 fn every_export_form_lands_in_the_right_lexed_export_variant() {
     // Exact sets, not presence: a specifier list misclassified as a re-export would pass a presence check.
     let source = r#"

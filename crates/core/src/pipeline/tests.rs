@@ -803,6 +803,43 @@ export function Table(props: TableProps) { return null; }
     );
 }
 
+/// `menu.tsx` declares `RootProps`; `ui.ts` exposes it as the `Menu` namespace the way given; `Item.tsx` uses it through
+/// a named import.
+fn namespace_reexport_project(ui: &str) -> ExtractionOutput {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "menu.tsx",
+        "export interface RootProps { open: boolean }\nexport function Root(props: RootProps) { return <div />; }\n",
+    );
+    write_file(&tmp, "ui.ts", ui);
+    write_file(
+        &tmp,
+        "Item.tsx",
+        "import { Menu as MenuPrimitive } from './ui';\n\
+         export function Item(props: MenuPrimitive.RootProps) { return null; }\n",
+    );
+    extract(&PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    })
+}
+
+#[test]
+fn a_member_of_a_namespace_reexport_resolves_through_a_named_import() {
+    for ui in [
+        "export * as Menu from './menu';\n",
+        "import * as menu from './menu';\nexport { menu as Menu };\n",
+        "export namespace Menu { export interface RootProps { open: boolean } export const Root = () => null; }\n",
+    ] {
+        let output = namespace_reexport_project(ui);
+
+        let props: Vec<&String> = output.components["Item"].props.keys().collect();
+        assert_eq!(props, ["open"], "{ui}{:#?}", output.diagnostics);
+    }
+}
+
 // ── test_native_js_global_resolves_via_real_typescript_lib_files ─────────
 //
 // Regression test for: `Date` (and any other native/DOM ambient global —

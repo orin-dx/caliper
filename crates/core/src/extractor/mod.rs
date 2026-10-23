@@ -294,17 +294,22 @@ impl<'src> SourceDataCollector<'src> {
         self.data
     }
 
-    /// `import { A } from "./a"; export { A }` re-exports `A` exactly like `export { A } from "./a"`; barrels use both
-    /// spellings, and only the second names a source file to follow.
+    /// `import { A } from "./a"; export { A }` re-exports `A` exactly like `export { A } from "./a"`, and
+    /// `import * as a from "./a"; export { a as A }` like `export * as A from "./a"`; barrels and bundled typings
+    /// (radix-ui's) use both spellings, and only the second names a source file to follow.
     fn promote_reexported_imports(&mut self) {
         for (index, local) in std::mem::take(&mut self.pending_local_exports) {
             let Some(binding) = self.data.imports.iter().find(|imp| imp.local_name.as_str() == local) else { continue };
-            if binding.exported_name.as_str() == "*" {
-                continue;
-            }
             let crate::types::LexedExport::LocalDeclaration { name, is_type_only } = &self.data.exports[index] else {
                 continue;
             };
+            if binding.exported_name.as_str() == "*" {
+                self.data.exports[index] = crate::types::LexedExport::ReExportNamespace {
+                    namespace: name.clone(),
+                    source_specifier: binding.specifier.clone(),
+                };
+                continue;
+            }
             self.data.exports[index] = crate::types::LexedExport::ReExportNamed {
                 local_name: name.clone(),
                 source_name: binding.exported_name.to_string(),
