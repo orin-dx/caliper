@@ -1074,6 +1074,47 @@ fn a_factory_payload_with_generic_props_yields_those_props_never_the_payload() {
 }
 
 #[test]
+fn functions_used_only_as_functions_are_not_components() {
+    let source = r#"
+        type T = { type: string };
+        interface P { label: string }
+        function IndexedAccess(props: T) { return <span>{props.type}</span>; }
+        function describe(t: T) { return IndexedAccess(t); }
+        export function Exported(props: T) { return <b />; }
+        const viaExport = Exported(x);
+        function Row(props: P) { return <li />; }
+        const rows = items.map(Row);
+        function Inline(props: P) { return <i />; }
+        const alsoCalled = Inline(p);
+        const shown = <Inline label="x" />;
+        function DropWrapper(props: P, ref: ForwardedRef<HTMLElement>) { return <div ref={ref} />; }
+        const context = { render: DropWrapper };
+        function Rendered(props: P, ref: ForwardedRef<HTMLElement>) { return <div />; }
+        const r = <Rendered label="x" />;
+    "#;
+    let data = parse_file(Utf8Path::new("/test/uses.tsx"), source);
+
+    let mut found: Vec<&str> = data.component_mappings.iter().map(|m| m.component_name.as_str()).collect();
+    found.sort_unstable();
+    assert_eq!(found, vec!["Exported", "Inline", "Rendered", "Row"]);
+    let skipped: Vec<&str> = data
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.ends_with("not a component"))
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(
+        skipped,
+        vec![
+            "'IndexedAccess' is only ever called as a function in this file, never rendered or passed on, so it is \
+             a helper, not a component",
+            "'DropWrapper' takes a second parameter (a ref) and is never rendered or passed to a component wrapper in \
+             this file, so it is a render callback, not a component",
+        ]
+    );
+}
+
+#[test]
 fn test_memo_forward_ref_detected() {
     let source = r#"
         import React, { memo, forwardRef } from "react";

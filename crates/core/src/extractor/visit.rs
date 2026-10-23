@@ -309,6 +309,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                             } else if let Some((props_name, type_args)) =
                                 self.extract_type_name_from_type(&type_ann.type_annotation)
                             {
+                                if func.params.items.len() > 1 {
+                                    self.takes_a_second_parameter.insert(name.into());
+                                }
                                 let (description, tags) = self.find_jsdoc_with_tags(func.span.start);
                                 let param_defaults = self.extract_param_defaults(&func.params);
                                 self.data.component_mappings.push(
@@ -384,7 +387,34 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         walk::walk_class(self, class);
     }
 
+    fn visit_identifier_reference(&mut self, it: &IdentifierReference<'a>) {
+        self.record_reference(it);
+    }
+
+    fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
+        self.record_call(it);
+        walk::walk_call_expression(self, it);
+    }
+
+    fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
+        self.record_jsx_element(it);
+        walk::walk_jsx_opening_element(self, it);
+    }
+
     fn visit_export_default_declaration(&mut self, node: &ExportDefaultDeclaration<'a>) {
+        match &node.declaration {
+            ExportDefaultDeclarationKind::FunctionDeclaration(func) => {
+                if let Some(id) = &func.id {
+                    self.record_exported_declaration(id.name.as_str());
+                }
+            }
+            ExportDefaultDeclarationKind::ClassDeclaration(class) => {
+                if let Some(id) = &class.id {
+                    self.record_exported_declaration(id.name.as_str());
+                }
+            }
+            _ => {}
+        }
         // An anonymous default export has no binding name, so the component is named after its file, as
         // `try_anonymous_default_export_component` already does for `export default function(props: Props) {}`.
         if self.is_tsx {

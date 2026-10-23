@@ -28,6 +28,7 @@ mod defaults;
 mod evidence;
 mod interface;
 mod jsdoc;
+mod uses;
 mod visit;
 mod wrapper;
 
@@ -222,6 +223,10 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) pending_local_exports: Vec<(usize, String)>,
     /// Why the current declarator's detector chain declined a candidate, used as the skip diagnostic's message.
     pub(super) decline_reason: Option<String>,
+    /// How each name is used in the file (`uses.rs`).
+    pub(super) name_uses: rustc_hash::FxHashMap<CompactString, uses::NameUses>,
+    /// Component candidates declared with a second parameter: a function component takes only props.
+    pub(super) takes_a_second_parameter: FxHashSet<CompactString>,
 }
 
 impl<'src> SourceDataCollector<'src> {
@@ -240,6 +245,8 @@ impl<'src> SourceDataCollector<'src> {
             pending_wrappers: Vec::new(),
             pending_local_exports: Vec::new(),
             decline_reason: None,
+            name_uses: Default::default(),
+            takes_a_second_parameter: FxHashSet::default(),
         }
     }
 
@@ -286,6 +293,7 @@ impl<'src> SourceDataCollector<'src> {
                 self.aliased_away.iter().filter(|n| !exported.contains(n.as_str())).cloned().collect();
             self.data.component_mappings.retain(|m| !hidden.contains(m.component_name.as_str()));
         }
+        self.drop_functions_used_only_as_functions();
         for (obj_name, display_name) in self.pending_display_name_renames.drain(..) {
             if let Some(mapping) = self.data.component_mappings.iter_mut().find(|m| m.component_name == obj_name) {
                 mapping.component_name = display_name;
