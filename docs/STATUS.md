@@ -1,14 +1,19 @@
 # Status
 
-**Updated:** 2026-09-28
+**Updated:** 2026-10-22
 
-Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are fully tested. Config file loading, cross-package `.d.ts` resolution, watch mode, plugin architecture, TOON token-optimized output format, JSON schema export, LSP server scaffold, and bounded atomic DTS caching are all fully implemented and verified.
+Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are fully tested. Config file loading, watch mode (including rebuilds on config changes and polling with `ensure_fresh`), plugin architecture, TOON token-optimized output format, JSON schema export, LSP server scaffold, and bounded atomic DTS caching are implemented and verified.
+
+**Types from other packages.** Imports resolve to any file under a source directory, `.d.ts` included, so a monorepo whose packages are all source directories resolves across them. From `node_modules`, only `@types/react` and TypeScript's own lib files are read. A prop whose type comes from any other installed package stays unresolved with an `UNRESOLVABLE_IMPORT` warning. Loading dependency declarations is in review behind `--load-dependencies` (#107, #109).
 
 ## Numbers
 
-- 545 Rust tests (77 cli + 443 core unit + 8 snapshot + 1 core compile-fail + 16 napi binding), 36 vitest (33 unit, mocked NAPI + 3 integration against the real native binding — `packages/vite-plugin/tests/integration/`, gated on a locally-built `.node` binary, auto-skips otherwise) — all green
+- 745 Rust tests (729 workspace tests under `cargo nextest`, 16 NAPI binding tests) and 46 vitest (41 unit with a mocked binding, 5 integration against the real native binding), all green
 - `cargo clippy --workspace --all-targets -D warnings` clean with `unsafe_code = "deny"` enforced workspace-wide
 - 20 real-world fixture libraries validated against `react-docgen-typescript` (shadcn, Radix, MUI, Chakra, Mantine, React Aria, antd, ariakit, ark-ui, base-ui, blueprint, day-picker, fluentui, headlessui, panda, react-final-form, react-resizable-panels, storybook-emotion, tanstack-table, zendesk-garden — see `rdt-coverage.md`)
+- **Recall** against `react-docgen-typescript`, own props, five source-only mirrors with no dependencies installed (`docs/projects/architecture-roadmap.md`, after #69): components found Mantine 93%, Chakra 92%, Ant Design 97%, shadcn/ui 98%, react-spectrum 99%; share of RDT's props reported 92%, 85%, 95%, 94%, 97%.
+- **Precision** per detection rule (`docs/precision.md`, 2026-10-21): 1 component that isn't one in 154 sampled, `functionDeclaration` 96% and every other rule 100%. 25 samples per rule can't yet establish the 95% gate.
+- **Speed** on five pinned public corpora (`docs/performance.md`, 2026-10-22): 34 to 81 ms wall time and 66 to 153 MB peak RSS for 41 to 490 kLOC, 17 to 39 times faster than `react-docgen-typescript` on the same files. CI fails on a 10% regression against main or a ratio under 10×.
 
 ## Features and improvements
 
