@@ -814,8 +814,8 @@ pub struct ComponentMapping {
     pub rule: DetectionRule,
     /// Whether its module exports it, directly or as a sub-component attached to an exported component.
     pub exported: bool,
-    /// For a `WrapperTypeArgument` component, the call that builds it: its result type can add props the selected
-    /// props type lacks.
+    /// For a component built by a generic call (`WrapperTypeArgument`, or a `HocWrapper` call with type arguments),
+    /// that call: its result type can add props the selected props type lacks.
     pub wrapper_callee: Option<WrapperCallee>,
 }
 
