@@ -21,7 +21,7 @@ Each `PropType` variant the resolver can emit; whether any fixture produces it.
 | `stringLiteral` | chakra, mantine, mui, react-aria, shadcn |
 | `union` | chakra, mantine, mui, react-aria, shadcn, **day-picker** (7-way discriminated) |
 | `named` | chakra, mantine, mui, react-aria |
-| `eventHandler` | all fixtures; real param names from `(open: boolean) => void`-style handlers (not a hardcoded `"e"`) verified against **headlessui**, **ark-ui** |
+| `function` | all fixtures; every parameter with its real name, and the real return type (`(renderProps: ButtonRenderProps) => ReactNode`), verified against **headlessui**, **ark-ui**, **react-aria** |
 | `ref` | mantine, mui |
 | `object` | mantine, **rdt-compat/types** (`raw_string()` renders real fields — `{ key: Type; key2?: Type2 }` — not the literal placeholder `"object"`) |
 | `literalUnion` | mantine, shadcn, **panda** (after defineRecipe arg-index fix) |
@@ -34,11 +34,11 @@ Each `PropType` variant the resolver can emit; whether any fixture produces it.
 | `htmlAttributes` | **rdt-compat/types** (`ComponentPropsWithoutRef<'button'>` as prop value); real per-element attribute resolution (not just this metadata layer) — see [HtmlAttributeMode](#htmlattributemode-curated--full--none) below |
 | `intersection` | **rdt-compat/types** (`CSSProperties & { '--accent': string }`) |
 | `opaque` | **rdt-compat/types** (inline conditional type `T extends A ? B : C`) |
-| `void` | ❌ not covered — `() => void` captured as `eventHandler`, standalone `void` never appears |
+| `void` | as a `function`'s return type (`() => void`); standalone `void` never appears |
 | `never` | ❌ not covered — no real-world prop has type `never` |
 | `any` | ❌ not covered — `any` suppressed by TypeScript `strict` in fixtures |
 
-> **Note on `void` / `never`:** These kinds exist in the type system for completeness but are not realistic prop types. A function return type `() => void` is always emitted as `eventHandler`, and `never` typically indicates a broken discriminant. No fixture is planned for either.
+> **Note on `void` / `never`:** These kinds exist in the type system for completeness but are not realistic prop types. A `void` return type appears inside a `function`, and `never` typically indicates a broken discriminant. No fixture is planned for either.
 
 ---
 

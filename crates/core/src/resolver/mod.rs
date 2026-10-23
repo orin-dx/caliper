@@ -32,6 +32,7 @@ mod extends;
 mod func;
 mod html;
 mod import;
+mod memo;
 mod named;
 mod precedence;
 mod primitives;
@@ -41,6 +42,7 @@ mod template;
 
 #[cfg(test)]
 pub(crate) use import::{follow_reexports_call_count, reset_follow_reexports_call_count};
+pub(crate) use import::{resolve_module_with, ModuleResolution};
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -83,6 +85,31 @@ pub(super) fn unresolved_location_note(
         format!(" (resolved to '{canonical_name}' in '{canonical_file}')")
     } else {
         String::new()
+    }
+}
+
+/// The help for an unresolvable type: why the dependency loader found no declaration for it, when it tried, or
+/// `otherwise`.
+pub(super) fn unresolved_type_help(
+    type_name: &str,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+    otherwise: &str,
+) -> String {
+    let reason = ctx.dependencies.as_ref().and_then(|layer| {
+        let (head, rest) = type_name.split_once('.').map_or((type_name, None), |(head, rest)| (head, Some(rest)));
+        let binding = ctx.import_map.find_import(file, head)?;
+        let name = match (binding.exported_name.as_str(), rest) {
+            ("*", Some(rest)) => rest.to_owned(),
+            ("*", None) => return None,
+            (exported, Some(rest)) => format!("{exported}.{rest}"),
+            (exported, None) => exported.to_owned(),
+        };
+        layer.unresolved_reason(file.parent()?, &binding.specifier, &name)
+    });
+    match reason {
+        Some(reason) => format!("Dependency types are loaded, but for '{type_name}' {}.", reason.describe()),
+        None => otherwise.to_owned(),
     }
 }
 
@@ -203,6 +230,8 @@ pub struct ResolutionContext {
     /// maps.
     pub(crate) named_types: Arc<crate::named_type_index::NamedTypeIndex>,
     pub oxc_resolver: Arc<Resolver>,
+    /// `ModuleResolvers::types_first`.
+    pub(crate) types_first_resolver: Arc<Resolver>,
     /// Module resolutions by `(directory, specifier)`. Resolution only reads the file system, which a run treats as
     /// fixed, and every component importing from the same directory asks again; a watch revision builds a fresh
     /// context, so nothing outlives one revision.
@@ -231,6 +260,11 @@ pub struct ResolutionContext {
     pub ambient_global_files: Vec<Utf8PathBuf>,
     /// Why the configured tsconfig could not be used, if it could not.
     pub(crate) tsconfig_diagnostic: Option<Diagnostic>,
+    /// Interface chains already resolved this run, shared by the components that inherit them.
+    pub(crate) interface_chains: memo::InterfaceChains,
+    /// Loaded dependency declarations (`PipelineOptions::load_dependencies`, ADR 0010).
+    pub(crate) dependencies: Option<Arc<crate::dependency_types::DependencyLayer>>,
+    pub(crate) collapse_inherited_props: crate::pipeline::CollapseInheritedProps,
 }
 
 impl ResolutionContext {
@@ -258,24 +292,10 @@ impl ResolutionContext {
         ambient_global_files: Vec<Utf8PathBuf>,
         named_types: Arc<crate::named_type_index::NamedTypeIndex>,
     ) -> Self {
-        // The resolver reads the tsconfig itself: comments, `extends`, `baseUrl` and `paths` wildcards as TypeScript
-        // reads them.
-        let resolve_options = ResolveOptions {
-            condition_names: vec!["types".into(), "import".into(), "require".into(), "default".into()],
-            main_fields: vec!["types".into(), "typings".into(), "module".into(), "main".into()],
-            extensions: vec![".ts".into(), ".tsx".into(), ".d.ts".into(), ".js".into()],
-            tsconfig: options.tsconfig_path.as_ref().map(|path| {
-                TsconfigDiscovery::Manual(TsconfigOptions {
-                    config_file: path.as_std_path().to_owned(),
-                    references: TsconfigReferences::Auto,
-                })
-            }),
-            ..ResolveOptions::default()
-        };
-        let oxc_resolver = Resolver::new(resolve_options);
+        let resolvers = ModuleResolvers::new(options);
         // A tsconfig that can't be read or parsed would otherwise fail every aliased import one by one.
-        let tsconfig_diagnostic = options.tsconfig_path.as_ref().and_then(|path| {
-            let error = oxc_resolver.resolve_tsconfig(path.as_std_path()).err()?;
+        let tsconfig_diagnostic = governing_tsconfig(options).and_then(|path| {
+            let error = resolvers.main.resolve_tsconfig(path.as_std_path()).err()?;
             Some(
                 Diagnostic::new(
                     DiagnosticSeverity::Warning,
@@ -310,7 +330,8 @@ impl ResolutionContext {
             import_map: Arc::new(ImportResolutionMap::build(&global)),
             named_types,
             global,
-            oxc_resolver: Arc::new(oxc_resolver),
+            oxc_resolver: Arc::new(resolvers.main),
+            types_first_resolver: Arc::new(resolvers.types_first),
             tsconfig_diagnostic,
             extra_builtins: options.extra_builtins.clone(),
             enum_bare_index,
@@ -318,8 +339,79 @@ impl ResolutionContext {
             html_attributes: options.html_attributes,
             ambient_global_files,
             module_resolutions: Default::default(),
+            interface_chains: Default::default(),
+            dependencies: None,
+            collapse_inherited_props: options.collapse_inherited_props,
         }
     }
+
+    /// This context over a loaded dependency layer: imports and re-exports of dependency files come from it. The
+    /// caller sets the same layer as its `NamedTypeIndex` fallback.
+    pub(crate) fn with_dependencies(mut self, layer: Option<Arc<crate::dependency_types::DependencyLayer>>) -> Self {
+        if let Some(layer) = &layer {
+            // Built just above and not yet shared, so this never copies the map.
+            if let Some(import_map) = Arc::get_mut(&mut self.import_map) {
+                import_map.fallback = Some(layer.import_map.clone());
+            }
+        }
+        self.dependencies = layer;
+        self
+    }
+
+    /// Whether `file` is a loaded dependency file.
+    pub(crate) fn is_dependency_file(&self, file: &Utf8Path) -> bool {
+        self.dependencies.as_ref().is_some_and(|layer| layer.is_dependency_file(file))
+    }
+
+    /// Whether this run can collapse any source; `expand_all` is set only then, since it splits shared chains.
+    pub(crate) fn can_collapse(&self) -> bool {
+        use crate::pipeline::CollapseInheritedProps;
+        match self.collapse_inherited_props {
+            CollapseInheritedProps::Dependencies => self.dependencies.is_some(),
+            CollapseInheritedProps::All => true,
+            CollapseInheritedProps::None => false,
+        }
+    }
+
+    /// Whether a source declaring `declared` props in `file`, reached at `depth`, is recorded as a layer instead of
+    /// expanded (ADR 0012). Depth 0 is the component's own props type. React's and TypeScript's own declarations stay
+    /// with `html_attributes` even under `All`.
+    pub(crate) fn collapses(&self, file: &Utf8Path, declared: usize, depth: u8, state: &ResolveState) -> bool {
+        use crate::pipeline::CollapseInheritedProps;
+        depth > 0
+            && declared > COLLAPSE_THRESHOLD
+            && !state.expand_all
+            && match self.collapse_inherited_props {
+                CollapseInheritedProps::Dependencies => self.is_dependency_file(file),
+                CollapseInheritedProps::All => {
+                    self.is_dependency_file(file) || !file.as_str().contains("/node_modules/")
+                }
+                CollapseInheritedProps::None => false,
+            }
+    }
+}
+
+/// Storybook's react-component-meta hides a dependency source contributing more than this many props.
+pub(crate) const COLLAPSE_THRESHOLD: usize = 30;
+
+/// Changes whenever the options could change what a specifier resolves to: the resolver configuration, the governing
+/// tsconfig and its modification time, and the build. Keys the dependency loader's persisted index (ADR 0011).
+pub(crate) fn resolution_fingerprint(options: &PipelineOptions) -> u64 {
+    let tsconfig = governing_tsconfig(options);
+    let tsconfig_mtime = tsconfig
+        .as_ref()
+        .and_then(|path| std::fs::metadata(path).ok()?.modified().ok())
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|age| age.as_nanos());
+    let text = format!(
+        "{:?}|{:?}|{:?}|{}",
+        resolve_options(options),
+        tsconfig,
+        tsconfig_mtime,
+        env!("CALIPER_SOURCE_FINGERPRINT"),
+    );
+    text.bytes()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3))
 }
 
 /// Resolve TypeScript's own `lib.es5.d.ts`/`lib.dom.d.ts` paths for the given
@@ -339,15 +431,118 @@ pub fn compute_ambient_global_files(options: &PipelineOptions) -> Vec<Utf8PathBu
 /// wiring needs this to know which file to parse and merge, before a
 /// `ResolutionContext` (which needs the already-merged `GlobalSourceData`) can
 /// exist yet.
-pub fn resolve_package_dts_path(from_dir: &camino::Utf8Path, package_name: &str) -> Option<String> {
-    let resolve_options = ResolveOptions {
-        condition_names: vec!["types".into(), "import".into(), "require".into(), "default".into()],
-        main_fields: vec!["types".into(), "typings".into(), "module".into(), "main".into()],
-        extensions: vec![".ts".into(), ".tsx".into(), ".d.ts".into(), ".js".into()],
-        ..ResolveOptions::default()
+pub fn resolve_package_dts_path(
+    from_dir: &camino::Utf8Path,
+    package_name: &str,
+    options: &PipelineOptions,
+) -> Option<String> {
+    let resolvers = ModuleResolvers::new(options);
+    // Resolved as if imported by a file in `from_dir`: the declaration resolver walks up from a file's directory.
+    let importing_file = from_dir.join("index.ts");
+    react::resolve_package_types_file(&resolvers.main, &resolvers.types_first, &importing_file, package_name)
+}
+
+/// The two resolvers of a run, configured the way TypeScript resolves this project's modules (`resolve_options`).
+pub(crate) struct ModuleResolvers {
+    pub(crate) main: Resolver,
+    /// Only `types` and the custom conditions: `resolve_dts` takes the first `exports` key that matches any condition,
+    /// so a package listing `"import"` before `"types"` resolves to JavaScript; this one reaches its declarations.
+    pub(crate) types_first: Resolver,
+}
+
+impl ModuleResolvers {
+    pub(crate) fn new(options: &PipelineOptions) -> Self {
+        let main = resolve_options(options);
+        let custom = custom_conditions(options);
+        let types_first =
+            ResolveOptions { condition_names: std::iter::once("types".into()).chain(custom).collect(), ..main.clone() };
+        ModuleResolvers { main: Resolver::new(main), types_first: Resolver::new(types_first) }
+    }
+}
+
+/// Module resolution as TypeScript does it for this project. The resolver reads the tsconfig itself (comments,
+/// `extends`, `baseUrl`, `paths` wildcards): the configured one, or else the nearest one above each importing file.
+/// The governing tsconfig's `customConditions` apply, ESM and CommonJS declaration files resolve, and an import written
+/// with a JavaScript extension (`./button.js`) finds its TypeScript source.
+fn resolve_options(options: &PipelineOptions) -> ResolveOptions {
+    let condition_names = ["types", "import", "require", "default"]
+        .into_iter()
+        .map(String::from)
+        .chain(custom_conditions(options))
+        .collect();
+    let tsconfig = match &options.tsconfig_path {
+        Some(path) => TsconfigDiscovery::Manual(TsconfigOptions {
+            config_file: path.as_std_path().to_owned(),
+            references: TsconfigReferences::Auto,
+        }),
+        None => TsconfigDiscovery::Auto,
     };
-    let resolver = Resolver::new(resolve_options);
-    react::resolve_package_types_file(&resolver, from_dir, package_name)
+    let aliases = |js: &str, ts: &[&str]| (js.to_owned(), ts.iter().map(|ext| (*ext).to_owned()).collect());
+    ResolveOptions {
+        condition_names,
+        main_fields: vec!["types".into(), "typings".into(), "module".into(), "main".into()],
+        extensions: [".ts", ".tsx", ".d.ts", ".d.mts", ".d.cts", ".js"].map(String::from).to_vec(),
+        extension_alias: vec![
+            aliases(".js", &[".ts", ".tsx", ".d.ts", ".js"]),
+            aliases(".jsx", &[".tsx", ".jsx"]),
+            aliases(".mjs", &[".mts", ".d.mts", ".mjs"]),
+            aliases(".cjs", &[".cts", ".d.cts", ".cjs"]),
+        ],
+        tsconfig: Some(tsconfig),
+        ..ResolveOptions::default()
+    }
+}
+
+/// The tsconfig that governs the run: the configured one, or the nearest `tsconfig.json` above the first source
+/// directory.
+fn governing_tsconfig(options: &PipelineOptions) -> Option<Utf8PathBuf> {
+    if let Some(path) = &options.tsconfig_path {
+        return Some(path.clone());
+    }
+    let first = Utf8PathBuf::from_path_buf(std::fs::canonicalize(options.src_dirs.first()?).ok()?).ok()?;
+    first.ancestors().map(|dir| dir.join("tsconfig.json")).find(|candidate| candidate.is_file())
+}
+
+/// `compilerOptions.customConditions` of the governing tsconfig, or of the nearest config it extends that sets them.
+/// `oxc_resolver` does not read them, and workspaces such as Chakra's and React Spectrum's point their packages'
+/// `exports` at TypeScript sources only through them.
+fn custom_conditions(options: &PipelineOptions) -> Vec<String> {
+    let mut next = governing_tsconfig(options);
+    // Bounds an `extends` cycle.
+    for _ in 0..16 {
+        let Some(path) = next.take() else { break };
+        let Some(config) = read_tsconfig_json(&path) else { break };
+        if let Some(conditions) = config.pointer("/compilerOptions/customConditions").and_then(|v| v.as_array()) {
+            return conditions.iter().filter_map(|c| c.as_str().map(str::to_owned)).collect();
+        }
+        // TypeScript applies an array of bases in order, so the last one that sets an option wins.
+        let extends: Vec<&str> = match config.get("extends") {
+            Some(serde_json::Value::String(base)) => vec![base.as_str()],
+            Some(serde_json::Value::Array(bases)) => bases.iter().rev().filter_map(|b| b.as_str()).collect(),
+            _ => Vec::new(),
+        };
+        let dir = path.parent().map(Utf8Path::to_owned).unwrap_or_default();
+        next = extends.into_iter().find_map(|base| tsconfig_base_path(&dir, base));
+    }
+    Vec::new()
+}
+
+/// Where an `extends` entry points: a relative path, with `.json` implied, or a package's tsconfig.
+fn tsconfig_base_path(dir: &Utf8Path, base: &str) -> Option<Utf8PathBuf> {
+    if base.starts_with('.') || base.starts_with('/') {
+        let path = dir.join(base);
+        let path = if path.extension() == Some("json") { path } else { Utf8PathBuf::from(format!("{path}.json")) };
+        return path.is_file().then_some(path);
+    }
+    let found = Resolver::new(ResolveOptions::default()).resolve(dir.as_std_path(), base).ok()?;
+    Utf8PathBuf::from_path_buf(found.into_path_buf()).ok()
+}
+
+/// A tsconfig as JSON: comments and trailing commas removed the way `oxc_resolver` removes them.
+fn read_tsconfig_json(path: &Utf8Path) -> Option<serde_json::Value> {
+    let mut bytes = std::fs::read(path).ok()?;
+    json_strip_comments::strip_slice(&mut bytes).ok()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
 /// Where TypeScript's lib files were found; see [`resolve_ts_lib_paths`].
@@ -473,13 +668,13 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
     );
 
     // Build props BTreeMap — own props win over inherited props with same name.
-    let mut props: BTreeMap<String, ParsedProp> = BTreeMap::new();
+    let mut props: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
     for prop in chain.props {
         props.entry(prop.name.clone()).or_insert(prop);
     }
 
     // Populate notable_inherited from HTML element layers and non-HTML inherited layers.
-    let mut notable_inherited: BTreeMap<String, ParsedProp> = BTreeMap::new();
+    let mut notable_inherited: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
     for layer in &chain.inheritance {
         if let Some(ref element) = layer.html_element {
             // Curated-mode synthesis only: Full mode already merged the real
@@ -501,7 +696,7 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
                 let prop_type = html::infer_html_attr_prop_type(attr_name);
                 notable_inherited.insert(
                     attr_name.to_string(),
-                    ParsedProp::new(
+                    Arc::new(ParsedProp::new(
                         attr_name.to_string(),
                         prop_type,
                         false,
@@ -513,16 +708,15 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
                             file_name: "node_modules/@types/react/index.d.ts".to_string(),
                         }),
                         vec![],
-                    ),
+                    )),
                 );
             }
-        } else {
-            // For non-HTML layers: add inherited props from chain.inherited_by_name
-            for (name, prop) in &chain.inherited_by_name {
-                if !props.contains_key(name) && !notable_inherited.contains_key(name) {
-                    notable_inherited.insert(name.clone(), prop.clone());
-                }
-            }
+        }
+    }
+    // A collapsed source's notable props (ADR 0012); the only non-HTML layers.
+    for prop in &chain.notable {
+        if !props.contains_key(&prop.name) && !notable_inherited.contains_key(&prop.name) {
+            notable_inherited.insert(prop.name.clone(), prop.clone());
         }
     }
 
@@ -549,14 +743,18 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
 
 // ─── Intermediate Resolution Result ──────────────────────────────────────────
 
-/// Result of resolving a props chain (including extends).
+/// Result of resolving a props chain (including extends). Props are shared: a parent's props move into every chain
+/// that inherits them, and into the component, without being copied.
+#[derive(Clone)]
 struct ResolvedChain {
     /// Resolved props (may include inherited props).
-    props: Vec<ParsedProp>,
+    props: Vec<Arc<ParsedProp>>,
     /// Inheritance layers, outermost first.
     inheritance: Vec<InheritedLayer>,
     /// Inherited props keyed by name — for notable_inherited population.
-    inherited_by_name: FxHashMap<String, ParsedProp>,
+    inherited_by_name: FxHashMap<String, Arc<ParsedProp>>,
+    /// The notable props of collapsed sources, which are not in `props`.
+    notable: Vec<Arc<ParsedProp>>,
     /// Type names that could not be resolved.
     composes: Vec<String>,
     /// Discriminant prop name if this is a discriminated union.
@@ -575,6 +773,7 @@ impl ResolvedChain {
             props: Vec::new(),
             inheritance: Vec::new(),
             inherited_by_name: FxHashMap::default(),
+            notable: Vec::new(),
             composes: Vec::new(),
             discriminant_prop: None,
         }
@@ -604,7 +803,7 @@ impl ResolvedChain {
 
         for prop in parent.props {
             if !existing.contains(&prop.name) {
-                self.props.push(prop.clone());
+                self.props.push(Arc::clone(&prop));
             }
             // Always populate inherited_by_name so notable lookup works.
             self.inherited_by_name.entry(prop.name.clone()).or_insert(prop);
@@ -616,6 +815,7 @@ impl ResolvedChain {
         self.inheritance = new_inheritance;
 
         self.composes.extend(parent.composes);
+        self.notable.extend(parent.notable);
         for (name, prop) in parent.inherited_by_name {
             self.inherited_by_name.entry(name).or_insert(prop);
         }
@@ -627,6 +827,96 @@ impl ResolvedChain {
         if self.discriminant_prop.is_none() {
             self.discriminant_prop = parent.discriminant_prop;
         }
+    }
+
+    /// Merge the next member of an intersection into self. Unlike an extended interface's, a prop both declare keeps
+    /// both declarations, as TypeScript intersects them.
+    fn intersect_member(&mut self, mut member: ResolvedChain) {
+        if !self.props.is_empty() && !member.props.is_empty() {
+            let theirs: FxHashMap<&str, usize> =
+                member.props.iter().enumerate().map(|(i, prop)| (prop.name.as_str(), i)).collect();
+            let mut merged = vec![false; member.props.len()];
+            for prop in &mut self.props {
+                if let Some(&i) = theirs.get(prop.name.as_str()) {
+                    *prop = Arc::new(intersect_declarations(prop, &member.props[i]));
+                    merged[i] = true;
+                }
+            }
+            let mut merged = merged.into_iter();
+            member.props.retain(|_| !merged.next().unwrap_or(false));
+        }
+        self.merge_parent(member);
+    }
+}
+
+/// One prop two intersection members declare, as TypeScript sees it: both types, each once; required when either
+/// requires it; documented by the first declaration that has documentation.
+fn intersect_declarations(first: &ParsedProp, second: &ParsedProp) -> ParsedProp {
+    let members = |prop_type: &PropType| match prop_type {
+        PropType::Intersection(members) => members.clone(),
+        other => vec![other.clone()],
+    };
+    let mut types = members(&first.prop_type);
+    for member in members(&second.prop_type) {
+        if !types.contains(&member) {
+            types.push(member);
+        }
+    }
+    let prop_type = match <[PropType; 1]>::try_from(types) {
+        Ok([only]) => only,
+        Err(types) => common_literals(&types).unwrap_or(PropType::Intersection(types)),
+    };
+    let documented = if first.description.is_empty() && first.tags.is_empty() { second } else { first };
+    let mut declarations = first.declarations.clone();
+    for declaration in &second.declarations {
+        if !declarations.contains(declaration) {
+            declarations.push(declaration.clone());
+        }
+    }
+    ParsedProp::new(
+        first.name.clone(),
+        prop_type,
+        first.required || second.required,
+        first.default_value.clone().or_else(|| second.default_value.clone()),
+        documented.description.clone(),
+        documented.tags.clone(),
+        first.parent.clone().or_else(|| second.parent.clone()),
+        declarations,
+    )
+}
+
+/// The intersection of types made only of literals, as TypeScript reduces it: the values every one of them has
+/// (`("a" | "b" | null) & ("a" | "c")` is `"a"`). `None` when any is not such a type.
+fn common_literals(types: &[PropType]) -> Option<PropType> {
+    let (first, rest) = types.split_first()?;
+    let rest: Vec<Vec<PropType>> = rest.iter().map(literal_values).collect::<Option<_>>()?;
+    let values = literal_values(first)?;
+    let total = values.len();
+    let mut common: Vec<PropType> =
+        values.into_iter().filter(|value| rest.iter().all(|values| values.contains(value))).collect();
+    Some(match common.len() {
+        0 => PropType::Never,
+        1 => common.remove(0),
+        // Spelled as the first declaration spells it when the others remove nothing.
+        len if len == total => first.clone(),
+        _ => PropType::Union(common),
+    })
+}
+
+/// The values of a type made only of literals, or `None`.
+fn literal_values(prop_type: &PropType) -> Option<Vec<PropType>> {
+    match prop_type {
+        PropType::StringLiteral(_) | PropType::NumberLiteral(_) | PropType::BoolLiteral(_) | PropType::Null => {
+            Some(vec![prop_type.clone()])
+        }
+        PropType::Boolean => Some(vec![PropType::BoolLiteral(false), PropType::BoolLiteral(true)]),
+        PropType::LiteralUnion { members, .. } => {
+            Some(members.iter().map(|member| PropType::StringLiteral(member.clone())).collect())
+        }
+        PropType::Union(members) => {
+            members.iter().map(literal_values).collect::<Option<Vec<_>>>().map(|values| values.concat())
+        }
+        _ => None,
     }
 }
 

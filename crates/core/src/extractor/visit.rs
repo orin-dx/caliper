@@ -63,10 +63,12 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     fn visit_export_named_declaration(&mut self, node: &ExportNamedDeclaration<'a>) {
         for spec in &node.specifiers {
             // Recorded as a local declaration for now; `finish()` turns it into a re-export when `local` is an import.
-            self.pending_local_exports.push((self.data.exports.len(), spec.local.name().as_str().to_owned()));
+            let (local, exported) = (spec.local.name().as_str(), spec.exported.name().as_str());
+            self.pending_local_exports.push((self.data.exports.len(), local.to_owned()));
             self.data.exports.push(LexedExport::LocalDeclaration {
-                name: spec.exported.name().as_str().to_owned(),
+                name: exported.to_owned(),
                 is_type_only: node.export_kind.is_type() || spec.export_kind.is_type(),
+                declared_as: (local != exported).then(|| local.to_owned()),
             });
         }
 
@@ -93,7 +95,11 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     /// `export type { A }`, and `export enum` declares a runtime value.
     fn visit_export_declaration(&mut self, node: &ExportDeclaration<'a>) {
         if let Some(name) = declaration_name(&node.declaration) {
-            self.data.exports.push(LexedExport::LocalDeclaration { name: name.to_owned(), is_type_only: false });
+            self.data.exports.push(LexedExport::LocalDeclaration {
+                name: name.to_owned(),
+                is_type_only: false,
+                declared_as: None,
+            });
         }
 
         // Walk the declaration so sub-visitors (interface, type alias, etc.) fire

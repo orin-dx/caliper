@@ -23,6 +23,8 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
         html_attributes,
         config_path,
         extra_builtins: &args.extra_builtins,
+        load_dependencies: args.load_dependencies,
+        collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
 
     let pb = if !quiet && !args.json {

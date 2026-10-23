@@ -30,6 +30,7 @@ arc-swap.workspace         = true
 camino.workspace           = true
 serde.workspace            = true
 serde_json.workspace       = true
+json-strip-comments.workspace = true
 rmp-serde.workspace        = true
 rayon.workspace            = true
 ignore.workspace           = true
@@ -39,7 +40,6 @@ criterion.workspace        = true
 insta.workspace            = true
 tempfile.workspace          = true
 rstest.workspace            = true
-trybuild                    = "1"
 
 [[bench]]
 name = "extraction"
