@@ -187,9 +187,12 @@ pub(super) fn resolve_props_chain(
         file: Some(consuming_file.to_string()),
         line: None,
         column: None,
-        help: Some(
-            "Type may be in an unresolvable cross-package location. Check that the package is installed.".into(),
-        ),
+        help: Some(super::unresolved_type_help(
+            type_name,
+            consuming_file,
+            ctx,
+            "Type may be in an unresolvable cross-package location. Check that the package is installed.",
+        )),
         code: DiagnosticCode::UnresolvableImport,
         affects: Vec::new(),
     });

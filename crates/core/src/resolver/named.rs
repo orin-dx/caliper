@@ -216,7 +216,12 @@ fn resolve_named_uncycled(
         file: Some(consuming_file.to_string()),
         line: None,
         column: None,
-        help: Some("Check that the package is installed and its types are resolvable.".into()),
+        help: Some(super::unresolved_type_help(
+            name.as_str(),
+            consuming_file,
+            ctx,
+            "Check that the package is installed and its types are resolvable.",
+        )),
         code: DiagnosticCode::UnresolvableImport,
         affects: Vec::new(),
     });

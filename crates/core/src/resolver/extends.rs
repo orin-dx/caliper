@@ -131,7 +131,9 @@ pub(super) fn component_props_of(
         .global
         .component_mappings
         .iter()
-        .find(|m| m.file_path == canonical_file && m.component_name == canonical_name);
+        .find(|m| m.file_path == canonical_file && m.component_name == canonical_name)
+        // A dependency's component, from the loaded layer's value index; never emitted itself (ADR 0010).
+        .or_else(|| ctx.dependencies.as_ref()?.component(&canonical_file, &canonical_name));
     match target {
         Some(target) => resolve_props_chain(
             target.props_type_name.as_str(),

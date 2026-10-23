@@ -42,6 +42,7 @@ mod template;
 
 #[cfg(test)]
 pub(crate) use import::{follow_reexports_call_count, reset_follow_reexports_call_count};
+pub(crate) use import::{resolve_module_with, ModuleResolution};
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -84,6 +85,31 @@ pub(super) fn unresolved_location_note(
         format!(" (resolved to '{canonical_name}' in '{canonical_file}')")
     } else {
         String::new()
+    }
+}
+
+/// The help for an unresolvable type: why the dependency loader found no declaration for it, when it tried, or
+/// `otherwise`.
+pub(super) fn unresolved_type_help(
+    type_name: &str,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+    otherwise: &str,
+) -> String {
+    let reason = ctx.dependencies.as_ref().and_then(|layer| {
+        let (head, rest) = type_name.split_once('.').map_or((type_name, None), |(head, rest)| (head, Some(rest)));
+        let binding = ctx.import_map.find_import(file, head)?;
+        let name = match (binding.exported_name.as_str(), rest) {
+            ("*", Some(rest)) => rest.to_owned(),
+            ("*", None) => return None,
+            (exported, Some(rest)) => format!("{exported}.{rest}"),
+            (exported, None) => exported.to_owned(),
+        };
+        layer.unresolved_reason(file.parent()?, &binding.specifier, &name)
+    });
+    match reason {
+        Some(reason) => format!("Dependency types are loaded, but for '{type_name}' {}.", reason.describe()),
+        None => otherwise.to_owned(),
     }
 }
 
@@ -236,6 +262,8 @@ pub struct ResolutionContext {
     pub(crate) tsconfig_diagnostic: Option<Diagnostic>,
     /// Interface chains already resolved this run, shared by the components that inherit them.
     pub(crate) interface_chains: memo::InterfaceChains,
+    /// Loaded dependency declarations (`PipelineOptions::load_dependencies`, ADR 0010).
+    pub(crate) dependencies: Option<Arc<crate::dependency_types::DependencyLayer>>,
 }
 
 impl ResolutionContext {
@@ -311,8 +339,47 @@ impl ResolutionContext {
             ambient_global_files,
             module_resolutions: Default::default(),
             interface_chains: Default::default(),
+            dependencies: None,
         }
     }
+
+    /// This context over a loaded dependency layer: imports and re-exports of dependency files come from it. The
+    /// caller sets the same layer as its `NamedTypeIndex` fallback.
+    pub(crate) fn with_dependencies(mut self, layer: Option<Arc<crate::dependency_types::DependencyLayer>>) -> Self {
+        if let Some(layer) = &layer {
+            // Built just above and not yet shared, so this never copies the map.
+            if let Some(import_map) = Arc::get_mut(&mut self.import_map) {
+                import_map.fallback = Some(layer.import_map.clone());
+            }
+        }
+        self.dependencies = layer;
+        self
+    }
+
+    /// Whether `file` is a loaded dependency file.
+    pub(crate) fn is_dependency_file(&self, file: &Utf8Path) -> bool {
+        self.dependencies.as_ref().is_some_and(|layer| layer.is_dependency_file(file))
+    }
+}
+
+/// Changes whenever the options could change what a specifier resolves to: the resolver configuration, the governing
+/// tsconfig and its modification time, and the build. Keys the dependency loader's persisted index (ADR 0011).
+pub(crate) fn resolution_fingerprint(options: &PipelineOptions) -> u64 {
+    let tsconfig = governing_tsconfig(options);
+    let tsconfig_mtime = tsconfig
+        .as_ref()
+        .and_then(|path| std::fs::metadata(path).ok()?.modified().ok())
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|age| age.as_nanos());
+    let text = format!(
+        "{:?}|{:?}|{:?}|{}",
+        resolve_options(options),
+        tsconfig,
+        tsconfig_mtime,
+        env!("CALIPER_SOURCE_FINGERPRINT"),
+    );
+    text.bytes()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3))
 }
 
 /// Resolve TypeScript's own `lib.es5.d.ts`/`lib.dom.d.ts` paths for the given
