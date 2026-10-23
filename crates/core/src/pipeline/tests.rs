@@ -669,9 +669,9 @@ export function Button(props: ButtonProps) { return null; }
 }
 
 /// `ComponentProps<"div">` lists none of the div's attributes, but TypeScript still intersects one another member
-/// declares. Only Full mode reads React's declarations, so curated mode keeps the other member's type alone.
+/// declares. Curated mode reads React's declarations for this lookup too.
 #[test]
-fn a_prop_beside_an_html_layer_also_has_the_elements_attribute_type_in_full_mode() {
+fn a_prop_beside_an_html_layer_also_has_the_elements_attribute_type_in_full_and_curated_mode() {
     let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
     write_file(
         &tmp,
@@ -704,7 +704,17 @@ export function Omitted(props: Omit<React.ComponentProps<"div">, "onTimeUpdate">
         (format!("({legend}) & ({dom})"), declared(&["LegendProps", "DOMAttributes"]))
     );
     assert_eq!(on_time_update(&full, "Omitted"), (legend.to_owned(), declared(&["LegendProps"])));
-    assert_eq!(on_time_update(&curated, "Legend"), (legend.to_owned(), declared(&["LegendProps"])));
+    // Curated mode resolves nothing else from React's declarations, so the attribute keeps its alias name.
+    let dom = "ReactEventHandler<HTMLDivElement>";
+    assert_eq!(
+        on_time_update(&curated, "Legend"),
+        (format!("{dom} & ({legend})"), declared(&["DOMAttributes", "LegendProps"]))
+    );
+    assert_eq!(
+        on_time_update(&curated, "Flipped"),
+        (format!("({legend}) & {dom}"), declared(&["LegendProps", "DOMAttributes"]))
+    );
+    assert_eq!(on_time_update(&curated, "Omitted"), (legend.to_owned(), declared(&["LegendProps"])));
 }
 
 // ── test_generic_svg_attributes_extends_resolves_to_its_element_in_full_mode ─

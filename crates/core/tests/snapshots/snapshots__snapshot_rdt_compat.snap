@@ -1781,7 +1781,7 @@ expression: value
     "componentsExtracted": 12,
     "componentsSkipped": 0,
     "filesParsed": 9,
-    "dtsFilesParsed": 2,
+    "dtsFilesParsed": 3,
     "dtsCacheHits": 0,
     "durationMs": 0,
     "tier1Count": 0,

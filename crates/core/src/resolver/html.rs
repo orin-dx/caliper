@@ -10,14 +10,15 @@ use super::collected::resolve_collected_type;
 use super::substitute::{build_substitution, substitute_alias, substitute_type};
 use super::ResolutionContext;
 
-/// `JSX.IntrinsicElements[element]` in React's own types at `react_file`, when this run has them: Full mode merges them;
-/// curated mode and the dependency loader leave them to the HTML layer.
+/// `JSX.IntrinsicElements[element]` in React's own types at `react_file`, when this run has them: Full mode merges them,
+/// curated mode indexes them apart (`ResolutionContext::react_index`), and `none` mode and the dependency loader don't
+/// read them.
 pub(super) fn intrinsic_element<'a>(
     element: &str,
     react_file: &Utf8Path,
     ctx: &'a ResolutionContext,
 ) -> Option<&'a CollectedType> {
-    let elements = ctx.named_types.lookup_interface_exact(react_file, "React.JSX.IntrinsicElements")?;
+    let elements = ctx.react_index().lookup_interface_exact(react_file, "React.JSX.IntrinsicElements")?;
     Some(&elements.props.iter().find(|prop| prop.name == element)?.collected_type)
 }
 
@@ -44,8 +45,8 @@ pub(super) fn react_attribute(
                 let key = key(&type_name);
                 // Defaulted parameters (`T = Element`) are not supplied, and need no warning.
                 let mut ignored = Vec::new();
-                if let Some(iface) = ctx.named_types.lookup_interface_exact(react_file, &key) {
-                    let params = ctx.named_types.lookup_interface_type_params_for(iface);
+                if let Some(iface) = ctx.react_index().lookup_interface_exact(react_file, &key) {
+                    let params = ctx.react_index().lookup_interface_type_params_for(iface);
                     let subst = params.map(|params| build_substitution(params, &args, react_file, &mut ignored));
                     let substituted =
                         |ty: &CollectedType| subst.as_ref().map_or_else(|| ty.clone(), |s| substitute_type(ty, s));
@@ -71,8 +72,8 @@ pub(super) fn react_attribute(
                         | ExtendsRef::Builtin { name, type_args, .. }) = extends;
                         CollectedType::Named { name: name.clone(), args: type_args.iter().map(substituted).collect() }
                     }));
-                } else if let Some(alias) = ctx.named_types.lookup_type_alias_exact(react_file, &key) {
-                    let alias = match ctx.named_types.lookup_type_alias_params(react_file, &key) {
+                } else if let Some(alias) = ctx.react_index().lookup_type_alias_exact(react_file, &key) {
+                    let alias = match ctx.react_index().lookup_type_alias_params(react_file, &key) {
                         Some(params) => {
                             substitute_alias(alias, &build_substitution(params, &args, react_file, &mut ignored))
                         }
