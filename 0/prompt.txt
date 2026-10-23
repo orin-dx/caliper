@@ -1,0 +1,1 @@
+Let's do all of the research necessary to understand these. We want to have a good understanding to appropriately spec and plan. We want to maintain a good architecture and think of our semantic models right?
