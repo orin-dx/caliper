@@ -117,7 +117,7 @@ pub(super) fn resolve_extends_ref(
 
 /// The props of the component bound to `name` as seen from `file` (`typeof Button`), found through the component
 /// mappings, with a warning when no detected component has that name.
-fn component_props_of(
+pub(super) fn component_props_of(
     name: &str,
     file: &Utf8Path,
     mapping: &ComponentMapping,
@@ -131,7 +131,9 @@ fn component_props_of(
         .global
         .component_mappings
         .iter()
-        .find(|m| m.file_path == canonical_file && m.component_name == canonical_name);
+        .find(|m| m.file_path == canonical_file && m.component_name == canonical_name)
+        // A dependency's component, from the loaded layer's value index; never emitted itself (ADR 0010).
+        .or_else(|| ctx.dependencies.as_ref()?.component(&canonical_file, &canonical_name));
     match target {
         Some(target) => resolve_props_chain(
             target.props_type_name.as_str(),

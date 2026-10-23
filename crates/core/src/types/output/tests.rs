@@ -69,10 +69,14 @@ fn to_tagged_value(pt: &PropType) -> serde_json::Value {
             "name": name.as_str(),
             "args": args.iter().map(|a| to_tagged_value(a)).collect::<Vec<_>>()
         }),
-        PropType::EventHandler { event_type, param_name } => serde_json::json!({
-            "kind": "eventHandler",
-            "eventType": event_type,
-            "paramName": param_name
+        PropType::Function { type_params, params, return_type } => serde_json::json!({
+            "kind": "function",
+            "typeParams": type_params,
+            "params": params.iter().map(|p| serde_json::json!({
+                "name": p.name,
+                "type": to_tagged_value(&p.param_type),
+            })).collect::<Vec<_>>(),
+            "returnType": to_tagged_value(return_type)
         }),
         PropType::Ref { element } => serde_json::json!({
             "kind": "ref",
@@ -111,13 +115,42 @@ fn to_tagged_value(pt: &PropType) -> serde_json::Value {
                 OpaqueReason::TemplateLiteral { expression } => {
                     serde_json::json!({"type": "templateLiteral", "expression": expression})
                 }
-                OpaqueReason::MultiParamFunction => serde_json::json!({"type": "multiParamFunction"}),
                 OpaqueReason::UnsupportedExpression => {
                     serde_json::json!({"type": "unsupportedExpression"})
                 }
             };
             serde_json::json!({"kind": "opaque", "raw": raw, "reason": reason_val})
         }
+    }
+}
+
+#[test]
+fn an_operand_is_parenthesized_where_typescript_needs_it() {
+    let callback = PropType::Function {
+        type_params: vec![],
+        params: vec![FunctionParam {
+            name: Some("theme".into()),
+            param_type: PropType::Named { name: "Theme".into(), args: vec![] },
+        }],
+        return_type: Box::new(PropType::CssProperties),
+    };
+    let either = PropType::Union(vec![PropType::String, PropType::Number]);
+    let cases = [
+        (
+            PropType::Union(vec![PropType::CssProperties, callback.clone()]),
+            "CSSProperties | ((theme: Theme) => CSSProperties)",
+        ),
+        (PropType::Array(Box::new(callback.clone())), "((theme: Theme) => CSSProperties)[]"),
+        (PropType::Array(Box::new(either.clone())), "(string | number)[]"),
+        (
+            PropType::Intersection(vec![either.clone(), PropType::Named { name: "A".into(), args: vec![] }]),
+            "(string | number) & A",
+        ),
+        (PropType::Union(vec![either, PropType::Null]), "string | number | null"),
+        (callback, "(theme: Theme) => CSSProperties"),
+    ];
+    for (ty, expected) in cases {
+        assert_eq!(ty.raw_string(), expected);
     }
 }
 
@@ -505,7 +538,7 @@ mod serde_key_casing_tests {
             vec![],
         );
         let mut props = BTreeMap::new();
-        props.insert("label".to_string(), prop);
+        props.insert("label".to_string(), std::sync::Arc::new(prop));
 
         let entry = ComponentEntry {
             display_name: "Widget".to_string(),
@@ -569,7 +602,7 @@ mod component_entry_roundtrip_tests {
             vec![],
         );
         let mut props = BTreeMap::new();
-        props.insert("label".to_string(), prop);
+        props.insert("label".to_string(), std::sync::Arc::new(prop));
 
         let original = ComponentEntry {
             display_name: "Widget".to_string(),
@@ -681,7 +714,6 @@ mod streaming_serialize_tests {
             OpaqueReason::DepthExceeded,
             OpaqueReason::IndexedAccess { expression: "T[\"k\"]".into() },
             OpaqueReason::TemplateLiteral { expression: "`a-${B}`".into() },
-            OpaqueReason::MultiParamFunction,
             OpaqueReason::UnsupportedExpression,
         ];
         let mut shapes = vec![
@@ -717,8 +749,18 @@ mod streaming_serialize_tests {
                 description: "The x.".into(),
             }]),
             PropType::Named { name: "Box".into(), args: vec![PropType::StringLiteral("div".into())] },
-            PropType::EventHandler { event_type: "MouseEvent".into(), param_name: Some("event".into()) },
-            PropType::EventHandler { event_type: "MouseEvent".into(), param_name: None },
+            PropType::Function {
+                type_params: vec!["T".into()],
+                params: vec![
+                    FunctionParam {
+                        name: Some("event".into()),
+                        param_type: PropType::Named { name: "MouseEvent".into(), args: vec![] },
+                    },
+                    FunctionParam { name: None, param_type: PropType::String },
+                ],
+                return_type: Box::new(PropType::ReactNode),
+            },
+            PropType::Function { type_params: vec![], params: vec![], return_type: Box::new(PropType::Void) },
             PropType::Ref { element: Some("HTMLDivElement".into()) },
             PropType::Ref { element: None },
             PropType::HtmlAttributes { element: "button".into(), omitted: vec!["type".into()] },

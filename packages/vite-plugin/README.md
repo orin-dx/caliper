@@ -37,6 +37,8 @@ import.meta.hot?.on(
 )
 ```
 
+Pass `loadDependencies: true` to resolve the types your props import from installed packages; by default they stay named references.
+
 In `vite build --watch`, a change to any file under `srcDirs` triggers a rebuild, even one no bundle module imports. A build fails if extraction fails.
 
 Extraction runs on OXC through [`caliper-docgen-napi`](https://www.npmjs.com/package/caliper-docgen-napi), so a single-file update takes about 2ms. Requires Vite 7 or 8. The module uses the canonical output format, not the `react-docgen-typescript` shape.

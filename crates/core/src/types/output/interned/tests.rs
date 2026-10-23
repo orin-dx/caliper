@@ -19,7 +19,8 @@ fn prop(name: &str, default: Option<&str>) -> ParsedProp {
 }
 
 fn component(name: &str, props: &[ParsedProp], notable: &[ParsedProp]) -> ComponentEntry {
-    let by_name = |props: &[ParsedProp]| props.iter().map(|p| (p.name.clone(), p.clone())).collect();
+    let by_name =
+        |props: &[ParsedProp]| props.iter().map(|p| (p.name.clone(), std::sync::Arc::new(p.clone()))).collect();
     ComponentEntry {
         display_name: name.to_string(),
         file_path: format!("/src/{name}.tsx").into(),
@@ -133,17 +134,16 @@ fn reading_an_id_missing_from_the_table_fails_naming_it() {
 fn two_different_props_with_one_id_fail_instead_of_sharing_an_entry() {
     let size = prop("size", None);
     let tone = prop("tone", None);
-    fn row(p: &ParsedProp) -> Row<'_> {
-        (p.name.as_str(), PropId(7), p, serde_json::to_vec(p).unwrap())
-    }
+    let json = |p: &ParsedProp| serde_json::to_vec(p).unwrap();
     let mut table = PropTable { entries: BTreeMap::new() };
 
-    let first: Result<_, serde_json::Error> = table.add(vec![row(&size)]);
-    assert_eq!(first.unwrap(), [("size", PropId(7))]);
-    let again: Result<_, serde_json::Error> = table.add(vec![row(&size)]);
-    assert_eq!(again.unwrap(), [("size", PropId(7))], "the same prop again shares the entry");
+    let first: Result<(), serde_json::Error> = table.add(&size, PropId(7), json(&size));
+    first.unwrap();
+    let again: Result<(), serde_json::Error> = table.add(&size, PropId(7), json(&size));
+    again.unwrap();
+    assert_eq!(table.entries.len(), 1, "the same prop again shares the entry");
 
-    let clash: Result<_, serde_json::Error> = table.add(vec![row(&tone)]);
+    let clash: Result<(), serde_json::Error> = table.add(&tone, PropId(7), json(&tone));
     let message = clash.unwrap_err().to_string();
     assert!(message.starts_with("prop 'tone' and a different prop have the same id 0000000000000007: "), "{message}");
     assert_eq!(table.entries.len(), 1);

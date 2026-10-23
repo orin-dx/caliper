@@ -10,6 +10,8 @@ fn args_for(src: &str, json: bool) -> crate::ExtractArgs {
         extra_builtins: vec![],
         include_unexported: false,
         json,
+        load_dependencies: false,
+        collapse_inherited_props: None,
     }
 }
 
@@ -373,7 +375,7 @@ fn component_with_props(name: &str, props: Vec<(&str, &str)>) -> caliper_docgen_
                     None,
                     vec![],
                 );
-                (prop_name.to_string(), prop)
+                (prop_name.to_string(), std::sync::Arc::new(prop))
             })
             .collect(),
         inheritance: vec![],
@@ -459,7 +461,7 @@ fn serialize_storybook_emits_exact_docgen_blocks() {
     );
     let mut entry = component_with_props("Widget", vec![]);
     entry.description = "A widget.".to_string();
-    entry.props.insert("label".to_string(), label);
+    entry.props.insert("label".to_string(), std::sync::Arc::new(label));
     let mut components = std::collections::BTreeMap::new();
     components.insert("Widget".to_string(), entry);
     let output = caliper_docgen_core::types::ExtractionOutput {
@@ -515,6 +517,8 @@ export function Button(props: ButtonProps) { return null; }
         extra_builtins: vec![],
         include_unexported: false,
         json: false,
+        load_dependencies: false,
+        collapse_inherited_props: None,
     };
 
     assert_eq!(cmd_extract(args, false, None).unwrap(), 0);

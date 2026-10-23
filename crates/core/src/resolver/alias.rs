@@ -1,6 +1,7 @@
 //! Type alias chain and type-level resolution.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use camino::Utf8Path;
 use rustc_hash::FxHashSet;
@@ -39,6 +40,7 @@ pub(super) fn resolve_type_alias_chain(
             };
             let omitted_set: FxHashSet<&str> = omitted.iter().map(String::as_str).collect();
             chain.props.retain(|p| !omitted_set.contains(p.name.as_str()));
+            chain.notable.retain(|p| !omitted_set.contains(p.name.as_str()));
             // Record omitted keys in the relevant inheritance layer.
             for layer in &mut chain.inheritance {
                 for key in &omitted {
@@ -51,7 +53,10 @@ pub(super) fn resolve_type_alias_chain(
         }
 
         CollectedTypeAlias::Pick { base, keys, file_path } => {
+            let expand_all = state.expand_all;
+            state.expand_all = expand_all || ctx.can_collapse();
             let mut chain = resolve_base_as_chain(base, file_path, mapping, ctx, state, depth);
+            state.expand_all = expand_all;
             let Some(picked) = resolve_key_set_or_warn("Pick", keys, file_path, mapping, ctx, state, depth) else {
                 chain.props.clear();
                 return chain;
@@ -64,8 +69,8 @@ pub(super) fn resolve_type_alias_chain(
         CollectedTypeAlias::Partial { base, file_path } => {
             let mut chain = resolve_base_as_chain(base, file_path, mapping, ctx, state, depth);
             // Make all props optional.
-            for prop in &mut chain.props {
-                prop.required = false;
+            for prop in chain.props.iter_mut().filter(|prop| prop.required) {
+                Arc::make_mut(prop).required = false;
             }
             chain
         }
@@ -73,8 +78,8 @@ pub(super) fn resolve_type_alias_chain(
         CollectedTypeAlias::Required { base, file_path } => {
             let mut chain = resolve_base_as_chain(base, file_path, mapping, ctx, state, depth);
             // Make all props required.
-            for prop in &mut chain.props {
-                prop.required = true;
+            for prop in chain.props.iter_mut().filter(|prop| !prop.required) {
+                Arc::make_mut(prop).required = true;
             }
             chain
         }
@@ -85,13 +90,7 @@ pub(super) fn resolve_type_alias_chain(
         }
 
         CollectedTypeAlias::Intersection { members, file_path } => {
-            // Merge all members' props.
-            let mut chain = ResolvedChain::empty();
-            for member in members {
-                let member_chain = resolve_base_as_chain(member, file_path, mapping, ctx, state, depth);
-                chain.merge_parent(member_chain);
-            }
-            chain
+            resolve_intersection_chain(members, file_path, mapping, ctx, state, depth)
         }
 
         CollectedTypeAlias::LiteralUnion { members, file_path } => {
@@ -166,12 +165,7 @@ pub(super) fn resolve_base_as_chain(
         // declared in a different file. Switch file context and continue.
         CollectedType::AtFile { file, inner } => resolve_base_as_chain(inner, file, mapping, ctx, state, depth),
         CollectedType::Intersection(members) => {
-            let mut chain = ResolvedChain::empty();
-            for member in members {
-                let sub = resolve_base_as_chain(member, file_path, mapping, ctx, state, depth);
-                chain.merge_parent(sub);
-            }
-            chain
+            resolve_intersection_chain(members, file_path, mapping, ctx, state, depth)
         }
         CollectedType::Object(fields) => {
             // Inline object type in an intersection: `ComponentPropsWithoutRef<'button'> & { asChild?: boolean }`
@@ -179,7 +173,7 @@ pub(super) fn resolve_base_as_chain(
             let mut chain = ResolvedChain::empty();
             for field in fields {
                 let prop_type = resolve_collected_type(&field.collected_type, file_path, ctx, state, depth);
-                chain.props.push(ParsedProp::new(
+                chain.props.push(Arc::new(ParsedProp::new(
                     field.name.clone(),
                     prop_type,
                     field.required,
@@ -188,7 +182,7 @@ pub(super) fn resolve_base_as_chain(
                     Default::default(),
                     None,
                     vec![],
-                ));
+                )));
             }
             chain
         }
@@ -256,6 +250,73 @@ pub(super) fn resolve_base_as_chain(
     }
 }
 
+/// Resolve an intersection's members and merge them as TypeScript does (`ResolvedChain::intersect_member`). An HTML layer
+/// lists none of its element's attributes but declares them all the same, so a prop another member declares also has the
+/// attribute's type when React's own declarations are loaded.
+fn resolve_intersection_chain(
+    members: &[CollectedType],
+    file_path: &Utf8Path,
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> ResolvedChain {
+    let mut chain = ResolvedChain::empty();
+    // HTML layers merged so far whose element's declarations this run has.
+    let mut layers: Vec<InheritedLayer> = Vec::new();
+    for member in members {
+        let mut member = resolve_base_as_chain(member, file_path, mapping, ctx, state, depth);
+        if !layers.is_empty() {
+            let listed: FxHashSet<&str> = chain.props.iter().map(|prop| prop.name.as_str()).collect();
+            for prop in member.props.iter_mut().filter(|prop| !listed.contains(prop.name.as_str())) {
+                for layer in &layers {
+                    if let Some(attribute) = layer_attribute(layer, &prop.name, ctx, state, depth) {
+                        *prop = Arc::new(super::intersect_declarations(&attribute, prop));
+                    }
+                }
+            }
+        }
+        let new_layers: Vec<InheritedLayer> = member
+            .inheritance
+            .iter()
+            .filter(|layer| layer.html_element.as_deref().is_some_and(|element| has_element(layer, element, ctx)))
+            .cloned()
+            .collect();
+        if !new_layers.is_empty() {
+            let own: FxHashSet<&str> = member.props.iter().map(|prop| prop.name.as_str()).collect();
+            for prop in chain.props.iter_mut().filter(|prop| !own.contains(prop.name.as_str())) {
+                for layer in &new_layers {
+                    if let Some(attribute) = layer_attribute(layer, &prop.name, ctx, state, depth) {
+                        *prop = Arc::new(super::intersect_declarations(prop, &attribute));
+                    }
+                }
+            }
+        }
+        layers.extend(new_layers);
+        chain.intersect_member(member);
+    }
+    chain
+}
+
+fn has_element(layer: &InheritedLayer, element: &str, ctx: &ResolutionContext) -> bool {
+    super::html::intrinsic_element(element, Utf8Path::new(&layer.file_name), ctx).is_some()
+}
+
+/// The declaration of attribute `name` an HTML layer's element has, unless the layer omits it.
+fn layer_attribute(
+    layer: &InheritedLayer,
+    name: &str,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> Option<ParsedProp> {
+    if layer.omitted.iter().any(|omitted| omitted == name) {
+        return None;
+    }
+    let element = layer.html_element.as_deref()?;
+    super::html::react_attribute(element, name, Utf8Path::new(&layer.file_name), ctx, state, depth)
+}
+
 /// Resolve a `CollectedTypeAlias::Union` — detect discriminated union if possible.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_union_alias(
@@ -269,7 +330,7 @@ pub(super) fn resolve_union_alias(
     use super::chain::find_discriminant_prop;
 
     // Collect all member chains for named types (only Named can be discriminated).
-    let named_members: Vec<(&str, Vec<ParsedProp>)> = members
+    let named_members: Vec<(&str, Vec<Arc<ParsedProp>>)> = members
         .iter()
         .filter_map(|m| {
             if let CollectedType::Named { name, .. } = m {
@@ -377,7 +438,7 @@ pub(super) fn resolve_union_alias(
     }
 
     ResolvedChain {
-        props: merged_props.into_values().collect(),
+        props: merged_props.into_values().map(Arc::new).collect(),
         discriminant_prop: discriminant,
         ..ResolvedChain::empty()
     }
@@ -388,14 +449,14 @@ pub(super) fn resolve_union_alias(
 /// distinct types contributed for each prop name, how many members declared
 /// it, and whether every member that declared it marked it required.
 fn record_variant_props(
-    props: &[ParsedProp],
+    props: &[Arc<ParsedProp>],
     merged_props: &mut BTreeMap<String, ParsedProp>,
     prop_types: &mut BTreeMap<String, Vec<PropType>>,
     seen_count: &mut BTreeMap<String, usize>,
     required_in_all: &mut BTreeMap<String, bool>,
 ) {
     for prop in props {
-        merged_props.entry(prop.name.clone()).or_insert_with(|| prop.clone());
+        merged_props.entry(prop.name.clone()).or_insert_with(|| ParsedProp::clone(prop));
 
         let types = prop_types.entry(prop.name.clone()).or_default();
         if !types.contains(&prop.prop_type) {
@@ -506,10 +567,11 @@ fn resolve_key_set(
             // A fresh cycle set: reading a type's keys is a separate question from the props walk that called it, which
             // has usually just visited the same type (`Omit<Base, keyof Base>` resolves `Base` first). Sharing the set
             // made `keyof Base` look circular and come back empty. Depth still bounds the recursion.
-            let mut branch_state = state.detached();
+            let mut branch_state =
+                ResolveState { expand_all: state.expand_all || ctx.can_collapse(), ..state.detached() };
             let chain = resolve_base_as_chain(target, file, mapping, ctx, &mut branch_state, depth + 1);
-            state.absorb(branch_state);
-            Some(chain.props.into_iter().map(|p| p.name).collect())
+            state.absorb_detached(branch_state);
+            Some(chain.props.iter().map(|p| p.name.clone()).collect())
         }
         CollectedType::Named { name, args } if (name == "Exclude" || name == "Extract") && args.len() == 2 => {
             let from = resolve_key_set(&args[0], file, mapping, ctx, state, depth + 1)?;
@@ -520,9 +582,7 @@ fn resolve_key_set(
         }
         // An unfilled type parameter (`Omit<T, "style" | PropsToOmit>` with no argument for `PropsToOmit`) contributes
         // no keys; its default is unknown to the extractor and is almost always `never`.
-        CollectedType::Named { name, args } if args.is_empty() && state.in_scope_type_params.contains(name) => {
-            Some(vec![])
-        }
+        CollectedType::Named { name, args } if args.is_empty() && state.has_type_param(name) => Some(vec![]),
         CollectedType::Named { name, args } => {
             let (canonical_file, _, matched) =
                 super::precedence::resolve_source_defined_or_known(name, &[], file, ctx, state);
