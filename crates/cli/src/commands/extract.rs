@@ -23,6 +23,8 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
         html_attributes,
         config_path,
         extra_builtins: &args.extra_builtins,
+        load_dependencies: args.load_dependencies,
+        collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
 
     let pb = if !quiet && !args.json {
@@ -54,7 +56,7 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
 
         let json = match args.format {
             crate::OutputFormat::Canonical => serde_json::to_string_pretty(&output).into_diagnostic()?,
-            crate::OutputFormat::Rdt => serialize_rdt(&output).into_diagnostic()?,
+            crate::OutputFormat::Rdt => serialize_rdt(&output, args.include_unexported).into_diagnostic()?,
             crate::OutputFormat::Toon => caliper_docgen_core::toon::render_output_toon(&output),
         };
 
@@ -73,9 +75,13 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
     Ok(exit_code)
 }
 
-/// `--format rdt`: react-docgen-typescript's shape, shared with the NAPI binding.
-pub fn serialize_rdt(output: &caliper_docgen_core::types::ExtractionOutput) -> serde_json::Result<String> {
-    caliper_docgen_core::pipeline::rdt::serialize(output)
+/// `--format rdt`: react-docgen-typescript's shape, shared with the NAPI binding. Like react-docgen-typescript, only
+/// exported components unless asked.
+pub fn serialize_rdt(
+    output: &caliper_docgen_core::types::ExtractionOutput,
+    include_unexported: bool,
+) -> serde_json::Result<String> {
+    caliper_docgen_core::pipeline::rdt::serialize(output, include_unexported)
 }
 
 #[cfg(test)]

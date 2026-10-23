@@ -402,6 +402,134 @@ export function FromQuieter(props: Quieter) { return null; }
     assert_eq!(y.parent.as_ref().map(|p| p.name.as_str()), Some("Base"));
 }
 
+// ── a prop two intersection members declare has both types ───────────────
+
+#[test]
+fn a_prop_two_intersection_members_declare_has_both_types() {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "Field.tsx",
+        r#"
+interface Native {
+  /** native doc */
+  onChange?: (event: Event) => void;
+  title?: string;
+  label?: string;
+  size?: "sm" | "md" | null;
+  align?: "start";
+}
+interface Custom {
+  onChange?: (value: string) => void;
+  title?: string;
+  label: string;
+  size?: "md" | "lg";
+  align?: "end";
+}
+interface Extended extends Native { onChange?: (value: string) => void }
+type FieldProps = Native & Custom;
+export function Field(props: Native & Custom) { return null; }
+export function Aliased(props: FieldProps) { return null; }
+export function Flipped(props: Custom & Native) { return null; }
+export function Child(props: Extended) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let props = |component: &str| {
+        output.components[component]
+            .props
+            .values()
+            .map(|p| {
+                let parent = p.parent.as_ref().map(|parent| parent.name.clone());
+                (p.name.clone(), p.prop_type.raw_string(), p.required, p.description.clone(), parent)
+            })
+            .collect::<Vec<_>>()
+    };
+    let prop = |name: &str, ty: &str, required: bool, description: &str, parent: &str| {
+        (name.to_owned(), ty.to_owned(), required, description.to_owned(), Some(parent.to_owned()))
+    };
+
+    // Literal types reduce to the values they share, as TypeScript reduces them.
+    let field = [
+        prop("align", "never", false, "", "Native"),
+        prop("label", "string", true, "", "Native"),
+        prop("onChange", "((event: Event) => void) & ((value: string) => void)", false, "native doc", "Native"),
+        prop("size", "\"md\"", false, "", "Native"),
+        prop("title", "string", false, "", "Native"),
+    ];
+    assert_eq!(props("Field"), field);
+    assert_eq!(props("Aliased"), field);
+    assert_eq!(
+        props("Flipped"),
+        [
+            prop("align", "never", false, "", "Custom"),
+            prop("label", "string", true, "", "Custom"),
+            prop("onChange", "((value: string) => void) & ((event: Event) => void)", false, "native doc", "Custom"),
+            prop("size", "\"md\"", false, "", "Custom"),
+            prop("title", "string", false, "", "Custom"),
+        ]
+    );
+    // An interface's own declaration replaces the one it extends instead.
+    assert_eq!(
+        props("Child"),
+        [
+            prop("align", "\"start\"", false, "", "Native"),
+            prop("label", "string", false, "", "Native"),
+            prop("onChange", "(value: string) => void", false, "native doc", "Extended"),
+            prop("size", "\"sm\" | \"md\" | null", false, "", "Native"),
+            prop("title", "string", false, "", "Native"),
+        ]
+    );
+}
+
+struct RedescribeButtonTone;
+
+impl crate::plugin::DocgenPlugin for RedescribeButtonTone {
+    fn name(&self) -> &str {
+        "redescribe-button-tone"
+    }
+
+    fn on_component_resolved(&self, entry: &mut ComponentEntry) {
+        if entry.display_name == "Button" {
+            if let Some(tone) = entry.props.get_mut("tone") {
+                std::sync::Arc::make_mut(tone).description = "Button's tone".into();
+            }
+        }
+    }
+}
+
+#[test]
+fn a_plugin_changing_an_inherited_prop_changes_it_for_that_component_only() {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "Comp.tsx",
+        r#"
+interface Base { /** shared tone */ tone?: string }
+interface ButtonProps extends Base { a?: string }
+interface ChipProps extends Base { b?: string }
+export function Button(props: ButtonProps) { return null; }
+export function Chip(props: ChipProps) { return null; }
+"#,
+    );
+    let mut options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    options.plugins.register(RedescribeButtonTone);
+    let output = extract(&options);
+
+    let description = |component: &str| output.components[component].props["tone"].description.as_str();
+    assert_eq!((description("Button"), description("Chip")), ("Button's tone", "shared tone"));
+}
+
 // ── literal-union alias props: bare members, never pre-quoted ────────────
 
 #[test]
@@ -538,6 +666,45 @@ export function Button(props: ButtonProps) { return null; }
         button.props.keys().collect::<Vec<_>>()
     );
     assert!(button.props.contains_key("variant"), "own prop 'variant' should still be present");
+}
+
+/// `ComponentProps<"div">` lists none of the div's attributes, but TypeScript still intersects one another member
+/// declares. Only Full mode reads React's declarations, so curated mode keeps the other member's type alone.
+#[test]
+fn a_prop_beside_an_html_layer_also_has_the_elements_attribute_type_in_full_mode() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "Legend.tsx",
+        r#"
+import * as React from "react";
+interface LegendProps { onTimeUpdate?: (data: unknown, index: number) => void; payload?: string[] }
+export function Legend(props: React.ComponentProps<"div"> & LegendProps) { return null; }
+export function Flipped(props: LegendProps & React.ComponentProps<"div">) { return null; }
+export function Omitted(props: Omit<React.ComponentProps<"div">, "onTimeUpdate"> & LegendProps) { return null; }
+"#,
+    );
+    let full = extract(&full_mode_options_for(&tmp));
+    let curated =
+        extract(&PipelineOptions { html_attributes: HtmlAttributeMode::Curated, ..full_mode_options_for(&tmp) });
+
+    let on_time_update = |output: &crate::types::ExtractionOutput, component: &str| {
+        let prop = &output.components[component].props["onTimeUpdate"];
+        (prop.prop_type.raw_string(), prop.declarations.iter().map(|p| p.name.clone()).collect::<Vec<_>>())
+    };
+    let dom = "(event: SyntheticEvent<HTMLDivElement>) => void";
+    let legend = "(data: unknown, index: number) => void";
+    let declared = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
+    assert_eq!(
+        on_time_update(&full, "Legend"),
+        (format!("({dom}) & ({legend})"), declared(&["DOMAttributes", "LegendProps"]))
+    );
+    assert_eq!(
+        on_time_update(&full, "Flipped"),
+        (format!("({legend}) & ({dom})"), declared(&["LegendProps", "DOMAttributes"]))
+    );
+    assert_eq!(on_time_update(&full, "Omitted"), (legend.to_owned(), declared(&["LegendProps"])));
+    assert_eq!(on_time_update(&curated, "Legend"), (legend.to_owned(), declared(&["LegendProps"])));
 }
 
 // ── test_generic_svg_attributes_extends_resolves_to_its_element_in_full_mode ─
@@ -801,6 +968,128 @@ export function Table(props: TableProps) { return null; }
         "expected 'cellRendererDependencies' prop, got: {:?}",
         table.props.keys().collect::<Vec<_>>()
     );
+}
+
+/// `menu.tsx` declares `RootProps`; `ui.ts` exposes it as the `Menu` namespace the way given; `Item.tsx` uses it through
+/// a named import.
+fn namespace_reexport_project(ui: &str) -> ExtractionOutput {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "menu.tsx",
+        "export interface RootProps { open: boolean }\nexport function Root(props: RootProps) { return <div />; }\n",
+    );
+    write_file(&tmp, "ui.ts", ui);
+    write_file(
+        &tmp,
+        "Item.tsx",
+        "import { Menu as MenuPrimitive } from './ui';\n\
+         export function Item(props: MenuPrimitive.RootProps) { return null; }\n",
+    );
+    extract(&PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    })
+}
+
+#[test]
+fn a_member_of_a_namespace_reexport_resolves_through_a_named_import() {
+    for ui in [
+        "export * as Menu from './menu';\n",
+        "import * as menu from './menu';\nexport { menu as Menu };\n",
+        "export namespace Menu { export interface RootProps { open: boolean } export const Root = () => null; }\n",
+    ] {
+        let output = namespace_reexport_project(ui);
+
+        let props: Vec<&String> = output.components["Item"].props.keys().collect();
+        assert_eq!(props, ["open"], "{ui}{:#?}", output.diagnostics);
+    }
+}
+
+#[test]
+fn a_jsdoc_comment_documents_the_declaration_right_after_it_only() {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "badge.tsx",
+        r#"/** The badge. */
+export function Badge(props: { tone: string; size: number }) { return <span />; }
+
+/** Not a component's doc: it belongs to the constant. */
+const placement = { left: "right" };
+export function Arrow(props: { side: string }) { return <span>{placement.left}</span>; }
+
+export interface PanelProps {
+  /** Hooks for the panel. */
+  hooks: { isOpen?: () => boolean };
+  /** @deprecated Use `open` instead. */
+  visible?: boolean | { keepMounted?: boolean };
+}
+/** The panel. */
+// eslint-disable-next-line
+export function Panel(props: PanelProps) { return <div />; }
+"#,
+    );
+    let output = extract(&PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    });
+
+    let description = |component: &str| output.components[component].description.as_str();
+    let prop = |component: &str, name: &str| output.components[component].props[name].clone();
+    assert_eq!(description("Badge"), "The badge.");
+    assert_eq!(prop("Badge", "tone").description, "");
+    assert_eq!(description("Arrow"), "");
+    assert_eq!(description("Panel"), "The panel.");
+    assert_eq!(prop("Panel", "hooks").description, "Hooks for the panel.");
+    let PropType::Object(fields) = &prop("Panel", "hooks").prop_type else { panic!("{:?}", prop("Panel", "hooks")) };
+    assert_eq!(fields[0].description, "");
+    assert_eq!(prop("Panel", "visible").tags.get("deprecated").map(String::as_str), Some("Use `open` instead."));
+}
+
+#[test]
+fn component_props_of_typeof_a_component_is_that_components_props() {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "menu.tsx",
+        "export interface RootProps { open: boolean }\nexport function Root(props: RootProps) { return <div />; }\n",
+    );
+    write_file(&tmp, "ui.ts", "export * as Menu from './menu';\n");
+    write_file(
+        &tmp,
+        "pagination.tsx",
+        r#"import * as React from "react";
+import type { ComponentProps } from "react";
+import { Root } from "./menu";
+import { Menu as MenuPrimitive } from "./ui";
+type PaginationLinkProps = { isActive?: boolean; href: string };
+export function PaginationLink(props: PaginationLinkProps) { return <a />; }
+export function PaginationNext(props: React.ComponentProps<typeof PaginationLink>) { return null; }
+export function Imported(props: ComponentProps<typeof Root>) { return null; }
+export function Namespaced(props: React.ComponentPropsWithoutRef<typeof MenuPrimitive.Root>) { return null; }
+"#,
+    );
+    write_file(
+        &tmp,
+        "own.tsx",
+        "type ComponentProps<T> = { own: T };\nimport { Root } from './menu';\n\
+         export function Own(props: ComponentProps<typeof Root>) { return null; }\n",
+    );
+    let output = extract(&PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    });
+
+    let props = |component: &str| output.components[component].props.keys().cloned().collect::<Vec<_>>();
+    assert_eq!(props("PaginationNext"), ["href", "isActive"], "{:#?}", output.diagnostics);
+    assert_eq!(props("Imported"), ["open"], "{:#?}", output.diagnostics);
+    assert_eq!(props("Namespaced"), ["open"], "{:#?}", output.diagnostics);
+    // A project's own `ComponentProps` is that declaration, not React's.
+    assert_eq!(props("Own"), ["own"], "{:#?}", output.diagnostics);
 }
 
 // ── test_native_js_global_resolves_via_real_typescript_lib_files ─────────
@@ -1394,7 +1683,7 @@ fn test_enum_scoped_keys_split_on_the_last_colon() {
     );
     global.re_export_map.insert(
         Utf8PathBuf::from("C:\\src\\Size.ts"),
-        vec![LexedExport::LocalDeclaration { name: "Size".into(), is_type_only: false }],
+        vec![LexedExport::LocalDeclaration { name: "Size".into(), is_type_only: false, declared_as: None }],
     );
     let (enums, diagnostics) = collect_public_enums(&global);
     assert_eq!(enums.keys().collect::<Vec<_>>(), vec!["Size"]);
@@ -1551,6 +1840,57 @@ fn test_generic_interface_type_arguments_are_substituted_into_props() {
     assert_eq!(kinds("B"), vec![pair("other", "string"), pair("value", "number")]);
     assert_eq!(kinds("C"), vec![pair("other", "string"), pair("value", "\"a\" | \"b\"")]);
     assert_eq!(kinds("D"), vec![pair("more", "boolean"), pair("other", "string"), pair("value", "boolean[]")]);
+}
+
+// An alias whose expansion would print a conditional or mapped type's source keeps its name, as TypeScript prints it;
+// literal unions and objects still expand.
+#[test]
+fn test_an_alias_over_an_unevaluated_type_keeps_its_name() {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "a.tsx",
+        "interface Override {}\n\
+         type Size = \"sm\" | \"lg\";\n\
+         type Breakpoint = Override extends { breakpoints: infer B } ? B : Size;\n\
+         type Keys = { [K in Size]: string };\n\
+         type StyleProp<V> = V | Partial<Record<Breakpoint, V>>;\n\
+         type Spacing = string | Breakpoint;\n\
+         type Slots = { root: Breakpoint; label: string };\n\
+         export function C(props: {\n\
+           size: Size;\n\
+           from: Breakpoint;\n\
+           keys: Keys;\n\
+           m: StyleProp<Size>;\n\
+           w: StyleProp<number | string>;\n\
+           gap: Spacing;\n\
+           slots: Slots;\n\
+         }) { return null }\n",
+    );
+    let dir = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![dir],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+
+    let output = extract(&options);
+
+    let kinds: Vec<(String, String)> =
+        output.components["C"].props.iter().map(|(name, prop)| (name.clone(), prop.prop_type.raw_string())).collect();
+    let pair = |a: &str, b: &str| (a.to_owned(), b.to_owned());
+    assert_eq!(
+        kinds,
+        vec![
+            pair("from", "Breakpoint"),
+            pair("gap", "Spacing"),
+            pair("keys", "Keys"),
+            pair("m", "StyleProp<Size>"),
+            pair("size", "\"sm\" | \"lg\""),
+            pair("slots", "{ root: Breakpoint; label: string }"),
+            pair("w", "StyleProp<number | string>"),
+        ]
+    );
 }
 
 // Barrels often import a name and then export it, instead of writing `export … from`; both must be followed.
@@ -2317,4 +2657,113 @@ fn an_unusable_tsconfig_is_reported_once() {
         output.diagnostics.iter().filter(|d| d.message.starts_with("Could not use the tsconfig")).collect();
     assert_eq!(reports.len(), 1, "{:#?}", output.diagnostics);
     assert_eq!(reports[0].severity, DiagnosticSeverity::Warning);
+}
+
+/// A project root holding `files`, with `src` as the source directory and no tsconfig configured.
+fn project_with(files: &[(&str, &str)]) -> (TempDir, Utf8PathBuf, PipelineOptions) {
+    let tmp = TempDir::new().unwrap();
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+    for (name, body) in files {
+        let path = root.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+    let options =
+        PipelineOptions { src_dirs: vec![root.join("src")], cache_dir: Some(root.join("cache")), ..Default::default() };
+    (tmp, root, options)
+}
+
+fn prop_names(output: &ExtractionOutput, component: &str) -> Vec<String> {
+    output.components[component].props.keys().cloned().collect()
+}
+
+#[test]
+fn the_nearest_tsconfig_applies_when_none_is_configured() {
+    let (_tmp, _root, options) = project_with(&[
+        ("tsconfig.json", "{ \"compilerOptions\": { \"baseUrl\": \".\", \"paths\": { \"@ui/*\": [\"src/ui/*\"] } } }"),
+        ("src/ui/types.ts", "export interface ButtonProps { label: string }\n"),
+        (
+            "src/Button.tsx",
+            "import type { ButtonProps } from '@ui/types';\nexport function Button(props: ButtonProps) { return null; }\n",
+        ),
+    ]);
+    assert_eq!(options.tsconfig_path, None);
+
+    let output = extract(&options);
+
+    assert_eq!(prop_names(&output, "Button"), ["label"], "{:#?}", output.diagnostics);
+}
+
+#[test]
+fn an_unusable_nearest_tsconfig_is_reported_once() {
+    let (_tmp, root, options) = project_with(&[
+        ("tsconfig.json", "{ \"compilerOptions\": "),
+        ("src/Button.tsx", "export function Button(props: { label: string }) { return null; }\n"),
+    ]);
+
+    let output = extract(&options);
+
+    let reports: Vec<&Diagnostic> =
+        output.diagnostics.iter().filter(|d| d.message.starts_with("Could not use the tsconfig")).collect();
+    assert_eq!(reports.len(), 1, "{:#?}", output.diagnostics);
+    assert_eq!(reports[0].file.as_deref(), Some(root.join("tsconfig.json").as_str()));
+}
+
+#[test]
+fn an_import_written_with_a_javascript_extension_finds_its_typescript_source() {
+    let (_tmp, _root, options) = project_with(&[
+        ("src/types.ts", "export interface ButtonProps { label: string }\n"),
+        (
+            "src/Button.tsx",
+            "import type { ButtonProps } from './types.js';\nexport function Button(props: ButtonProps) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options);
+
+    assert_eq!(prop_names(&output, "Button"), ["label"], "{:#?}", output.diagnostics);
+}
+
+/// A workspace package whose `exports` reach its TypeScript source only through the `source` condition, linked into
+/// `node_modules` the way a package manager links workspace packages.
+#[cfg(unix)]
+fn workspace_package_project(tsconfigs: &[(&str, &str)]) -> (TempDir, PipelineOptions) {
+    let package =
+        "{ \"name\": \"@acme/ui\", \"exports\": { \".\": { \"source\": \"./index.ts\", \"types\": \"./dist/index.d.ts\" } } }";
+    let card = "import type { CardProps } from '@acme/ui';\nexport function Card(props: CardProps) { return null; }\n";
+    let mut files = vec![
+        ("src/ui/package.json", package),
+        ("src/ui/index.ts", "export interface CardProps { title: string }\n"),
+        ("src/Card.tsx", card),
+    ];
+    files.extend_from_slice(tsconfigs);
+    let (tmp, root, options) = project_with(&files);
+    std::fs::create_dir_all(root.join("node_modules/@acme")).unwrap();
+    std::os::unix::fs::symlink(root.join("src/ui"), root.join("node_modules/@acme/ui")).unwrap();
+    (tmp, options)
+}
+
+#[cfg(unix)]
+#[test]
+fn custom_conditions_from_an_extended_tsconfig_reach_a_workspace_packages_source() {
+    let (_tmp, options) = workspace_package_project(&[
+        ("tsconfig.base.json", "{ \"compilerOptions\": { \"customConditions\": [\"source\"], } }"),
+        ("tsconfig.json", "// the project config\n{ \"extends\": \"./tsconfig.base\" }"),
+    ]);
+
+    let output = extract(&options);
+
+    assert_eq!(prop_names(&output, "Card"), ["title"], "{:#?}", output.diagnostics);
+}
+
+#[cfg(unix)]
+#[test]
+fn without_custom_conditions_a_source_only_workspace_package_does_not_resolve() {
+    let (_tmp, options) = workspace_package_project(&[("tsconfig.json", "{}")]);
+
+    let output = extract(&options);
+
+    assert_eq!(prop_names(&output, "Card"), Vec::<String>::new());
+    let unresolved = output.diagnostics.iter().find(|d| d.code == DiagnosticCode::UnresolvableImport);
+    assert!(unresolved.is_some_and(|d| d.message.contains("@acme/ui")), "{:#?}", output.diagnostics);
 }

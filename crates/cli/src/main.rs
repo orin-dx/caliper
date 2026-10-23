@@ -97,11 +97,23 @@ pub struct ExtractArgs {
     #[arg(long, value_delimiter = ',')]
     pub extra_builtins: Vec<String>,
 
+    /// Keep components their module doesn't export in `--format rdt`, which omits them by default as
+    /// react-docgen-typescript does. Canonical output always keeps them, marked `exported: false`.
+    #[arg(long)]
+    pub include_unexported: bool,
+
     /// Machine-readable JSON output: the canonical schema, compact, always to
     /// stdout, ignoring --out/--format (which govern the human/RDT/TOON
     /// paths below), and suppresses the human-readable summary/diagnostics.
     #[arg(long, short = 'j')]
     pub json: bool,
+    /// Load the type declarations props reference from installed packages (off by default)
+    #[arg(long)]
+    pub load_dependencies: bool,
+
+    /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
+    #[arg(long, value_enum)]
+    pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 }
 
 #[derive(clap::ValueEnum, Clone)]
@@ -124,6 +136,26 @@ pub enum HtmlAttributeModeArg {
     None,
 }
 
+#[derive(clap::ValueEnum, Clone, Copy)]
+pub enum CollapseInheritedPropsArg {
+    /// Sources from loaded dependencies (default)
+    Dependencies,
+    /// Dependency and project sources
+    All,
+    /// List every prop
+    None,
+}
+
+impl From<CollapseInheritedPropsArg> for caliper_docgen_core::pipeline::CollapseInheritedProps {
+    fn from(arg: CollapseInheritedPropsArg) -> Self {
+        match arg {
+            CollapseInheritedPropsArg::Dependencies => Self::Dependencies,
+            CollapseInheritedPropsArg::All => Self::All,
+            CollapseInheritedPropsArg::None => Self::None,
+        }
+    }
+}
+
 #[derive(clap::Args)]
 pub struct InspectArgs {
     /// Component name to inspect
@@ -132,6 +164,13 @@ pub struct InspectArgs {
     /// Source directories to scan [default: ./src]
     #[arg(long, short, value_delimiter = ',')]
     pub src: Vec<String>,
+    /// Load the type declarations props reference from installed packages (off by default)
+    #[arg(long)]
+    pub load_dependencies: bool,
+
+    /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
+    #[arg(long, value_enum)]
+    pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 }
 
 #[derive(clap::Args)]
@@ -143,6 +182,13 @@ pub struct WatchArgs {
     /// Output file to write on each change
     #[arg(long, short)]
     pub out: Option<String>,
+    /// Load the type declarations props reference from installed packages (off by default)
+    #[arg(long)]
+    pub load_dependencies: bool,
+
+    /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
+    #[arg(long, value_enum)]
+    pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 }
 
 #[derive(clap::Args)]
@@ -158,6 +204,13 @@ pub struct CheckArgs {
     /// Machine-readable JSON diagnostics instead of the human-readable table
     #[arg(long, short = 'j')]
     pub json: bool,
+    /// Load the type declarations props reference from installed packages (off by default)
+    #[arg(long)]
+    pub load_dependencies: bool,
+
+    /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
+    #[arg(long, value_enum)]
+    pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 }
 
 #[derive(clap::Args)]

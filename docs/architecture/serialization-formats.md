@@ -16,6 +16,10 @@ The line the project actually draws, reverse-engineered from where each format l
 
 Two entry points share one projection: `serialize` (`--format rdt`) applies RDT's default `skipChildrenPropWithoutDoc` (`omits`), and `docgen_info` (the NAPI `sessionDocgenInfo`, feeding the Storybook provider) keeps an undocumented `children`, because Storybook 11's React docgen lists it.
 
+`serialize` holds only components with `exported: true`, unless `--include-unexported` is passed. react-docgen-typescript documents only a module's exports, so a file-local helper component would otherwise appear in RDT-shaped output where RDT never puts one.
+
+Each component carries `filePath`, the absolute path of its source file, as RDT's `ComponentDoc` does.
+
 ### The `enum`-shape convention (`type_json`)
 
 react-docgen-typescript encodes a literal union prop type not as an inlined string but as a structured shape renderers pattern-match on:

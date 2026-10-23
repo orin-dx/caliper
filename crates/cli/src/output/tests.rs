@@ -94,7 +94,7 @@ fn format_component_renders_header_description_props_table_and_inherited_note() 
             ("size", prop("size", PropType::Number, false, Some("3"), None)),
         ]
         .into_iter()
-        .map(|(name, prop)| (name.to_owned(), prop))
+        .map(|(name, prop)| (name.to_owned(), std::sync::Arc::new(prop)))
         .collect(),
         inheritance: vec![InheritedLayer {
             type_name: "ButtonHTMLAttributes".into(),
@@ -103,14 +103,18 @@ fn format_component_renders_header_description_props_table_and_inherited_note() 
             html_element: Some("button".into()),
             total_props: 0,
         }],
-        notable_inherited: [("onClick".to_owned(), prop("onClick", PropType::Any, false, None, None))]
-            .into_iter()
-            .collect(),
+        notable_inherited: [(
+            "onClick".to_owned(),
+            std::sync::Arc::new(prop("onClick", PropType::Any, false, None, None)),
+        )]
+        .into_iter()
+        .collect(),
         discriminant_prop: None,
         composes: vec![],
         tags: Default::default(),
         methods: vec![],
         detected_by: caliper_docgen_core::types::DetectionRule::FunctionDeclaration,
+        exported: true,
     };
 
     let lines: Vec<String> = format_component(&entry).iter().map(|line| strip_ansi(line)).collect();

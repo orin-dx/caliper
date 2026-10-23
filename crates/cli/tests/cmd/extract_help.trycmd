@@ -38,6 +38,11 @@ Options:
           Extra type names to treat as recognized/builtin (no "unknown type"
           warning) — e.g. a library-specific type this tool doesn't already know
 
+      --include-unexported
+          Keep components their module doesn't export in `--format rdt`, which
+          omits them by default as react-docgen-typescript does. Canonical
+          output always keeps them, marked `exported: false`
+
   -j, --json
           Machine-readable JSON output: the canonical schema, compact, always to
           stdout, ignoring --out/--format (which govern the human/RDT/TOON paths
@@ -46,8 +51,21 @@ Options:
   -v, --verbose...
           Verbose output (repeat for more: -v, -vv)
 
+      --load-dependencies
+          Load the type declarations props reference from installed packages
+          (off by default)
+
   -q, --quiet
           Suppress all non-error output
+
+      --collapse-inherited-props <COLLAPSE_INHERITED_PROPS>
+          Which inherited sources of more than 30 props to list as one inherited
+          layer instead of prop by prop
+
+          Possible values:
+          - dependencies: Sources from loaded dependencies (default)
+          - all:          Dependency and project sources
+          - none:         List every prop
 
       --config <CONFIG>
           Path to docgen.config.ts
