@@ -66,14 +66,37 @@ expression: value
             "kind": "union",
             "members": [
               {
-                "kind": "eventHandler",
-                "eventType": "string",
-                "paramName": "value"
+                "kind": "function",
+                "typeParams": [],
+                "params": [
+                  {
+                    "name": "value",
+                    "type": {
+                      "kind": "string"
+                    }
+                  }
+                ],
+                "returnType": {
+                  "kind": "void"
+                }
               },
               {
-                "kind": "eventHandler",
-                "eventType": "string[]",
-                "paramName": "value"
+                "kind": "function",
+                "typeParams": [],
+                "params": [
+                  {
+                    "name": "value",
+                    "type": {
+                      "kind": "array",
+                      "element": {
+                        "kind": "string"
+                      }
+                    }
+                  }
+                ],
+                "returnType": {
+                  "kind": "void"
+                }
               }
             ]
           },
@@ -368,9 +391,21 @@ expression: value
         "onBlur": {
           "name": "onBlur",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -385,9 +420,21 @@ expression: value
         "onClick": {
           "name": "onClick",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -402,9 +449,21 @@ expression: value
         "onFocus": {
           "name": "onFocus",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -579,9 +638,21 @@ expression: value
         "onBlur": {
           "name": "onBlur",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -596,9 +667,21 @@ expression: value
         "onClick": {
           "name": "onClick",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -613,9 +696,21 @@ expression: value
         "onFocus": {
           "name": "onFocus",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -835,9 +930,21 @@ expression: value
         "onBlur": {
           "name": "onBlur",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -852,9 +959,21 @@ expression: value
         "onClick": {
           "name": "onClick",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -869,9 +988,21 @@ expression: value
         "onFocus": {
           "name": "onFocus",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -1136,9 +1267,19 @@ expression: value
         "onOpenChange": {
           "name": "onOpenChange",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "boolean",
-            "paramName": "open"
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "open",
+                "type": {
+                  "kind": "boolean"
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -1158,9 +1299,19 @@ expression: value
         "onValueChange": {
           "name": "onValueChange",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "string",
-            "paramName": "value"
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "value",
+                "type": {
+                  "kind": "string"
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -1556,7 +1707,7 @@ expression: value
                       "kind": "string"
                     },
                     "required": true,
-                    "description": "Inline intersection in a prop value — exercises `intersection`.\nCssProperties resolves to cssProperties; the object literal stays as-is."
+                    "description": ""
                   }
                 ]
               }
@@ -1564,7 +1715,7 @@ expression: value
           },
           "required": false,
           "defaultValue": null,
-          "description": "",
+          "description": "Inline intersection in a prop value — exercises `intersection`.\nCssProperties resolves to cssProperties; the object literal stays as-is.",
           "tags": {},
           "parent": {
             "name": "TypeSamplerProps",

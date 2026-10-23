@@ -12,6 +12,13 @@ export interface CaliperDocgenOptions {
   srcDirs: string[]
   exclude?: string[]
   skipHtmlProps?: boolean
+  /** Load the type declarations your props reference from installed packages. Off by default. */
+  loadDependencies?: boolean
+  /**
+   * Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop: those from
+   * loaded dependencies (the default), every inherited source, or none.
+   */
+  collapseInheritedProps?: 'dependencies' | 'all' | 'none'
 }
 
 /**
@@ -59,6 +66,8 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
       srcDirs: resolvedSrcDirs,
       exclude: options.exclude,
       htmlAttributes: options.skipHtmlProps ? ('none' as const) : undefined,
+      loadDependencies: options.loadDependencies,
+      collapseInheritedProps: options.collapseInheritedProps,
     }
   }
 

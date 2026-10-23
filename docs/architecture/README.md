@@ -8,9 +8,9 @@ Read this first. Load only the file your task requires — never load all seven 
 
 | Working on... | Load |
 | --- | --- |
-| File discovery, parallel parse/resolve orchestration, the DTS cache, watch mode, panic containment, plugin hook points | `pipeline-orchestration.md` |
+| File discovery, parallel parse/resolve orchestration, the DTS cache, dependency loading, watch mode, panic containment, plugin hook points | `pipeline-orchestration.md` |
 | OXC AST visiting, component detection patterns, JSDoc/default-value extraction, `SourceData` | `extractor-ast-visiting.md` |
-| Type resolution, generic substitution, the source-vs-known-pattern precedence rule, give-up/degrade discipline, cycle detection | `resolver-type-resolution.md` |
+| Type resolution, generic substitution, the source-vs-known-pattern precedence rule, the dependency layer's fallbacks, give-up/degrade discipline, cycle detection | `resolver-type-resolution.md` |
 | `PropType`/`CollectedType`/`ComponentEntry`/`Diagnostic` shapes, manual serde, `ParsedProp`'s sealed constructor, the msgpack cache wire format | `types-and-output-contract.md` |
 | RDT-compat/Storybook/TOON/JSON-Schema output, the `enum` shape rule, `composes`, truncation | `serialization-formats.md` |
 | Any `crates/cli` command, exit codes, config loading, the LSP scaffold | `cli-commands.md` |

@@ -29,21 +29,6 @@ pub(super) fn react_type_to_prop_type(
         // CSS properties.
         "CSSProperties" | "CSSObject" => PropType::CssProperties,
 
-        // Named event handlers (e.g. MouseEventHandler).
-        n if n.ends_with("EventHandler") || n.ends_with("Handler") => {
-            PropType::EventHandler { event_type: name.to_owned(), param_name: None }
-        }
-
-        // Synthetic and DOM events — the type IS the event type.
-        "SyntheticEvent" | "MouseEvent" | "KeyboardEvent" | "ChangeEvent" | "FocusEvent" | "FormEvent"
-        | "DragEvent" | "TouchEvent" | "WheelEvent" | "AnimationEvent" | "TransitionEvent" | "ClipboardEvent"
-        | "CompositionEvent" | "PointerEvent" => {
-            let raw_args: Vec<String> = args.iter().map(|a| a.to_raw_string()).collect();
-            let event_type =
-                if raw_args.is_empty() { name.to_owned() } else { format!("{}<{}>", name, raw_args.join(", ")) };
-            PropType::EventHandler { event_type, param_name: None }
-        }
-
         // Ref types.
         "Ref" | "RefObject" | "ForwardedRef" | "MutableRefObject" | "RefCallback" | "LegacyRef" => {
             let element = args.first().map(|a| a.to_raw_string());
@@ -113,32 +98,30 @@ pub(super) fn react_type_to_prop_type(
 /// Best-effort path to the @types/react .d.ts file for RDT propFilter compat.
 /// Falls back to a synthetic path if @types/react is not installed.
 pub(super) fn resolve_react_types_file(from_file: &Utf8Path, ctx: &ResolutionContext) -> String {
-    let Some(from_dir) = from_file.parent() else {
-        return "node_modules/@types/react/index.d.ts".to_owned();
-    };
-    resolve_package_types_file(&ctx.oxc_resolver, from_dir, "react")
+    resolve_package_types_file(&ctx.oxc_resolver, &ctx.types_first_resolver, from_file, "react")
         .unwrap_or_else(|| "node_modules/@types/react/index.d.ts".to_owned())
 }
 
-/// Resolve `package_name` to its real `.d.ts` file, following the same fallback
-/// TypeScript's own resolver uses: if the package has no types of its own
-/// (common for packages with an `exports` map but no `"types"` condition —
-/// `oxc_resolver`'s `resolve_dts` stops at the first `exports` match, even a
-/// plain JS one, so it never reaches its own `@types` fallback for these), retry
-/// against the separate `@types/<name>` package.
+/// Resolve `package_name` to its declaration file the way TypeScript does. `oxc_resolver`'s `resolve_dts` stops at the
+/// first `exports` key that matches any condition, even one pointing at JavaScript, so two retries follow: with only
+/// the `types` conditions (`types_first`), for a package that lists `"import"` before `"types"`; then the separate
+/// `@types/<name>` package, for one with no types of its own. A declaration file that doesn't exist counts as none.
 pub(super) fn resolve_package_types_file(
     resolver: &Resolver,
-    from_dir: &Utf8Path,
+    types_first: &Resolver,
+    importing_file: &Utf8Path,
     package_name: &str,
 ) -> Option<String> {
-    if let Ok(resolved) = resolver.resolve_dts(from_dir.as_std_path(), package_name) {
-        let path = resolved.path().to_string_lossy().into_owned();
-        if path.ends_with(".d.ts") || path.ends_with(".d.mts") || path.ends_with(".d.cts") {
-            return Some(path);
-        }
-    }
-    let types_specifier = format!("@types/{}", mangle_scoped_package_name(package_name));
-    resolver.resolve_dts(from_dir.as_std_path(), &types_specifier).ok().map(|r| r.path().to_string_lossy().into_owned())
+    let declaration = |resolver: &Resolver, specifier: &str| {
+        let resolved = resolver.resolve_dts(importing_file.as_std_path(), specifier).ok()?;
+        // `resolve_dts` returns an `exports` target without checking it exists (an unbuilt workspace package's `dist`).
+        let is_declaration =
+            [".d.ts", ".d.mts", ".d.cts"].iter().any(|ext| resolved.path().to_string_lossy().ends_with(ext));
+        (is_declaration && resolved.path().is_file()).then(|| resolved.path().to_string_lossy().into_owned())
+    };
+    declaration(resolver, package_name)
+        .or_else(|| declaration(types_first, package_name))
+        .or_else(|| declaration(resolver, &format!("@types/{}", mangle_scoped_package_name(package_name))))
 }
 
 /// `@scope/name` -> `scope__name`, matching TypeScript's `@types` scoped-package
@@ -151,27 +134,23 @@ fn mangle_scoped_package_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxc_resolver::{ResolveOptions, Resolver};
+    use crate::pipeline::PipelineOptions;
+    use crate::resolver::ModuleResolvers;
 
-    fn test_resolver() -> Resolver {
-        Resolver::new(ResolveOptions {
-            condition_names: vec!["types".into(), "import".into(), "require".into(), "default".into()],
-            main_fields: vec!["types".into(), "typings".into(), "module".into(), "main".into()],
-            extensions: vec![".ts".into(), ".tsx".into(), ".d.ts".into(), ".js".into()],
-            ..ResolveOptions::default()
-        })
+    fn test_resolvers() -> ModuleResolvers {
+        ModuleResolvers::new(&PipelineOptions::default())
     }
 
     #[test]
     fn falls_back_to_at_types_when_package_has_no_own_types() {
-        let resolver = test_resolver();
+        let ModuleResolvers { main, types_first } = test_resolvers();
         // `react`'s package.json has an `exports` field with no "types" condition and
         // ships no .d.ts of its own — this repo's node_modules has a real `@types/react`
         // package, so this exercises the real gap end to end, not a mock.
-        let from_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let from_file = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs");
 
-        let resolved =
-            resolve_package_types_file(&resolver, &from_dir, "react").expect("expected @types/react to resolve");
+        let resolved = resolve_package_types_file(&main, &types_first, &from_file, "react")
+            .expect("expected @types/react to resolve");
 
         assert!(resolved.ends_with(".d.ts"), "expected a .d.ts file, got {resolved}");
         assert!(
@@ -182,15 +161,15 @@ mod tests {
 
     #[test]
     fn resolves_own_types_directly_without_at_types_fallback() {
-        let resolver = test_resolver();
+        let ModuleResolvers { main, types_first } = test_resolvers();
         // Resolving "@types/react" itself (rather than "react") exercises the
         // primary (non-fallback) path with no ambiguity: if it ever fell through
         // to the fallback branch, that would ask for the nonexistent
         // "@types/types__react" package and correctly return None instead — so a
         // `Some(..d.ts)` result here can only come from the primary path.
-        let from_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let from_file = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs");
 
-        let resolved = resolve_package_types_file(&resolver, &from_dir, "@types/react")
+        let resolved = resolve_package_types_file(&main, &types_first, &from_file, "@types/react")
             .expect("expected @types/react's own types to resolve directly");
 
         assert!(resolved.ends_with(".d.ts"), "expected a .d.ts file, got {resolved}");
@@ -201,5 +180,48 @@ mod tests {
         assert_eq!(mangle_scoped_package_name("react"), "react");
         assert_eq!(mangle_scoped_package_name("@babel/core"), "babel__core");
         assert_eq!(mangle_scoped_package_name("@radix-ui/react-select"), "radix-ui__react-select");
+    }
+
+    /// `node_modules/<name>` holding `files`, resolved from the project root.
+    fn resolve_installed(name: &str, files: &[(&str, &str)]) -> Option<String> {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        for (file, body) in files {
+            let path = root.join("node_modules").join(name).join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        let ModuleResolvers { main, types_first } = test_resolvers();
+        let resolved = resolve_package_types_file(&main, &types_first, &root.join("index.ts"), name)?;
+        Some(resolved.strip_prefix(root.as_str()).unwrap_or(&resolved).to_owned())
+    }
+
+    #[test]
+    fn a_package_listing_import_before_types_resolves_to_its_declarations() {
+        let resolved = resolve_installed(
+            "icons",
+            &[
+                ("package.json", r#"{ "exports": { ".": { "import": "./index.mjs", "types": "./index.d.ts" } } }"#),
+                ("index.mjs", "export const Icon = () => null;\n"),
+                ("index.d.ts", "export interface IconProps { size?: number }\n"),
+            ],
+        );
+        assert_eq!(resolved.as_deref(), Some("/node_modules/icons/index.d.ts"));
+    }
+
+    #[test]
+    fn esm_declaration_files_resolve() {
+        let resolved = resolve_installed(
+            "esm-only",
+            &[
+                (
+                    "package.json",
+                    r#"{ "exports": { ".": { "types": "./dist/index.d.mts", "import": "./dist/index.mjs" } } }"#,
+                ),
+                ("dist/index.d.mts", "export interface Props { size?: number }\n"),
+                ("dist/index.mjs", "export {};\n"),
+            ],
+        );
+        assert_eq!(resolved.as_deref(), Some("/node_modules/esm-only/dist/index.d.mts"));
     }
 }
