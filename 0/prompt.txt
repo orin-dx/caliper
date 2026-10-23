@@ -1,0 +1,11 @@
+<task-notification>
+<task-id>a92191aeafead399c</task-id>
+<tool-use-id>toolu_01VYTC1WFrsc1WeaFY8TCWRu</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/a92191aeafead399c.output</output-file>
+<status>completed</status>
+<summary>Agent "Reader: extractor, resolver, types code" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>This agent's report was delivered to you as a message from "a92191aeafead399c" (its SubagentHandback call). Read it there; it is not repeated here.
+</result>
+<usage><subagent_tokens>215375</subagent_tokens><tool_uses>50</tool_uses><duration_ms>257873</duration_ms></usage>
+</task-notification>
