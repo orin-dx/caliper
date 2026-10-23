@@ -59,11 +59,13 @@ test-rust:
 # Run TypeScript tests
 test-ts:
     pnpm --filter caliper-docgen-vite-plugin test
+    pnpm --filter caliper-docgen-storybook test
 
 # Build the native binding and run the Vite plugin against it
 test-integration:
     pnpm --filter caliper-docgen-napi build:napi
     NAPI_BINARY_REQUIRED=true pnpm --filter caliper-docgen-vite-plugin test:integration
+    NAPI_BINARY_REQUIRED=true pnpm --filter caliper-docgen-storybook test:integration
 
 # Pack the npm packages and check napi arrives only as vite-plugin's transitive dependency (pm: npm or pnpm)
 verify-install pm="pnpm":
@@ -86,9 +88,10 @@ coverage-rust threshold="":
       cargo llvm-cov report --summary-only --fail-under-lines "{{ threshold }}"
     fi
 
-# TypeScript coverage: prints the summary and writes packages/vite-plugin/coverage/lcov.info
+# TypeScript coverage: prints the summaries and writes each package's coverage/lcov.info
 coverage-ts threshold="":
     pnpm --filter caliper-docgen-vite-plugin exec vitest run --coverage {{ if threshold != "" { "--coverage.thresholds.lines=" + threshold } else { "" } }}
+    pnpm --filter caliper-docgen-storybook exec vitest run --coverage {{ if threshold != "" { "--coverage.thresholds.lines=" + threshold } else { "" } }}
 
 # Rust coverage report, opened in the browser
 coverage-html:
@@ -107,9 +110,9 @@ machete:
 mutants:
     cargo mutants --workspace --exclude caliper-docgen-napi
 
-ts_src := "'packages/vite-plugin/src/**/*.ts' 'packages/vite-plugin/tests/**/*.ts' 'packages/vite-plugin/vitest.config.ts' 'packages/napi/*.d.ts' 'packages/cli/bin/**/*.js' 'apps/validate/src/**/*.ts'"
-ts_src_only := "'packages/vite-plugin/src' 'packages/vite-plugin/vitest.config.ts' 'packages/napi/*.d.ts' 'packages/cli/bin/**/*.js' 'apps/validate/src'"
-ts_tests_only := "'packages/vite-plugin/tests'"
+ts_src := "'packages/vite-plugin/src/**/*.ts' 'packages/vite-plugin/tests/**/*.ts' 'packages/vite-plugin/vitest.config.ts' 'packages/storybook/src/**/*.ts' 'packages/storybook/tests/**/*.ts' 'packages/storybook/*.config.ts' 'packages/napi/*.d.ts' 'packages/cli/bin/**/*.js' 'apps/validate/src/**/*.ts'"
+ts_src_only := "'packages/vite-plugin/src' 'packages/vite-plugin/vitest.config.ts' 'packages/storybook/src' 'packages/storybook/vitest.config.ts' 'packages/napi/*.d.ts' 'packages/cli/bin/**/*.js' 'apps/validate/src'"
+ts_tests_only := "'packages/vite-plugin/tests' 'packages/storybook/tests'"
 md_src := "'**/*.md' '!node_modules/**' '!target/**' '!dist/**'"
 
 # Lint and format check

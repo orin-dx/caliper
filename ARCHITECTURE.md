@@ -37,12 +37,14 @@ graph TD
     cli["crates/cli\ncaliper-docgen\nCLI binary"]
     napi["packages/napi\ncaliper-docgen-napi\nTS types + dev binary loader"]
     vite["packages/vite-plugin\ncaliper-docgen-vite-plugin\nVite HMR plugin"]
+    storybook["packages/storybook\ncaliper-docgen-storybook\nStorybook 11 docgen provider"]
     validate["apps/validate\nAccuracy comparison harness"]
 
     core --> binding
     core --> cli
     binding --> napi
     napi --> vite
+    napi --> storybook
     cli -.->|"runtime dep"| validate
     napi -.->|"runtime dep"| validate
 ```

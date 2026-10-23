@@ -139,6 +139,7 @@ jobs:
           path: |
             lcov.info
             packages/vite-plugin/coverage/lcov.info
+            packages/storybook/coverage/lcov.info
           retention-days: 14
 
   install:
