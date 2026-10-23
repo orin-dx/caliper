@@ -179,7 +179,7 @@ mod tests {
         let mut props = BTreeMap::new();
         props.insert(
             "variant".to_string(),
-            ParsedProp::new(
+            std::sync::Arc::new(ParsedProp::new(
                 "variant".into(),
                 PropType::LiteralUnion { members: vec!["primary".into(), "secondary".into()], has_default: true },
                 false,
@@ -188,7 +188,7 @@ mod tests {
                 Default::default(),
                 None,
                 vec![],
-            ),
+            )),
         );
 
         let entry = ComponentEntry {

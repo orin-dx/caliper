@@ -352,7 +352,7 @@ fn component_with_props(name: &str, props: Vec<(&str, &str)>) -> caliper_docgen_
                     None,
                     vec![],
                 );
-                (prop_name.to_string(), prop)
+                (prop_name.to_string(), std::sync::Arc::new(prop))
             })
             .collect(),
         inheritance: vec![],
@@ -409,7 +409,7 @@ fn serialize_storybook_emits_exact_docgen_blocks() {
     );
     let mut entry = component_with_props("Widget", vec![]);
     entry.description = "A widget.".to_string();
-    entry.props.insert("label".to_string(), label);
+    entry.props.insert("label".to_string(), std::sync::Arc::new(label));
     let mut components = std::collections::BTreeMap::new();
     components.insert("Widget".to_string(), entry);
     let output = caliper_docgen_core::types::ExtractionOutput {

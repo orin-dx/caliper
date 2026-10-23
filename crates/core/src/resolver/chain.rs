@@ -1,5 +1,7 @@
 //! Props chain resolution — the recursive core of prop resolution.
 
+use std::sync::Arc;
+
 use camino::Utf8Path;
 use compact_str::CompactString;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -123,7 +125,9 @@ pub(super) fn resolve_props_chain(
         }
         Some(super::precedence::SourceOrKnownMatch::Known(result)) => {
             return match result {
-                KnownPatternResult::Props(props) => ResolvedChain { props, ..ResolvedChain::empty() },
+                KnownPatternResult::Props(props) => {
+                    ResolvedChain { props: props.into_iter().map(Arc::new).collect(), ..ResolvedChain::empty() }
+                }
                 KnownPatternResult::Type(PropType::HtmlAttributes { element, omitted }) => {
                     let layer = InheritedLayer {
                         type_name: type_name.to_owned(),
@@ -308,7 +312,7 @@ pub(super) fn resolve_interface_chain(
             Some(_) | None => raw_prop.description.clone(),
         };
 
-        chain.props.push(ParsedProp::new(
+        chain.props.push(Arc::new(ParsedProp::new(
             raw_prop.name.clone(),
             prop_type,
             raw_prop.required,
@@ -317,14 +321,14 @@ pub(super) fn resolve_interface_chain(
             raw_prop.tags.clone(),
             Some(parent.clone()),
             vec![parent.clone()],
-        ));
+        )));
     }
 
     chain
 }
 
 /// Find a discriminant prop — a prop that has a distinct string literal type across all members.
-pub(super) fn find_discriminant_prop(members: &[(&str, Vec<ParsedProp>)]) -> Option<String> {
+pub(super) fn find_discriminant_prop(members: &[(&str, Vec<Arc<ParsedProp>>)]) -> Option<String> {
     if members.is_empty() {
         return None;
     }

@@ -582,6 +582,8 @@ fn test_discriminated_union_detection() {
             )],
         ),
     ];
+    let members: Vec<(&str, Vec<std::sync::Arc<ParsedProp>>)> =
+        members.into_iter().map(|(name, props)| (name, props.into_iter().map(std::sync::Arc::new).collect())).collect();
     let discriminant = chain::find_discriminant_prop(&members);
     assert_eq!(discriminant, Some("variant".to_string()));
 }

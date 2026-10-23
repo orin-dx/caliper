@@ -1,6 +1,7 @@
 //! Type alias chain and type-level resolution.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use camino::Utf8Path;
 use rustc_hash::FxHashSet;
@@ -64,8 +65,8 @@ pub(super) fn resolve_type_alias_chain(
         CollectedTypeAlias::Partial { base, file_path } => {
             let mut chain = resolve_base_as_chain(base, file_path, mapping, ctx, state, depth);
             // Make all props optional.
-            for prop in &mut chain.props {
-                prop.required = false;
+            for prop in chain.props.iter_mut().filter(|prop| prop.required) {
+                Arc::make_mut(prop).required = false;
             }
             chain
         }
@@ -73,8 +74,8 @@ pub(super) fn resolve_type_alias_chain(
         CollectedTypeAlias::Required { base, file_path } => {
             let mut chain = resolve_base_as_chain(base, file_path, mapping, ctx, state, depth);
             // Make all props required.
-            for prop in &mut chain.props {
-                prop.required = true;
+            for prop in chain.props.iter_mut().filter(|prop| !prop.required) {
+                Arc::make_mut(prop).required = true;
             }
             chain
         }
@@ -179,7 +180,7 @@ pub(super) fn resolve_base_as_chain(
             let mut chain = ResolvedChain::empty();
             for field in fields {
                 let prop_type = resolve_collected_type(&field.collected_type, file_path, ctx, state, depth);
-                chain.props.push(ParsedProp::new(
+                chain.props.push(Arc::new(ParsedProp::new(
                     field.name.clone(),
                     prop_type,
                     field.required,
@@ -188,7 +189,7 @@ pub(super) fn resolve_base_as_chain(
                     Default::default(),
                     None,
                     vec![],
-                ));
+                )));
             }
             chain
         }
@@ -269,7 +270,7 @@ pub(super) fn resolve_union_alias(
     use super::chain::find_discriminant_prop;
 
     // Collect all member chains for named types (only Named can be discriminated).
-    let named_members: Vec<(&str, Vec<ParsedProp>)> = members
+    let named_members: Vec<(&str, Vec<Arc<ParsedProp>>)> = members
         .iter()
         .filter_map(|m| {
             if let CollectedType::Named { name, .. } = m {
@@ -377,7 +378,7 @@ pub(super) fn resolve_union_alias(
     }
 
     ResolvedChain {
-        props: merged_props.into_values().collect(),
+        props: merged_props.into_values().map(Arc::new).collect(),
         discriminant_prop: discriminant,
         ..ResolvedChain::empty()
     }
@@ -388,14 +389,14 @@ pub(super) fn resolve_union_alias(
 /// distinct types contributed for each prop name, how many members declared
 /// it, and whether every member that declared it marked it required.
 fn record_variant_props(
-    props: &[ParsedProp],
+    props: &[Arc<ParsedProp>],
     merged_props: &mut BTreeMap<String, ParsedProp>,
     prop_types: &mut BTreeMap<String, Vec<PropType>>,
     seen_count: &mut BTreeMap<String, usize>,
     required_in_all: &mut BTreeMap<String, bool>,
 ) {
     for prop in props {
-        merged_props.entry(prop.name.clone()).or_insert_with(|| prop.clone());
+        merged_props.entry(prop.name.clone()).or_insert_with(|| ParsedProp::clone(prop));
 
         let types = prop_types.entry(prop.name.clone()).or_default();
         if !types.contains(&prop.prop_type) {
@@ -509,7 +510,7 @@ fn resolve_key_set(
             let mut branch_state = state.detached();
             let chain = resolve_base_as_chain(target, file, mapping, ctx, &mut branch_state, depth + 1);
             state.absorb(branch_state);
-            Some(chain.props.into_iter().map(|p| p.name).collect())
+            Some(chain.props.iter().map(|p| p.name.clone()).collect())
         }
         CollectedType::Named { name, args } if (name == "Exclude" || name == "Extract") && args.len() == 2 => {
             let from = resolve_key_set(&args[0], file, mapping, ctx, state, depth + 1)?;
