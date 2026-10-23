@@ -78,31 +78,13 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
     Ok(exit_code)
 }
 
-/// RDT's type-name convention for literal unions: `{"name": "enum", "value": [...]}`
-/// instead of inlining the literal text into `type.name` as a plain string. Lets
-/// prop-table renderers that pattern-match `type.name === "enum"` (a common
-/// Storybook addon integration point) show a `<select>` control for the most
-/// common, most curated props in any design system (variant, size, color…).
-fn rdt_type_json(prop_type: &caliper_docgen_core::types::PropType) -> serde_json::Value {
-    use caliper_docgen_core::types::PropType;
-
-    if prop_type.is_literal_union() {
-        let values: Vec<serde_json::Value> = match prop_type {
-            PropType::Union(members) => members.iter().map(|m| serde_json::json!({"value": m.raw_string()})).collect(),
-            PropType::LiteralUnion { members, .. } => {
-                members.iter().map(|m| serde_json::json!({"value": format!("\"{m}\"")})).collect()
-            }
-            _ => vec![],
-        };
-        return serde_json::json!({ "name": "enum", "value": values });
-    }
-    serde_json::json!({ "name": prop_type.raw_string() })
-}
-
-/// RDT's default `skipChildrenPropWithoutDoc`: an undocumented `children` says nothing a
-/// prop table can show, so RDT never emits it. Canonical output keeps it.
-fn rdt_omits(prop: &caliper_docgen_core::types::ParsedProp) -> bool {
-    prop.name == "children" && prop.description.is_empty()
+/// `--format rdt`: react-docgen-typescript's shape, shared with the NAPI binding. Like react-docgen-typescript, only
+/// exported components unless asked.
+pub fn serialize_rdt(
+    output: &caliper_docgen_core::types::ExtractionOutput,
+    include_unexported: bool,
+) -> serde_json::Result<String> {
+    caliper_docgen_core::pipeline::rdt::serialize(output, include_unexported)
 }
 
 /// The components a compatibility format writes: like react-docgen-typescript, only exported ones unless asked.
@@ -111,46 +93,6 @@ fn compat_components(
     include_unexported: bool,
 ) -> impl Iterator<Item = (&String, &caliper_docgen_core::types::ComponentEntry)> {
     output.components.iter().filter(move |(_, entry)| include_unexported || entry.exported)
-}
-
-/// `methods` is always `[]` — this tool doesn't extract class methods, and RDT
-/// consumers (Storybook's docgen addon) only ever read it for class components.
-pub fn serialize_rdt(
-    output: &caliper_docgen_core::types::ExtractionOutput,
-    include_unexported: bool,
-) -> serde_json::Result<String> {
-    let mut map = serde_json::Map::new();
-    for (name, entry) in compat_components(output, include_unexported) {
-        let props: serde_json::Map<String, serde_json::Value> = entry
-            .props
-            .iter()
-            .filter(|(_, prop)| !rdt_omits(prop))
-            .map(|(k, prop)| {
-                let obj = serde_json::json!({
-                    "name": prop.name,
-                    "type": rdt_type_json(&prop.prop_type),
-                    "required": prop.required,
-                    "defaultValue": prop.default_value.as_ref().map(|d| serde_json::json!({"value": d.value, "computed": d.computed})),
-                    "description": prop.description,
-                    "parent": prop.parent.as_ref().map(|p| serde_json::json!({"name": p.name, "fileName": p.file_name})),
-                });
-                (k.clone(), obj)
-            })
-            .collect();
-        map.insert(
-            name.clone(),
-            serde_json::json!({
-                "displayName": entry.display_name,
-                "filePath": entry.file_path,
-                "props": serde_json::Value::Object(props),
-                "description": entry.description,
-                "methods": [],
-                "tags": entry.tags,
-                "composes": entry.composes,
-            }),
-        );
-    }
-    serde_json::to_string_pretty(&serde_json::Value::Object(map))
 }
 
 pub fn serialize_storybook(

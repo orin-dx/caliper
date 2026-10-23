@@ -786,3 +786,4 @@ module.exports.extractFileIncremental = nativeBinding.extractFileIncremental
 module.exports.initializeSession = nativeBinding.initializeSession
 module.exports.isResolutionConfig = nativeBinding.isResolutionConfig
 module.exports.resolutionConfigFiles = nativeBinding.resolutionConfigFiles
+module.exports.sessionDocgenInfo = nativeBinding.sessionDocgenInfo

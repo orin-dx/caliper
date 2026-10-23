@@ -224,6 +224,11 @@ impl WatchSession {
         }
     }
 
+    /// The current output, shared rather than copied. `None` before `initialize`.
+    pub fn current_output(&self) -> Option<Arc<ExtractionOutput>> {
+        self.current.load_full().map(|revision| revision.output.clone())
+    }
+
     /// Whether a change to `path` can alter how imports resolve, so the session must be rebuilt rather than updated: a
     /// tsconfig, jsconfig, `package.json` or lockfile in a source directory, or in a directory above one. Anything
     /// under `node_modules` is not the project's configuration.

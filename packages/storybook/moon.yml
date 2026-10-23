@@ -1,0 +1,19 @@
+language: typescript
+
+tasks:
+  build:
+    command: pnpm build
+    inputs:
+      - 'src/**/*'
+      - 'tsconfig.json'
+    outputs:
+      - 'dist'
+
+  test:
+    command: pnpm test
+    inputs:
+      - 'src/**/*'
+      - 'tests/**/*'
+      - 'vitest.config.ts'
+      - 'package.json'
+      - 'tsconfig.json'

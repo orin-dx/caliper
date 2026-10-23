@@ -156,6 +156,27 @@ export interface ExtractionStats {
   opaqueCount: number
 }
 
+/** A prop as react-docgen-typescript documents it (`sessionDocgenInfo`). */
+export interface RdtProp {
+  name: string
+  /** A literal union is `{ name: 'enum', raw, value }`; any other type is `{ name }`, its text. */
+  type: { name: string; raw?: string; value?: Array<{ value: string }> }
+  required: boolean
+  defaultValue: { value: string; computed: boolean } | null
+  description: string
+  parent: { name: string; fileName: string } | null
+}
+
+/** A component as react-docgen-typescript documents it: the `__docgenInfo` Storybook converts to argTypes. */
+export interface RdtComponentDoc {
+  displayName: string
+  description: string
+  props: Record<string, RdtProp>
+  methods: []
+  tags: Record<string, string>
+  composes: string[]
+}
+
 export interface ExtractionOutput {
   components: Record<string, ComponentEntry>
   /** Every distinct prop the components refer to, written once (ADR 0009). */

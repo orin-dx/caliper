@@ -13,6 +13,7 @@ use crate::resolver::ResolutionContext;
 use crate::types::*;
 
 mod discover;
+pub mod rdt;
 mod revision;
 pub mod watch;
 

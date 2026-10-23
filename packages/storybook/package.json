@@ -1,0 +1,68 @@
+{
+  "name": "caliper-docgen-storybook",
+  "version": "0.3.0",
+  "description": "Storybook addon for caliper-docgen — argTypes from a live caliper-docgen session",
+  "keywords": [
+    "docgen",
+    "oxc",
+    "react",
+    "storybook",
+    "storybook-addon",
+    "typescript"
+  ],
+  "homepage": "https://orin-dx.com/tools/caliper/",
+  "bugs": {
+    "url": "https://github.com/orin-dx/caliper/issues"
+  },
+  "license": "FSL-1.1-MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/orin-dx/caliper.git",
+    "directory": "packages/storybook"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./preset": {
+      "import": "./dist/preset.js",
+      "types": "./dist/preset.d.ts"
+    },
+    "./provider": {
+      "import": "./dist/provider.js",
+      "types": "./dist/provider.d.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "pnpm build",
+    "test": "vitest run",
+    "test:integration": "tsc && vitest run --config vitest.integration.config.ts"
+  },
+  "dependencies": {
+    "caliper-docgen-napi": "workspace:*"
+  },
+  "devDependencies": {
+    "@storybook/react": "11.0.0-alpha.7",
+    "@types/node": "^26.6.5",
+    "@vitest/coverage-v8": "^5.0.3",
+    "react": "^19.3.0",
+    "storybook": "11.0.0-alpha.7",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  },
+  "peerDependencies": {
+    "@storybook/react": "^11.0.0-0",
+    "storybook": "^11.0.0-0"
+  }
+}

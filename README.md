@@ -82,6 +82,7 @@ Caliper is pre-v1. [`docs/STATUS.md`](docs/STATUS.md) lists what works, and [`do
 ```bash
 npm install --save-dev caliper-docgen                # CLI, with the prebuilt binary for your platform
 npm install --save-dev caliper-docgen-vite-plugin    # Vite plugin
+npm install --save-dev caliper-docgen-storybook      # Storybook 11 addon
 cargo install caliper-docgen                         # CLI from crates.io
 ```
 
@@ -126,7 +127,19 @@ import docgen from 'virtual:caliper-docgen'
 docgen.components['Button'].props
 ```
 
-The module updates through HMR as components change. The plugin and the `caliper-docgen-napi` binding expose the canonical format only, not the `react-docgen-typescript` shape.
+The module updates through HMR as components change. The plugin exposes the canonical format only, not the `react-docgen-typescript` shape.
+
+## Storybook
+
+```ts
+// .storybook/main.ts
+export default {
+  framework: '@storybook/react-vite',
+  addons: [{ name: 'caliper-docgen-storybook', options: { srcDirs: ['src'] } }],
+}
+```
+
+Storybook 11's docgen server then takes each component's argTypes from caliper-docgen instead of the TypeScript checker, and hands anything caliper can't document to React's own docgen. See [`packages/storybook`](packages/storybook/README.md).
 
 ## Supported patterns
 

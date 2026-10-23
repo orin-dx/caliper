@@ -1,4 +1,5 @@
 use super::*;
+use caliper_docgen_core::pipeline::rdt::type_json as rdt_type_json;
 
 fn args_for(src: &str, json: bool) -> crate::ExtractArgs {
     crate::ExtractArgs {
@@ -269,13 +270,13 @@ fn rdt_type_json_two_plus_member_literal_unions_produce_exact_enum_shape() {
     let union = PropType::Union(vec![PropType::StringLiteral("red".into()), PropType::NumberLiteral(5.0)]);
     assert_eq!(
         rdt_type_json(&union),
-        serde_json::json!({"name": "enum", "value": [{"value": "\"red\""}, {"value": "5"}]})
+        serde_json::json!({"name": "enum", "raw": "\"red\" | 5", "value": [{"value": "\"red\""}, {"value": "5"}]})
     );
 
     let literal_union = PropType::LiteralUnion { members: vec!["red".into(), "blue".into()], has_default: false };
     assert_eq!(
         rdt_type_json(&literal_union),
-        serde_json::json!({"name": "enum", "value": [{"value": "\"red\""}, {"value": "\"blue\""}]})
+        serde_json::json!({"name": "enum", "raw": "\"red\" | \"blue\"", "value": [{"value": "\"red\""}, {"value": "\"blue\""}]})
     );
 }
 
@@ -416,6 +417,15 @@ fn serialize_rdt_omits_undocumented_children_but_keeps_documented_ones() {
 
     // Canonical output is untouched: the undocumented `children` is still there.
     assert!(output.components["Bare"].props.contains_key("children"));
+}
+
+#[test]
+fn docgen_info_keeps_undocumented_children_for_storybook() {
+    let entry = component_with_props("Bare", vec![("children", ""), ("label", "")]);
+    let doc = caliper_docgen_core::pipeline::rdt::docgen_info(&entry);
+    let mut names: Vec<&String> = doc["props"].as_object().unwrap().keys().collect();
+    names.sort();
+    assert_eq!(names, vec!["children", "label"]);
 }
 
 #[test]

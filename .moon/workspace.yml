@@ -9,6 +9,7 @@ projects:
   napi: "packages/napi"
   validate: "apps/validate"
   vite-plugin: "packages/vite-plugin"
+  storybook: "packages/storybook"
 
 vcs:
   client: git

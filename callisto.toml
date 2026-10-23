@@ -43,6 +43,11 @@ match = "npm/caliper-docgen-vite-plugin"
 publish-to = ["npm"]
 release-trigger = "changeset"
 
+[[package]]
+match = "npm/caliper-docgen-storybook"
+publish-to = ["npm"]
+release-trigger = "changeset"
+
 # The npm wrapper is meaningless without a matching binding build.
 [[fixed-group]]
 name = "napi-and-binding"
