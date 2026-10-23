@@ -4,6 +4,8 @@
 
 **Hardware:** Apple Silicon (arm64), macOS. Numbers below are absolute and will shift on different hardware — treat the _relative_ comparisons as the durable signal, not the absolute milliseconds.
 
+Whole-library numbers on five pinned public corpora, and the CI gates that hold them, are in [`performance.md`](performance.md).
+
 This report has two independent halves: **performance** (how fast) and **output quality** (how correct/complete). They're measured differently on purpose — a fast tool that produces wrong output isn't actually useful, and this project's whole premise is "faster AND at least as accurate," so both get held to a real, reproducible standard here. Every number below has a script in `apps/validate/` or `crates/core/benches/` that reproduces it — see [Reproducing these numbers](#reproducing-these-numbers).
 
 ## Tools compared
