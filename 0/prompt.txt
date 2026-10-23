@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bsm9jcs0a</task-id>
+<tool-use-id>toolu_01QiAgzkPjbZsvYxxv6zhQWc</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/bsm9jcs0a.output</output-file>
+<status>completed</status>
+<summary>Background command "bash /Users/gabe/.claude/jobs/ba6a68d6/tmp/release_loop.sh 2&gt;&amp;1 | tail -5; python3 /Users/gabe/.claude/jobs/ba6a68d6/tmp/release_state.py | tail -4" completed (exit code 0)</summary>
+</task-notification>
