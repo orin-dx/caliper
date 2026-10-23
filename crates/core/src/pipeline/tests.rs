@@ -2237,6 +2237,30 @@ fn a_builtin_name_whose_binding_does_not_resolve_falls_back_to_react_with_a_repo
     assert!(fallback[0].contains("is imported from './types'"), "{}", fallback[0]);
 }
 
+#[test]
+fn parallel_json_writer_matches_serde_json_byte_for_byte() {
+    let tmp = TempDir::new().unwrap();
+    write_file(&tmp, "Size.ts", "export enum Size { Small = \"sm\", Large = \"lg\" }\n");
+    write_file(
+        &tmp,
+        "Button.tsx",
+        "import { Size } from './Size';\nimport { Missing } from './nowhere';\n\
+         /** A button. */\nexport function Button(props: { size?: Size; label: string; extra: Missing }) {\n  \
+         return <button>{props.label}</button>;\n}\n\
+         export function Badge(props: { tone: 'info' | \"it's\" }) {\n  return <span />;\n}\n",
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_path_buf()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+    assert_eq!(output.components.keys().collect::<Vec<_>>(), ["Badge", "Button"]);
+    assert!(!output.enums.is_empty() && !output.diagnostics.is_empty(), "every field must carry data: {output:#?}");
+
+    assert_eq!(extraction_output_to_json(&output).unwrap(), serde_json::to_string(&output).unwrap());
+}
+
 /// A project with `src/ui/types.ts` and a Button importing it through the `@ui/*` alias, and `tsconfig` written as given.
 fn aliased_project(tsconfig: &[(&str, &str)]) -> (TempDir, PipelineOptions) {
     let tmp = TempDir::new().unwrap();

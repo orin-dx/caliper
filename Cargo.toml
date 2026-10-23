@@ -65,6 +65,7 @@ miette            = "7.6"
 
 # Parallelism
 rayon             = "1.12"
+mimalloc          = "0.1"
 tokio             = { version = "1.52", features = ["rt-multi-thread", "process", "io-util", "sync", "macros"] }
 
 # File system

@@ -8,12 +8,14 @@ use super::collected::{EnumEntry, TypeName};
 use super::diagnostic::{Diagnostic, DiagnosticSeverity};
 use super::global::ResolveState;
 
+pub(crate) mod interned;
+
 // ─── Top-level output ─────────────────────────────────────────────────────────
 
-/// The complete extraction output — top-level return type of the pipeline.
+/// The complete extraction output — top-level return type of the pipeline. Its JSON writes each distinct prop once
+/// and refers to it by id (see `interned`).
 #[must_use]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExtractionOutput {
     /// Extracted component entries, keyed by component name
     pub components: BTreeMap<String, ComponentEntry>,

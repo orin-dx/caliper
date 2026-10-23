@@ -15,6 +15,7 @@ One line per ADR, with what it guards. Add a line when you add an ADR.
 
 - [7. Let the backend discover components, always compile it in, and keep structural as the default](0007-backend-discovers-components-and-compiles-in.md) — do not feature-gate the backend crate, run it by default, or let it replace a structural entry on a clash.
 - [8. Discard the parse cache whenever the build that wrote it differs](0008-parse-cache-keyed-by-build.md) — do not load cache entries without checking the payload's header against the running build.
+- [9. Write each distinct prop once in the canonical output](0009-canonical-output-interns-props.md) — do not inline props in canonical JSON or derive prop ids from position.
 
 Changing any of these needs a new ADR.
 

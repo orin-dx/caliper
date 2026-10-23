@@ -114,16 +114,19 @@ function normalize(output: any): NormalizedOutput {
       displayName: c.displayName,
       description: c.description ?? '',
       props: Object.fromEntries(
-        Object.entries(c.props ?? {}).map(([propName, prop]: [string, any]) => [
-          propName,
-          {
-            name: propName,
-            required: prop.required ?? false,
-            type: propTypeToString(prop.type),
-            description: prop.description ?? '',
-            defaultValue: prop.defaultValue?.value,
-          },
-        ]),
+        Object.entries(c.props ?? {}).map(([propName, id]: [string, any]) => {
+          const prop = output.props[id]
+          return [
+            propName,
+            {
+              name: propName,
+              required: prop.required ?? false,
+              type: propTypeToString(prop.type),
+              description: prop.description ?? '',
+              defaultValue: prop.defaultValue?.value,
+            },
+          ]
+        }),
       ),
     }
   }

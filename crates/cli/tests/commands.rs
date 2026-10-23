@@ -194,7 +194,7 @@ impl Watch {
             std::thread::sleep(Duration::from_millis(300));
             if let Ok(json) = std::fs::read_to_string(&self.out) {
                 let written: serde_json::Value = serde_json::from_str(&json).unwrap();
-                if written["components"]["Widget"]["props"]["size"].is_object() {
+                if written["components"]["Widget"]["props"]["size"].is_string() {
                     return written;
                 }
             }
@@ -244,6 +244,7 @@ fn watch_reports_a_change_and_writes_out_what_extract_produces() {
     let props: Vec<&String> = watched["components"]["Widget"]["props"].as_object().unwrap().keys().collect();
     assert_eq!(props, ["label", "size"]);
     assert_eq!(watched["components"], extracted["components"], "watch and extract must agree on the same tree");
+    assert_eq!(watched["props"], extracted["props"], "watch and extract must agree on the props the ids name");
 
     let stdout = watch.logged(&watch.stdout);
     assert!(

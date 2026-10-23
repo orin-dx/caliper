@@ -83,13 +83,21 @@ export interface ParsedProp {
   declarations: PropParent[]
 }
 
+/**
+ * A prop's key in a `props` table: 16 hex digits hashed from the prop's JSON, so the same prop has the same id in every
+ * output and update of a build. Opaque: never store one beyond the output it came from.
+ */
+export type PropId = string
+
 export interface ComponentEntry {
   displayName: string
   filePath: string
   description: string
-  props: Record<string, ParsedProp>
+  /** Prop name to the prop's id in the output's (or update's) `props` table. */
+  props: Record<string, PropId>
   inheritance: InheritedLayer[]
-  notableInherited: Record<string, ParsedProp>
+  /** Prop name to the prop's id in the output's (or update's) `props` table. */
+  notableInherited: Record<string, PropId>
   discriminantProp: string | null
   composes: string[]
   tags: Record<string, string>
@@ -142,6 +150,8 @@ export interface ExtractionStats {
 
 export interface ExtractionOutput {
   components: Record<string, ComponentEntry>
+  /** Every distinct prop the components refer to, written once (ADR 0009). */
+  props: Record<PropId, ParsedProp>
   enums: Record<string, EnumEntry[]>
   diagnostics: Diagnostic[]
   stats: ExtractionStats
@@ -152,6 +162,8 @@ export interface IncrementalUpdate {
   revision: number
   /** Components re-resolved by this change, in the same order as `updatedKeys`. */
   updatedComponents: ComponentEntry[]
+  /** Every prop `updatedComponents` refer to. Merge it into the output's table; ids nothing refers to can be dropped. */
+  props: Record<PropId, ParsedProp>
   /** The output key each updated component is published under: a bare name, or `Name (file)` when disambiguated. */
   updatedKeys: string[]
   /** Output keys that no longer exist: the component was renamed, deleted, or stopped being a component. */

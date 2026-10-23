@@ -3,8 +3,6 @@
 //! Orchestrates: file discovery → parallel parse → global merge → parallel resolve → output.
 //! Also manages DTS cache and incremental watch-mode state.
 
-use std::sync::Arc;
-
 use camino::{Utf8Path, Utf8PathBuf};
 use rayon::prelude::*;
 use rustc_hash::FxHashSet;
@@ -105,9 +103,8 @@ impl Default for PipelineOptions {
 
 // ─── Incremental watch types ──────────────────────────────────────────────────
 
-/// Result of processing a single file change in watch mode.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
+/// Result of processing a single file change in watch mode. Its JSON writes the updated components' props as ids, with
+/// a `props` table holding every prop they refer to (ADR 0009).
 pub struct IncrementalUpdate {
     /// The session revision this update produced; a consumer can drop an update older than one it already applied.
     pub revision: u64,
@@ -127,6 +124,39 @@ pub struct IncrementalUpdate {
     pub duration_ms: u64,
 }
 
+impl Serialize for IncrementalUpdate {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use crate::types::output::interned::{intern, InternedComponent};
+        use serde::ser::SerializeStruct;
+
+        let IncrementalUpdate {
+            revision,
+            updated_components,
+            updated_keys,
+            removed_keys,
+            affected_files,
+            diagnostics,
+            removed_diagnostics,
+            duration_ms,
+        } = self;
+        let entries: Vec<&ComponentEntry> = updated_components.iter().collect();
+        let (ids, props) = intern::<S::Error>(&entries)?;
+        let components: Vec<InternedComponent<'_>> =
+            entries.iter().zip(&ids).map(|(entry, ids)| InternedComponent { entry, ids }).collect();
+        let mut out = serializer.serialize_struct("IncrementalUpdate", 9)?;
+        out.serialize_field("revision", revision)?;
+        out.serialize_field("updatedComponents", &components)?;
+        out.serialize_field("props", &props)?;
+        out.serialize_field("updatedKeys", updated_keys)?;
+        out.serialize_field("removedKeys", removed_keys)?;
+        out.serialize_field("affectedFiles", affected_files)?;
+        out.serialize_field("diagnostics", diagnostics)?;
+        out.serialize_field("removedDiagnostics", removed_diagnostics)?;
+        out.serialize_field("durationMs", duration_ms)?;
+        out.end()
+    }
+}
+
 // ─── JSON serialization helpers ──────────────────────────────────────────────
 
 /// Serialize an [`ExtractionOutput`] to a JSON string.
@@ -135,7 +165,17 @@ pub struct IncrementalUpdate {
 /// `PropType`'s hand-written `Serialize` (see ADR 0002) happens once here,
 /// not in every downstream crate.
 pub fn extraction_output_to_json(output: &ExtractionOutput) -> Result<String, serde_json::Error> {
-    serde_json::to_string(output)
+    let mut json = Vec::new();
+    write_extraction_output_json(output, &mut json)?;
+    String::from_utf8(json).map_err(|e| serde_json::Error::io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
+}
+
+/// Write an [`ExtractionOutput`] as compact JSON.
+pub fn write_extraction_output_json(
+    output: &ExtractionOutput,
+    writer: impl std::io::Write,
+) -> Result<(), serde_json::Error> {
+    serde_json::to_writer(writer, output)
 }
 
 /// Serialize an [`IncrementalUpdate`] to a JSON string (same reason as above).
@@ -147,8 +187,7 @@ pub fn incremental_update_to_json(update: &IncrementalUpdate) -> Result<String, 
 
 /// Stateless extraction — suitable for CLI and NAPI cold runs.
 pub fn extract(options: &PipelineOptions) -> ExtractionOutput {
-    let revision = revision::Revision::cold(options, 0);
-    Arc::try_unwrap(revision.output).unwrap_or_else(|shared| (*shared).clone())
+    revision::Revision::cold_output(options)
 }
 
 // ─── Helper functions ─────────────────────────────────────────────────────────
