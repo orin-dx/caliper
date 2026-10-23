@@ -62,11 +62,14 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     /// `export { Foo }`: local specifiers, no source.
     fn visit_export_named_declaration(&mut self, node: &ExportNamedDeclaration<'a>) {
         for spec in &node.specifiers {
+            self.record_exported_local(spec.local.name().as_str());
             // Recorded as a local declaration for now; `finish()` turns it into a re-export when `local` is an import.
-            self.pending_local_exports.push((self.data.exports.len(), spec.local.name().as_str().to_owned()));
+            let (local, exported) = (spec.local.name().as_str(), spec.exported.name().as_str());
+            self.pending_local_exports.push((self.data.exports.len(), local.to_owned()));
             self.data.exports.push(LexedExport::LocalDeclaration {
-                name: spec.exported.name().as_str().to_owned(),
+                name: exported.to_owned(),
                 is_type_only: node.export_kind.is_type() || spec.export_kind.is_type(),
+                declared_as: (local != exported).then(|| local.to_owned()),
             });
         }
 
@@ -93,7 +96,26 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     /// `export type { A }`, and `export enum` declares a runtime value.
     fn visit_export_declaration(&mut self, node: &ExportDeclaration<'a>) {
         if let Some(name) = declaration_name(&node.declaration) {
-            self.data.exports.push(LexedExport::LocalDeclaration { name: name.to_owned(), is_type_only: false });
+            self.data.exports.push(LexedExport::LocalDeclaration {
+                name: name.to_owned(),
+                is_type_only: false,
+                declared_as: None,
+            });
+        }
+        // `export const A = …, B = …` exports every declarator.
+        match &node.declaration {
+            Declaration::VariableDeclaration(vd) => {
+                for declarator in &vd.declarations {
+                    if let BindingPattern::BindingIdentifier(id) = &declarator.id {
+                        self.record_exported_local(id.name.as_str());
+                    }
+                }
+            }
+            declaration => {
+                if let Some(name) = declaration_name(declaration) {
+                    self.record_exported_local(name);
+                }
+            }
         }
 
         // Walk the declaration so sub-visitors (interface, type alias, etc.) fire
@@ -226,6 +248,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             if let BindingPattern::BindingIdentifier(id) = &declarator.id {
                 let name = id.name.as_str().to_owned();
                 self.try_collect_cva_call(declarator, &name);
+                self.record_object_assign_declarator(&name, declarator.init.as_ref());
             }
             if self.is_tsx {
                 if let Some(name) = self.extract_pascal_name(declarator) {
@@ -309,6 +332,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                             } else if let Some((props_name, type_args)) =
                                 self.extract_type_name_from_type(&type_ann.type_annotation)
                             {
+                                if func.params.items.len() > 1 {
+                                    self.takes_a_second_parameter.insert(name.into());
+                                }
                                 let (description, tags) = self.find_jsdoc_with_tags(func.span.start);
                                 let param_defaults = self.extract_param_defaults(&func.params);
                                 self.data.component_mappings.push(
@@ -384,7 +410,38 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         walk::walk_class(self, class);
     }
 
+    fn visit_identifier_reference(&mut self, it: &IdentifierReference<'a>) {
+        self.record_reference(it);
+    }
+
+    fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
+        self.record_call(it);
+        walk::walk_call_expression(self, it);
+    }
+
+    fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
+        self.record_jsx_element(it);
+        walk::walk_jsx_opening_element(self, it);
+    }
+
     fn visit_export_default_declaration(&mut self, node: &ExportDefaultDeclaration<'a>) {
+        // The default export's local name; an anonymous one is named after its file below.
+        let local = match &node.declaration {
+            ExportDefaultDeclarationKind::FunctionDeclaration(func) => func.id.as_ref().map(|id| id.name.as_str()),
+            ExportDefaultDeclarationKind::ClassDeclaration(class) => class.id.as_ref().map(|id| id.name.as_str()),
+            kind => match kind.as_expression().map(super::component::peel_expr) {
+                Some(Expression::Identifier(id)) => Some(id.name.as_str()),
+                _ => None,
+            },
+        };
+        match local {
+            Some(name) => self.record_exported_local(name),
+            None => {
+                if let Some(name) = super::component::pascal_case_from_file_stem(&self.file_path) {
+                    self.record_exported_local(&name);
+                }
+            }
+        }
         // An anonymous default export has no binding name, so the component is named after its file, as
         // `try_anonymous_default_export_component` already does for `export default function(props: Props) {}`.
         if self.is_tsx {
@@ -422,6 +479,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     fn visit_expression_statement(&mut self, node: &ExpressionStatement<'a>) {
         self.try_scan_display_name(node);
         self.try_scan_default_props(node);
+        self.record_member_assignment(node);
         if self.is_tsx {
             self.try_scan_object_assign_sub_components(node);
         }

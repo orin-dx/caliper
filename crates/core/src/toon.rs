@@ -125,7 +125,11 @@ fn format_type_compact(prop_type: &PropType) -> String {
         PropType::NumberLiteral(n) => n.to_string(),
         PropType::BoolLiteral(b) => b.to_string(),
         PropType::LiteralUnion { members, .. } => truncate_with_indicator(members, 6, "|"),
-        PropType::EventHandler { event_type, .. } => format!("handler({event_type})"),
+        // Parameter types only: the names cost tokens and say little an agent needs.
+        PropType::Function { params, return_type, .. } => {
+            let params: Vec<String> = params.iter().map(|p| format_type_compact(&p.param_type)).collect();
+            format!("({}) => {}", params.join(", "), format_type_compact(return_type))
+        }
         PropType::ReactNode => "ReactNode".into(),
         PropType::CssProperties => "CSSProperties".into(),
         PropType::ElementType => "ElementType".into(),
@@ -175,7 +179,7 @@ mod tests {
         let mut props = BTreeMap::new();
         props.insert(
             "variant".to_string(),
-            ParsedProp::new(
+            std::sync::Arc::new(ParsedProp::new(
                 "variant".into(),
                 PropType::LiteralUnion { members: vec!["primary".into(), "secondary".into()], has_default: true },
                 false,
@@ -184,7 +188,7 @@ mod tests {
                 Default::default(),
                 None,
                 vec![],
-            ),
+            )),
         );
 
         let entry = ComponentEntry {
@@ -199,6 +203,7 @@ mod tests {
             tags: Default::default(),
             methods: vec![],
             detected_by: crate::types::DetectionRule::FunctionDeclaration,
+            exported: true,
         };
 
         let toon = render_component_toon(&entry);
@@ -247,10 +252,15 @@ mod tests {
             format_type_compact(&PropType::Ref { element: Some("HTMLButtonElement".into()) }),
             "Ref<HTMLButtonElement>"
         );
-        assert_eq!(
-            format_type_compact(&PropType::EventHandler { event_type: "MouseEvent".into(), param_name: None }),
-            "handler(MouseEvent)"
-        );
+        let on_select = PropType::Function {
+            type_params: vec![],
+            params: vec![crate::types::FunctionParam {
+                name: Some("event".into()),
+                param_type: PropType::Named { name: "MouseEvent".into(), args: vec![] },
+            }],
+            return_type: Box::new(PropType::Boolean),
+        };
+        assert_eq!(format_type_compact(&on_select), "(MouseEvent) => boolean");
         assert_eq!(
             format_type_compact(&PropType::HtmlAttributes { element: "button".into(), omitted: vec![] }),
             "HTMLAttributes<button>"

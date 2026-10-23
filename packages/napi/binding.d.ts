@@ -19,6 +19,14 @@ export declare function closeSession(sessionId: number): void
 export declare function createSession(options: JsExtractOptions): number
 
 /**
+ * Bring the session up to date with the files on disk, for a host without a file watcher (a docgen provider in a
+ * worker): stats every file the session read and applies what changed since, rebuilding when a tsconfig,
+ * `package.json` or lockfile changed. Returns JSON string of IncrementalUpdate; the revision is unchanged when nothing
+ * changed. Errors for an unknown session.
+ */
+export declare function ensureFresh(sessionId: number): Promise<string>
+
+/**
  * Cold extraction — returns JSON string of ExtractionOutput.
  * Use for: build-time extraction, CLI backing, one-off runs.
  */
@@ -37,6 +45,12 @@ export declare function extractFileIncremental(filePath: string, sessionId: numb
  */
 export declare function initializeSession(sessionId: number, options: JsExtractOptions): Promise<string>
 
+/**
+ * Whether a change to `file_path` rebuilds the session: a tsconfig, jsconfig, `package.json` or lockfile in or above
+ * a source directory, outside `node_modules`. False for an unknown session.
+ */
+export declare function isResolutionConfig(sessionId: number, filePath: string): boolean
+
 /** Options passed from TypeScript — flat struct for easy NAPI marshalling. */
 export interface JsExtractOptions {
   srcDirs: Array<string>
@@ -45,4 +59,15 @@ export interface JsExtractOptions {
   tsconfigPath?: string
   extraBuiltins?: Array<string>
   cacheDir?: string
+  /** Load the dependency type declarations project types reference (off by default). */
+  loadDependencies?: boolean
+  /** Which inherited sources of more than 30 props to list as one layer (default `'dependencies'`). */
+  collapseInheritedProps?: 'dependencies' | 'all' | 'none'
 }
+
+/**
+ * The tsconfigs, `package.json` files and lockfiles above the session's source directories: a watcher adds them, and
+ * passes a change to one to `extractFileIncremental` like any other file, which rebuilds the session. Empty for an
+ * unknown session.
+ */
+export declare function resolutionConfigFiles(sessionId: number): Array<string>

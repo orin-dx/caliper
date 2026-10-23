@@ -96,6 +96,11 @@ pub struct JsExtractOptions {
     pub tsconfig_path: Option<String>,
     pub extra_builtins: Option<Vec<String>>,
     pub cache_dir: Option<String>,
+    /// Load the dependency type declarations project types reference (off by default).
+    pub load_dependencies: Option<bool>,
+    /// Which inherited sources of more than 30 props to list as one layer (default `'dependencies'`).
+    #[napi(ts_type = "'dependencies' | 'all' | 'none'")]
+    pub collapse_inherited_props: Option<String>,
 }
 
 // ─── TryFrom<JsExtractOptions> for PipelineOptions ────────────────────────────
@@ -126,6 +131,15 @@ impl TryFrom<JsExtractOptions> for PipelineOptions {
         }
         if let Some(dir) = js.cache_dir {
             opts.cache_dir = Some(dir.into());
+        }
+        if let Some(load) = js.load_dependencies {
+            opts.load_dependencies = load;
+        }
+        if let Some(mode) = js.collapse_inherited_props.as_deref() {
+            opts.collapse_inherited_props = caliper_docgen_core::pipeline::CollapseInheritedProps::parse(mode)
+                .map_err(|bad| {
+                    format!("collapseInheritedProps is '{bad}', expected \"dependencies\", \"all\" or \"none\"")
+                })?;
         }
 
         Ok(opts)
@@ -260,6 +274,53 @@ pub async fn initialize_session(session_id: u32, options: JsExtractOptions) -> n
     .map_err(|e| napi::Error::from_reason(e.to_string()))?
 }
 
+/// Bring the session up to date with the files on disk, for a host without a file watcher (a docgen provider in a
+/// worker): stats every file the session read and applies what changed since, rebuilding when a tsconfig,
+/// `package.json` or lockfile changed. Returns JSON string of IncrementalUpdate; the revision is unchanged when nothing
+/// changed. Errors for an unknown session.
+#[napi]
+pub async fn ensure_fresh(session_id: u32) -> napi::Result<String> {
+    tokio::task::spawn_blocking(move || {
+        match caliper_docgen_core::panic_guard::contain_panic("ensure_fresh", move || {
+            let session = SESSIONS
+                .get(&session_id)
+                .map(|s| s.clone())
+                .ok_or_else(|| napi::Error::from_reason(format!("Unknown session {session_id}")))?;
+            let update = session.ensure_fresh();
+            incremental_update_to_json(&update).map_err(|e| napi::Error::from_reason(e.to_string()))
+        }) {
+            Ok(result) => result,
+            Err(diag) => Err(napi::Error::from_reason(diag.to_string())),
+        }
+    })
+    .await
+    .map_err(|e| napi::Error::from_reason(e.to_string()))?
+}
+
+/// The tsconfigs, `package.json` files and lockfiles above the session's source directories: a watcher adds them, and
+/// passes a change to one to `extractFileIncremental` like any other file, which rebuilds the session. Empty for an
+/// unknown session.
+#[napi]
+pub fn resolution_config_files(session_id: u32) -> Vec<String> {
+    caliper_docgen_core::panic_guard::contain_panic("resolution_config_files", move || {
+        SESSIONS
+            .get(&session_id)
+            .map(|session| session.resolution_config_files().into_iter().map(String::from).collect())
+            .unwrap_or_default()
+    })
+    .unwrap_or_default()
+}
+
+/// Whether a change to `file_path` rebuilds the session: a tsconfig, jsconfig, `package.json` or lockfile in or above
+/// a source directory, outside `node_modules`. False for an unknown session.
+#[napi]
+pub fn is_resolution_config(session_id: u32, file_path: String) -> bool {
+    caliper_docgen_core::panic_guard::contain_panic("is_resolution_config", move || {
+        SESSIONS.get(&session_id).is_some_and(|session| session.is_resolution_config(Utf8Path::new(&file_path)))
+    })
+    .unwrap_or(false)
+}
+
 /// Release session state. Call in Vite's buildEnd hook.
 #[napi]
 pub fn close_session(session_id: u32) {
@@ -286,6 +347,8 @@ mod tests {
             tsconfig_path: None,
             extra_builtins: None,
             cache_dir: None,
+            load_dependencies: None,
+            collapse_inherited_props: None,
         }
     }
 
@@ -297,6 +360,40 @@ mod tests {
         assert_eq!(opts.html_attributes, defaults.html_attributes);
         assert_eq!(opts.extra_builtins, defaults.extra_builtins);
         assert_eq!(opts.cache_dir, defaults.cache_dir);
+        assert_eq!(opts.load_dependencies, defaults.load_dependencies);
+    }
+
+    #[test]
+    fn load_dependencies_maps_onto_pipeline_options() {
+        let mut js = base_options();
+        js.load_dependencies = Some(true);
+        assert!(PipelineOptions::try_from(js).expect("should convert").load_dependencies);
+    }
+
+    #[test]
+    fn collapse_inherited_props_names_map_onto_pipeline_options_and_a_bad_one_is_an_error() {
+        use caliper_docgen_core::pipeline::CollapseInheritedProps;
+
+        assert_eq!(
+            PipelineOptions::try_from(base_options()).expect("should convert").collapse_inherited_props,
+            CollapseInheritedProps::Dependencies
+        );
+        for (name, expected) in [
+            ("dependencies", CollapseInheritedProps::Dependencies),
+            ("all", CollapseInheritedProps::All),
+            ("none", CollapseInheritedProps::None),
+        ] {
+            let mut js = base_options();
+            js.collapse_inherited_props = Some(name.into());
+            let opts = PipelineOptions::try_from(js).expect("should convert");
+            assert_eq!(opts.collapse_inherited_props, expected, "{name}");
+        }
+        let mut js = base_options();
+        js.collapse_inherited_props = Some("some".into());
+        assert_eq!(
+            PipelineOptions::try_from(js).expect_err("a typo must not fall back to the default"),
+            "collapseInheritedProps is 'some', expected \"dependencies\", \"all\" or \"none\""
+        );
     }
 
     #[test]
@@ -358,6 +455,23 @@ mod tests {
             "got {}",
             err.reason
         );
+    }
+
+    #[tokio::test]
+    async fn ensure_fresh_errors_for_an_unknown_session_and_updates_a_registered_one() {
+        let session_id = next_session_id();
+        let err = ensure_fresh(session_id).await.expect_err("an unknown session has no options to extract with");
+        assert_eq!(err.reason, format!("Unknown session {session_id}"));
+
+        // `./src` holds this crate's Rust sources: an existing directory with no components.
+        let options = PipelineOptions::try_from(base_options()).expect("valid options");
+        SESSIONS.insert(session_id, Arc::new(WatchSession::new(options)));
+        let first = ensure_fresh(session_id).await.expect("a registered session");
+        let second = ensure_fresh(session_id).await.expect("a registered session");
+        close_session(session_id);
+        let without_duration = |update: &str| update.split_once(r#","durationMs""#).expect("durationMs").0.to_owned();
+        let empty = r#"{"revision":1,"updatedComponents":[],"props":{},"updatedKeys":[],"removedKeys":[],"affectedFiles":[],"diagnostics":[],"removedDiagnostics":[]"#;
+        assert_eq!((without_duration(&first), without_duration(&second)), (empty.to_owned(), empty.to_owned()));
     }
 
     // ── SPEC-BINDING-001 AC3: close_session's panic is caught, and the call

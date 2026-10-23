@@ -3,8 +3,10 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Arc;
 
 use rayon::prelude::*;
+use rustc_hash::FxHashMap;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -53,60 +55,67 @@ impl Serialize for PropTable<'_> {
     }
 }
 
-/// A prop by name, with its id and the JSON the id was computed from.
-type Row<'a> = (&'a str, PropId, &'a ParsedProp, Vec<u8>);
-
-/// Identify every prop of `entries` and collect the distinct ones.
+/// Identify every prop of `entries` and collect the distinct ones. Components that inherit one interface share its
+/// props, so each shared allocation is serialized once.
 pub(crate) fn intern<'a, E: serde::ser::Error>(
     entries: &[&'a ComponentEntry],
 ) -> Result<(Vec<ComponentIds<'a>>, PropTable<'a>), E> {
-    let identify = |props: &'a BTreeMap<String, ParsedProp>| -> serde_json::Result<Vec<Row<'a>>> {
+    let mut slots: FxHashMap<*const ParsedProp, usize> = FxHashMap::default();
+    let mut allocations: Vec<&'a ParsedProp> = Vec::new();
+    let mut slots_of = |props: &'a BTreeMap<String, Arc<ParsedProp>>| -> Vec<(&'a str, usize)> {
         props
             .iter()
             .map(|(name, prop)| {
-                let json = serde_json::to_vec(prop)?;
-                Ok((name.as_str(), PropId::of(&json), prop, json))
+                let slot = *slots.entry(Arc::as_ptr(prop)).or_insert_with(|| {
+                    allocations.push(prop);
+                    allocations.len() - 1
+                });
+                (name.as_str(), slot)
             })
             .collect()
     };
-    let rows: Vec<(Vec<Row<'a>>, Vec<Row<'a>>)> = entries
+    let named: Vec<_> =
+        entries.iter().map(|entry| (slots_of(&entry.props), slots_of(&entry.notable_inherited))).collect();
+
+    let identified: Vec<(PropId, Vec<u8>)> = allocations
         .par_iter()
-        .map(|entry| Ok((identify(&entry.props)?, identify(&entry.notable_inherited)?)))
+        .map(|prop| {
+            let json = serde_json::to_vec(prop)?;
+            Ok((PropId::of(&json), json))
+        })
         .collect::<serde_json::Result<_>>()
         .map_err(E::custom)?;
 
     let mut table = PropTable { entries: BTreeMap::new() };
-    let ids = rows
+    let mut ids = Vec::with_capacity(identified.len());
+    for (prop, (id, json)) in allocations.into_iter().zip(identified) {
+        table.add(prop, id, json)?;
+        ids.push(id);
+    }
+    let by_name = |slots: Vec<(&'a str, usize)>| slots.into_iter().map(|(name, slot)| (name, ids[slot])).collect();
+    let components = named
         .into_iter()
-        .map(|(props, notable_inherited)| {
-            Ok(ComponentIds { props: table.add(props)?, notable_inherited: table.add(notable_inherited)? })
-        })
-        .collect::<Result<_, E>>()?;
-    Ok((ids, table))
+        .map(|(props, notable)| ComponentIds { props: by_name(props), notable_inherited: by_name(notable) });
+    Ok((components.collect(), table))
 }
 
 impl<'a> PropTable<'a> {
-    /// Add each row's prop under its id, and return the ids by name. Fails if a different prop already holds an id, so
-    /// one can never stand in for the other.
-    fn add<E: serde::ser::Error>(&mut self, rows: Vec<Row<'a>>) -> Result<Vec<(&'a str, PropId)>, E> {
-        rows.into_iter()
-            .map(|(name, id, prop, json)| {
-                match self.entries.get(&id) {
-                    Some((_, existing)) if *existing != json => {
-                        return Err(E::custom(format!(
-                            "prop '{name}' and a different prop have the same id {id}: {} and {}",
-                            String::from_utf8_lossy(existing),
-                            String::from_utf8_lossy(&json)
-                        )));
-                    }
-                    Some(_) => {}
-                    None => {
-                        self.entries.insert(id, (prop, json));
-                    }
-                }
-                Ok((name, id))
-            })
-            .collect()
+    /// Add `prop` under `id`, the hash of `json`. Fails if a different prop already holds the id, so one can never stand
+    /// in for the other.
+    fn add<E: serde::ser::Error>(&mut self, prop: &'a ParsedProp, id: PropId, json: Vec<u8>) -> Result<(), E> {
+        match self.entries.get(&id) {
+            Some((_, existing)) if *existing != json => Err(E::custom(format!(
+                "prop '{}' and a different prop have the same id {id}: {} and {}",
+                prop.name,
+                String::from_utf8_lossy(existing),
+                String::from_utf8_lossy(&json)
+            ))),
+            Some(_) => Ok(()),
+            None => {
+                self.entries.insert(id, (prop, json));
+                Ok(())
+            }
+        }
     }
 }
 
@@ -140,8 +149,9 @@ impl Serialize for InternedComponent<'_> {
             tags,
             methods,
             detected_by,
+            exported,
         } = self.entry;
-        let mut out = serializer.serialize_struct("ComponentEntry", 11)?;
+        let mut out = serializer.serialize_struct("ComponentEntry", 12)?;
         out.serialize_field("displayName", display_name)?;
         out.serialize_field("filePath", file_path)?;
         out.serialize_field("description", description)?;
@@ -153,6 +163,7 @@ impl Serialize for InternedComponent<'_> {
         out.serialize_field("tags", tags)?;
         out.serialize_field("methods", methods)?;
         out.serialize_field("detectedBy", detected_by)?;
+        out.serialize_field("exported", exported)?;
         out.end()
     }
 }

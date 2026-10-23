@@ -58,6 +58,33 @@ pub(super) fn record_module_resolution() {
     with_recorder(|deps| deps.resolves_modules = true);
 }
 
+impl Dependencies {
+    fn absorb(&mut self, other: &Dependencies) {
+        self.files.extend(other.files.iter().cloned());
+        self.bare_names.extend(other.bare_names.iter().cloned());
+        self.resolves_modules |= other.resolves_modules;
+    }
+}
+
+/// Run `f` inside the current recording and also return what `f` alone depended on, so a reused result can replay it.
+pub(super) fn capturing<T>(f: impl FnOnce() -> T) -> (T, Dependencies) {
+    let outer = RECORDER.with(|recorder| recorder.borrow_mut().replace(Dependencies::default()));
+    let result = f();
+    let inner = RECORDER.with(|recorder| recorder.borrow_mut().take()).unwrap_or_default();
+    RECORDER.with(|recorder| {
+        *recorder.borrow_mut() = outer.map(|mut deps| {
+            deps.absorb(&inner);
+            deps
+        });
+    });
+    (result, inner)
+}
+
+/// Record `deps` into the current recording, as if the lookups behind them had run again.
+pub(super) fn replay(deps: &Dependencies) {
+    with_recorder(|current| current.absorb(deps));
+}
+
 /// Run `f` and return what it depended on. Not reentrant: resolution never nests a component inside another.
 pub(super) fn recording<T>(f: impl FnOnce() -> T) -> (T, Dependencies) {
     RECORDER.with(|recorder| *recorder.borrow_mut() = Some(Dependencies::default()));

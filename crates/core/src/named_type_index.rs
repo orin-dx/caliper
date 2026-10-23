@@ -31,6 +31,9 @@ pub(crate) struct NamedTypeIndex {
     interface_type_params: FxHashMap<PathKey, FxHashMap<CompactString, Vec<TypeName>>>,
     /// Files declaring `React.`-qualified names (`@types/react`), the only ones a qualified fallback can match.
     react_namespaced: FxHashSet<PathKey>,
+    /// Loaded dependency declarations (ADR 0010), consulted for a file this index holds nothing for. Shared by every
+    /// watch revision, never copied.
+    pub(crate) fallback: Option<std::sync::Arc<NamedTypeIndex>>,
 }
 
 /// What `lookup_ambient` found at a given ambient lib file, mirroring the
@@ -58,6 +61,7 @@ impl NamedTypeIndex {
             type_alias_params: FxHashMap::default(),
             interface_type_params: FxHashMap::default(),
             react_namespaced: FxHashSet::default(),
+            fallback: None,
         };
         index.insert_flat_maps(
             &global.interfaces,
@@ -140,6 +144,19 @@ impl NamedTypeIndex {
         }
     }
 
+    /// The index holding `file`'s declarations: this one, or the dependency fallback for a file this one doesn't hold.
+    /// Project and dependency files never overlap, so a file is in exactly one of them.
+    fn layer_for(&self, file: &Utf8Path) -> &NamedTypeIndex {
+        match &self.fallback {
+            Some(fallback)
+                if !self.interfaces.contains_key(file.as_str()) && !self.type_aliases.contains_key(file.as_str()) =>
+            {
+                fallback
+            }
+            _ => self,
+        }
+    }
+
     /// Look up an interface by canonical `(file, name)`, falling back to a
     /// `React.`-namespace-qualified name. `@types/react` declares everything
     /// inside `declare namespace React { ... }`, so real declarations are
@@ -147,9 +164,10 @@ impl NamedTypeIndex {
     /// way — a plain `import type { HTMLAttributes } from "react"` binds the
     /// bare name.
     pub(crate) fn lookup_interface(&self, file: &Utf8Path, name: &str) -> Option<&CollectedInterface> {
-        let per_file = self.interfaces.get(file.as_str())?;
+        let index = self.layer_for(file);
+        let per_file = index.interfaces.get(file.as_str())?;
         per_file.get(name).or_else(|| {
-            self.react_namespaced.contains(file.as_str()).then(|| per_file.get(format!("React.{name}").as_str()))?
+            index.react_namespaced.contains(file.as_str()).then(|| per_file.get(format!("React.{name}").as_str()))?
         })
     }
 
@@ -161,11 +179,12 @@ impl NamedTypeIndex {
         file: &Utf8Path,
         name: &str,
     ) -> Option<(CompactString, &CollectedTypeAlias)> {
-        let per_file = self.type_aliases.get(file.as_str())?;
+        let index = self.layer_for(file);
+        let per_file = index.type_aliases.get(file.as_str())?;
         if let Some(alias) = per_file.get(name) {
             return Some((CompactString::from(name), alias));
         }
-        if !self.react_namespaced.contains(file.as_str()) {
+        if !index.react_namespaced.contains(file.as_str()) {
             return None;
         }
         let qualified = format!("React.{name}");
@@ -181,7 +200,7 @@ impl NamedTypeIndex {
     }
 
     pub(crate) fn lookup_type_alias_params(&self, file: &Utf8Path, name: &str) -> Option<&Vec<TypeName>> {
-        self.type_alias_params.get(file.as_str())?.get(name)
+        self.layer_for(file).type_alias_params.get(file.as_str())?.get(name)
     }
 
     /// Declared generic type parameters for an interface the caller already
@@ -196,7 +215,7 @@ impl NamedTypeIndex {
     }
 
     fn lookup_interface_type_params(&self, file: &Utf8Path, name: &str) -> Option<&Vec<TypeName>> {
-        self.interface_type_params.get(file.as_str())?.get(name)
+        self.layer_for(file).interface_type_params.get(file.as_str())?.get(name)
     }
 
     /// Same as `lookup_interface`, but also falls back to TypeScript's own
@@ -236,7 +255,7 @@ impl NamedTypeIndex {
     /// `@types/react` lookup, which tries both forms itself in a specific
     /// priority order).
     pub(crate) fn lookup_interface_exact(&self, file: &Utf8Path, name: &str) -> Option<&CollectedInterface> {
-        self.interfaces.get(file.as_str())?.get(name)
+        self.layer_for(file).interfaces.get(file.as_str())?.get(name)
     }
 
     /// Same as `lookup_interface_exact`, for type aliases — no bare/`React.`-
@@ -246,7 +265,7 @@ impl NamedTypeIndex {
     /// an exact key can use this to fetch the matching alias without
     /// re-deriving a fallback that can't actually diverge.
     pub(crate) fn lookup_type_alias_exact(&self, file: &Utf8Path, name: &str) -> Option<&CollectedTypeAlias> {
-        self.type_aliases.get(file.as_str())?.get(name)
+        self.layer_for(file).type_aliases.get(file.as_str())?.get(name)
     }
 }
 
