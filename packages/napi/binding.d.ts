@@ -45,4 +45,8 @@ export interface JsExtractOptions {
   tsconfigPath?: string
   extraBuiltins?: Array<string>
   cacheDir?: string
+  /** Load the dependency type declarations project types reference (off by default). */
+  loadDependencies?: boolean
+  /** Which inherited sources of more than 30 props to list as one layer (default `'dependencies'`). */
+  collapseInheritedProps?: 'dependencies' | 'all' | 'none'
 }

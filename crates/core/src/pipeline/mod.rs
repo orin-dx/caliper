@@ -64,6 +64,32 @@ impl HtmlAttributeMode {
     }
 }
 
+/// Which inherited sources of more than 30 props are recorded as an `InheritedLayer` instead of expanded prop by prop
+/// (ADR 0012). A component's own props type is always expanded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CollapseInheritedProps {
+    /// Sources declared in a loaded dependency (`load_dependencies`), as Storybook's react-component-meta shows them.
+    #[default]
+    Dependencies,
+    /// Dependency sources and the project's own.
+    All,
+    /// Expand every source.
+    None,
+}
+
+impl CollapseInheritedProps {
+    /// The mode named by a config or binding string. `Err` carries the unrecognized value.
+    pub fn parse(s: &str) -> Result<Self, &str> {
+        match s {
+            "dependencies" => Ok(Self::Dependencies),
+            "all" => Ok(Self::All),
+            "none" => Ok(Self::None),
+            other => Err(other),
+        }
+    }
+}
+
 /// Configuration for a single extraction run.
 #[derive(Debug, Clone)]
 pub struct PipelineOptions {
@@ -75,7 +101,8 @@ pub struct PipelineOptions {
     pub exclude_prefixes: Vec<String>,
     /// How much of an inherited HTML element's attributes to expose.
     pub html_attributes: HtmlAttributeMode,
-    /// Path to tsconfig.json (auto-detected if None).
+    /// Path to the tsconfig that governs module resolution. When unset, each importing file uses the nearest
+    /// `tsconfig.json` above it, and the one above the first source directory supplies `customConditions`.
     pub tsconfig_path: Option<Utf8PathBuf>,
     /// Additional builtin type names beyond the React standard set.
     pub extra_builtins: FxHashSet<compact_str::CompactString>,
@@ -83,6 +110,11 @@ pub struct PipelineOptions {
     pub cache_dir: Option<Utf8PathBuf>,
     /// Custom docgen extension plugins.
     pub plugins: crate::plugin::PluginRegistry,
+    /// Load the dependency declarations project types reference, by name, before resolving (ADR 0010). Off by default:
+    /// without it a type imported from a package resolves only when it is a builtin or a known shortcut.
+    pub load_dependencies: bool,
+    /// Which large inherited sources to record as a layer instead of expanding.
+    pub collapse_inherited_props: CollapseInheritedProps,
 }
 
 impl Default for PipelineOptions {
@@ -96,6 +128,8 @@ impl Default for PipelineOptions {
             extra_builtins: Default::default(),
             cache_dir: None,
             plugins: crate::plugin::PluginRegistry::default(),
+            load_dependencies: false,
+            collapse_inherited_props: CollapseInheritedProps::default(),
         }
     }
 }

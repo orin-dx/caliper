@@ -1,4 +1,5 @@
 pub(crate) mod cache;
+pub(crate) mod dependency_types;
 pub(crate) mod extractor;
 pub(crate) mod import_map;
 pub(crate) mod known;
