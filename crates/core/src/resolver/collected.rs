@@ -94,8 +94,8 @@ pub fn resolve_collected_type(
         CollectedType::TemplateLiteral(parts) => resolve_template_literal(parts, consuming_file, ctx, state, depth),
 
         // ── Function type ─────────────────────────────────────────────────────
-        CollectedType::Function { params, param_names, return_type } => {
-            resolve_function_type(params, param_names, return_type, consuming_file, ctx, state, depth)
+        CollectedType::Function { type_params, params, param_names, return_type } => {
+            resolve_function_type(type_params, params, param_names, return_type)
         }
 
         // ── Opaque (needs type checker) ───────────────────────────────────────

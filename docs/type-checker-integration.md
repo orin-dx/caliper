@@ -169,7 +169,7 @@ Pass only the files you need as roots. The API's checker is lazy, and diagnostic
 
 ## Open decisions
 
-1. **Output type.** Checker types don't fit `PropType` losslessly: `Named` has no file or symbol, `EventHandler` has no return type, `Tuple` has no optional or rest elements, and `Object` has no index signatures. Add a variant or map into existing ones. `ExtractionOutput` has no schema version, so add one first.
+1. **Output type.** Checker types don't fit `PropType` losslessly: `Named` has no file or symbol, `Tuple` has no optional or rest elements, and `Object` has no index signatures. Add a variant or map into existing ones. `ExtractionOutput` has no schema version, so add one first.
 2. **`ref` and `key`.** RDT emits both, and nothing else records forwardRef metadata. Semantic mode must match whatever the structural path does.
 3. **Trigger.** Run on every exported component or only on files with degrade diagnostics. Bare generic parameters and TypeScript utility types resolve to `Named` with no diagnostic by design, so the second misses them.
 4. **Union order.** Sort in canonical output, or keep source order for structural results.
