@@ -57,9 +57,10 @@ export function createDocgenProvider(
     skipHtmlProps: options.skipHtmlProps,
   }
   // The native binding loads on the first story request, not when Storybook starts the worker.
-  let session: Promise<DocgenSession> | undefined
+  let sessionPromise: Promise<DocgenSession> | undefined
   const getSession = () =>
-    (session ??= (async () => new DocgenSession(sessionOptions, binding ?? (await import('caliper-docgen-napi'))))())
+    (sessionPromise ??= (async () =>
+      new DocgenSession(sessionOptions, binding ?? (await import('caliper-docgen-napi'))))())
   const resolveMeta = createMetaComponentResolver()
   const fallback = options.fallback ?? 'degraded'
   let extractArgTypes: Promise<ExtractArgTypes> | undefined
@@ -82,7 +83,8 @@ export function createDocgenProvider(
   }
 
   async function docgen(key: string): Promise<RdtComponentDoc> {
-    const doc = (await getSession()).docgenInfo(key)
+    const session = await getSession()
+    const doc = session.docgenInfo(key)
     if (!doc) throw new Error(`${key} left the session`)
     return doc
   }
