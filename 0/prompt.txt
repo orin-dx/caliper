@@ -1,0 +1,1 @@
+First let's think about the problem structurally and comprehensively. How does it first in our architecture? Do we adjust it? What about our semantic models? What of performance?
