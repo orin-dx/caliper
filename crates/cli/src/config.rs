@@ -17,6 +17,7 @@ struct DocgenConfigSchema {
     tsconfig_path: Option<String>,
     cache_dir: Option<String>,
     extra_builtins: Option<Vec<String>>,
+    load_dependencies: Option<bool>,
 }
 
 impl DocgenConfigSchema {
@@ -45,6 +46,9 @@ impl DocgenConfigSchema {
         }
         if let Some(names) = self.extra_builtins {
             opts.extra_builtins = names.into_iter().map(Into::into).collect();
+        }
+        if let Some(load) = self.load_dependencies {
+            opts.load_dependencies = load;
         }
         Ok(opts)
     }
@@ -147,7 +151,7 @@ pub fn try_load_config(path: &std::path::Path) -> Result<Option<PipelineOptions>
             help = "Check docgen.config.ts's exported fields against the supported schema \
                     (srcDirs, excludePatterns, excludePrefixes, reactVersion, crossPackage, \
                     pandacssOutdir, variantFunctions, htmlAttributes, tsconfigPath, \
-                    vanillaExtract, cacheDir, extraBuiltins).",
+                    vanillaExtract, cacheDir, extraBuiltins, loadDependencies).",
             "docgen.config.ts at {} doesn't match the expected shape: {}",
             path.display(),
             e,
@@ -167,6 +171,8 @@ pub struct BuildOptionsArgs<'a> {
     pub html_attributes: Option<&'a str>,
     pub config_path: Option<&'a str>,
     pub extra_builtins: &'a [String],
+    /// `--load-dependencies`: turns loading on over the config; absent leaves the config's choice.
+    pub load_dependencies: bool,
 }
 
 pub fn build_options(args: BuildOptionsArgs) -> Result<PipelineOptions> {
@@ -195,6 +201,9 @@ pub fn build_options(args: BuildOptionsArgs) -> Result<PipelineOptions> {
     }
     if !args.extra_builtins.is_empty() {
         opts.extra_builtins = args.extra_builtins.iter().map(Into::into).collect();
+    }
+    if args.load_dependencies {
+        opts.load_dependencies = true;
     }
 
     Ok(opts)

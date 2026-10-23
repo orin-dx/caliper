@@ -14,6 +14,7 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::cache::DtsCache;
+use crate::dependency_types::{self, DependencyLayer};
 use crate::named_type_index::NamedTypeIndex;
 use crate::resolver::{Dependencies, ResolutionContext};
 use crate::types::output::severity_rank;
@@ -76,6 +77,8 @@ pub(crate) struct Revision {
     pub(crate) id: u64,
     global: Arc<GlobalSourceData>,
     named_types: Arc<NamedTypeIndex>,
+    /// The loaded dependency declarations, with `load_dependencies`.
+    dependencies: Option<Arc<DependencyLayer>>,
     ambient_global_files: Vec<Utf8PathBuf>,
     /// Source-directory and discovery diagnostics.
     head_diagnostics: Vec<Diagnostic>,
@@ -186,7 +189,11 @@ impl Revision {
 
         let mut global = GlobalSourceData::default();
         let mut file_diagnostics: BTreeMap<Utf8PathBuf, Vec<Diagnostic>> = BTreeMap::new();
+        let mut demands = Vec::new();
         for (path, mut data, io_diag) in parsed {
+            if options.load_dependencies {
+                demands.extend(dependency_types::project_demands(&path, &data));
+            }
             let mut diags: Vec<Diagnostic> = io_diag.into_iter().collect();
             diags.append(&mut data.diagnostics);
             diags.extend(options.plugins.run_on_file_extracted(&path, &mut data));
@@ -226,15 +233,19 @@ impl Revision {
             }
         }
 
+        let dependencies = options.load_dependencies.then(|| Arc::new(dependency_types::load(demands, options, None)));
         let global = Arc::new(global);
-        let named_types = Arc::new(NamedTypeIndex::build(&global));
+        let mut named_types = NamedTypeIndex::build(&global);
+        named_types.fallback = dependencies.as_ref().map(|layer| layer.named_types.clone());
+        let named_types = Arc::new(named_types);
         let ambient_global_files = crate::resolver::compute_ambient_global_files(options);
         let ctx = ResolutionContext::new_with_cached_ambient_global_files(
             global.clone(),
             options,
             ambient_global_files.clone(),
             named_types.clone(),
-        );
+        )
+        .with_dependencies(dependencies.clone());
         lib_diagnostics.extend(ctx.tsconfig_diagnostic.clone());
         let resolved = resolve_all(&component_ids(&global, options), &ctx);
         let files = Arc::new(src_files.into_iter().collect());
@@ -252,6 +263,7 @@ impl Revision {
             id,
             global,
             named_types,
+            dependencies,
             ambient_global_files,
             head_diagnostics,
             file_diagnostics,
@@ -279,6 +291,7 @@ impl Revision {
         let mut named_types = (*self.named_types).clone();
         let mut file_diagnostics = self.file_diagnostics.clone();
         let mut files = (*self.files).clone();
+        let mut dependencies = self.dependencies.clone();
         let mut bare_names: FxHashSet<String> = bare_names_declared(changed, &self.global.enums).into_iter().collect();
         bare_names.extend(bare_names_declared(changed, &self.global.const_arrays));
         global.remove_file(changed);
@@ -307,6 +320,15 @@ impl Revision {
                 }
                 bare_names.extend(bare_names_declared(changed, &data.enums));
                 bare_names.extend(bare_names_declared(changed, &data.const_arrays));
+                // Only names no earlier revision loaded cost a load; the new layer keeps everything the old one had.
+                if let Some(layer) = &self.dependencies {
+                    let missing = layer.missing(&dependency_types::project_demands(changed, &data));
+                    if !missing.is_empty() {
+                        let extended = dependency_types::load(missing, options, Some(layer));
+                        named_types.fallback = Some(extended.named_types.clone());
+                        dependencies = Some(Arc::new(extended));
+                    }
+                }
                 named_types.merge_file(&data);
                 global.merge(changed, data);
                 files.insert(changed.to_owned())
@@ -326,7 +348,8 @@ impl Revision {
             options,
             self.ambient_global_files.clone(),
             named_types.clone(),
-        );
+        )
+        .with_dependencies(dependencies.clone());
         let fresh = resolve_all(&stale, &ctx);
         let mut resolved: FxHashMap<ComponentId, Arc<Resolved>> =
             kept.into_iter().filter_map(|(id, _)| self.resolved.get(&id).map(|r| (id, r.clone()))).collect();
@@ -337,6 +360,7 @@ impl Revision {
             id: self.id + 1,
             global,
             named_types,
+            dependencies,
             ambient_global_files: self.ambient_global_files.clone(),
             head_diagnostics: self.head_diagnostics.clone(),
             file_diagnostics,

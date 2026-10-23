@@ -95,6 +95,13 @@ fn follow_reexports(
     if depth >= MAX_REEXPORT_DEPTH || ctx.named_types.is_declared_at(&file, &name) {
         return (file, name);
     }
+    // A package's re-export stubs are not in the layer; the loader's answer for them stands in (ADR 0011).
+    if let Some(answer) = ctx.dependencies.as_ref().and_then(|layer| layer.export_of(&file, &name)) {
+        return match answer {
+            Some((declaring_file, declared_name)) => (declaring_file.clone(), declared_name.to_string()),
+            None => (file, name),
+        };
+    }
     // Real barrels commonly share descendants (several sub-barrels wildcarding
     // the same underlying `types.ts`, say) — without this, re-exploring an
     // already-visited (file, name) pair from a different parent multiplies out
@@ -245,6 +252,17 @@ pub(super) fn resolve_import_specifier(
 
 /// Resolve `specifier` as imported by `from_file`; the file, not its directory, is what finds the nearest tsconfig.
 fn resolve_module(specifier: &str, from_file: &Utf8Path, ctx: &ResolutionContext) -> ModuleResolution {
+    resolve_module_with(&ctx.oxc_resolver, &ctx.types_first_resolver, specifier, from_file)
+}
+
+/// `resolve_module` with explicit resolvers (`ModuleResolvers`): the dependency loader resolves before a
+/// `ResolutionContext` exists and must find the same files the resolver later does.
+pub(crate) fn resolve_module_with(
+    main: &oxc_resolver::Resolver,
+    types_first: &oxc_resolver::Resolver,
+    specifier: &str,
+    from_file: &Utf8Path,
+) -> ModuleResolution {
     // Bare package specifiers (not relative/absolute) need real TypeScript
     // declaration resolution: prefer a real .d.ts over whatever JS entry point
     // the package's own "main"/"exports" happens to point to, and fall back to
@@ -254,12 +272,7 @@ fn resolve_module(specifier: &str, from_file: &Utf8Path, ctx: &ResolutionContext
     // `index.js`, and a named type-only import like `HTMLAttributes` can never
     // be found there.
     if !specifier.starts_with('.') && !specifier.starts_with('/') {
-        let types = super::react::resolve_package_types_file(
-            &ctx.oxc_resolver,
-            &ctx.types_first_resolver,
-            from_file,
-            specifier,
-        );
+        let types = super::react::resolve_package_types_file(main, types_first, from_file, specifier);
         if let Some(path) = types {
             return match Utf8PathBuf::from_path_buf(std::path::PathBuf::from(path)) {
                 Ok(path) => ModuleResolution::PackageTypes(path),
@@ -268,7 +281,7 @@ fn resolve_module(specifier: &str, from_file: &Utf8Path, ctx: &ResolutionContext
         }
     }
 
-    match ctx.oxc_resolver.resolve_file(from_file.as_std_path(), specifier) {
+    match main.resolve_file(from_file.as_std_path(), specifier) {
         Ok(resolved) => match Utf8PathBuf::from_path_buf(resolved.path().to_owned()) {
             Ok(path) => ModuleResolution::File(path),
             Err(path) => ModuleResolution::Unresolved(format!("non-UTF-8 path {}", path.display())),

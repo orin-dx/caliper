@@ -84,6 +84,9 @@ pub struct PipelineOptions {
     pub cache_dir: Option<Utf8PathBuf>,
     /// Custom docgen extension plugins.
     pub plugins: crate::plugin::PluginRegistry,
+    /// Load the dependency declarations project types reference, by name, before resolving (ADR 0010). Off by default:
+    /// without it a type imported from a package resolves only when it is a builtin or a known shortcut.
+    pub load_dependencies: bool,
 }
 
 impl Default for PipelineOptions {
@@ -97,6 +100,7 @@ impl Default for PipelineOptions {
             extra_builtins: Default::default(),
             cache_dir: None,
             plugins: crate::plugin::PluginRegistry::default(),
+            load_dependencies: false,
         }
     }
 }

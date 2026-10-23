@@ -103,6 +103,8 @@ caliper-docgen check --src src
 
 Settings can also live in a `docgen.config.ts` (`srcDirs`, `htmlAttributes`, `cacheDir`, and more). `caliper-docgen --help` lists the rest, including `schema` for the JSON Schema of the output.
 
+Types your props import from installed packages stay named references by default. `--load-dependencies` (config, NAPI and Vite option `loadDependencies`) loads the declarations those names point to.
+
 ## Vite plugin
 
 ```ts

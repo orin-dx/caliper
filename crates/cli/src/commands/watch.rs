@@ -34,6 +34,7 @@ fn start_session(
         html_attributes: None,
         config_path,
         extra_builtins: &[],
+        load_dependencies: args.load_dependencies,
     })?;
 
     if !quiet {
@@ -508,7 +509,11 @@ mod tests {
             std::fs::write(src.path().join("Widget.tsx"), WIDGET).unwrap();
             let dir = src.path().to_str().unwrap().to_owned();
             let out = src.path().join("out.json");
-            let args = crate::WatchArgs { src: vec![dir.clone()], out: Some(out.to_str().unwrap().to_owned()) };
+            let args = crate::WatchArgs {
+                src: vec![dir.clone()],
+                out: Some(out.to_str().unwrap().to_owned()),
+                load_dependencies: false,
+            };
 
             let (options, session, exit_code) = start_session(&args, quiet, false, None).unwrap();
 

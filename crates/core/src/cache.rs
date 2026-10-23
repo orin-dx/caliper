@@ -28,7 +28,8 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 /// `SerializableCacheKey`'s own shape changed, so pre-existing on-disk cache
 /// files must be discarded rather than misread under the new field layout.
 /// Extractor changes that keep the shape are covered by `CacheHeader::fingerprint` instead.
-const CACHE_SCHEMA_VERSION: u32 = 15;
+/// 16: `LexedExport::LocalDeclaration` gained `declared_as`.
+const CACHE_SCHEMA_VERSION: u32 = 16;
 
 const DATA_FILE: &str = "dts.msgpack";
 

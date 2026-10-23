@@ -12,6 +12,8 @@ export interface CaliperDocgenOptions {
   srcDirs: string[]
   exclude?: string[]
   skipHtmlProps?: boolean
+  /** Load the type declarations your props reference from installed packages. Off by default. */
+  loadDependencies?: boolean
 }
 
 /**
@@ -59,6 +61,7 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
       srcDirs: resolvedSrcDirs,
       exclude: options.exclude,
       htmlAttributes: options.skipHtmlProps ? ('none' as const) : undefined,
+      loadDependencies: options.loadDependencies,
     }
   }
 

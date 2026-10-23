@@ -102,6 +102,9 @@ pub struct ExtractArgs {
     /// paths below), and suppresses the human-readable summary/diagnostics.
     #[arg(long, short = 'j')]
     pub json: bool,
+    /// Load the type declarations props reference from installed packages (off by default)
+    #[arg(long)]
+    pub load_dependencies: bool,
 }
 
 #[derive(clap::ValueEnum, Clone)]
@@ -134,6 +137,9 @@ pub struct InspectArgs {
     /// Source directories to scan [default: ./src]
     #[arg(long, short, value_delimiter = ',')]
     pub src: Vec<String>,
+    /// Load the type declarations props reference from installed packages (off by default)
+    #[arg(long)]
+    pub load_dependencies: bool,
 }
 
 #[derive(clap::Args)]
@@ -145,6 +151,9 @@ pub struct WatchArgs {
     /// Output file to write on each change
     #[arg(long, short)]
     pub out: Option<String>,
+    /// Load the type declarations props reference from installed packages (off by default)
+    #[arg(long)]
+    pub load_dependencies: bool,
 }
 
 #[derive(clap::Args)]
@@ -160,6 +169,9 @@ pub struct CheckArgs {
     /// Machine-readable JSON diagnostics instead of the human-readable table
     #[arg(long, short = 'j')]
     pub json: bool,
+    /// Load the type declarations props reference from installed packages (off by default)
+    #[arg(long)]
+    pub load_dependencies: bool,
 }
 
 #[derive(clap::Args)]

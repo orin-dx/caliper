@@ -1516,7 +1516,7 @@ fn test_enum_scoped_keys_split_on_the_last_colon() {
     );
     global.re_export_map.insert(
         Utf8PathBuf::from("C:\\src\\Size.ts"),
-        vec![LexedExport::LocalDeclaration { name: "Size".into(), is_type_only: false }],
+        vec![LexedExport::LocalDeclaration { name: "Size".into(), is_type_only: false, declared_as: None }],
     );
     let (enums, diagnostics) = collect_public_enums(&global);
     assert_eq!(enums.keys().collect::<Vec<_>>(), vec!["Size"]);
