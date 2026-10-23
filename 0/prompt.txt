@@ -1,0 +1,1 @@
+But at that point can we just consume the --format json?
