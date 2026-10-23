@@ -1,0 +1,1 @@
+Yes, replace trybuild, help me decide if the collapse inherited props applies locally too. Do all of the rest, commit appropriatelly and stack PRs
