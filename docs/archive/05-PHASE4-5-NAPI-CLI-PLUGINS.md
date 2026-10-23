@@ -531,8 +531,8 @@ fn cmd_inspect(args: InspectArgs) -> Result<()> {
 ## Additional CLI dependencies (`crates/cli/Cargo.toml`)
 
 ```toml
-comfy-table = "7.0"     # prop table in inspect command
-crossterm   = "0.28"    # raw terminal input for watch mode (q to quit, r to re-extract)
+comfy-table = "7.0" # prop table in inspect command
+crossterm = "0.28" # raw terminal input for watch mode (q to quit, r to re-extract)
 ```
 
 ## `inspect` command — table output with `comfy-table`
