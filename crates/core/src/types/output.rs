@@ -121,6 +121,32 @@ impl ComponentEntry {
 }
 
 /// A single resolved prop.
+///
+/// Built only through [`ParsedProp::new`], which makes a prop with a default value optional:
+///
+/// ```
+/// use caliper_docgen_core::types::{ParsedProp, PropType};
+///
+/// let prop = ParsedProp::new("x".into(), PropType::String, true, None, String::new(), Default::default(), None, vec![]);
+/// assert!(prop.required);
+/// ```
+///
+/// A struct literal, which would skip that rule, does not compile outside this module:
+///
+/// ```compile_fail
+/// use caliper_docgen_core::types::{ParsedProp, PropType};
+///
+/// let prop = ParsedProp {
+///     name: "x".into(),
+///     prop_type: PropType::String,
+///     required: true,
+///     default_value: None,
+///     description: String::new(),
+///     tags: Default::default(),
+///     parent: None,
+///     declarations: vec![],
+/// };
+/// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParsedProp {
