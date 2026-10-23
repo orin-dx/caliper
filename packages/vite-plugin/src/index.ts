@@ -2,6 +2,7 @@ import type { Plugin, ResolvedConfig, ViteDevServer, HotUpdateOptions, Environme
 import * as napi from 'caliper-docgen-napi'
 import type { ExtractionOutput, IncrementalUpdate, RdtComponentDoc } from 'caliper-docgen-napi'
 import { ComponentFiles, docgenAssignments, invalidateDeclaringModules } from './docgen-info.js'
+import { updatePayload } from './update.js'
 
 const VIRTUAL_ID = 'virtual:caliper-docgen'
 const RESOLVED_VIRTUAL_ID = `\0${VIRTUAL_ID}`
@@ -15,27 +16,16 @@ export interface CaliperDocgenOptions {
   skipHtmlProps?: boolean
   /** Assign each component its react-docgen-typescript docs as `__docgenInfo`, for Storybook without a docgen server. */
   injectDocgenInfo?: boolean
+  /** Load the type declarations your props reference from installed packages. Off by default. */
+  loadDependencies?: boolean
+  /**
+   * Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop: those from
+   * loaded dependencies (the default), every inherited source, or none.
+   */
+  collapseInheritedProps?: 'dependencies' | 'all' | 'none'
 }
 
-/**
- * What `caliper-docgen:update` carries to the client. Events arrive in `revision` order; each is a delta from the one
- * before. Delete `removedKeys`, set `updatedKeys[i]` to `updatedComponents[i]`, merge `props` into the output's
- * `props`, drop `removedDiagnostics` and add `diagnostics`, and the client holds the same output the virtual module
- * serves, less any props no component refers to any more.
- */
-export interface CaliperDocgenUpdate {
-  file: string
-  revision: number
-  updatedKeys: string[]
-  updatedComponents: IncrementalUpdate['updatedComponents']
-  /** Every prop `updatedComponents` refer to, by id. */
-  props: IncrementalUpdate['props']
-  removedKeys: string[]
-  /** Diagnostics this revision added. */
-  diagnostics: IncrementalUpdate['diagnostics']
-  /** Diagnostics this revision no longer has. */
-  removedDiagnostics: IncrementalUpdate['removedDiagnostics']
-}
+export type { CaliperDocgenUpdate } from './update.js'
 
 export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
   let sessionId: number
@@ -63,11 +53,18 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
       srcDirs: resolvedSrcDirs,
       exclude: options.exclude,
       htmlAttributes: options.skipHtmlProps ? ('none' as const) : undefined,
+      loadDependencies: options.loadDependencies,
+      collapseInheritedProps: options.collapseInheritedProps,
     }
   }
 
   function isSrcFile(file: string): boolean {
     return (file.endsWith('.tsx') || file.endsWith('.ts')) && resolvedSrcDirs.some((dir) => file.startsWith(`${dir}/`))
+  }
+
+  /** A source file, or a tsconfig, `package.json` or lockfile whose change rebuilds the session. */
+  function isTrackedFile(file: string): boolean {
+    return isSrcFile(file) || napi.isResolutionConfig(sessionId, file)
   }
 
   /** Runs `task` after every earlier one has finished, failed or not. */
@@ -125,8 +122,10 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
     async buildStart() {
       if (command !== 'build') return
       if (isWatchBuild) {
-        // Source files no bundle module imports must still trigger a rebuild, since the docs come from them.
+        // Source files no bundle module imports must still trigger a rebuild, since the docs come from them, and so must
+        // the configuration that decides how their imports resolve.
         for (const dir of resolvedSrcDirs) this.addWatchFile(dir)
+        for (const file of napi.resolutionConfigFiles(sessionId)) this.addWatchFile(file)
         await Promise.all(pendingWatchChanges)
         pendingWatchChanges = []
       }
@@ -143,7 +142,7 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
 
     // `vite build --watch` never calls hotUpdate; Rollup reports each changed file here before rebuilding.
     async watchChange(id: string) {
-      if (!isSrcFile(id)) return
+      if (!isTrackedFile(id)) return
       const change = inOrder(async () => {
         try {
           await applyChange(id)
@@ -177,6 +176,10 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
         })
       /* oxlint-enable promise/prefer-await-to-then, promise/always-return, promise/prefer-await-to-callbacks */
 
+      // A tsconfig, `package.json` or lockfile above the source directories changes how every import resolves; its
+      // change reaches hotUpdate like a source file's and rebuilds the session there.
+      server.watcher.add(napi.resolutionConfigFiles(sessionId))
+
       // buildEnd isn't called in dev mode — this is the only reliable cleanup hook.
       return () => {
         napi.closeSession(sessionId)
@@ -201,7 +204,7 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
         | undefined
 
       if (!env || env.name !== 'client') return
-      if (!isSrcFile(opts.file)) return
+      if (!isTrackedFile(opts.file)) return
 
       if (initPromise) await initPromise
 
@@ -215,17 +218,7 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
           return
         }
         if (!applied) return
-        const payload: CaliperDocgenUpdate = {
-          file: opts.file,
-          revision: applied.revision,
-          updatedKeys: applied.updatedKeys,
-          updatedComponents: applied.updatedComponents,
-          props: applied.props,
-          removedKeys: applied.removedKeys,
-          diagnostics: applied.diagnostics,
-          removedDiagnostics: applied.removedDiagnostics,
-        }
-        env.hot.send('caliper-docgen:update', payload)
+        env.hot.send('caliper-docgen:update', updatePayload(opts.file, applied))
         return applied
       })
       if (!update) return

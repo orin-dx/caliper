@@ -662,6 +662,49 @@ fn test_exports_collected() {
 }
 
 #[test]
+fn an_exported_namespace_import_is_a_namespace_reexport() {
+    let source = "import * as menu from './menu';\nimport * as unused from './unused';\nexport { menu as Menu };\n";
+    let data = parse_file(Utf8Path::new("/test/ui.ts"), source);
+
+    let namespaces: Vec<(&str, &str)> = data
+        .exports
+        .iter()
+        .filter_map(|e| match e {
+            LexedExport::ReExportNamespace { namespace, source_specifier } => {
+                Some((namespace.as_str(), source_specifier.as_str()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(namespaces, [("Menu", "./menu")]);
+    assert_eq!(data.exports.len(), 1, "{:?}", data.exports);
+}
+
+#[test]
+fn a_local_export_alias_records_the_declarations_own_name() {
+    let source = r#"
+        declare const DialogContent: unknown;
+        interface DialogContentProps { a: string }
+        export { DialogContent as Content, DialogContent, type DialogContentProps };
+        export interface Own { b: string }
+    "#;
+    let data = parse_file(Utf8Path::new("/test/index.d.ts"), source);
+
+    let locals: Vec<(&str, Option<&str>)> = data
+        .exports
+        .iter()
+        .filter_map(|e| match e {
+            LexedExport::LocalDeclaration { name, declared_as, .. } => Some((name.as_str(), declared_as.as_deref())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        locals,
+        [("Content", Some("DialogContent")), ("DialogContent", None), ("DialogContentProps", None), ("Own", None)]
+    );
+}
+
+#[test]
 fn every_export_form_lands_in_the_right_lexed_export_variant() {
     // Exact sets, not presence: a specifier list misclassified as a re-export would pass a presence check.
     let source = r#"
@@ -681,7 +724,7 @@ fn every_export_form_lands_in_the_right_lexed_export_variant() {
         .exports
         .iter()
         .filter_map(|e| match e {
-            LexedExport::LocalDeclaration { name, is_type_only } => Some((name.as_str(), *is_type_only)),
+            LexedExport::LocalDeclaration { name, is_type_only, .. } => Some((name.as_str(), *is_type_only)),
             _ => None,
         })
         .collect();
@@ -1036,6 +1079,132 @@ fn wrapper_calls_carrying_props_in_a_type_argument_are_detected_by_shape() {
             ("Late", "ItemProps", WrapperTypeArgument),
             ("Remote", "RemoteProps", WrapperTypeArgument),
         ]
+    );
+}
+
+#[test]
+fn a_factory_payload_with_generic_props_yields_those_props_never_the_payload() {
+    let source = r#"
+        import { genericFactory } from "./lib";
+        export interface OverflowListProps<T = any> { data: T[] }
+        export type OverflowListFactory = Factory<{
+          props: OverflowListProps<any>;
+          ref: HTMLDivElement;
+          signature: <T = any>(props: OverflowListProps<T>) => React.JSX.Element;
+        }>;
+        export const OverflowList = genericFactory<OverflowListFactory>((_props) => <div />);
+        export type InlineFactory = Factory<{ props: { label: string }; ref: HTMLDivElement }>;
+        export const Inline = genericFactory<InlineFactory>((_props) => <div />);
+    "#;
+    let data = parse_file(Utf8Path::new("/test/overflow.tsx"), source);
+
+    let found: Vec<(&str, &str, String)> = data
+        .component_mappings
+        .iter()
+        .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), format!("{:?}", m.props_type_args)))
+        .collect();
+    assert_eq!(found, vec![("OverflowList", "OverflowListProps", "[Any]".to_owned())]);
+    let skipped: Vec<&str> = data
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == crate::types::DiagnosticCode::SkippedCandidate)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(
+        skipped,
+        vec!["'Inline' is built from the factory payload 'InlineFactory', whose `props` member is not a named type"]
+    );
+}
+
+#[test]
+fn functions_used_only_as_functions_are_not_components() {
+    let source = r#"
+        type T = { type: string };
+        interface P { label: string }
+        function IndexedAccess(props: T) { return <span>{props.type}</span>; }
+        function describe(t: T) { return IndexedAccess(t); }
+        export function Exported(props: T) { return <b />; }
+        const viaExport = Exported(x);
+        function Row(props: P) { return <li />; }
+        const rows = items.map(Row);
+        function Inline(props: P) { return <i />; }
+        const alsoCalled = Inline(p);
+        const shown = <Inline label="x" />;
+        function DropWrapper(props: P, ref: ForwardedRef<HTMLElement>) { return <div ref={ref} />; }
+        const context = { render: DropWrapper };
+        function Rendered(props: P, ref: ForwardedRef<HTMLElement>) { return <div />; }
+        const r = <Rendered label="x" />;
+    "#;
+    let data = parse_file(Utf8Path::new("/test/uses.tsx"), source);
+
+    let mut found: Vec<&str> = data.component_mappings.iter().map(|m| m.component_name.as_str()).collect();
+    found.sort_unstable();
+    assert_eq!(found, vec!["Exported", "Inline", "Rendered", "Row"]);
+    let skipped: Vec<&str> = data
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.ends_with("not a component"))
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(
+        skipped,
+        vec![
+            "'IndexedAccess' is only ever called as a function in this file, never rendered or passed on, so it is \
+             a helper, not a component",
+            "'DropWrapper' takes a second parameter (a ref) and is never rendered or passed to a component wrapper in \
+             this file, so it is a render callback, not a component",
+        ]
+    );
+}
+
+#[test]
+fn a_component_is_exported_when_its_module_exports_it_or_attaches_it_to_an_export() {
+    let exports = |path: &str, source: &str| -> Vec<(String, bool)> {
+        let data = parse_file(Utf8Path::new(path), source);
+        let mut found: Vec<(String, bool)> =
+            data.component_mappings.iter().map(|m| (m.component_name.to_string(), m.exported)).collect();
+        found.sort_unstable();
+        found
+    };
+    let source = r#"
+        interface P { label: string }
+        export function Direct(props: P) { return <b />; }
+        export const Arrow = (props: P) => <i />;
+        function Renamed(props: P) { return <u />; }
+        export { Renamed as Public };
+        function Defaulted(props: P) { return <s />; }
+        export default Defaulted;
+        function Item(props: P) { return <li />; }
+        Direct.Item = Item;
+        function Header(props: P) { return <h1 />; }
+        export const Card = Object.assign((props: P) => <div />, { Header });
+        function MenuRoot(props: P) { return <ul />; }
+        function MenuItem(props: P) { return <li />; }
+        export const Menu = Object.assign(MenuRoot, { Item: MenuItem });
+        function Internal(props: P) { return <p />; }
+        function Orphan(props: P) { return <em />; }
+        Internal.Orphan = Orphan;
+        const shown = <><Internal label="x" /><Orphan label="y" /></>;
+    "#;
+    assert_eq!(
+        exports("/test/exports.tsx", source),
+        vec![
+            ("Arrow".to_string(), true),
+            ("Card".to_string(), true),
+            ("Defaulted".to_string(), true),
+            ("Direct".to_string(), true),
+            ("Header".to_string(), true),
+            ("Internal".to_string(), false),
+            ("Item".to_string(), true),
+            ("MenuItem".to_string(), true),
+            ("MenuRoot".to_string(), true),
+            ("Orphan".to_string(), false),
+            ("Renamed".to_string(), true),
+        ]
+    );
+    assert_eq!(
+        exports("/test/fancy-badge.tsx", "export default function (props: { tone: string }) { return <span />; }"),
+        vec![("FancyBadge".to_string(), true)]
     );
 }
 

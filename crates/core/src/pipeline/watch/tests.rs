@@ -162,6 +162,200 @@ fn widget_project(source: &str) -> (tempfile::TempDir, Utf8PathBuf, PipelineOpti
     (tmp, widget, options)
 }
 
+/// A project root with `tsconfig.json` (configured, without `paths`), and `src` holding a Button that imports its props
+/// through the `@ui/*` alias.
+fn aliased_project() -> (tempfile::TempDir, Utf8PathBuf, PipelineOptions) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().expect("canonicalize")).expect("utf8");
+    std::fs::create_dir_all(root.join("src/ui")).expect("create src/ui");
+    std::fs::write(root.join("tsconfig.json"), "{}").expect("write tsconfig");
+    std::fs::write(root.join("src/ui/types.ts"), "export interface ButtonProps { label: string }\n")
+        .expect("write types");
+    std::fs::write(
+        root.join("src/Button.tsx"),
+        "import type { ButtonProps } from '@ui/types';\nexport function Button(props: ButtonProps) { return null; }\n",
+    )
+    .expect("write Button");
+    let options = PipelineOptions {
+        src_dirs: vec![root.join("src")],
+        tsconfig_path: Some(root.join("tsconfig.json")),
+        cache_dir: Some(root.join("cache")),
+        ..Default::default()
+    };
+    (tmp, root, options)
+}
+
+#[test]
+fn editing_the_tsconfig_rebuilds_the_session_and_reports_every_changed_component() {
+    let (_tmp, root, options) = aliased_project();
+    let session = WatchSession::new(options);
+    let before = session.initialize();
+    assert_eq!(before.components["Button"].props.keys().collect::<Vec<_>>(), Vec::<&String>::new());
+    let unresolved: Vec<String> = before
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.starts_with("Cannot resolve '@ui/types'"))
+        .map(|d| d.message.clone())
+        .collect();
+    assert_eq!(unresolved.len(), 1, "{:#?}", before.diagnostics);
+
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{ "compilerOptions": { "baseUrl": ".", "paths": { "@ui/*": ["src/ui/*"] } } }"#,
+    )
+    .expect("edit tsconfig");
+    let update = session.update_file(&root.join("tsconfig.json"));
+
+    assert_eq!(update.revision, 2);
+    assert_eq!(update.updated_keys, ["Button"]);
+    assert_eq!(update.updated_components[0].props.keys().collect::<Vec<_>>(), ["label"]);
+    assert_eq!(update.removed_keys, Vec::<String>::new());
+    let removed: Vec<&String> = update.removed_diagnostics.iter().map(|d| &d.message).collect();
+    assert!(unresolved.iter().all(|m| removed.contains(&m)), "{removed:#?}");
+    assert_matches_cold(&session);
+}
+
+#[test]
+fn only_the_projects_own_configuration_counts_as_a_resolution_config() {
+    let (_tmp, root, options) = aliased_project();
+    for (file, body) in [
+        ("package.json", "{}"),
+        ("pnpm-lock.yaml", ""),
+        ("README.md", ""),
+        ("src/package.json", "{}"),
+        ("src/node_modules/dep/package.json", "{}"),
+        ("other/tsconfig.json", "{}"),
+    ] {
+        std::fs::create_dir_all(root.join(file).parent().unwrap()).unwrap();
+        std::fs::write(root.join(file), body).unwrap();
+    }
+    let session = WatchSession::new(options);
+
+    let config = |file: &str| session.is_resolution_config(&root.join(file));
+    assert!(
+        config("tsconfig.json") && config("package.json") && config("pnpm-lock.yaml") && config("src/package.json")
+    );
+    assert!(!config("README.md") && !config("src/node_modules/dep/package.json") && !config("other/tsconfig.json"));
+
+    let listed: Vec<Utf8PathBuf> =
+        session.resolution_config_files().into_iter().filter(|path| path.starts_with(&root)).collect();
+    assert_eq!(listed, [root.join("package.json"), root.join("pnpm-lock.yaml"), root.join("tsconfig.json")]);
+}
+
+#[test]
+fn editing_another_packages_tsconfig_changes_nothing() {
+    let (_tmp, root, options) = aliased_project();
+    std::fs::create_dir_all(root.join("other")).unwrap();
+    std::fs::write(root.join("other/tsconfig.json"), "{}").unwrap();
+    let session = WatchSession::new(options);
+    let _ignored = session.initialize();
+
+    std::fs::write(root.join("other/tsconfig.json"), r#"{ "compilerOptions": {} }"#).unwrap();
+    let update = session.update_file(&root.join("other/tsconfig.json"));
+
+    assert_eq!((update.revision, session.revision()), (1, 1));
+}
+
+/// What an update changes, without its revision and timing.
+type Delta = (Vec<String>, Vec<crate::types::ComponentEntry>, Vec<String>, Vec<Utf8PathBuf>, Vec<String>, Vec<String>);
+
+fn delta(update: &crate::pipeline::IncrementalUpdate) -> Delta {
+    let messages = |diagnostics: &[crate::types::Diagnostic]| diagnostics.iter().map(|d| d.message.clone()).collect();
+    (
+        update.updated_keys.clone(),
+        update.updated_components.clone(),
+        update.removed_keys.clone(),
+        update.affected_files.clone(),
+        messages(&update.diagnostics),
+        messages(&update.removed_diagnostics),
+    )
+}
+
+/// A session that has already caught up: files written just before its cold extraction are applied again once.
+fn fresh_session(options: &PipelineOptions) -> WatchSession {
+    let session = WatchSession::new(options.clone());
+    let _ignored = session.initialize();
+    let caught_up = session.ensure_fresh();
+    assert_eq!(delta(&caught_up), delta(&super::unchanged(0)));
+    session
+}
+
+#[test]
+fn ensure_fresh_applies_edits_creations_and_deletions_exactly_as_update_file_does() {
+    let (_tmp, widget, options) = widget_project("export function Widget(props: { a: string }) { return null; }\n");
+    let other = widget.with_file_name("Other.tsx");
+    let watched = WatchSession::new(options.clone());
+    let _ignored = watched.initialize();
+    let polled = fresh_session(&options);
+
+    let steps: [(&Utf8PathBuf, Option<&str>); 3] = [
+        (&widget, Some("export function Widget(props: { a: string; bb?: number }) { return null; }\n")),
+        (&other, Some("export function Other(props: { c: boolean }) { return null; }\n")),
+        (&widget, None),
+    ];
+    for (path, source) in steps {
+        match source {
+            Some(source) => std::fs::write(path, source).unwrap(),
+            None => std::fs::remove_file(path).unwrap(),
+        }
+        let expected = watched.update_file(path);
+        let before = polled.revision();
+        let update = polled.ensure_fresh();
+        assert_eq!(delta(&update), delta(&expected), "{path}");
+        assert_eq!(update.revision, polled.revision());
+        assert!(update.revision > before);
+        assert_matches_cold(&polled);
+    }
+    assert_eq!(polled.snapshot().components.keys().collect::<Vec<_>>(), ["Other"]);
+    assert_eq!(polled.snapshot().components["Other"].props.keys().collect::<Vec<_>>(), ["c"]);
+}
+
+#[test]
+fn ensure_fresh_with_nothing_changed_keeps_the_revision() {
+    let (_tmp, _widget, options) = widget_project(FIXED);
+    let session = fresh_session(&options);
+    let revision = session.revision();
+
+    let update = session.ensure_fresh();
+
+    assert_eq!((update.revision, session.revision()), (revision, revision));
+    assert_eq!(delta(&update), delta(&super::unchanged(0)));
+}
+
+#[test]
+fn ensure_fresh_rebuilds_when_the_tsconfig_changed() {
+    let (_tmp, root, options) = aliased_project();
+    let watched = WatchSession::new(options.clone());
+    let _ignored = watched.initialize();
+    let polled = fresh_session(&options);
+
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{ "compilerOptions": { "baseUrl": ".", "paths": { "@ui/*": ["src/ui/*"] } } }"#,
+    )
+    .unwrap();
+    let expected = watched.update_file(&root.join("tsconfig.json"));
+    let update = polled.ensure_fresh();
+
+    assert_eq!(delta(&update), delta(&expected));
+    assert_eq!(update.updated_components[0].props.keys().collect::<Vec<_>>(), ["label"]);
+    assert_matches_cold(&polled);
+}
+
+#[test]
+fn ensure_fresh_before_initialize_reports_every_component() {
+    let (_tmp, _widget, options) = widget_project(FIXED);
+    let session = WatchSession::new(options.clone());
+
+    let update = session.ensure_fresh();
+
+    let cold = crate::pipeline::extract(&options);
+    assert_eq!(update.revision, 1);
+    assert_eq!(update.updated_keys, cold.components.keys().cloned().collect::<Vec<_>>());
+    assert_eq!(update.updated_components, cold.components.values().cloned().collect::<Vec<_>>());
+    assert_matches_cold(&session);
+}
+
 const BROKEN: &str = "export const = ;\n";
 const FIXED: &str = "export function Widget() { return null; }\n";
 
@@ -1169,4 +1363,29 @@ fn an_updates_props_are_exactly_the_ones_its_components_refer_to_and_applying_it
     let session_now = serde_json::to_value(session.snapshot()).unwrap();
     assert_eq!(client["components"], session_now["components"]);
     assert_eq!(client["props"], session_now["props"]);
+}
+
+#[test]
+fn editing_a_file_a_shared_interface_chain_reads_re_resolves_every_component_that_shares_it() {
+    // One of Button and Chip reuses the other's resolution of Base; both must still follow tone.ts and match a cold run.
+    let (tmp, options) = write_project(&[
+        ("tone.ts", "export type Tone = 'info' | 'warn';\n"),
+        ("base.ts", "import type { Tone } from './tone';\nexport interface Base { tone?: Tone }\n"),
+        (
+            "Comp.tsx",
+            "import type { Base } from './base';\ninterface ButtonProps extends Base { a?: string }\n\
+             interface ChipProps extends Base { b?: string }\n\
+             export function Button(props: ButtonProps) { return null; }\n\
+             export function Chip(props: ChipProps) { return null; }\n",
+        ),
+    ]);
+    let session = WatchSession::new(options.clone());
+    let _initial = session.initialize();
+
+    let tone = Utf8PathBuf::from_path_buf(std::fs::canonicalize(tmp.path().join("tone.ts")).unwrap()).unwrap();
+    std::fs::write(&tone, "export type Tone = 'info' | 'warn' | 'error';\n").unwrap();
+    let update = session.update_file(&tone);
+
+    assert_eq!(update.updated_keys, vec!["Button".to_owned(), "Chip".to_owned()]);
+    assert_eq!(visible(&session.snapshot()), visible(&crate::pipeline::extract(&options)));
 }

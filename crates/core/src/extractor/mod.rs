@@ -28,6 +28,7 @@ mod defaults;
 mod evidence;
 mod interface;
 mod jsdoc;
+mod uses;
 mod visit;
 mod wrapper;
 
@@ -222,6 +223,15 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) pending_local_exports: Vec<(usize, String)>,
     /// Why the current declarator's detector chain declined a candidate, used as the skip diagnostic's message.
     pub(super) decline_reason: Option<String>,
+    /// How each name is used in the file (`uses.rs`).
+    pub(super) name_uses: rustc_hash::FxHashMap<CompactString, uses::NameUses>,
+    /// Component candidates declared with a second parameter: a function component takes only props.
+    pub(super) takes_a_second_parameter: FxHashSet<CompactString>,
+    /// Local names the module exports, under any exported name (`uses.rs`).
+    pub(super) exported_locals: FxHashSet<CompactString>,
+    /// `(sub-component, parent)` for each component attached to another (`Parent.Sub = Sub`,
+    /// `Object.assign(Parent, { Sub })`): exported when its parent is.
+    pub(super) attached_to: Vec<(CompactString, CompactString)>,
 }
 
 impl<'src> SourceDataCollector<'src> {
@@ -240,6 +250,10 @@ impl<'src> SourceDataCollector<'src> {
             pending_wrappers: Vec::new(),
             pending_local_exports: Vec::new(),
             decline_reason: None,
+            name_uses: Default::default(),
+            takes_a_second_parameter: FxHashSet::default(),
+            exported_locals: FxHashSet::default(),
+            attached_to: Vec::new(),
         }
     }
 
@@ -286,6 +300,11 @@ impl<'src> SourceDataCollector<'src> {
                 self.aliased_away.iter().filter(|n| !exported.contains(n.as_str())).cloned().collect();
             self.data.component_mappings.retain(|m| !hidden.contains(m.component_name.as_str()));
         }
+        let exported = self.exported_components();
+        self.drop_functions_used_only_as_functions(&exported);
+        for mapping in &mut self.data.component_mappings {
+            mapping.exported = exported.contains(mapping.component_name.as_str());
+        }
         for (obj_name, display_name) in self.pending_display_name_renames.drain(..) {
             if let Some(mapping) = self.data.component_mappings.iter_mut().find(|m| m.component_name == obj_name) {
                 mapping.component_name = display_name;
@@ -294,17 +313,23 @@ impl<'src> SourceDataCollector<'src> {
         self.data
     }
 
-    /// `import { A } from "./a"; export { A }` re-exports `A` exactly like `export { A } from "./a"`; barrels use both
-    /// spellings, and only the second names a source file to follow.
+    /// `import { A } from "./a"; export { A }` re-exports `A` exactly like `export { A } from "./a"`, and
+    /// `import * as a from "./a"; export { a as A }` like `export * as A from "./a"`; barrels and bundled typings
+    /// (radix-ui's) use both spellings, and only the second names a source file to follow.
     fn promote_reexported_imports(&mut self) {
         for (index, local) in std::mem::take(&mut self.pending_local_exports) {
             let Some(binding) = self.data.imports.iter().find(|imp| imp.local_name.as_str() == local) else { continue };
-            if binding.exported_name.as_str() == "*" {
-                continue;
-            }
-            let crate::types::LexedExport::LocalDeclaration { name, is_type_only } = &self.data.exports[index] else {
+            let crate::types::LexedExport::LocalDeclaration { name, is_type_only, .. } = &self.data.exports[index]
+            else {
                 continue;
             };
+            if binding.exported_name.as_str() == "*" {
+                self.data.exports[index] = crate::types::LexedExport::ReExportNamespace {
+                    namespace: name.clone(),
+                    source_specifier: binding.specifier.clone(),
+                };
+                continue;
+            }
             self.data.exports[index] = crate::types::LexedExport::ReExportNamed {
                 local_name: name.clone(),
                 source_name: binding.exported_name.to_string(),
@@ -505,7 +530,12 @@ impl<'src> SourceDataCollector<'src> {
                     f.params.items.iter().map(|p| binding_pattern_name(&p.pattern)).collect();
                 // return_type on TSFunctionType is Box<TSTypeAnnotation> (not Option)
                 let return_type = self.ts_type_to_collected_at_depth(&f.return_type.type_annotation, depth + 1);
-                CollectedType::Function { params, param_names, return_type: Box::new(return_type) }
+                CollectedType::Function {
+                    type_params: type_param_names(f.type_parameters.as_deref()),
+                    params,
+                    param_names,
+                    return_type: Box::new(return_type),
+                }
             }
 
             TSType::TSIndexedAccessType(ia) => CollectedType::IndexedAccess {
@@ -663,7 +693,12 @@ impl<'src> SourceDataCollector<'src> {
                     .unwrap_or(CollectedType::Void);
                 Some(CollectedObjectField {
                     name,
-                    collected_type: CollectedType::Function { params, param_names, return_type: Box::new(return_type) },
+                    collected_type: CollectedType::Function {
+                        type_params: type_param_names(sig.type_parameters.as_deref()),
+                        params,
+                        param_names,
+                        return_type: Box::new(return_type),
+                    },
                     required: !sig.optional,
                     description: String::new(),
                 })
@@ -820,7 +855,12 @@ impl<'src> SourceDataCollector<'src> {
                     .unwrap_or(CollectedType::Void);
                 Some(RawProp {
                     name,
-                    collected_type: CollectedType::Function { params, param_names, return_type: Box::new(return_type) },
+                    collected_type: CollectedType::Function {
+                        type_params: type_param_names(ms.type_parameters.as_deref()),
+                        params,
+                        param_names,
+                        return_type: Box::new(return_type),
+                    },
                     required: !ms.optional,
                     description,
                     tags,
@@ -838,6 +878,13 @@ impl<'src> SourceDataCollector<'src> {
 pub(super) fn is_pascal_case(s: &str) -> bool {
     let mut chars = s.chars();
     chars.next().is_some_and(|c| c.is_uppercase())
+}
+
+/// The names a function type declares as its own type parameters (`<T, U>`).
+fn type_param_names(declaration: Option<&TSTypeParameterDeclaration>) -> Vec<CompactString> {
+    declaration
+        .map(|d| d.params.iter().map(|p| CompactString::from(p.name.name.as_str())).collect())
+        .unwrap_or_default()
 }
 
 /// A parameter's simple identifier name, if it has one (not a destructured pattern).

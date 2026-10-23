@@ -1,5 +1,7 @@
 //! Props chain resolution — the recursive core of prop resolution.
 
+use std::sync::Arc;
+
 use camino::Utf8Path;
 use compact_str::CompactString;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -37,7 +39,7 @@ pub(super) fn resolve_props_chain(
     // extends list) are not the same visit and must not collide on the bare name alone. The arguments are keyed by
     // structure: their display form abbreviates object types to `{ ... }`, so distinct instantiations collided.
     let visit_key: CompactString = format!("{}:{}<{:?}>", consuming_file, type_name, type_args).into();
-    if !state.visited.insert(visit_key) {
+    if !state.visit(visit_key) {
         return ResolvedChain::give_up(
             type_name.to_owned(),
             Some(Diagnostic {
@@ -72,6 +74,17 @@ pub(super) fn resolve_props_chain(
         }
     }
 
+    // ── Step 0.6: React's `ComponentProps<typeof Button>` is `Button`'s props ─
+    // `typeof` names a value, the component, so this finds the component instead of a type called `Button`, exactly as
+    // the same reference does in an `extends` clause.
+    if let Some(CollectedType::TypeOf(component)) = type_args.first() {
+        let component_props =
+            matches!(type_name_bare, "ComponentProps" | "ComponentPropsWithoutRef" | "ComponentPropsWithRef");
+        if component_props && super::may_be_react_builtin(type_name, consuming_file, ctx) {
+            return super::extends::component_props_of(component, consuming_file, mapping, ctx, state, depth);
+        }
+    }
+
     // ── Step 1: TypeScript built-in utility types — silent no-op ─────────────
     // Not prop providers; suppress false "unresolvable" warnings.
     if ts_lib && super::is_ts_utility_type(type_name_bare) {
@@ -95,7 +108,7 @@ pub(super) fn resolve_props_chain(
             // As for interfaces and for aliases in a prop position: parameters left unfilled by the call site are
             // placeholders in the body, not unresolvable types.
             if let Some(params) = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key) {
-                state.in_scope_type_params.extend(params.iter().skip(type_args.len()).cloned());
+                state.add_type_params(params.iter().skip(type_args.len()));
             }
             let alias = super::substitute::apply_generic_args(
                 alias,
@@ -105,6 +118,23 @@ pub(super) fn resolve_props_chain(
                 ctx,
                 &mut state.diagnostics,
             );
+            if let CollectedTypeAlias::Passthrough { target: CollectedType::Object(fields), file_path } = &alias {
+                if ctx.collapses(file_path, fields.len(), depth, state) {
+                    let notable = fields
+                        .iter()
+                        .filter(|field| is_notable(&field.name))
+                        .map(|f| (f.name.as_str(), f.collected_type.clone(), f.required, f.description.as_str()));
+                    return collapsed_source(
+                        &canonical_name,
+                        file_path,
+                        fields.len(),
+                        notable.collect(),
+                        ctx,
+                        state,
+                        depth,
+                    );
+                }
+            }
             return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
         }
         Some(super::precedence::SourceOrKnownMatch::Interface(iface)) => {
@@ -112,7 +142,9 @@ pub(super) fn resolve_props_chain(
         }
         Some(super::precedence::SourceOrKnownMatch::Known(result)) => {
             return match result {
-                KnownPatternResult::Props(props) => ResolvedChain { props, ..ResolvedChain::empty() },
+                KnownPatternResult::Props(props) => {
+                    ResolvedChain { props: props.into_iter().map(Arc::new).collect(), ..ResolvedChain::empty() }
+                }
                 KnownPatternResult::Type(PropType::HtmlAttributes { element, omitted }) => {
                     let layer = InheritedLayer {
                         type_name: type_name.to_owned(),
@@ -172,20 +204,92 @@ pub(super) fn resolve_props_chain(
         file: Some(consuming_file.to_string()),
         line: None,
         column: None,
-        help: Some(
-            "Type may be in an unresolvable cross-package location. Check that the package is installed.".into(),
-        ),
+        help: Some(super::unresolved_type_help(
+            type_name,
+            consuming_file,
+            ctx,
+            "Type may be in an unresolvable cross-package location. Check that the package is installed.",
+        )),
         code: DiagnosticCode::UnresolvableImport,
         affects: Vec::new(),
     });
     ResolvedChain::empty_with_compose(type_name.to_owned())
 }
 
+/// Whether a collapsed source keeps `name` as a notable prop: the element-independent curated attributes.
+fn is_notable(name: &str) -> bool {
+    react_types::notable_html_attrs("").contains(&name)
+}
+
+/// A source recorded as a layer instead of expanded (ADR 0012): `total` is how many props it declares; only `notable`
+/// fields are resolved.
+#[allow(clippy::too_many_arguments)]
+fn collapsed_source(
+    type_name: &str,
+    file: &Utf8Path,
+    total: usize,
+    notable: Vec<(&str, CollectedType, bool, &str)>,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> ResolvedChain {
+    let parent = PropParent { name: type_name.to_owned(), file_name: file.to_string() };
+    let notable = notable
+        .into_iter()
+        .map(|(name, ty, required, description)| {
+            let prop_type = resolve_collected_type(&ty, file, ctx, state, depth);
+            let (parents, parent) = (vec![parent.clone()], Some(parent.clone()));
+            let tags = Default::default();
+            Arc::new(ParsedProp::new(
+                name.to_owned(),
+                prop_type,
+                required,
+                None,
+                description.to_owned(),
+                tags,
+                parent,
+                parents,
+            ))
+        })
+        .collect();
+    let layer = InheritedLayer {
+        type_name: type_name.to_owned(),
+        file_name: file.to_string(),
+        omitted: vec![],
+        html_element: None,
+        total_props: u32::try_from(total).unwrap_or(u32::MAX),
+    };
+    ResolvedChain { inheritance: vec![layer], notable, ..ResolvedChain::empty() }
+}
+
 /// Resolve an interface to a chain of props. `type_args` are the call site's arguments for the interface's declared type
 /// parameters (`Box<string>` for `interface Box<T>`); they replace the parameters in its members and in its own extends
 /// clause.
+///
+/// A non-generic interface's chain is resolved once per run and shared by every component whose state would resolve it
+/// the same way (`resolver::memo`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_interface_chain(
+    iface: &CollectedInterface,
+    type_args: &[CollectedType],
+    consuming_file: &Utf8Path,
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> ResolvedChain {
+    let generic = !type_args.is_empty()
+        || ctx.named_types.lookup_interface_type_params_for(iface).is_some_and(|params| !params.is_empty());
+    if generic {
+        return resolve_interface_chain_uncached(iface, type_args, consuming_file, mapping, ctx, state, depth);
+    }
+    ctx.interface_chains.get_or_resolve(&iface.scoped_key, depth, state, mapping, |state| {
+        resolve_interface_chain_uncached(iface, type_args, consuming_file, mapping, ctx, state, depth)
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_interface_chain_uncached(
     iface: &CollectedInterface,
     type_args: &[CollectedType],
     consuming_file: &Utf8Path,
@@ -201,7 +305,7 @@ pub(super) fn resolve_interface_chain(
     // not unresolvable types. Register them so `resolve_named` doesn't warn.
     let declared_params = ctx.named_types.lookup_interface_type_params_for(iface);
     if let Some(params) = declared_params {
-        state.in_scope_type_params.extend(params.iter().cloned());
+        state.add_type_params(params.iter());
     }
     // Supplied arguments replace the parameters; with none supplied the parameters stay placeholders.
     let substitution = match declared_params {
@@ -242,6 +346,21 @@ pub(super) fn resolve_interface_chain(
         chain.merge_parent(parent_chain);
     }
 
+    // Its parents are sources of their own, resolved above; only this interface's members collapse.
+    if ctx.collapses(&iface.file_path, iface.props.len(), depth, state) {
+        let notable = iface.props.iter().filter(|prop| is_notable(&prop.name)).map(|prop| {
+            let ty = match &substitution {
+                Some(subst) => super::substitute::substitute_type(&prop.collected_type, subst),
+                None => prop.collected_type.clone(),
+            };
+            (prop.name.as_str(), ty, prop.required, prop.description.as_str())
+        });
+        let collapsed =
+            collapsed_source(&iface.name, &iface.file_path, iface.props.len(), notable.collect(), ctx, state, depth);
+        chain.merge_parent(collapsed);
+        return chain;
+    }
+
     // ── Resolve own props ────────────────────────────────────────────────────
     // A redeclared prop replaces the inherited one, as in TS. An undocumented redeclaration keeps the inherited
     // description, as TS's JSDoc lookup does (`resolve_component` keeps the first duplicate, so drop them here).
@@ -264,7 +383,7 @@ pub(super) fn resolve_interface_chain(
         };
 
         // Default value: code default takes precedence over JSDoc @default.
-        let code_default = mapping.param_defaults.get(&raw_prop.name);
+        let code_default = state.param_default(mapping, &raw_prop.name);
         let jsdoc_default =
             raw_prop.tags.get("default").or_else(|| raw_prop.tags.get("defaultValue")).map(|s| s.trim());
 
@@ -297,7 +416,7 @@ pub(super) fn resolve_interface_chain(
             Some(_) | None => raw_prop.description.clone(),
         };
 
-        chain.props.push(ParsedProp::new(
+        chain.props.push(Arc::new(ParsedProp::new(
             raw_prop.name.clone(),
             prop_type,
             raw_prop.required,
@@ -306,14 +425,14 @@ pub(super) fn resolve_interface_chain(
             raw_prop.tags.clone(),
             Some(parent.clone()),
             vec![parent.clone()],
-        ));
+        )));
     }
 
     chain
 }
 
 /// Find a discriminant prop — a prop that has a distinct string literal type across all members.
-pub(super) fn find_discriminant_prop(members: &[(&str, Vec<ParsedProp>)]) -> Option<String> {
+pub(super) fn find_discriminant_prop(members: &[(&str, Vec<Arc<ParsedProp>>)]) -> Option<String> {
     if members.is_empty() {
         return None;
     }

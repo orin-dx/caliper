@@ -53,3 +53,6 @@ lcov.info
 
 # Entire (local checkpoint/session history, not repo content)
 .entire/
+
+# Performance scorecard corpora and outputs (scripts/scorecard.py)
+.scorecard/

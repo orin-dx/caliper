@@ -160,6 +160,10 @@ $ caliper-docgen schema
               "typedFunctionExpression",
               "wrapperTypeArgument"
             ]
+          },
+          "exported": {
+            "description": "Whether its module exports it, directly or as a sub-component attached to an exported component",
+            "type": "boolean"
           }
         }
       }

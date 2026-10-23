@@ -46,7 +46,6 @@ pub fn push_known_opaque_diagnostic(
         OpaqueReason::DepthExceeded => "exceeded the maximum resolution depth".to_string(),
         OpaqueReason::IndexedAccess { expression } => format!("is an indexed access type ('{expression}')"),
         OpaqueReason::TemplateLiteral { expression } => format!("is a template literal type ('{expression}')"),
-        OpaqueReason::MultiParamFunction => "is a function type with more than one parameter".to_string(),
         OpaqueReason::UnsupportedExpression => "is a type expression this tool doesn't recognize".to_string(),
     };
     diagnostics.push(Diagnostic {
@@ -235,8 +234,15 @@ fn render_props(args: &[PropType]) -> Vec<ParsedProp> {
     let state = args.first().map_or_else(|| "RenderProps".to_owned(), PropType::raw_string);
     let or_function = |value: PropType| {
         PropType::Union(vec![
-            value,
-            PropType::EventHandler { event_type: state.clone(), param_name: Some("values".into()) },
+            value.clone(),
+            PropType::Function {
+                type_params: vec![],
+                params: vec![FunctionParam {
+                    name: Some("values".into()),
+                    param_type: PropType::Named { name: state.clone().into(), args: vec![] },
+                }],
+                return_type: Box::new(value),
+            },
         ])
     };
     vec![
