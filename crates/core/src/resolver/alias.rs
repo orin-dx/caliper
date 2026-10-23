@@ -90,13 +90,7 @@ pub(super) fn resolve_type_alias_chain(
         }
 
         CollectedTypeAlias::Intersection { members, file_path } => {
-            // Merge all members' props.
-            let mut chain = ResolvedChain::empty();
-            for member in members {
-                let member_chain = resolve_base_as_chain(member, file_path, mapping, ctx, state, depth);
-                chain.merge_parent(member_chain);
-            }
-            chain
+            resolve_intersection_chain(members, file_path, mapping, ctx, state, depth)
         }
 
         CollectedTypeAlias::LiteralUnion { members, file_path } => {
@@ -171,12 +165,7 @@ pub(super) fn resolve_base_as_chain(
         // declared in a different file. Switch file context and continue.
         CollectedType::AtFile { file, inner } => resolve_base_as_chain(inner, file, mapping, ctx, state, depth),
         CollectedType::Intersection(members) => {
-            let mut chain = ResolvedChain::empty();
-            for member in members {
-                let sub = resolve_base_as_chain(member, file_path, mapping, ctx, state, depth);
-                chain.merge_parent(sub);
-            }
-            chain
+            resolve_intersection_chain(members, file_path, mapping, ctx, state, depth)
         }
         CollectedType::Object(fields) => {
             // Inline object type in an intersection: `ComponentPropsWithoutRef<'button'> & { asChild?: boolean }`
@@ -259,6 +248,73 @@ pub(super) fn resolve_base_as_chain(
             ResolvedChain::empty_with_compose(base.to_raw_string())
         }
     }
+}
+
+/// Resolve an intersection's members and merge them as TypeScript does (`ResolvedChain::intersect_member`). An HTML layer
+/// lists none of its element's attributes but declares them all the same, so a prop another member declares also has the
+/// attribute's type when React's own declarations are loaded.
+fn resolve_intersection_chain(
+    members: &[CollectedType],
+    file_path: &Utf8Path,
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> ResolvedChain {
+    let mut chain = ResolvedChain::empty();
+    // HTML layers merged so far whose element's declarations this run has.
+    let mut layers: Vec<InheritedLayer> = Vec::new();
+    for member in members {
+        let mut member = resolve_base_as_chain(member, file_path, mapping, ctx, state, depth);
+        if !layers.is_empty() {
+            let listed: FxHashSet<&str> = chain.props.iter().map(|prop| prop.name.as_str()).collect();
+            for prop in member.props.iter_mut().filter(|prop| !listed.contains(prop.name.as_str())) {
+                for layer in &layers {
+                    if let Some(attribute) = layer_attribute(layer, &prop.name, ctx, state, depth) {
+                        *prop = Arc::new(super::intersect_declarations(&attribute, prop));
+                    }
+                }
+            }
+        }
+        let new_layers: Vec<InheritedLayer> = member
+            .inheritance
+            .iter()
+            .filter(|layer| layer.html_element.as_deref().is_some_and(|element| has_element(layer, element, ctx)))
+            .cloned()
+            .collect();
+        if !new_layers.is_empty() {
+            let own: FxHashSet<&str> = member.props.iter().map(|prop| prop.name.as_str()).collect();
+            for prop in chain.props.iter_mut().filter(|prop| !own.contains(prop.name.as_str())) {
+                for layer in &new_layers {
+                    if let Some(attribute) = layer_attribute(layer, &prop.name, ctx, state, depth) {
+                        *prop = Arc::new(super::intersect_declarations(prop, &attribute));
+                    }
+                }
+            }
+        }
+        layers.extend(new_layers);
+        chain.intersect_member(member);
+    }
+    chain
+}
+
+fn has_element(layer: &InheritedLayer, element: &str, ctx: &ResolutionContext) -> bool {
+    super::html::intrinsic_element(element, Utf8Path::new(&layer.file_name), ctx).is_some()
+}
+
+/// The declaration of attribute `name` an HTML layer's element has, unless the layer omits it.
+fn layer_attribute(
+    layer: &InheritedLayer,
+    name: &str,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> Option<ParsedProp> {
+    if layer.omitted.iter().any(|omitted| omitted == name) {
+        return None;
+    }
+    let element = layer.html_element.as_deref()?;
+    super::html::react_attribute(element, name, Utf8Path::new(&layer.file_name), ctx, state, depth)
 }
 
 /// Resolve a `CollectedTypeAlias::Union` — detect discriminated union if possible.
