@@ -18,7 +18,7 @@ Two entry points share one projection: `serialize` (`--format rdt`) applies RDT'
 
 `serialize` holds only components with `exported: true`, unless `--include-unexported` is passed. react-docgen-typescript documents only a module's exports, so a file-local helper component would otherwise appear in RDT-shaped output where RDT never puts one.
 
-Each component carries `filePath`, the absolute path of its source file, as RDT's `ComponentDoc` does.
+Each component `serialize` writes carries `filePath`, the absolute path of its source file, as RDT's `ComponentDoc` does. `docgen_info` leaves it out.
 
 ### The `enum`-shape convention (`type_json`)
 
