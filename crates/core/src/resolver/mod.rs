@@ -264,6 +264,8 @@ pub struct ResolutionContext {
     pub(crate) interface_chains: memo::InterfaceChains,
     /// Loaded dependency declarations (`PipelineOptions::load_dependencies`, ADR 0010).
     pub(crate) dependencies: Option<Arc<crate::dependency_types::DependencyLayer>>,
+    /// React's own declarations in curated mode, which only HTML-attribute lookups read (`react_index`).
+    pub(crate) react_types: Option<Arc<crate::named_type_index::NamedTypeIndex>>,
     pub(crate) collapse_inherited_props: crate::pipeline::CollapseInheritedProps,
 }
 
@@ -341,8 +343,24 @@ impl ResolutionContext {
             module_resolutions: Default::default(),
             interface_chains: Default::default(),
             dependencies: None,
+            react_types: None,
             collapse_inherited_props: options.collapse_inherited_props,
         }
+    }
+
+    /// This context with React's own declarations indexed apart from the project's, for an HTML layer's attribute
+    /// lookups only (`html::react_attribute`, ADR 0010's amendment). Full mode merges them into `named_types` instead.
+    pub(crate) fn with_react_types(
+        mut self,
+        react_types: Option<Arc<crate::named_type_index::NamedTypeIndex>>,
+    ) -> Self {
+        self.react_types = react_types;
+        self
+    }
+
+    /// The index holding React's declarations, when this run has them.
+    pub(super) fn react_index(&self) -> &crate::named_type_index::NamedTypeIndex {
+        self.react_types.as_deref().unwrap_or(&self.named_types)
     }
 
     /// This context over a loaded dependency layer: imports and re-exports of dependency files come from it. The
