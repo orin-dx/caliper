@@ -17,7 +17,6 @@ Options:
           Possible values:
           - canonical: caliper-docgen canonical schema (richest)
           - rdt:       react-docgen-typescript compatible output
-          - storybook: Storybook __docgenInfo blocks
           - toon:      Token-Optimized Object Notation (compact agent format)
           
           [default: canonical]
@@ -40,15 +39,14 @@ Options:
           warning) — e.g. a library-specific type this tool doesn't already know
 
       --include-unexported
-          Keep components their module doesn't export in `--format rdt` and
-          `--format storybook`, which omit them by default as
-          react-docgen-typescript does. Canonical output always keeps them,
-          marked `exported: false`
+          Keep components their module doesn't export in `--format rdt`, which
+          omits them by default as react-docgen-typescript does. Canonical
+          output always keeps them, marked `exported: false`
 
   -j, --json
           Machine-readable JSON output: the canonical schema, compact, always to
-          stdout, ignoring --out/--format (which govern the human/RDT/Storybook
-          paths below), and suppresses the human-readable summary/diagnostics
+          stdout, ignoring --out/--format (which govern the human/RDT/TOON paths
+          below), and suppresses the human-readable summary/diagnostics
 
   -v, --verbose...
           Verbose output (repeat for more: -v, -vv)

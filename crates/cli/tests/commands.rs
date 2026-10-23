@@ -103,15 +103,6 @@ fn extract_rdt_format_emits_react_docgen_typescript_props() {
 }
 
 #[test]
-fn extract_storybook_format_emits_docgen_info_without_parents() {
-    let parsed: serde_json::Value = serde_json::from_str(&extract_to_stdout("storybook")).unwrap();
-
-    let label = &parsed["Widget"]["props"]["label"];
-    assert_eq!(label["type"], serde_json::json!({ "name": "string" }));
-    assert!(label.get("parent").is_none(), "storybook output carries no parent: {label}");
-}
-
-#[test]
 fn extract_toon_format_lists_each_component_with_its_props() {
     let toon = extract_to_stdout("toon");
 

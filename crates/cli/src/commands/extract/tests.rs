@@ -429,7 +429,7 @@ fn docgen_info_keeps_undocumented_children_for_storybook() {
 }
 
 #[test]
-fn compat_formats_omit_unexported_components_unless_asked() {
+fn rdt_omits_unexported_components_unless_asked() {
     let mut components = std::collections::BTreeMap::new();
     components.insert("Public".to_string(), component_with_props("Public", vec![]));
     components.insert(
@@ -448,60 +448,10 @@ fn compat_formats_omit_unexported_components_unless_asked() {
     };
 
     assert_eq!(names(serialize_rdt(&output, false).unwrap()), vec!["Public"]);
-    assert_eq!(names(serialize_storybook(&output, false).unwrap()), vec!["Public"]);
     assert_eq!(names(serialize_rdt(&output, true).unwrap()), vec!["Internal", "Public"]);
-    assert_eq!(names(serialize_storybook(&output, true).unwrap()), vec!["Internal", "Public"]);
     let canonical: serde_json::Value = serde_json::to_value(&output).unwrap();
     assert_eq!(canonical["components"]["Internal"]["exported"], false);
     assert_eq!(canonical["components"]["Public"]["exported"], true);
-}
-
-#[test]
-fn serialize_storybook_emits_exact_docgen_blocks() {
-    use caliper_docgen_core::types::{DefaultValue, ParsedProp};
-    let label = ParsedProp::new(
-        "label".to_string(),
-        PropType::ReactNode,
-        false,
-        Some(DefaultValue { value: "\"hi\"".to_string(), computed: false }),
-        "The label.".to_string(),
-        Default::default(),
-        None,
-        vec![],
-    );
-    let mut entry = component_with_props("Widget", vec![]);
-    entry.description = "A widget.".to_string();
-    entry.props.insert("label".to_string(), std::sync::Arc::new(label));
-    let mut components = std::collections::BTreeMap::new();
-    components.insert("Widget".to_string(), entry);
-    let output = caliper_docgen_core::types::ExtractionOutput {
-        components,
-        enums: Default::default(),
-        diagnostics: vec![],
-        stats: Default::default(),
-    };
-
-    let parsed: serde_json::Value = serde_json::from_str(&serialize_storybook(&output, false).unwrap()).unwrap();
-
-    assert_eq!(
-        parsed,
-        serde_json::json!({
-            "Widget": {
-                "displayName": "Widget",
-                "description": "A widget.",
-                "methods": [],
-                "props": {
-                    "label": {
-                        "name": "label",
-                        "type": { "name": "ReactNode" },
-                        "required": false,
-                        "defaultValue": { "value": "\"hi\"" },
-                        "description": "The label."
-                    }
-                }
-            }
-        })
-    );
 }
 
 /// Runs `extract` end to end over one button component and returns its canonical JSON. Lives inside the crate so
