@@ -2630,7 +2630,7 @@ fn parsed_ctx(dir: &Utf8Path, files: &[(&str, &str)]) -> ResolutionContext {
 }
 
 /// Resolve `components` in order on one context, asserting each gives exactly what it gives on a context of its own:
-/// entry, diagnostics and dependencies.
+/// entry, dependencies, and each distinct diagnostic in the order first reported (a reused chain reports each once).
 fn resolve_shared(
     dir: &Utf8Path,
     files: &[(&str, &str)],
@@ -2646,7 +2646,11 @@ fn resolve_shared(
         let alone = resolve_component_tracked(&mapping(&fresh, name), &fresh);
         let reused = resolve_component_tracked(&mapping(&shared, name), &shared);
         assert_eq!(serde_json::to_value(&reused.0).unwrap(), serde_json::to_value(&alone.0).unwrap(), "{name}");
-        assert_eq!(reused.1, alone.1, "{name}: diagnostics");
+        let firsts = |diagnostics: &[Diagnostic]| {
+            let mut seen = FxHashSet::default();
+            diagnostics.iter().filter(|d| seen.insert(*d)).cloned().collect::<Vec<_>>()
+        };
+        assert_eq!(firsts(&reused.1), firsts(&alone.1), "{name}: diagnostics");
         assert_eq!(reused.2, alone.2, "{name}: dependencies");
         results.insert((*name).to_owned(), reused);
     }

@@ -1,5 +1,7 @@
 //! Global resolution context — merged source data from all parsed files.
 
+use std::sync::Arc;
+
 use camino::{Utf8Path, Utf8PathBuf};
 use compact_str::CompactString;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -51,16 +53,17 @@ pub(crate) struct ResolveState {
 /// The reads a recorded resolution made, so another component's state can be checked to give the same answers.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct StateReads {
-    /// Cycle-set keys looked up, each with whether it was already there.
-    pub(crate) visited: Vec<(CompactString, bool)>,
+    /// Cycle-set keys looked up, each with whether it was already there. The keys are long and every enclosing
+    /// recording keeps them again, so they are shared.
+    pub(crate) visited: Vec<(Arc<str>, bool)>,
     /// `named_in_progress` keys looked up, each with whether it was already there.
-    pub(crate) named: Vec<(CompactString, bool)>,
+    pub(crate) named: Vec<(Arc<str>, bool)>,
     /// In-scope type parameter names looked up, each with whether it was in scope.
     pub(crate) in_scope: Vec<(CompactString, bool)>,
     /// Prop names whose component default was looked up, with the default found.
     pub(crate) defaults: Vec<(CompactString, Option<(std::string::String, bool)>)>,
     /// Cycle-set keys this state itself added (a branch's own additions are dropped with the branch).
-    pub(crate) visited_added: Vec<CompactString>,
+    pub(crate) visited_added: Vec<Arc<str>>,
     /// In-scope type parameters this state itself added.
     pub(crate) in_scope_added: Vec<CompactString>,
 }
@@ -131,19 +134,21 @@ impl ResolveState {
     /// Enter `key` into the cycle set; false if it was already there.
     pub(crate) fn visit(&mut self, key: CompactString) -> bool {
         let Some(reads) = self.reads.as_mut() else { return self.visited.insert(key) };
-        let inserted = self.visited.insert(key.clone());
+        let shared: Arc<str> = Arc::from(key.as_str());
+        let inserted = self.visited.insert(key);
         if inserted {
-            reads.visited_added.push(key.clone());
+            reads.visited_added.push(Arc::clone(&shared));
         }
-        reads.visited.push((key, !inserted));
+        reads.visited.push((shared, !inserted));
         inserted
     }
 
     /// Enter `key` into `named_in_progress`; false if it was already there.
     pub(crate) fn enter_named(&mut self, key: CompactString) -> bool {
         let Some(reads) = self.reads.as_mut() else { return self.named_in_progress.insert(key) };
-        let inserted = self.named_in_progress.insert(key.clone());
-        reads.named.push((key, !inserted));
+        let shared: Arc<str> = Arc::from(key.as_str());
+        let inserted = self.named_in_progress.insert(key);
+        reads.named.push((shared, !inserted));
         inserted
     }
 

@@ -10,7 +10,12 @@
 //!
 //! Only the first read of a key says what the state held on entry: a later one may see what the resolution itself
 //! added, which a replay adds again.
+//!
+//! A recording keeps each distinct diagnostic once. Resolution reports one each time it meets the cause, the output
+//! merges identical diagnostics, and nothing in resolution reads them back, so only the first of each matters; keeping
+//! every copy, again in each recording that encloses it, took gigabytes on Chakra with dependencies loaded.
 
+use std::hash::Hash;
 use std::sync::Arc;
 
 use compact_str::CompactString;
@@ -43,17 +48,23 @@ struct Recording {
 
 /// Keep the first read of each key: what the state held on entry. A later read may see the resolution's own
 /// additions, and an enclosing recording only needs the first one either.
-fn first_reads<V>(reads: Vec<(CompactString, V)>) -> Vec<(CompactString, V)> {
-    let mut seen: FxHashSet<CompactString> = FxHashSet::default();
+fn first_reads<K: Clone + Eq + Hash, V>(reads: Vec<(K, V)>) -> Vec<(K, V)> {
+    let mut seen: FxHashSet<K> = FxHashSet::default();
     reads.into_iter().filter(|(key, _)| seen.insert(key.clone())).collect()
+}
+
+/// Each distinct diagnostic once, in the order first reported.
+fn distinct(diagnostics: &[Diagnostic]) -> Vec<Diagnostic> {
+    let mut seen: FxHashSet<&Diagnostic> = FxHashSet::default();
+    diagnostics.iter().filter(|diagnostic| seen.insert(diagnostic)).cloned().collect()
 }
 
 impl Recording {
     /// Whether `state` and `mapping` give the same answer to every read the recorded resolution made.
     fn applies_to(&self, state: &ResolveState, mapping: &ComponentMapping) -> bool {
         let reads = &self.reads;
-        reads.visited.iter().all(|(key, present)| state.visited.contains(key) == *present)
-            && reads.named.iter().all(|(key, present)| state.named_in_progress.contains(key) == *present)
+        reads.visited.iter().all(|(key, present)| state.visited.contains(&**key) == *present)
+            && reads.named.iter().all(|(key, present)| state.named_in_progress.contains(&**key) == *present)
             && reads.in_scope.iter().all(|(name, present)| state.in_scope_type_params.contains(name) == *present)
             && reads.defaults.iter().all(|(name, found)| {
                 mapping.param_defaults.get(name.as_str()).map(|d| (d.value.as_str(), d.computed))
@@ -66,7 +77,7 @@ impl Recording {
         if let Some(reads) = state.reads.as_mut() {
             reads.append(&self.reads, true, true);
         }
-        state.visited.extend(self.reads.visited_added.iter().cloned());
+        state.visited.extend(self.reads.visited_added.iter().map(|key| CompactString::from(&**key)));
         state.in_scope_type_params.extend(self.reads.in_scope_added.iter().cloned());
         state.diagnostics.extend(self.diagnostics.iter().cloned());
         state.named_unevaluated |= self.named_unevaluated;
@@ -114,7 +125,7 @@ impl InterfaceChains {
 
         let recording = Recording {
             chain: chain.clone(),
-            diagnostics: state.diagnostics[diagnostics_before..].to_vec(),
+            diagnostics: distinct(&state.diagnostics[diagnostics_before..]),
             named_unevaluated,
             deps,
             reads,
