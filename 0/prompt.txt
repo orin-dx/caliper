@@ -1,0 +1,13 @@
+<task-notification>
+<task-id>a75c51be5bf7193ae</task-id>
+<tool-use-id>toolu_01A5chU6nCxoPbuPxPSmUqX4</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/a75c51be5bf7193ae.output</output-file>
+<status>completed</status>
+<summary>Agent "Dependency loader behind a flag" stopped at its 200-turn limit (partial result; SendMessage to task-id to continue)</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>NOTE: this agent stopped at its 200-turn limit before finishing. The text below is PARTIAL output; treat it as incomplete. Send the agent a message (SendMessage) to let it continue from where it stopped.
+
+Serializers already handle layers without an element. Regenerating trycmd help and running the full suite and lint.</result>
+<usage><subagent_tokens>398738</subagent_tokens><tool_uses>322</tool_uses><duration_ms>2106852</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-a75c51be5bf7193ae</worktreePath><worktreeBranch>worktree-agent-a75c51be5bf7193ae</worktreeBranch></worktree>
+</task-notification>
