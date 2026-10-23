@@ -828,6 +828,96 @@ impl ResolvedChain {
             self.discriminant_prop = parent.discriminant_prop;
         }
     }
+
+    /// Merge the next member of an intersection into self. Unlike an extended interface's, a prop both declare keeps
+    /// both declarations, as TypeScript intersects them.
+    fn intersect_member(&mut self, mut member: ResolvedChain) {
+        if !self.props.is_empty() && !member.props.is_empty() {
+            let theirs: FxHashMap<&str, usize> =
+                member.props.iter().enumerate().map(|(i, prop)| (prop.name.as_str(), i)).collect();
+            let mut merged = vec![false; member.props.len()];
+            for prop in &mut self.props {
+                if let Some(&i) = theirs.get(prop.name.as_str()) {
+                    *prop = Arc::new(intersect_declarations(prop, &member.props[i]));
+                    merged[i] = true;
+                }
+            }
+            let mut merged = merged.into_iter();
+            member.props.retain(|_| !merged.next().unwrap_or(false));
+        }
+        self.merge_parent(member);
+    }
+}
+
+/// One prop two intersection members declare, as TypeScript sees it: both types, each once; required when either
+/// requires it; documented by the first declaration that has documentation.
+fn intersect_declarations(first: &ParsedProp, second: &ParsedProp) -> ParsedProp {
+    let members = |prop_type: &PropType| match prop_type {
+        PropType::Intersection(members) => members.clone(),
+        other => vec![other.clone()],
+    };
+    let mut types = members(&first.prop_type);
+    for member in members(&second.prop_type) {
+        if !types.contains(&member) {
+            types.push(member);
+        }
+    }
+    let prop_type = match <[PropType; 1]>::try_from(types) {
+        Ok([only]) => only,
+        Err(types) => common_literals(&types).unwrap_or(PropType::Intersection(types)),
+    };
+    let documented = if first.description.is_empty() && first.tags.is_empty() { second } else { first };
+    let mut declarations = first.declarations.clone();
+    for declaration in &second.declarations {
+        if !declarations.contains(declaration) {
+            declarations.push(declaration.clone());
+        }
+    }
+    ParsedProp::new(
+        first.name.clone(),
+        prop_type,
+        first.required || second.required,
+        first.default_value.clone().or_else(|| second.default_value.clone()),
+        documented.description.clone(),
+        documented.tags.clone(),
+        first.parent.clone().or_else(|| second.parent.clone()),
+        declarations,
+    )
+}
+
+/// The intersection of types made only of literals, as TypeScript reduces it: the values every one of them has
+/// (`("a" | "b" | null) & ("a" | "c")` is `"a"`). `None` when any is not such a type.
+fn common_literals(types: &[PropType]) -> Option<PropType> {
+    let (first, rest) = types.split_first()?;
+    let rest: Vec<Vec<PropType>> = rest.iter().map(literal_values).collect::<Option<_>>()?;
+    let values = literal_values(first)?;
+    let total = values.len();
+    let mut common: Vec<PropType> =
+        values.into_iter().filter(|value| rest.iter().all(|values| values.contains(value))).collect();
+    Some(match common.len() {
+        0 => PropType::Never,
+        1 => common.remove(0),
+        // Spelled as the first declaration spells it when the others remove nothing.
+        len if len == total => first.clone(),
+        _ => PropType::Union(common),
+    })
+}
+
+/// The values of a type made only of literals, or `None`.
+fn literal_values(prop_type: &PropType) -> Option<Vec<PropType>> {
+    match prop_type {
+        PropType::StringLiteral(_) | PropType::NumberLiteral(_) | PropType::BoolLiteral(_) | PropType::Null => {
+            Some(vec![prop_type.clone()])
+        }
+        PropType::Boolean => Some(vec![PropType::BoolLiteral(false), PropType::BoolLiteral(true)]),
+        PropType::LiteralUnion { members, .. } => {
+            Some(members.iter().map(|member| PropType::StringLiteral(member.clone())).collect())
+        }
+        PropType::Union(members) => {
+            members.iter().map(literal_values).collect::<Option<Vec<_>>>().map(|values| values.concat())
+        }
+        _ => None,
+    }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

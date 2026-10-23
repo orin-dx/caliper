@@ -402,6 +402,92 @@ export function FromQuieter(props: Quieter) { return null; }
     assert_eq!(y.parent.as_ref().map(|p| p.name.as_str()), Some("Base"));
 }
 
+// ── a prop two intersection members declare has both types ───────────────
+
+#[test]
+fn a_prop_two_intersection_members_declare_has_both_types() {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "Field.tsx",
+        r#"
+interface Native {
+  /** native doc */
+  onChange?: (event: Event) => void;
+  title?: string;
+  label?: string;
+  size?: "sm" | "md" | null;
+  align?: "start";
+}
+interface Custom {
+  onChange?: (value: string) => void;
+  title?: string;
+  label: string;
+  size?: "md" | "lg";
+  align?: "end";
+}
+interface Extended extends Native { onChange?: (value: string) => void }
+type FieldProps = Native & Custom;
+export function Field(props: Native & Custom) { return null; }
+export function Aliased(props: FieldProps) { return null; }
+export function Flipped(props: Custom & Native) { return null; }
+export function Child(props: Extended) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let props = |component: &str| {
+        output.components[component]
+            .props
+            .values()
+            .map(|p| {
+                let parent = p.parent.as_ref().map(|parent| parent.name.clone());
+                (p.name.clone(), p.prop_type.raw_string(), p.required, p.description.clone(), parent)
+            })
+            .collect::<Vec<_>>()
+    };
+    let prop = |name: &str, ty: &str, required: bool, description: &str, parent: &str| {
+        (name.to_owned(), ty.to_owned(), required, description.to_owned(), Some(parent.to_owned()))
+    };
+
+    // Literal types reduce to the values they share, as TypeScript reduces them.
+    let field = [
+        prop("align", "never", false, "", "Native"),
+        prop("label", "string", true, "", "Native"),
+        prop("onChange", "((event: Event) => void) & ((value: string) => void)", false, "native doc", "Native"),
+        prop("size", "\"md\"", false, "", "Native"),
+        prop("title", "string", false, "", "Native"),
+    ];
+    assert_eq!(props("Field"), field);
+    assert_eq!(props("Aliased"), field);
+    assert_eq!(
+        props("Flipped"),
+        [
+            prop("align", "never", false, "", "Custom"),
+            prop("label", "string", true, "", "Custom"),
+            prop("onChange", "((value: string) => void) & ((event: Event) => void)", false, "native doc", "Custom"),
+            prop("size", "\"md\"", false, "", "Custom"),
+            prop("title", "string", false, "", "Custom"),
+        ]
+    );
+    // An interface's own declaration replaces the one it extends instead.
+    assert_eq!(
+        props("Child"),
+        [
+            prop("align", "\"start\"", false, "", "Native"),
+            prop("label", "string", false, "", "Native"),
+            prop("onChange", "(value: string) => void", false, "native doc", "Extended"),
+            prop("size", "\"sm\" | \"md\" | null", false, "", "Native"),
+            prop("title", "string", false, "", "Native"),
+        ]
+    );
+}
+
 struct RedescribeButtonTone;
 
 impl crate::plugin::DocgenPlugin for RedescribeButtonTone {
@@ -580,6 +666,45 @@ export function Button(props: ButtonProps) { return null; }
         button.props.keys().collect::<Vec<_>>()
     );
     assert!(button.props.contains_key("variant"), "own prop 'variant' should still be present");
+}
+
+/// `ComponentProps<"div">` lists none of the div's attributes, but TypeScript still intersects one another member
+/// declares. Only Full mode reads React's declarations, so curated mode keeps the other member's type alone.
+#[test]
+fn a_prop_beside_an_html_layer_also_has_the_elements_attribute_type_in_full_mode() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "Legend.tsx",
+        r#"
+import * as React from "react";
+interface LegendProps { onTimeUpdate?: (data: unknown, index: number) => void; payload?: string[] }
+export function Legend(props: React.ComponentProps<"div"> & LegendProps) { return null; }
+export function Flipped(props: LegendProps & React.ComponentProps<"div">) { return null; }
+export function Omitted(props: Omit<React.ComponentProps<"div">, "onTimeUpdate"> & LegendProps) { return null; }
+"#,
+    );
+    let full = extract(&full_mode_options_for(&tmp));
+    let curated =
+        extract(&PipelineOptions { html_attributes: HtmlAttributeMode::Curated, ..full_mode_options_for(&tmp) });
+
+    let on_time_update = |output: &crate::types::ExtractionOutput, component: &str| {
+        let prop = &output.components[component].props["onTimeUpdate"];
+        (prop.prop_type.raw_string(), prop.declarations.iter().map(|p| p.name.clone()).collect::<Vec<_>>())
+    };
+    let dom = "(event: SyntheticEvent<HTMLDivElement>) => void";
+    let legend = "(data: unknown, index: number) => void";
+    let declared = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
+    assert_eq!(
+        on_time_update(&full, "Legend"),
+        (format!("({dom}) & ({legend})"), declared(&["DOMAttributes", "LegendProps"]))
+    );
+    assert_eq!(
+        on_time_update(&full, "Flipped"),
+        (format!("({legend}) & ({dom})"), declared(&["LegendProps", "DOMAttributes"]))
+    );
+    assert_eq!(on_time_update(&full, "Omitted"), (legend.to_owned(), declared(&["LegendProps"])));
+    assert_eq!(on_time_update(&curated, "Legend"), (legend.to_owned(), declared(&["LegendProps"])));
 }
 
 // ── test_generic_svg_attributes_extends_resolves_to_its_element_in_full_mode ─
