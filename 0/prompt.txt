@@ -1,0 +1,1 @@
+I feel like even unexported types can play a part in exported ones and thus documenting them so we should report, right?
