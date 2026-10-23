@@ -1,0 +1,1 @@
+We should have a 7.1 beta now to test against too right? We want to keep our performance edge even as we address the issues at hand. Is RDT adopting TS 7.1? What are their perf numbers? Are we wasting our time with oxc if we always honestly need TS 7.1?
