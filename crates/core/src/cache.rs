@@ -29,7 +29,8 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 /// files must be discarded rather than misread under the new field layout.
 /// Extractor changes that keep the shape are covered by `CacheHeader::fingerprint` instead.
 /// 16: `LexedExport::LocalDeclaration` gained `declared_as`.
-const CACHE_SCHEMA_VERSION: u32 = 16;
+/// 17: component mappings record whether they are exported.
+const CACHE_SCHEMA_VERSION: u32 = 17;
 
 const DATA_FILE: &str = "dts.msgpack";
 

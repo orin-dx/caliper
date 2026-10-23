@@ -227,6 +227,11 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) name_uses: rustc_hash::FxHashMap<CompactString, uses::NameUses>,
     /// Component candidates declared with a second parameter: a function component takes only props.
     pub(super) takes_a_second_parameter: FxHashSet<CompactString>,
+    /// Local names the module exports, under any exported name (`uses.rs`).
+    pub(super) exported_locals: FxHashSet<CompactString>,
+    /// `(sub-component, parent)` for each component attached to another (`Parent.Sub = Sub`,
+    /// `Object.assign(Parent, { Sub })`): exported when its parent is.
+    pub(super) attached_to: Vec<(CompactString, CompactString)>,
 }
 
 impl<'src> SourceDataCollector<'src> {
@@ -247,6 +252,8 @@ impl<'src> SourceDataCollector<'src> {
             decline_reason: None,
             name_uses: Default::default(),
             takes_a_second_parameter: FxHashSet::default(),
+            exported_locals: FxHashSet::default(),
+            attached_to: Vec::new(),
         }
     }
 
@@ -293,7 +300,11 @@ impl<'src> SourceDataCollector<'src> {
                 self.aliased_away.iter().filter(|n| !exported.contains(n.as_str())).cloned().collect();
             self.data.component_mappings.retain(|m| !hidden.contains(m.component_name.as_str()));
         }
-        self.drop_functions_used_only_as_functions();
+        let exported = self.exported_components();
+        self.drop_functions_used_only_as_functions(&exported);
+        for mapping in &mut self.data.component_mappings {
+            mapping.exported = exported.contains(mapping.component_name.as_str());
+        }
         for (obj_name, display_name) in self.pending_display_name_renames.drain(..) {
             if let Some(mapping) = self.data.component_mappings.iter_mut().find(|m| m.component_name == obj_name) {
                 mapping.component_name = display_name;

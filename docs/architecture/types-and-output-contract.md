@@ -223,6 +223,7 @@ pub struct ComponentEntry {
     pub tags: BTreeMap<String, String>,
     pub methods: Vec<()>,
     pub detected_by: DetectionRule,
+    pub exported: bool,
 }
 ```
 
@@ -231,6 +232,8 @@ The Rust types hold props inline, but the canonical JSON does not (ADR 0009, `ty
 **Invariant 6a:** two different props never share an id. `PropTable::add` compares the JSON of every prop added under an existing id and fails serialization on a mismatch, rather than letting one prop stand in for another.
 
 `detected_by` (`detectedBy` in JSON) is the extractor rule that recognized the component, so a consumer can tell an explicit declaration form (`functionDeclaration`, `forwardRef`, `fcAnnotation`, `classComponent`, ...) from an inference (`typedFunctionExpression`, `wrapperTypeArgument`). It is the grouping the per-rule precision sample uses (`docs/precision.md`).
+
+`exported` says whether the component's module exports it: an exported declaration, an `export { X as Y }` or `export default X` of a local, or a sub-component attached to an exported component (`Parent.Sub = Sub`, `Object.assign(Parent, { Sub })`). Canonical output keeps unexported components; `--format rdt` and `--format storybook` omit them unless `--include-unexported` is passed, as react-docgen-typescript only documents exports.
 
 **Invariant 6:** `components`, `enums`, `props`, and `notable_inherited` are `BTreeMap`, not `FxHashMap` — this is AGENTS.md non-negotiable #2 (`FxHashMap` for internal maps, `BTreeMap` for JSON-output maps) applied at the type level. `ExtractionOutput` and everything nested inside it that's part of the JSON contract is output-facing, so it gets deterministic key order for free from `BTreeMap`'s iteration order — output diffing, snapshot tests, and any consumer that hashes or compares the JSON depend on this being stable across runs, not just correct.
 

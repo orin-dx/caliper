@@ -112,6 +112,9 @@ pub struct ComponentEntry {
     /// The extractor rule that recognized this component. `typedFunctionExpression` and `wrapperTypeArgument` are
     /// inferred from a function's shape and what it returns; the others are explicit declaration forms.
     pub detected_by: crate::types::DetectionRule,
+    /// Whether its module exports it, directly or as a sub-component attached to an exported component. An unexported
+    /// component is an implementation detail other components render; RDT does not report those.
+    pub exported: bool,
 }
 
 impl ComponentEntry {

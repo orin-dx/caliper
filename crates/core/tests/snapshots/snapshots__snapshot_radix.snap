@@ -347,7 +347,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRefExoticDecl"
+      "detectedBy": "forwardRefExoticDecl",
+      "exported": true
     }
   },
   "enums": {},

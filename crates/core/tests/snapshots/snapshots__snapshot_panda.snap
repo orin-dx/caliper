@@ -407,7 +407,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     }
   },
   "enums": {

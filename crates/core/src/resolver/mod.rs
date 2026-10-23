@@ -736,6 +736,7 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
             tags: mapping.tags.clone(),
             methods: vec![],
             detected_by: mapping.rule,
+            exported: mapping.exported,
         },
         state.diagnostics,
     )

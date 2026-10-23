@@ -807,7 +807,8 @@ expression: value
       ],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRefExoticDecl"
+      "detectedBy": "forwardRefExoticDecl",
+      "exported": true
     },
     "ButtonGroup": {
       "displayName": "ButtonGroup",
@@ -1080,7 +1081,8 @@ expression: value
       ],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRefExoticDecl"
+      "detectedBy": "forwardRefExoticDecl",
+      "exported": true
     },
     "Input": {
       "displayName": "Input",
@@ -1931,7 +1933,8 @@ expression: value
       ],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRefExoticDecl"
+      "detectedBy": "forwardRefExoticDecl",
+      "exported": true
     },
     "InputGroup": {
       "displayName": "InputGroup",
@@ -2244,7 +2247,8 @@ expression: value
       ],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRefExoticDecl"
+      "detectedBy": "forwardRefExoticDecl",
+      "exported": true
     },
     "InputLeftAddon": {
       "displayName": "InputLeftAddon",
@@ -2517,7 +2521,8 @@ expression: value
       ],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRefExoticDecl"
+      "detectedBy": "forwardRefExoticDecl",
+      "exported": true
     },
     "InputLeftElement": {
       "displayName": "InputLeftElement",
@@ -2810,7 +2815,8 @@ expression: value
       ],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRefExoticDecl"
+      "detectedBy": "forwardRefExoticDecl",
+      "exported": true
     },
     "InputRightAddon": {
       "displayName": "InputRightAddon",
@@ -3083,7 +3089,8 @@ expression: value
       ],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRefExoticDecl"
+      "detectedBy": "forwardRefExoticDecl",
+      "exported": true
     },
     "InputRightElement": {
       "displayName": "InputRightElement",
@@ -3376,7 +3383,8 @@ expression: value
       ],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRefExoticDecl"
+      "detectedBy": "forwardRefExoticDecl",
+      "exported": true
     }
   },
   "enums": {},
