@@ -81,6 +81,7 @@ Wired in:
 - `visit_variable_declaration` — PascalCase `.tsx` binding with an initializer, matching none of patterns 1-3 nor the alias-rename fallback (visit.rs:254-263).
 - `visit_function` — PascalCase function declaration with a first param that either has no type annotation at all (visit.rs:314-318) or has one that isn't a recognizable props-type reference (visit.rs:304-312).
 - `classify_type_alias`'s `Omit`/`Pick`/`Partial`/`Required`/`Readonly` arms — each malformed-argument early-return (missing type args, wrong arg count, unrecognizable base type) calls `record_skip` before returning `None` (alias.rs, throughout).
+- `skip_local_component` — a declaration inside a function body (`function_depth > 0`, counted in `visit_function_body`) that a detector would map: a factory's returned component, a story's local helper. It exists per call, so no module imports it by that name; it is reported, not mapped. A local binding no detector maps (`const Comp = asChild ? Slot : "button"`) produces nothing.
 
 Explicitly _not_ wired (by design, per Invariant 4):
 

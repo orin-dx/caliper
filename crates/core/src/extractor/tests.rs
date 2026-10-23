@@ -2245,6 +2245,45 @@ fn object_assign_sub_component_with_untyped_first_param_is_flagged() {
 }
 
 #[test]
+fn a_component_declared_inside_a_function_body_is_reported_not_mapped() {
+    let source = r#"
+        import { forwardRef, Component } from "react";
+        interface CardProps { title: string }
+        export function Card(props: CardProps) { return <div />; }
+        export function createLeaf<P>(render: (props: P) => any) {
+            const Result = forwardRef((props: P, ref) => <div>{render(props)}</div>);
+            function Inner(props: P) { return <div />; }
+            class Legacy extends Component<P> { render() { return null; } }
+            const Tag = "div";
+            return Result;
+        }
+        export const Story = (props: CardProps) => {
+            const Local: React.FC<CardProps> = (props) => <div />;
+            return <Local title="x" />;
+        };
+    "#;
+    let data = parse_file(Utf8Path::new("/test/factory.tsx"), source);
+
+    let names: Vec<&str> = data.component_mappings.iter().map(|m| m.component_name.as_str()).collect();
+    assert_eq!(names, ["Card", "Story"]);
+    let skips: Vec<&str> = data
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::SkippedCandidate)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(
+        skips,
+        [
+            "'Result' is declared inside a function body, so no module can import it",
+            "'Inner' is declared inside a function body, so no module can import it",
+            "'Legacy' is declared inside a function body, so no module can import it",
+            "'Local' is declared inside a function body, so no module can import it",
+        ]
+    );
+}
+
+#[test]
 fn unrelated_object_assign_call_is_not_treated_as_a_component_pattern() {
     let source = r#"
         const config = {};

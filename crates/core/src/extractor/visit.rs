@@ -250,7 +250,13 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 self.try_collect_cva_call(declarator, &name);
                 self.record_object_assign_declarator(&name, declarator.init.as_ref());
             }
-            if self.is_tsx {
+            if self.is_tsx && self.function_depth > 0 {
+                if let Some(name) = self.extract_pascal_name(declarator) {
+                    if self.detect_component(&Binding::of(declarator), &name).is_some() {
+                        self.skip_local_component(&name, declarator.span);
+                    }
+                }
+            } else if self.is_tsx {
                 if let Some(name) = self.extract_pascal_name(declarator) {
                     self.decline_reason = None;
                     let binding = Binding::of(declarator);
@@ -313,7 +319,13 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 let name = id.name.as_str();
                 let declaration =
                     matches!(func.r#type, FunctionType::FunctionDeclaration | FunctionType::TSDeclareFunction);
-                if is_pascal_case(name) && declaration {
+                if is_pascal_case(name) && declaration && self.function_depth > 0 {
+                    let typed = func.params.items.first().is_some_and(|p| p.type_annotation.is_some());
+                    let shape = super::evidence::FunctionShape::of_function(func);
+                    if typed && super::evidence::renders(&shape, &|n| self.may_be_react(n)).is_ok() {
+                        self.skip_local_component(name, func.span);
+                    }
+                } else if is_pascal_case(name) && declaration {
                     if let Some(first_param) = func.params.items.first() {
                         if let Some(type_ann) = &first_param.type_annotation {
                             if let Err(reason) =
@@ -375,13 +387,26 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         walk::walk_function(self, func, flags);
     }
 
+    fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
+        self.function_depth += 1;
+        walk::walk_function_body(self, body);
+        self.function_depth -= 1;
+    }
+
     fn visit_class(&mut self, class: &Class<'a>) {
         // `class Button extends React.Component<Props> { ... }` — shared entry
         // point for both a ClassDeclaration and a self-named ClassExpression;
         // an anonymous ClassExpression (no `class.id`) is instead picked up by
         // `try_class_expression_wrapped` in `visit_variable_declaration`'s
         // detector chain, from the outer binding's name.
-        if self.is_tsx {
+        if self.is_tsx && self.function_depth > 0 {
+            if let Some(id) = &class.id {
+                let name = id.name.as_str();
+                if is_pascal_case(name) && self.super_class_is_component_family(class).is_some() {
+                    self.skip_local_component(name, class.span);
+                }
+            }
+        } else if self.is_tsx {
             if let Some(id) = &class.id {
                 let name = id.name.as_str();
                 if is_pascal_case(name) {
