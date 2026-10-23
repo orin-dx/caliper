@@ -1,0 +1,236 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+<tools-used-before-summary>Agent, Bash, Edit, EnterWorktree, Grep, Read, ReadNotifications, SendMessage, Skill, TaskCreate, TaskStop, TaskUpdate, ToolSearch, WebSearch, Write</tools-used-before-summary>
+Summary:
+1. Primary Request and Intent:
+   - **Ongoing mandate (pre-summary):** fix the caliper-docgen v1 review findings as non-draft PRs. The user said: "Let's stack PRs please", "Don't create the PRs as draft", "Can you just stack them? I won't release until it's clear". Releases are held; #46, the release PR, stays unmerged until the user decides.
+   - **"Are we leveraging AST and typing appropriately here or are we producing a lot of special cases?"** I answered with an analysis: the core is structural, plus about 300 name-literal checks. That became task #7.
+   - **Stacking requests:**
+     - "Seems like we're not stacking our PRs also"
+     - "Let's fix the stacking and improperly closed PRs??"
+     - "Are things properly stacked now?"
+     - "Nothing else should be stacked?"
+     - "Looks like we merge conflicts"
+     - "Looks like GH closed some PRs that should not have been closed"
+     - "You didn't stack things properly again"
+   - **Codex review:** the user pasted a Codex review ("Caliper v1 review — October 21, 2026") to act on after the PR cleanup. Its high findings:
+     1. Name-based resolution overrides local types.
+     2. Render evidence is weak; no precision gate.
+     3. The watch delta is wrong on name collisions and diagnostic removal.
+     4. The semantic-backend merge contract contradicts itself.
+     5. Silent degradations: the tsconfig comment stripper, RenderProps, the silence list.
+     6. Performance and resource gates, including a cache bound.
+   - "Merged all", then "Continue the work".
+   - **Current request:** "Do research and analysis to help guide me".
+   - **Then:** "The gate should be dependent on the size of the codebase being analyzed. Precision is super important so let's understand the gaps too". The time gate should be normalized to codebase size, and precision gaps need a deep analysis.
+
+2. Key Technical Concepts:
+   - **Rust core:** OXC parsing; Revision watch model (ArcSwapOption, writer Mutex, `Revision::cold/next/assemble`); dependency recorder in `resolver/deps.rs`.
+     - `Dependencies { files: FxHashSet<PathKey>, bare_names, resolves_modules }`.
+     - `PathKey`: string-hashed path, `Borrow<str>`.
+     - Module-resolution memo in `ResolutionContext::module_resolutions`.
+   - **Diagnostics:** deduplicated by identity, with `affects` listing component keys, sorted canonically. Severity is ranked explicitly; there is no `Ord` on `DiagnosticSeverity` (documented invariant).
+   - **Cache:** fingerprinted by build. `build.rs` computes an FNV hash of `src` and `Cargo.lock` into `CALIPER_SOURCE_FINGERPRINT`. The payload carries a `CacheHeader{schema, version, fingerprint}`; the file is `dts.msgpack`; ADR 0008. `CACHE_SCHEMA_VERSION` is 14 on #92 and 13 on main. rmp_serde encodes enum variants by name.
+   - **IncrementalUpdate contract (#87):** `revision`, `updated_keys` (re-resolved components plus kept ones whose key moved), `removed_keys`, `diagnostics` (added), `removed_diagnostics`. The Vite plugin serializes changes with `inOrder`.
+   - **Symbol precedence (#90):** `name_binding`, `may_be_react_builtin`, `may_be_ts_lib_type`, `may_be_utility`, `declaration_resolves`, `builtin_fallback_diagnostic`.
+   - **Render evidence (#91):** a function counts as rendering by its returned values (`ElementInValue` visitor, `OwnBody`), its top-level hooks, and `may_be_react` annotations.
+   - **`detectedBy` output field (#92):** a `DetectionRule` serialized in camelCase.
+   - **Silent degradations (#93):** the tsconfig goes through `oxc_resolver` (`TsconfigDiscovery::Manual`), with `resolve_tsconfig` validation; RenderProps carries `value | (values: T) => …`; cache file size limit `MAX_CACHE_FILE_BYTES` = 256 MiB.
+   - **Tooling:**
+     - Sandbox: `gh` and `git commit` need `dangerouslyDisableSandbox: true`.
+     - Writes to the job tmp dir need the sandbox disabled.
+     - Worktree guard: one plain git command per call via `/usr/bin/git`; multi-step logic in Python scripts.
+   - **External context:**
+     - TS 7.1 beta API (`tsc --api`, msgpack over stdio).
+     - Storybook 11 docgen server: react-component-meta (RCM), with the `experimental_docgenProvider` / `createDocgenProvider` API.
+
+3. Files and Code Sections (main ones this period):
+   - **Watch revision model (#75)**
+     - Files:
+       - `crates/core/src/pipeline/revision.rs`
+       - `crates/core/src/pipeline/watch.rs`
+       - `crates/core/src/resolver/deps.rs`
+       - `crates/core/src/pipeline/mod.rs`
+       - `crates/core/src/pipeline/discover.rs`
+       - `docs/architecture/pipeline-orchestration.md`
+       - `ARCHITECTURE.md`
+     - Tests: `every_kind_of_change_leaves_the_snapshot_equal_to_a_cold_extract` (with an `Applied` delta replay added in #87).
+     - Unreadable files are now treated as in a cold run.
+   - **`crates/cli/src/commands/watch.rs` (#76):** `publish()`; `handle_key` takes `quiet` and `out`; `r` calls `rebuild()`; `keep_output_processing()` sets `OPOST|ONLCR` via rustix.
+   - **`packages/vite-plugin/src/index.ts` (#77, #87):** `load()` serves `initializeSession`; `hotUpdate` sends the keyed payload, invalidates the virtual module and runs inside `inOrder`; `watchChange` and `addWatchFile` handle build watch; `this.error` on failure. The `CaliperDocgenUpdate` type includes `removedDiagnostics`.
+   - **`.github/workflows/ci.yml` and `justfile`:** a `test-integration` job, with `NAPI_BINARY_REQUIRED=true`.
+   - **`crates/core/src/types/diagnostic.rs`:** `affects: Vec<String>` (`serde(default, skip_serializing_if empty)`); derives `Eq` and `Hash`. `DiagnosticSet` lives in `revision.rs`.
+   - **Cache fingerprint:** `crates/core/build.rs`, `crates/core/src/cache.rs` (`CacheHeader`, `LoadFailure`, `counts()`, `load_diagnostic()`), `docs/adr/0008-parse-cache-keyed-by-build.md`.
+   - **Performance:**
+     - `crates/core/src/path_key.rs`
+     - `named_type_index.rs` (`PathKey` keys, `react_namespaced`)
+     - `import_map.rs` (`re_exports`)
+     - `resolver/import.rs` (`ModuleResolution` enum)
+     - `discover.rs` (parallel walker, canonical root)
+   - **`crates/core/src/types/output.rs`:** streaming `Serialize` for `PropType`, plus `WireFields` and `WireReason`. The reference `to_tagged_value` moved to `output/tests.rs`.
+   - **`crates/core/src/resolver/named.rs`:** generic alias substitution in prop position via `build_substitution` and `substitute_alias`, now `pub(super)`.
+   - **`crates/core/src/extractor/evidence.rs` (#91):** rewritten around `ReactBinding`, `ElementInValue`, `OwnBody` and `returns_element`. `Body::Arrow(&body, is_expression)`.
+   - **#92 files:**
+     - `types/collected.rs`: `DetectionRule` gets `#[serde(rename_all="camelCase")]`.
+     - `types/output.rs`: `ComponentEntry.detected_by`.
+     - `schema.rs`
+     - `index.d.ts`
+     - `docs/precision.md`
+     - `scripts/precision-sample.py`
+   - **#93 files:** `resolver/mod.rs` (tsconfig via `oxc_resolver`, `tsconfig_diagnostic` field), `react.rs` (`read_tsconfig_paths` and `strip_json_comments` removed), `known.rs` (`render_props(args)`), `cache.rs` (size cap and sparse-file test).
+   - **Memory:** `/Users/gabe/.claude/projects/-Users-gabe-Projects-caliper/memory/` holds `stacked-pr-retargeting.md`, `sandbox-git-and-gh.md` and `MEMORY.md`.
+   - **Research scripts** (in `/Users/gabe/.claude/jobs/ba6a68d6/tmp/review/`):
+     - `score.py`, `vs_rdt.py`, `precision_sample.py`, `extras.py`, `extras_batches.py`
+     - `prop_precision.py`, `type_families.py`, `show_gaps.py`, `only_caliper_sample.py`
+     - Data lives in `precision/`: `sample.json`, `extras*.json`, `onlycal*.json`, `prop_gaps.json`.
+
+4. Errors and fixes:
+   - **Vacuous test:** `update_file_with_non_utf8_content` passed vacuously on macOS (`/var` symlink) and failed on Linux. Fixed by canonicalizing the path and by treating unreadable files as a cold run does.
+   - **Wrong golden-test assumption:** the cache golden snapshot changed when `DetectionRule` was renamed, because rmp encodes enum variants by name. Fixed by bumping the schema to 14 and correcting the doc comment.
+   - **Architecture test:** the scanner was confused by a `#[cfg(test)]` fn inside an `impl`. Fixed by moving `to_tagged_value` into the tests module.
+   - **Lint (oxlint):** rejected `new Promise` and a useless `undefined`. Fixed by rewriting `inOrder` as an async IIFE.
+   - **#89 regressions:** antd lost `children` from `React.PropsWithChildren`, and spectrum lost DOMAttributes inheritance. Fixed with the `may_be_utility` split (React helpers versus TS lib types) and the `declaration_resolves` fallback with a diagnostic.
+   - **Stacking:**
+     - #56 and #89 were auto-closed when their base branches were deleted. Replaced by #83 and #90.
+     - #67 conflicted because `main` had rewritten commit hashes. Fixed by merging main into `fix/watch-parity` (taking the branch's refactored side) and propagating the merge up the stack with `propagate.py`.
+     - User feedback: "You didn't stack things properly again". New rule: retarget children to main when a parent merges, and open new PRs against main.
+   - **Branch bases:** #91, #92 and #93 were branched before #90 merged. #93 was rebased onto main, resolving an add/add test conflict.
+   - **Sandbox:**
+     - `gh` TLS errors and commit-write failures: run those outside the sandbox.
+     - Job-tmp writes are denied in the sandbox.
+     - A careless `find /` was stopped.
+   - **Wrong size claim:** I claimed lib.dom's cache entry was under 1 MB; measurement showed 2.9 MB for the four lib files, and the comment was fixed.
+
+5. Problem Solving:
+   - **PR state:** everything from #66 to #90 is merged into main, verified by ancestry. Open PRs:
+     - #91 (returned render evidence)
+     - #92 (detectedBy and precision)
+     - #93 (silent degradations)
+     - #46 (release)
+     - #84 (dependabot)
+
+     #91, #92 and #93 all target main and merge cleanly together (checked via the local `scratch/next-main`). Main CI is green.
+   - **Research findings so far:**
+     - **Recall on next-main:**
+
+       | Corpus | own | any | extras |
+       | --- | ---: | ---: | ---: |
+       | mantine | 94% | 87% | 13 |
+       | chakra | 88% | 80% | 3 |
+       | antd | 98% | 83% | 110 |
+       | shadcn | 98% | 99% | 112 |
+       | spectrum | 99% | 80% | 233 |
+
+       The old baseline found 11% of components on Mantine and 8% on chakra.
+     - **Against RDT (time and peak memory):**
+
+       | Corpus | RDT | Caliper | Speed | Memory |
+       | --- | --- | --- | ---: | ---: |
+       | mantine | 1270 ms / 473 MB | 85 ms / 149 MB | 15× | 3.2× |
+       | chakra | 576 ms / 315 MB | 23 ms / 35 MB | 25× | 9× |
+       | antd | 811 ms / 411 MB | 36 ms / 47 MB | 23× | 8.7× |
+       | shadcn | 1222 ms / 620 MB | 39 ms / 58 MB | 32× | 10.7× |
+       | spectrum | 1242 ms / 541 MB | 62 ms / 89 MB | 20× | 6.1× |
+
+       The RDT numbers include about 0.3 s of Node startup.
+     - **Roadmap gates:** recall gates met. Time gate violated as written (Mantine 44 → 85 ms with about 8× the components); the user wants it scaled to codebase size. Precision gate only partially met. The dependency-installed run has not been done.
+     - **Per-rule precision sample:** 153/154 correct. The miss is `ListBoxDropIndicatorWrapper`.
+     - **Extras labelling** (142 sampled of 446 extras; 82 exported, 364 internal): 139 components, 3 not components. The three are render helpers that are called rather than rendered: IndexedAccess, ObjectType and the DropIndicator render callback, all internal.
+
+       Main reasons RDT "missed" them:
+       - Default exports: RDT names them after the file or directory, so the metric double-counts them as a miss plus an extra.
+       - Compound type-cast default exports (RDT reports nothing).
+       - Re-exports under aliases.
+       - Not exported (a product-policy question: should internal components be emitted?).
+       - Static sub-components, and components nested in factory functions.
+     - **Prop level, over 26,448 shared props:**
+       - `required` differs on only 5.
+       - Props only Caliper reports: mantine 145, chakra 9, antd 262, shadcn 361, spectrum 1,289. Labelling is in progress.
+       - Type-disagreement families:
+         - Alias expanded where RDT names it: 15,866. Mostly Mantine `StyleProp`, which shows raw conditional types.
+         - Conditional type left unevaluated: 733
+         - Other: 718
+         - Formatting only: 368
+         - Callback return type lost: 261
+         - Fake `(e: void)` parameter: 191
+         - RDT any/unknown: 190
+         - `"enum"` placeholder: 100
+         - Handler type wrapped as a parameter: 60
+         - Caliper kept a name RDT expanded: 37
+       - `--format rdt` lacks `filePath` (a compatibility gap).
+     - **TS7 research:**
+       - 7.1 beta was published 2026-10-20; RC around late November.
+       - `tsc --api` speaks msgpack over stdio; the protocol may change in minor releases, and only the JS client is a stable surface.
+       - 178 checker methods, plus `batchRequests`.
+       - RDT crashes on TS7; Storybook is pinning TS6.
+       - A native RDT would cut Caliper's cold lead to about 8×.
+       - Doc corrections are needed in `type-checker-integration.md` (dates, method count, entry points) and ADR 0006 (`typescript/unstable`).
+     - **Market research:**
+       - Storybook 11 makes RCM (Volar/TS LS) the docgen engine, with a pluggable provider API. Its Mantine figure is 154/154 in 200 ms versus RDT's 8698 ms.
+       - caliper-docgen is not on npm.
+       - Ranked integration paths: (1) a Storybook docgen provider preset with RCM fallback, (2) `__docgenInfo` injection in the Vite plugin, (3) an MCP/manifest path.
+       - The roadmap currently lists Storybook integration as out of scope.
+       - The agent's recall figures (29%/9%) were stale roadmap numbers.
+
+6. All user messages (since the previous summary):
+   - "Are we leveraging AST and typing appropriately here or are we producing a lot of special cases?"
+   - "Seems like we're not stacking our PRs also"
+   - "Let's fix the stacking and improperly closed PRs??"
+   - "Are things properly stacked now?"
+   - "Nothing else should be stacked?"
+   - "Looks like we merge conflicts"
+   - "Once you're done cleaning up the PRs here is some feedback from codex: [Caliper v1 review — October 21, 2026, full text pasted]"
+   - "Looks like GH closed some PRs that should not have been closed"
+   - "You didn't stack things properly again"
+   - "Merged all"
+   - "Continue the work"
+   - "Do research and analysis to help guide me"
+   - "The gate should be dependent on the size of the codebase being analyzed. Precision is super important so let's understand the gaps too"
+   - Earlier standing instructions: "Let's stack PRs please"; "Don't create the PRs as draft"; "Can you just stack them? I won't release until it's clear".
+
+7. Pending Tasks:
+   - Finish the research and analysis brief guiding the user's decisions, covering:
+     - v1 readiness
+     - semantic backend and TS7 strategy
+     - Storybook and integration strategy, given the RCM competitor
+     - a size-normalized time gate (per KLOC or per component)
+     - a full precision-gap analysis at component and prop level, with recommended fixes
+   - Collect the results of the 2 labelling agents checking the 60 sampled props that only Caliper reports.
+   - Open tasks:
+     - #6: docs, DX, the semantic merge contract ADR, a reproducible scorecard, stale doc corrections.
+     - #7: structural rules replacing name-based ones.
+   - Possible fix work implied by the gaps:
+     - callback return types and the fake `(e: void)` parameter
+     - handler types wrapped as parameters
+     - alias-name display
+     - `filePath` in `--format rdt`
+     - default-export naming policy
+     - exported-only policy and an `exported` flag
+     - extending the precision sample to about 60 per rule
+   - PRs #91, #92 and #93 await merge.
+   - #46 (release) awaits the user's decision; #84 (Dependabot) lint failure.
+
+8. Current Work:
+   The work was the research brief requested by "Do research and analysis to help guide me", refined by "The gate should be dependent on the size of the codebase being analyzed. Precision is super important so let's understand the gaps too".
+   - All four extras-labelling batches are back: 139/142 components; the three misses are internal render helpers.
+   - Type families and prop-level gaps are computed.
+   - Two agents are still labelling `onlycal0.json` and `onlycal1.json`. Each item is labelled real, false or unsure, with `why_rdt_missed`.
+   - The worktree is on the `fix/silent-degradations` branch. A local `scratch/next-main` exists (main plus #91, #92 and #93), and the next-main binary is `caliper-docgen-next`.
+
+9. Optional Next Step:
+   1. When the only-Caliper prop labels arrive, compute the prop false-positive rate and its families.
+   2. Compute size-normalized throughput for the time gate: ms per 1k LOC and per component on each corpus.
+   3. Deliver the guidance brief. Cover:
+      - the precision gap families, with counts and the fixes ranked
+      - the normalized time gate proposal
+      - the TS7 backend recommendations (Node sidecar as a planned transport; batch queries; doc corrections)
+      - the Storybook provider strategy versus RCM
+      - v1 readiness and the remaining blockers
+   4. Offer to publish it as a page.
+
+   Per the user's latest words: "Precision is super important so let's understand the gaps too" and "The gate should be dependent on the size of the codebase being analyzed."
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/gabe/.claude/projects/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+The messages after this summary are the most recent messages from before compaction, kept verbatim. The summary was written without seeing them, so something it says has not happened yet may already have happened in them.
