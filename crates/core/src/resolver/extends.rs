@@ -117,7 +117,7 @@ pub(super) fn resolve_extends_ref(
 
 /// The props of the component bound to `name` as seen from `file` (`typeof Button`), found through the component
 /// mappings, with a warning when no detected component has that name.
-fn component_props_of(
+pub(super) fn component_props_of(
     name: &str,
     file: &Utf8Path,
     mapping: &ComponentMapping,
