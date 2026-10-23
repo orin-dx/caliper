@@ -840,6 +840,49 @@ fn a_member_of_a_namespace_reexport_resolves_through_a_named_import() {
     }
 }
 
+#[test]
+fn component_props_of_typeof_a_component_is_that_components_props() {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "menu.tsx",
+        "export interface RootProps { open: boolean }\nexport function Root(props: RootProps) { return <div />; }\n",
+    );
+    write_file(&tmp, "ui.ts", "export * as Menu from './menu';\n");
+    write_file(
+        &tmp,
+        "pagination.tsx",
+        r#"import * as React from "react";
+import type { ComponentProps } from "react";
+import { Root } from "./menu";
+import { Menu as MenuPrimitive } from "./ui";
+type PaginationLinkProps = { isActive?: boolean; href: string };
+export function PaginationLink(props: PaginationLinkProps) { return <a />; }
+export function PaginationNext(props: React.ComponentProps<typeof PaginationLink>) { return null; }
+export function Imported(props: ComponentProps<typeof Root>) { return null; }
+export function Namespaced(props: React.ComponentPropsWithoutRef<typeof MenuPrimitive.Root>) { return null; }
+"#,
+    );
+    write_file(
+        &tmp,
+        "own.tsx",
+        "type ComponentProps<T> = { own: T };\nimport { Root } from './menu';\n\
+         export function Own(props: ComponentProps<typeof Root>) { return null; }\n",
+    );
+    let output = extract(&PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    });
+
+    let props = |component: &str| output.components[component].props.keys().cloned().collect::<Vec<_>>();
+    assert_eq!(props("PaginationNext"), ["href", "isActive"], "{:#?}", output.diagnostics);
+    assert_eq!(props("Imported"), ["open"], "{:#?}", output.diagnostics);
+    assert_eq!(props("Namespaced"), ["open"], "{:#?}", output.diagnostics);
+    // A project's own `ComponentProps` is that declaration, not React's.
+    assert_eq!(props("Own"), ["own"], "{:#?}", output.diagnostics);
+}
+
 // ── test_native_js_global_resolves_via_real_typescript_lib_files ─────────
 //
 // Regression test for: `Date` (and any other native/DOM ambient global —

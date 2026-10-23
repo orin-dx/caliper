@@ -72,6 +72,17 @@ pub(super) fn resolve_props_chain(
         }
     }
 
+    // ── Step 0.6: React's `ComponentProps<typeof Button>` is `Button`'s props ─
+    // `typeof` names a value, the component, so this finds the component instead of a type called `Button`, exactly as
+    // the same reference does in an `extends` clause.
+    if let Some(CollectedType::TypeOf(component)) = type_args.first() {
+        let component_props =
+            matches!(type_name_bare, "ComponentProps" | "ComponentPropsWithoutRef" | "ComponentPropsWithRef");
+        if component_props && super::may_be_react_builtin(type_name, consuming_file, ctx) {
+            return super::extends::component_props_of(component, consuming_file, mapping, ctx, state, depth);
+        }
+    }
+
     // ── Step 1: TypeScript built-in utility types — silent no-op ─────────────
     // Not prop providers; suppress false "unresolvable" warnings.
     if ts_lib && super::is_ts_utility_type(type_name_bare) {
