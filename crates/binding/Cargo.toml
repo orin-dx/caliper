@@ -1,6 +1,6 @@
 [package]
 name = "caliper-docgen-napi"
-version = "0.3.0"
+version = "0.4.0"
 edition.workspace = true
 license.workspace = true
 publish = false
@@ -12,7 +12,7 @@ workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-caliper-docgen-core = { path = "../core", version = "0.3.0" }
+caliper-docgen-core = { path = "../core", version = "0.4.0" }
 napi = { workspace = true, features = ["tokio_rt"] }
 napi-derive.workspace  = true
 dashmap.workspace      = true
