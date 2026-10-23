@@ -389,13 +389,14 @@ impl OpaqueDetail {
 }
 
 impl PropType {
-    /// Whether a conditional or mapped type the static resolver can't evaluate appears anywhere in this type, so its
-    /// text would include that type's source.
+    /// Whether a conditional, mapped or indexed access type the static resolver can't evaluate appears anywhere in this
+    /// type, so its text would include that type's source.
     pub(crate) fn holds_unevaluated_type(&self) -> bool {
         match self {
-            PropType::Opaque(detail) => {
-                matches!(detail.reason(), OpaqueReason::ConditionalType | OpaqueReason::MappedType)
-            }
+            PropType::Opaque(detail) => matches!(
+                detail.reason(),
+                OpaqueReason::ConditionalType | OpaqueReason::MappedType | OpaqueReason::IndexedAccess { .. }
+            ),
             PropType::Union(members) | PropType::Intersection(members) | PropType::Tuple(members) => {
                 members.iter().any(PropType::holds_unevaluated_type)
             }

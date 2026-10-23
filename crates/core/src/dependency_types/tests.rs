@@ -146,6 +146,39 @@ fn a_curated_shortcut_still_wins_over_the_packages_own_declaration() {
     assert_eq!(prop_types(&on, "Pill"), [("intent".into(), "\"primary\" | \"danger\" | null".into())]);
 }
 
+/// `z.infer<typeof schema>` indexes the type of a runtime value, which no static reading evaluates: it keeps its name
+/// whether or not zod's declaration is loaded, as TypeScript prints it, while one over a declared type still expands.
+#[test]
+fn an_alias_over_an_unevaluable_indexed_access_keeps_its_name() {
+    let source = "import * as z from 'zod';\nimport * as React from 'react';\n\
+        const schema = z.object({ id: 1 });\n\
+        interface Parsed { _output: { id: number } }\n\
+        export function Row(props: { item: z.infer<typeof schema>; items: z.infer<typeof schema>[]; parsed: z.infer<Parsed> }) { return null; }\n";
+    let (_tmp, root) = project(&[
+        ("node_modules/zod/package.json", r#"{ "name": "zod", "version": "3.23.8", "types": "index.d.ts" }"#),
+        (
+            "node_modules/zod/index.d.ts",
+            "export interface ZodType<Output = any> { readonly _output: Output }\n\
+             export declare function object<T>(shape: T): ZodType<T>;\n\
+             export type infer<T extends { _output: unknown }> = T[\"_output\"];\n",
+        ),
+        ("src/Row.tsx", source),
+    ]);
+
+    let off = extract(&options(&root, false));
+    let on = extract(&options(&root, true));
+
+    assert_eq!(
+        prop_types(&on, "Row"),
+        [
+            ("item".into(), "z.infer<typeof schema>".into()),
+            ("items".into(), "z.infer<typeof schema>[]".into()),
+            ("parsed".into(), "{ id: number }".into()),
+        ]
+    );
+    assert_eq!(prop_types(&off, "Row")[..2], prop_types(&on, "Row")[..2]);
+}
+
 #[test]
 fn custom_conditions_from_the_governing_tsconfig_pick_the_export_target() {
     let files: &[(&str, &str)] = &[
