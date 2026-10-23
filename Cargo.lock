@@ -216,6 +216,7 @@ dependencies = [
  "tracing-subscriber",
  "trycmd",
  "watchexec",
+ "watchexec-events",
  "watchexec-signals",
 ]
 
