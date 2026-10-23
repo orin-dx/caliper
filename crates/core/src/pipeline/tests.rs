@@ -883,6 +883,48 @@ fn a_member_of_a_namespace_reexport_resolves_through_a_named_import() {
 }
 
 #[test]
+fn a_jsdoc_comment_documents_the_declaration_right_after_it_only() {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "badge.tsx",
+        r#"/** The badge. */
+export function Badge(props: { tone: string; size: number }) { return <span />; }
+
+/** Not a component's doc: it belongs to the constant. */
+const placement = { left: "right" };
+export function Arrow(props: { side: string }) { return <span>{placement.left}</span>; }
+
+export interface PanelProps {
+  /** Hooks for the panel. */
+  hooks: { isOpen?: () => boolean };
+  /** @deprecated Use `open` instead. */
+  visible?: boolean | { keepMounted?: boolean };
+}
+/** The panel. */
+// eslint-disable-next-line
+export function Panel(props: PanelProps) { return <div />; }
+"#,
+    );
+    let output = extract(&PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    });
+
+    let description = |component: &str| output.components[component].description.as_str();
+    let prop = |component: &str, name: &str| output.components[component].props[name].clone();
+    assert_eq!(description("Badge"), "The badge.");
+    assert_eq!(prop("Badge", "tone").description, "");
+    assert_eq!(description("Arrow"), "");
+    assert_eq!(description("Panel"), "The panel.");
+    assert_eq!(prop("Panel", "hooks").description, "Hooks for the panel.");
+    let PropType::Object(fields) = &prop("Panel", "hooks").prop_type else { panic!("{:?}", prop("Panel", "hooks")) };
+    assert_eq!(fields[0].description, "");
+    assert_eq!(prop("Panel", "visible").tags.get("deprecated").map(String::as_str), Some("Use `open` instead."));
+}
+
+#[test]
 fn component_props_of_typeof_a_component_is_that_components_props() {
     let tmp = TempDir::new().unwrap();
     write_file(

@@ -1707,7 +1707,7 @@ expression: value
                       "kind": "string"
                     },
                     "required": true,
-                    "description": "Inline intersection in a prop value — exercises `intersection`.\nCssProperties resolves to cssProperties; the object literal stays as-is."
+                    "description": ""
                   }
                 ]
               }
@@ -1715,7 +1715,7 @@ expression: value
           },
           "required": false,
           "defaultValue": null,
-          "description": "",
+          "description": "Inline intersection in a prop value — exercises `intersection`.\nCssProperties resolves to cssProperties; the object literal stays as-is.",
           "tags": {},
           "parent": {
             "name": "TypeSamplerProps",
