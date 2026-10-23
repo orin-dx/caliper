@@ -32,7 +32,7 @@ pub(super) fn resolve_function_type(
 }
 
 /// `ct` as its source spells it: names stay names, and a form `PropType` has no shape for keeps its source text.
-fn as_written(ct: &CollectedType) -> PropType {
+pub(super) fn as_written(ct: &CollectedType) -> PropType {
     let named = |name: std::string::String| PropType::Named { name: name.into(), args: vec![] };
     match ct {
         CollectedType::String => PropType::String,

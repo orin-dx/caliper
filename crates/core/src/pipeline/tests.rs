@@ -1633,6 +1633,57 @@ fn test_generic_interface_type_arguments_are_substituted_into_props() {
     assert_eq!(kinds("D"), vec![pair("more", "boolean"), pair("other", "string"), pair("value", "boolean[]")]);
 }
 
+// An alias whose expansion would print a conditional or mapped type's source keeps its name, as TypeScript prints it;
+// literal unions and objects still expand.
+#[test]
+fn test_an_alias_over_an_unevaluated_type_keeps_its_name() {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "a.tsx",
+        "interface Override {}\n\
+         type Size = \"sm\" | \"lg\";\n\
+         type Breakpoint = Override extends { breakpoints: infer B } ? B : Size;\n\
+         type Keys = { [K in Size]: string };\n\
+         type StyleProp<V> = V | Partial<Record<Breakpoint, V>>;\n\
+         type Spacing = string | Breakpoint;\n\
+         type Slots = { root: Breakpoint; label: string };\n\
+         export function C(props: {\n\
+           size: Size;\n\
+           from: Breakpoint;\n\
+           keys: Keys;\n\
+           m: StyleProp<Size>;\n\
+           w: StyleProp<number | string>;\n\
+           gap: Spacing;\n\
+           slots: Slots;\n\
+         }) { return null }\n",
+    );
+    let dir = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![dir],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+
+    let output = extract(&options);
+
+    let kinds: Vec<(String, String)> =
+        output.components["C"].props.iter().map(|(name, prop)| (name.clone(), prop.prop_type.raw_string())).collect();
+    let pair = |a: &str, b: &str| (a.to_owned(), b.to_owned());
+    assert_eq!(
+        kinds,
+        vec![
+            pair("from", "Breakpoint"),
+            pair("gap", "Spacing"),
+            pair("keys", "Keys"),
+            pair("m", "StyleProp<Size>"),
+            pair("size", "\"sm\" | \"lg\""),
+            pair("slots", "{ root: Breakpoint; label: string }"),
+            pair("w", "StyleProp<number | string>"),
+        ]
+    );
+}
+
 // Barrels often import a name and then export it, instead of writing `export … from`; both must be followed.
 #[test]
 fn test_barrel_that_imports_then_exports_a_name_is_followed() {

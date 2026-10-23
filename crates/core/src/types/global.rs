@@ -40,6 +40,9 @@ pub(crate) struct ResolveState {
     /// one of these names is an expected, unexpandable generic placeholder, not
     /// a broken/missing type — see `resolver::named::resolve_named`.
     pub(crate) in_scope_type_params: FxHashSet<CompactString>,
+    /// Set when an alias is shown by its name because its expansion holds a type the resolver can't evaluate, so an
+    /// alias whose expansion contains that one is shown by name too — see `resolver::named::alias_display`.
+    pub(crate) named_unevaluated: bool,
 }
 
 impl ResolveState {
@@ -51,6 +54,7 @@ impl ResolveState {
             named_in_progress: self.named_in_progress.clone(),
             diagnostics: Vec::new(),
             in_scope_type_params: self.in_scope_type_params.clone(),
+            named_unevaluated: false,
         }
     }
 
@@ -60,9 +64,11 @@ impl ResolveState {
         ResolveState { in_scope_type_params: self.in_scope_type_params.clone(), ..Self::default() }
     }
 
-    /// Take a branch's diagnostics. Its cycle sets and in-scope additions stay with the branch.
+    /// Take a branch's diagnostics and whether it named an unevaluated alias. Its cycle sets and in-scope additions
+    /// stay with the branch.
     pub(crate) fn absorb(&mut self, branch: ResolveState) {
         self.diagnostics.extend(branch.diagnostics);
+        self.named_unevaluated |= branch.named_unevaluated;
     }
 }
 
