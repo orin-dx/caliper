@@ -1,0 +1,3 @@
+The gate should be dependent on the size of the codebase being analyzed.
+
+Precision is super important so let’s understand the gaps too
