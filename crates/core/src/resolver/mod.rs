@@ -264,6 +264,7 @@ pub struct ResolutionContext {
     pub(crate) interface_chains: memo::InterfaceChains,
     /// Loaded dependency declarations (`PipelineOptions::load_dependencies`, ADR 0010).
     pub(crate) dependencies: Option<Arc<crate::dependency_types::DependencyLayer>>,
+    pub(crate) collapse_inherited_props: crate::pipeline::CollapseInheritedProps,
 }
 
 impl ResolutionContext {
@@ -340,6 +341,7 @@ impl ResolutionContext {
             module_resolutions: Default::default(),
             interface_chains: Default::default(),
             dependencies: None,
+            collapse_inherited_props: options.collapse_inherited_props,
         }
     }
 
@@ -360,7 +362,37 @@ impl ResolutionContext {
     pub(crate) fn is_dependency_file(&self, file: &Utf8Path) -> bool {
         self.dependencies.as_ref().is_some_and(|layer| layer.is_dependency_file(file))
     }
+
+    /// Whether this run can collapse any source; `expand_all` is set only then, since it splits shared chains.
+    pub(crate) fn can_collapse(&self) -> bool {
+        use crate::pipeline::CollapseInheritedProps;
+        match self.collapse_inherited_props {
+            CollapseInheritedProps::Dependencies => self.dependencies.is_some(),
+            CollapseInheritedProps::All => true,
+            CollapseInheritedProps::None => false,
+        }
+    }
+
+    /// Whether a source declaring `declared` props in `file`, reached at `depth`, is recorded as a layer instead of
+    /// expanded (ADR 0012). Depth 0 is the component's own props type. React's and TypeScript's own declarations stay
+    /// with `html_attributes` even under `All`.
+    pub(crate) fn collapses(&self, file: &Utf8Path, declared: usize, depth: u8, state: &ResolveState) -> bool {
+        use crate::pipeline::CollapseInheritedProps;
+        depth > 0
+            && declared > COLLAPSE_THRESHOLD
+            && !state.expand_all
+            && match self.collapse_inherited_props {
+                CollapseInheritedProps::Dependencies => self.is_dependency_file(file),
+                CollapseInheritedProps::All => {
+                    self.is_dependency_file(file) || !file.as_str().contains("/node_modules/")
+                }
+                CollapseInheritedProps::None => false,
+            }
+    }
 }
+
+/// Storybook's react-component-meta hides a dependency source contributing more than this many props.
+pub(crate) const COLLAPSE_THRESHOLD: usize = 30;
 
 /// Changes whenever the options could change what a specifier resolves to: the resolver configuration, the governing
 /// tsconfig and its modification time, and the build. Keys the dependency loader's persisted index (ADR 0011).
@@ -679,13 +711,12 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
                     )),
                 );
             }
-        } else {
-            // For non-HTML layers: add inherited props from chain.inherited_by_name
-            for (name, prop) in &chain.inherited_by_name {
-                if !props.contains_key(name) && !notable_inherited.contains_key(name) {
-                    notable_inherited.insert(name.clone(), prop.clone());
-                }
-            }
+        }
+    }
+    // A collapsed source's notable props (ADR 0012); the only non-HTML layers.
+    for prop in &chain.notable {
+        if !props.contains_key(&prop.name) && !notable_inherited.contains_key(&prop.name) {
+            notable_inherited.insert(prop.name.clone(), prop.clone());
         }
     }
 
@@ -722,6 +753,8 @@ struct ResolvedChain {
     inheritance: Vec<InheritedLayer>,
     /// Inherited props keyed by name — for notable_inherited population.
     inherited_by_name: FxHashMap<String, Arc<ParsedProp>>,
+    /// The notable props of collapsed sources, which are not in `props`.
+    notable: Vec<Arc<ParsedProp>>,
     /// Type names that could not be resolved.
     composes: Vec<String>,
     /// Discriminant prop name if this is a discriminated union.
@@ -740,6 +773,7 @@ impl ResolvedChain {
             props: Vec::new(),
             inheritance: Vec::new(),
             inherited_by_name: FxHashMap::default(),
+            notable: Vec::new(),
             composes: Vec::new(),
             discriminant_prop: None,
         }
@@ -781,6 +815,7 @@ impl ResolvedChain {
         self.inheritance = new_inheritance;
 
         self.composes.extend(parent.composes);
+        self.notable.extend(parent.notable);
         for (name, prop) in parent.inherited_by_name {
             self.inherited_by_name.entry(name).or_insert(prop);
         }

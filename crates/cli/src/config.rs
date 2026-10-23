@@ -1,4 +1,4 @@
-use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions};
+use caliper_docgen_core::pipeline::{CollapseInheritedProps, HtmlAttributeMode, PipelineOptions};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use serde::Deserialize;
 
@@ -18,6 +18,7 @@ struct DocgenConfigSchema {
     cache_dir: Option<String>,
     extra_builtins: Option<Vec<String>>,
     load_dependencies: Option<bool>,
+    collapse_inherited_props: Option<String>,
 }
 
 impl DocgenConfigSchema {
@@ -49,6 +50,11 @@ impl DocgenConfigSchema {
         }
         if let Some(load) = self.load_dependencies {
             opts.load_dependencies = load;
+        }
+        if let Some(mode) = self.collapse_inherited_props.as_deref() {
+            opts.collapse_inherited_props = CollapseInheritedProps::parse(mode).map_err(|bad| {
+                format!("collapseInheritedProps is '{bad}', expected \"dependencies\", \"all\" or \"none\"")
+            })?;
         }
         Ok(opts)
     }
@@ -151,7 +157,7 @@ pub fn try_load_config(path: &std::path::Path) -> Result<Option<PipelineOptions>
             help = "Check docgen.config.ts's exported fields against the supported schema \
                     (srcDirs, excludePatterns, excludePrefixes, reactVersion, crossPackage, \
                     pandacssOutdir, variantFunctions, htmlAttributes, tsconfigPath, \
-                    vanillaExtract, cacheDir, extraBuiltins, loadDependencies).",
+                    vanillaExtract, cacheDir, extraBuiltins, loadDependencies, collapseInheritedProps).",
             "docgen.config.ts at {} doesn't match the expected shape: {}",
             path.display(),
             e,
@@ -173,6 +179,8 @@ pub struct BuildOptionsArgs<'a> {
     pub extra_builtins: &'a [String],
     /// `--load-dependencies`: turns loading on over the config; absent leaves the config's choice.
     pub load_dependencies: bool,
+    /// `--collapse-inherited-props`; absent leaves the config's choice.
+    pub collapse_inherited_props: Option<CollapseInheritedProps>,
 }
 
 pub fn build_options(args: BuildOptionsArgs) -> Result<PipelineOptions> {
@@ -204,6 +212,9 @@ pub fn build_options(args: BuildOptionsArgs) -> Result<PipelineOptions> {
     }
     if args.load_dependencies {
         opts.load_dependencies = true;
+    }
+    if let Some(mode) = args.collapse_inherited_props {
+        opts.collapse_inherited_props = mode;
     }
 
     Ok(opts)

@@ -36,6 +36,8 @@ With `PipelineOptions::load_dependencies`, `ResolutionContext::with_dependencies
 - **Value index:** `ComponentProps<typeof X>` and `typeof X` in `extends` find a dependency component through `DependencyLayer::component`. Dependency components and enums live only in the layer's `GlobalSourceData`, so they never reach output or the bare-name indexes.
 - **Diagnostics:** a type the loader could not find says why in the help of "Cannot resolve type" (`unresolved_type_help`): the module did not resolve, resolved to JavaScript without types, or does not export the name.
 
+- **Collapse** (`collapse_inherited_props`, ADR 0012): `ctx.collapses` records an inherited source declaring more than 30 props as an `InheritedLayer` (no `html_element`, `total_props` = its declared count) and resolves only its notable members (`notable_html_attrs`' element-independent list) into `notable_inherited`. Sources are an interface's own members and an object-literal alias; an interface's parents are sources of their own. Never at depth 0 (the component's own props type), and never while `ResolveState::expand_all` is set: `Pick`'s base and `keyof` operands select or count props by name. `Dependencies` (default) collapses loaded dependency files only; `All` adds every file outside `node_modules`, so React's and TypeScript's declarations stay with `html_attributes`. Interface-chain recordings are keyed on `expand_all` too.
+
 **Invariant:** never merge layer data into the project's `GlobalSourceData`; that would emit dependency components and enums and let dependency names shadow project names in bare-name lookups.
 
 ## The three-tier data model this resolver operates on

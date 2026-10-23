@@ -10,6 +10,7 @@ fn args_for(src: &str, json: bool) -> crate::ExtractArgs {
         extra_builtins: vec![],
         json,
         load_dependencies: false,
+        collapse_inherited_props: None,
     }
 }
 
@@ -466,6 +467,7 @@ export function Button(props: ButtonProps) { return null; }
         extra_builtins: vec![],
         json: false,
         load_dependencies: false,
+        collapse_inherited_props: None,
     };
 
     assert_eq!(cmd_extract(args, false, None).unwrap(), 0);
