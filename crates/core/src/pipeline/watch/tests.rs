@@ -256,6 +256,106 @@ fn editing_another_packages_tsconfig_changes_nothing() {
     assert_eq!((update.revision, session.revision()), (1, 1));
 }
 
+/// What an update changes, without its revision and timing.
+type Delta = (Vec<String>, Vec<crate::types::ComponentEntry>, Vec<String>, Vec<Utf8PathBuf>, Vec<String>, Vec<String>);
+
+fn delta(update: &crate::pipeline::IncrementalUpdate) -> Delta {
+    let messages = |diagnostics: &[crate::types::Diagnostic]| diagnostics.iter().map(|d| d.message.clone()).collect();
+    (
+        update.updated_keys.clone(),
+        update.updated_components.clone(),
+        update.removed_keys.clone(),
+        update.affected_files.clone(),
+        messages(&update.diagnostics),
+        messages(&update.removed_diagnostics),
+    )
+}
+
+/// A session that has already caught up: files written just before its cold extraction are applied again once.
+fn fresh_session(options: &PipelineOptions) -> WatchSession {
+    let session = WatchSession::new(options.clone());
+    let _ignored = session.initialize();
+    let caught_up = session.ensure_fresh();
+    assert_eq!(delta(&caught_up), delta(&super::unchanged(0)));
+    session
+}
+
+#[test]
+fn ensure_fresh_applies_edits_creations_and_deletions_exactly_as_update_file_does() {
+    let (_tmp, widget, options) = widget_project("export function Widget(props: { a: string }) { return null; }\n");
+    let other = widget.with_file_name("Other.tsx");
+    let watched = WatchSession::new(options.clone());
+    let _ignored = watched.initialize();
+    let polled = fresh_session(&options);
+
+    let steps: [(&Utf8PathBuf, Option<&str>); 3] = [
+        (&widget, Some("export function Widget(props: { a: string; bb?: number }) { return null; }\n")),
+        (&other, Some("export function Other(props: { c: boolean }) { return null; }\n")),
+        (&widget, None),
+    ];
+    for (path, source) in steps {
+        match source {
+            Some(source) => std::fs::write(path, source).unwrap(),
+            None => std::fs::remove_file(path).unwrap(),
+        }
+        let expected = watched.update_file(path);
+        let before = polled.revision();
+        let update = polled.ensure_fresh();
+        assert_eq!(delta(&update), delta(&expected), "{path}");
+        assert_eq!(update.revision, polled.revision());
+        assert!(update.revision > before);
+        assert_matches_cold(&polled);
+    }
+    assert_eq!(polled.snapshot().components.keys().collect::<Vec<_>>(), ["Other"]);
+    assert_eq!(polled.snapshot().components["Other"].props.keys().collect::<Vec<_>>(), ["c"]);
+}
+
+#[test]
+fn ensure_fresh_with_nothing_changed_keeps_the_revision() {
+    let (_tmp, _widget, options) = widget_project(FIXED);
+    let session = fresh_session(&options);
+    let revision = session.revision();
+
+    let update = session.ensure_fresh();
+
+    assert_eq!((update.revision, session.revision()), (revision, revision));
+    assert_eq!(delta(&update), delta(&super::unchanged(0)));
+}
+
+#[test]
+fn ensure_fresh_rebuilds_when_the_tsconfig_changed() {
+    let (_tmp, root, options) = aliased_project();
+    let watched = WatchSession::new(options.clone());
+    let _ignored = watched.initialize();
+    let polled = fresh_session(&options);
+
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{ "compilerOptions": { "baseUrl": ".", "paths": { "@ui/*": ["src/ui/*"] } } }"#,
+    )
+    .unwrap();
+    let expected = watched.update_file(&root.join("tsconfig.json"));
+    let update = polled.ensure_fresh();
+
+    assert_eq!(delta(&update), delta(&expected));
+    assert_eq!(update.updated_components[0].props.keys().collect::<Vec<_>>(), ["label"]);
+    assert_matches_cold(&polled);
+}
+
+#[test]
+fn ensure_fresh_before_initialize_reports_every_component() {
+    let (_tmp, _widget, options) = widget_project(FIXED);
+    let session = WatchSession::new(options.clone());
+
+    let update = session.ensure_fresh();
+
+    let cold = crate::pipeline::extract(&options);
+    assert_eq!(update.revision, 1);
+    assert_eq!(update.updated_keys, cold.components.keys().cloned().collect::<Vec<_>>());
+    assert_eq!(update.updated_components, cold.components.values().cloned().collect::<Vec<_>>());
+    assert_matches_cold(&session);
+}
+
 const BROKEN: &str = "export const = ;\n";
 const FIXED: &str = "export function Widget() { return null; }\n";
 

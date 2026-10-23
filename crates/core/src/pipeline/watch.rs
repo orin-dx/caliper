@@ -1,12 +1,15 @@
-use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime};
 
 use arc_swap::ArcSwapOption;
 use camino::{Utf8Path, Utf8PathBuf};
+use rustc_hash::FxHashMap;
 
 use crate::types::*;
 
-use super::revision::Revision;
+use super::discover::{discover_dirs, discover_files};
+use super::revision::{empty_output, output_delta, Revision};
 use super::{IncrementalUpdate, PipelineOptions};
 
 /// Canonicalize `path`, falling back to canonicalizing its parent directory
@@ -51,6 +54,115 @@ fn canonical_src_dirs(options: &PipelineOptions) -> Vec<Utf8PathBuf> {
     options.src_dirs.iter().map(|dir| canonicalize_best_effort(dir)).collect()
 }
 
+/// What `stat` reported for a file or directory when it was recorded. `Unknown` never matches a fresh stamp: the path
+/// may have changed after the revision read it, so it must be applied again.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Stamp {
+    Missing,
+    /// `hash` is set when the modification time was too recent to tell a later edit apart: a hash of a file's
+    /// contents, or of a directory's entry names.
+    Present {
+        modified: SystemTime,
+        len: u64,
+        hash: Option<u64>,
+    },
+    Unknown,
+}
+
+/// Filesystems that keep modification times to the second, or to a kernel clock tick, give an edit made just after a
+/// stat the same modification time.
+const MTIME_GRANULARITY: Duration = Duration::from_secs(2);
+
+fn stamp(path: &Utf8Path) -> Stamp {
+    stamp_like(path, None)
+}
+
+/// A fresh stamp comparable with `recorded`: hashed when `recorded` was, or when the modification time is recent.
+fn stamp_like(path: &Utf8Path, recorded: Option<&Stamp>) -> Stamp {
+    let now = SystemTime::now();
+    let Ok(meta) = std::fs::metadata(path) else { return Stamp::Missing };
+    let Ok(modified) = meta.modified() else { return Stamp::Unknown };
+    let hashed = matches!(recorded, Some(Stamp::Present { hash: Some(_), .. })) || modified + MTIME_GRANULARITY >= now;
+    let hash = if hashed {
+        match content_hash(path, meta.is_dir()) {
+            Some(hash) => Some(hash),
+            None => return Stamp::Unknown,
+        }
+    } else {
+        None
+    };
+    Stamp::Present { modified, len: meta.len(), hash }
+}
+
+fn content_hash(path: &Utf8Path, is_dir: bool) -> Option<u64> {
+    let mut hasher = rustc_hash::FxHasher::default();
+    if is_dir {
+        let mut names: Vec<String> =
+            path.read_dir_utf8().ok()?.flatten().map(|entry| entry.file_name().to_owned()).collect();
+        names.sort();
+        names.hash(&mut hasher);
+    } else {
+        std::fs::read(path).ok()?.hash(&mut hasher);
+    }
+    Some(hasher.finish())
+}
+
+/// The stamp of a path the revision built at `built_at` read, or `Unknown` when it may have changed since that build
+/// started.
+fn stamp_since(path: &Utf8Path, built_at: SystemTime) -> Stamp {
+    match stamp(path) {
+        Stamp::Present { modified, .. } if modified + MTIME_GRANULARITY >= built_at => Stamp::Unknown,
+        stamp => stamp,
+    }
+}
+
+fn stamps_of(paths: impl IntoIterator<Item = Utf8PathBuf>, built_at: SystemTime) -> FxHashMap<Utf8PathBuf, Stamp> {
+    paths
+        .into_iter()
+        .map(|path| {
+            let stamp = stamp_since(&path, built_at);
+            (path, stamp)
+        })
+        .collect()
+}
+
+/// The stamps `ensure_fresh` compares against: the published revision's source files, every directory discovery
+/// walks (a file created or deleted there changes the directory's stamp), and every resolution config.
+struct Stamps {
+    files: FxHashMap<Utf8PathBuf, Stamp>,
+    dirs: FxHashMap<Utf8PathBuf, Stamp>,
+    configs: FxHashMap<Utf8PathBuf, Stamp>,
+    /// The resolution configs inside the source directories; the ones above them are listed again on every call.
+    inner_configs: Vec<Utf8PathBuf>,
+}
+
+/// Writer-side state, guarded by the writer lock.
+struct Freshness {
+    /// When the cold extraction behind the published revision started.
+    built_at: SystemTime,
+    /// Recorded on the first `ensure_fresh` after a cold extraction, so sessions that never call it never pay for it.
+    stamps: Option<Stamps>,
+}
+
+impl Freshness {
+    fn cold(built_at: SystemTime) -> Self {
+        Self { built_at, stamps: None }
+    }
+}
+
+fn unchanged(revision: u64) -> IncrementalUpdate {
+    IncrementalUpdate {
+        revision,
+        updated_components: Vec::new(),
+        updated_keys: Vec::new(),
+        removed_keys: Vec::new(),
+        affected_files: Vec::new(),
+        diagnostics: Vec::new(),
+        removed_diagnostics: Vec::new(),
+        duration_ms: 0,
+    }
+}
+
 /// Stateful session for incremental watch-mode extraction.
 ///
 /// The session holds one immutable `Revision` at a time. `update_file` builds the next revision from the current one
@@ -60,13 +172,13 @@ fn canonical_src_dirs(options: &PipelineOptions) -> Vec<Utf8PathBuf> {
 pub struct WatchSession {
     pub options: PipelineOptions,
     current: ArcSwapOption<Revision>,
-    writer: Mutex<()>,
+    writer: Mutex<Freshness>,
 }
 
 impl WatchSession {
     /// Create an empty WatchSession (call `initialize()` before first use).
     pub fn new(options: PipelineOptions) -> Self {
-        Self { options, current: ArcSwapOption::empty(), writer: Mutex::new(()) }
+        Self { options, current: ArcSwapOption::empty(), writer: Mutex::new(Freshness::cold(SystemTime::UNIX_EPOCH)) }
     }
 
     /// Run a full cold extraction to populate this session.
@@ -74,24 +186,28 @@ impl WatchSession {
     /// Idempotent — concurrent or repeated calls return the current snapshot without re-running extraction. Use
     /// `rebuild` to force a fresh extraction.
     pub fn initialize(&self) -> ExtractionOutput {
-        let _writer = self.writer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut writer = self.writer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(current) = self.current.load_full() {
             return (*current.output).clone();
         }
-        let revision = Arc::new(Revision::cold(&self.options, 1));
-        let output = (*revision.output).clone();
-        self.current.store(Some(revision));
-        output
+        let revision = self.cold(&mut writer, 1);
+        (*revision.output).clone()
     }
 
     /// Discard the session's state and extract everything again.
     pub fn rebuild(&self) -> ExtractionOutput {
-        let _writer = self.writer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut writer = self.writer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let id = self.current.load().as_ref().map_or(1, |r| r.id + 1);
+        let revision = self.cold(&mut writer, id);
+        (*revision.output).clone()
+    }
+
+    /// Extract everything as revision `id` and publish it. The caller holds the writer lock.
+    fn cold(&self, writer: &mut Freshness, id: u64) -> Arc<Revision> {
+        *writer = Freshness::cold(SystemTime::now());
         let revision = Arc::new(Revision::cold(&self.options, id));
-        let output = (*revision.output).clone();
-        self.current.store(Some(revision));
-        output
+        self.current.store(Some(revision.clone()));
+        revision
     }
 
     /// The published revision's number: 0 before `initialize`, then one higher for every change that produced a new
@@ -104,12 +220,7 @@ impl WatchSession {
     pub fn snapshot(&self) -> ExtractionOutput {
         match self.current.load_full() {
             Some(revision) => (*revision.output).clone(),
-            None => ExtractionOutput {
-                components: BTreeMap::new(),
-                enums: BTreeMap::new(),
-                diagnostics: Vec::new(),
-                stats: ExtractionStats::default(),
-            },
+            None => empty_output(),
         }
     }
 
@@ -148,36 +259,135 @@ impl WatchSession {
         // path must be canonicalized the same way to match.
         let changed = canonicalize_best_effort(changed);
         let rebuild = self.is_resolution_config(&changed);
-        let _writer = self.writer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut writer = self.writer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let current = match self.current.load_full() {
             Some(current) => current,
-            None => {
-                let revision = Arc::new(Revision::cold(&self.options, 1));
-                self.current.store(Some(revision.clone()));
-                revision
-            }
+            None => self.cold(&mut writer, 1),
         };
         if rebuild {
-            let (next, update) = current.rebuilt(&self.options);
-            self.current.store(Some(Arc::new(next)));
-            return update;
+            return self.rebuilt(&mut writer, &current);
         }
+        // Stamped before it is read, so an edit made while it is applied still looks changed to `ensure_fresh`.
+        let before = stamp(&changed);
         match current.next(&self.options, &changed) {
             Some((next, update)) => {
+                if let Some(stamps) = &mut writer.stamps {
+                    if next.source_files().contains(&changed) {
+                        stamps.files.insert(changed, before);
+                    } else {
+                        stamps.files.remove(&changed);
+                    }
+                }
                 self.current.store(Some(Arc::new(next)));
                 update
             }
-            None => IncrementalUpdate {
-                revision: current.id,
-                updated_components: Vec::new(),
-                updated_keys: Vec::new(),
-                removed_keys: Vec::new(),
-                affected_files: Vec::new(),
-                diagnostics: Vec::new(),
-                removed_diagnostics: Vec::new(),
-                duration_ms: 0,
-            },
+            None => unchanged(current.id),
         }
+    }
+
+    /// Bring the session up to date with the files on disk, for a host that has no file watcher: stat every file the
+    /// published revision read, every directory discovery walks and every resolution config, then apply what changed
+    /// since the session last saw it. A changed resolution config rebuilds the session, as in `update_file`.
+    ///
+    /// The update takes a client holding the previous snapshot to the new one, exactly as the `update_file` calls for
+    /// the same changes would have, one after another. The revision is unchanged when nothing changed. Before
+    /// `initialize`, it extracts everything and reports every component as updated.
+    ///
+    /// A change is noticed by its modification time or size, and by its contents while the modification time is too
+    /// recent to tell edits apart. The first call after a cold extraction applies again every file modified shortly
+    /// before it started, which can raise the revision with an empty update.
+    pub fn ensure_fresh(&self) -> IncrementalUpdate {
+        let start = Instant::now();
+        let mut writer = self.writer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(current) = self.current.load_full() else {
+            let revision = self.cold(&mut writer, 1);
+            return output_delta(&empty_output(), &revision.output, revision.id, start);
+        };
+        let recorded = match writer.stamps.take() {
+            Some(stamps) => stamps,
+            None => self.record(&current, writer.built_at),
+        };
+
+        let dirs: FxHashMap<Utf8PathBuf, Stamp> =
+            recorded.dirs.iter().map(|(dir, was)| (dir.clone(), stamp_like(dir, Some(was)))).collect();
+        let (dirs, inner_configs, discovered) = if dirs == recorded.dirs {
+            (dirs, recorded.inner_configs.clone(), None)
+        } else {
+            // Stamped before the walk, so a file created during it changes the stamp again.
+            let (walked, inner_configs) =
+                discover_dirs(&self.options.src_dirs, &self.options.exclude_patterns, is_resolution_config_name);
+            let dirs = walked.into_iter().map(|dir| (dir.clone(), dirs.get(&dir).copied().unwrap_or(Stamp::Unknown)));
+            let (files, _) = discover_files(&self.options.src_dirs, &self.options.exclude_patterns);
+            (dirs.collect(), inner_configs, Some(files))
+        };
+        let configs = self.config_stamps(&inner_configs, |path| stamp_like(path, recorded.configs.get(path)));
+        if configs != recorded.configs {
+            return self.rebuilt(&mut writer, &current);
+        }
+
+        let mut files = recorded.files;
+        let mut changed: Vec<(Utf8PathBuf, Stamp)> = files
+            .keys()
+            .chain(discovered.iter().flatten().filter(|path| !files.contains_key(*path)))
+            .map(|path| (path.clone(), stamp_like(path, files.get(path))))
+            .filter(|(path, now)| files.get(path) != Some(now))
+            .collect();
+        changed.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut next = current.clone();
+        for (path, now) in changed {
+            if let Some((revision, _)) = next.next(&self.options, &path) {
+                next = Arc::new(revision);
+            }
+            if next.source_files().contains(&path) {
+                files.insert(path, now);
+            } else {
+                files.remove(&path);
+            }
+        }
+        writer.stamps = Some(Stamps { files, dirs, configs, inner_configs });
+        if next.id == current.id {
+            return unchanged(current.id);
+        }
+        self.current.store(Some(next.clone()));
+        output_delta(&current.output, &next.output, next.id, start)
+    }
+
+    /// Rebuild from `current` after a resolution config changed. The caller holds the writer lock.
+    fn rebuilt(&self, writer: &mut Freshness, current: &Revision) -> IncrementalUpdate {
+        *writer = Freshness::cold(SystemTime::now());
+        let (next, update) = current.rebuilt(&self.options);
+        self.current.store(Some(Arc::new(next)));
+        update
+    }
+
+    /// The first stamps after a cold extraction that started at `built_at`: anything modified since then, and any
+    /// source file gone since, is `Unknown`.
+    fn record(&self, revision: &Revision, built_at: SystemTime) -> Stamps {
+        let mut files = stamps_of(revision.source_files().iter().cloned(), built_at);
+        for stamp in files.values_mut().filter(|stamp| **stamp == Stamp::Missing) {
+            *stamp = Stamp::Unknown;
+        }
+        let (dirs, inner_configs) =
+            discover_dirs(&self.options.src_dirs, &self.options.exclude_patterns, is_resolution_config_name);
+        let configs = self.config_stamps(&inner_configs, |path| stamp_since(path, built_at));
+        Stamps { files, dirs: stamps_of(dirs, built_at), configs, inner_configs }
+    }
+
+    /// Every resolution config: the ones inside the source directories, and the ones above them as listed now.
+    fn config_stamps(
+        &self,
+        inner_configs: &[Utf8PathBuf],
+        stamp: impl Fn(&Utf8Path) -> Stamp,
+    ) -> FxHashMap<Utf8PathBuf, Stamp> {
+        inner_configs
+            .iter()
+            .cloned()
+            .chain(self.resolution_config_files())
+            .map(|path| {
+                let stamp = stamp(&path);
+                (path, stamp)
+            })
+            .collect()
     }
 }
 

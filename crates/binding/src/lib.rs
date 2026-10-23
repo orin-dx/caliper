@@ -260,6 +260,29 @@ pub async fn initialize_session(session_id: u32, options: JsExtractOptions) -> n
     .map_err(|e| napi::Error::from_reason(e.to_string()))?
 }
 
+/// Bring the session up to date with the files on disk, for a host without a file watcher (a docgen provider in a
+/// worker): stats every file the session read and applies what changed since, rebuilding when a tsconfig,
+/// `package.json` or lockfile changed. Returns JSON string of IncrementalUpdate; the revision is unchanged when nothing
+/// changed. Errors for an unknown session.
+#[napi]
+pub async fn ensure_fresh(session_id: u32) -> napi::Result<String> {
+    tokio::task::spawn_blocking(move || {
+        match caliper_docgen_core::panic_guard::contain_panic("ensure_fresh", move || {
+            let session = SESSIONS
+                .get(&session_id)
+                .map(|s| s.clone())
+                .ok_or_else(|| napi::Error::from_reason(format!("Unknown session {session_id}")))?;
+            let update = session.ensure_fresh();
+            incremental_update_to_json(&update).map_err(|e| napi::Error::from_reason(e.to_string()))
+        }) {
+            Ok(result) => result,
+            Err(diag) => Err(napi::Error::from_reason(diag.to_string())),
+        }
+    })
+    .await
+    .map_err(|e| napi::Error::from_reason(e.to_string()))?
+}
+
 /// The tsconfigs, `package.json` files and lockfiles above the session's source directories: a watcher adds them, and
 /// passes a change to one to `extractFileIncremental` like any other file, which rebuilds the session. Empty for an
 /// unknown session.
@@ -382,6 +405,23 @@ mod tests {
             "got {}",
             err.reason
         );
+    }
+
+    #[tokio::test]
+    async fn ensure_fresh_errors_for_an_unknown_session_and_updates_a_registered_one() {
+        let session_id = next_session_id();
+        let err = ensure_fresh(session_id).await.expect_err("an unknown session has no options to extract with");
+        assert_eq!(err.reason, format!("Unknown session {session_id}"));
+
+        // `./src` holds this crate's Rust sources: an existing directory with no components.
+        let options = PipelineOptions::try_from(base_options()).expect("valid options");
+        SESSIONS.insert(session_id, Arc::new(WatchSession::new(options)));
+        let first = ensure_fresh(session_id).await.expect("a registered session");
+        let second = ensure_fresh(session_id).await.expect("a registered session");
+        close_session(session_id);
+        let without_duration = |update: &str| update.split_once(r#","durationMs""#).expect("durationMs").0.to_owned();
+        let empty = r#"{"revision":1,"updatedComponents":[],"props":{},"updatedKeys":[],"removedKeys":[],"affectedFiles":[],"diagnostics":[],"removedDiagnostics":[]"#;
+        assert_eq!((without_duration(&first), without_duration(&second)), (empty.to_owned(), empty.to_owned()));
     }
 
     // ── SPEC-BINDING-001 AC3: close_session's panic is caught, and the call

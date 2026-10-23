@@ -780,6 +780,7 @@ module.exports.__napiBindingTarget = __napiStampBindingTarget(nativeBinding, __n
 module.exports = nativeBinding
 module.exports.closeSession = nativeBinding.closeSession
 module.exports.createSession = nativeBinding.createSession
+module.exports.ensureFresh = nativeBinding.ensureFresh
 module.exports.extractAll = nativeBinding.extractAll
 module.exports.extractFileIncremental = nativeBinding.extractFileIncremental
 module.exports.initializeSession = nativeBinding.initializeSession
