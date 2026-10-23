@@ -179,11 +179,26 @@ pub(super) fn substitute_type(ct: &CollectedType, subst: &Substitution) -> Colle
         CollectedType::TemplateLiteral(parts) => {
             CollectedType::TemplateLiteral(parts.iter().map(|p| substitute_type(p, subst)).collect())
         }
-        CollectedType::Function { params, param_names, return_type } => CollectedType::Function {
-            params: params.iter().map(|p| substitute_type(p, subst)).collect(),
-            param_names: param_names.clone(),
-            return_type: Box::new(substitute_type(return_type, subst)),
-        },
+        CollectedType::Function { type_params, params, param_names, return_type } => {
+            // The function's own type parameters shadow the outer ones of the same name.
+            let shadowed;
+            let subst = if type_params.iter().any(|p| subst.contains_key(p.as_str())) {
+                shadowed = subst
+                    .iter()
+                    .filter(|(k, _)| !type_params.iter().any(|p| p == **k))
+                    .map(|(k, v)| (*k, v.clone()))
+                    .collect();
+                &shadowed
+            } else {
+                subst
+            };
+            CollectedType::Function {
+                type_params: type_params.clone(),
+                params: params.iter().map(|p| substitute_type(p, subst)).collect(),
+                param_names: param_names.clone(),
+                return_type: Box::new(substitute_type(return_type, subst)),
+            }
+        }
         CollectedType::Conditional { check, extends_type, true_type, false_type } => CollectedType::Conditional {
             check: Box::new(substitute_type(check, subst)),
             extends_type: Box::new(substitute_type(extends_type, subst)),

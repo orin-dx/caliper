@@ -42,7 +42,12 @@ impl<'src> SourceDataCollector<'src> {
                 break;
             }
             if c.is_block && !self.consumed_jsdoc.contains(&c.span_end) {
-                found = Some(i);
+                // A comment documents the declaration right after it, so one that something else stands between belongs
+                // to that something: the props of `function Badge(props: { a: string })` follow the component's
+                // comment, but `Badge(props:` is in the way.
+                if documents_what_follows(&self.source[c.span_end as usize..span_start as usize]) {
+                    found = Some(i);
+                }
                 break;
             }
         }
@@ -58,6 +63,79 @@ impl<'src> SourceDataCollector<'src> {
         }
         (text, tags)
     }
+}
+
+/// Whether only what may precede a declaration lies between a comment and it: whitespace, other comments, decorators,
+/// and modifier or declaration keywords (`export default function`, `@observable readonly`).
+fn documents_what_follows(between: &str) -> bool {
+    const KEYWORDS: &[&str] = &[
+        "export",
+        "default",
+        "declare",
+        "async",
+        "abstract",
+        "public",
+        "private",
+        "protected",
+        "readonly",
+        "static",
+        "override",
+        "accessor",
+        "const",
+        "let",
+        "var",
+        "function",
+        "class",
+        "interface",
+        "type",
+        "enum",
+        "namespace",
+        "module",
+    ];
+    let mut rest = between;
+    loop {
+        rest = rest.trim_start();
+        if rest.is_empty() {
+            return true;
+        }
+        if let Some(line_comment) = rest.strip_prefix("//") {
+            rest = line_comment.split_once('\n').map_or("", |(_, after)| after);
+        } else if let Some(block) = rest.strip_prefix("/*") {
+            let Some((_, after)) = block.split_once("*/") else { return false };
+            rest = after;
+        } else if let Some(decorator) = rest.strip_prefix('@') {
+            let name_end = decorator.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$' || c == '.'));
+            rest = &decorator[name_end.unwrap_or(decorator.len())..];
+            if rest.starts_with('(') {
+                let Some(close) = matching_paren(rest) else { return false };
+                rest = &rest[close + 1..];
+            }
+        } else {
+            let word_end = rest.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$')).unwrap_or(rest.len());
+            if word_end == 0 || !KEYWORDS.contains(&&rest[..word_end]) {
+                return false;
+            }
+            rest = &rest[word_end..];
+        }
+    }
+}
+
+/// The byte index of the `)` closing the `(` that `text` starts with.
+fn matching_paren(text: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (i, c) in text.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 // ─── JSDoc parsing ────────────────────────────────────────────────────────────
