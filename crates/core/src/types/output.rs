@@ -361,6 +361,44 @@ impl OpaqueDetail {
 }
 
 impl PropType {
+    /// Whether a conditional or mapped type the static resolver can't evaluate appears anywhere in this type, so its
+    /// text would include that type's source.
+    pub(crate) fn holds_unevaluated_type(&self) -> bool {
+        match self {
+            PropType::Opaque(detail) => {
+                matches!(detail.reason(), OpaqueReason::ConditionalType | OpaqueReason::MappedType)
+            }
+            PropType::Union(members) | PropType::Intersection(members) | PropType::Tuple(members) => {
+                members.iter().any(PropType::holds_unevaluated_type)
+            }
+            PropType::Array(inner) => inner.holds_unevaluated_type(),
+            PropType::Object(fields) => fields.iter().any(|f| f.prop_type.holds_unevaluated_type()),
+            PropType::Named { args, .. } => args.iter().any(PropType::holds_unevaluated_type),
+            PropType::Function { params, return_type, .. } => {
+                params.iter().any(|p| p.param_type.holds_unevaluated_type()) || return_type.holds_unevaluated_type()
+            }
+            PropType::String
+            | PropType::Number
+            | PropType::Boolean
+            | PropType::Null
+            | PropType::Undefined
+            | PropType::Any
+            | PropType::Never
+            | PropType::Unknown
+            | PropType::Void
+            | PropType::StringLiteral(_)
+            | PropType::NumberLiteral(_)
+            | PropType::BoolLiteral(_)
+            | PropType::ReactNode
+            | PropType::CssProperties
+            | PropType::Ref { .. }
+            | PropType::ElementType
+            | PropType::HtmlAttributes { .. }
+            | PropType::LiteralUnion { .. }
+            | PropType::SxProps => false,
+        }
+    }
+
     /// True if this type is a pure literal union (all members are literals).
     /// Used by serializers to choose between "enum" and "union" in RDT output.
     /// Requires at least 2 members — a 0- or 1-member "union" isn't a

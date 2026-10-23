@@ -90,15 +90,24 @@ fn resolve_named_uncycled(
             // The call site's arguments replace the alias's declared parameters (`type Foo<TData> = ...` used as
             // `Foo<string>`). Parameters left unfilled stay expected, unexpandable placeholders, not unresolvable
             // types, so they are registered for step 7 below.
-            let Some(params) = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key) else {
-                return resolve_type_alias_type(&alias, ctx, state, depth);
+            let params = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key);
+            let outer_named_unevaluated = std::mem::take(&mut state.named_unevaluated);
+            let expanded = match params {
+                Some(params) if !args.is_empty() => {
+                    state.in_scope_type_params.extend(params.iter().cloned());
+                    let subst =
+                        super::substitute::build_substitution(params, args, consuming_file, &mut state.diagnostics);
+                    resolve_type_alias_type(&super::substitute::substitute_alias(&alias, &subst), ctx, state, depth)
+                }
+                Some(params) => {
+                    state.in_scope_type_params.extend(params.iter().cloned());
+                    resolve_type_alias_type(&alias, ctx, state, depth)
+                }
+                None => resolve_type_alias_type(&alias, ctx, state, depth),
             };
-            state.in_scope_type_params.extend(params.iter().cloned());
-            if args.is_empty() {
-                return resolve_type_alias_type(&alias, ctx, state, depth);
-            }
-            let subst = super::substitute::build_substitution(params, args, consuming_file, &mut state.diagnostics);
-            return resolve_type_alias_type(&super::substitute::substitute_alias(&alias, &subst), ctx, state, depth);
+            let unevaluated = state.named_unevaluated || expanded.holds_unevaluated_type();
+            state.named_unevaluated = outer_named_unevaluated || unevaluated;
+            return alias_display(name, args, expanded, unevaluated);
         }
         Some(super::precedence::SourceOrKnownMatch::Interface(_)) => {
             // At the prop-TYPE level (not chain level), an interface name is returned as Named.
@@ -212,4 +221,15 @@ fn resolve_named_uncycled(
         affects: Vec::new(),
     });
     PropType::Named { name: name.clone(), args: resolved_args }
+}
+
+/// A referenced alias whose expansion is `unevaluated` — it holds a conditional or mapped type the resolver can't
+/// evaluate, or an alias named for that reason — shows as its name with its arguments as written
+/// (`StyleProp<MantineSpacing>`), the way TypeScript prints it, rather than as that type's source text. An object
+/// expansion stays: its fields still read, and only the unevaluated field shows source.
+fn alias_display(name: &CompactString, args: &[CollectedType], expanded: PropType, unevaluated: bool) -> PropType {
+    if matches!(expanded, PropType::Object(_)) || !unevaluated {
+        return expanded;
+    }
+    PropType::Named { name: name.clone(), args: args.iter().map(super::func::as_written).collect() }
 }
