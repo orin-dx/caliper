@@ -105,6 +105,7 @@ mod tests {
             tags: Default::default(),
             methods: vec![],
             detected_by: crate::types::DetectionRule::FunctionDeclaration,
+            exported: true,
         };
 
         registry.run_on_component_resolved(&mut entry);
@@ -171,6 +172,7 @@ mod tests {
             tags: Default::default(),
             methods: vec![],
             detected_by: crate::types::DetectionRule::FunctionDeclaration,
+            exported: true,
         };
 
         let diagnostics = registry.run_on_component_resolved(&mut entry);

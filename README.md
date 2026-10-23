@@ -31,6 +31,8 @@ Cold run over 21 real component libraries, Apple M5 Max, October 2026:
 
 `react-docgen` and `react-docgen-typescript` only run inside Node, so all three share one harness (`pnpm exec tsx`, 5 runs each). Starting that harness costs 0.32s on its own, which is most of the Caliper figure. A watch-mode update to one file takes about 2ms, where `react-docgen-typescript` pays the full cold cost on every edit. Method and raw numbers: [`docs/benchmarks.md`](docs/benchmarks.md).
 
+On whole libraries (Mantine, Chakra, Ant Design, shadcn/ui and React Spectrum at pinned commits, source only), Caliper takes 34 to 81ms and is 17 to 39 times faster than `react-docgen-typescript` on the same files, a median of 22 times. CI checks this weekly ([`docs/performance.md`](docs/performance.md)). With dependencies installed the comparison is not like for like yet: `react-docgen-typescript` reads every dependency's types, and Caliper reads only `@types/react` until dependency loading lands.
+
 ## A component through Caliper
 
 ```tsx
@@ -103,6 +105,8 @@ caliper-docgen check --src src
 ```
 
 Settings can also live in a `docgen.config.ts` (`srcDirs`, `htmlAttributes`, `cacheDir`, and more). `caliper-docgen --help` lists the rest, including `schema` for the JSON Schema of the output.
+
+Types your props import from installed packages stay named references by default. `--load-dependencies` (config, NAPI and Vite option `loadDependencies`) loads the declarations those names point to. A package source contributing more than 30 props is then listed as one inherited layer with its notable props, as Storybook does; `--collapse-inherited-props all` does the same for the project's own sources and `none` lists every prop.
 
 ## Vite plugin
 

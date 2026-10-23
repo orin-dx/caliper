@@ -66,14 +66,37 @@ expression: value
             "kind": "union",
             "members": [
               {
-                "kind": "eventHandler",
-                "eventType": "string",
-                "paramName": "value"
+                "kind": "function",
+                "typeParams": [],
+                "params": [
+                  {
+                    "name": "value",
+                    "type": {
+                      "kind": "string"
+                    }
+                  }
+                ],
+                "returnType": {
+                  "kind": "void"
+                }
               },
               {
-                "kind": "eventHandler",
-                "eventType": "string[]",
-                "paramName": "value"
+                "kind": "function",
+                "typeParams": [],
+                "params": [
+                  {
+                    "name": "value",
+                    "type": {
+                      "kind": "array",
+                      "element": {
+                        "kind": "string"
+                      }
+                    }
+                  }
+                ],
+                "returnType": {
+                  "kind": "void"
+                }
               }
             ]
           },
@@ -160,7 +183,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "Avatar": {
       "displayName": "Avatar",
@@ -234,7 +258,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "hocWrapper"
+      "detectedBy": "hocWrapper",
+      "exported": true
     },
     "Badge": {
       "displayName": "Badge",
@@ -282,7 +307,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "fcAnnotation"
+      "detectedBy": "fcAnnotation",
+      "exported": true
     },
     "Box": {
       "displayName": "Box",
@@ -368,9 +394,21 @@ expression: value
         "onBlur": {
           "name": "onBlur",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -385,9 +423,21 @@ expression: value
         "onClick": {
           "name": "onClick",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -402,9 +452,21 @@ expression: value
         "onFocus": {
           "name": "onFocus",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -451,7 +513,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "Card": {
       "displayName": "Card",
@@ -579,9 +642,21 @@ expression: value
         "onBlur": {
           "name": "onBlur",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -596,9 +671,21 @@ expression: value
         "onClick": {
           "name": "onClick",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -613,9 +700,21 @@ expression: value
         "onFocus": {
           "name": "onFocus",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -666,7 +765,8 @@ expression: value
         "since": "1.0.0"
       },
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "Chip": {
       "displayName": "Chip",
@@ -723,7 +823,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "fcAnnotation"
+      "detectedBy": "fcAnnotation",
+      "exported": true
     },
     "Icon": {
       "displayName": "Icon",
@@ -835,9 +936,21 @@ expression: value
         "onBlur": {
           "name": "onBlur",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -852,9 +965,21 @@ expression: value
         "onClick": {
           "name": "onClick",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -869,9 +994,21 @@ expression: value
         "onFocus": {
           "name": "onFocus",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "Event",
-            "paramName": null
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "Event",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -918,7 +1055,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "IconButton": {
       "displayName": "IconButton",
@@ -1046,7 +1184,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "Select": {
       "displayName": "Select",
@@ -1136,9 +1275,19 @@ expression: value
         "onOpenChange": {
           "name": "onOpenChange",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "boolean",
-            "paramName": "open"
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "open",
+                "type": {
+                  "kind": "boolean"
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -1158,9 +1307,19 @@ expression: value
         "onValueChange": {
           "name": "onValueChange",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "string",
-            "paramName": "value"
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "value",
+                "type": {
+                  "kind": "string"
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -1224,7 +1383,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "Toast": {
       "displayName": "Toast",
@@ -1262,7 +1422,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "Toggle": {
       "displayName": "Toggle",
@@ -1336,7 +1497,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     },
     "TypeSampler": {
       "displayName": "TypeSampler",
@@ -1556,7 +1718,7 @@ expression: value
                       "kind": "string"
                     },
                     "required": true,
-                    "description": "Inline intersection in a prop value — exercises `intersection`.\nCssProperties resolves to cssProperties; the object literal stays as-is."
+                    "description": ""
                   }
                 ]
               }
@@ -1564,7 +1726,7 @@ expression: value
           },
           "required": false,
           "defaultValue": null,
-          "description": "",
+          "description": "Inline intersection in a prop value — exercises `intersection`.\nCssProperties resolves to cssProperties; the object literal stays as-is.",
           "tags": {},
           "parent": {
             "name": "TypeSamplerProps",
@@ -1584,7 +1746,8 @@ expression: value
       "composes": [],
       "tags": {},
       "methods": [],
-      "detectedBy": "forwardRef"
+      "detectedBy": "forwardRef",
+      "exported": true
     }
   },
   "enums": {},

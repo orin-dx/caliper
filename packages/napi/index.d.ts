@@ -36,6 +36,12 @@ export type OpaqueReason =
   | { type: 'indexedAccess'; expression: string }
   | { type: 'templateLiteral'; expression: string }
 
+export interface FunctionParam {
+  /** `null` for a destructured parameter. */
+  name: string | null
+  type: PropType
+}
+
 export interface ObjectField {
   name: string
   propType: PropType
@@ -66,7 +72,7 @@ export type PropType =
   | { kind: 'tuple'; elements: PropType[] }
   | { kind: 'object'; fields: ObjectField[] }
   | { kind: 'named'; name: string; args: PropType[] }
-  | { kind: 'eventHandler'; eventType: string; paramName: string | null }
+  | { kind: 'function'; typeParams: string[]; params: FunctionParam[]; returnType: PropType }
   | { kind: 'ref'; element: string | null }
   | { kind: 'htmlAttributes'; element: string; omitted: string[] }
   | { kind: 'literalUnion'; members: string[]; hasDefault: boolean }
@@ -104,6 +110,8 @@ export interface ComponentEntry {
   methods: []
   /** The rule that recognized the component; `typedFunctionExpression` and `wrapperTypeArgument` are inferred. */
   detectedBy: DetectionRule
+  /** Whether its module exports it, directly or as a sub-component attached to an exported component. */
+  exported: boolean
 }
 
 export type DetectionRule =
