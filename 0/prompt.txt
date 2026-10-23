@@ -1,0 +1,42 @@
+Base directory for this skill: /Users/gabe/.claude/plugins/cache/orin-dx-agent-plugins/vanguard/2.0.2/skills/research
+
+# Vanguard Research Skill
+
+<overview>
+Vanguard builds a documented evidence base before committing to a solution direction. It separates what is known from what is assumed, surfaces contradictions, and delivers a recommendation a spec writer can act on directly.
+
+One skill, one pipeline — not a menu of separately-invokable modes. `recon` maps sources (internal specs/docs/code, dependency manifests, external references), `reader` reads only what the map points at, `synthesizer` resolves the findings into one report, `risk-assessor` reviews the resulting approach. The pipeline narrows itself to what's asked: a question answerable from internal sources alone gets `scope: internal` from recon and never touches external search; a request for risk review of an already-decided approach can hand `risk-assessor` that approach directly.
+</overview>
+
+---
+
+<language_agnostic_note>
+Recon detects the workspace language from manifest files present (Cargo.toml → Rust, package.json → Node/TypeScript, pyproject.toml → Python, etc.), then loads the appropriate shared/references search heuristics for that ecosystem. The skill is not language-specific.
+</language_agnostic_note>
+
+---
+
+<subagent_dispatch_matrix>
+
+| Agent | Role | Model / Effort | Delegate When |
+| :--- | :--- | :--- | :--- |
+| **recon** | Source mapper | haiku / low | Start every research task here. Maps internal sources, external keywords, and existing implementations. |
+| **reader** | Evidence extractor | sonnet / medium | Given the source map, reads each source and extracts findings with citations and confidence levels. |
+| **synthesizer** | Recommendation producer | sonnet / medium | Given findings, synthesizes a research-report@1 with a falsifiable recommendation and confidence level. |
+| **risk-assessor** | Risk prioritizer | sonnet / medium | Given a proposed approach or research-report@1, identifies and prioritizes technical risks with mitigations. |
+
+</subagent_dispatch_matrix>
+
+---
+
+<output>
+All research concludes in a `research-report@1` (schema: `shared/schemas/research-report@1.json`). The report distinguishes:
+- **confirmed** — read directly from source
+- **likely** — strong inference from evidence
+- **assumed** — unverified, flagged explicitly
+
+The recommendation is falsifiable: a spec or plan written from it will not be surprised by implementation reality.
+</output>
+
+
+ARGUMENTS: How should caliper-docgen detect and resolve React components declared through wrapper calls (e.g. Mantine factory/polymorphicFactory/genericFactory<XFactory>(...), Chakra v3 withContext<El, Props>/withRootProvider<Props>(...), tableElement<T>, createEdgeComponent, createIconLoader("x")), without hardcoding library names, while preserving the architecture and semantic models (docs/architecture/, ARCHITECTURE.md, docs/adr/, crates/core extractor/resolver/types, ADR 0006 semantic backend)? Evidence so far: a 5-project benchmark (mantine, chakra-ui, ant-design, shadcn-ui, react-spectrum) in /Users/gabe/.claude/jobs/ba6a68d6/tmp/bench-results (accuracy.md, rdt.dump.json, caliper.dump.json) with scripts in /Users/gabe/.claude/jobs/ba6a68d6/tmp/bench (recall2.py, patterns.py, samples.py) and mirrored inputs in /Users/gabe/.claude/jobs/ba6a68d6/tmp/bench-inputs. Component recall vs react-docgen-typescript on source-only mirrors: shadcn 98%, spectrum 98%, antd 88%, mantine 29%, chakra 9%; ~72% of misses are the shape `const PascalName = wrapperCall<TypeArgs>(fn)` with props carried as a type argument or as a `props` member of a payload type argument. Open items: 29 plain arrow-function misses, 67 name mismatches (displayName property, default exports), calls with no type argument (createIconLoader, lazy) which need return-type resolution (ADR 0006 semantic backend), Mantine's ElementProps<'input', ...> generic helper not resolving, and why Chakra forwardRef components lose props. Questions to answer: (1) what are all the distinct declaration shapes and where does the props type come from in each; (2) how does the current extractor (crates/core/src/extractor/component.rs, visit.rs, mod.rs) and resolver decide what is a component and resolve props, and where would a shape-based detector fit without breaking the layering and 'no reverse dependency' rules; (3) how should the semantic types (SourceData, ComponentMapping, PropType, Diagnostic) represent an inferred component and its provenance; (4) how does this interact with ADR 0006's semantic backend and what is each one's job; (5) how do RDT, react-docgen, Storybook docgen and the TypeScript checker decide what a component is, for prior art; (6) false-positive risks and the guard design; (7) test and CI strategy for recall by shape. Do not change any code; produce a research report.
