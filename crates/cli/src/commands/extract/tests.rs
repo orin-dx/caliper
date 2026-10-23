@@ -9,6 +9,7 @@ fn args_for(src: &str, json: bool) -> crate::ExtractArgs {
         html_attributes: None,
         extra_builtins: vec![],
         json,
+        load_dependencies: false,
     }
 }
 
@@ -464,6 +465,7 @@ export function Button(props: ButtonProps) { return null; }
         html_attributes: Some(mode),
         extra_builtins: vec![],
         json: false,
+        load_dependencies: false,
     };
 
     assert_eq!(cmd_extract(args, false, None).unwrap(), 0);

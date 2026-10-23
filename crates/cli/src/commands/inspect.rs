@@ -10,6 +10,7 @@ pub fn cmd_inspect(args: crate::InspectArgs, config_path: Option<&str>) -> Resul
         html_attributes: None,
         config_path,
         extra_builtins: &[],
+        load_dependencies: args.load_dependencies,
     })?;
     let output = caliper_docgen_core::pipeline::extract(&options);
 
@@ -54,7 +55,8 @@ export interface BrokenProps {
         .unwrap();
 
         let dir = camino::Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
-        let args = crate::InspectArgs { component: "Comp".into(), src: vec![dir.to_string()] };
+        let args =
+            crate::InspectArgs { component: "Comp".into(), src: vec![dir.to_string()], load_dependencies: false };
         let code = cmd_inspect(args, None).expect("cmd_inspect should find Comp and not error");
         assert_eq!(
             code, 2,
@@ -76,7 +78,8 @@ export interface BrokenProps {
         )
         .unwrap();
         let dir = camino::Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
-        let args = crate::InspectArgs { component: "Comp".into(), src: vec![dir.to_string()] };
+        let args =
+            crate::InspectArgs { component: "Comp".into(), src: vec![dir.to_string()], load_dependencies: false };
         let code = cmd_inspect(args, None).expect("cmd_inspect should find Comp and not error");
         assert_eq!(code, 0, "expected exit code 0 for a clean run");
     }
@@ -96,7 +99,11 @@ export interface BrokenProps {
         )
         .unwrap();
         let dir = camino::Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
-        let args = crate::InspectArgs { component: "NoSuchComponent".into(), src: vec![dir.to_string()] };
+        let args = crate::InspectArgs {
+            component: "NoSuchComponent".into(),
+            src: vec![dir.to_string()],
+            load_dependencies: false,
+        };
         let err = cmd_inspect(args, None).expect_err("expected an Err for a component that doesn't exist");
         let message = format!("{err:?}");
         assert!(

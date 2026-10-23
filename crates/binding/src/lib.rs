@@ -96,6 +96,8 @@ pub struct JsExtractOptions {
     pub tsconfig_path: Option<String>,
     pub extra_builtins: Option<Vec<String>>,
     pub cache_dir: Option<String>,
+    /// Load the dependency type declarations project types reference (off by default).
+    pub load_dependencies: Option<bool>,
 }
 
 // ─── TryFrom<JsExtractOptions> for PipelineOptions ────────────────────────────
@@ -126,6 +128,9 @@ impl TryFrom<JsExtractOptions> for PipelineOptions {
         }
         if let Some(dir) = js.cache_dir {
             opts.cache_dir = Some(dir.into());
+        }
+        if let Some(load) = js.load_dependencies {
+            opts.load_dependencies = load;
         }
 
         Ok(opts)
@@ -286,6 +291,7 @@ mod tests {
             tsconfig_path: None,
             extra_builtins: None,
             cache_dir: None,
+            load_dependencies: None,
         }
     }
 
@@ -297,6 +303,14 @@ mod tests {
         assert_eq!(opts.html_attributes, defaults.html_attributes);
         assert_eq!(opts.extra_builtins, defaults.extra_builtins);
         assert_eq!(opts.cache_dir, defaults.cache_dir);
+        assert_eq!(opts.load_dependencies, defaults.load_dependencies);
+    }
+
+    #[test]
+    fn load_dependencies_maps_onto_pipeline_options() {
+        let mut js = base_options();
+        js.load_dependencies = Some(true);
+        assert!(PipelineOptions::try_from(js).expect("should convert").load_dependencies);
     }
 
     #[test]

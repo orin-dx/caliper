@@ -190,6 +190,7 @@ fn build_options_maps_extra_builtins_cli_flag() {
         html_attributes: None,
         config_path: None,
         extra_builtins: &extra_builtins,
+        load_dependencies: false,
     })
     .expect("build_options should succeed with no config file");
 
@@ -223,6 +224,7 @@ export default {
         html_attributes: None,
         config_path: Some(config_path.to_str().unwrap()),
         extra_builtins: &extra_builtins,
+        load_dependencies: false,
     })
     .expect("build_options should succeed");
 
@@ -244,6 +246,7 @@ fn build_options_propagates_a_config_load_failure_as_err() {
         html_attributes: None,
         config_path: Some("/nonexistent-parent-dir-xyz/docgen.config.ts"),
         extra_builtins: &[],
+        load_dependencies: false,
     });
     assert!(result.is_err(), "expected build_options to return Err for a failing --config path");
 }
@@ -283,7 +286,14 @@ fn html_attributes_mode_names_map_onto_pipeline_options() {
 }
 
 fn no_flags<'a>() -> BuildOptionsArgs<'a> {
-    BuildOptionsArgs { src: &[], cache_dir: None, html_attributes: None, config_path: None, extra_builtins: &[] }
+    BuildOptionsArgs {
+        src: &[],
+        cache_dir: None,
+        html_attributes: None,
+        config_path: None,
+        extra_builtins: &[],
+        load_dependencies: false,
+    }
 }
 
 #[test]
@@ -318,6 +328,16 @@ fn build_options_rejects_an_unrecognized_html_attributes_flag_naming_the_value()
     let err = build_options(BuildOptionsArgs { html_attributes: Some("all"), ..no_flags() })
         .expect_err("all is not a supported --html-attributes");
     assert_eq!(err.to_string(), "--html-attributes is 'all', which isn't a recognized value");
+}
+
+#[test]
+fn load_dependencies_comes_from_the_config_and_the_flag_turns_it_on() {
+    for (json, expected) in [("{}", false), (r#"{ "loadDependencies": true }"#, true)] {
+        let schema: DocgenConfigSchema = serde_json::from_str(json).expect("valid config JSON");
+        assert_eq!(schema.into_pipeline_options().unwrap().load_dependencies, expected, "{json}");
+    }
+    assert!(!build_options(no_flags()).unwrap().load_dependencies);
+    assert!(build_options(BuildOptionsArgs { load_dependencies: true, ..no_flags() }).unwrap().load_dependencies);
 }
 
 #[test]

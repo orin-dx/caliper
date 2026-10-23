@@ -45,4 +45,6 @@ export interface JsExtractOptions {
   tsconfigPath?: string
   extraBuiltins?: Array<string>
   cacheDir?: string
+  /** Load the dependency type declarations project types reference (off by default). */
+  loadDependencies?: boolean
 }

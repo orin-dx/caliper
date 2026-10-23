@@ -44,6 +44,10 @@ Options:
           stdout, ignoring --out/--format (which govern the human/RDT/Storybook
           paths below), and suppresses the human-readable summary/diagnostics
 
+      --load-dependencies
+          Load the type declarations props reference from installed packages
+          (off by default)
+
   -v, --verbose...
           Verbose output (repeat for more: -v, -vv)
 
