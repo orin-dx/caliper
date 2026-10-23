@@ -1431,7 +1431,7 @@ Button.defaultProps = { size: 'md' };
     let button = output.components.get("Button").expect("Button component not found");
     let size_prop = button.props.get("size").expect("'size' prop not found");
     let default = size_prop.default_value.as_ref().expect("expected a default value for 'size'");
-    assert_eq!(default.value, "\"md\"");
+    assert_eq!(default.value, "'md'");
     assert!(!default.computed);
 }
 

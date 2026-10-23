@@ -378,6 +378,22 @@ fn test_display_name_update() {
 }
 
 #[test]
+fn string_defaults_keep_their_source_quotes() {
+    let source = r#"
+        export function Button({ size = 'md', tone = "neutral", label = `Go` }: { size?: string; tone?: string; label?: string }) {
+            return null;
+        }
+    "#;
+    let data = parse_file(Utf8Path::new("/test/button.tsx"), source);
+    let button = data.component_mappings.iter().find(|m| m.component_name == "Button").unwrap();
+
+    let mut defaults: Vec<(&str, &str, bool)> =
+        button.param_defaults.iter().map(|(name, d)| (name.as_str(), d.value.as_str(), d.computed)).collect();
+    defaults.sort();
+    assert_eq!(defaults, [("label", "`Go`", true), ("size", "'md'", false), ("tone", "\"neutral\"", false)]);
+}
+
+#[test]
 fn test_default_props_assignment_merged_into_component_mapping() {
     // MUI-style: `Component.defaultProps = { size: 'md' }` (deprecated in
     // React 19 but still shipped in real .d.ts/.tsx). Distinct from
@@ -401,7 +417,7 @@ fn test_default_props_assignment_merged_into_component_mapping() {
     let size_default = button.param_defaults.get("size");
     assert!(size_default.is_some(), "expected 'size' default from defaultProps, got {:?}", button.param_defaults);
     let size_default = size_default.unwrap();
-    assert_eq!(size_default.value, "\"md\"");
+    assert_eq!(size_default.value, "'md'");
     assert!(!size_default.computed);
     assert!(matches!(size_default.source, DefaultSource::DefaultProps));
 
