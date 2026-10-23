@@ -39,6 +39,8 @@ vi.mock('caliper-docgen-napi', () => ({
   initializeSession: vi.fn(),
   extractFileIncremental: vi.fn(),
   closeSession: vi.fn(),
+  resolutionConfigFiles: vi.fn(() => ['/project/tsconfig.json']),
+  isResolutionConfig: vi.fn((_session: number, file: string) => file === '/project/tsconfig.json'),
 }))
 
 import { caliperDocgen } from '../../src/index.js'
@@ -50,6 +52,12 @@ const pluginContext = () => ({
     throw new Error(message)
   }),
   addWatchFile: vi.fn(),
+})
+
+/** A dev server whose client environment sends HMR events through `send`. */
+const server = ({ send }: { send: (event: string, data?: unknown) => void }) => ({
+  environments: { client: { hot: { send } } },
+  watcher: { add: vi.fn() },
 })
 
 describe('caliperDocgen', () => {
@@ -132,17 +140,24 @@ describe('caliperDocgen', () => {
   describe('configureServer', () => {
     it('runs the cold extraction and announces it', async () => {
       const send = vi.fn()
-      ;(plugin.configureServer as Function)({ environments: { client: { hot: { send } } } })
+      ;(plugin.configureServer as Function)(server({ send }))
       await vi.waitUntil(() => send.mock.calls.length > 0)
       expect(napi.initializeSession).toHaveBeenCalledWith(42, expect.objectContaining({ srcDirs: ['/project/src'] }))
       expect(send).toHaveBeenCalledWith('caliper-docgen:ready', { components: { Button: { displayName: 'Button' } } })
+    })
+
+    it('watches the tsconfigs, package.json files and lockfiles that decide how imports resolve', () => {
+      const devServer = server({ send: vi.fn() })
+      ;(plugin.configureServer as Function)(devServer)
+      expect(napi.resolutionConfigFiles).toHaveBeenCalledWith(42)
+      expect(devServer.watcher.add).toHaveBeenCalledWith(['/project/tsconfig.json'])
     })
 
     // buildEnd isn't called in dev mode, so configureServer's returned
     // teardown function is the only reliable cleanup hook.
 
     it('returns a teardown function that closes the NAPI session', async () => {
-      const teardown = (plugin.configureServer as Function)({ environments: { client: { hot: { send: vi.fn() } } } })
+      const teardown = (plugin.configureServer as Function)(server({ send: vi.fn() }))
       await vi.waitUntil(() => (napi.initializeSession as any).mock.calls.length > 0)
 
       expect(napi.closeSession).not.toHaveBeenCalled()
@@ -301,7 +316,7 @@ describe('caliperDocgen', () => {
           resolveInit = resolve
         }),
       )
-      ;(plugin.configureServer as Function)({ environments: { client: { hot: { send: vi.fn() } } } })
+      ;(plugin.configureServer as Function)(server({ send: vi.fn() }))
 
       const hotUpdatePromise = (plugin.hotUpdate as Function).call(clientEnv(), makeOpts('/project/src/Button.tsx'))
       await Promise.resolve()
@@ -337,6 +352,17 @@ describe('caliperDocgen', () => {
         [2, 'Button'],
         [3, 'Input'],
       ])
+    })
+
+    // The session rebuilds itself for a resolution config, and the update is an ordinary delta.
+    it('applies a tsconfig change like a source change and ignores other non-source files', async () => {
+      const ctx = clientEnv()
+      await (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/tsconfig.json'))
+      await (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/README.md'))
+      expect((napi.extractFileIncremental as any).mock.calls.map(([file]: [string]) => file)).toEqual([
+        '/project/tsconfig.json',
+      ])
+      expect(sentUpdates(ctx).map((u: any) => u.updatedKeys)).toEqual([['Button']])
     })
 
     it('keeps applying changes after one fails', async () => {
@@ -396,10 +422,10 @@ describe('caliperDocgen', () => {
       expect(napi.closeSession).toHaveBeenCalledWith(42)
     })
 
-    it('watches every source directory, so a change to a file no bundle module imports still rebuilds', async () => {
+    it('watches every source directory and resolution config, so a change no bundle module imports still rebuilds', async () => {
       const ctx = pluginContext()
       await (watchBuild().buildStart as Function).call(ctx)
-      expect(ctx.addWatchFile.mock.calls).toEqual([['/project/src'], ['/project/lib']])
+      expect(ctx.addWatchFile.mock.calls).toEqual([['/project/src'], ['/project/lib'], ['/project/tsconfig.json']])
     })
 
     it('applies a changed source file before the next rebuild loads the virtual module', async () => {

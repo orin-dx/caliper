@@ -34,6 +34,23 @@ fn canonicalize_best_effort(path: &Utf8Path) -> Utf8PathBuf {
     path.to_owned()
 }
 
+/// Lockfiles: a change means the installed packages, and so what imports resolve to, may have changed.
+const LOCKFILES: [&str; 6] =
+    ["pnpm-lock.yaml", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "bun.lock", "bun.lockb"];
+
+/// Whether a file of this name configures module resolution: a tsconfig or jsconfig, a `package.json`, or a lockfile.
+fn is_resolution_config_name(name: &str) -> bool {
+    name == "package.json"
+        || name == "jsconfig.json"
+        || LOCKFILES.contains(&name)
+        || (name.starts_with("tsconfig") && name.ends_with(".json"))
+}
+
+/// The source directories, canonicalized the way `discover_files` reports paths.
+fn canonical_src_dirs(options: &PipelineOptions) -> Vec<Utf8PathBuf> {
+    options.src_dirs.iter().map(|dir| canonicalize_best_effort(dir)).collect()
+}
+
 /// Stateful session for incremental watch-mode extraction.
 ///
 /// The session holds one immutable `Revision` at a time. `update_file` builds the next revision from the current one
@@ -96,12 +113,41 @@ impl WatchSession {
         }
     }
 
+    /// Whether a change to `path` can alter how imports resolve, so the session must be rebuilt rather than updated: a
+    /// tsconfig, jsconfig, `package.json` or lockfile in a source directory, or in a directory above one. Anything
+    /// under `node_modules` is not the project's configuration.
+    pub fn is_resolution_config(&self, path: &Utf8Path) -> bool {
+        let path = canonicalize_best_effort(path);
+        let (Some(name), Some(dir)) = (path.file_name(), path.parent()) else { return false };
+        if !is_resolution_config_name(name) || path.components().any(|part| part.as_str() == "node_modules") {
+            return false;
+        }
+        canonical_src_dirs(&self.options).iter().any(|src| src.starts_with(dir) || dir.starts_with(src))
+    }
+
+    /// The resolution configs that exist in the directories above each source directory, for a watcher to add to what
+    /// it watches; ones inside a source directory are already watched with it. See [`Self::is_resolution_config`].
+    pub fn resolution_config_files(&self) -> Vec<Utf8PathBuf> {
+        let mut files: Vec<Utf8PathBuf> = canonical_src_dirs(&self.options)
+            .iter()
+            .flat_map(|src| src.ancestors().skip(1).map(Utf8Path::to_owned).collect::<Vec<_>>())
+            .filter_map(|dir| dir.read_dir_utf8().ok())
+            .flat_map(|entries| entries.flatten().map(|entry| entry.into_path()).collect::<Vec<_>>())
+            .filter(|path| path.file_name().is_some_and(is_resolution_config_name) && path.is_file())
+            .collect();
+        files.sort();
+        files.dedup();
+        files
+    }
+
     /// Apply one file change: an edit, a new file, or a deletion. A path that is not a source file of this project
-    /// (outside every source directory, excluded, or not TypeScript) changes nothing.
+    /// (outside every source directory, excluded, or not TypeScript) changes nothing. A resolution config
+    /// ([`Self::is_resolution_config`]) rebuilds the session, and the update carries every component that changed.
     pub fn update_file(&self, changed: &Utf8Path) -> IncrementalUpdate {
         // `discover_files` canonicalizes the paths it reports (e.g. macOS's `/var` -> `/private/var`), so a watcher's
         // path must be canonicalized the same way to match.
         let changed = canonicalize_best_effort(changed);
+        let rebuild = self.is_resolution_config(&changed);
         let _writer = self.writer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let current = match self.current.load_full() {
             Some(current) => current,
@@ -111,6 +157,11 @@ impl WatchSession {
                 revision
             }
         };
+        if rebuild {
+            let (next, update) = current.rebuilt(&self.options);
+            self.current.store(Some(Arc::new(next)));
+            return update;
+        }
         match current.next(&self.options, &changed) {
             Some((next, update)) => {
                 self.current.store(Some(Arc::new(next)));

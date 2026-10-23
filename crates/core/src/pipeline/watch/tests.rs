@@ -162,6 +162,100 @@ fn widget_project(source: &str) -> (tempfile::TempDir, Utf8PathBuf, PipelineOpti
     (tmp, widget, options)
 }
 
+/// A project root with `tsconfig.json` (configured, without `paths`), and `src` holding a Button that imports its props
+/// through the `@ui/*` alias.
+fn aliased_project() -> (tempfile::TempDir, Utf8PathBuf, PipelineOptions) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().expect("canonicalize")).expect("utf8");
+    std::fs::create_dir_all(root.join("src/ui")).expect("create src/ui");
+    std::fs::write(root.join("tsconfig.json"), "{}").expect("write tsconfig");
+    std::fs::write(root.join("src/ui/types.ts"), "export interface ButtonProps { label: string }\n")
+        .expect("write types");
+    std::fs::write(
+        root.join("src/Button.tsx"),
+        "import type { ButtonProps } from '@ui/types';\nexport function Button(props: ButtonProps) { return null; }\n",
+    )
+    .expect("write Button");
+    let options = PipelineOptions {
+        src_dirs: vec![root.join("src")],
+        tsconfig_path: Some(root.join("tsconfig.json")),
+        cache_dir: Some(root.join("cache")),
+        ..Default::default()
+    };
+    (tmp, root, options)
+}
+
+#[test]
+fn editing_the_tsconfig_rebuilds_the_session_and_reports_every_changed_component() {
+    let (_tmp, root, options) = aliased_project();
+    let session = WatchSession::new(options);
+    let before = session.initialize();
+    assert_eq!(before.components["Button"].props.keys().collect::<Vec<_>>(), Vec::<&String>::new());
+    let unresolved: Vec<String> = before
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.starts_with("Cannot resolve '@ui/types'"))
+        .map(|d| d.message.clone())
+        .collect();
+    assert_eq!(unresolved.len(), 1, "{:#?}", before.diagnostics);
+
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{ "compilerOptions": { "baseUrl": ".", "paths": { "@ui/*": ["src/ui/*"] } } }"#,
+    )
+    .expect("edit tsconfig");
+    let update = session.update_file(&root.join("tsconfig.json"));
+
+    assert_eq!(update.revision, 2);
+    assert_eq!(update.updated_keys, ["Button"]);
+    assert_eq!(update.updated_components[0].props.keys().collect::<Vec<_>>(), ["label"]);
+    assert_eq!(update.removed_keys, Vec::<String>::new());
+    let removed: Vec<&String> = update.removed_diagnostics.iter().map(|d| &d.message).collect();
+    assert!(unresolved.iter().all(|m| removed.contains(&m)), "{removed:#?}");
+    assert_matches_cold(&session);
+}
+
+#[test]
+fn only_the_projects_own_configuration_counts_as_a_resolution_config() {
+    let (_tmp, root, options) = aliased_project();
+    for (file, body) in [
+        ("package.json", "{}"),
+        ("pnpm-lock.yaml", ""),
+        ("README.md", ""),
+        ("src/package.json", "{}"),
+        ("src/node_modules/dep/package.json", "{}"),
+        ("other/tsconfig.json", "{}"),
+    ] {
+        std::fs::create_dir_all(root.join(file).parent().unwrap()).unwrap();
+        std::fs::write(root.join(file), body).unwrap();
+    }
+    let session = WatchSession::new(options);
+
+    let config = |file: &str| session.is_resolution_config(&root.join(file));
+    assert!(
+        config("tsconfig.json") && config("package.json") && config("pnpm-lock.yaml") && config("src/package.json")
+    );
+    assert!(!config("README.md") && !config("src/node_modules/dep/package.json") && !config("other/tsconfig.json"));
+
+    let listed: Vec<Utf8PathBuf> =
+        session.resolution_config_files().into_iter().filter(|path| path.starts_with(&root)).collect();
+    assert_eq!(listed, [root.join("package.json"), root.join("pnpm-lock.yaml"), root.join("tsconfig.json")]);
+}
+
+#[test]
+fn editing_another_packages_tsconfig_changes_nothing() {
+    let (_tmp, root, options) = aliased_project();
+    std::fs::create_dir_all(root.join("other")).unwrap();
+    std::fs::write(root.join("other/tsconfig.json"), "{}").unwrap();
+    let session = WatchSession::new(options);
+    let _ignored = session.initialize();
+
+    std::fs::write(root.join("other/tsconfig.json"), r#"{ "compilerOptions": {} }"#).unwrap();
+    let update = session.update_file(&root.join("other/tsconfig.json"));
+
+    assert_eq!((update.revision, session.revision()), (1, 1));
+}
+
 const BROKEN: &str = "export const = ;\n";
 const FIXED: &str = "export function Widget() { return null; }\n";
 
