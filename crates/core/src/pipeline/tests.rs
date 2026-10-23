@@ -2846,6 +2846,50 @@ export const Typed = factory<ButtonFactory>((props: ButtonProps) => <button>{pro
     assert_eq!(warnings, Vec::<&str>::new());
 }
 
+/// An `export *` barrel reaches any exported value, not only types: `ComponentProps<typeof Button>` finds a component
+/// declared as a const two barrels away, renamed exports included.
+#[test]
+fn an_export_star_barrel_reaches_an_exported_value() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    fs::create_dir_all(tmp.path().join("ui/button")).unwrap();
+    write_file(
+        &tmp,
+        "ui/button/button.tsx",
+        "export interface ButtonProps { label: string }\n\
+         export const Button = (props: ButtonProps) => <button>{props.label}</button>;\n\
+         const Ghost = (props: { faint?: boolean }) => <button />;\nexport { Ghost as GhostButton };\n",
+    );
+    write_file(&tmp, "ui/button/index.ts", "export * from './button';\n");
+    write_file(&tmp, "ui/index.ts", "export * from './button';\n");
+    write_file(
+        &tmp,
+        "App.tsx",
+        r#"
+import * as React from "react";
+import { Button, GhostButton } from "./ui";
+export function Fancy(props: React.ComponentProps<typeof Button> & { extra?: boolean }) { return null; }
+export function Faint(props: React.ComponentProps<typeof GhostButton>) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let names = |component: &str| output.components[component].props.keys().cloned().collect::<Vec<_>>();
+    assert_eq!(names("Fancy"), ["extra", "label"]);
+    assert_eq!(names("Faint"), ["faint"]);
+    let warnings: Vec<&str> = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity != DiagnosticSeverity::Info)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(warnings, Vec::<&str>::new());
+}
+
 /// Chakra's recipe props: a conditional on a literal picks its branch, indexed accesses read a generic interface's
 /// member, and a mapped type over `keyof` an interface lists one prop per key. Every step is evaluated from known
 /// operands, so nothing warns.
