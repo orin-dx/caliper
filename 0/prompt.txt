@@ -1,0 +1,1 @@
+We should adapt to the latest callisto and attempt a proper release. We added a lot of features so read the callisto docs and the last 3 weeks of PRs
