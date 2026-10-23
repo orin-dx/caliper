@@ -16,6 +16,73 @@ use super::extends::resolve_extends_ref;
 use super::react::resolve_react_types_file;
 use super::{ResolutionContext, ResolvedChain, MAX_DEPTH};
 
+/// A declaration's props chain, unless it evaluated to nothing (no props, no inherited layer, and something left
+/// unevaluated: cva's `VariantProps` is `Omit<OmitUndefined<Parameters<…>[0]>, …>`) and a known shortcut covers the
+/// name, which then stands in (ADR 0014). An `attempt` that is kept is merged into `state`; a replaced one is dropped
+/// with its diagnostics.
+#[allow(clippy::too_many_arguments)]
+fn known_fallback(
+    chain: ResolvedChain,
+    attempt: ResolveState,
+    type_name: &str,
+    resolved_args: &[PropType],
+    consuming_file: &Utf8Path,
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> ResolvedChain {
+    let evaluated_to_nothing = chain.props.is_empty()
+        && chain.inheritance.is_empty()
+        && (!chain.composes.is_empty() || !attempt.diagnostics.is_empty());
+    if evaluated_to_nothing {
+        let bare = type_name.strip_prefix("React.").unwrap_or(type_name);
+        if let Some(result) = crate::known::resolve_known(bare, resolved_args, &ctx.global, &ctx.enum_bare_index) {
+            return known_chain(result, type_name, consuming_file, mapping, ctx, state, depth);
+        }
+    }
+    state.absorb(attempt);
+    chain
+}
+
+/// The props chain a known shortcut gives `type_name`.
+#[allow(clippy::too_many_arguments)]
+fn known_chain(
+    result: KnownPatternResult,
+    type_name: &str,
+    consuming_file: &Utf8Path,
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> ResolvedChain {
+    match result {
+        KnownPatternResult::Props(props) => {
+            ResolvedChain { props: props.into_iter().map(Arc::new).collect(), ..ResolvedChain::empty() }
+        }
+        KnownPatternResult::Type(PropType::HtmlAttributes { element, omitted }) => {
+            let layer = InheritedLayer {
+                type_name: type_name.to_owned(),
+                file_name: resolve_react_types_file(consuming_file, ctx),
+                omitted,
+                html_element: Some(element),
+                total_props: 0,
+            };
+            ResolvedChain { inheritance: vec![layer], ..ResolvedChain::empty() }
+        }
+        KnownPatternResult::Type(pt) => {
+            if let PropType::Opaque(detail) = &pt {
+                let bare = type_name.strip_prefix("React.").unwrap_or(type_name);
+                push_known_opaque_diagnostic(&mut state.diagnostics, detail.reason(), bare, consuming_file);
+            }
+            ResolvedChain::empty_with_compose(pt.raw_string())
+        }
+        KnownPatternResult::Alias { name } => {
+            resolve_props_chain(&name, &[], consuming_file, mapping, ctx, state, depth + 1)
+        }
+    }
+}
+
 /// Resolve a named type to a chain of props.
 /// This is the recursive core — handles interfaces, aliases, known patterns, etc.
 #[allow(clippy::too_many_arguments)]
@@ -135,41 +202,37 @@ pub(super) fn resolve_props_chain(
                     );
                 }
             }
-            return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
+            let mut attempt = state.branch();
+            let chain = resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, &mut attempt, depth);
+            return known_fallback(
+                chain,
+                attempt,
+                type_name,
+                &resolved_args,
+                consuming_file,
+                mapping,
+                ctx,
+                state,
+                depth,
+            );
         }
         Some(super::precedence::SourceOrKnownMatch::Interface(iface)) => {
-            return resolve_interface_chain(iface, type_args, consuming_file, mapping, ctx, state, depth);
+            let mut attempt = state.branch();
+            let chain = resolve_interface_chain(iface, type_args, consuming_file, mapping, ctx, &mut attempt, depth);
+            return known_fallback(
+                chain,
+                attempt,
+                type_name,
+                &resolved_args,
+                consuming_file,
+                mapping,
+                ctx,
+                state,
+                depth,
+            );
         }
         Some(super::precedence::SourceOrKnownMatch::Known(result)) => {
-            return match result {
-                KnownPatternResult::Props(props) => {
-                    ResolvedChain { props: props.into_iter().map(Arc::new).collect(), ..ResolvedChain::empty() }
-                }
-                KnownPatternResult::Type(PropType::HtmlAttributes { element, omitted }) => {
-                    let layer = InheritedLayer {
-                        type_name: type_name.to_owned(),
-                        file_name: resolve_react_types_file(consuming_file, ctx),
-                        omitted,
-                        html_element: Some(element),
-                        total_props: 0,
-                    };
-                    ResolvedChain { inheritance: vec![layer], ..ResolvedChain::empty() }
-                }
-                KnownPatternResult::Type(pt) => {
-                    if let PropType::Opaque(detail) = &pt {
-                        push_known_opaque_diagnostic(
-                            &mut state.diagnostics,
-                            detail.reason(),
-                            type_name_bare,
-                            consuming_file,
-                        );
-                    }
-                    ResolvedChain::empty_with_compose(pt.raw_string())
-                }
-                KnownPatternResult::Alias { name } => {
-                    resolve_props_chain(&name, &[], consuming_file, mapping, ctx, state, depth + 1)
-                }
-            };
+            return known_chain(result, type_name, consuming_file, mapping, ctx, state, depth);
         }
         None => {}
     }

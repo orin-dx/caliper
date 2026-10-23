@@ -1684,7 +1684,9 @@ expression: value
         "sx": {
           "name": "sx",
           "type": {
-            "kind": "sxProps"
+            "kind": "named",
+            "name": "SxProps",
+            "args": []
           },
           "required": false,
           "defaultValue": null,
@@ -1772,6 +1774,18 @@ expression: value
       "column": null,
       "help": null,
       "code": "OPAQUE_TYPE",
+      "affects": [
+        "TypeSampler"
+      ]
+    },
+    {
+      "severity": "warning",
+      "message": "Cannot resolve type 'SxProps' in '[ROOT]/fixtures/rdt-compat/types.tsx' — it will appear as an unexpanded named reference",
+      "file": "[ROOT]/fixtures/rdt-compat/types.tsx",
+      "line": null,
+      "column": null,
+      "help": "Check that the package is installed and its types are resolvable.",
+      "code": "UNRESOLVABLE_IMPORT",
       "affects": [
         "TypeSampler"
       ]

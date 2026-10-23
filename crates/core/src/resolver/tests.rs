@@ -99,9 +99,10 @@ fn test_string_and_empty_object_normalizes_to_string() {
 #[test]
 fn test_sx_props_known_pattern() {
     let ctx = empty_ctx();
+    // No shortcut (ADR 0014): without MUI's declaration it stays the named reference RDT also prints.
     let ct = CollectedType::Named { name: "SxProps".into(), args: vec![] };
     let result = resolve_type(&ct, &ctx);
-    assert_eq!(result, PropType::SxProps, "Expected SxProps, got {:?}", result);
+    assert_eq!(result, PropType::Named { name: "SxProps".into(), args: vec![] });
 }
 
 // ── Test: P0-1 regression — a project-defined SxProps extended via
@@ -1871,23 +1872,29 @@ fn test_unhandled_intersection_member_gets_diagnostic_not_silent_drop() {
 
 // ── Test 20: resolve_known's Opaque results must emit a diagnostic ─────────
 // Regression test for: adversarial review finding — a KnownPatternResult::Type
-// that's actually PropType::Opaque (ThemingProps, StylesApiProps, cva/tv
-// without discoverable variants, ...) never got a diagnostic pushed at
-// either call site (named.rs step 5, chain.rs step 2), even though
-// resolve_known has no diagnostics channel of its own to push through.
+// that's actually PropType::Opaque (cva/tv without discoverable variants)
+// never got a diagnostic pushed at either call site (named.rs step 5,
+// chain.rs step 2), even though resolve_known has no diagnostics channel of
+// its own to push through.
+
+fn variants_of_missing() -> CollectedType {
+    CollectedType::Named { name: "VariantProps".into(), args: vec![CollectedType::TypeOf("missingVariants".into())] }
+}
 
 #[test]
 fn test_known_opaque_result_emits_diagnostic_at_type_level() {
     let ctx = empty_ctx();
     let mut state = ResolveState::default();
-    let ct = CollectedType::Named { name: "ThemingProps".into(), args: vec![] };
-    let result = super::collected::resolve_collected_type(&ct, Utf8Path::new("/test/button.tsx"), &ctx, &mut state, 0);
+    let result = super::collected::resolve_collected_type(
+        &variants_of_missing(),
+        Utf8Path::new("/test/button.tsx"),
+        &ctx,
+        &mut state,
+        0,
+    );
 
     assert!(matches!(result, PropType::Opaque(_)), "expected Opaque, got {:?}", result);
-    assert!(
-        !state.diagnostics.is_empty(),
-        "expected a diagnostic for the known-but-runtime-dependent ThemingProps result, got none"
-    );
+    assert!(!state.diagnostics.is_empty(), "expected a diagnostic for VariantProps without variants, got none");
 }
 
 #[test]
@@ -1897,20 +1904,18 @@ fn test_known_opaque_result_emits_diagnostic_at_chain_level() {
     let file_path = Utf8PathBuf::from("/test/box.tsx");
     let mapping = ComponentMapping::new(
         "Box".into(),
-        "ThemingProps".into(),
+        "VariantProps".into(),
         file_path.clone(),
         0,
         0,
         crate::types::DetectionRule::FunctionDeclaration,
     );
+    let CollectedType::Named { args, .. } = variants_of_missing() else { unreachable!() };
 
-    let chain = super::chain::resolve_props_chain("ThemingProps", &[], &file_path, &mapping, &ctx, &mut state, 0);
+    let chain = super::chain::resolve_props_chain("VariantProps", &args, &file_path, &mapping, &ctx, &mut state, 0);
 
-    assert!(!chain.composes.is_empty(), "expected ThemingProps to still surface via composes");
-    assert!(
-        !state.diagnostics.is_empty(),
-        "expected a diagnostic for the known-but-runtime-dependent ThemingProps result at chain level, got none"
-    );
+    assert!(!chain.composes.is_empty(), "expected VariantProps to still surface via composes");
+    assert!(!state.diagnostics.is_empty(), "expected a diagnostic for VariantProps without variants, got none");
 }
 
 // ── Test 21: collected.rs's Conditional/Mapped/KeyOf/Raw-fallback Opaque

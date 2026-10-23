@@ -16,10 +16,11 @@ One line per ADR, with what it guards. Add a line when you add an ADR.
 - [7. Let the backend discover components, always compile it in, and keep structural as the default](0007-backend-discovers-components-and-compiles-in.md) — do not feature-gate the backend crate, run it by default, or let it replace a structural entry on a clash.
 - [8. Discard the parse cache whenever the build that wrote it differs](0008-parse-cache-keyed-by-build.md) — do not load cache entries without checking the payload's header against the running build.
 - [9. Write each distinct prop once in the canonical output](0009-canonical-output-interns-props.md) — do not inline props in canonical JSON or derive prop ids from position.
-- [10. Load dependency declarations by name, before resolution, into a shared layer](0010-load-dependency-declarations-by-name.md) — do not load dependency files by import closure, resolve against them lazily during resolution, emit their components or enums, or let them outrank a known shortcut.
+- [10. Load dependency declarations by name, before resolution, into a shared layer](0010-load-dependency-declarations-by-name.md) — do not load dependency files by import closure, resolve against them lazily during resolution, or emit their components or enums. Its precedence of shortcuts over dependency declarations is superseded by 0014.
 - [11. Find dependency declarations through a per-package export index, not the parse cache](0011-per-package-export-index.md) — do not put dependency files in the `DtsCache` or reuse an index whose package's `package.json` changed.
 - [12. Collapse large inherited dependency sources, as Storybook does](0012-collapse-large-dependency-sources.md) — do not resolve a collapsed source's props, or collapse a component's own props.
 - [13. Read React's attribute declarations in curated mode, in an index of their own](0013-curated-mode-reads-react-attributes-apart.md) — do not merge React into the project index outside Full mode, or make the React index a lookup fallback.
+- [14. A loaded declaration wins over a known shortcut; shortcuts are fallbacks](0014-declarations-before-shortcuts.md) — do not check a shortcut before a declaration, or add one without measuring it against the declaration on consumer code.
 
 Changing any of these needs a new ADR.
 

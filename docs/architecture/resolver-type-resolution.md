@@ -32,7 +32,7 @@ With `PipelineOptions::load_dependencies`, `ResolutionContext::with_dependencies
 
 - **Import map and named-type index:** a file the project's maps don't hold is looked up in the layer's (`ImportResolutionMap::fallback`, `NamedTypeIndex::fallback`).
 - **Re-exports:** `follow_reexports` takes the loader's answer for a `(module, name)` it walked, instead of walking the package's stubs again; a module with no answer is walked as before.
-- **Precedence:** a project declaration, then a known shortcut, then the dependency's own declaration, then a builtin. `resolve_source_defined_or_known` checks `resolve_known` first for a name declared in a dependency file, because the shortcuts (cva's `VariantProps`, MUI's `SxProps`) stand in for conditional or mapped types this resolver can't expand.
+- **Precedence (ADR 0014):** a declaration, the project's or a loaded dependency's, then a known shortcut, then a builtin. At the props-chain level a declaration that evaluates to nothing (cva's `VariantProps`, which needs `Parameters<C>[0]`) gives way to a shortcut of the same name (`chain::known_fallback`), and its diagnostics are dropped with it.
 - **Value index:** `ComponentProps<typeof X>` and `typeof X` in `extends` find a dependency component through `DependencyLayer::component`. Dependency components and enums live only in the layer's `GlobalSourceData`, so they never reach output or the bare-name indexes.
 - **Diagnostics:** a type the loader could not find says why in the help of "Cannot resolve type" (`unresolved_type_help`): the module did not resolve, resolved to JavaScript without types, or does not export the name.
 
