@@ -1,0 +1,55 @@
+<task-notification>
+<task-id>ad204df9ff28e2f9b</task-id>
+<tool-use-id>toolu_01FFWDEp62YtC8N1uwkHZ99x</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/ad204df9ff28e2f9b.output</output-file>
+<status>completed</status>
+<summary>Agent "Bug batch from Storybook and loader findings" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I opened three stacked fixes for the bugs the Storybook and loader tracks found, and dropped one because it was already fixed. Each PR has a test that fails without the fix; the full test suite and `just lint doc-check machete typos` pass on every branch.
+
+| Bug | Branch → base | PR | Commit |
+|---|---|---|---|
+| 1. JSDoc on a one-line function | `fix/jsdoc-one-line-function` → `feat/collapse-inherited-props` (#109) | https://github.com/orin-dx/caliper/pull/121 | `801bc99a` |
+| 2. Render prop shown as `=&gt; void` | dropped | — | — |
+| 3. DOM handler overwritten | `fix/dom-handler-overwrite` → `fix/jsdoc-one-line-function` | https://github.com/orin-dx/caliper/pull/122 | `8d0cffd9` |
+| 4. `z.infer` unwrapped | `fix/zod-infer-unwrap` → `fix/dom-handler-overwrite` | https://github.com/orin-dx/caliper/pull/123 | `86c36f19` |
+
+All work is in the worktree `.claude/worktrees/agent-ad204df9ff28e2f9b`.
+
+**1. JSDoc (#121)**
+- **Cause:** a comment attached to any declaration that started within 120 bytes after it. In `function Badge(props: { a: string })` the first prop is resolved before the component, so it took the component's comment. The same rule let inline fields take their prop's comment, and let license headers become component descriptions.
+- **Fix:** a comment now documents only the declaration directly after it. Only keywords, modifiers, decorators and other comments may sit in between, as in TypeScript.
+- **Effect with default flags:** mantine 11 components change, chakra 1, shadcn 1, antd 17, spectrum 27. All the changes I checked are improvements. Diagnostic counts are unchanged.
+- **Snapshots:** one description moves in `rdt_compat`, and the parse-cache golden bytes change (record shape is the same, so no schema version bump).
+
+**2. Render prop: dropped.** It doesn't reproduce on the base branch; #103 already fixed it. The Storybook observation came from `main`.
+
+**3. DOM handler (#122)**
+- **TypeScript's rule** (confirmed with the TypeScript checker on shadcn): when two members of an intersection declare the same prop, its type is the intersection of both. An interface's own declaration replaces the one it extends. Literal unions reduce to their common values.
+- **What RDT shows:** run directly with the app's tsconfig, RDT prints only the first declaration, `ReactEventHandler&lt;HTMLDivElement&gt;`. The `string | …SVGSVGElement` in the bench results came from a different tsconfig.
+- **Cause:** intersections were merged with the `extends` rule, so one declaration silently replaced the other. `React.ComponentProps&lt;"div"&gt;` is recorded as an HTML layer with no listed props, so recharts' handler was the only declaration Caliper saw.
+- **Fix:** intersections now combine both types. A prop is required if any member requires it, and lists every declaration. When React's own types are loaded, the element's real attribute declaration also joins the intersection. `extends` still lets the derived declaration win.
+- **Still not fixed in curated mode.** This is the CLI default and what the Vite plugin and Storybook use. Only Full mode loads React's own type declarations, and the dependency loader skips them by design (ADR 0010). So in curated mode, `ChartLegendContent.onTimeUpdate` still shows only recharts' type. In Full mode with dependencies it now shows both types intersected. Fixing curated mode would mean loading React's attribute declarations there too, which needs an ADR 0010 amendment.
+- **Effect with default flags:** shadcn 1 prop (`Callout.variant` is now `"default"`, matching TypeScript), antd 2, spectrum 3; the rest are identical.
+- **Effect with `--load-dependencies`:** chakra 363 components, but only the `asChild` declarations list changes (it now lists both `PolymorphicProps`). shadcn 10, antd 3, spectrum 3.
+- **Speed:** chakra with dependencies went from 452 to 465 ms; the default run is unchanged. No snapshots changed.
+
+**4. `z.infer` (#123)**
+- **Cause:** #104 keeps an alias's name when its expansion can't be evaluated, but an indexed access that can't be evaluated (`T["_output"]`) didn't count. Two related gaps:
+  - **Declared-type case:** an indexed access on a type passed as an argument (`z.infer&lt;Parsed&gt;`) never evaluated, even though it can.
+  - **Flags-off output:** it printed `z.infer&lt;schema&gt;`, because an unevaluable `typeof X` lost its `typeof`.
+- **Fix:** all three are fixed. With or without dependencies, the prop now prints `z.infer&lt;typeof schema&gt;`, and `z.infer&lt;Parsed&gt;` evaluates to `{ id: number }`.
+- **Effect** (prop types in RDT format):
+  - **Default flags:** mantine 11, chakra 0, shadcn 29, antd 23, spectrum 11.
+  - **With dependencies:** mantine 11, chakra 1, shadcn 53, antd 19, spectrum 11.
+  - Every sampled change matches how TypeScript prints the type, for example `CarouselOptions`, `ClosableType`, `Responsive&lt;BackgroundColor[C]&gt;` and `ReturnType&lt;typeof useTree&gt;`.
+  - antd drops two max-depth-exceeded diagnostics.
+- **Snapshots:** none changed.
+- **Follow-up:** Radix's `(typeof SIDE_OPTIONS)[number]` now shows as `Side`. TypeScript evaluates it to the literal union, which would need Caliper to read `declare const` tuple types from `.d.ts` files.
+
+The repro and measurement scripts are in `target/bugrepro/` and are not committed.
+
+result: Opened stacked PRs #121 (JSDoc attachment), #122 (intersection prop merge; curated mode still shows only recharts' handler by design) and #123 (`z.infer&lt;typeof schema&gt;` keeps its name); dropped the render-prop bug as already fixed by #103.</result>
+<usage><subagent_tokens>350837</subagent_tokens><tool_uses>263</tool_uses><duration_ms>2125471</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-ad204df9ff28e2f9b</worktreePath><worktreeBranch>worktree-agent-ad204df9ff28e2f9b</worktreeBranch></worktree>
+</task-notification>
