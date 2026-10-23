@@ -1,0 +1,1 @@
+What about coding patterns, crates? Do we have anti-patterns we should address? Better patterns to adopt?
