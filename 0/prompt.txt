@@ -1,0 +1,3 @@
+We've been building a lot for caliper v1. I'd like you check what has been built over the last week and all of the outstanding PRs. Consider them in the context of our goals for the project, the stated architecture and semantic models. Also consider Rust best practices, performance and security, DX and maintainability.
+
+Give me a comprehensive report, including concerns, architectural issues, Rust semantic and best practices smells, bugs, etc. Be comprehensive. Come at this from a principal engineer lens worried about our v1 release and worried about proving the value of caliper over RDT
