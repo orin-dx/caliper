@@ -151,7 +151,8 @@ export interface ExtractionStats {
 /** A prop as react-docgen-typescript documents it (`sessionDocgenInfo`). */
 export interface RdtProp {
   name: string
-  type: { name: string; value?: Array<{ value: string }> }
+  /** A literal union is `{ name: 'enum', raw, value }`; any other type is `{ name }`, its text. */
+  type: { name: string; raw?: string; value?: Array<{ value: string }> }
   required: boolean
   defaultValue: { value: string; computed: boolean } | null
   description: string

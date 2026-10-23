@@ -14,6 +14,8 @@ The line the project actually draws, reverse-engineered from where each format l
 
 ## RDT format (`pipeline::rdt`)
 
+Two entry points share one projection: `serialize` (`--format rdt`) applies RDT's default `skipChildrenPropWithoutDoc` (`omits`), and `docgen_info` (the NAPI `sessionDocgenInfo`, feeding the Storybook provider) keeps an undocumented `children`, because Storybook 11's React docgen lists it.
+
 ### The `enum`-shape convention (`type_json`)
 
 react-docgen-typescript encodes a literal union prop type not as an inlined string but as a structured shape renderers pattern-match on:
@@ -27,14 +29,14 @@ if prop_type.is_literal_union() {
         }
         _ => vec![],
     };
-    return serde_json::json!({ "name": "enum", "value": values });
+    return serde_json::json!({ "name": "enum", "raw": prop_type.raw_string(), "value": values });
 }
 serde_json::json!({ "name": prop_type.raw_string() })
 ```
 
 This exists because Storybook's own docgen addon (a real consumer of RDT's JSON) looks for `type.name === "enum"` as the trigger to render a `<select>` control instead of a free-text field — the single highest-value renderer hook for the most commonly curated kind of prop in any design system (`variant`, `size`, `color`, …).
 
-**Invariant 2:** `rdt::type_json` returns `{"name": "enum", "value": [...]}` if and only if `prop_type.is_literal_union()` is `true`. Do not special-case `PropType::Union`/`PropType::LiteralUnion` shape-matching directly inside `rdt::type_json` — route every literal-union check through `is_literal_union()`, because that's the single place the 2+ member truthiness rule (below) is enforced.
+**Invariant 2:** `rdt::type_json` returns `{"name": "enum", "raw": ..., "value": [...]}` if and only if `prop_type.is_literal_union()` is `true`. Do not special-case `PropType::Union`/`PropType::LiteralUnion` shape-matching directly inside `rdt::type_json` — route every literal-union check through `is_literal_union()`, because that's the single place the 2+ member truthiness rule (below) is enforced.
 
 ### The 2+ member truthiness rule
 

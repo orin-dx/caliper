@@ -122,6 +122,14 @@ fn to_tagged_value(pt: &PropType) -> serde_json::Value {
 }
 
 #[test]
+fn zero_argument_callback_raw_string_has_no_parameter() {
+    let ty = PropType::EventHandler { event_type: "void".into(), param_name: None };
+    assert_eq!(ty.raw_string(), "() => void");
+    let named = PropType::EventHandler { event_type: "void".into(), param_name: Some("value".into()) };
+    assert_eq!(named.raw_string(), "(value: void) => void");
+}
+
+#[test]
 fn tuple_raw_string_renders_real_elements_not_a_placeholder() {
     let ty = PropType::Tuple(vec![PropType::Number, PropType::Number]);
     assert_eq!(ty.raw_string(), "[number, number]");

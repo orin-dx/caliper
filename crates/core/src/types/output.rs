@@ -423,6 +423,8 @@ impl PropType {
             }
             PropType::ReactNode => "ReactNode".into(),
             PropType::CssProperties => "CSSProperties".into(),
+            // `resolve_function_type` records a zero-argument callback as a `void` event with no parameter name.
+            PropType::EventHandler { event_type, param_name: None } if event_type == "void" => "() => void".into(),
             PropType::EventHandler { event_type, param_name } => {
                 format!("({}: {}) => void", param_name.as_deref().unwrap_or("e"), event_type)
             }

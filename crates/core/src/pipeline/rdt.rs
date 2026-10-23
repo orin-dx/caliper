@@ -17,7 +17,7 @@ pub fn type_json(prop_type: &PropType) -> serde_json::Value {
             }
             _ => vec![],
         };
-        return serde_json::json!({ "name": "enum", "value": values });
+        return serde_json::json!({ "name": "enum", "raw": prop_type.raw_string(), "value": values });
     }
     serde_json::json!({ "name": prop_type.raw_string() })
 }
@@ -28,13 +28,18 @@ pub fn omits(prop: &ParsedProp) -> bool {
     prop.name == "children" && prop.description.is_empty()
 }
 
-/// One component as RDT documents it. `methods` is always `[]` — this tool doesn't extract class methods, and RDT
-/// consumers (Storybook's docgen addon) only ever read it for class components.
+/// One component as RDT documents it, except that an undocumented `children` stays: this is the `__docgenInfo`
+/// Storybook's React renderer converts, and its own docgen lists `children`. `methods` is always `[]` — this tool
+/// doesn't extract class methods, and Storybook only reads it for class components.
 pub fn docgen_info(entry: &ComponentEntry) -> serde_json::Value {
+    component_doc(entry, |_| true)
+}
+
+fn component_doc(entry: &ComponentEntry, keep: impl Fn(&ParsedProp) -> bool) -> serde_json::Value {
     let props: serde_json::Map<String, serde_json::Value> = entry
         .props
         .iter()
-        .filter(|(_, prop)| !omits(prop))
+        .filter(|(_, prop)| keep(prop))
         .map(|(k, prop)| {
             let obj = serde_json::json!({
                 "name": prop.name,
@@ -57,9 +62,12 @@ pub fn docgen_info(entry: &ComponentEntry) -> serde_json::Value {
     })
 }
 
-/// Every component of `output`, keyed as in the output, pretty-printed.
+/// Every component of `output` as RDT documents it, keyed as in the output, pretty-printed.
 pub fn serialize(output: &ExtractionOutput) -> serde_json::Result<String> {
-    let map: serde_json::Map<String, serde_json::Value> =
-        output.components.iter().map(|(name, entry)| (name.clone(), docgen_info(entry))).collect();
+    let map: serde_json::Map<String, serde_json::Value> = output
+        .components
+        .iter()
+        .map(|(name, entry)| (name.clone(), component_doc(entry, |prop| !omits(prop))))
+        .collect();
     serde_json::to_string_pretty(&serde_json::Value::Object(map))
 }
