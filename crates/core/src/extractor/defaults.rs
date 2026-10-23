@@ -46,17 +46,15 @@ impl<'src> SourceDataCollector<'src> {
 
     pub(super) fn eval_expr_as_default<'a>(&self, expr: &Expression<'a>, source: DefaultSource) -> RawDefault {
         match expr {
-            Expression::StringLiteral(s) => {
-                RawDefault { value: format!("\"{}\"", s.value.as_str()), computed: false, source }
-            }
             Expression::NumericLiteral(n) => RawDefault { value: n.value.to_string(), computed: false, source },
             Expression::BooleanLiteral(b) => RawDefault { value: b.value.to_string(), computed: false, source },
             Expression::NullLiteral(_) => RawDefault { value: "null".into(), computed: false, source },
             Expression::Identifier(id) if id.name.as_str() == "undefined" => {
                 RawDefault { value: "undefined".into(), computed: false, source }
             }
-            // Array and object literals: capture source text, not computed
-            Expression::ArrayExpression(_) | Expression::ObjectExpression(_) => {
+            // String, array and object literals keep their source text, quotes included, as react-docgen-typescript and
+            // Storybook's React docgen print them.
+            Expression::StringLiteral(_) | Expression::ArrayExpression(_) | Expression::ObjectExpression(_) => {
                 use oxc_span::GetSpan;
                 let span = expr.span();
                 RawDefault {

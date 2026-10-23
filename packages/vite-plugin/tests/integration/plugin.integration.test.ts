@@ -99,7 +99,7 @@ describe.skipIf(!shouldRun)('caliperDocgen (integration, real native binding)', 
     expect(prop('variant').required).toBe(false)
     // The NAPI boundary's ParsedProp.defaultValue.value carries the prop's
     // source-text literal verbatim, quotes included — not a bare JS string.
-    expect(prop('variant').defaultValue?.value).toBe('"primary"')
+    expect(prop('variant').defaultValue?.value).toBe("'primary'")
   })
 
   it('re-extracts real prop changes via a direct hotUpdate call against the real binding', async () => {
