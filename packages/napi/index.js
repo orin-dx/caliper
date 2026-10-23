@@ -783,3 +783,4 @@ module.exports.createSession = nativeBinding.createSession
 module.exports.extractAll = nativeBinding.extractAll
 module.exports.extractFileIncremental = nativeBinding.extractFileIncremental
 module.exports.initializeSession = nativeBinding.initializeSession
+module.exports.sessionDocgenInfo = nativeBinding.sessionDocgenInfo

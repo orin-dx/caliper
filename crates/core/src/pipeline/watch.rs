@@ -96,6 +96,11 @@ impl WatchSession {
         }
     }
 
+    /// The current output, shared rather than copied. `None` before `initialize`.
+    pub fn current_output(&self) -> Option<Arc<ExtractionOutput>> {
+        self.current.load_full().map(|revision| revision.output.clone())
+    }
+
     /// Apply one file change: an edit, a new file, or a deletion. A path that is not a source file of this project
     /// (outside every source directory, excluded, or not TypeScript) changes nothing.
     pub fn update_file(&self, changed: &Utf8Path) -> IncrementalUpdate {

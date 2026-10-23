@@ -260,6 +260,27 @@ pub async fn initialize_session(session_id: u32, options: JsExtractOptions) -> n
     .map_err(|e| napi::Error::from_reason(e.to_string()))?
 }
 
+/// The session's components with these keys as react-docgen-typescript documents them (`__docgenInfo`, which
+/// Storybook converts to argTypes), as a JSON object keyed by component key. A key the session doesn't have is left
+/// out; so is every key before the session is initialized.
+#[napi]
+pub fn session_docgen_info(session_id: u32, keys: Vec<String>) -> napi::Result<String> {
+    match caliper_docgen_core::panic_guard::contain_panic("session_docgen_info", move || {
+        let output = SESSIONS.get(&session_id).and_then(|session| session.current_output());
+        let docs: serde_json::Map<String, serde_json::Value> = keys
+            .into_iter()
+            .filter_map(|key| {
+                let entry = output.as_ref()?.components.get(&key)?;
+                Some((key, caliper_docgen_core::pipeline::rdt::docgen_info(entry)))
+            })
+            .collect();
+        serde_json::to_string(&docs).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }) {
+        Ok(result) => result,
+        Err(diag) => Err(napi::Error::from_reason(diag.to_string())),
+    }
+}
+
 /// Release session state. Call in Vite's buildEnd hook.
 #[napi]
 pub fn close_session(session_id: u32) {

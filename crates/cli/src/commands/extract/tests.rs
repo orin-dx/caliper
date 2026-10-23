@@ -1,4 +1,5 @@
 use super::*;
+use caliper_docgen_core::pipeline::rdt::type_json as rdt_type_json;
 
 fn args_for(src: &str, json: bool) -> crate::ExtractArgs {
     crate::ExtractArgs {

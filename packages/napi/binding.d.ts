@@ -46,3 +46,10 @@ export interface JsExtractOptions {
   extraBuiltins?: Array<string>
   cacheDir?: string
 }
+
+/**
+ * The session's components with these keys as react-docgen-typescript documents them (`__docgenInfo`, which
+ * Storybook converts to argTypes), as a JSON object keyed by component key. A key the session doesn't have is left
+ * out; so is every key before the session is initialized.
+ */
+export declare function sessionDocgenInfo(sessionId: number, keys: Array<string>): string
