@@ -110,5 +110,6 @@ pub(super) fn resolve_typeof(
         affects: Vec::new(),
     });
 
-    PropType::Named { name: name.clone(), args: vec![] }
+    // The value's type, not the value: spelled as written, as TypeScript prints it.
+    PropType::Named { name: format!("typeof {name}").into(), args: vec![] }
 }
