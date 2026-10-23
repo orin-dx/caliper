@@ -1,0 +1,87 @@
+<task-notification>
+<task-id>a1bf012dd9d3d2112</task-id>
+<tool-use-id>toolu_01176ypASLgVm3etynizZEXD</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/a1bf012dd9d3d2112.output</output-file>
+<status>completed</status>
+<summary>Agent "Stage 2: dependency loading end to end" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Stage 2 (end-to-end proof of loading dependency types by name, inside Caliper) is done: committed locally on `exp/dependency-types`, not pushed, no PR.
+
+**Branch:** `exp/dependency-types` in `/Users/gabe/Projects/caliper/.claude/worktrees/agent-a1bf012dd9d3d2112`. Commits `1b111e1d` (merge of #95 + #93), `0e6cc853`, `d3dc713a`, `320891e5`. Measurement scripts and binaries are in `/Users/gabe/.claude/jobs/ba6a68d6/tmp/stage2/`.
+
+**What was built**
+- `crates/core/src/dependency_types.rs` (new): the loader.
+  - Demands are package names a project file uses in types. A `rayon` work queue resolves each one, follows re-exports, and parses only declaring files with Caliper's own `parse_file`. It then follows each declaration's referenced names.
+  - A per-package export/resolution index is persisted in the cache dir and validated by `package.json` mtime+size. A cut re-export cycle never enters the cache.
+  - The resulting `DependencyLayer` holds declaring-file data, its own `NamedTypeIndex` and `ImportResolutionMap`, the export answers, the resolutions and a dependency component value index. Each demand runs in `contain_panic`.
+- **Fallback layer:** `NamedTypeIndex` and `ImportResolutionMap` fall back to the dependency layer behind an `Arc`, which watch revisions share (`named_type_index.rs`, `import_map.rs`).
+- **Resolver** (`resolver/mod.rs`, `import.rs`, `precedence.rs`, `chain.rs`, `extends.rs`):
+  - one shared `resolve_options` builder, with tsconfig auto-discovery, `customConditions` and `.d.mts`/`.d.cts`
+  - two `resolve_dts` retries
+  - resolutions and re-export answers taken from the layer
+  - precedence: project declaration, then curated shortcut, then dependency declaration
+  - `ComponentProps&lt;typeof X&gt;` resolved through the value index, including `import { Menu as MenuPrimitive }` followed by `MenuPrimitive.Root`
+  - the ComponentMeta rule (more than 30 props) applied before resolving
+- **Pipeline** (`pipeline/revision.rs`): loads before indexing. `next()` loads only demands the session hasn't seen, into a new shared layer.
+- **CLI:** `--load-dependencies`, `--dependency-display`, and the env vars `CALIPER_LOAD_DEPENDENCIES` / `CALIPER_DEPENDENCY_DISPLAY`.
+- **Extractor:** `import * as ns; export { ns as N }` is now recorded as a namespace re-export. radix-ui's typings are written this way.
+- **Harness:** `crates/core/examples/watch_edit.rs`.
+
+**Deviations from the plan**
+- **Session memo:** implemented (`CALIPER_MEMO=1`) but not a clear win. Output is identical, but chakra goes 2.2 s → 1.8 s while memory doubles to 6.8 GB, and spectrum goes 100 → 146 ms. Copying memoized chains costs about what resolving does; resolved props need to be shared behind `Arc` instead.
+- **Watch updates:** the layer is cloned when an edit adds new demands, not updated in place.
+- **Not done:**
+  - dependency-reason text on the unresolved diagnostics
+  - project file discovery of `.mts`
+  - per-declaration index summaries (whole declaring files are still parsed)
+  - project barrels doing `export * from 'pkg'`
+
+**Measurements (flag off → on, Full mode, warm index)**
+
+| Project | Unresolved types | Empty components | Props | Dep files parsed / declaring | Load ms | Wall ms off → on | RDT ms |
+|---|---|---|---|---|---|---|---|
+| mantine | 12 → 8 | 10 → 10 | 19,506 → 19,506 | 32 / 21 | 2 | 55 → 58 | 1,463 |
+| chakra | 323 → 26 | 144 → 4 | 560 → 398,910 | 653 / 484 | 17 | 29 → 2,419 (3.4 GB) | 16,601 |
+| shadcn | 1,023 → 82 | 1,224 → 878 | 1,161 → 10,728 | 716 / 404 | 29 | 44 → 89 | 3,166 |
+| antd | 116 → 58 | 7 → 6 | 3,389 → 4,489 | 152 / 98 | 8 | 38 → 47 | 1,833 |
+| spectrum | 586 → 172 | 57 → 18 | 22,585 → 32,826 | 9 / 7 | 7 | 83 → 100 | 2,537 |
+
+- **Cold index:** adds 10–55 ms over warm (mantine 68, shadcn 100, antd 57, spectrum 116 ms).
+- **ComponentMeta:** cuts props on shadcn (10,728 → 6,312) and antd (4,489 → 3,877). It does nothing for chakra, whose props are project-declared.
+- **Watch, ms per edit off → on:**
+  - mantine 19–23 → 20–24
+  - antd 15–17 → 15–21
+  - shadcn 12–15 → 15–17, new import 26–33
+  - spectrum 34–46 → 45–58
+  - chakra 8–11 → about 980
+- **Against RDT on props:** added props that RDT also reports are 99.6% for chakra, 98.5% for shadcn, 77% for spectrum and 61% for antd. Their type text matches RDT exactly far less often: 27% shadcn, 45% spectrum, 61% antd.
+- **Props whose type changed:** they matched RDT less often after than before (shadcn 18 → 1, spectrum 35 → 10).
+
+**Correctness**
+- **Flag-off parity:** output is byte-identical to the base on 31 targets (5 corpora, 5 mirrors, 21 fixtures), the extractor change included.
+- **Determinism:** flag-on content is identical at 1/4/18 threads and with a cold or warm index. Only `stats.dtsCacheHits` differs between cold and warm, which is pre-existing `.d.ts` cache behavior.
+- **Leaks:** none. Component keys and enums are identical off/on, and no emitted component comes from `node_modules`.
+- **Watch equals cold** after props-changing edits on shadcn and antd, in both modes.
+- **Tests:** 731 pass. That includes 10 new flag-on tests: star exports, cycles, namespaces, the value index, the cva precedence check, `customConditions`, ComponentMeta, determinism with a warm index, watch parity, and JSONC/`@types` naming. Lint, doc-check, machete and typos are clean.
+- **Wrong results:**
+  - Some aliases expand into raw conditional text (`Row&lt;…&gt;`, `RouterConfig extends …`, mantine `NamePath`).
+  - Generic defaults are dropped, so spectrum's `StyleString` keeps a placeholder `P`.
+  - The existing type-text bugs now show up far more often: handlers wrapped as parameters, lost callback return types, the made-up `(e: void)`.
+  - Named aliases RDT keeps (`LucideIcon`) are expanded.
+
+**Risks**
+- chakra-scale prop volume costs 2.4 s and 3.4 GB; resolved props are copied per component.
+- Opaque types rise with reach (shadcn 671 → 381 is the exception; chakra 71 → 770).
+- The remaining unresolved demands are mostly corpus artifacts or structural limits: `@/registry` generated paths, unbuilt workspace packages, and properties of a value's type (`Primitive.div`, `Command.Empty`).
+- The project-barrel `export * from 'pkg'` case is unhandled.
+
+**Real phased PRs**
+1. **Resolver groundwork:** tsconfig discovery, `customConditions`, `.d.mts`, the `resolve_dts` retries, one options builder. This alone accounts for much of spectrum's gain, since it uses only 9 dependency files.
+2. **Namespace re-exports:** the extractor promotion, plus named-import namespace members in `resolve_to_canonical`.
+3. **Loader + layer:** the persisted per-package index, fallback indexes, precedence, the value index, leak guards, the watch demand diff. Needs an ADR, and an ADR replacing the `DtsCache` for dependencies.
+4. **Display policy:** keep the alias name when its expansion is conditional or mapped; decide on project-declared large sources (ComponentMeta's scope).
+5. **Shared resolved props (`Arc`)** before turning on the memo.
+6. **Type-text fixes:** handlers, callback returns, generic defaults.</result>
+<usage><subagent_tokens>834386</subagent_tokens><tool_uses>191</tool_uses><duration_ms>2321658</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-a1bf012dd9d3d2112</worktreePath><worktreeBranch>worktree-agent-a1bf012dd9d3d2112</worktreeBranch></worktree>
+</task-notification>
