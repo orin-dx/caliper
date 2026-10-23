@@ -1,0 +1,1 @@
+"Early in our agentic journey, we pointed a model at Storybook, where our components are documented, and the codebase. It didn’t work well. Storybook wasn’t enough, and searching the code often cost a great deal of work and context." note that the models were opus 4.5 and the matching sonnet at the time (search which version)
