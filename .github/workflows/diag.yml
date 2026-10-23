@@ -28,11 +28,12 @@ jobs:
           ls -la / /tmp | grep -Ei 'json|lock' || echo "no configs in / or /tmp"
           src=$(mktemp -d)
           printf 'export function Widget(props: { label: string }) { return null; }\n' > "$src/Widget.tsx"
-          ./target/debug/caliper-docgen watch "$src" < /dev/null > "$RUNNER_TEMP/watch.log" 2>&1 &
+          ./target/debug/caliper-docgen watch --src "$src" < /dev/null > "$RUNNER_TEMP/watch.log" 2>&1 &
           pid=$!
           sleep 4
           echo '// 1' >> "$src/Widget.tsx"
           sleep 2
+          echo "== watch output so far"; cat "$RUNNER_TEMP/watch.log"; kill -0 "$pid" || { wait "$pid"; echo "exited: $?"; exit 1; }
           ticks() { awk '{print $14 + $15}' "/proc/$pid/stat"; }
           echo "== idle, no churn (ticks per second, 100 = one core)"
           for i in 1 2 3 4; do a=$(ticks); sleep 1; echo "$(( $(ticks) - a ))"; done
