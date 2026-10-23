@@ -139,6 +139,7 @@ pub fn serialize_rdt(
             name.clone(),
             serde_json::json!({
                 "displayName": entry.display_name,
+                "filePath": entry.file_path,
                 "props": serde_json::Value::Object(props),
                 "description": entry.description,
                 "methods": [],

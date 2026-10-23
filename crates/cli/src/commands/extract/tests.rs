@@ -221,6 +221,25 @@ export function Comp(props: CompProps) { return null; }
     assert!(!composes.is_empty(), "expected the unresolvable Weird<'x'> member to appear in RDT's composes field");
 }
 
+#[test]
+fn rdt_output_gives_each_component_its_absolute_file_path() {
+    let manifest_dir = camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmp = tempfile::TempDir::new_in(manifest_dir).unwrap();
+    std::fs::write(tmp.path().join("Badge.tsx"), "export function Badge(props: { tone: string }) { return null; }")
+        .unwrap();
+    let dir = camino::Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
+    let options = caliper_docgen_core::pipeline::PipelineOptions {
+        src_dirs: vec![dir.clone()],
+        cache_dir: Some(dir.join("cache")),
+        ..Default::default()
+    };
+
+    let output = caliper_docgen_core::pipeline::extract(&options);
+    let parsed: serde_json::Value = serde_json::from_str(&serialize_rdt(&output, false).unwrap()).unwrap();
+    assert!(dir.is_absolute());
+    assert_eq!(parsed["Badge"]["filePath"], dir.join("Badge.tsx").as_str());
+}
+
 // ── SPEC-SERIALIZATION-001 AC-1/AC-2/AC-3/AC-4: rdt_type_json had zero
 // direct tests — it's private and was only ever exercised indirectly.
 
