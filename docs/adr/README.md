@@ -21,6 +21,7 @@ One line per ADR, with what it guards. Add a line when you add an ADR.
 - [12. Collapse large inherited dependency sources, as Storybook does](0012-collapse-large-dependency-sources.md) — do not resolve a collapsed source's props, or collapse a component's own props.
 - [13. Read React's attribute declarations in curated mode, in an index of their own](0013-curated-mode-reads-react-attributes-apart.md) — do not merge React into the project index outside Full mode, or make the React index a lookup fallback.
 - [14. A loaded declaration wins over a known shortcut; shortcuts are fallbacks](0014-declarations-before-shortcuts.md) — do not check a shortcut before a declaration, or add one without measuring it against the declaration on consumer code.
+- [15. A member read through React's types reads React's declaration and what it imports](0015-member-reads-of-react-types-read-their-declarations.md) — do not answer an indexed access from a table before its declaration, or add React's own files to the dependency layer. Narrows 0013's "only HTML-attribute lookups read the React index" and 0010's "the loader doesn't read React".
 
 Changing any of these needs a new ADR.
 

@@ -179,6 +179,52 @@ fn a_loaded_declaration_wins_over_a_shortcut_of_the_same_name() {
     assert_eq!(layers, [Some("div")]);
 }
 
+/// `@types/react`'s shape around `CSSProperties`: a UMD namespace whose interface extends csstype's, which it imports.
+const REACT_WITH_CSSTYPE: [(&str, &str); 4] = [
+    (
+        "node_modules/@types/react/package.json",
+        r#"{ "name": "@types/react", "version": "19.0.0", "types": "index.d.ts" }"#,
+    ),
+    (
+        "node_modules/@types/react/index.d.ts",
+        "import * as CSS from 'csstype';\nexport = React;\nexport as namespace React;\n\
+         declare namespace React {\n  interface CSSProperties extends CSS.Properties<string | number> {}\n}\n",
+    ),
+    ("node_modules/csstype/package.json", r#"{ "name": "csstype", "version": "3.1.3", "types": "index.d.ts" }"#),
+    (
+        "node_modules/csstype/index.d.ts",
+        "export interface StandardLonghandProperties<TLength = (string & {}) | 0> {\n\
+           zIndex?: Property.ZIndex | undefined;\n  width?: Property.Width<TLength> | undefined;\n}\n\
+         export interface Properties<TLength = (string & {}) | 0> extends StandardLonghandProperties<TLength> {}\n\
+         type Globals = \"inherit\" | \"initial\";\n\
+         export namespace Property {\n  export type ZIndex = Globals | \"auto\" | (number & {});\n\
+           export type Width<TLength = (string & {}) | 0> = Globals | TLength | \"auto\";\n}\n",
+    ),
+];
+const CSS_Z_INDEX: &str = "\"inherit\" | \"initial\" | \"auto\" | number";
+const CSS_WIDTH: &str = "\"inherit\" | \"initial\" | string | number | \"auto\"";
+
+/// `React.CSSProperties["zIndex"]` reads csstype's declaration, which React imports, when dependencies are loaded, with
+/// or without an import of React (its UMD global); without them, a shortcut answers.
+#[test]
+fn a_member_of_a_react_type_reads_what_react_imports_when_dependencies_load() {
+    let box_source = "import * as React from 'react';\n\
+        export function Box(props: { z?: React.CSSProperties['zIndex']; w?: React.CSSProperties['width'] }) { return null; }\n";
+    let umd_source = "export function Umd(props: { z?: React.CSSProperties['zIndex'] }) { return null; }\n";
+    let mut files = REACT_WITH_CSSTYPE.to_vec();
+    files.extend([("src/Box.tsx", box_source), ("src/Umd.tsx", umd_source)]);
+    let (_tmp, root) = project(&files);
+
+    let on = extract(&options(&root, true));
+    let off = extract(&options(&root, false));
+
+    let (z_index, width) = (CSS_Z_INDEX, CSS_WIDTH);
+    assert_eq!(prop_types(&on, "Box"), [("w".into(), width.into()), ("z".into(), z_index.into())]);
+    assert_eq!(prop_types(&on, "Umd"), [("z".into(), z_index.into())]);
+    assert_eq!(prop_types(&off, "Box"), [("w".into(), "string".into()), ("z".into(), "number".into())]);
+    assert_eq!(prop_types(&off, "Umd"), [("z".into(), "number".into())]);
+}
+
 /// `z.infer<typeof schema>` indexes the type of a runtime value, which no static reading evaluates: it keeps its name
 /// whether or not zod's declaration is loaded, as TypeScript prints it, while one over a declared type still expands.
 #[test]
@@ -411,6 +457,37 @@ fn watch_revisions_with_dependencies_match_a_cold_extract() {
         assert_eq!(watched.enums, cold.enums, "after:\n{edit}");
         assert_eq!(watched.diagnostics, cold.diagnostics, "after:\n{edit}");
         assert_eq!(watched.components["Badge"].props.keys().collect::<Vec<_>>(), expected, "after:\n{edit}");
+    }
+}
+
+/// A revision whose edit first reaches React's `CSSProperties` extends the layer with csstype as a cold run loads it.
+#[test]
+fn a_watch_revision_that_first_reads_a_react_member_matches_a_cold_extract() {
+    let first = "export function Box(props: { plain: string }) { return null; }\n";
+    let mut files = REACT_WITH_CSSTYPE.to_vec();
+    files.push(("src/Box.tsx", first));
+    let (_tmp, root) = project(&files);
+    let path = root.join("src/Box.tsx");
+    let session = crate::pipeline::WatchSession::new(options(&root, true));
+    let _initial = session.initialize();
+    let edits = [
+        "export function Box(props: { z?: React.CSSProperties['zIndex'] }) { return null; }\n",
+        // A new demand (`A`) extends the layer the previous revision loaded.
+        "import type { A } from 'ui-kit';\n\
+         export function Box(props: { a: A; z?: React.CSSProperties['zIndex']; w?: React.CSSProperties['width'] }) { return null; }\n",
+    ];
+    let expected: [&[(&str, &str)]; 2] =
+        [&[("z", CSS_Z_INDEX)], &[("a", "string"), ("w", CSS_WIDTH), ("z", CSS_Z_INDEX)]];
+    for (edit, expected) in edits.into_iter().zip(expected) {
+        std::fs::write(&path, edit).unwrap();
+        let _update = session.update_file(&path);
+        let watched = session.snapshot();
+        let cold = extract(&options(&root, true));
+        assert_eq!(watched.components, cold.components, "after:\n{edit}");
+        assert_eq!(watched.diagnostics, cold.diagnostics, "after:\n{edit}");
+        let types = prop_types(&watched, "Box");
+        let types: Vec<(&str, &str)> = types.iter().map(|(n, t)| (n.as_str(), t.as_str())).collect();
+        assert_eq!(types, expected, "after:\n{edit}");
     }
 }
 

@@ -337,15 +337,24 @@ expression: value
             "kind": "union",
             "members": [
               {
-                "kind": "literalUnion",
-                "members": [
-                  "xs",
-                  "sm",
-                  "md",
-                  "lg",
-                  "xl"
-                ],
-                "hasDefault": false
+                "kind": "stringLiteral",
+                "value": "xs"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "sm"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "md"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "lg"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "xl"
               },
               {
                 "kind": "string"
@@ -401,26 +410,44 @@ expression: value
             "kind": "union",
             "members": [
               {
-                "kind": "literalUnion",
-                "members": [
-                  "xs",
-                  "sm",
-                  "md",
-                  "lg",
-                  "xl"
-                ],
-                "hasDefault": false
+                "kind": "stringLiteral",
+                "value": "xs"
               },
               {
-                "kind": "literalUnion",
-                "members": [
-                  "compact-xs",
-                  "compact-sm",
-                  "compact-md",
-                  "compact-lg",
-                  "compact-xl"
-                ],
-                "hasDefault": false
+                "kind": "stringLiteral",
+                "value": "sm"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "md"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "lg"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "xl"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "compact-xs"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "compact-sm"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "compact-md"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "compact-lg"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "compact-xl"
               }
             ]
           },
@@ -1577,15 +1604,24 @@ expression: value
             "kind": "union",
             "members": [
               {
-                "kind": "literalUnion",
-                "members": [
-                  "xs",
-                  "sm",
-                  "md",
-                  "lg",
-                  "xl"
-                ],
-                "hasDefault": false
+                "kind": "stringLiteral",
+                "value": "xs"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "sm"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "md"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "lg"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "xl"
               },
               {
                 "kind": "string"
