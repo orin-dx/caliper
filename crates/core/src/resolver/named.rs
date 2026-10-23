@@ -31,7 +31,7 @@ pub(super) fn resolve_named(
     // instantiations into a false cycle.
     let visit_key: CompactString = format!("{}:{}<{:?}>", consuming_file, name, args).into();
 
-    if !state.named_in_progress.insert(visit_key.clone()) {
+    if !state.enter_named(visit_key.clone()) {
         state.diagnostics.push(Diagnostic {
             severity: DiagnosticSeverity::Info,
             message: format!(
@@ -94,13 +94,13 @@ fn resolve_named_uncycled(
             let outer_named_unevaluated = std::mem::take(&mut state.named_unevaluated);
             let expanded = match params {
                 Some(params) if !args.is_empty() => {
-                    state.in_scope_type_params.extend(params.iter().cloned());
+                    state.add_type_params(params.iter());
                     let subst =
                         super::substitute::build_substitution(params, args, consuming_file, &mut state.diagnostics);
                     resolve_type_alias_type(&super::substitute::substitute_alias(&alias, &subst), ctx, state, depth)
                 }
                 Some(params) => {
-                    state.in_scope_type_params.extend(params.iter().cloned());
+                    state.add_type_params(params.iter());
                     resolve_type_alias_type(&alias, ctx, state, depth)
                 }
                 None => resolve_type_alias_type(&alias, ctx, state, depth),
@@ -183,7 +183,7 @@ fn resolve_named_uncycled(
     }
 
     // ── 6.5 Enclosing generic's own type parameter — expected, not unresolvable ─
-    if state.in_scope_type_params.contains(bare) {
+    if state.has_type_param(bare) {
         return PropType::Named { name: name.clone(), args: resolved_args };
     }
 

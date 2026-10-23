@@ -509,7 +509,7 @@ fn resolve_key_set(
             // made `keyof Base` look circular and come back empty. Depth still bounds the recursion.
             let mut branch_state = state.detached();
             let chain = resolve_base_as_chain(target, file, mapping, ctx, &mut branch_state, depth + 1);
-            state.absorb(branch_state);
+            state.absorb_detached(branch_state);
             Some(chain.props.iter().map(|p| p.name.clone()).collect())
         }
         CollectedType::Named { name, args } if (name == "Exclude" || name == "Extract") && args.len() == 2 => {
@@ -521,9 +521,7 @@ fn resolve_key_set(
         }
         // An unfilled type parameter (`Omit<T, "style" | PropsToOmit>` with no argument for `PropsToOmit`) contributes
         // no keys; its default is unknown to the extractor and is almost always `never`.
-        CollectedType::Named { name, args } if args.is_empty() && state.in_scope_type_params.contains(name) => {
-            Some(vec![])
-        }
+        CollectedType::Named { name, args } if args.is_empty() && state.has_type_param(name) => Some(vec![]),
         CollectedType::Named { name, args } => {
             let (canonical_file, _, matched) =
                 super::precedence::resolve_source_defined_or_known(name, &[], file, ctx, state);

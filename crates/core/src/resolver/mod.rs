@@ -32,6 +32,7 @@ mod extends;
 mod func;
 mod html;
 mod import;
+mod memo;
 mod named;
 mod precedence;
 mod primitives;
@@ -233,6 +234,8 @@ pub struct ResolutionContext {
     pub ambient_global_files: Vec<Utf8PathBuf>,
     /// Why the configured tsconfig could not be used, if it could not.
     pub(crate) tsconfig_diagnostic: Option<Diagnostic>,
+    /// Interface chains already resolved this run, shared by the components that inherit them.
+    pub(crate) interface_chains: memo::InterfaceChains,
 }
 
 impl ResolutionContext {
@@ -307,6 +310,7 @@ impl ResolutionContext {
             html_attributes: options.html_attributes,
             ambient_global_files,
             module_resolutions: Default::default(),
+            interface_chains: Default::default(),
         }
     }
 }
