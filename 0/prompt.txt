@@ -1,0 +1,1 @@
+Our readmes should be succint, friendly, professional and clear of AI slop, AI word salada and wordy prose. Be inspired by the callisto and wisp-plugins readme, architecture, etc
