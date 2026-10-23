@@ -1,0 +1,1 @@
+Is there a better, more clever way of doing this in a super duper performant way? Can parallelism help?
