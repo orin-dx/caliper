@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const SNAPSHOT = JSON.stringify({
-  components: { Button: { displayName: 'Button' } },
+  components: { Button: { displayName: 'Button', filePath: '/project/src/Button.tsx' } },
   enums: {},
   diagnostics: [],
   stats: {},
@@ -39,6 +39,7 @@ vi.mock('caliper-docgen-napi', () => ({
   initializeSession: vi.fn(),
   extractFileIncremental: vi.fn(),
   closeSession: vi.fn(),
+  sessionDocgenInfo: vi.fn(),
 }))
 
 import { caliperDocgen } from '../../src/index.js'
@@ -135,7 +136,9 @@ describe('caliperDocgen', () => {
       ;(plugin.configureServer as Function)({ environments: { client: { hot: { send } } } })
       await vi.waitUntil(() => send.mock.calls.length > 0)
       expect(napi.initializeSession).toHaveBeenCalledWith(42, expect.objectContaining({ srcDirs: ['/project/src'] }))
-      expect(send).toHaveBeenCalledWith('caliper-docgen:ready', { components: { Button: { displayName: 'Button' } } })
+      expect(send).toHaveBeenCalledWith('caliper-docgen:ready', {
+        components: { Button: { displayName: 'Button', filePath: '/project/src/Button.tsx' } },
+      })
     })
 
     // buildEnd isn't called in dev mode, so configureServer's returned
@@ -353,6 +356,80 @@ describe('caliperDocgen', () => {
 
       expect(sentUpdates(ctx).map((u: any) => u.updatedKeys[0])).toEqual(['Input'])
       consoleError.mockRestore()
+    })
+  })
+
+  // ── injectDocgenInfo ───────────────────────────────────────────────────────
+
+  describe('injectDocgenInfo', () => {
+    const doc = (displayName: string) => ({
+      displayName,
+      description: '',
+      props: {},
+      methods: [],
+      tags: {},
+      composes: [],
+    })
+    const assignment = (displayName: string) =>
+      `try { ${displayName}.__docgenInfo = ${JSON.stringify(doc(displayName))} } catch {}`
+    const transform = (code: string, id: string) => (plugin.transform as any).handler.call(pluginContext(), code, id)
+
+    beforeEach(async () => {
+      ;(napi.sessionDocgenInfo as any).mockImplementation((_id: number, keys: string[]) =>
+        JSON.stringify(Object.fromEntries(keys.map((key) => [key, doc(key)]))),
+      )
+      plugin = caliperDocgen({ srcDirs: ['src'], injectDocgenInfo: true })
+      ;(plugin.configResolved as Function)({ root: '/project', command: 'build' })
+      await (plugin.buildStart as Function).call(pluginContext())
+    })
+
+    it('appends a guarded __docgenInfo assignment for each component the module declares', async () => {
+      expect(await transform('export function Button() {}', '/project/src/Button.tsx?v=1')).toEqual({
+        code: `export function Button() {}\n${assignment('Button')}\n`,
+        map: null,
+      })
+      expect(napi.sessionDocgenInfo).toHaveBeenCalledWith(42, ['Button'])
+    })
+
+    it('leaves a module without components, outside srcDirs, or with the option off untouched', async () => {
+      expect(await transform('export const x = 1', '/project/src/util.ts')).toBeUndefined()
+      expect(await transform('export function Button() {}', '/elsewhere/Button.tsx')).toBeUndefined()
+      const off = caliperDocgen({ srcDirs: ['src'] })
+      ;(off.configResolved as Function)({ root: '/project', command: 'build' })
+      await expect(
+        (off.transform as any).handler.call(pluginContext(), 'x', '/project/src/Button.tsx'),
+      ).resolves.toBeUndefined()
+    })
+
+    it('follows the session through changes: a new component gains docs, a removed one loses them', async () => {
+      ;(napi.extractFileIncremental as any).mockResolvedValueOnce(update(2, ['Card'], ['Button']))
+      await (plugin.watchChange as Function).call(pluginContext(), '/project/src/Card.tsx')
+      expect(await transform('export function Button() {}', '/project/src/Button.tsx')).toBeUndefined()
+      expect((await transform('export function Card() {}', '/project/src/Card.tsx')).code).toBe(
+        `export function Card() {}\n${assignment('Card')}\n`,
+      )
+    })
+
+    it('re-transforms the module of a component whose props changed through another file', async () => {
+      ;(napi.extractFileIncremental as any).mockResolvedValueOnce(update(2, ['Button']))
+      const buttonModule = { id: '/project/src/Button.tsx' }
+      const typesModule = { id: '/project/src/types.ts' }
+      const moduleGraph = {
+        getModuleById: vi.fn(),
+        getModulesByFile: vi.fn((file: string) => (file === buttonModule.id ? new Set([buttonModule]) : undefined)),
+        invalidateModule: vi.fn(),
+      }
+      const ctx = { environment: { name: 'client', hot: { send: vi.fn() }, moduleGraph } }
+      const opts = {
+        file: typesModule.id,
+        type: 'update',
+        modules: [typesModule],
+        timestamp: 1,
+        read: vi.fn(),
+        server: {},
+      }
+      expect(await (plugin.hotUpdate as Function).call(ctx, opts)).toEqual([typesModule, buttonModule])
+      expect(moduleGraph.invalidateModule).toHaveBeenCalledWith(buttonModule)
     })
   })
 

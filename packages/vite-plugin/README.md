@@ -37,6 +37,29 @@ import.meta.hot?.on(
 )
 ```
 
+## Storybook without the docgen server
+
+On Storybook 10, or Storybook 11 with `features.docgenServer: false`, Storybook reads each component's `__docgenInfo`. With `injectDocgenInfo`, the plugin assigns it from the session, in react-docgen-typescript's shape, and an edit re-transforms every module whose components it changed. Turn off Storybook's own docgen plugin so it doesn't overwrite the assignments:
+
+```ts
+// .storybook/main.ts
+import type { StorybookConfig } from '@storybook/react-vite'
+import { caliperDocgen } from 'caliper-docgen-vite-plugin'
+
+const config: StorybookConfig = {
+  framework: '@storybook/react-vite',
+  stories: ['../src/**/*.stories.tsx'],
+  typescript: { reactDocgen: false },
+  viteFinal: (config) => ({
+    ...config,
+    plugins: [...(config.plugins ?? []), caliperDocgen({ srcDirs: ['src'], injectDocgenInfo: true })],
+  }),
+}
+export default config
+```
+
+Each assignment sits in a `try`, so a component the module can't reach by name (an anonymous default export) keeps no docs instead of failing. On Storybook 11 with the docgen server on, use `caliper-docgen-storybook` instead.
+
 In `vite build --watch`, a change to any file under `srcDirs` triggers a rebuild, even one no bundle module imports. A build fails if extraction fails.
 
 Extraction runs on OXC through [`caliper-docgen-napi`](https://www.npmjs.com/package/caliper-docgen-napi), so a single-file update takes about 2ms. Requires Vite 7 or 8. The module uses the canonical output format, not the `react-docgen-typescript` shape.
