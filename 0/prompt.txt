@@ -1,0 +1,74 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+<tools-used-before-summary>Bash, Edit, EnterWorktree, Grep, Read, Write</tools-used-before-summary>
+Summary:
+## Session summary (session name: caliper-release; repo `/Users/gabe/Projects/caliper`, GitHub `orin-dx/caliper`)
+
+### Latest user message
+The newest user turn was "Is the example below is best thing to add", followed by the text of a summarization request. It reads as the summary instructions pasted in, not a separate question about the repo. This summary is the response to it. If the user did mean something else, they should restate it.
+
+### Standing user instructions and constraints
+- Global CLAUDE.md pulls in RTK.md. A hook rewrites `git` to `rtk git`. In this worktree-isolated session the guard refuses plain `git`, `git -C`, compound commands and computed arguments. Workaround: use `/usr/bin/git` with plain, separate commands, run from the worktree.
+- Output style is Concise: lead with the result, skip narration, no closing recap.
+- Never push to main or force-push. Commit and push only on branches. Commit trailer: `Claude-Session: https://claude.ai/code/REDACTED`. PR bodies end with `https://claude.ai/code/REDACTED`.
+- Never hard-wrap Markdown, commit messages or PR bodies (AGENTS.md). Comments only for the non-obvious why.
+- Use pronouns they/them for people whose pronouns are unknown.
+- Temporary files go in `/Users/gabe/.claude/jobs/ba6a68d6/tmp` or the scratchpad `/private/tmp/claude-501/-Users-gabe-Projects-caliper/ba6a68d6-c702-4382-ab2f-60cd0f6af675/scratchpad`, not `/tmp`.
+- Background-job reporting convention: a `result:` line on completion, `needs input:` when blocked, `failed:` when impossible.
+- No secrets or credential handling rules beyond those above were stated. Do not read or expose token values. The workflow masks them.
+
+### Decisions the user made
+- Commit the tool or hook config so it doesn't get lost. I committed only the `.codex` and `.github` Entire hooks. `.claude/settings.json` and `.gemini/settings.json` were deliberately left alone: they would drop the `Read(./.entire/metadata/**)` deny rule, empty `enabledPlugins`, and wipe the gemini hooks. They are still modified in the user's main checkout, and the user never chose between the options I offered.
+- "Adapt to the latest callisto and attempt a proper release." They said "Let's follow the plan, yes. Just move forward in versions to avoid problems" (I chose a minor changeset and later a patch changeset).
+- Crate and npm names should match the repo "caliper". The user said "I think @orin-dx namespace", then "I own it" (the npm org), and then asked "Can we do caliper-docgen without the scope?" (answer: yes, unscoped names were free, so the scope was dropped).
+- "The tokens are in the org" (said twice). Both `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN` appear as org secrets available to `orin-dx/caliper`.
+- The user merged #33, #36, #37, #38, #39, #40 and the release PRs themselves (#22 and #41).
+
+### Final package and tool names (after the rename in PR #39)
+- Crates: `caliper-docgen` (CLI, binary `caliper-docgen`), `caliper-docgen-core`, `caliper-docgen-napi` (`publish = false`), `caliper-docgen-tsc-client` (`publish = false`).
+- npm (unscoped): `caliper-docgen`, `caliper-docgen-napi`, `caliper-docgen-vite-plugin`, `caliper-docgen-validate` (private), plus platform packages `caliper-docgen-<darwin-arm64|darwin-x64|linux-arm64-gnu|linux-x64-gnu|win32-x64-msvc>` and `caliper-docgen-napi-<same>`.
+- napi files are `caliper_docgen_napi.*.node`. The Vite plugin export is `caliperDocgen`.
+- `callisto.toml` uses qualified names (`cargo/…`, `npm/…`) because cargo and npm share `caliper-docgen`.
+- `docs/archive` keeps the old `oxc-react-docgen` name as history.
+
+### Work done and where it lives
+- **Callisto:** the pins are now 0.11.0 at SHA `5e8c1696ed08bdef37f2cf6f0ccd6277f1963f8f` in `release.yml`, `ci.yml` and the `callisto.toml` comment. The local 0.11.0 binary is at `/Users/gabe/.claude/jobs/ba6a68d6/tmp/callisto/callisto`. The `mise` shim on the machine is 0.5.0. The local callisto checkout `~/Projects/callisto` is stale at 0.10.0.
+- **Verified against 0.11.0:** `status --check`, `release --dry-run`, flag compatibility (`--profile` is not accepted by 0.11.0 and is not in our workflow), and `artifactSlots` in the intent JSON (matches callisto's own workflow at the 0.11.0 tag).
+- **PR #33:** callisto 0.11.0 pins, URL fix (`oxc-react-docgen` → `caliper` in `repository.url`), `tsc-client` set to `publish = false`, first-release changeset, 8 previously unpushed local commits (AGENTS.md convention, ADR 0006, tsc-client, Entire hooks), CI fixes.
+- **Fixes along the way:**
+  - Lint, from `oxfmt` reformatting markdown. The oxfmt formatter also rewrites quoted YAML keys in changesets to single quotes, which callisto rejects.
+  - The flaky `extract_out_with_a_missing_parent_directory…` test, where miette wraps long paths.
+  - #36: two archive docs flagged by the newer oxfmt.
+  - #37: `**/CHANGELOG.md` added to `.oxfmtrc.json` `ignorePatterns`.
+  - #38: `CARGO_TERM_COLOR: never` for the `execute` job.
+  - #39: the rename, plus `scripts/verify-install.sh` tarball names.
+  - #40: patch changeset `.changeset/rename-to-caliper-docgen.md` with qualified names. The real release PR then bumped the six packages to 0.2.1.
+- **Merged:** PRs #33, #36, #37, #38, #39, #40, release PR #22 (old names) and release PR #41 (new names).
+- **Other PRs:** dependabot PRs #27, #31 and #32 were open when last seen. #30 and #35 were merged.
+
+### Problems met and how they were handled
+- **Stale checkout:** local `main` was behind and diverged from `origin/main`, with 8 unpushed commits. I cherry-picked them (two trivial conflicts, in `.gitignore` and `crates/binding/src/lib.rs`) onto the release branch.
+- **Release-candidate race:** after merging #22, the `release-candidate` job decided it wasn't a release-PR merge, so it ran `version-pr` instead of `plan`, `build` and `execute`. At that point the merged-PR check and commit verification both passed when I replayed them, so it looks like a GitHub timing race. I recovered with `gh workflow run release.yml --ref main -f release_source_sha=71140ca619024edb3e39bd770d41193008b67d01`. The race may recur on later releases.
+- **E157/E176:** on that dispatch, `oxc-react-docgen-core` 0.2.0 published to crates.io but `execute` failed twice. The workflow's `CARGO_TERM_COLOR: always` makes `cargo info` print ANSI escapes around `version:`, and callisto's `classify_cargo_info` couldn't parse it. Reproduced locally with color forced; fixed by #38. This is also an upstream callisto bug worth reporting.
+- **Dead-end recovery:** after the rename, dispatching a recovery wasn't possible. The workflow only releases from a merged `callisto/version-packages` release-PR commit, and `71140ca` bumped the old names. The renamed packages sat at 0.2.0 with no tag and no pending changeset, so callisto wouldn't open a release PR. The fix was changeset PR #40.
+- **Release run for the new names (run 39356498287, release PR #41 merge):** the release-candidate check was recognized correctly this time. Plan and all 5 builds passed. `execute` failed publishing `caliper-docgen-core` v0.2.1 to crates.io with "status 403 Forbidden: this token does not have the required permissions to perform this action" (callisto error E163).
+  - Cause (my best explanation, not confirmed): `CARGO_REGISTRY_TOKEN` probably lacks `publish-new` or is restricted to a crate-name pattern, since it did publish `oxc-react-docgen-core` earlier. The user's reply, "The tokens are in the org", doesn't address this: the secret was read and the token authenticated, so the 403 is a permission problem, not a missing secret.
+
+### Current state
+- **Run 39356498287:** attempt 1, completed, failure. Nothing is published under the new names (crates.io and npm return 404 for `caliper-docgen`, `caliper-docgen-core`, `caliper-docgen-napi`, `caliper-docgen-vite-plugin` and the platform packages). No tags or GitHub releases were created for the new names.
+- **Old name:** `oxc-react-docgen-core` 0.2.0 is on crates.io. It cannot be unpublished, only yanked, and the name stays reserved.
+- **Versions:** all six publishable packages are at 0.2.1 after release PR #41. The release-source SHA for that run is the merge commit of #41, which I never recorded here.
+- **Worktree:** `/Users/gabe/Projects/caliper/.claude/worktrees/release-0.2.0`, currently on branch `chore/queue-caliper-release` (merged). The user's main checkout is untouched.
+
+### Open items / next steps
+1. **needs input:** the user must check the crates.io token at Account Settings → API Tokens. It needs the `publish-new` and `publish-update` scopes, and the crates must be unrestricted or match `caliper-docgen*`. If it is restricted, they should create a new token, replace the `CARGO_REGISTRY_TOKEN` org secret, and tell me.
+2. After that, I run `gh run rerun 39356498287 --failed` and watch it to completion. If the release-candidate or plan state is stale, I fall back to a `workflow_dispatch` with the #41 merge SHA. Re-running adopts effects that already landed.
+3. Unverified: whether the `NPM_TOKEN` account can create unscoped npm packages (npm publishes will be the next failure if not), and whether provenance (`NPM_CONFIG_PROVENANCE=true`) works with the repo URL.
+4. After the new `caliper-docgen-core` is out, yank `oxc-react-docgen-core` 0.2.0.
+5. Verify actual publication on crates.io, npm, git tags and the receipt. A green workflow alone is not proof.
+6. Minor follow-ups: a `cargo update -p yoke-derive` (the 0.8.3 in `Cargo.lock` is yanked, which gave a warning in the run); report the callisto ANSI-parse bug upstream; consider hardening the release-candidate race; `.claude/settings.json` and `.gemini/settings.json` diffs remain unresolved in the user's main checkout; `docs/STATUS.md` still says 545 tests and is dated 2026-09-28; the open dependabot PRs.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/gabe/.claude/projects/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Whatever is still not started, not finished, not checked, or different from what the user asked for is part of the work: finish it or put it right before you report back, unless it cannot be done here, the user ruled it out, or a condition they set for it is not yet met. What you made earlier may no longer be in view. Before you report back, try out each thing the user asked for at least once, in each place it is meant to work, where that is safe to do, and fix what fails. Pick up the last task as if the break never happened.
+
+The messages after this summary are the most recent messages from before compaction, kept verbatim. The summary was written without seeing them, so something it says has not happened yet may already have happened in them.
