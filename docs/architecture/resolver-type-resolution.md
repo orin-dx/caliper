@@ -46,6 +46,10 @@ A component built by a generic call (`wrapperTypeArgument`, or `hocWrapper` with
 
 **Gap:** a result type asserted through an alias declared inside the function body (Mantine's `polymorphicFactory`) is not reachable.
 
+## Evaluating a props base with known operands (`resolver/evaluate.rs`)
+
+`resolve_base_as_chain` evaluates three kinds of props base when their operands are known, without a checker: a conditional whose check is a literal and whose constraint is `keyof X`, a literal or a union of literals (`RecipeProps<"button">` picks its branch); an indexed access, chained and through generic interface members and aliases (`ConfigRecipes["button"]["__type"]`); and a mapped type over `keyof X` or a literal union, one prop per key with the key variable bound. A homomorphic mapped type without `?`/`-?` keeps each source member's optionality and description. Anything else (an `infer`, an unbound generic) evaluates to `None` and keeps the warning and `composes` entry. `alias_display` uses the same evaluator for an argument that reads a member (`ConditionalValue<ButtonVariant["size"]>` prints the member's type). Lookups record their files, so editing the declarations re-resolves dependents.
+
 ## The three-tier data model this resolver operates on
 
 - `CollectedType` / `CollectedTypeAlias` — what the extractor produced: structural, not yet resolved, may reference cross-file names.
