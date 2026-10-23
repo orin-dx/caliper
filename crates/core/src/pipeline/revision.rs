@@ -394,6 +394,38 @@ impl Revision {
         Some((next, update))
     }
 
+    /// The revision after a change that can alter how every import resolves (a tsconfig, `package.json` or lockfile),
+    /// rebuilt from scratch, and the delta from this one: every component whose entry differs, every key that went
+    /// away, every diagnostic added or dropped.
+    pub(crate) fn rebuilt(&self, options: &PipelineOptions) -> (Revision, IncrementalUpdate) {
+        let start = Instant::now();
+        let next = Revision::cold(options, self.id + 1);
+        let updated: Vec<(&String, &ComponentEntry)> = next
+            .output
+            .components
+            .iter()
+            .filter(|(key, entry)| self.output.components.get(*key) != Some(*entry))
+            .collect();
+        let removed_keys: Vec<String> =
+            self.output.components.keys().filter(|key| !next.output.components.contains_key(*key)).cloned().collect();
+        let mut affected_files: Vec<Utf8PathBuf> = updated.iter().map(|(_, entry)| entry.file_path.clone()).collect();
+        affected_files.sort();
+        affected_files.dedup();
+        let before: FxHashSet<&Diagnostic> = self.output.diagnostics.iter().collect();
+        let after: FxHashSet<&Diagnostic> = next.output.diagnostics.iter().collect();
+        let update = IncrementalUpdate {
+            revision: next.id,
+            updated_components: updated.iter().map(|(_, entry)| (*entry).clone()).collect(),
+            updated_keys: updated.iter().map(|(key, _)| (*key).clone()).collect(),
+            removed_keys,
+            affected_files,
+            diagnostics: next.output.diagnostics.iter().filter(|d| !before.contains(d)).cloned().collect(),
+            removed_diagnostics: self.output.diagnostics.iter().filter(|d| !after.contains(d)).cloned().collect(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        };
+        (next, update)
+    }
+
     /// Build the public output from the revision, and the key each component was published under: components keyed
     /// with the same disambiguation rule everywhere, plugin hooks applied, diagnostics in a stable order, public
     /// enums. `take` yields a component's resolved entry and diagnostics, copied or moved out.

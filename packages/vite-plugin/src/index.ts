@@ -66,6 +66,11 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
     return (file.endsWith('.tsx') || file.endsWith('.ts')) && resolvedSrcDirs.some((dir) => file.startsWith(`${dir}/`))
   }
 
+  /** A source file, or a tsconfig, `package.json` or lockfile whose change rebuilds the session. */
+  function isTrackedFile(file: string): boolean {
+    return isSrcFile(file) || napi.isResolutionConfig(sessionId, file)
+  }
+
   /** Runs `task` after every earlier one has finished, failed or not. */
   function inOrder<T>(task: () => Promise<T>): Promise<T> {
     const earlier = previousChange
@@ -120,8 +125,10 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
     async buildStart() {
       if (command !== 'build') return
       if (isWatchBuild) {
-        // Source files no bundle module imports must still trigger a rebuild, since the docs come from them.
+        // Source files no bundle module imports must still trigger a rebuild, since the docs come from them, and so must
+        // the configuration that decides how their imports resolve.
         for (const dir of resolvedSrcDirs) this.addWatchFile(dir)
+        for (const file of napi.resolutionConfigFiles(sessionId)) this.addWatchFile(file)
         await Promise.all(pendingWatchChanges)
         pendingWatchChanges = []
       }
@@ -137,7 +144,7 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
 
     // `vite build --watch` never calls hotUpdate; Rollup reports each changed file here before rebuilding.
     async watchChange(id: string) {
-      if (!isSrcFile(id)) return
+      if (!isTrackedFile(id)) return
       const change = inOrder(async () => {
         try {
           await applyChange(id)
@@ -170,6 +177,10 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
         })
       /* oxlint-enable promise/prefer-await-to-then, promise/always-return, promise/prefer-await-to-callbacks */
 
+      // A tsconfig, `package.json` or lockfile above the source directories changes how every import resolves; its
+      // change reaches hotUpdate like a source file's and rebuilds the session there.
+      server.watcher.add(napi.resolutionConfigFiles(sessionId))
+
       // buildEnd isn't called in dev mode — this is the only reliable cleanup hook.
       return () => {
         napi.closeSession(sessionId)
@@ -193,7 +204,7 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
         | undefined
 
       if (!env || env.name !== 'client') return
-      if (!isSrcFile(opts.file)) return
+      if (!isTrackedFile(opts.file)) return
 
       if (initPromise) await initPromise
 

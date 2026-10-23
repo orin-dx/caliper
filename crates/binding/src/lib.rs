@@ -260,6 +260,30 @@ pub async fn initialize_session(session_id: u32, options: JsExtractOptions) -> n
     .map_err(|e| napi::Error::from_reason(e.to_string()))?
 }
 
+/// The tsconfigs, `package.json` files and lockfiles above the session's source directories: a watcher adds them, and
+/// passes a change to one to `extractFileIncremental` like any other file, which rebuilds the session. Empty for an
+/// unknown session.
+#[napi]
+pub fn resolution_config_files(session_id: u32) -> Vec<String> {
+    caliper_docgen_core::panic_guard::contain_panic("resolution_config_files", move || {
+        SESSIONS
+            .get(&session_id)
+            .map(|session| session.resolution_config_files().into_iter().map(String::from).collect())
+            .unwrap_or_default()
+    })
+    .unwrap_or_default()
+}
+
+/// Whether a change to `file_path` rebuilds the session: a tsconfig, jsconfig, `package.json` or lockfile in or above
+/// a source directory, outside `node_modules`. False for an unknown session.
+#[napi]
+pub fn is_resolution_config(session_id: u32, file_path: String) -> bool {
+    caliper_docgen_core::panic_guard::contain_panic("is_resolution_config", move || {
+        SESSIONS.get(&session_id).is_some_and(|session| session.is_resolution_config(Utf8Path::new(&file_path)))
+    })
+    .unwrap_or(false)
+}
+
 /// Release session state. Call in Vite's buildEnd hook.
 #[napi]
 pub fn close_session(session_id: u32) {

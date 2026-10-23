@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use caliper_docgen_core::pipeline::{PipelineOptions, WatchSession};
 use caliper_docgen_core::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, ExtractionOutput};
+use camino::Utf8PathBuf;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use miette::{IntoDiagnostic, Result};
 use watchexec_signals::Signal;
@@ -84,7 +85,7 @@ fn publish(snapshot: &ExtractionOutput, out: Option<&str>, exit_code: &AtomicI32
 }
 
 /// `Some(exit code)` when `key` quits. Raw mode turns off ISIG, so Ctrl-C arrives here as a key, not SIGINT. `r`
-/// extracts everything again, for changes the watcher cannot see (`tsconfig.json`, `package.json`, `node_modules`).
+/// extracts everything again, for changes the watcher cannot see (a package's files in `node_modules`).
 fn handle_key(
     key: KeyEvent,
     session: &WatchSession,
@@ -218,6 +219,13 @@ fn handle_change(session: &WatchSession, path: &Path, quiet: bool, out: Option<&
     publish(&session.snapshot(), out, exit_code);
 }
 
+/// The source directories, and the tsconfigs, `package.json` files and lockfiles above them: editing one rebuilds the
+/// session (`WatchSession::update_file`).
+fn watched_paths(options: &PipelineOptions, session: &WatchSession) -> Vec<std::path::PathBuf> {
+    let src_dirs = options.src_dirs.iter().map(|dir| dir.as_std_path().to_owned());
+    src_dirs.chain(session.resolution_config_files().into_iter().map(Utf8PathBuf::into_std_path_buf)).collect()
+}
+
 pub fn cmd_watch(args: crate::WatchArgs, quiet: bool, config_path: Option<&str>) -> Result<i32> {
     // Without a terminal on stdin (CI, a pipe, a service) there are no keys to read, and reading anyway fails at once.
     let interactive = std::io::stdin().is_terminal();
@@ -229,7 +237,7 @@ pub fn cmd_watch(args: crate::WatchArgs, quiet: bool, config_path: Option<&str>)
     }
 
     // watchexec's constructor is synchronous even though its event loop is async.
-    let src_dirs: Vec<std::path::PathBuf> = options.src_dirs.iter().map(|p| p.as_std_path().to_owned()).collect();
+    let watched = watched_paths(&options, &session);
 
     let rt = tokio::runtime::Runtime::new().into_diagnostic()?;
     let handler_exit_code = exit_code.clone();
@@ -250,7 +258,7 @@ pub fn cmd_watch(args: crate::WatchArgs, quiet: bool, config_path: Option<&str>)
         })
         .into_diagnostic()?;
 
-        wx.config.pathset(src_dirs);
+        wx.config.pathset(watched);
         wx.main().await.into_diagnostic()??;
         Ok::<(), miette::Error>(())
     })?;
@@ -262,7 +270,6 @@ pub fn cmd_watch(args: crate::WatchArgs, quiet: bool, config_path: Option<&str>)
 mod tests {
     use super::*;
 
-    use camino::Utf8PathBuf;
     use tempfile::TempDir;
 
     fn empty_output() -> ExtractionOutput {
@@ -307,6 +314,47 @@ mod tests {
 
     fn prop_names(written: &serde_json::Value, component: &str) -> Vec<String> {
         written["components"][component]["props"].as_object().unwrap().keys().cloned().collect()
+    }
+
+    #[test]
+    fn a_tsconfig_change_rebuilds_and_rewrites_out() {
+        let root = TempDir::new().unwrap();
+        let root_dir = Utf8PathBuf::from_path_buf(root.path().canonicalize().unwrap()).unwrap();
+        std::fs::create_dir_all(root_dir.join("src/ui")).unwrap();
+        std::fs::write(root_dir.join("tsconfig.json"), "{}").unwrap();
+        std::fs::write(root_dir.join("package.json"), "{}").unwrap();
+        std::fs::write(root_dir.join("src/ui/types.ts"), "export interface ButtonProps { label: string }\n").unwrap();
+        std::fs::write(
+            root_dir.join("src/Button.tsx"),
+            "import type { ButtonProps } from '@ui/types';\nexport function Button(props: ButtonProps) { return null; }\n",
+        )
+        .unwrap();
+        let options = PipelineOptions {
+            src_dirs: vec![root_dir.join("src")],
+            tsconfig_path: Some(root_dir.join("tsconfig.json")),
+            cache_dir: Some(root_dir.join("cache")),
+            ..Default::default()
+        };
+        let session = WatchSession::new(options.clone());
+        let _ignored = session.initialize();
+
+        let watched: Vec<std::path::PathBuf> =
+            watched_paths(&options, &session).into_iter().filter(|p| p.starts_with(&root_dir)).collect();
+        let expected: Vec<std::path::PathBuf> =
+            ["src", "package.json", "tsconfig.json"].iter().map(|p| root_dir.join(p).into_std_path_buf()).collect();
+        assert_eq!(watched, expected);
+
+        std::fs::write(
+            root_dir.join("tsconfig.json"),
+            r#"{ "compilerOptions": { "baseUrl": ".", "paths": { "@ui/*": ["src/ui/*"] } } }"#,
+        )
+        .unwrap();
+        let out = root_dir.join("out.json");
+        let exit_code = AtomicI32::new(0);
+        handle_change(&session, root_dir.join("tsconfig.json").as_std_path(), true, Some(out.as_str()), &exit_code);
+
+        let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        assert_eq!(prop_names(&written, "Button"), ["label"]);
     }
 
     #[test]
