@@ -37,6 +37,7 @@ mimalloc.workspace        = true
 comfy-table               = "8.0"
 crossterm                 = "0.29"
 watchexec-signals         = "5"
+watchexec-events          = { version = "6", features = ["notify"] }
 
 [target.'cfg(unix)'.dependencies]
 rustix                    = { version = "1", features = ["termios"] }
