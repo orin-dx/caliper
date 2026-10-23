@@ -1,0 +1,201 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+<tools-used-before-summary>Agent, Bash, Edit, EnterWorktree, Grep, Read, ReadNotifications, SendMessage, Skill, TaskCreate, TaskUpdate, ToolSearch, WebSearch, Write</tools-used-before-summary>
+Summary:
+1. Primary Request and Intent:
+   - Earlier (pre-summary) the work was the caliper-docgen roadmap, and the user asked to work through it as stacked PRs, not drafts ("Let's stack PRs please", "Can we stack the next?", "Keep going", "Keep going until we close the gaps we identifie", "Don't create the PRs as draft"). That produced PRs #48–#70: #48–#50 merged, #52–#70 open and stacked.
+   - The user pasted a Codex "Caliper v1 review" and asked: "I want you to vet these and look for similar patterns of issues. We might have a lot more. Be thorough and think like a principal engineer driving quality architecture, performance and DX".
+   - Then: "How long until the sweeps finish? Should we start fixing issues related to the open PRs before we merge them?"
+   - Then: "Can you just stack them? I won't release until it's clear". I took this to mean: put the fixes as new PRs stacked on top of the existing stack, top being #70, and keep releases held until things are clear.
+   - Current intent: keep fixing the review findings as stacked, non-draft PRs, following the task list.
+
+2. Key Technical Concepts:
+   - **Pipeline:** Rust core with OXC parsing, SourceData → GlobalSourceData → resolver → ExtractionOutput. Rayon parallel resolution. Parse cache is positional MessagePack; `CACHE_SCHEMA_VERSION` is currently 12 on the #73/#74 branches.
+   - **Render evidence** (extractor/evidence.rs). A function counts as rendering if it has any of:
+     - JSX, or an element factory call (`createElement`, `cloneElement`, `jsx`, `jsxs`, `jsxDEV`)
+     - a top-level hook call (`use[A-Z]`)
+     - a top-level return of `null`, `children`, or a call to a PascalCase function
+     - an element return type: `Element`, `ReactElement`, `ReactNode`, `ReactPortal`, `JSX`, or `Promise<…>` of one
+
+     Generators never count.
+   - **Wrapper evidence** for the first argument of a generic wrapper call: a function that renders, a PascalCase reference (leading `_` or `$` trimmed), a wrapped component (`is_component_wrapper_call`), or a tag string. A tag string needs either an element type argument or a factory payload (`TagNeedsPayload`). `createContext` is declined.
+   - **Rename calls are component wrappers only if** the callee is `memo`, `observer`, contains "forwardref" (case-insensitive; the callee is peeled first, so `(forwardRef as T)(X)` counts), is `with[A-Z]…`, contains "Component", or is a curried call. An exported base is never hidden by its alias.
+   - **Structured type args:** `Vec<CollectedType>` on `ComponentMapping.props_type_args` and `ExtendsRef` type_args. The text parsers are deleted. `synthesize_utility_alias` handles Omit, Pick, Partial, Required, PropsWithChildren (as `P & {children?: React.ReactNode}`), Readonly and PropsWithRef.
+   - **`CollectedTypeAlias::Pick` / `::Omit`** are now `{ base, keys: CollectedType, file_path }`. `resolve_key_set` handles:
+     - literals and unions
+     - `Never`
+     - `KeyOf`, using a detached state
+     - `AtFile`
+     - `Exclude` and `Extract`
+     - aliases, via `apply_generic_args`
+     - unfilled in-scope type parameters, which contribute an empty set
+     - anything else: `None` plus a warning
+   - **`ResolveState::branch()` / `detached()` / `absorb()`.**
+   - **Binding:** `Binding<'b,'a>{init, span, annotation}` lets the detection rules apply to both declarators and default exports. `detect_component` runs the rule chain.
+   - **Watch revision model (in progress):** an immutable `Revision` published through `ArcSwapOption`, a writer `Mutex`, a shared `assemble()`, and a thread-local dependency recorder (resolver/deps.rs) that records the files each component's resolution read.
+   - **Calibration metrics (score.py):**
+     - recall(own) and recall(any): recall(any) counts every react-docgen-typescript (RDT) component with props, which fixes the old metric's blind spot.
+     - props(own)
+     - extras
+     - timing (timing.py)
+     - output equality and determinism (same_output.py)
+
+3. Files and Code Sections:
+   - **/Users/gabe/.claude/jobs/ba6a68d6/tmp/review/v1-quality-review.md:** the consolidated vetted review. Families A–J are detection, silent degradation, text types, incremental, diagnostics, cache, performance, evidence, docs and ADRs.
+   - **crates/core/src/extractor/evidence.rs (new, #71):** `type_renders`, `RenderFinder` (a Visit impl), `Body` enum (Block/Arrow), `FunctionShape::{of_arrow, of_function}`, and `renders(&FunctionShape) -> Result<(), &'static str>`.
+   - **crates/core/src/extractor/wrapper.rs:**
+     - `component_argument_evidence(callee, call) -> Result<ArgumentEvidence, &'static str>`
+     - `PendingWrapper.needs_payload`
+     - `select_wrapper_props` returns `(TypeName, Vec<CollectedType>, bool from_payload)`
+     - a `SKIPPED_CANDIDATE` diagnostic when a recorded candidate is promoted without props
+     - `try_record_wrapper_call(&mut self, decl: &super::component::Binding<'_, 'a>, name)`
+   - **crates/core/src/extractor/component.rs:**
+     - `Binding` struct with `pub(super)` fields and `Binding::of(decl)`.
+     - `detect_component` runs fc_annotation, forward_ref, hoc_wrapped, class_expression_wrapped, typed_function_expression in that order.
+     - Evidence checks in `try_typed_function_expression` and `try_hoc_wrapped`.
+     - `pub(super) fn is_component_wrapper_call`.
+     - `pub(super) fn pascal_case_from_file_stem`.
+     - The rename function sets `decline_reason`.
+   - **crates/core/src/extractor/visit.rs:**
+     - The detector chain uses `Binding::of(declarator)` and `decline_reason`.
+     - `visit_function` applies to `FunctionDeclaration` and `TSDeclareFunction`. Evidence decline diagnostics are emitted only for `FunctionDeclaration`.
+     - `visit_export_default_declaration` handles an anonymous function, an anonymous class (`try_class_component`), and expressions (`detect_component` with a fallback to `try_record_wrapper_call`), each named from the file stem.
+   - **crates/core/src/extractor/mod.rs:**
+     - `mod evidence; mod wrapper;` and fields `decline_reason` and `pending_local_exports`.
+     - `finish()` hides only non-exported aliased bases.
+     - `extract_type_args` now returns `Vec<CollectedType>`.
+     - `extract_type_name_from_type` no longer unwraps PropsWithChildren, Readonly or Required.
+     - `classify_extends` takes `Vec<CollectedType>` and uses `react_types::html_element_from_collected`.
+     - The `#[cfg(test)] use crate::types::LexedExport;` line must stay as-is.
+   - **crates/core/src/extractor/alias.rs:** Omit and Pick store `base = ts_type_to_collected(params[0])` and `keys = ts_type_to_collected(params[1])`. `collect_string_union_keys` and `collect_omit_keys` were removed.
+   - **crates/core/src/resolver/chain.rs:**
+     - `resolve_props_chain(type_name, type_args: &[CollectedType], …)`.
+     - The visit key is structural: `format!("{}:{}<{:?}>", …)`.
+     - Step 0.5 uses `synthesize_utility_alias`.
+     - The TypeAlias branch registers unfilled alias parameters as in scope.
+     - `resolve_interface_chain` substitutes with `build_substitution` and `substitute_type`, through `ExtendsRef::map_type_args`.
+     - Uses `state.branch()` and `state.absorb()`.
+   - **crates/core/src/resolver/extends.rs:**
+     - `ComponentProps*<"tag">` produces an element layer.
+     - `ComponentProps*<typeof X>` goes through `component_props_of`, which looks the component up among the mappings and warns if it is missing.
+     - The Imported case keeps `iface_file` as the consuming file when the name is bound.
+   - **crates/core/src/resolver/alias.rs:** Omit and Pick resolve through `resolve_key_set_or_warn` and `resolve_key_set`.
+   - **crates/core/src/resolver/substitute.rs:** `apply_generic_args` takes `&[CollectedType]`; `raw_arg_to_collected_type` was removed; `synthesize_utility_alias` extended as above.
+   - **crates/core/src/resolver/collected.rs:** text parsers removed; the Raw fallback names only valid identifiers.
+   - **crates/core/src/resolver/named.rs:** visit key is structural Debug; generic-alias substitution in prop position is reverted, with a comment that it waits for the cache.
+   - **crates/core/src/resolver/import.rs:** the follow-reexports counter is scoped to the test directory; deps record calls added (current branch).
+   - **crates/core/src/resolver/deps.rs (new, current branch):** thread-local `RECORDER`, `record(file)`, and `recording(f) -> (T, FxHashSet<Utf8PathBuf>)`.
+   - **crates/core/src/resolver/mod.rs (current branch):** `mod deps;` and `pub(crate) fn resolve_component_tracked(mapping, ctx) -> (ComponentEntry, Vec<Diagnostic>, FxHashSet<Utf8PathBuf>)`.
+   - **crates/core/src/resolver/precedence.rs:** `deps::record(consuming_file)`.
+   - **crates/core/src/types/collected.rs:** `DetectionRule` gained `TypedFunctionExpression` and `WrapperTypeArgument`; `ExtendsRef::map_type_args(Fn(&CollectedType)->CollectedType)`; the Pick and Omit changes above.
+   - **crates/core/src/types/global.rs:** `ResolveState::branch`, `detached`, `absorb`. The memo fields were removed.
+   - **crates/core/src/react_types.rs:** `html_element_from_collected`.
+   - **crates/core/src/pipeline/discover.rs:**
+     - `is_typescript`.
+     - `excluded(relative, dir_is_in_node_modules, extra)` checks file names for `.stories.`, `.test.` and `.spec.`, path components for `__snapshots__` and `node_modules`, and does substring matching for user excludes on the relative path.
+     - `pub(super) fn is_source_file(path, src_dirs, extra_excludes)`.
+   - **crates/core/src/pipeline/revision.rs (new, current branch, written in full):**
+     - `ComponentId{file, name, ordinal}` and `Resolved{entry, diagnostics, depends_on}`, with `incomplete()` true when it has an `UnresolvableImport` diagnostic.
+     - `Revision` fields: `id`, `global`, `named_types`, `ambient_global_files`, `head`/`file`/`lib`/`tail` diagnostics, `resolved`, `files_parsed`, `dts_cache_hits`, `duration_ms`, `output: Arc<ExtractionOutput>`, `keys`.
+     - `component_ids()` sorts by (file, span_start, ordinal).
+     - `resolve_all`.
+     - `Revision::cold(options, id)`.
+     - `Revision::next(&self, options, changed) -> Option<(Revision, IncrementalUpdate)>`. A NotFound read means deletion; other read errors keep the previous data via `global_data_for`. It re-resolves components that are new, live in the changed file, depend on it, or are incomplete.
+     - `assemble()` disambiguates keys, runs plugin hooks, records collision diagnostics, and builds enums.
+     - Helpers `parse_source_file`, `source_dir_diagnostics`, `empty_output`.
+   - **crates/core/src/pipeline/mod.rs (current branch):**
+     - `mod revision;`.
+     - `IncrementalUpdate` adds `revision: u64`, `updated_keys`, `removed_keys`.
+     - `extract()` now calls `Revision::cold(options, 0)`.
+     - `ReverseDeps` and `extract_with_global` removed.
+     - `merge_cached_dts_file` and `canonicalize_first_src_dir` are now `pub(super)`.
+     - `resolve_guarded` returns a triple and uses `resolve_component_tracked`.
+     - Unused imports remain: VecDeque, AtomicU32/Ordering, Instant, FxHashMap, resolve_component, discover_files/should_skip.
+   - **crates/core/src/pipeline/watch.rs (rewritten, current branch):** `WatchSession{pub options, current: ArcSwapOption<Revision>, writer: Mutex<()>}` with `new`, `initialize` (idempotent), `rebuild`, `snapshot`, and `update_file` (canonicalize, take the writer lock, initialize on demand, store the next revision or return an empty update).
+   - **Tests added across PRs:**
+     - crates/core/tests/shapes.rs: negative and positive families, default exports, Required/PropsWithChildren, barrels.
+     - crates/core/tests/snapshots.rs: a fresh temporary cache directory.
+     - pipeline/tests.rs: `test_structured_type_arguments_resolve_exactly`, `test_key_sets_resolve_exactly`, `test_excludes_match_inside_the_source_directory_only`, and the wrapper kept-with-reason test.
+     - extractor/tests.rs: evidence declines, rendering without JSX, alias non-destructive, `declare function`, anonymous default exports, Omit with a literal base.
+   - **Changesets added:**
+     - detection-requires-render-evidence.md
+     - structured-type-arguments.md
+     - pick-omit-key-sets.md
+     - default-exports-and-wrappers.md
+
+4. Errors and fixes:
+   - **The worktree guard blocks git through rtk and complex shell.** Fix: use `/usr/bin/git` with one plain command per call, and write scripts with the Write tool, then run them with python3.
+   - **Stale persistent cache hid regressions.** The snapshot tests used `node_modules/.cache` from earlier builds, which hid #71's lib.dom `declare function` noise and caused a false `Record<Selectors>` regression. Fix: a fresh temporary cache per snapshot test, schema bumps, and silent declines for `TSDeclareFunction`.
+   - **Flaky barrel call-count test.** It used a global counter that parallel tests also incremented. Fix: scope the counting to the test's own directory.
+   - **First calibration pass of #71 lost real components:**
+     - Mantine `tableElement`: fixed by accepting a tag plus a factory payload.
+     - `_Box`: fixed by trimming the underscore before the PascalCase check.
+     - `(forwardRef as T)(X)`: fixed by peeling the callee.
+     - Base UI `useRender`: fixed by counting hook calls as evidence.
+     - Direct component calls: fixed by counting a returned PascalCase call as evidence.
+   - **`keyof Base` came back empty** because it cloned a visited set that already contained Base. Fix: a detached state.
+   - **150 new warnings on Mantine for unfilled `PropsToOmit`.** Fix: register unfilled alias parameters as in scope on the chain path, and treat in-scope bare parameters as an empty key set.
+   - **The resolve_named memo changed output and was nondeterministic.** A cache hit skipped the side effects that added parameters to in-scope. It was reverted along with generic-alias substitution in prop position (deferred to task 5). Substitution alone cost about 33% on Mantine.
+   - **Script cut errors:** a leftover brace in chain.rs, a doc comment with nothing after it in alias.rs, a duplicate test name, and a CompactString vs String mismatch. All fixed.
+   - **The architecture tripwire flagged `pub span: oxc_span::Span` in Binding.** Fix: make the fields `pub(super)`.
+   - **Snapshot `.snap.new` files leaked into a WIP commit.** They were removed when amending.
+   - **#44:** I first said it was "stale". Codex was right: it fails oxfmt on five docs/archive markdown files.
+   - **The DX sweep's "platform packages have no versioning path" P0 was refuted.** Release PR #46 bumps them.
+
+5. Problem Solving:
+   - **Verified Codex's findings and added more.** Key confirmed defects:
+     - watch dependency edits duplicate components
+     - barrel and `../` edits are never applied in watch
+     - initial diagnostics are lost
+     - deletes stay stale forever
+     - excludes are not applied in watch
+     - the Vite plugin has no removals, a key mismatch, no invalidation, and a stale build-watch
+     - 82–97% of diagnostics are duplicates
+     - the cache is not fingerprinted by build
+     - serialization dominates at scale
+     - `--format rdt` is not RDT's shape
+   - **Calibration results after #71–#74, recall(own):** mantine 94%, chakra 88%, antd 99%, shadcn 98%, spectrum 99%. recall(any) on chakra went from 68% to 80%. Timing is flat.
+
+6. All user messages:
+   - "Can we start tackling these?"
+   - "Let's stack PRs please"
+   - "Can we stack the next?"
+   - "Keep going"
+   - "Keep going until we close the gaps we identifie"
+   - "Don't create the PRs as draft"
+   - "PRs are failing"
+   - "Codex this a quick review of our work and found many structural issues: [pasted Codex v1 review] I want you to vet these and look for similar patterns of issues. We might have a lot more. Be thorough and think like a principal engineer driving quality architecture, performance and DX"
+   - "How long until the sweeps finish? Should we start fixing issues related to the open PRs before we merge them?"
+   - "Can you just stack them? I won't release until it's clear"
+
+7. Pending Tasks (TaskList):
+   - **#4 (in progress):** watch revision model shared with the cold path, plus Vite plugin and CLI watch fixes. Planned as three PRs:
+     - 4a: core
+     - 4b: CLI writes `--out` at start, and 'r' calls `rebuild()`
+     - 4c: NAPI snapshot and removals; Vite removals, keys, virtual-module invalidation, build-watch refresh, `this.error` on build failure; native integration tests in CI
+   - **#5:** diagnostics identity and dedup; resolution memoization, verified deterministic and byte-identical, which brings back generic-alias substitution in prop position; cache fingerprint (crate version plus extractor fingerprint, version in the payload, diagnostics on decode failure).
+   - **#6:** docs, DX and the ADR 0007 amendment (discovery vs completion, provenance vs schemaVersion); restate #64's figures; `config.rs` help listing removed options; stale architecture docs; CLI DX (zero components exits 0, `check` flags, missing-config message, NO_COLOR, line:col).
+   - Releases stay held, and #46 stays unmerged until the user decides.
+
+8. Current Work:
+   Task 4a is on branch `refactor/watch-revision-model`, based on `fix/discovery-and-defaults` (#74). I wrote revision.rs, deps.rs and the new watch.rs; added the deps record calls (import.rs follow_reexports / resolve_import_specifier / lookup_interface / lookup_type_alias, and precedence.rs); added `resolve_component_tracked`; added the discover.rs `is_source_file` predicate; and edited pipeline/mod.rs (IncrementalUpdate fields, `extract()` via Revision, ReverseDeps and extract_with_global removed). The last `cargo build -p caliper-docgen-core` succeeded with warnings only:
+   - unused imports in pipeline/mod.rs: `VecDeque`, `AtomicU32`/`Ordering`, `Instant`, `FxHashMap`, `resolve_component`, `discover_files`/`should_skip`
+   - `ResolutionContext::new` is never used
+
+   Tests have not been compiled or run yet. watch/tests.rs uses `session.component_cache` and comments mention ReverseDeps; pipeline/tests.rs may reference removed items. The binding constructs `IncrementalUpdate` JSON through `incremental_update_to_json`, so it needs the new fields reflected in packages/napi/binding.d.ts and index.d.ts, and in the Vite plugin, in 4c.
+
+9. Optional Next Step:
+   Continue task 4a, "core: one `Revision` assembled by the same code `extract()` uses", in this order:
+   1. Remove the unused imports in pipeline/mod.rs, and decide whether to keep or remove `ResolutionContext::new`.
+   2. Compile the tests and fix watch/tests.rs and pipeline/tests.rs (drop the `component_cache` and ReverseDeps internals).
+   3. Run the full suite and the snapshots. Cold output must stay byte-identical to the previous build: use same_output.py against caliper-docgen-fix4 on the five corpora.
+   4. Re-run the watch repros (watch_dep_edit.py, watch_barrel_edit.py, watch_parent_edit.py, and a deletion and an excluded `.stories.tsx`). Watch snapshots must equal cold `extract`.
+   5. Add a snapshot()==extract() sequence test covering edits, creates, renames, deletes and dependency edits, comparing components, enums and diagnostics.
+   6. Time the incremental bench.
+   7. Commit, then open a non-draft PR with base `fix/discovery-and-defaults`, plus a changeset (minor: WatchSession internals and ReverseDeps removed, IncrementalUpdate fields added).
+   8. Then 4b and 4c.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/gabe/.claude/projects/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+The messages after this summary are the most recent messages from before compaction, kept verbatim. The summary was written without seeing them, so something it says has not happened yet may already have happened in them.
