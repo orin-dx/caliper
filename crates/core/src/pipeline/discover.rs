@@ -52,6 +52,39 @@ pub(super) fn discover_files(
     (files, diagnostics)
 }
 
+/// Every directory `discover_files` walks under `src_dirs` (canonical), and every file in them named `is_config`: a
+/// file created in or deleted from one of these directories changes the directory's modification time.
+pub(super) fn discover_dirs(
+    src_dirs: &[Utf8PathBuf],
+    extra_excludes: &[String],
+    is_config: impl Fn(&str) -> bool,
+) -> (Vec<Utf8PathBuf>, Vec<Utf8PathBuf>) {
+    let (mut dirs, mut configs) = (Vec::new(), Vec::new());
+    for dir in src_dirs {
+        let dir_is_in_node_modules = dir.as_str().contains("node_modules");
+        let root = dir.canonicalize_utf8().unwrap_or_else(|_| dir.clone());
+        let walker =
+            ignore::WalkBuilder::new(root.as_std_path()).hidden(false).git_ignore(!dir_is_in_node_modules).build();
+        for entry in walker.flatten() {
+            let Ok(path) = Utf8PathBuf::from_path_buf(entry.path().to_owned()) else { continue };
+            let relative = path.strip_prefix(&root).unwrap_or(&path);
+            if excluded(relative.as_std_path(), dir_is_in_node_modules, extra_excludes) {
+                continue;
+            }
+            if entry.file_type().is_some_and(|kind| kind.is_dir()) {
+                dirs.push(path);
+            } else if path.file_name().is_some_and(&is_config) {
+                configs.push(path);
+            }
+        }
+    }
+    dirs.sort();
+    dirs.dedup();
+    configs.sort();
+    configs.dedup();
+    (dirs, configs)
+}
+
 /// One walked entry: a source file to keep, a diagnostic, or `None` to skip it.
 fn visit(
     result: Result<ignore::DirEntry, ignore::Error>,

@@ -24,6 +24,8 @@ This is the orchestration layer: it owns nothing about _how_ a component is pars
 
 `WatchSession` (`pipeline/watch.rs`) holds one immutable `Revision` in an `ArcSwapOption` and a writer `Mutex`. `initialize()` builds the first revision with `Revision::cold()` and is idempotent; `rebuild()` replaces it with a fresh cold one. `update_file(changed)` takes the writer lock, builds the next revision with `Revision::next()`, and publishes it with one atomic store. Readers (`snapshot()`) never wait on the writer and always see one complete revision.
 
+`ensure_fresh()` is for a host without a file watcher. Under the writer lock it compares stamps (modification time and size, plus a content hash while the time is within 2 s of the stat) of the revision's source files, every directory discovery walks, and every resolution config. A changed config rebuilds; a changed directory reruns discovery to find created and deleted files; each changed file goes through `Revision::next()` in path order. It returns one `output_delta()` from the starting output to the final one. Stamps are recorded on the first call after a cold extraction, and anything modified within 2 s of that extraction's start counts as changed, so an edit made while it ran is not lost.
+
 `Revision::next(changed)`:
 
 1. Ignores a path discovery would not include (outside every source directory, excluded, not TypeScript): `discover::is_source_file`.

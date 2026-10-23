@@ -19,6 +19,14 @@ export declare function closeSession(sessionId: number): void
 export declare function createSession(options: JsExtractOptions): number
 
 /**
+ * Bring the session up to date with the files on disk, for a host without a file watcher (a docgen provider in a
+ * worker): stats every file the session read and applies what changed since, rebuilding when a tsconfig,
+ * `package.json` or lockfile changed. Returns JSON string of IncrementalUpdate; the revision is unchanged when nothing
+ * changed. Errors for an unknown session.
+ */
+export declare function ensureFresh(sessionId: number): Promise<string>
+
+/**
  * Cold extraction — returns JSON string of ExtractionOutput.
  * Use for: build-time extraction, CLI backing, one-off runs.
  */

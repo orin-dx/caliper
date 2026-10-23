@@ -424,30 +424,13 @@ impl Revision {
     pub(crate) fn rebuilt(&self, options: &PipelineOptions) -> (Revision, IncrementalUpdate) {
         let start = Instant::now();
         let next = Revision::cold(options, self.id + 1);
-        let updated: Vec<(&String, &ComponentEntry)> = next
-            .output
-            .components
-            .iter()
-            .filter(|(key, entry)| self.output.components.get(*key) != Some(*entry))
-            .collect();
-        let removed_keys: Vec<String> =
-            self.output.components.keys().filter(|key| !next.output.components.contains_key(*key)).cloned().collect();
-        let mut affected_files: Vec<Utf8PathBuf> = updated.iter().map(|(_, entry)| entry.file_path.clone()).collect();
-        affected_files.sort();
-        affected_files.dedup();
-        let before: FxHashSet<&Diagnostic> = self.output.diagnostics.iter().collect();
-        let after: FxHashSet<&Diagnostic> = next.output.diagnostics.iter().collect();
-        let update = IncrementalUpdate {
-            revision: next.id,
-            updated_components: updated.iter().map(|(_, entry)| (*entry).clone()).collect(),
-            updated_keys: updated.iter().map(|(key, _)| (*key).clone()).collect(),
-            removed_keys,
-            affected_files,
-            diagnostics: next.output.diagnostics.iter().filter(|d| !before.contains(d)).cloned().collect(),
-            removed_diagnostics: self.output.diagnostics.iter().filter(|d| !after.contains(d)).cloned().collect(),
-            duration_ms: start.elapsed().as_millis() as u64,
-        };
+        let update = output_delta(&self.output, &next.output, next.id, start);
         (next, update)
+    }
+
+    /// The project's source files this revision parsed.
+    pub(crate) fn source_files(&self) -> &FxHashSet<Utf8PathBuf> {
+        &self.files
     }
 
     /// Build the public output from the revision, and the key each component was published under: components keyed
@@ -519,6 +502,36 @@ impl Revision {
             },
         };
         (output, keys)
+    }
+}
+
+/// The delta that takes a client holding `previous` to `next`, published as `revision`: every component whose entry
+/// differs, every key that went away, every diagnostic added or dropped. Revisions built one change at a time report
+/// their own delta from `next`; this one is for a rebuild or several changes applied together.
+pub(crate) fn output_delta(
+    previous: &ExtractionOutput,
+    next: &ExtractionOutput,
+    revision: u64,
+    start: Instant,
+) -> IncrementalUpdate {
+    let updated: Vec<(&String, &ComponentEntry)> =
+        next.components.iter().filter(|(key, entry)| previous.components.get(*key) != Some(*entry)).collect();
+    let removed_keys: Vec<String> =
+        previous.components.keys().filter(|key| !next.components.contains_key(*key)).cloned().collect();
+    let mut affected_files: Vec<Utf8PathBuf> = updated.iter().map(|(_, entry)| entry.file_path.clone()).collect();
+    affected_files.sort();
+    affected_files.dedup();
+    let before: FxHashSet<&Diagnostic> = previous.diagnostics.iter().collect();
+    let after: FxHashSet<&Diagnostic> = next.diagnostics.iter().collect();
+    IncrementalUpdate {
+        revision,
+        updated_components: updated.iter().map(|(_, entry)| (*entry).clone()).collect(),
+        updated_keys: updated.iter().map(|(key, _)| (*key).clone()).collect(),
+        removed_keys,
+        affected_files,
+        diagnostics: next.diagnostics.iter().filter(|d| !before.contains(d)).cloned().collect(),
+        removed_diagnostics: previous.diagnostics.iter().filter(|d| !after.contains(d)).cloned().collect(),
+        duration_ms: start.elapsed().as_millis() as u64,
     }
 }
 
@@ -630,7 +643,7 @@ fn source_dir_diagnostics(options: &PipelineOptions) -> Vec<Diagnostic> {
         .collect()
 }
 
-fn empty_output() -> ExtractionOutput {
+pub(crate) fn empty_output() -> ExtractionOutput {
     ExtractionOutput {
         components: BTreeMap::new(),
         enums: BTreeMap::new(),
