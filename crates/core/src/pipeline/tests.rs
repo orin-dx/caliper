@@ -2804,6 +2804,7 @@ export type LinkFactory = Factory<{ props: LinkProps; ref: HTMLAnchorElement }>;
 export const Button = factory<ButtonFactory>((props) => <button>{props.label}</button>);
 export const Link = factory<LinkFactory>((props) => <a>{props.label}</a>);
 export const Plain = opaque<ButtonFactory>((props) => <button>{props.label}</button>);
+export const Typed = factory<ButtonFactory>((props: ButtonProps) => <button>{props.label}</button>);
 "#,
     );
     let options = PipelineOptions {
@@ -2837,6 +2838,8 @@ export const Plain = opaque<ButtonFactory>((props) => <button>{props.label}</but
         [prop("component", "\"a\" | \"span\"", true, ""), prop("label", "string", true, ""), render_root]
     );
     assert_eq!(props("Plain"), [prop("label", "string", true, "")]);
+    // A typed render function makes this a HOC-wrapper detection; the callee still adds its props.
+    assert_eq!(props("Typed"), props("Button"));
     let warnings: Vec<&str> = output
         .diagnostics
         .iter()

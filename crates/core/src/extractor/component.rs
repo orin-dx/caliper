@@ -299,19 +299,22 @@ impl<'src> SourceDataCollector<'src> {
         let param_defaults = self.extract_param_defaults(params);
         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
 
-        Some(
-            ComponentMapping::new(
-                name.to_owned(),
-                props_name,
-                self.file_path.clone(),
-                decl.span.start,
-                decl.span.end,
-                DetectionRule::HocWrapper,
-            )
-            .with_props_type_args(type_args)
-            .with_doc(description, tags)
-            .with_param_defaults(param_defaults),
+        let mapping = ComponentMapping::new(
+            name.to_owned(),
+            props_name,
+            self.file_path.clone(),
+            decl.span.start,
+            decl.span.end,
+            DetectionRule::HocWrapper,
         )
+        .with_props_type_args(type_args)
+        .with_doc(description, tags)
+        .with_param_defaults(param_defaults);
+        // `factory<Payload>((props: P) => …)`: a generic wrapper's result type can add props, as in `wrapper.rs`.
+        Some(match self.wrapper_callee(call) {
+            Some(callee) => mapping.with_wrapper_callee(callee),
+            None => mapping,
+        })
     }
 
     /// Try to detect: `declare const Button: React.ForwardRefExoticComponent<ButtonProps & RefAttributes<E>>`
