@@ -39,7 +39,7 @@ Scraping the full 250+ inherited HTML attributes per component? It's supported, 
 | `defaultValue` | ✅ | `{value, computed}` — captured from destructured parameter defaults (`{ variant = 'primary' }`) or JSDoc `@default`, code value wins on conflict |
 | `parent.name` / `parent.fileName` | ✅ | `fileName` is always canonicalized to an absolute path regardless of how `--src` was invoked |
 | `props.children` | ✅ | Omitted when it has no description, matching RDT's default `skipChildrenPropWithoutDoc`; `--format canonical` keeps it |
-| `declarations` | ❌ not emitted in `--format rdt` | Only present in `--format canonical` (the raw internal shape); omitted from both `--format rdt` and `--format storybook` to match RDT's single-parent shape. File an issue if you need it |
+| `declarations` | ❌ not emitted in `--format rdt` | Only present in `--format canonical` (the raw internal shape); omitted from `--format rdt` to match RDT's single-parent shape. File an issue if you need it |
 
 ### Intentionally omitted
 

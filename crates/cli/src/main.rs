@@ -98,7 +98,7 @@ pub struct ExtractArgs {
     pub extra_builtins: Vec<String>,
 
     /// Machine-readable JSON output: the canonical schema, compact, always to
-    /// stdout, ignoring --out/--format (which govern the human/RDT/Storybook
+    /// stdout, ignoring --out/--format (which govern the human/RDT/TOON
     /// paths below), and suppresses the human-readable summary/diagnostics.
     #[arg(long, short = 'j')]
     pub json: bool,
@@ -110,8 +110,6 @@ pub enum OutputFormat {
     Canonical,
     /// react-docgen-typescript compatible output
     Rdt,
-    /// Storybook __docgenInfo blocks
-    Storybook,
     /// Token-Optimized Object Notation (compact agent format)
     Toon,
 }

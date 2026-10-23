@@ -55,7 +55,6 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
         let json = match args.format {
             crate::OutputFormat::Canonical => serde_json::to_string_pretty(&output).into_diagnostic()?,
             crate::OutputFormat::Rdt => serialize_rdt(&output).into_diagnostic()?,
-            crate::OutputFormat::Storybook => serialize_storybook(&output).into_diagnostic()?,
             crate::OutputFormat::Toon => caliper_docgen_core::toon::render_output_toon(&output),
         };
 
@@ -77,36 +76,6 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
 /// `--format rdt`: react-docgen-typescript's shape, shared with the NAPI binding.
 pub fn serialize_rdt(output: &caliper_docgen_core::types::ExtractionOutput) -> serde_json::Result<String> {
     caliper_docgen_core::pipeline::rdt::serialize(output)
-}
-
-pub fn serialize_storybook(output: &caliper_docgen_core::types::ExtractionOutput) -> serde_json::Result<String> {
-    let mut map = serde_json::Map::new();
-    for (name, entry) in &output.components {
-        let props: serde_json::Map<String, serde_json::Value> = entry
-            .props
-            .iter()
-            .map(|(k, prop)| {
-                let obj = serde_json::json!({
-                    "name": prop.name,
-                    "type": { "name": prop.prop_type.raw_string() },
-                    "required": prop.required,
-                    "defaultValue": prop.default_value.as_ref().map(|d| serde_json::json!({"value": d.value})),
-                    "description": prop.description,
-                });
-                (k.clone(), obj)
-            })
-            .collect();
-        map.insert(
-            name.clone(),
-            serde_json::json!({
-                "displayName": entry.display_name,
-                "props": serde_json::Value::Object(props),
-                "description": entry.description,
-                "methods": [],
-            }),
-        );
-    }
-    serde_json::to_string_pretty(&serde_json::Value::Object(map))
 }
 
 #[cfg(test)]

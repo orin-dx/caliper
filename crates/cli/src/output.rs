@@ -33,7 +33,7 @@ pub fn write_atomic(path: &str, contents: &str) -> std::io::Result<()> {
 }
 
 /// Human-readable extraction summary. Always written to stderr — stdout is reserved for the
-/// JSON payload (canonical/RDT/storybook), in every mode, so `caliper-docgen extract | jq .`
+/// JSON payload (canonical/RDT/TOON), in every mode, so `caliper-docgen extract | jq .`
 /// never sees this interleaved with the data.
 pub fn print_summary(output: &caliper_docgen_core::types::ExtractionOutput, quiet: bool) {
     if quiet {

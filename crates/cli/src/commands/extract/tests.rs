@@ -404,54 +404,6 @@ fn docgen_info_keeps_undocumented_children_for_storybook() {
     assert_eq!(names, vec!["children", "label"]);
 }
 
-#[test]
-fn serialize_storybook_emits_exact_docgen_blocks() {
-    use caliper_docgen_core::types::{DefaultValue, ParsedProp};
-    let label = ParsedProp::new(
-        "label".to_string(),
-        PropType::ReactNode,
-        false,
-        Some(DefaultValue { value: "\"hi\"".to_string(), computed: false }),
-        "The label.".to_string(),
-        Default::default(),
-        None,
-        vec![],
-    );
-    let mut entry = component_with_props("Widget", vec![]);
-    entry.description = "A widget.".to_string();
-    entry.props.insert("label".to_string(), label);
-    let mut components = std::collections::BTreeMap::new();
-    components.insert("Widget".to_string(), entry);
-    let output = caliper_docgen_core::types::ExtractionOutput {
-        components,
-        enums: Default::default(),
-        diagnostics: vec![],
-        stats: Default::default(),
-    };
-
-    let parsed: serde_json::Value = serde_json::from_str(&serialize_storybook(&output).unwrap()).unwrap();
-
-    assert_eq!(
-        parsed,
-        serde_json::json!({
-            "Widget": {
-                "displayName": "Widget",
-                "description": "A widget.",
-                "methods": [],
-                "props": {
-                    "label": {
-                        "name": "label",
-                        "type": { "name": "ReactNode" },
-                        "required": false,
-                        "defaultValue": { "value": "\"hi\"" },
-                        "description": "The label."
-                    }
-                }
-            }
-        })
-    );
-}
-
 /// Runs `extract` end to end over one button component and returns its canonical JSON. Lives inside the crate so
 /// `@types/react` resolves for `full` mode.
 fn extract_button(mode: crate::HtmlAttributeModeArg) -> serde_json::Value {

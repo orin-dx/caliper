@@ -17,7 +17,6 @@ Options:
           Possible values:
           - canonical: caliper-docgen canonical schema (richest)
           - rdt:       react-docgen-typescript compatible output
-          - storybook: Storybook __docgenInfo blocks
           - toon:      Token-Optimized Object Notation (compact agent format)
           
           [default: canonical]
