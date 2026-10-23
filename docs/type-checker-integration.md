@@ -1,6 +1,6 @@
 # Semantic backend (TypeScript 7)
 
-**Status:** designed, not implemented ([ADR 0006](adr/0006-semantic-backend-as-second-resolver.md)). `PipelineOptions::resolve_complex_types` exists and does nothing. **Last verified:** 2026-09-27. Each measurement names its nightly.
+**Status:** designed, not implemented ([ADR 0006](adr/0006-semantic-backend-as-second-resolver.md)). `PipelineOptions::resolve_complex_types` exists and does nothing. **Last verified:** 2026-09-27 for measurements, each naming its nightly; 2026-10-22 for the API table against the `7.1.0-beta` package.
 
 ## Next step
 
@@ -75,12 +75,13 @@ RDT also emits any exported symbol that has a JSDoc comment but no props. We don
 | Topic | Detail |
 | --- | --- |
 | Where | `microsoft/TypeScript` `main` (`7.1.0-dev`). typescript-go closed on 2026-08-20 |
-| Timeline | Beta 2026-10-06, RC 2026-11-10, stable 2026-11-24 ([#63703](https://github.com/microsoft/TypeScript/issues/63703)) |
-| Get it | `npm i typescript@beta` (`7.1.0-beta`, published 2026-10-06) or `@next`. 7.0.x (`latest`) has no API |
-| Launch | `tsc --api --async --cwd <dir>`: JSON-RPC with LSP-style `Content-Length` framing, handled concurrently. Without `--async`: msgpack over stdio, strictly serial. `--pipe` uses a socket |
-| Stability | The beta's JS entry points are `typescript/sync`, `/async`, `/proto` and `/ast/*` (the `unstable/*` names are gone). The protocol has no version handshake, so pin the build |
+| Timeline | The plan ([#63703](https://github.com/microsoft/TypeScript/issues/63703)) put the beta on 2026-10-06; npm published `7.1.0-beta` on 2026-10-20. RC 2026-11-10 and stable 2026-11-24 are still planned |
+| Get it | `npm i typescript@beta` (`7.1.0-beta`) or `@next` (daily `7.1.0-dev`). 7.0.x (`latest`, `7.0.2`) has no API |
+| Launch | `tsc --api [--async] --cwd <dir> --useCaseSensitiveFileNames=<bool>`, plus `--runExternalCode` and `--timing` when asked. With `--async`: JSON-RPC with LSP-style `Content-Length` framing over stdio (`vscode-jsonrpc`), handled concurrently. Without it: msgpack over stdio |
+| msgpack caveats | Each message is a 3-element msgpack array: message type (u8), method (bin) and payload (bin). The server answers one request at a time, so a sync client blocks until the reply. Encoded strings are WTF-8: a lone surrogate from a JS string survives, so a Rust client must not decode them as strict UTF-8. On Windows the sync client passes `--pipe <named pipe>` instead of stdio |
+| Stability | The beta's JS entry points are `typescript/sync`, `/async`, `/proto`, `/ast` and `/ast/*`, `/fs`, `/path` and `/vscode`; the root export is only the version. The `unstable/*` names in ADR 0006 were the nightlies' and are gone. The protocol has no version handshake, so pin the build |
 | Positions | UTF-16 code units. OXC offsets are UTF-8 bytes |
-| Surface | 157 methods on 2026-09-19, mostly with TS 6 checker names |
+| Surface | 177 methods in `7.1.0-beta` (`APIMethodInfo` in `dist/api/proto.generated.d.ts`), up from 157 on 2026-09-19, mostly with TS 6 checker names. Every call in "The algorithm" is present |
 
 **Beta re-probe (2026-10-21, `7.1.0-beta`).** `crates/tsc-client`'s smoke example spawned the beta's `bin/tsc --api`, completed the `initialize` round trip (`caseSensitivity`, `currentDirectory`) and shut down cleanly with exit status 0, so framing and shutdown behave as the fake-tsc harness assumes. `TSC_PACKAGE_DIR=<dir> cargo run -p caliper-docgen-tsc-client --example smoke_real_tsc` repeats it against any installed `typescript`. The beta's `proto.generated.d.ts` still exposes every checker call the algorithm uses: `getTypeAtLocation`, `getTypeOfSymbol`, `getDeclaredTypeOfSymbol`, `getSignaturesOfType`, `getResolvedSignature`, `getReturnTypeOfSignature`, `getBaseTypes` and `getPropertiesOfType`. Not yet re-run on the beta: the 13-component parity run below and discovery over a whole project.
 
@@ -92,7 +93,7 @@ RDT also emits any exported symbol that has a JSDoc comment but no props. We don
 const s1 = await s0.update({ fileNotifications: { changed: [file] }, ensurePrograms: true })
 ```
 
-With the notification, the dependent component's props updated (0.5 ms update, 2.8 ms query). An unnotified disk edit stayed stale (2026-09-20).
+With the notification, the dependent component's props updated (0.5 ms update, 2.8 ms query). An unnotified disk edit stayed stale (2026-09-20). Both incremental paths must notify it once the backend is wired in: `WatchSession::update_file` and `WatchSession::ensure_fresh`, which finds changes by stat instead of being told (ADR 0007 names only the first).
 
 ## Evidence
 
