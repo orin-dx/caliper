@@ -8,7 +8,10 @@ fn args_for(src: &str, json: bool) -> crate::ExtractArgs {
         cache_dir: None,
         html_attributes: None,
         extra_builtins: vec![],
+        include_unexported: false,
         json,
+        load_dependencies: false,
+        collapse_inherited_props: None,
     }
 }
 
@@ -214,10 +217,29 @@ export function Comp(props: CompProps) { return null; }
     };
     let output = caliper_docgen_core::pipeline::extract(&options);
 
-    let rdt_json = serialize_rdt(&output).unwrap();
+    let rdt_json = serialize_rdt(&output, false).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&rdt_json).unwrap();
     let composes = parsed["Comp"]["composes"].as_array().expect("expected a composes array in RDT output");
     assert!(!composes.is_empty(), "expected the unresolvable Weird<'x'> member to appear in RDT's composes field");
+}
+
+#[test]
+fn rdt_output_gives_each_component_its_absolute_file_path() {
+    let manifest_dir = camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tmp = tempfile::TempDir::new_in(manifest_dir).unwrap();
+    std::fs::write(tmp.path().join("Badge.tsx"), "export function Badge(props: { tone: string }) { return null; }")
+        .unwrap();
+    let dir = camino::Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
+    let options = caliper_docgen_core::pipeline::PipelineOptions {
+        src_dirs: vec![dir.clone()],
+        cache_dir: Some(dir.join("cache")),
+        ..Default::default()
+    };
+
+    let output = caliper_docgen_core::pipeline::extract(&options);
+    let parsed: serde_json::Value = serde_json::from_str(&serialize_rdt(&output, false).unwrap()).unwrap();
+    assert!(dir.is_absolute());
+    assert_eq!(parsed["Badge"]["filePath"], dir.join("Badge.tsx").as_str());
 }
 
 // ── SPEC-SERIALIZATION-001 AC-1/AC-2/AC-3/AC-4: rdt_type_json had zero
@@ -315,6 +337,7 @@ fn serialize_rdt_emits_composes_exactly() {
         tags: Default::default(),
         methods: vec![],
         detected_by: caliper_docgen_core::types::DetectionRule::FunctionDeclaration,
+        exported: true,
     };
     let mut components = std::collections::BTreeMap::new();
     components.insert("Widget".to_string(), entry);
@@ -325,7 +348,7 @@ fn serialize_rdt_emits_composes_exactly() {
         stats: Default::default(),
     };
 
-    let rdt_json = serialize_rdt(&output).unwrap();
+    let rdt_json = serialize_rdt(&output, false).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&rdt_json).unwrap();
     assert_eq!(parsed["Widget"]["composes"], serde_json::json!(["BaseA", "BaseB"]));
 }
@@ -352,7 +375,7 @@ fn component_with_props(name: &str, props: Vec<(&str, &str)>) -> caliper_docgen_
                     None,
                     vec![],
                 );
-                (prop_name.to_string(), prop)
+                (prop_name.to_string(), std::sync::Arc::new(prop))
             })
             .collect(),
         inheritance: vec![],
@@ -362,6 +385,7 @@ fn component_with_props(name: &str, props: Vec<(&str, &str)>) -> caliper_docgen_
         tags: Default::default(),
         methods: vec![],
         detected_by: caliper_docgen_core::types::DetectionRule::FunctionDeclaration,
+        exported: true,
     }
 }
 
@@ -380,7 +404,7 @@ fn serialize_rdt_omits_undocumented_children_but_keeps_documented_ones() {
         stats: Default::default(),
     };
 
-    let parsed: serde_json::Value = serde_json::from_str(&serialize_rdt(&output).unwrap()).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&serialize_rdt(&output, false).unwrap()).unwrap();
     let prop_names = |component: &str| -> Vec<String> {
         let mut names: Vec<String> = parsed[component]["props"].as_object().unwrap().keys().cloned().collect();
         names.sort();
@@ -392,6 +416,34 @@ fn serialize_rdt_omits_undocumented_children_but_keeps_documented_ones() {
 
     // Canonical output is untouched: the undocumented `children` is still there.
     assert!(output.components["Bare"].props.contains_key("children"));
+}
+
+#[test]
+fn compat_formats_omit_unexported_components_unless_asked() {
+    let mut components = std::collections::BTreeMap::new();
+    components.insert("Public".to_string(), component_with_props("Public", vec![]));
+    components.insert(
+        "Internal".to_string(),
+        caliper_docgen_core::types::ComponentEntry { exported: false, ..component_with_props("Internal", vec![]) },
+    );
+    let output = caliper_docgen_core::types::ExtractionOutput {
+        components,
+        enums: Default::default(),
+        diagnostics: vec![],
+        stats: Default::default(),
+    };
+    let names = |json: String| -> Vec<String> {
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        parsed.as_object().unwrap().keys().cloned().collect()
+    };
+
+    assert_eq!(names(serialize_rdt(&output, false).unwrap()), vec!["Public"]);
+    assert_eq!(names(serialize_storybook(&output, false).unwrap()), vec!["Public"]);
+    assert_eq!(names(serialize_rdt(&output, true).unwrap()), vec!["Internal", "Public"]);
+    assert_eq!(names(serialize_storybook(&output, true).unwrap()), vec!["Internal", "Public"]);
+    let canonical: serde_json::Value = serde_json::to_value(&output).unwrap();
+    assert_eq!(canonical["components"]["Internal"]["exported"], false);
+    assert_eq!(canonical["components"]["Public"]["exported"], true);
 }
 
 #[test]
@@ -409,7 +461,7 @@ fn serialize_storybook_emits_exact_docgen_blocks() {
     );
     let mut entry = component_with_props("Widget", vec![]);
     entry.description = "A widget.".to_string();
-    entry.props.insert("label".to_string(), label);
+    entry.props.insert("label".to_string(), std::sync::Arc::new(label));
     let mut components = std::collections::BTreeMap::new();
     components.insert("Widget".to_string(), entry);
     let output = caliper_docgen_core::types::ExtractionOutput {
@@ -419,7 +471,7 @@ fn serialize_storybook_emits_exact_docgen_blocks() {
         stats: Default::default(),
     };
 
-    let parsed: serde_json::Value = serde_json::from_str(&serialize_storybook(&output).unwrap()).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&serialize_storybook(&output, false).unwrap()).unwrap();
 
     assert_eq!(
         parsed,
@@ -463,7 +515,10 @@ export function Button(props: ButtonProps) { return null; }
         cache_dir: Some(tmp.path().join("cache").to_str().unwrap().to_owned()),
         html_attributes: Some(mode),
         extra_builtins: vec![],
+        include_unexported: false,
         json: false,
+        load_dependencies: false,
+        collapse_inherited_props: None,
     };
 
     assert_eq!(cmd_extract(args, false, None).unwrap(), 0);
@@ -534,7 +589,7 @@ export function Comp(props: Props) { return null; }
         comp.composes
     );
 
-    let rdt_json = serialize_rdt(&output).unwrap();
+    let rdt_json = serialize_rdt(&output, false).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&rdt_json).unwrap();
     assert_eq!(parsed["Comp"]["composes"], serde_json::json!(["\"a\" | \"b\""]));
 }

@@ -287,8 +287,13 @@ impl<'src> SourceDataCollector<'src> {
             let (params, span_start, span_end) = match &op.value {
                 Expression::FunctionExpression(fe) => (&fe.params, fe.span.start, fe.span.end),
                 Expression::ArrowFunctionExpression(afe) => (&afe.params, afe.span.start, afe.span.end),
+                Expression::Identifier(sub) => {
+                    self.record_attached(sub.name.as_str(), parent_id.name.as_str());
+                    continue;
+                }
                 _ => continue,
             };
+            self.record_attached(&key_name, parent_id.name.as_str());
 
             let Some(first_param) = params.items.first() else { continue };
             let Some(type_ann) = &first_param.type_annotation else {

@@ -14,6 +14,10 @@ The line the project actually draws, reverse-engineered from where each format l
 
 ## RDT format (`serialize_rdt`)
 
+RDT and Storybook output hold only components with `exported: true`, unless `--include-unexported` is passed (`compat_components`). react-docgen-typescript documents only a module's exports, so a file-local helper component would otherwise appear in RDT-shaped output where RDT never puts one.
+
+Each RDT component carries `filePath`, the absolute path of its source file, as RDT's `ComponentDoc` does. Storybook format leaves it out.
+
 ### The `enum`-shape convention (`rdt_type_json`)
 
 react-docgen-typescript encodes a literal union prop type not as an inlined string but as a structured shape renderers pattern-match on:

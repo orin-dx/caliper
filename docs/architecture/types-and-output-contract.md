@@ -40,7 +40,7 @@ pub enum PropType {
     Tuple(Vec<PropType>), Object(Vec<ObjectField>),
     Named { name: TypeName, args: Vec<PropType> },
     ReactNode, CssProperties,
-    EventHandler { event_type: String, param_name: Option<String> },
+    Function { type_params: Vec<String>, params: Vec<FunctionParam>, return_type: Box<PropType> },
     Ref { element: Option<String> },
     ElementType,
     HtmlAttributes { element: String, omitted: Vec<String> },
@@ -50,7 +50,7 @@ pub enum PropType {
 }
 ```
 
-Note what disappeared crossing the boundary: `BigInt`, `Symbol`, `TypeOf`, `KeyOf`, `AtFile`, `IndexedAccess`, `TemplateLiteral`, `Function`, `Conditional`, `Mapped`, `Raw` are all gone from `PropType`. Each either resolves into a concrete `PropType` variant (`Function` with the right shape becomes `EventHandler`) or terminates in `PropType::Opaque` with an `OpaqueReason` explaining exactly which unresolvable TypeScript construct it was (`ConditionalType`, `MappedType`, `IndexedAccess`, `TemplateLiteral`, ...). This is the resolver's entire job, structurally: eliminate every "can't be sure yet" variant.
+Note what disappeared crossing the boundary: `BigInt`, `Symbol`, `TypeOf`, `KeyOf`, `AtFile`, `IndexedAccess`, `TemplateLiteral`, `Function`, `Conditional`, `Mapped`, `Raw` are all gone from `PropType`. Each either resolves into a concrete `PropType` variant (`Function` becomes `PropType::Function` with its parameters and return type resolved) or terminates in `PropType::Opaque` with an `OpaqueReason` explaining exactly which unresolvable TypeScript construct it was (`ConditionalType`, `MappedType`, `IndexedAccess`, `TemplateLiteral`, ...). This is the resolver's entire job, structurally: eliminate every "can't be sure yet" variant.
 
 ## LOCKED DESIGN DECISION: manual Serialize/Deserialize on the recursive enums (ADR-0002)
 
@@ -74,7 +74,7 @@ pub enum OpaqueReason {
     PandaCodegenMissing, DepthExceeded,
     IndexedAccess { expression: String },
     TemplateLiteral { expression: String },
-    MultiParamFunction, UnsupportedExpression,
+    UnsupportedExpression,
 }
 ```
 
@@ -120,7 +120,7 @@ impl OpaqueDetail {
 
 **Who actually calls which, verified against current source:**
 
-- `resolver/collected.rs`, `resolver/primitives.rs`, `resolver/template.rs`, `resolver/named.rs`, `resolver/func.rs` — every one of these resolver-internal degradation sites calls `OpaqueDetail::give_up`, each with its own specific `OpaqueReason` (`DepthExceeded`, `MappedType`, `ConditionalType`, `UnsupportedExpression`, `IndexedAccess`, `TemplateLiteral`, `MultiParamFunction`) and a diagnostic message tailored to that reason.
+- `resolver/collected.rs`, `resolver/primitives.rs`, `resolver/template.rs`, `resolver/named.rs` — every one of these resolver-internal degradation sites calls `OpaqueDetail::give_up`, each with its own specific `OpaqueReason` (`DepthExceeded`, `MappedType`, `ConditionalType`, `UnsupportedExpression`, `IndexedAccess`, `TemplateLiteral`) and a diagnostic message tailored to that reason.
 - `known.rs` — every call is `OpaqueDetail::new`, for the documented exception: `known.rs` has no `ResolveState` of its own to push a diagnostic onto (it's a lookup table, not a resolution pass), so it pushes its diagnostic separately through `push_known_opaque_diagnostic` (`known.rs:31`) at the call site that invokes the lookup, rather than inline in the constructor.
 - `output.rs`'s own `from_tagged_value` — deserialization uses `OpaqueDetail::new` for both the "opaque" JSON tag and the catch-all unknown-`kind` fallback (line 712). This is deserialization, not resolution — there is no `ResolveState` in scope during deserialization, and re-diagnosing a value that's simply being read back off disk/wire would be meaningless (the diagnostic, if any, was already emitted and persisted when the value was first produced).
 
@@ -223,6 +223,7 @@ pub struct ComponentEntry {
     pub tags: BTreeMap<String, String>,
     pub methods: Vec<()>,
     pub detected_by: DetectionRule,
+    pub exported: bool,
 }
 ```
 
@@ -231,6 +232,8 @@ The Rust types hold props inline, but the canonical JSON does not (ADR 0009, `ty
 **Invariant 6a:** two different props never share an id. `PropTable::add` compares the JSON of every prop added under an existing id and fails serialization on a mismatch, rather than letting one prop stand in for another.
 
 `detected_by` (`detectedBy` in JSON) is the extractor rule that recognized the component, so a consumer can tell an explicit declaration form (`functionDeclaration`, `forwardRef`, `fcAnnotation`, `classComponent`, ...) from an inference (`typedFunctionExpression`, `wrapperTypeArgument`). It is the grouping the per-rule precision sample uses (`docs/precision.md`).
+
+`exported` says whether the component's module exports it: an exported declaration, an `export { X as Y }` or `export default X` of a local, or a sub-component attached to an exported component (`Parent.Sub = Sub`, `Object.assign(Parent, { Sub })`). Canonical output keeps unexported components; `--format rdt` and `--format storybook` omit them unless `--include-unexported` is passed, as react-docgen-typescript only documents exports.
 
 **Invariant 6:** `components`, `enums`, `props`, and `notable_inherited` are `BTreeMap`, not `FxHashMap` — this is AGENTS.md non-negotiable #2 (`FxHashMap` for internal maps, `BTreeMap` for JSON-output maps) applied at the type level. `ExtractionOutput` and everything nested inside it that's part of the JSON contract is output-facing, so it gets deterministic key order for free from `BTreeMap`'s iteration order — output diffing, snapshot tests, and any consumer that hashes or compares the JSON depend on this being stable across runs, not just correct.
 
@@ -285,4 +288,3 @@ This is also _why_ `CollectedObjectField` (collected.rs:469-475) still plainly d
 ## Known gaps (cross-referenced, not re-derived)
 
 - `docs/edge-cases.md` P0-1: `known.rs` shortcut lookup-precedence is inconsistent between `resolver/named.rs` (source-defined types checked first, correct) and `resolver/chain.rs`'s `extends`-clause path (hardcoded shortcuts checked first) — a project defining its own `interface SxProps {...}` and extending it gets silently replaced by the hardcoded MUI opaque shape. This is a resolver call-site bug, not a `types/` shape problem, but it's the kind of thing that would be invisible without knowing `OpaqueDetail::new`'s two call sites (`known.rs` vs. resolver `give_up` sites) both ultimately produce the same `PropType::Opaque` shape — you can't tell from the _type_ alone which path produced a given opaque value.
-- `docs/edge-cases.md`: multi-parameter function types degrade to `PropType::Opaque { MultiParamFunction }` via `func.rs:79`'s `give_up` call — this one _does_ push a diagnostic (confirmed reading `func.rs:79` above), which appears to resolve what edge-cases.md describes as inconsistent at `func.rs:54-61`; worth a follow-up check against `docs/edge-cases.md`'s exact line reference if that document predates a fix.
