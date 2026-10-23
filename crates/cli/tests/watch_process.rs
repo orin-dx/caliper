@@ -312,6 +312,8 @@ fn raw_mode_keeps_newline_translation_for_output() {
 fn a_signal_restores_the_terminal_mode_the_session_changed() {
     let mut watch = Watch::start_in_terminal();
     watch.wait_until_raw();
+    // Raw mode comes before watchexec installs its signal handlers; a SIGTERM before them kills the process outright.
+    watch.wait_until_watching();
 
     watch.signal("TERM");
 
