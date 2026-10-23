@@ -276,13 +276,12 @@ pub enum PropType {
     ReactNode,
     /// React.CSSProperties
     CssProperties,
-    /// Event handler: (e: MouseEvent) => void etc.
-    EventHandler {
-        /// "MouseEvent", "`ChangeEvent<HTMLInputElement>`", etc.
-        event_type: std::string::String,
-        /// The source parameter's name (e.g. "open" in `(open: boolean) => void`),
-        /// if the underlying function type had a simple identifier binding.
-        param_name: Option<std::string::String>,
+    /// A function type: callbacks, render props and event handlers alike (`(value: number) => ReactNode`).
+    Function {
+        /// The function's own type parameters: `T` in `<T>(item: T) => ReactNode`.
+        type_params: Vec<std::string::String>,
+        params: Vec<FunctionParam>,
+        return_type: Box<PropType>,
     },
     /// `Ref<T>` / `RefObject<T>` / `ForwardedRef<T>`
     Ref {
@@ -395,9 +394,13 @@ impl PropType {
             PropType::StringLiteral(s) => format!("\"{}\"", s),
             PropType::NumberLiteral(n) => n.to_string(),
             PropType::BoolLiteral(b) => b.to_string(),
-            PropType::Union(members) => members.iter().map(|m| m.raw_string()).collect::<Vec<_>>().join(" | "),
-            PropType::Intersection(members) => members.iter().map(|m| m.raw_string()).collect::<Vec<_>>().join(" & "),
-            PropType::Array(inner) => format!("{}[]", inner.raw_string()),
+            PropType::Union(members) => {
+                members.iter().map(|m| m.operand_string(Precedence::Union)).collect::<Vec<_>>().join(" | ")
+            }
+            PropType::Intersection(members) => {
+                members.iter().map(|m| m.operand_string(Precedence::Intersection)).collect::<Vec<_>>().join(" & ")
+            }
+            PropType::Array(inner) => format!("{}[]", inner.operand_string(Precedence::Array)),
             PropType::Tuple(members) => {
                 format!("[{}]", members.iter().map(|m| m.raw_string()).collect::<Vec<_>>().join(", "))
             }
@@ -423,8 +426,23 @@ impl PropType {
             }
             PropType::ReactNode => "ReactNode".into(),
             PropType::CssProperties => "CSSProperties".into(),
-            PropType::EventHandler { event_type, param_name } => {
-                format!("({}: {}) => void", param_name.as_deref().unwrap_or("e"), event_type)
+            PropType::Function { type_params, params, return_type } => {
+                let type_params = if type_params.is_empty() {
+                    std::string::String::new()
+                } else {
+                    format!("<{}>", type_params.join(", "))
+                };
+                // A destructured parameter has no name; TypeScript prints it as `__0`, `__1`, ...
+                let params = params
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| match &p.name {
+                        Some(name) => format!("{name}: {}", p.param_type.raw_string()),
+                        None => format!("__{i}: {}", p.param_type.raw_string()),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{type_params}({params}) => {}", return_type.raw_string())
             }
             PropType::Ref { element: Some(e) } => format!("Ref<{}>", e),
             PropType::Ref { element: None } => "Ref<unknown>".into(),
@@ -436,6 +454,31 @@ impl PropType {
             PropType::Opaque(detail) => detail.raw.clone(),
         }
     }
+
+    /// `raw_string`, parenthesized where TypeScript needs it as an operand of `context`: a function inside a union,
+    /// a union inside an intersection, any of them before `[]`.
+    fn operand_string(&self, context: Precedence) -> std::string::String {
+        let own = match self {
+            PropType::Function { .. } => Precedence::Function,
+            PropType::Union(_) | PropType::LiteralUnion { .. } => Precedence::Union,
+            PropType::Intersection(_) => Precedence::Intersection,
+            _ => Precedence::Array,
+        };
+        if own < context {
+            format!("({})", self.raw_string())
+        } else {
+            self.raw_string()
+        }
+    }
+}
+
+/// How tightly a type operator binds, loosest first.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Precedence {
+    Function,
+    Union,
+    Intersection,
+    Array,
 }
 
 /// Streams each variant as a map with `kind` first, then its fields in a fixed order. Building a `serde_json::Value`
@@ -516,10 +559,11 @@ impl serde::Serialize for PropType {
                 map.serialize_entry("name", name.as_str())?;
                 map.serialize_entry("args", args)?;
             }
-            PropType::EventHandler { event_type, param_name } => {
-                map.serialize_entry("kind", "eventHandler")?;
-                map.serialize_entry("eventType", event_type)?;
-                map.serialize_entry("paramName", param_name)?;
+            PropType::Function { type_params, params, return_type } => {
+                map.serialize_entry("kind", "function")?;
+                map.serialize_entry("typeParams", type_params)?;
+                map.serialize_entry("params", params)?;
+                map.serialize_entry("returnType", return_type)?;
             }
             PropType::Ref { element } => {
                 map.serialize_entry("kind", "ref")?;
@@ -603,7 +647,6 @@ impl serde::Serialize for WireReason<'_> {
                 map.serialize_entry("type", "templateLiteral")?;
                 map.serialize_entry("expression", expression)?;
             }
-            OpaqueReason::MultiParamFunction => map.serialize_entry("type", "multiParamFunction")?,
             OpaqueReason::UnsupportedExpression => map.serialize_entry("type", "unsupportedExpression")?,
         }
         map.end()
@@ -710,10 +753,26 @@ impl PropType {
                     .unwrap_or(Ok(vec![]))?;
                 Ok(PropType::Named { name, args })
             }
-            "eventHandler" | "event_handler" => {
-                let event_type = v["eventType"].as_str().or_else(|| v["event_type"].as_str()).unwrap_or("").to_owned();
-                let param_name = v["paramName"].as_str().or_else(|| v["param_name"].as_str()).map(|s| s.to_owned());
-                Ok(PropType::EventHandler { event_type, param_name })
+            "function" => {
+                let type_params = v["typeParams"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect())
+                    .unwrap_or_default();
+                let params = v["params"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .map(|p| {
+                                Ok(FunctionParam {
+                                    name: p["name"].as_str().map(str::to_owned),
+                                    param_type: Self::from_tagged_value(&p["type"])?,
+                                })
+                            })
+                            .collect::<Result<Vec<_>, std::string::String>>()
+                    })
+                    .unwrap_or(Ok(vec![]))?;
+                let return_type = Box::new(Self::from_tagged_value(&v["returnType"])?);
+                Ok(PropType::Function { type_params, params, return_type })
             }
             "ref" => {
                 let element = v["element"].as_str().map(|s| s.to_owned());
@@ -754,7 +813,6 @@ impl PropType {
                     "templateLiteral" => OpaqueReason::TemplateLiteral {
                         expression: v["reason"]["expression"].as_str().unwrap_or("").to_owned(),
                     },
-                    "multiParamFunction" => OpaqueReason::MultiParamFunction,
                     "unsupportedExpression" => OpaqueReason::UnsupportedExpression,
                     _ => OpaqueReason::DepthExceeded,
                 };
@@ -812,13 +870,19 @@ pub enum OpaqueReason {
     IndexedAccess { expression: std::string::String },
     /// Template literal type — partially or fully unresolvable.
     TemplateLiteral { expression: std::string::String },
-    /// A function type with more than one parameter — describing it fully
-    /// needs a real type signature, not just an EventHandler-shaped summary.
-    MultiParamFunction,
     /// A raw type expression the extractor couldn't parse into any recognized
     /// structural shape (not a depth or circularity problem — see
     /// DepthExceeded for that).
     UnsupportedExpression,
+}
+
+/// One parameter of a [`PropType::Function`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FunctionParam {
+    /// `None` for a destructured parameter, which has no single name.
+    pub name: Option<std::string::String>,
+    #[serde(rename = "type")]
+    pub param_type: PropType,
 }
 
 /// A field in an object type.

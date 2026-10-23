@@ -261,9 +261,23 @@ expression: value
                 "kind": "reactNode"
               },
               {
-                "kind": "eventHandler",
-                "eventType": "ButtonRenderProps",
-                "paramName": "renderProps"
+                "kind": "function",
+                "typeParams": [],
+                "params": [
+                  {
+                    "name": "renderProps",
+                    "type": {
+                      "kind": "named",
+                      "name": "ButtonRenderProps",
+                      "args": []
+                    }
+                  }
+                ],
+                "returnType": {
+                  "kind": "named",
+                  "name": "React.ReactNode",
+                  "args": []
+                }
               }
             ]
           },
@@ -291,9 +305,21 @@ expression: value
                 "kind": "string"
               },
               {
-                "kind": "eventHandler",
-                "eventType": "ButtonRenderProps",
-                "paramName": "renderProps"
+                "kind": "function",
+                "typeParams": [],
+                "params": [
+                  {
+                    "name": "renderProps",
+                    "type": {
+                      "kind": "named",
+                      "name": "ButtonRenderProps",
+                      "args": []
+                    }
+                  }
+                ],
+                "returnType": {
+                  "kind": "string"
+                }
               }
             ]
           },
@@ -453,9 +479,27 @@ expression: value
         "onBlur": {
           "name": "onBlur",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "React.FocusEvent<HTMLButtonElement>",
-            "paramName": "e"
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "React.FocusEvent",
+                  "args": [
+                    {
+                      "kind": "named",
+                      "name": "HTMLButtonElement",
+                      "args": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -475,9 +519,27 @@ expression: value
         "onFocus": {
           "name": "onFocus",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "React.FocusEvent<HTMLButtonElement>",
-            "paramName": "e"
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "React.FocusEvent",
+                  "args": [
+                    {
+                      "kind": "named",
+                      "name": "HTMLButtonElement",
+                      "args": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -497,9 +559,19 @@ expression: value
         "onFocusChange": {
           "name": "onFocusChange",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "boolean",
-            "paramName": "isFocused"
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "isFocused",
+                "type": {
+                  "kind": "boolean"
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -519,9 +591,27 @@ expression: value
         "onKeyDown": {
           "name": "onKeyDown",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "React.KeyboardEvent<HTMLButtonElement>",
-            "paramName": "e"
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "React.KeyboardEvent",
+                  "args": [
+                    {
+                      "kind": "named",
+                      "name": "HTMLButtonElement",
+                      "args": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -541,9 +631,27 @@ expression: value
         "onKeyUp": {
           "name": "onKeyUp",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "React.KeyboardEvent<HTMLButtonElement>",
-            "paramName": "e"
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "React.KeyboardEvent",
+                  "args": [
+                    {
+                      "kind": "named",
+                      "name": "HTMLButtonElement",
+                      "args": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -563,9 +671,21 @@ expression: value
         "onPress": {
           "name": "onPress",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "PressEvent",
-            "paramName": "e"
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "PressEvent",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -585,9 +705,19 @@ expression: value
         "onPressChange": {
           "name": "onPressChange",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "boolean",
-            "paramName": "isPressed"
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "isPressed",
+                "type": {
+                  "kind": "boolean"
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -607,9 +737,21 @@ expression: value
         "onPressEnd": {
           "name": "onPressEnd",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "PressEvent",
-            "paramName": "e"
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "PressEvent",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -629,9 +771,21 @@ expression: value
         "onPressStart": {
           "name": "onPressStart",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "PressEvent",
-            "paramName": "e"
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "PressEvent",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -651,9 +805,21 @@ expression: value
         "onPressUp": {
           "name": "onPressUp",
           "type": {
-            "kind": "eventHandler",
-            "eventType": "PressEvent",
-            "paramName": "e"
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "PressEvent",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
           },
           "required": false,
           "defaultValue": null,
@@ -783,9 +949,23 @@ expression: value
                 "kind": "cssProperties"
               },
               {
-                "kind": "eventHandler",
-                "eventType": "ButtonRenderProps",
-                "paramName": "renderProps"
+                "kind": "function",
+                "typeParams": [],
+                "params": [
+                  {
+                    "name": "renderProps",
+                    "type": {
+                      "kind": "named",
+                      "name": "ButtonRenderProps",
+                      "args": []
+                    }
+                  }
+                ],
+                "returnType": {
+                  "kind": "named",
+                  "name": "React.CSSProperties",
+                  "args": []
+                }
               }
             ]
           },

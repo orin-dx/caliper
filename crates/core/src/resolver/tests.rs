@@ -470,16 +470,15 @@ fn test_less_common_event_handler_names_recognized_as_builtin() {
     // resolving @types/react's real HTMLAttributes/DOMAttributes chain was
     // tractable. Without this, each one falls through to same-file/imported
     // type resolution, fails (they're real @types/react types, not local), and
-    // degrades to opaque instead of a proper EventHandler PropType.
+    // degrades to opaque. A handler type keeps its name, as TypeScript prints it.
     let ctx = empty_ctx();
     for handler_name in ["ReactEventHandler", "SubmitEventHandler", "InputEventHandler", "ToggleEventHandler"] {
-        let ct = CollectedType::Named { name: handler_name.into(), args: vec![] };
+        let ct = CollectedType::Named {
+            name: handler_name.into(),
+            args: vec![CollectedType::Named { name: "HTMLDivElement".into(), args: vec![] }],
+        };
         let result = resolve_type(&ct, &ctx);
-        assert!(
-            matches!(&result, PropType::EventHandler { .. }),
-            "Expected {handler_name} to resolve as PropType::EventHandler, got {:?}",
-            result
-        );
+        assert_eq!(result.raw_string(), format!("{handler_name}<HTMLDivElement>"));
     }
 }
 
@@ -1735,106 +1734,76 @@ fn test_mapped_type_is_opaque() {
     );
 }
 
-// ── Test 16: Function type → EventHandler ────────────────────────────────
+// ── Test 16: Function types keep their parameters and return type ────────
 
-#[test]
-fn test_function_type_single_param() {
-    let ctx = empty_ctx();
-    let ct = CollectedType::Function {
-        params: vec![CollectedType::Named { name: "MouseEvent".into(), args: vec![] }],
-        param_names: vec![Some("e".into())],
-        return_type: Box::new(CollectedType::Void),
-    };
-    let result = resolve_type(&ct, &ctx);
-    assert!(
-        matches!(&result, PropType::EventHandler { event_type, param_name }
-            if event_type == "MouseEvent" && param_name.as_deref() == Some("e")),
-        "Expected EventHandler<MouseEvent> with param_name 'e', got {:?}",
-        result
-    );
+fn function_type(params: Vec<(&str, CollectedType)>, return_type: CollectedType) -> CollectedType {
+    CollectedType::Function {
+        type_params: vec![],
+        param_names: params.iter().map(|(name, _)| Some((*name).into())).collect(),
+        params: params.into_iter().map(|(_, t)| t).collect(),
+        return_type: Box::new(return_type),
+    }
 }
 
 #[test]
-fn test_function_type_multi_param_tags_multi_param_function_not_conditional_type() {
-    // Adversarial review finding: a multi-param function type's Opaque
-    // result was tagged OpaqueReason::ConditionalType — factually wrong,
-    // it's not a conditional type at all — misleading anyone consuming
-    // the "reason" field to understand why a prop degraded.
+fn a_function_type_prints_every_parameter_and_its_return_type() {
     let ctx = empty_ctx();
-    let ct = CollectedType::Function {
-        params: vec![CollectedType::String, CollectedType::Number],
-        param_names: vec![Some("a".into()), Some("b".into())],
-        return_type: Box::new(CollectedType::Void),
-    };
-    let result = resolve_type(&ct, &ctx);
-    assert!(
-        matches!(&result, PropType::Opaque(d) if matches!(d.reason(), OpaqueReason::MultiParamFunction)),
-        "Expected MultiParamFunction opaque, got {:?}",
-        result
-    );
+    let named = |name: &str| CollectedType::Named { name: name.into(), args: vec![] };
+    let cases = [
+        (function_type(vec![("e", named("MouseEvent"))], CollectedType::Void), "(e: MouseEvent) => void"),
+        (function_type(vec![], CollectedType::Void), "() => void"),
+        (function_type(vec![("value", CollectedType::Number)], named("ReactNode")), "(value: number) => ReactNode"),
+        (
+            function_type(vec![("a", CollectedType::String), ("b", CollectedType::Number)], CollectedType::Boolean),
+            "(a: string, b: number) => boolean",
+        ),
+    ];
+    for (ct, expected) in cases {
+        let mut state = ResolveState::default();
+        let result = super::collected::resolve_collected_type(&ct, Utf8Path::new("/test/b.tsx"), &ctx, &mut state, 0);
+        assert_eq!(result.raw_string(), expected);
+        assert_eq!(state.diagnostics, vec![], "{expected}");
+    }
 }
 
 #[test]
-fn test_multi_param_function_opaque_emits_diagnostic() {
-    // Regression test for: func.rs's multi-param function degrade
-    // constructed PropType::Opaque directly with no diagnostic at all — the
-    // only Opaque-producing path in the resolver that gave up silently.
+fn a_generic_function_types_own_parameters_are_placeholders_not_types_to_look_up() {
     let ctx = empty_ctx();
     let mut state = ResolveState::default();
+    let item = CollectedType::Named { name: "T".into(), args: vec![] };
     let ct = CollectedType::Function {
-        params: vec![CollectedType::String, CollectedType::Number],
-        param_names: vec![Some("a".into()), Some("b".into())],
-        return_type: Box::new(CollectedType::Void),
+        type_params: vec!["T".into()],
+        params: vec![item.clone()],
+        param_names: vec![Some("item".into())],
+        return_type: Box::new(item),
     };
-    let result = super::collected::resolve_collected_type(&ct, Utf8Path::new("/test/button.tsx"), &ctx, &mut state, 0);
-    assert!(
-        matches!(&result, PropType::Opaque(d) if matches!(d.reason(), OpaqueReason::MultiParamFunction)),
-        "Expected MultiParamFunction opaque, got {:?}",
-        result
-    );
-    // Exact contract: AC-3 specifies the message contains the byte-for-byte
-    // `(<p1>, <p2>, ...) => <returnType>` format!() output, not just "some
-    // diagnostic exists" — a non-empty check would pass on any unrelated
-    // diagnostic, including a spurious one from a different code path.
-    let diag = state.diagnostics.iter().find(|d| d.message.contains("(string, number) => void"));
-    assert!(
-        diag.is_some(),
-        "expected a diagnostic whose message contains '(string, number) => void', got {:?}",
-        state.diagnostics
-    );
-    assert_eq!(diag.unwrap().severity, DiagnosticSeverity::Info);
+    let result = super::collected::resolve_collected_type(&ct, Utf8Path::new("/test/b.tsx"), &ctx, &mut state, 0);
+    assert_eq!(result.raw_string(), "<T>(item: T) => T");
+    assert_eq!(state.diagnostics, vec![]);
+    assert!(state.in_scope_type_params.is_empty(), "the function's own parameters leave scope with it");
 }
 
 #[test]
-fn test_multi_param_function_does_not_emit_a_spurious_unresolvable_diagnostic_for_its_return_type() {
-    // Regression test for: resolve_function_type resolved the multi-param
-    // function's return type "to see if it's ReactNode" (per its own
-    // comment) but discarded the result with `let _ =` — resolve_collected_type
-    // isn't a pure query, it mutates ResolveState, so an unresolvable
-    // return type pushed a "Cannot resolve type" warning for a type that
-    // never appears anywhere in the emitted output. Under `check --strict`
-    // this fabricated warning could flip a user's exit code to 1.
-    let ctx = empty_ctx();
+fn a_signature_names_its_types_as_written_without_looking_them_up() {
+    // `CalendarMode` is an alias of a literal union here; the signature still says `CalendarMode`, as TypeScript prints it.
+    let mut global = GlobalSourceData::default();
+    global.type_aliases.insert(
+        "/test/b.tsx:CalendarMode".into(),
+        CollectedTypeAlias::LiteralUnion {
+            members: vec!["year".into(), "month".into()],
+            file_path: "/test/b.tsx".into(),
+        },
+    );
+    let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
     let mut state = ResolveState::default();
-    let ct = CollectedType::Function {
-        params: vec![CollectedType::String, CollectedType::Number],
-        param_names: vec![Some("a".into()), Some("b".into())],
-        return_type: Box::new(CollectedType::Named { name: "SomeUnresolvableType".into(), args: vec![] }),
-    };
-    let result = super::collected::resolve_collected_type(&ct, Utf8Path::new("/test/button.tsx"), &ctx, &mut state, 0);
-    assert!(
-        matches!(&result, PropType::Opaque(d) if matches!(d.reason(), OpaqueReason::MultiParamFunction)),
-        "Expected MultiParamFunction opaque, got {:?}",
-        result
+    let named = |name: &str| CollectedType::Named { name: name.into(), args: vec![] };
+    let ct = function_type(
+        vec![("mode", named("CalendarMode")), ("rest", CollectedType::Array(Box::new(named("Missing"))))],
+        CollectedType::Union(vec![named("HTMLElement"), named("Window")]),
     );
-    assert_eq!(
-        state.diagnostics.len(),
-        1,
-        "expected exactly one diagnostic (the MultiParamFunction opaque one) — \
-         not a second, spurious diagnostic about the discarded return-type resolution, got {:?}",
-        state.diagnostics
-    );
-    assert_eq!(state.diagnostics[0].code, DiagnosticCode::OpaqueType);
+    let result = super::collected::resolve_collected_type(&ct, Utf8Path::new("/test/b.tsx"), &ctx, &mut state, 0);
+    assert_eq!(result.raw_string(), "(mode: CalendarMode, rest: Missing[]) => HTMLElement | Window");
+    assert_eq!(state.diagnostics, vec![]);
 }
 
 #[test]

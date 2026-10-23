@@ -182,7 +182,7 @@ mod tests {
                     "onClick".to_string(),
                     ParsedProp::new(
                         "onClick".into(),
-                        PropType::EventHandler { event_type: "MouseEvent".into(), param_name: None },
+                        PropType::Named { name: "MouseEventHandler".into(), args: vec![] },
                         false,
                         None,
                         String::new(),

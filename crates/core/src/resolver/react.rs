@@ -29,21 +29,6 @@ pub(super) fn react_type_to_prop_type(
         // CSS properties.
         "CSSProperties" | "CSSObject" => PropType::CssProperties,
 
-        // Named event handlers (e.g. MouseEventHandler).
-        n if n.ends_with("EventHandler") || n.ends_with("Handler") => {
-            PropType::EventHandler { event_type: name.to_owned(), param_name: None }
-        }
-
-        // Synthetic and DOM events — the type IS the event type.
-        "SyntheticEvent" | "MouseEvent" | "KeyboardEvent" | "ChangeEvent" | "FocusEvent" | "FormEvent"
-        | "DragEvent" | "TouchEvent" | "WheelEvent" | "AnimationEvent" | "TransitionEvent" | "ClipboardEvent"
-        | "CompositionEvent" | "PointerEvent" => {
-            let raw_args: Vec<String> = args.iter().map(|a| a.to_raw_string()).collect();
-            let event_type =
-                if raw_args.is_empty() { name.to_owned() } else { format!("{}<{}>", name, raw_args.join(", ")) };
-            PropType::EventHandler { event_type, param_name: None }
-        }
-
         // Ref types.
         "Ref" | "RefObject" | "ForwardedRef" | "MutableRefObject" | "RefCallback" | "LegacyRef" => {
             let element = args.first().map(|a| a.to_raw_string());

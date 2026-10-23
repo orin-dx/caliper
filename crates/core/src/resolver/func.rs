@@ -7,77 +7,78 @@ use crate::types::*;
 
 use super::ResolutionContext;
 
-#[allow(clippy::too_many_arguments)]
+/// A function type with its parameters and return type as written. A signature names its types (`(mode: CalendarMode)
+/// => void`) the way TypeScript prints it; expanding each alias into its definition would read worse and, for a
+/// conditional or mapped alias, would leave raw type text in place of the name.
 pub(super) fn resolve_function_type(
+    type_params: &[CompactString],
     params: &[CollectedType],
     param_names: &[Option<CompactString>],
     return_type: &CollectedType,
-    consuming_file: &Utf8Path,
-    // Unused in the body — kept so this function's signature matches its
-    // dispatch siblings in resolve_collected_type's match arms (e.g.
-    // resolve_indexed_access, resolve_template_literal), which all take the
-    // same (ctx, state, depth) tail.
-    _ctx: &ResolutionContext,
-    state: &mut ResolveState,
-    _depth: u8,
 ) -> PropType {
-    // Check if the return type is a React node → render prop pattern.
-    let returns_react_node = matches!(
-        return_type,
-        CollectedType::Named { name, .. }
-            if matches!(
-                name.as_str(),
-                "ReactNode"
-                    | "ReactElement"
-                    | "JSX.Element"
-                    | "Element"
-                    | "ReactPortal"
-                    | "ReactFragment"
-            )
-    );
-
-    let first_param_name = || param_names.first().and_then(|n| n.as_ref()).map(|s| s.to_string());
-
-    if returns_react_node && params.len() == 1 {
-        let event_type = params[0].to_raw_string();
-        return PropType::EventHandler { event_type, param_name: first_param_name() };
+    let params = params
+        .iter()
+        .enumerate()
+        .map(|(i, param)| FunctionParam {
+            name: param_names.get(i).cloned().flatten().map(|n| n.to_string()),
+            param_type: as_written(param),
+        })
+        .collect();
+    PropType::Function {
+        type_params: type_params.iter().map(|p| p.to_string()).collect(),
+        params,
+        return_type: Box::new(as_written(return_type)),
     }
+}
 
-    // Generic event handler: (e: SomeEvent) => void
-    if params.len() == 1 {
-        let event_type = params[0].to_raw_string();
-        return PropType::EventHandler { event_type, param_name: first_param_name() };
-    }
-
-    // Zero-arg callback: () => void
-    if params.is_empty() {
-        return PropType::EventHandler { event_type: "void".into(), param_name: None };
-    }
-
-    // Multi-param function — describe as opaque. Deliberately does NOT resolve
-    // return_type: resolve_collected_type mutates ResolveState (pushes
-    // diagnostics, extends in_scope_type_params) rather than being a pure
-    // query, and the function is emitted as opaque regardless of what the
-    // return type resolves to — resolving it here only risked side effects
-    // (e.g. a spurious "Cannot resolve type" warning) for a value nothing
-    // ever reads.
-    let param_strs: Vec<String> = params.iter().map(|p| p.to_raw_string()).collect();
-    let raw = format!("({}) => {}", param_strs.join(", "), return_type.to_raw_string());
-
-    let diagnostic = Diagnostic {
-        severity: DiagnosticSeverity::Info,
-        message: format!(
-            "'{}' is a multi-parameter function type and can't be statically resolved — it will appear as opaque",
-            raw
+/// `ct` as its source spells it: names stay names, and a form `PropType` has no shape for keeps its source text.
+fn as_written(ct: &CollectedType) -> PropType {
+    let named = |name: std::string::String| PropType::Named { name: name.into(), args: vec![] };
+    match ct {
+        CollectedType::String => PropType::String,
+        CollectedType::Number => PropType::Number,
+        CollectedType::Boolean => PropType::Boolean,
+        CollectedType::Null => PropType::Null,
+        CollectedType::Undefined => PropType::Undefined,
+        CollectedType::Any => PropType::Any,
+        CollectedType::Never => PropType::Never,
+        CollectedType::Unknown => PropType::Unknown,
+        CollectedType::Void => PropType::Void,
+        CollectedType::StringLiteral(s) => PropType::StringLiteral(s.to_string()),
+        CollectedType::NumberLiteral(n) => PropType::NumberLiteral(*n),
+        CollectedType::BoolLiteral(b) => PropType::BoolLiteral(*b),
+        CollectedType::Union(members) => PropType::Union(members.iter().map(as_written).collect()),
+        CollectedType::Intersection(members) => PropType::Intersection(members.iter().map(as_written).collect()),
+        CollectedType::Array(inner) => PropType::Array(Box::new(as_written(inner))),
+        CollectedType::Tuple(members) => PropType::Tuple(members.iter().map(as_written).collect()),
+        CollectedType::Object(fields) => PropType::Object(
+            fields
+                .iter()
+                .map(|f| ObjectField {
+                    name: f.name.clone(),
+                    prop_type: as_written(&f.collected_type),
+                    required: f.required,
+                    description: f.description.clone(),
+                })
+                .collect(),
         ),
-        file: Some(consuming_file.to_string()),
-        line: None,
-        column: None,
-        help: None,
-        code: DiagnosticCode::OpaqueType,
-        affects: Vec::new(),
-    };
-    OpaqueDetail::give_up(state, raw, OpaqueReason::MultiParamFunction, diagnostic)
+        CollectedType::Named { name, args } => {
+            PropType::Named { name: name.clone(), args: args.iter().map(as_written).collect() }
+        }
+        CollectedType::Function { type_params, params, param_names, return_type } => {
+            resolve_function_type(type_params, params, param_names, return_type)
+        }
+        CollectedType::AtFile { inner, .. } => as_written(inner),
+        CollectedType::BigInt
+        | CollectedType::Symbol
+        | CollectedType::TypeOf(_)
+        | CollectedType::KeyOf(_)
+        | CollectedType::IndexedAccess { .. }
+        | CollectedType::TemplateLiteral(_)
+        | CollectedType::Conditional { .. }
+        | CollectedType::Mapped { .. }
+        | CollectedType::Raw(_) => named(ct.to_raw_string()),
+    }
 }
 
 pub(super) fn resolve_typeof(

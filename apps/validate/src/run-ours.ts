@@ -85,8 +85,12 @@ function propTypeToString(pt: any): string {
     case 'named': {
       return pt.args?.length ? `${pt.name}<${pt.args.map((member) => propTypeToString(member)).join(', ')}>` : pt.name
     }
-    case 'eventHandler': {
-      return `(${pt.paramName ?? 'e'}: ${pt.eventType}) => void`
+    case 'function': {
+      const typeParams = pt.typeParams?.length ? `<${pt.typeParams.join(', ')}>` : ''
+      const params = pt.params
+        .map((param: any, index: number) => `${param.name ?? `__${index}`}: ${propTypeToString(param.type)}`)
+        .join(', ')
+      return `${typeParams}(${params}) => ${propTypeToString(pt.returnType)}`
     }
     case 'ref': {
       return pt.element ? `Ref<${pt.element}>` : 'Ref'
