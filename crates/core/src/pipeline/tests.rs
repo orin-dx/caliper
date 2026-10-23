@@ -2986,3 +2986,53 @@ export function opaque<Payload extends FactoryPayload>(ui: (props: Payload["prop
   return ui;
 }
 "#;
+
+#[test]
+fn a_union_lists_each_member_once_however_it_was_spelled() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "List.tsx",
+        r#"
+import * as React from "react";
+type SectionElement = React.ReactElement | null;
+type ItemElement = React.ReactElement | null;
+type CollectionElement = SectionElement | ItemElement;
+export function List(props: {
+    children: CollectionElement | CollectionElement[];
+    each: string[] | readonly string[];
+    tone: "a" | ("a" | "b") | "b";
+    onPick: (names: string[] | readonly string[]) => void;
+}) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let props = &output.components["List"].props;
+    let element = PropType::Union(vec![PropType::ReactNode, PropType::Null]);
+    assert_eq!(
+        props["children"].prop_type,
+        PropType::Union(vec![PropType::ReactNode, PropType::Null, PropType::Array(Box::new(element))])
+    );
+    assert_eq!(props["each"].prop_type, PropType::Array(Box::new(PropType::String)));
+    assert_eq!(
+        props["tone"].prop_type,
+        PropType::Union(vec![PropType::StringLiteral("a".into()), PropType::StringLiteral("b".into())])
+    );
+    assert_eq!(
+        props["onPick"].prop_type,
+        PropType::Function {
+            type_params: vec![],
+            params: vec![FunctionParam {
+                name: Some("names".into()),
+                param_type: PropType::Array(Box::new(PropType::String))
+            }],
+            return_type: Box::new(PropType::Void),
+        }
+    );
+}

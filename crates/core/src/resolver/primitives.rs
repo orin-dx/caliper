@@ -22,19 +22,24 @@ pub(super) fn resolve_union(
 
     let to_resolve = if meaningful.is_empty() { members.iter().collect::<Vec<_>>() } else { meaningful };
 
-    let resolved: Vec<PropType> =
-        to_resolve.iter().map(|m| resolve_collected_type(m, consuming_file, ctx, state, depth + 1)).collect();
+    union_of(to_resolve.iter().map(|m| resolve_collected_type(m, consuming_file, ctx, state, depth + 1)))
+}
 
-    // Flatten nested Unions.
-    let mut flat: Vec<PropType> = Vec::with_capacity(resolved.len());
-    for pt in resolved {
-        if let PropType::Union(inner) = pt {
-            flat.extend(inner);
-        } else {
-            flat.push(pt);
+/// The union of `members` as TypeScript forms it: a member that is itself a union contributes its members, a member
+/// equal to an earlier one is dropped, and a single member stands alone. Two members can be equal here although their
+/// source differs (`T[] | readonly T[]`, or two aliases that both resolve to `ReactNode | null`).
+pub(super) fn union_of(members: impl IntoIterator<Item = PropType>) -> PropType {
+    fn push(members: impl IntoIterator<Item = PropType>, flat: &mut Vec<PropType>) {
+        for member in members {
+            match member {
+                PropType::Union(inner) => push(inner, flat),
+                member if !flat.contains(&member) => flat.push(member),
+                _ => {}
+            }
         }
     }
-
+    let mut flat = Vec::new();
+    push(members, &mut flat);
     if flat.len() == 1 {
         flat.remove(0)
     } else {
