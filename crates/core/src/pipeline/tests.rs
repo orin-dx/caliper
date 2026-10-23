@@ -2318,3 +2318,112 @@ fn an_unusable_tsconfig_is_reported_once() {
     assert_eq!(reports.len(), 1, "{:#?}", output.diagnostics);
     assert_eq!(reports[0].severity, DiagnosticSeverity::Warning);
 }
+
+/// A project root holding `files`, with `src` as the source directory and no tsconfig configured.
+fn project_with(files: &[(&str, &str)]) -> (TempDir, Utf8PathBuf, PipelineOptions) {
+    let tmp = TempDir::new().unwrap();
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+    for (name, body) in files {
+        let path = root.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+    let options =
+        PipelineOptions { src_dirs: vec![root.join("src")], cache_dir: Some(root.join("cache")), ..Default::default() };
+    (tmp, root, options)
+}
+
+fn prop_names(output: &ExtractionOutput, component: &str) -> Vec<String> {
+    output.components[component].props.keys().cloned().collect()
+}
+
+#[test]
+fn the_nearest_tsconfig_applies_when_none_is_configured() {
+    let (_tmp, _root, options) = project_with(&[
+        ("tsconfig.json", "{ \"compilerOptions\": { \"baseUrl\": \".\", \"paths\": { \"@ui/*\": [\"src/ui/*\"] } } }"),
+        ("src/ui/types.ts", "export interface ButtonProps { label: string }\n"),
+        (
+            "src/Button.tsx",
+            "import type { ButtonProps } from '@ui/types';\nexport function Button(props: ButtonProps) { return null; }\n",
+        ),
+    ]);
+    assert_eq!(options.tsconfig_path, None);
+
+    let output = extract(&options);
+
+    assert_eq!(prop_names(&output, "Button"), ["label"], "{:#?}", output.diagnostics);
+}
+
+#[test]
+fn an_unusable_nearest_tsconfig_is_reported_once() {
+    let (_tmp, root, options) = project_with(&[
+        ("tsconfig.json", "{ \"compilerOptions\": "),
+        ("src/Button.tsx", "export function Button(props: { label: string }) { return null; }\n"),
+    ]);
+
+    let output = extract(&options);
+
+    let reports: Vec<&Diagnostic> =
+        output.diagnostics.iter().filter(|d| d.message.starts_with("Could not use the tsconfig")).collect();
+    assert_eq!(reports.len(), 1, "{:#?}", output.diagnostics);
+    assert_eq!(reports[0].file.as_deref(), Some(root.join("tsconfig.json").as_str()));
+}
+
+#[test]
+fn an_import_written_with_a_javascript_extension_finds_its_typescript_source() {
+    let (_tmp, _root, options) = project_with(&[
+        ("src/types.ts", "export interface ButtonProps { label: string }\n"),
+        (
+            "src/Button.tsx",
+            "import type { ButtonProps } from './types.js';\nexport function Button(props: ButtonProps) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options);
+
+    assert_eq!(prop_names(&output, "Button"), ["label"], "{:#?}", output.diagnostics);
+}
+
+/// A workspace package whose `exports` reach its TypeScript source only through the `source` condition, linked into
+/// `node_modules` the way a package manager links workspace packages.
+#[cfg(unix)]
+fn workspace_package_project(tsconfigs: &[(&str, &str)]) -> (TempDir, PipelineOptions) {
+    let package =
+        "{ \"name\": \"@acme/ui\", \"exports\": { \".\": { \"source\": \"./index.ts\", \"types\": \"./dist/index.d.ts\" } } }";
+    let card = "import type { CardProps } from '@acme/ui';\nexport function Card(props: CardProps) { return null; }\n";
+    let mut files = vec![
+        ("src/ui/package.json", package),
+        ("src/ui/index.ts", "export interface CardProps { title: string }\n"),
+        ("src/Card.tsx", card),
+    ];
+    files.extend_from_slice(tsconfigs);
+    let (tmp, root, options) = project_with(&files);
+    std::fs::create_dir_all(root.join("node_modules/@acme")).unwrap();
+    std::os::unix::fs::symlink(root.join("src/ui"), root.join("node_modules/@acme/ui")).unwrap();
+    (tmp, options)
+}
+
+#[cfg(unix)]
+#[test]
+fn custom_conditions_from_an_extended_tsconfig_reach_a_workspace_packages_source() {
+    let (_tmp, options) = workspace_package_project(&[
+        ("tsconfig.base.json", "{ \"compilerOptions\": { \"customConditions\": [\"source\"], } }"),
+        ("tsconfig.json", "// the project config\n{ \"extends\": \"./tsconfig.base\" }"),
+    ]);
+
+    let output = extract(&options);
+
+    assert_eq!(prop_names(&output, "Card"), ["title"], "{:#?}", output.diagnostics);
+}
+
+#[cfg(unix)]
+#[test]
+fn without_custom_conditions_a_source_only_workspace_package_does_not_resolve() {
+    let (_tmp, options) = workspace_package_project(&[("tsconfig.json", "{}")]);
+
+    let output = extract(&options);
+
+    assert_eq!(prop_names(&output, "Card"), Vec::<String>::new());
+    let unresolved = output.diagnostics.iter().find(|d| d.code == DiagnosticCode::UnresolvableImport);
+    assert!(unresolved.is_some_and(|d| d.message.contains("@acme/ui")), "{:#?}", output.diagnostics);
+}
