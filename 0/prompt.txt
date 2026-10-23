@@ -1,0 +1,229 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+<tools-used-before-summary>Agent, Bash, Edit, EnterWorktree, Grep, Read, ReadNotifications, SendMessage, Skill, TaskCreate, TaskStop, TaskUpdate, ToolSearch, WebSearch, Write</tools-used-before-summary>
+Summary:
+1. Primary Request and Intent:
+   - **Main thread:** improve caliper-docgen (Rust/OXC React props extractor; Storybook integration is "the whole point") via stacked, non-draft PRs.
+   - **Dependency types (this phase):** "Let's explore and prove it out first"; then "Let's get going on this work now".
+   - **Approved order:** resolver groundwork → namespace re-exports → shared props → type-text fixes → loader behind a flag, with ADRs.
+   - "Yes, replace trybuild, help me decide if the collapse inherited props applies locally too. Do all of the rest, commit appropriatelly and stack PRs".
+     - I recommended collapse for dependency sources only (react-component-meta parity) as the default, with a `collapseInheritedProps` option.
+   - "Keep going on features, polish and hardening".
+   - **Latest:** "Let's stack and cleanup the PRs appropriately" — put all open PRs into one linear stack in merge order, resolve conflicts, and clean up worktrees and branches.
+   - **Release-related:**
+     - User: "yes rerun it" (release); "Fixed the forbidden issue".
+     - User: "We need to bump to the latest Callisto" — done in #98.
+     - User: "Callisto doesn't support OIDC yet" — keep the NPM_TOKEN step.
+     - User: "But GH is setup for it" — `id-token: write` is already present.
+   - User asked for the Rust best practice on compile-fail tests (answered: trybuild for proc-macro diagnostics; compile_fail doctests for type invariants; error codes are nightly-only).
+
+2. Key Technical Concepts:
+   - **Dependency loading:**
+     - Name-driven loading of `.d.ts` files before resolution, into a shared Arc dependency layer.
+     - A per-package export index keyed by realpath + resolver config hash, validated by `package.json` mtime+size.
+     - Precedence: project > known shortcut > dependency > builtin.
+     - A value index for `ComponentProps<typeof X>`.
+     - Leak guards (no dependency components or enums in output).
+     - A watch demand diff.
+     - ADRs 0010–0012.
+     - `--load-dependencies` is off by default.
+     - `collapseInheritedProps: dependencies|all|none`, threshold 30.
+   - **ModuleResolvers (#97):**
+     - tsconfig auto-discovery: `resolve_file`/`resolve_dts` take the importing file, not its directory.
+     - `customConditions` read via json-strip-comments.
+     - `.d.mts`/`.d.cts` and extension aliases.
+     - Retries: `types_first` conditions, then `@types/<name>`.
+     - A declaration path must exist.
+   - Shared `Arc<ParsedProp>` with a per-run interface memo (#105).
+   - Canonical JSON prop interning, ADR 0009 (shipped).
+   - **Storybook 11:** server-side docgen provider (`experimental_docgenProvider`, `createDocgenProvider`, worker_threads, argTypes payload).
+   - **Storybook 10:** Vite `__docgenInfo` injection.
+   - Cache schema version bumps: #103 → 15, #107 → 16, merged with #113 → 17.
+   - **Callisto:** 0.12 waits up to 6 minutes for npm; 0.13 is on crates.io but has no tag or GitHub release; there's no OIDC support yet.
+
+3. Files and Code Sections (latest-relevant):
+   - **`/Users/gabe/.claude/jobs/ba6a68d6/tmp/restack.py`** — the restack driver. `ORDER` (index: PR branch):
+     - 0: #98 `ci/callisto-0.12`
+     - 1: #102 `docs/oxfmt-073-toml`
+     - 2: #100 `test/doctest-seal`
+     - 3: #97 `fix/resolver-groundwork`
+     - 4: #99 `feat/namespace-reexports`
+     - 5: #101 `feat/component-props-of-typeof`
+     - 6: #103 `fix/function-type-text`
+     - 7: #104 `fix/alias-display`
+     - 8: #105 `perf/shared-props`
+     - 9: #106 `docs/adr-dependency-types`
+     - 10: #107 `feat/load-dependency-types`
+     - 11: #109 `feat/collapse-inherited-props`
+     - 12: #121 `fix/jsdoc-one-line-function`
+     - 13: #122 `fix/dom-handler-overwrite`
+     - 14: #123 `fix/zod-infer-unwrap`
+     - 15: #110 `fix/factory-payload-props`
+     - 16: #112 `fix/called-helpers-are-not-components`
+     - 17: #113 `feat/exported-flag`
+     - 18: #115 `fix/rdt-file-path`
+     - 19: #111 `feat/watch-rebuild-on-config`
+     - 20: #114 `feat/session-ensure-fresh`
+     - 21: #116 `ci/size-normalized-gates`
+     - 22: #118 `docs/status-and-ts7`
+     - 23: #108 `spike/napi-in-worker-threads`
+     - 24: #117 `feat/storybook-provider`
+     - 25: #119 `feat/storybook-vite-docgen`
+     - 26: #120 `chore/remove-storybook-format`
+
+     Behaviour:
+     - Per index it runs `checkout -B branch origin/branch`, stopping if the local branch has unpushed commits.
+     - It then runs `merge --no-edit` of the predecessor (`origin/main` for index 0), stopping on conflict with exit 2.
+     - On success it pushes if anything changed, then `gh pr edit --base`, skipping when the base already matches.
+     - After a manual resolution: commit, push the branch manually, then rerun from that index.
+   - **`/Users/gabe/.claude/jobs/ba6a68d6/tmp/resolve_one_sided.py`** — keeps the non-empty side of a conflict block. It didn't help here: every #117 conflict is two-sided.
+   - **`crates/core/src/cache.rs`** (resolved on #113):
+     ```rust
+     /// 16: `LexedExport::LocalDeclaration` gained `declared_as`.
+     /// 17: component mappings record whether they are exported.
+     const CACHE_SCHEMA_VERSION: u32 = 17;
+     ```
+     The golden snapshot was regenerated with `INSTA_UPDATE=always`.
+   - **`docs/architecture/pipeline-orchestration.md`** and **`packages/vite-plugin/README.md`** (resolved on #111): both sides' bullets and paragraphs combined.
+   - **`docs/STATUS.md`** (resolved on #118): combined paragraph about types from other packages and `--load-dependencies`.
+   - **Current conflicts on #117** (in the worktree, merge in progress):
+     - **`crates/core/src/pipeline/rdt.rs`** (from #117) has `type_json` (enum with `raw`), `omits`, `docgen_info(entry)` (keeps children), private `component_doc(entry, keep)` and `pub fn serialize(output: &ExtractionOutput)`. It needs to gain `filePath` in `component_doc` and `serialize(output, include_unexported: bool)` filtering on `entry.exported`. `entry.props` is now `Arc<ParsedProp>`, so `keep(prop)` may need `&**prop`.
+     - **`crates/cli/src/commands/extract.rs`** — the conflict at line 81 should be replaced with:
+       ```rust
+       /// `--format rdt`: react-docgen-typescript's shape, shared with the NAPI binding. Like react-docgen-typescript, only
+       /// exported components unless asked.
+       pub fn serialize_rdt(
+           output: &caliper_docgen_core::types::ExtractionOutput,
+           include_unexported: bool,
+       ) -> serde_json::Result<String> {
+           caliper_docgen_core::pipeline::rdt::serialize(output, include_unexported)
+       }
+
+       /// The components a compatibility format writes: like react-docgen-typescript, only exported ones unless asked.
+       fn compat_components(
+           output: &caliper_docgen_core::types::ExtractionOutput,
+           include_unexported: bool,
+       ) -> impl Iterator<Item = (&String, &caliper_docgen_core::types::ComponentEntry)> {
+           output.components.iter().filter(move |(_, entry)| include_unexported || entry.exported)
+       ```
+       The closing `}` follows the marker. `serialize_storybook(output, include_unexported)` still exists and uses `compat_components`; #120 removes it later.
+     - **`crates/cli/src/commands/extract/tests.rs`**: keep both `docgen_info_keeps_undocumented_children_for_storybook` (HEAD) and `compat_formats_omit_unexported_components_unless_asked` (theirs), adjusting the closing brace.
+     - **`crates/core/src/pipeline/watch.rs`**: keep both HEAD's `current_output()` method and theirs (`is_resolution_config`, `resolution_config_files`). Ours lacks its closing `    }`; insert `    }\n\n` between.
+     - **`crates/binding/src/lib.rs`**: keep both HEAD's `session_docgen_info` and theirs (`ensure_fresh`, `resolution_config_files`, `is_resolution_config`); insert `}\n\n` between.
+     - **`packages/napi/binding.d.ts`**: keep both (`sessionDocgenInfo`, and `resolutionConfigFiles` with a `/**` opener between).
+     - **`packages/napi/index.js`**: keep both export lines.
+     - **`crates/core/src/types/output.rs`**: take theirs (`PropType::Function` printing) and drop HEAD's `EventHandler` arms, since #103 removed `EventHandler`.
+     - **`crates/core/src/types/output/tests.rs`**: take theirs (`an_operand_is_parenthesized_where_typescript_needs_it`) and drop HEAD's `EventHandler` test.
+     - **`docs/architecture/napi-binding.md`** (2 blocks) and **`docs/architecture/serialization-formats.md`** (1 block): combine.
+   - **Earlier PR content** (for reference):
+     - #97 ModuleResolvers in `resolver/mod.rs` and `react.rs`.
+     - #99 `ReExportNamespace` promotion in `extractor/mod.rs`, `import_map.rs`, `import.rs`.
+     - #101 chain.rs step 0.6 calling `extends::component_props_of`.
+     - #100 doctest pair on `ParsedProp`, trybuild removed.
+     - #102 oxfmt 0.73 TOML formatting in `docs/archive`.
+     - #98 Callisto pin `c3d524d3aba359f5e767007ea76d229e8a291dc3`.
+
+4. Errors and fixes:
+   - **Worktree guard:** it blocks complex shell commands (computed values, loops, `git -C`, inline Python heredocs). Use simple commands, Write+python scripts or the Edit tool. The most recent block hit an inline Python edit of `extract.rs`.
+   - **`gh pr edit` GraphQL transient error:** the script now skips the edit when the base already matches.
+   - **trybuild slowness:** it was the slow test locally; replaced in #100.
+   - **Flaky tests:**
+     - `watch_process a_signal_restores_the_terminal_mode_the_session_changed` failed once and passed on rerun. Track C also reported it as flaky; a fix is still pending.
+     - `tsc-client` timing tests flake under load.
+   - **`extract_help.trycmd` after the merge:** only option order changed; regenerated with `TRYCMD=overwrite`.
+   - **My grep filter hid HEAD lines** in the combined diff, which made me misread the conflicts as one-sided. Fix: view the full conflict blocks.
+   - **Release:**
+     - Transient API error, then npm 403 (automation token; the user fixed the package setting).
+     - Callisto 0.11's npm visibility check needed repeated re-runs; loop script `tmp/release_loop.sh`. 0.3.0 fully released.
+   - **I wrongly attempted an OIDC workflow change;** the user said Callisto doesn't support OIDC, so I reverted it and deleted the branch.
+
+5. Problem Solving:
+   - **Restack progress:** done through index 23 (#108 merged and pushed). Conflicts resolved and verified at #113, #111 and #118. On #113 the full suite passed: 761 tests, lint clean. On #111: 766 Rust tests and 44 TypeScript tests.
+   - **Cleanup:** agent worktrees removed (`agent-a5e5…`, `a75c…`, `aad4…`, `ac4f…`, `ad20…`, `ad2a…`, `af0f…`, `a1bf…`); branches kept.
+   - **Local-only branches to keep:**
+     - `exp/dependency-types`
+     - `fix/generic-defaults` (dropped work)
+     - `scratch/shared-props-deps`
+     - `scratch/shared-props-deps-before`
+   - **Still to clean up:** remote branches of merged PRs (e.g. `perf/output-path`, `feat/interned-props`, `fix/silent-degradations` and older ones).
+
+6. All user messages (this phase and the most recent):
+   - "What's next?" (after the earlier summary)
+   - "Yes, replace trybuild, help me decide if the collapse inherited props applies locally too. Do all of the rest, commit appropriatelly and stack PRs"
+   - "Did the release succeed?"
+   - "yes rerun it"
+   - "Is that slow test required? HOw do michi and callisto do it?"
+   - "What is the best practice in rust-land??"
+   - "Fixed the forbidden issue"
+   - "I'll have Callisto take a look"
+   - "We need to bump to the latest Callisto, this is fixed already"
+   - "Isn't 0.13 out?"
+   - "This is taking forever"
+   - "I've setup trusted publishing"
+   - "Callisto doesn't support OIDC yet"
+   - "But GH is setup for it"
+   - "What's next?"
+   - "Keep going on features, polish and hardening"
+   - "Let's stack and cleanup the PRs appropriately"
+   - Earlier this phase:
+     - "First let's think about the problem structurally and comprehensively…"
+     - "Does this all account for dev/watch mode?"
+     - "Is there a better, more clever way… Can parallelism help?"
+     - "Let's explore and prove it out first. I like that"
+     - "Let's get going on this work now"
+     - "Stack has conflicts"
+     - "Still working on it?"
+     - "Ok, sounds good"
+     - "RDT allows for exclusions to speed-up parsing right?"
+     - "why isn't caliper reading the node_modules types? Does storybook normaly recommend not reading all the node_modules?"
+     - "Let's make sure that each have node_modules here"
+     - "It's important to resolve dependencies"
+     - "Is it stuck?"
+     - "What is our average performance compared to RDT now?"
+     - "Why is this CI taking 3 hrs?? … This is fucking ridiculous and you must be doing some crazy stuff with the workflows"
+   - **Standing constraints, which remain in effect:**
+     - Stack PRs, non-draft.
+     - Never push to main, force-push or merge.
+     - The user merges releases.
+     - Keep the NPM_TOKEN step (Callisto has no OIDC yet).
+
+7. Pending Tasks:
+   - **Finish restacking:**
+     - Resolve #117's conflicts, run tests and lint, commit, push `feat/storybook-provider`.
+     - Rerun `restack.py 24` for #119 and #120, resolving any further conflicts.
+     - Verify all PR bases and CI.
+   - **Cleanup:**
+     - Delete remote branches of already-merged PRs (confirm each is merged first).
+     - Optionally fix the flaky terminal-signal test.
+   - **Pending user decisions:**
+     - String default quote style (`'md'` vs `"md"`).
+     - Whether chakra-style project sources collapse by default.
+     - An ADR 0010 amendment so curated mode loads React's attribute declarations (handler merge).
+     - When to make `--load-dependencies` the default.
+   - Task #7 (structural rules replacing name-based shortcuts) remains pending.
+
+8. Current Work:
+   - **Task:** restacking all open PRs into one linear stack, following "Let's stack and cleanup the PRs appropriately".
+   - **Where it stopped:** `restack.py` stopped at index 24:
+     `[24] #117 feat/storybook-provider: CONFLICT merging spike/napi-in-worker-threads: ['crates/binding/src/lib.rs', 'crates/cli/src/commands/extract.rs', 'crates/cli/src/commands/extract/tests.rs', 'crates/core/src/pipeline/watch.rs', 'crates/core/src/types/output.rs', 'crates/core/src/types/output/tests.rs', 'docs/architecture/napi-binding.md', 'docs/architecture/serialization-formats.md', 'packages/napi/binding.d.ts', 'packages/napi/index.js']`
+   - **State:** the worktree (`release-0.2.0`) is on `feat/storybook-provider` with the merge in progress. All conflicts are two-sided. My inline-Python attempt to rewrite the `extract.rs` conflict was refused by the worktree guard, so none of these 10 files is resolved yet.
+   - **Planned resolution** (detailed in section 3):
+     - Extend `core/pipeline/rdt.rs` with `filePath` and an `include_unexported` parameter on `serialize`.
+     - CLI wrapper plus `compat_components`.
+     - Keep both sides in the binding, `watch.rs`, d.ts, index.js and the extract tests.
+     - Take theirs (`Function`) in `output.rs` and its tests.
+     - Combine the docs.
+
+9. Optional Next Step:
+   1. Resolve #117's merge conflicts with the Edit tool, per the plan above. In `extract.rs`, replace the conflict with the `serialize_rdt(output, include_unexported)` wrapper plus `compat_components`.
+   2. Update `crates/core/src/pipeline/rdt.rs` so `serialize(output, include_unexported)` filters on `entry.exported` and `component_doc` emits `"filePath": entry.file_path`.
+   3. Fix any `Arc<ParsedProp>` deref and any `EventHandler` references.
+   4. Run `cargo nextest run --workspace --exclude caliper-docgen-napi`, `just test-ts` and `just lint doc-check typos`, plus a NAPI build and `just test-integration`, since the binding changed.
+   5. Commit (`/usr/bin/git add -A`, then `/usr/bin/git commit -q --no-edit`), then `/usr/bin/git push -q origin feat/storybook-provider`.
+   6. Run `python3 /Users/gabe/.claude/jobs/ba6a68d6/tmp/restack.py 24` to continue with #119 and #120.
+   7. Clean up remote branches of merged PRs, then report the final linear stack to the user.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/gabe/.claude/projects/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+The messages after this summary are the most recent messages from before compaction, kept verbatim. The summary was written without seeing them, so something it says has not happened yet may already have happened in them.
