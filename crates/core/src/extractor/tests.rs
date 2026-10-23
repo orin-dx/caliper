@@ -1040,6 +1040,40 @@ fn wrapper_calls_carrying_props_in_a_type_argument_are_detected_by_shape() {
 }
 
 #[test]
+fn a_factory_payload_with_generic_props_yields_those_props_never_the_payload() {
+    let source = r#"
+        import { genericFactory } from "./lib";
+        export interface OverflowListProps<T = any> { data: T[] }
+        export type OverflowListFactory = Factory<{
+          props: OverflowListProps<any>;
+          ref: HTMLDivElement;
+          signature: <T = any>(props: OverflowListProps<T>) => React.JSX.Element;
+        }>;
+        export const OverflowList = genericFactory<OverflowListFactory>((_props) => <div />);
+        export type InlineFactory = Factory<{ props: { label: string }; ref: HTMLDivElement }>;
+        export const Inline = genericFactory<InlineFactory>((_props) => <div />);
+    "#;
+    let data = parse_file(Utf8Path::new("/test/overflow.tsx"), source);
+
+    let found: Vec<(&str, &str, String)> = data
+        .component_mappings
+        .iter()
+        .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), format!("{:?}", m.props_type_args)))
+        .collect();
+    assert_eq!(found, vec![("OverflowList", "OverflowListProps", "[Any]".to_owned())]);
+    let skipped: Vec<&str> = data
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == crate::types::DiagnosticCode::SkippedCandidate)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(
+        skipped,
+        vec!["'Inline' is built from the factory payload 'InlineFactory', whose `props` member is not a named type"]
+    );
+}
+
+#[test]
 fn test_memo_forward_ref_detected() {
     let source = r#"
         import React, { memo, forwardRef } from "react";
