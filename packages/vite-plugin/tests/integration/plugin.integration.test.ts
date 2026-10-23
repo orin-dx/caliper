@@ -6,8 +6,7 @@
 // toolchain doesn't fail. Set NAPI_BINARY_AVAILABLE=false to force-skip
 // regardless of whether a binary happens to be present.
 //
-// Run via `pnpm test:integration` (a separate vitest config, pool: 'forks' —
-// required, the native binary cannot load inside worker threads).
+// Run via `pnpm test:integration` (a separate vitest config, pool: 'forks').
 
 import { describe, it, expect, afterEach } from 'vitest'
 import { build, createServer, type ViteDevServer } from 'vite'
