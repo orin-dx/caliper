@@ -1,0 +1,60 @@
+<task-notification>
+<task-id>a5e5cfedce67ab662</task-id>
+<tool-use-id>toolu_01W9gexwrkrdMN7JhsH7Mbp4</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/a5e5cfedce67ab662.output</output-file>
+<status>completed</status>
+<summary>Agent "Share resolved props in memory" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I shared resolved props in memory and added a per-run memo of interface chains, as one PR stacked on #104. Output is byte-identical everywhere I measured. Memory is lower on every corpus, and time is lower everywhere except shadcn with dependency loading, where it is flat.
+
+**PR:** https://github.com/orin-dx/caliper/pull/105 (non-draft). Branch `perf/shared-props`, base `fix/alias-display`, 5 commits.
+
+**Design**
+- **Shared props:** `ComponentEntry.props`, `ComponentEntry.notable_inherited` and `ResolvedChain` now hold `Arc&lt;ParsedProp&gt;`, so components that inherit an interface point at the same props instead of copying them. `Partial`/`Required` and plugins change a prop through `Arc::make_mut`, which copies it only if another component shares it. This changes a public Rust type, so the changeset marks core as minor and the other packages as patch.
+- **Memo (`resolver/memo.rs`):**
+  - **Scope:** only non-generic interfaces, keyed by interface and depth. It lives on `ResolutionContext`, which each watch revision rebuilds, so nothing survives a revision.
+  - **Reuse:** each recording logs the first read of everything the result depends on: the cycle-detection sets, type parameters in scope and the component's parameter defaults. It is reused only when the current component's state answers every one of those reads the same way.
+  - **Replay:** the chain itself, the state changes, the alias-display flag, watch dependencies and diagnostics.
+- **One deviation from "replay diagnostics exactly":** a recording keeps each distinct diagnostic once, in the order first reported. Keeping every copy at every nesting level held 4.8 million diagnostics on chakra with dependency loading and pushed RSS to 4.7 GB. The output merges identical diagnostics anyway, and no resolver logic reads the list back (the only two reads are inside tests), so the output can't change.
+
+**Byte-identity:** snapshots are unchanged, and the `--json` output (with `durationMs` zeroed) is identical before and after on all five corpora. With `CALIPER_LOAD_DEPENDENCIES=1` it is also identical on chakra, shadcn and spectrum.
+
+**Without dependency loading** (hyperfine `-N`, warmup 2, 10 runs; min time / mean peak RSS):
+
+| Project | base ms / MB | sharing only | this PR |
+| --- | ---: | ---: | ---: |
+| mantine | 74 / 164 | 75 / 158 | 45 / 108 |
+| chakra | 51 / 107 | 52 / 106 | 35 / 83 |
+| shadcn | 69 / 121 | 72 / 124 | 58 / 103 |
+| antd | 58 / 117 | 59 / 116 | 52 / 108 |
+| spectrum | 110 / 355 | 109 / 333 | 97 / 195 |
+
+**With `CALIPER_LOAD_DEPENDENCIES=1`** (local scratch merge with `exp/dependency-types`):
+
+| Project | exp alone | before (perf commits reverted) | after |
+| --- | ---: | ---: | ---: |
+| chakra | 2,140 / 3,401 | 2,122 / 3,014 | 377 / 1,275 |
+| shadcn | 89 / 175 | 94 / 185 | 84 / 171 |
+| spectrum | 103 / 334 | 108 / 361 | 94 / 207 |
+
+"exp alone" corresponds to your 2,419 ms / 3.4 GB chakra baseline. Its output differs from the other two columns only because it lacks the stack's fixes. Timings were taken at load averages of 2–9, so they are noisy; the RSS figures are stable.
+
+**Tests**
+- **Memo correctness:** one test resolves components on a shared context and compares each against a fresh context: entry, dependencies and distinct diagnostics. It also checks recording counts, that components share prop pointers, and that a component with its own default gets its own recording.
+- **Cycle state:** another test covers a cycle reached at the same depth with and without the cycle open. No existing test caught a memo that ignored cycle state.
+- **Plugins and watch:** one test checks that a plugin change stays with its component, another that a watch edit re-resolves both components and matches a cold run.
+- **Fault injection:** breaking the diagnostics replay, the dependency replay, the defaults check or the cycle check each makes a test fail.
+- **Suites:**
+  - 737 workspace tests pass (nextest flagged one as leaky; none failed).
+  - `just lint doc-check machete typos` passes.
+  - The NAPI build and `just test-integration` pass (5/5).
+
+**Left out**
+- The watch test still passes when the dependency replay is broken, because watch also re-resolves files that import the changed one. The resolver test is what pins dependency parity.
+- `exp/dependency-types` had its own opt-in memo (`CALIPER_MEMO`). I dropped it in the scratch merge; this PR's memo replaces it.
+- The scratch branches `scratch/shared-props-deps` and `scratch/shared-props-deps-before` remain local and unpushed, in case you want to re-measure.
+
+result: PR #105 (`perf/shared-props` → `fix/alias-display`) shares resolved props and resolves each interface chain once per run with byte-identical output; with dependency loading, chakra drops from 2,122 ms / 3.0 GB to 377 ms / 1.3 GB.</result>
+<usage><subagent_tokens>283007</subagent_tokens><tool_uses>267</tool_uses><duration_ms>2426271</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-a5e5cfedce67ab662</worktreePath><worktreeBranch>worktree-agent-a5e5cfedce67ab662</worktreeBranch></worktree>
+</task-notification>
