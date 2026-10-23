@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>btitm2e5p</task-id>
+<tool-use-id>toolu_01F23gWu3voDJ2TLwXNkbUbV</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/btitm2e5p.output</output-file>
+<status>completed</status>
+<summary>Background command "bash /Users/gabe/.claude/jobs/ba6a68d6/tmp/release_loop.sh 2&gt;&amp;1 | tail -15; npm view caliper-docgen version; npm view caliper-docgen-napi version; npm view caliper-docgen-vite-plugin version" completed (exit code 0)</summary>
+</task-notification>
