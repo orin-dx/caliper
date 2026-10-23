@@ -1,0 +1,11 @@
+<task-notification>
+<task-id>bj2pokfd1</task-id>
+<tool-use-id>toolu_01GVvS685fTcE6wERrbAdCXK</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/bj2pokfd1.output</output-file>
+<status>completed</status>
+<summary>Background command "rtk cargo build --release -q -p caliper-docgen 2&gt;&amp;1 | tail -2; cp target/release/caliper-docgen /Users/gabe/.claude/jobs/ba6a68d6/tmp/caliper-callee; python3 /Users/gabe/.claude/jobs/ba6a68d6/tmp/bench/type_diff.py /Users/gabe/.claude/jobs/ba6a68d6/tmp/caliper-decisions /Users/gabe/.claude/jobs/ba6a68d6/tmp/caliper-callee --show 2" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+They're in the main checkout sow e need a branch and pr

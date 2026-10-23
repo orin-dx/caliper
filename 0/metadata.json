@@ -1,0 +1,176 @@
+{
+  "cli_version": "0.12.1-nightly.202610230625.e04328a5d",
+  "checkpoint_id": "01M5N6WVSTXA3PR5CJGG9C1VGV",
+  "session_id": "ba6a68d6-c702-4382-ab2f-60cd0f6af675",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-23T20:23:30.238949Z",
+  "branch": "chore/llm-hooks",
+  "checkpoints_count": 4,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "713b84e6c406",
+  "checkpoint_transcript_start": 199,
+  "transcript_lines_at_start": 199,
+  "compact_transcript_start": 19,
+  "token_usage": {
+    "input_tokens": 4766,
+    "cache_creation_tokens": 9920763,
+    "cache_read_tokens": 1016804154,
+    "output_tokens": 1720307,
+    "api_call_count": 2336,
+    "subagent_tokens": {
+      "input_tokens": 5202,
+      "cache_creation_tokens": 7957150,
+      "cache_read_tokens": 728765822,
+      "output_tokens": 420796,
+      "api_call_count": 2567
+    }
+  },
+  "redaction": {
+    "replacements": 689,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 689,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01QchtZUzPN3PMVrg8Gy3ykV",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "vanguard:research"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "713b84e6c406",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 6111,
+        "end": 6112,
+        "entry_ids": [
+          "255a129b-35bc-4cc3-9675-402f9d83f595"
+        ],
+        "tool_use_id": "toolu_01QchtZUzPN3PMVrg8Gy3ykV"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01QchtZUzPN3PMVrg8Gy3ykV"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: vanguard:research",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": ".claude/worktrees/release-0.2.0:adr"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "713b84e6c406",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 40539,
+        "end": 40540,
+        "entry_ids": [
+          "0a2d086d-18f7-41f9-b6a6-3a37c42b1182"
+        ],
+        "tool_use_id": "toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: .claude/worktrees/release-0.2.0:adr",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "summary": {
+    "intent": "Get the first public release (0.2.0) of the caliper / oxc-react-docgen project published to crates.io and npm via callisto, then continue with extraction-quality improvements (string-default quotes, curated-mode React attributes, Mantine wrapper props) and open a PR for the user's fixed LLM hooks.",
+    "outcome": "Release prep PR #33 and a series of CI fixes (#36, #37, #38) were merged or opened, but the 0.2.0 publish is only half done: oxc-react-docgen-core 0.2.0 reached crates.io while execute failed on a cargo info color-parsing issue, with a fix in PR #38 pending. PRs #126-#129 were also opened for follow-up work and a chore/llm-hooks branch was pushed for the hooks PR.",
+    "learnings": {
+      "repo": [
+        "Local main had 8 commits never pushed to origin (AGENTS.md convention, ADR 0006, tsc-client, Entire hooks); they were cherry-picked onto the release branch. All 8 subjects already existed on origin/main under new hashes by the end.",
+        "callisto is pinned in release.yml, ci.yml and callisto.toml; moved from 0.10.0 to 0.11.0 (sha 5e8c169). The first release is forced to 0.2.0 via a minor changeset to avoid PR #22 shipping 0.1.1 and skipping the unpublished 0.1.0.",
+        "oxfmt rewrites double-quoted scoped package names in changeset frontmatter to single quotes, which callisto does not strip; scoped names must be left unquoted.",
+        "oxfmt --check on markdown flags callisto-generated CHANGELOG.md files, so release PRs failed Lint; fixed by adding **/CHANGELOG.md to ignorePatterns in .oxfmtrc.json (PR #37).",
+        "Dependabot oxfmt bumps can newly flag docs/archive/*.md files and turn Lint red on main (fixed in PR #36).",
+        "Workflow-wide CARGO_TERM_COLOR=always makes cargo info wrap the 'version:' label in ANSI escapes, so callisto 0.11.0's classify_cargo_info fails with E176 and cannot adopt an already-published crate. Fix: set CARGO_TERM_COLOR=never in the execute job (PR #38).",
+        "Callisto runs `cargo info NAME@VERSION --registry crates-io` and classifies stdout in crates/callisto-graph/src/commands/release/provider/registry.rs.",
+        "The release-candidate job once failed to recognise the merged release PR (likely a GitHub timing race), skipping plan/build/execute; recovery is `gh workflow run release.yml --ref main -f release_source_sha=<sha>`.",
+        "Test in crates/cli/src/commands/extract.rs was fragile: miette word-wraps long CI temp paths mid-directory-name, breaking substring asserts.",
+        "ADR rule: changing an ADR requires a new ADR, so the curated-mode amendment became ADR 0013.",
+        "Wildcard re-exports (`export * from`) previously found types but not functions in follow_reexports (crates/core/src/resolver/import.rs), which blocked Mantine factory callee lookup through two barrels.",
+        "Watch-mode dependency tracking needed the wrapper callee file recorded so editing the factory file re-resolves wrapper-built components; a watch test caught this."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/resolver/import.rs",
+          "line": 95,
+          "end_line": 126,
+          "finding": "is_declared_at checks in follow_reexports were replaced with a declares() helper so wildcard re-exports resolve functions as well as types."
+        },
+        {
+          "path": "crates/core/src/extractor/wrapper.rs",
+          "finding": "Added asserted_return_type to read the single top-level `return x as T` of a wrapper function, giving the callee's result type for resolver/callee.rs."
+        },
+        {
+          "path": ".github/workflows/release.yml",
+          "finding": "execute job needs CARGO_TERM_COLOR=never to override the workflow-wide 'always' so callisto can parse cargo info."
+        }
+      ],
+      "workflow": [
+        "Verify publishes on the registries (npm view, cargo search, tags) rather than trusting a green workflow run; the first run was green but published nothing.",
+        "Read the tool's source at the exact tagged version; the local callisto checkout was 0.10.0 so the 0.11.0 tag had to be read via the GitHub API.",
+        "Reproducing CI failures locally by matching toolchain and environment (forced color, byte dump with od -c) pinpointed the root cause.",
+        "Back up and stash before resetting a user's main checkout (backup branch plus named stash) and avoid force-pushes by merging main instead of rebasing.",
+        "Transient proto/Node download failures in CI are resolved by `gh run rerun --failed`."
+      ]
+    },
+    "friction": [
+      "Several bash calls had to be re-issued (git fetch/rebase, git commit, sed) after initial attempts apparently did not take effect or the stash was empty.",
+      "The release-candidate job skipped plan/build/execute on the first release-PR merge, requiring a manual dispatch.",
+      "execute failed repeatedly with E157/E176 after the core crate was already published, leaving the release half done.",
+      "User's merges of dependabot bumps were mistaken for release PR merges, causing confusion about what had published.",
+      "CI flakiness: install-action error on main, proto install Node download failure on #84, and a macOS signal test flake.",
+      "Corpus benchmark timings were noisy and needed hyperfine reruns to rule out regressions.",
+      "Earlier recall figures reported to the user (29% and 9%) were stale and had to be corrected."
+    ],
+    "open_items": [
+      "Merge PR #38, then re-dispatch the release for source sha 71140ca619024edb3e39bd770d41193008b67d01 to publish the remaining crates and npm packages.",
+      "Report upstream the callisto 0.11.0 bug where ANSI-colored cargo info output is not parsed.",
+      "Investigate the release-candidate race that skipped plan/build/execute.",
+      "Review and merge #126-#129 (#129 CI was still running) and the chore/llm-hooks PR; the hooks PR itself had not been opened with gh pr create yet, only the branch pushed.",
+      "60 Mantine props from polymorphicFactory (conditional return type declared in the function body) need the TypeScript backend.",
+      "27 Chakra recipe variant props (size, variant) are missing; suggested as the cheapest next step.",
+      "About 7 opaque factories (createIconLoader, createIcon) remain unresolved.",
+      "--load-dependencies is planned to become the default in 0.5.0.",
+      "Stash main-checkout-cleanup-2026-10-23 and branch backup/local-main-2026-09-28 hold old local state that may be deleted later.",
+      "The release workflow's lack of CI checks on the release-PR branch (GITHUB_TOKEN pushes) was not investigated."
+    ]
+  }
+}
