@@ -46,7 +46,7 @@ pub(super) fn resolve_extends_ref(
             if let Some(element_name) = element {
                 let file_name = resolve_react_types_file(iface_file, ctx);
                 let real_chain = if ctx.html_attributes == HtmlAttributeMode::Full {
-                    real_html_attrs_chain(name.as_str(), &file_name, mapping, ctx, state, depth)
+                    real_html_attrs_chain(name.as_str(), type_args, iface_file, &file_name, mapping, ctx, state, depth)
                 } else {
                     None
                 };
@@ -168,9 +168,13 @@ pub(super) fn component_props_of(
 /// namespace import, or no import at all in a `.d.ts`), so there's nothing for
 /// that path to resolve — we already know exactly which file these types live in.
 /// Returns `None` (not a diagnostic) when @types/react wasn't actually merged;
-/// callers fall back to the existing curated/metadata-only behavior.
+/// callers fall back to the existing curated/metadata-only behavior. `type_args`, written in `args_file`, bind the
+/// interface's element parameter (`DOMAttributes<T>` reached from `SVGProps<SVGSVGElement>`).
+#[allow(clippy::too_many_arguments)]
 fn real_html_attrs_chain(
     name: &str,
+    type_args: &[CollectedType],
+    args_file: &Utf8Path,
     react_file: &str,
     mapping: &ComponentMapping,
     ctx: &ResolutionContext,
@@ -190,5 +194,5 @@ fn real_html_attrs_chain(
         .named_types
         .lookup_interface_exact(react_file_path, &qualified_name)
         .or_else(|| ctx.named_types.lookup_interface_exact(react_file_path, bare_name))?;
-    Some(resolve_interface_chain(iface, &[], react_file_path, mapping, ctx, state, depth + 1))
+    Some(resolve_interface_chain(iface, type_args, args_file, mapping, ctx, state, depth + 1))
 }
