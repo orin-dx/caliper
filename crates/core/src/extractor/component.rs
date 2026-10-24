@@ -538,6 +538,10 @@ impl<'src> SourceDataCollector<'src> {
             _ => return false,
         };
 
+        // The component it receives is not the one it builds when a type argument names the props.
+        if call.is_some_and(|call| self.call_names_props_type(call)) {
+            return false;
+        }
         let Some(base) = self.data.component_mappings.iter().find(|m| m.component_name == inner_name) else {
             return false;
         };

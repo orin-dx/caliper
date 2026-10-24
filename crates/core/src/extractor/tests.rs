@@ -1083,6 +1083,35 @@ fn a_component_passed_to_a_non_wrapper_call_keeps_its_name_and_the_call_is_not_a
 }
 
 #[test]
+fn a_wrapper_call_naming_its_props_type_does_not_take_the_props_of_the_component_it_receives() {
+    use crate::types::DetectionRule::{ForwardRef, WrapperTypeArgument};
+    let source = r#"
+        import { forwardRef, memo } from "react";
+        interface BaseProps { asChild?: boolean }
+        interface OverlayProps { tone?: string }
+        const BaseOverlay = forwardRef<HTMLDivElement, BaseProps>((props, ref) => <div ref={ref} />);
+        export const Overlay = withContext<HTMLDivElement, OverlayProps>(BaseOverlay, "overlay");
+        export const Memoized = memo(BaseOverlay);
+        export const Themed = withTheme<HTMLDivElement>(BaseOverlay);
+    "#;
+    let data = parse_file(Utf8Path::new("/test/overlay.tsx"), source);
+    let mut found: Vec<(&str, &str, crate::types::DetectionRule)> = data
+        .component_mappings
+        .iter()
+        .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule))
+        .collect();
+    found.sort_by_key(|(name, _, _)| *name);
+    assert_eq!(
+        found,
+        vec![
+            ("Memoized", "BaseProps", ForwardRef),
+            ("Overlay", "OverlayProps", WrapperTypeArgument),
+            ("Themed", "BaseProps", ForwardRef),
+        ]
+    );
+}
+
+#[test]
 fn anonymous_default_exports_are_named_after_their_file() {
     let cases = [
         ("/test/chip.tsx", "interface ChipProps { a?: string }\nexport default (props: ChipProps) => <span />;\n"),
