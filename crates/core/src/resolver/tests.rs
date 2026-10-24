@@ -2628,30 +2628,37 @@ export function C({ tone = "b" }: CProps) { return null; }
 "#;
 
 /// A context over real files in a temp dir, so imports resolve as in a run.
-fn parsed_ctx(dir: &Utf8Path, files: &[(&str, &str)]) -> ResolutionContext {
+fn parsed_ctx(dir: &Utf8Path, files: &[(&str, &str)], options: &PipelineOptions) -> ResolutionContext {
     let mut global = GlobalSourceData::default();
     for (name, source) in files {
         let path = dir.join(name);
         std::fs::write(&path, source).unwrap();
         global.merge(&path, crate::extractor::parse_file(&path, source));
     }
-    ResolutionContext::new(Arc::new(global), &PipelineOptions::default())
+    ResolutionContext::new(Arc::new(global), options)
 }
+
+type SharedResults = BTreeMap<String, (ComponentEntry, Vec<Diagnostic>, deps::Dependencies)>;
 
 /// Resolve `components` in order on one context, asserting each gives exactly what it gives on a context of its own:
 /// entry, dependencies, and each distinct diagnostic in the order first reported (a reused chain reports each once).
-fn resolve_shared(
+fn resolve_shared(dir: &Utf8Path, files: &[(&str, &str)], components: &[&str]) -> (ResolutionContext, SharedResults) {
+    resolve_shared_with(dir, files, components, &PipelineOptions::default())
+}
+
+fn resolve_shared_with(
     dir: &Utf8Path,
     files: &[(&str, &str)],
     components: &[&str],
-) -> (ResolutionContext, BTreeMap<String, (ComponentEntry, Vec<Diagnostic>, deps::Dependencies)>) {
-    let shared = parsed_ctx(dir, files);
+    options: &PipelineOptions,
+) -> (ResolutionContext, SharedResults) {
+    let shared = parsed_ctx(dir, files, options);
     let mapping = |ctx: &ResolutionContext, name: &str| {
         ctx.global.component_mappings.iter().find(|m| m.component_name == name).unwrap().clone()
     };
     let mut results = BTreeMap::new();
     for name in components {
-        let fresh = parsed_ctx(dir, files);
+        let fresh = parsed_ctx(dir, files, options);
         let flat = |(entry, diagnostics, deps): (ComponentEntry, ResolvedDiagnostics, deps::Dependencies)| {
             (entry, diagnostics.flatten(), deps)
         };
@@ -2703,6 +2710,55 @@ fn a_shared_interface_chain_resolves_like_a_fresh_one_for_every_component() {
     assert!(!Arc::ptr_eq(prop("A", "tone"), prop("C", "tone")));
     let default_of = |component: &str| prop(component, "tone").default_value.as_ref().map(|d| d.value.clone());
     assert_eq!((default_of("A"), default_of("B"), default_of("C")), (None, None, Some("\"b\"".to_owned())));
+}
+
+#[test]
+fn an_interface_chain_read_for_its_keys_is_not_reused_where_its_props_are_listed() {
+    // K reads only Base's names (`keyof Base`), so its resolution of Base skips member types; N lists Base's props.
+    // Both reach Base at depth 2, so only the mode tells the recordings apart.
+    let (_tmp, dir) = canonical_temp_dir();
+    let source = r#"
+type Tone = "a" | "b";
+interface Base { tone?: Tone; label: string }
+interface Own { tone?: number; extra?: boolean }
+interface Mid extends Base {}
+interface NProps extends Mid {}
+export function K(props: Omit<Own, keyof Base>) { return null; }
+export function N(props: NProps) { return null; }
+"#;
+    let (shared, results) = resolve_shared(&dir, &[("Comp.tsx", source)], &["K", "N"]);
+
+    let types = |component: &str| {
+        results[component].0.props.iter().map(|(name, p)| (name.as_str(), p.prop_type.clone())).collect::<Vec<_>>()
+    };
+    assert_eq!(types("K"), [("extra", PropType::Boolean)]);
+    let tone = PropType::LiteralUnion { members: vec!["a".into(), "b".into()], has_default: false };
+    assert_eq!(types("N"), [("label", PropType::String), ("tone", tone)]);
+    assert_eq!(memo::recording_counts(&shared.interface_chains)[&format!("{dir}/Comp.tsx:Base")], 2);
+}
+
+#[test]
+fn an_interface_chain_expanded_for_a_pick_is_not_reused_where_it_collapses() {
+    // `Pick` expands its base so it can pick from the props; Q inherits the same 31-prop interface, which collapses
+    // to a layer. Both reach Big at depth 1, so only the mode tells the recordings apart.
+    let (_tmp, dir) = canonical_temp_dir();
+    let fields: String = (0..31).map(|i| format!("p{i}?: string; ")).collect();
+    let source = format!(
+        "export interface Big {{ {fields}}}\ninterface QProps extends Big {{ own?: boolean }}\n\
+         export function P(props: Pick<Big, \"p0\">) {{ return null; }}\n\
+         export function Q(props: QProps) {{ return null; }}\n"
+    );
+    let options = PipelineOptions {
+        collapse_inherited_props: crate::pipeline::CollapseInheritedProps::All,
+        ..Default::default()
+    };
+    let (shared, results) = resolve_shared_with(&dir, &[("Comp.tsx", &source)], &["P", "Q"], &options);
+
+    let names = |component: &str| results[component].0.props.keys().map(String::as_str).collect::<Vec<_>>();
+    assert_eq!((names("P"), names("Q")), (vec!["p0"], vec!["own"]));
+    let layers: Vec<&str> = results["Q"].0.inheritance.iter().map(|layer| layer.type_name.as_str()).collect();
+    assert_eq!(layers, ["Big"]);
+    assert_eq!(memo::recording_counts(&shared.interface_chains)[&format!("{dir}/Comp.tsx:Big")], 2);
 }
 
 #[test]
