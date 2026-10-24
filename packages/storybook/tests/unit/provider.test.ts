@@ -100,6 +100,15 @@ describe('createDocgenProvider', () => {
     })
   })
 
+  it('looks at the files once per story, however many subcomponents it documents', async () => {
+    const fake = binding()
+    await request(fake, story('Button'))
+    expect(fake.looks).toBe(1)
+    const listed = binding()
+    await request(listed, story('List'))
+    expect(listed.looks).toBe(1)
+  })
+
   it('asks the next provider when the session has no such component', async () => {
     const fake = binding()
     delete fake.output.components!.Card

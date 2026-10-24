@@ -100,7 +100,11 @@ describe('DocgenSession.fresh', () => {
     await session.fresh()
     binding.updates.push({ removedKeys: ['Button'] })
     await session.fresh()
-    const stale = { revision: 2, updatedKeys: ['Button'], updatedComponents: [entry('Button', join(src, 'Button.tsx'))] }
+    const stale = {
+      revision: 2,
+      updatedKeys: ['Button'],
+      updatedComponents: [entry('Button', join(src, 'Button.tsx'))],
+    }
     binding.ensureFresh = async () =>
       JSON.stringify({ ...stale, removedKeys: [], removedDiagnostics: [], diagnostics: [] })
     await session.fresh()

@@ -9,6 +9,9 @@ use caliper_docgen_core::pipeline::{
     extraction_output_to_json, incremental_update_to_json, PipelineOptions, WatchSession,
 };
 
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 // ─── Session store ────────────────────────────────────────────────────────────
 
 static SESSIONS: LazyLock<DashMap<u32, Arc<WatchSession>>> = LazyLock::new(DashMap::new);
@@ -307,7 +310,8 @@ pub async fn initialize_session_index(session_id: u32, options: JsExtractOptions
                     (key.clone(), location)
                 })
                 .collect();
-            let diagnostics = serde_json::to_value(&output.diagnostics).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+            let diagnostics =
+                serde_json::to_value(&output.diagnostics).map_err(|e| napi::Error::from_reason(e.to_string()))?;
             serde_json::to_string(&serde_json::json!({ "components": components, "diagnostics": diagnostics }))
                 .map_err(|e| napi::Error::from_reason(e.to_string()))
         }) {
@@ -664,6 +668,67 @@ mod tests {
             Arc::ptr_eq(&first_session, &second_session),
             "expected the second call to reuse the SAME WatchSession, not construct a new one under the same key"
         );
+    }
+
+    /// A project directory holding one component, removed when dropped.
+    struct Project(std::path::PathBuf);
+
+    impl Project {
+        fn with_button() -> Self {
+            let dir = std::env::temp_dir().join(format!("caliper-binding-index-{}", next_session_id()));
+            std::fs::create_dir_all(&dir).expect("create the project directory");
+            std::fs::write(
+                dir.join("Button.tsx"),
+                "export interface ButtonProps { /** The label. */ label: string; size?: 'sm' | 'lg' }\n\
+                 export function Button(props: ButtonProps) { return null }\n",
+            )
+            .expect("write the component");
+            Self(dir)
+        }
+
+        fn options(&self) -> JsExtractOptions {
+            JsExtractOptions { src_dirs: vec![self.0.to_string_lossy().into_owned()], ..base_options() }
+        }
+    }
+
+    impl Drop for Project {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).ok();
+        }
+    }
+
+    #[tokio::test]
+    async fn the_index_names_the_same_components_and_diagnostics_as_the_full_output() {
+        let project = Project::with_button();
+        let full = initialize_session(next_session_id(), project.options()).await.expect("full output");
+        let full: serde_json::Value = serde_json::from_str(&full).expect("full output is JSON");
+        let index = initialize_session_index(next_session_id(), project.options()).await.expect("index");
+        let index: serde_json::Value = serde_json::from_str(&index).expect("index is JSON");
+
+        let expected: serde_json::Map<String, serde_json::Value> = full["components"]
+            .as_object()
+            .expect("components")
+            .iter()
+            .map(|(key, entry)| {
+                (key.clone(), serde_json::json!({ "filePath": entry["filePath"], "displayName": entry["displayName"] }))
+            })
+            .collect();
+        assert_eq!(expected.keys().collect::<Vec<_>>(), ["Button"]);
+        assert_eq!(index["components"], serde_json::Value::Object(expected));
+        assert_eq!(index["diagnostics"], full["diagnostics"]);
+    }
+
+    #[tokio::test]
+    async fn the_index_leaves_the_props_to_session_docgen_info() {
+        let project = Project::with_button();
+        let session_id = next_session_id();
+        let index = initialize_session_index(session_id, project.options()).await.expect("index");
+        assert!(!index.contains("\"props\""), "the index carries no props: {index}");
+
+        let docs = session_docgen_info(session_id, vec!["Button".into()]).expect("docgen info");
+        let docs: serde_json::Value = serde_json::from_str(&docs).expect("docgen info is JSON");
+        let props = docs["Button"]["props"].as_object().expect("props");
+        assert_eq!(props.keys().cloned().collect::<Vec<_>>(), ["label", "size"]);
     }
 
     // ── SPEC-BINDING-001 AC11: close_session on an unrecognized or

@@ -143,7 +143,8 @@ export function createDocgenProvider(
     const code = await readFile(storyPath, 'utf8')
     const csf = loadCsf(code, { fileName: storyPath, makeTitle: () => entry.title }).parse()
     // One look at the files for the story and its subcomponents: they are all answered from the same moment.
-    await (await getSession()).fresh()
+    const session = await getSession()
+    await session.fresh()
     const { key } = await component(csf, storyPath)
     const doc = await docgen(key)
     const { description, summary, jsDocTags } = extractComponentDescription(
