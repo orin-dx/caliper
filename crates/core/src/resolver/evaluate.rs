@@ -130,6 +130,11 @@ fn extends(
     ctx: &ResolutionContext,
     depth: u8,
 ) -> Option<bool> {
+    // Everything extends `unknown` (and `any`), whatever the check is: `T extends unknown ? Omit<T, K> : never`, the
+    // idiom for distributing over a union, takes its true branch.
+    if matches!(unwrap_at_file(extends_type).0, CollectedType::Unknown | CollectedType::Any) {
+        return Some(true);
+    }
     let values = check_atoms(check, file, ctx, depth + 1)?;
     if values.is_empty() {
         return None;

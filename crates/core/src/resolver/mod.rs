@@ -52,6 +52,9 @@ pub(crate) use import::{resolve_module_with, ModuleResolution};
 /// Prevents infinite loops on circular type references.
 const MAX_DEPTH: u8 = 20;
 
+/// Maximum named types being resolved at once: the declarations a reference passes through to reach another.
+const MAX_NAMED_NESTING: usize = 64;
+
 /// Shared "max resolution depth exceeded" diagnostic — every recursive
 /// resolver entry point (resolve_named, resolve_props_chain,
 /// resolve_collected_type) hits this same guard, and previously each built

@@ -34,9 +34,14 @@ Before answering, the provider compares every source file's mtime and size with 
 | `exclude` |  | Glob patterns to skip. |
 | `tsconfigPath` |  | tsconfig for path aliases. |
 | `skipHtmlProps` | `false` | Leave out the HTML attributes a component inherits from its element. |
+| `htmlAttributes` | `curated` | `curated` lists the notable HTML attributes, `full` all of them, `none` none. Wins over `skipHtmlProps`. |
+| `loadDependencies` | `true` | Read the type declarations your props reference from installed packages, so library-typed props resolve instead of degrading. `false` skips the work. |
+| `collapseInheritedProps` | `none` | `none` lists every inherited prop. `dependencies` or `all` list inherited sources of more than 30 props as one layer. |
 | `fallback` | `degraded` | `degraded`: a component whose extraction reported a warning or error goes to React's docgen. `never`: always answer. |
 
-A story whose component caliper-docgen can't find goes to React's docgen, which stays registered underneath.
+A story whose component caliper-docgen can't find goes to React's docgen, which stays registered underneath. Each component handed on is logged once as a warning with the reason (the extraction diagnostics that affect it).
+
+The defaults favour completeness over Storybook's: caliper-docgen is fast enough to read dependency types and list inherited props that a checker-backed docgen leaves out.
 
 ## Differences from React's docgen
 

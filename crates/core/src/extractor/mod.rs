@@ -292,6 +292,57 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
+    /// Inside `namespace X {}` a sibling is written by its bare name but stored as `X.Name`, so a reference to it
+    /// would never find its declaration. Run when the innermost namespace's body has been walked, with every
+    /// member declared: rewrites the references in the namespace's aliases and interfaces to the qualified key,
+    /// except where a type parameter of the declaration shadows the name.
+    pub(super) fn qualify_namespace_references(&mut self) {
+        let prefix = self.namespace_stack.join(".");
+        // `@types/react`'s `React` namespace is looked up bare, by the index's own fallback (`NamedTypeIndex::lookup_*`).
+        if prefix == "React" {
+            return;
+        }
+        let key_prefix = format!("{}:{prefix}.", self.file_path);
+        let direct = |key: &str| key.strip_prefix(key_prefix.as_str()).filter(|rest| !rest.contains('.')).is_some();
+        let members: FxHashSet<CompactString> = self
+            .data
+            .type_aliases
+            .keys()
+            .chain(self.data.interfaces.keys())
+            .filter(|key| direct(key))
+            .filter_map(|key| key.strip_prefix(key_prefix.as_str()))
+            .map(CompactString::from)
+            .collect();
+        if members.is_empty() {
+            return;
+        }
+        let qualified = |params: Option<&Vec<CompactString>>, name: &str| -> Option<CompactString> {
+            if params.is_some_and(|p| p.iter().any(|p| p == name)) || !members.contains(name) {
+                return None;
+            }
+            Some(format!("{prefix}.{name}").into())
+        };
+        for (key, alias) in self.data.type_aliases.iter_mut().filter(|(key, _)| direct(key)) {
+            let params = self.data.type_alias_params.get(key);
+            *alias = alias.rename_named(&|name: &str| qualified(params, name));
+        }
+        for (key, interface) in self.data.interfaces.iter_mut().filter(|(key, _)| direct(key)) {
+            let params = self.data.interface_type_params.get(key);
+            let rename = |name: &str| qualified(params, name);
+            for prop in &mut interface.props {
+                prop.collected_type = prop.collected_type.rename_named(&rename);
+            }
+            for extends in &mut interface.extends {
+                *extends = extends.map_type_args(|arg| arg.rename_named(&rename));
+                if let ExtendsRef::SameFile { name, .. } = extends {
+                    if let Some(renamed) = rename(name) {
+                        *name = renamed;
+                    }
+                }
+            }
+        }
+    }
+
     fn finish(mut self) -> SourceData {
         self.promote_wrapper_calls();
         self.promote_reexported_imports();

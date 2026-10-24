@@ -4,8 +4,26 @@ import type { CaliperStorybookOptions } from './index.js'
 
 /** The addon's options travel to the docgen worker by structured clone, so only these plain fields go. */
 function workerOptions(options: CaliperStorybookOptions): CaliperStorybookOptions {
-  const { srcDirs, exclude, tsconfigPath, skipHtmlProps, fallback } = options
-  return { srcDirs, exclude, tsconfigPath, skipHtmlProps, fallback }
+  const {
+    srcDirs,
+    exclude,
+    tsconfigPath,
+    skipHtmlProps,
+    htmlAttributes,
+    loadDependencies,
+    collapseInheritedProps,
+    fallback,
+  } = options
+  return {
+    srcDirs,
+    exclude,
+    tsconfigPath,
+    skipHtmlProps,
+    htmlAttributes,
+    loadDependencies,
+    collapseInheritedProps,
+    fallback,
+  }
 }
 
 /** Registered last, the provider wraps React's: it answers first and hands on what it can't document. */

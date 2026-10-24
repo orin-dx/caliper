@@ -1,7 +1,8 @@
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { DocgenPayload, IndexEntry } from 'storybook/internal/types'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { logger } from 'storybook/internal/node-logger'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createDocgenProvider } from '../../src/provider.js'
 import { FakeBinding, entry, rdtDoc, warning } from './fake-binding.js'
 
@@ -99,6 +100,15 @@ describe('createDocgenProvider', () => {
     })
   })
 
+  it('looks at the files once per story, however many subcomponents it documents', async () => {
+    const fake = binding()
+    await request(fake, story('Button'))
+    expect(fake.looks).toBe(1)
+    const listed = binding()
+    await request(listed, story('List'))
+    expect(listed.looks).toBe(1)
+  })
+
   it('asks the next provider when the session has no such component', async () => {
     const fake = binding()
     delete fake.output.components!.Card
@@ -112,6 +122,40 @@ describe('createDocgenProvider', () => {
     const { payload, nextCalls } = await request(fake, story('Button'), { fallback: 'never' })
     expect(nextCalls).toBe(0)
     expect(payload?.argTypes).toEqual({ label: labelArgType })
+  })
+
+  it('warns once per component handed on, with the reason', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const fake = binding()
+    fake.output.diagnostics = [warning(['Button'])]
+    const provider = createDocgenProvider({}, fake)(async () => NEXT)
+    await provider({ entry: story('Button') })
+    await provider({ entry: story('Button') })
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0]?.[0]).toBe(
+      "[caliper-docgen] Button: Cannot resolve type; Storybook's own docgen answers instead",
+    )
+    warn.mockRestore()
+  })
+
+  it('reads dependencies and lists inherited props unless told not to, and passes the HTML attribute choice on', async () => {
+    const seen: unknown[] = []
+    const spy = (fake: FakeBinding) => {
+      const init = fake.initializeSessionIndex
+      fake.initializeSessionIndex = async (id: number, options: unknown) => {
+        seen.push(options)
+        return init(id, options as never)
+      }
+      return fake
+    }
+    await request(spy(binding()), story('Button'))
+    expect(seen[0]).toMatchObject({ loadDependencies: true, collapseInheritedProps: 'none', htmlAttributes: undefined })
+    await request(spy(binding()), story('Button'), {
+      loadDependencies: false,
+      htmlAttributes: 'full',
+      collapseInheritedProps: 'all',
+    })
+    expect(seen[1]).toMatchObject({ loadDependencies: false, collapseInheritedProps: 'all', htmlAttributes: 'full' })
   })
 
   it('passes a docs-only entry straight on without starting a session', async () => {

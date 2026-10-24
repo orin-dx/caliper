@@ -820,6 +820,50 @@ fn only_an_identifier_named_namespace_qualifies_the_types_declared_inside_it() {
     assert_eq!(keys, expected.iter().map(String::as_str).collect::<Vec<_>>());
 }
 
+/// csstype's shape: `namespace DataType { type ColorBase = ...; type Color = ColorBase | ... }`. A sibling is written bare
+/// and stored qualified, so its reference is qualified too, unless a type parameter of the declaration shadows it.
+#[test]
+fn a_namespace_sibling_is_referenced_by_its_qualified_name() {
+    let source = r#"
+        namespace DataType {
+            type Base = "red" | "blue";
+            type Color<T = string> = Base | "green" | T;
+            type Shadowed<Base> = Base | Color;
+            interface Shape extends Frame<Base> { color: Color; shades: Array<Base> }
+            interface Frame<T> { inner: T }
+        }
+        type Outside = Base;
+    "#;
+    let path = Utf8Path::new("/test/ns-siblings.ts");
+    let data = parse_file(path, source);
+
+    let alias = |name: &str| match &data.type_aliases[&format!("{path}:{name}")] {
+        CollectedTypeAlias::Union { members, .. } => {
+            members.iter().map(CollectedType::to_raw_string).collect::<Vec<_>>()
+        }
+        CollectedTypeAlias::Passthrough { target, .. } => vec![target.to_raw_string()],
+        other => panic!("unexpected alias {other:?}"),
+    };
+    assert_eq!(alias("DataType.Color"), ["DataType.Base", "\"green\"", "T"]);
+    assert_eq!(alias("DataType.Shadowed"), ["Base", "DataType.Color"]);
+    assert_eq!(alias("Outside"), ["Base"]);
+
+    let shape = &data.interfaces[&format!("{path}:DataType.Shape")];
+    let props: Vec<_> = shape.props.iter().map(|p| (p.name.as_str(), p.collected_type.to_raw_string())).collect();
+    assert_eq!(props, [("color", "DataType.Color".to_owned()), ("shades", "Array<DataType.Base>".to_owned())]);
+    let extends: Vec<_> = shape
+        .extends
+        .iter()
+        .map(|e| match e {
+            ExtendsRef::SameFile { name, type_args } => {
+                (name.to_string(), type_args.iter().map(CollectedType::to_raw_string).collect::<Vec<_>>())
+            }
+            other => panic!("unexpected extends {other:?}"),
+        })
+        .collect();
+    assert_eq!(extends, [("DataType.Frame".to_owned(), vec!["DataType.Base".to_owned()])]);
+}
+
 #[test]
 fn test_forward_ref_component_annotation_with_as_cast() {
     // Fluent UI's real pattern: no explicit forwardRef<Ref, Props> type args, and

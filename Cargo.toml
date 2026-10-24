@@ -4,6 +4,7 @@ members = [
     "crates/binding",
     "crates/cli",
     "crates/tsc-client",
+    "crates/semantic",
 ]
 resolver = "2"
 

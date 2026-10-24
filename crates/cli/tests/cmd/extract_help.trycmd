@@ -70,6 +70,15 @@ Options:
       --config <CONFIG>
           Path to docgen.config.ts
 
+      --experimental-semantic-types
+          Experimental: ask TypeScript 7.1's `tsc --api` for each component's
+          props and merge them over the structural result, which stands wherever
+          the checker cannot answer (off by default)
+
+      --tsc-path <TSC_PATH>
+          The `tsc` binary `--experimental-semantic-types` runs, instead of
+          `node_modules/typescript/bin/tsc`
+
   -h, --help
           Print help (see a summary with '-h')
 

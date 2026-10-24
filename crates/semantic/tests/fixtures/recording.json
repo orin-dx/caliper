@@ -1,0 +1,1495 @@
+[
+  {
+    "method": "initialize",
+    "params": null,
+    "result": {
+      "caseSensitivity": 0,
+      "currentDirectory": "<ROOT>"
+    }
+  },
+  {
+    "method": "createSnapshot",
+    "params": {
+      "createPrograms": [
+        {
+          "rootFiles": [
+            "<ROOT>/Button.tsx"
+          ],
+          "compilerOptions": {
+            "jsx": 1,
+            "module": 99,
+            "moduleResolution": 100,
+            "target": 9,
+            "strict": true,
+            "skipLibCheck": true,
+            "noEmit": true
+          }
+        }
+      ]
+    },
+    "result": {
+      "snapshot": 1,
+      "projects": [
+        {
+          "id": "/dev/null/synthetic/1",
+          "currentDirectory": "<ROOT>",
+          "dirty": false,
+          "parsedCommandLine": {
+            "fileNames": [
+              "<ROOT>/Button.tsx"
+            ],
+            "options": {
+              "jsx": 1,
+              "module": 99,
+              "moduleResolution": 100,
+              "noEmit": true,
+              "skipLibCheck": true,
+              "strict": true,
+              "target": 9
+            },
+            "errors": []
+          }
+        }
+      ],
+      "operation": {
+        "createdPrograms": [
+          "/dev/null/synthetic/1"
+        ]
+      }
+    }
+  },
+  {
+    "method": "getSymbolOfSourceFile",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "file": "<ROOT>/Button.tsx"
+    },
+    "result": {
+      "reference": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Button.tsx",
+          "path": "<root>/button.tsx",
+          "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 1
+      },
+      "name": "\"<ROOT>/Button\"",
+      "flags": 512,
+      "checkFlags": 0,
+      "declarations": [
+        "1.308.<root>/button.tsx"
+      ],
+      "valueDeclaration": "1.308.<root>/button.tsx"
+    }
+  },
+  {
+    "method": "getExportsOfModule",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Button.tsx",
+          "path": "<root>/button.tsx",
+          "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 1
+      }
+    },
+    "result": [
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 3
+        },
+        "name": "Button",
+        "flags": 16,
+        "checkFlags": 0,
+        "declarations": [
+          "60.264.<root>/button.tsx"
+        ],
+        "valueDeclaration": "60.264.<root>/button.tsx",
+        "parent": {
+          "id": 1,
+          "file": "77"
+        }
+      },
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 2
+        },
+        "name": "default",
+        "flags": 16,
+        "checkFlags": 0,
+        "declarations": [
+          "80.264.<root>/button.tsx"
+        ],
+        "valueDeclaration": "80.264.<root>/button.tsx",
+        "parent": {
+          "id": 1,
+          "file": "77"
+        }
+      }
+    ]
+  },
+  {
+    "method": "getTypeOfSymbol",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Button.tsx",
+          "path": "<root>/button.tsx",
+          "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 3
+      }
+    },
+    "result": {
+      "id": 86,
+      "flags": 1048576,
+      "objectFlags": 16,
+      "isTupleType": false,
+      "value": null,
+      "isThisType": false,
+      "symbol": {
+        "id": 3,
+        "file": "77"
+      }
+    }
+  },
+  {
+    "method": "getSignaturesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 86,
+      "kind": 0
+    },
+    "result": [
+      {
+        "id": 5,
+        "flags": 0,
+        "declaration": "60.264.<root>/button.tsx",
+        "parameters": [
+          {
+            "id": 24,
+            "file": "77"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "method": "getParametersOfSignature",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 5
+    },
+    "result": [
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 24
+        },
+        "name": "___0",
+        "flags": 1,
+        "checkFlags": 0,
+        "declarations": [
+          "65.171.<root>/button.tsx"
+        ],
+        "valueDeclaration": "65.171.<root>/button.tsx"
+      }
+    ]
+  },
+  {
+    "method": "getTypeOfSymbol",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Button.tsx",
+          "path": "<root>/button.tsx",
+          "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 24
+      }
+    },
+    "result": {
+      "id": 87,
+      "flags": 1048576,
+      "objectFlags": 2,
+      "isTupleType": false,
+      "value": null,
+      "isThisType": false,
+      "symbol": {
+        "id": 4,
+        "file": "77"
+      }
+    }
+  },
+  {
+    "method": "getPropertiesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 87
+    },
+    "result": [
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 11
+        },
+        "name": "label",
+        "flags": 4,
+        "checkFlags": 0,
+        "declarations": [
+          "14.173.<root>/button.tsx"
+        ],
+        "valueDeclaration": "14.173.<root>/button.tsx",
+        "parent": {
+          "id": 4,
+          "file": "77"
+        }
+      },
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 5
+        },
+        "name": "size",
+        "flags": 16777220,
+        "checkFlags": 0,
+        "declarations": [
+          "20.173.<root>/button.tsx"
+        ],
+        "valueDeclaration": "20.173.<root>/button.tsx",
+        "parent": {
+          "id": 4,
+          "file": "77"
+        }
+      },
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 6
+        },
+        "name": "disabled",
+        "flags": 16777220,
+        "checkFlags": 0,
+        "declarations": [
+          "25.173.<root>/button.tsx"
+        ],
+        "valueDeclaration": "25.173.<root>/button.tsx",
+        "parent": {
+          "id": 4,
+          "file": "77"
+        }
+      },
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 7
+        },
+        "name": "onClick",
+        "flags": 16777220,
+        "checkFlags": 0,
+        "declarations": [
+          "29.173.<root>/button.tsx"
+        ],
+        "valueDeclaration": "29.173.<root>/button.tsx",
+        "parent": {
+          "id": 4,
+          "file": "77"
+        }
+      },
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 8
+        },
+        "name": "tags",
+        "flags": 16777220,
+        "checkFlags": 0,
+        "declarations": [
+          "38.173.<root>/button.tsx"
+        ],
+        "valueDeclaration": "38.173.<root>/button.tsx",
+        "parent": {
+          "id": 4,
+          "file": "77"
+        }
+      },
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 9
+        },
+        "name": "pair",
+        "flags": 4,
+        "checkFlags": 0,
+        "declarations": [
+          "43.173.<root>/button.tsx"
+        ],
+        "valueDeclaration": "43.173.<root>/button.tsx",
+        "parent": {
+          "id": 4,
+          "file": "77"
+        }
+      },
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 10
+        },
+        "name": "box",
+        "flags": 4,
+        "checkFlags": 0,
+        "declarations": [
+          "49.173.<root>/button.tsx"
+        ],
+        "valueDeclaration": "49.173.<root>/button.tsx",
+        "parent": {
+          "id": 4,
+          "file": "77"
+        }
+      }
+    ]
+  },
+  {
+    "method": "getTypesOfSymbols",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbols": [
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 11
+        },
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 5
+        },
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 6
+        },
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 7
+        },
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 8
+        },
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 9
+        },
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 10
+        }
+      ]
+    },
+    "result": [
+      {
+        "id": 14,
+        "flags": 32,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "string"
+      },
+      {
+        "id": 94,
+        "flags": 134217728,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false
+      },
+      {
+        "id": 95,
+        "flags": 134217728,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false
+      },
+      {
+        "id": 97,
+        "flags": 134217728,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false
+      },
+      {
+        "id": 99,
+        "flags": 134217728,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false
+      },
+      {
+        "id": 105,
+        "flags": 1048576,
+        "objectFlags": 536870916,
+        "isTupleType": true,
+        "value": null,
+        "target": 103,
+        "isThisType": false
+      },
+      {
+        "id": 106,
+        "flags": 1048576,
+        "objectFlags": 16,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "symbol": {
+          "id": 19,
+          "file": "77"
+        }
+      }
+    ]
+  },
+  {
+    "method": "getAliasSymbolOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 94
+    },
+    "result": null
+  },
+  {
+    "method": "getTypesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 94
+    },
+    "result": [
+      {
+        "id": 10,
+        "flags": 4,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "undefined"
+      },
+      {
+        "id": 90,
+        "flags": 1024,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": "lg",
+        "freshType": 91,
+        "regularType": 90,
+        "isThisType": false
+      },
+      {
+        "id": 88,
+        "flags": 1024,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": "sm",
+        "freshType": 89,
+        "regularType": 88,
+        "isThisType": false
+      }
+    ]
+  },
+  {
+    "method": "getDocumentationComment",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Button.tsx",
+          "path": "<root>/button.tsx",
+          "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 5
+      }
+    },
+    "result": ""
+  },
+  {
+    "method": "getAliasSymbolOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 95
+    },
+    "result": null
+  },
+  {
+    "method": "getTypesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 95
+    },
+    "result": [
+      {
+        "id": 10,
+        "flags": 4,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "undefined"
+      },
+      {
+        "id": 17,
+        "flags": 8192,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": false,
+        "freshType": 18,
+        "regularType": 17,
+        "isThisType": false
+      },
+      {
+        "id": 19,
+        "flags": 8192,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": true,
+        "freshType": 20,
+        "regularType": 19,
+        "isThisType": false
+      }
+    ]
+  },
+  {
+    "method": "typeToString",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 17
+    },
+    "result": "false"
+  },
+  {
+    "method": "typeToString",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 19
+    },
+    "result": "true"
+  },
+  {
+    "method": "getDocumentationComment",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Button.tsx",
+          "path": "<root>/button.tsx",
+          "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 6
+      }
+    },
+    "result": ""
+  },
+  {
+    "method": "getAliasSymbolOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 97
+    },
+    "result": null
+  },
+  {
+    "method": "getTypesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 97
+    },
+    "result": [
+      {
+        "id": 10,
+        "flags": 4,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "undefined"
+      },
+      {
+        "id": 96,
+        "flags": 1048576,
+        "objectFlags": 16,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "symbol": {
+          "id": 16,
+          "file": "77"
+        }
+      }
+    ]
+  },
+  {
+    "method": "typeToString",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 96
+    },
+    "result": "(event: number) => void"
+  },
+  {
+    "method": "getSignaturesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 96,
+      "kind": 0
+    },
+    "result": [
+      {
+        "id": 6,
+        "flags": 0,
+        "declaration": "32.186.<root>/button.tsx",
+        "parameters": [
+          {
+            "id": 18,
+            "file": "77"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "method": "getParametersOfSignature",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 6
+    },
+    "result": [
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 18
+        },
+        "name": "event",
+        "flags": 1,
+        "checkFlags": 0,
+        "declarations": [
+          "34.171.<root>/button.tsx"
+        ],
+        "valueDeclaration": "34.171.<root>/button.tsx"
+      }
+    ]
+  },
+  {
+    "method": "getTypesOfSymbols",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbols": [
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 18
+        }
+      ]
+    },
+    "result": [
+      {
+        "id": 15,
+        "flags": 64,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "number"
+      }
+    ]
+  },
+  {
+    "method": "getReturnTypeOfSignature",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 6
+    },
+    "result": {
+      "id": 23,
+      "flags": 16,
+      "objectFlags": 0,
+      "isTupleType": false,
+      "value": null,
+      "isThisType": false,
+      "intrinsicName": "void"
+    }
+  },
+  {
+    "method": "getDocumentationComment",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Button.tsx",
+          "path": "<root>/button.tsx",
+          "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 7
+      }
+    },
+    "result": ""
+  },
+  {
+    "method": "getAliasSymbolOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 99
+    },
+    "result": null
+  },
+  {
+    "method": "getTypesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 99
+    },
+    "result": [
+      {
+        "id": 10,
+        "flags": 4,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "undefined"
+      },
+      {
+        "id": 98,
+        "flags": 1048576,
+        "objectFlags": 536870916,
+        "isTupleType": false,
+        "value": null,
+        "target": 65,
+        "isThisType": false,
+        "symbol": {
+          "id": 31
+        }
+      }
+    ]
+  },
+  {
+    "method": "isArrayType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 98
+    },
+    "result": true
+  },
+  {
+    "method": "getTypeArguments",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 98
+    },
+    "result": [
+      {
+        "id": 14,
+        "flags": 32,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "string"
+      }
+    ]
+  },
+  {
+    "method": "getDocumentationComment",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Button.tsx",
+          "path": "<root>/button.tsx",
+          "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 8
+      }
+    },
+    "result": ""
+  },
+  {
+    "method": "getTypeArguments",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 105
+    },
+    "result": [
+      {
+        "id": 14,
+        "flags": 32,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "string"
+      },
+      {
+        "id": 15,
+        "flags": 64,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "number"
+      }
+    ]
+  },
+  {
+    "method": "getDocumentationComment",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Button.tsx",
+          "path": "<root>/button.tsx",
+          "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 9
+      }
+    },
+    "result": ""
+  },
+  {
+    "method": "typeToString",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 106
+    },
+    "result": "{ a: number; b?: string | undefined; }"
+  },
+  {
+    "method": "getPropertiesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 106
+    },
+    "result": [
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 21
+        },
+        "name": "a",
+        "flags": 4,
+        "checkFlags": 0,
+        "declarations": [
+          "53.173.<root>/button.tsx"
+        ],
+        "valueDeclaration": "53.173.<root>/button.tsx",
+        "parent": {
+          "id": 19,
+          "file": "77"
+        }
+      },
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 20
+        },
+        "name": "b",
+        "flags": 16777220,
+        "checkFlags": 0,
+        "declarations": [
+          "56.173.<root>/button.tsx"
+        ],
+        "valueDeclaration": "56.173.<root>/button.tsx",
+        "parent": {
+          "id": 19,
+          "file": "77"
+        }
+      }
+    ]
+  },
+  {
+    "method": "getTypesOfSymbols",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbols": [
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 21
+        },
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 20
+        }
+      ]
+    },
+    "result": [
+      {
+        "id": 15,
+        "flags": 64,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "number"
+      },
+      {
+        "id": 107,
+        "flags": 134217728,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false
+      }
+    ]
+  },
+  {
+    "method": "getAliasSymbolOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 107
+    },
+    "result": null
+  },
+  {
+    "method": "getTypesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 107
+    },
+    "result": [
+      {
+        "id": 10,
+        "flags": 4,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "undefined"
+      },
+      {
+        "id": 14,
+        "flags": 32,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "string"
+      }
+    ]
+  },
+  {
+    "method": "getDocumentationComment",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Button.tsx",
+          "path": "<root>/button.tsx",
+          "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 10
+      }
+    },
+    "result": ""
+  },
+  {
+    "method": "getTypeOfSymbol",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Button.tsx",
+          "path": "<root>/button.tsx",
+          "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 2
+      }
+    },
+    "result": {
+      "id": 108,
+      "flags": 1048576,
+      "objectFlags": 16,
+      "isTupleType": false,
+      "value": null,
+      "isThisType": false,
+      "symbol": {
+        "id": 2,
+        "file": "77"
+      }
+    }
+  },
+  {
+    "method": "getSignaturesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 108,
+      "kind": 0
+    },
+    "result": [
+      {
+        "id": 7,
+        "flags": 0,
+        "declaration": "80.264.<root>/button.tsx",
+        "parameters": [
+          {
+            "id": 25,
+            "file": "77"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "method": "getParametersOfSignature",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 7
+    },
+    "result": [
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 25
+        },
+        "name": "props",
+        "flags": 1,
+        "checkFlags": 0,
+        "declarations": [
+          "86.171.<root>/button.tsx"
+        ],
+        "valueDeclaration": "86.171.<root>/button.tsx"
+      }
+    ]
+  },
+  {
+    "method": "getTypeOfSymbol",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Button.tsx",
+          "path": "<root>/button.tsx",
+          "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 25
+      }
+    },
+    "result": {
+      "id": 109,
+      "flags": 1048576,
+      "objectFlags": 16,
+      "isTupleType": false,
+      "value": null,
+      "isThisType": false,
+      "symbol": {
+        "id": 26,
+        "file": "77"
+      }
+    }
+  },
+  {
+    "method": "getPropertiesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 109
+    },
+    "result": [
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 27
+        },
+        "name": "a",
+        "flags": 16777220,
+        "checkFlags": 0,
+        "declarations": [
+          "90.173.<root>/button.tsx"
+        ],
+        "valueDeclaration": "90.173.<root>/button.tsx",
+        "parent": {
+          "id": 26,
+          "file": "77"
+        }
+      }
+    ]
+  },
+  {
+    "method": "getTypesOfSymbols",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbols": [
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Button.tsx",
+            "path": "<root>/button.tsx",
+            "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 27
+        }
+      ]
+    },
+    "result": [
+      {
+        "id": 110,
+        "flags": 134217728,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false
+      }
+    ]
+  },
+  {
+    "method": "getAliasSymbolOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 110
+    },
+    "result": null
+  },
+  {
+    "method": "getTypesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 110
+    },
+    "result": [
+      {
+        "id": 10,
+        "flags": 4,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "undefined"
+      },
+      {
+        "id": 15,
+        "flags": 64,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "number"
+      }
+    ]
+  },
+  {
+    "method": "getDocumentationComment",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Button.tsx",
+          "path": "<root>/button.tsx",
+          "contentHash": "dcb2370a94cfbf427ed9f0c4a66107e1",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 27
+      }
+    },
+    "result": ""
+  }
+]

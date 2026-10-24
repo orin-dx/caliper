@@ -46,6 +46,14 @@ export declare function extractFileIncremental(filePath: string, sessionId: numb
 export declare function initializeSession(sessionId: number, options: JsExtractOptions): Promise<string>
 
 /**
+ * Like [`initialize_session`], but returns only what a host needs to find a component and judge whether its props are
+ * complete: `{ components: { key: { filePath, displayName } }, diagnostics }`. The props stay in the session for
+ * [`session_docgen_info`]. A host that documents one component at a time skips serializing and parsing every prop of
+ * every component, which is tens of megabytes when dependencies are loaded.
+ */
+export declare function initializeSessionIndex(sessionId: number, options: JsExtractOptions): Promise<string>
+
+/**
  * Whether a change to `file_path` rebuilds the session: a tsconfig, jsconfig, `package.json` or lockfile in or above
  * a source directory, outside `node_modules`. False for an unknown session.
  */

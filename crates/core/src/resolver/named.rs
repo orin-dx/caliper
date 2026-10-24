@@ -12,7 +12,7 @@ use super::collected::resolve_collected_type;
 use super::import::{lookup_ambient_global, AmbientGlobalLookup};
 use super::precedence::Declared;
 use super::react::react_type_to_prop_type;
-use super::{ResolutionContext, MAX_DEPTH};
+use super::{ResolutionContext, MAX_DEPTH, MAX_NAMED_NESTING};
 
 /// Cycle-detecting entry point — see `ResolveState::named_in_progress`'s doc
 /// comment for why this can't reuse chain.rs's permanent `visited` set or
@@ -68,7 +68,10 @@ fn resolve_named_uncycled(
     state: &mut ResolveState,
     depth: u8,
 ) -> PropType {
-    if depth > MAX_DEPTH {
+    // `depth` counts how deeply one type expression nests; an alias body starts again at 0, since the alias is a
+    // declaration of its own (csstype's `Property.X` is four aliases deep under a prop already 15 levels down). What
+    // bounds the hops between declarations, and the expansion of a generic that never repeats, is the names in progress.
+    if depth > MAX_DEPTH || state.named_in_progress.len() > MAX_NAMED_NESTING {
         let diag = super::max_depth_diagnostic(&format!("named type '{}'", name), consuming_file);
         return OpaqueDetail::give_up(state, name.to_string(), OpaqueReason::DepthExceeded, diag);
     }
@@ -113,13 +116,13 @@ fn resolve_named_uncycled(
             let expanded = match params {
                 Some(params) if !args.is_empty() || defaults.is_some() => {
                     state.add_type_params(params.iter());
-                    expand_alias(&alias, params, defaults, args, consuming_file, &canonical_file, ctx, state, depth)
+                    expand_alias(&alias, params, defaults, args, consuming_file, &canonical_file, ctx, state, 0)
                 }
                 Some(params) => {
                     state.add_type_params(params.iter());
                     resolve_type_alias_type(&alias, ctx, state, depth)
                 }
-                None => resolve_type_alias_type(&alias, ctx, state, depth),
+                None => resolve_type_alias_type(&alias, ctx, state, 0),
             };
             let unevaluated = state.named_unevaluated || expanded.holds_unevaluated_type();
             state.named_unevaluated = outer_named_unevaluated || unevaluated;
