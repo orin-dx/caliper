@@ -657,13 +657,7 @@ expression: value
         "tabIndex": {
           "name": "tabIndex",
           "type": {
-            "kind": "named",
-            "name": "NonNullable",
-            "args": [
-              {
-                "kind": "number"
-              }
-            ]
+            "kind": "number"
           },
           "required": false,
           "defaultValue": {

@@ -107,15 +107,8 @@ fn resolve_named_uncycled(
             };
             let unevaluated = state.named_unevaluated || expanded.holds_unevaluated_type();
             state.named_unevaluated = outer_named_unevaluated || unevaluated;
-            // An argument the evaluator can read (`Variant["size"]`) shows as what it reads, as TypeScript prints it.
-            let args: Vec<CollectedType> = args
-                .iter()
-                .map(|arg| match arg {
-                    CollectedType::IndexedAccess { .. } => super::evaluate::reduce(arg, consuming_file, ctx, depth)
-                        .map_or_else(|| arg.clone(), |(reduced, _)| reduced),
-                    _ => arg.clone(),
-                })
-                .collect();
+            let args: Vec<CollectedType> =
+                args.iter().map(|arg| displayed_arg(arg, consuming_file, ctx, state, depth)).collect();
             return alias_display(name, &args, expanded, unevaluated);
         }
         Some(super::precedence::SourceOrKnownMatch::Interface(_)) => {
@@ -162,6 +155,9 @@ fn resolve_named_uncycled(
     // attribute types all appear as prop types in real-world .d.ts files but
     // cannot be expanded without a type-checker. Return Named silently.
     let bare = name.strip_prefix("React.").unwrap_or(name.as_str());
+    if let Some(filtered) = super::primitives::evaluate_filter(bare, &resolved_args) {
+        return filtered;
+    }
     if super::is_ts_utility_type(bare)
         || matches!(
             bare,
@@ -241,6 +237,50 @@ fn resolve_named_uncycled(
 /// evaluate, or an alias named for that reason — shows as its name with its arguments as written
 /// (`StyleProp<MantineSpacing>`), the way TypeScript prints it, rather than as that type's source text. An object
 /// expansion stays: its fields still read, and only the unevaluated field shows source.
+/// An alias argument as TypeScript prints it: a member read (`Variant["size"]`) shows as the member's type and a finite
+/// template literal as its strings, union members included; anything else as written.
+fn displayed_arg(
+    arg: &CollectedType,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> CollectedType {
+    if depth > super::MAX_DEPTH {
+        return arg.clone();
+    }
+    match arg {
+        // What the member read reads may itself read a member (csstype's `Fallback<T>` gives `T[P] | …`).
+        CollectedType::IndexedAccess { .. } => match super::evaluate::reduce(arg, file, ctx, 0) {
+            Some((reduced, reduced_file)) => displayed_arg(&reduced, &reduced_file, ctx, state, depth + 1),
+            None => arg.clone(),
+        },
+        CollectedType::Named { name, args } if !args.is_empty() => CollectedType::Named {
+            name: name.clone(),
+            args: args.iter().map(|a| displayed_arg(a, file, ctx, state, depth + 1)).collect(),
+        },
+        CollectedType::Array(inner) => {
+            CollectedType::Array(Box::new(displayed_arg(inner, file, ctx, state, depth + 1)))
+        }
+        CollectedType::TemplateLiteral(parts) => {
+            match super::template::try_expand_template_literal(parts, file, ctx, state, depth + 1) {
+                Some(values) => CollectedType::Union(
+                    values.into_iter().map(|value| CollectedType::StringLiteral(value.into())).collect(),
+                ),
+                None => arg.clone(),
+            }
+        }
+        CollectedType::Union(members) => {
+            CollectedType::Union(members.iter().map(|m| displayed_arg(m, file, ctx, state, depth + 1)).collect())
+        }
+        CollectedType::AtFile { file, inner } => CollectedType::AtFile {
+            file: file.clone(),
+            inner: Box::new(displayed_arg(inner, file, ctx, state, depth + 1)),
+        },
+        _ => arg.clone(),
+    }
+}
+
 fn alias_display(name: &CompactString, args: &[CollectedType], expanded: PropType, unevaluated: bool) -> PropType {
     if matches!(expanded, PropType::Object(_)) || !unevaluated {
         return expanded;

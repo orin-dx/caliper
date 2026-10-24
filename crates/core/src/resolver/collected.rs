@@ -100,6 +100,10 @@ pub fn resolve_collected_type(
 
         // ── Opaque (needs type checker) ───────────────────────────────────────
         CollectedType::Conditional { .. } => {
+            // The branch a decidable conditional takes (`resolver/evaluate.rs`).
+            if let Some((branch, branch_file)) = super::evaluate::reduce(ct, consuming_file, ctx, 0) {
+                return resolve_collected_type(&branch, &branch_file, ctx, state, depth + 1);
+            }
             let diag = opaque_diagnostic("a conditional type", ct, consuming_file);
             OpaqueDetail::give_up(state, ct.to_raw_string(), OpaqueReason::ConditionalType, diag)
         }
