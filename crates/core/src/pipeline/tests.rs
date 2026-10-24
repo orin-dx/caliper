@@ -607,6 +607,35 @@ fn full_mode_does_not_emit_components_declared_in_merged_react_types() {
     assert_eq!(names, vec!["Button"]);
 }
 
+#[test]
+fn full_mode_binds_the_element_in_inherited_react_event_handlers() {
+    // `SVGProps<SVGSVGElement>` reaches `DOMAttributes<T>` through `SVGAttributes<T>`; its handlers take the element.
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "Icon.tsx",
+        r#"
+import * as React from "react";
+interface IconProps extends React.SVGProps<SVGSVGElement> { label?: string }
+export function Icon(props: IconProps) { return null; }
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> { tone?: string }
+export function Button(props: ButtonProps) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        html_attributes: HtmlAttributeMode::Full,
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let handler = |component: &str, prop: &str| output.components[component].props[prop].prop_type.raw_string();
+    assert_eq!(handler("Icon", "onClick"), "(event: MouseEvent<SVGSVGElement>) => void");
+    assert_eq!(handler("Icon", "onCopy"), "(event: ClipboardEvent<SVGSVGElement>) => void");
+    assert_eq!(handler("Button", "onClick"), "(event: MouseEvent<HTMLButtonElement>) => void");
+}
+
 // ── test_html_attribute_mode_full_resolves_real_button_attrs_end_to_end ───
 
 #[test]
