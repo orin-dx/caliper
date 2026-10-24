@@ -1,29 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { DocgenSession } from '../../src/session.js'
 import { FakeBinding, entry, warning } from './fake-binding.js'
 
-let dir: string
-let src: string
-
-beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'caliper-sb-session-'))
-  src = join(dir, 'src')
-  mkdirSync(join(src, 'node_modules'), { recursive: true })
-  writeFileSync(join(src, 'Button.tsx'), 'export function Button() {}')
-  writeFileSync(join(src, 'node_modules', 'Dep.tsx'), 'export function Dep() {}')
-})
-
-afterEach(() => rmSync(dir, { recursive: true, force: true }))
-
-/** Moves a file's mtime forward, so a rewrite within the same millisecond still counts as a change. */
-function touch(path: string, content: string, secondsAhead = 10): void {
-  writeFileSync(path, content)
-  const later = new Date(Date.now() + secondsAhead * 1000)
-  utimesSync(path, later, later)
-}
+const src = join('/project', 'src')
 
 describe('DocgenSession.find', () => {
   function sessionWith(components: Record<string, ReturnType<typeof entry>>): Promise<DocgenSession> {
@@ -67,53 +47,63 @@ describe('DocgenSession.degraded', () => {
     expect(session.degraded('Button')).toBe(true)
     expect(session.degraded('Card')).toBe(false)
 
-    binding.updates.set(join(src, 'Button.tsx'), { removedDiagnostics: [warning(['Button'])] })
-    touch(join(src, 'Button.tsx'), 'export function Button(props: { a: string }) {}')
+    binding.updates.push({ removedDiagnostics: [warning(['Button'])] })
     await session.fresh()
     expect(session.degraded('Button')).toBe(false)
+  })
+
+  it('lists each message once, however many diagnostics carry it', async () => {
+    const binding = new FakeBinding({ diagnostics: [warning(['Button']), { ...warning(['Button']), line: 3 }] })
+    const session = new DocgenSession({ srcDirs: [src] }, binding)
+    await session.fresh()
+    expect(session.degradedBy('Button')).toEqual(['Cannot resolve type'])
   })
 })
 
 describe('DocgenSession.fresh', () => {
-  it('initializes once and applies only the source files saved since the last look', async () => {
+  it('initializes once and looks at the files on every call', async () => {
     const binding = new FakeBinding({ components: { Button: entry('Button', join(src, 'Button.tsx')) } })
     const session = new DocgenSession({ srcDirs: [src] }, binding)
     await session.fresh()
     await session.fresh()
     expect(binding.initializations).toBe(1)
-    expect(binding.changed).toEqual([])
-
-    touch(join(src, 'Button.tsx'), 'export function Button(props: { a: string }) {}')
-    writeFileSync(join(src, 'Card.tsx'), 'export function Card() {}')
-    writeFileSync(join(src, 'notes.md'), '# not source')
-    touch(join(src, 'node_modules', 'Dep.tsx'), 'export function Dep(props: { a: string }) {}')
-    await session.fresh()
-    expect(binding.changed.toSorted()).toEqual([join(src, 'Button.tsx'), join(src, 'Card.tsx')])
+    expect(binding.looks).toBe(2)
   })
 
   it('applies a deleted file, and the update removes its components', async () => {
     const binding = new FakeBinding({ components: { Button: entry('Button', join(src, 'Button.tsx')) } })
     const session = new DocgenSession({ srcDirs: [src] }, binding)
     await session.fresh()
-    binding.updates.set(join(src, 'Button.tsx'), { removedKeys: ['Button'] })
-    rmSync(join(src, 'Button.tsx'))
+    binding.updates.push({ removedKeys: ['Button'] })
     await session.fresh()
-    expect(binding.changed).toEqual([join(src, 'Button.tsx')])
     expect(session.keyOf(join(src, 'Button.tsx'), 'Button')).toBeUndefined()
   })
 
-  it('publishes a renamed component under its new key', async () => {
+  it('publishes a renamed component under its new key, and finds it by file and name afterwards', async () => {
     const binding = new FakeBinding({ components: { Button: entry('Button', join(src, 'Button.tsx')) } })
     const session = new DocgenSession({ srcDirs: [src] }, binding)
     await session.fresh()
-    binding.updates.set(join(src, 'Button.tsx'), {
+    expect(session.keyOf(join(src, 'Button.tsx'), 'Button')).toBe('Button')
+    binding.updates.push({
       removedKeys: ['Button'],
       updatedKeys: ['PrimaryButton'],
       updatedComponents: [entry('PrimaryButton', join(src, 'Button.tsx'))],
     })
-    touch(join(src, 'Button.tsx'), 'export function PrimaryButton() {}')
     await session.fresh()
     expect(session.keyOf(join(src, 'Button.tsx'), 'PrimaryButton')).toBe('PrimaryButton')
+    expect(session.keyOf(join(src, 'Button.tsx'), 'Button')).toBeUndefined()
+  })
+
+  it('ignores an update that is not newer than the one applied', async () => {
+    const binding = new FakeBinding({ components: { Button: entry('Button', join(src, 'Button.tsx')) } })
+    const session = new DocgenSession({ srcDirs: [src] }, binding)
+    await session.fresh()
+    binding.updates.push({ removedKeys: ['Button'] })
+    await session.fresh()
+    const stale = { revision: 2, updatedKeys: ['Button'], updatedComponents: [entry('Button', join(src, 'Button.tsx'))] }
+    binding.ensureFresh = async () =>
+      JSON.stringify({ ...stale, removedKeys: [], removedDiagnostics: [], diagnostics: [] })
+    await session.fresh()
     expect(session.keyOf(join(src, 'Button.tsx'), 'Button')).toBeUndefined()
   })
 
@@ -121,33 +111,17 @@ describe('DocgenSession.fresh', () => {
     const binding = new FakeBinding({ components: {} })
     const session = new DocgenSession({ srcDirs: [src] }, binding)
     await session.fresh()
+    const before = binding.looks
 
     let later: Promise<void>[] = []
-    binding.duringExtraction = () => {
-      // Saved while the first look is applying its changes: only a later look can see it.
-      touch(join(src, 'Button.tsx'), 'export function Button(props: { b: string }) {}', 20)
+    // Saved while the first look is under way: only a later look can see it.
+    binding.duringLook = () => {
       later = [session.fresh(), session.fresh()]
     }
-    touch(join(src, 'Button.tsx'), 'export function Button(props: { a: string }) {}')
     await session.fresh()
     await Promise.all(later)
     expect(later).toHaveLength(2)
-    expect(binding.changed).toEqual([join(src, 'Button.tsx'), join(src, 'Button.tsx')])
-  })
-})
-
-describe('DocgenSession.fresh and resolution config', () => {
-  it('applies a changed tsconfig, package.json or lockfile like a source file', async () => {
-    const config = join(dir, 'tsconfig.json')
-    writeFileSync(config, '{}')
-    const fake = new FakeBinding({})
-    fake.configFiles = [config]
-    const session = new DocgenSession({ srcDirs: [src] }, fake)
-    await session.fresh()
-    expect(fake.changed).toEqual([])
-    touch(config, '{"compilerOptions":{}}')
-    await session.fresh()
-    expect(fake.changed).toEqual([config])
+    expect(binding.looks - before).toBe(2)
   })
 
   it('passes the extraction options to the binding', async () => {

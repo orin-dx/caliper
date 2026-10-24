@@ -274,6 +274,51 @@ pub async fn initialize_session(session_id: u32, options: JsExtractOptions) -> n
     .map_err(|e| napi::Error::from_reason(e.to_string()))?
 }
 
+/// Like [`initialize_session`], but returns only what a host needs to find a component and judge whether its props are
+/// complete: `{ components: { key: { filePath, displayName } }, diagnostics }`. The props stay in the session for
+/// [`session_docgen_info`]. A host that documents one component at a time skips serializing and parsing every prop of
+/// every component, which is tens of megabytes when dependencies are loaded.
+#[napi]
+pub async fn initialize_session_index(session_id: u32, options: JsExtractOptions) -> napi::Result<String> {
+    tokio::task::spawn_blocking(move || {
+        match caliper_docgen_core::panic_guard::contain_panic("initialize_session_index", move || {
+            let session = match SESSIONS.get(&session_id) {
+                Some(s) => s.clone(),
+                None => {
+                    let pipeline_options = PipelineOptions::try_from(options).map_err(napi::Error::from_reason)?;
+                    let s = Arc::new(WatchSession::new(pipeline_options));
+                    SESSIONS.insert(session_id, s.clone());
+                    s
+                }
+            };
+
+            drop(session.initialize());
+            let output = session
+                .current_output()
+                .ok_or_else(|| napi::Error::from_reason("the session has no output after initialize".to_owned()))?;
+            let components: serde_json::Map<String, serde_json::Value> = output
+                .components
+                .iter()
+                .map(|(key, entry)| {
+                    let location = serde_json::json!({
+                        "filePath": entry.file_path.as_str(),
+                        "displayName": entry.display_name,
+                    });
+                    (key.clone(), location)
+                })
+                .collect();
+            let diagnostics = serde_json::to_value(&output.diagnostics).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+            serde_json::to_string(&serde_json::json!({ "components": components, "diagnostics": diagnostics }))
+                .map_err(|e| napi::Error::from_reason(e.to_string()))
+        }) {
+            Ok(result) => result,
+            Err(diag) => Err(napi::Error::from_reason(diag.to_string())),
+        }
+    })
+    .await
+    .map_err(|e| napi::Error::from_reason(e.to_string()))?
+}
+
 /// The session's components with these keys as react-docgen-typescript documents them (`__docgenInfo`, which
 /// Storybook converts to argTypes), as a JSON object keyed by component key. A key the session doesn't have is left
 /// out; so is every key before the session is initialized.

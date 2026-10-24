@@ -77,7 +77,10 @@ export function createDocgenProvider(
     logger.warn(`[caliper-docgen] ${key}: ${reason}; Storybook's own docgen answers instead`)
   }
 
-  /** The session key and file of the component `name` (default: `meta.component`) names, or why there is none. */
+  /**
+   * The session key and file of the component `name` (default: `meta.component`) names, or why there is none. The
+   * caller has brought the session up to date for this request.
+   */
   async function component(csf: CsfFile, storyPath: string, name?: string): Promise<{ key: string; path: string }> {
     const target = name
       ? ({ _metaAnnotations: { component: expressionFor(name) }, _file: csf._file } as unknown as CsfFile)
@@ -87,7 +90,6 @@ export function createDocgenProvider(
     const { path, exportName } = resolution.component
     if (!path) throw new Error(`no file for the import of ${exportName}`)
     const session = await getSession()
-    await session.fresh()
     const key = session.keyOf(path, exportName)
     if (!key) throw new Error(`caliper-docgen found no component ${exportName} in ${path}`)
     if (fallback === 'degraded') {
@@ -140,6 +142,8 @@ export function createDocgenProvider(
     const storyPath = resolve(cwd, importPath)
     const code = await readFile(storyPath, 'utf8')
     const csf = loadCsf(code, { fileName: storyPath, makeTitle: () => entry.title }).parse()
+    // One look at the files for the story and its subcomponents: they are all answered from the same moment.
+    await (await getSession()).fresh()
     const { key } = await component(csf, storyPath)
     const doc = await docgen(key)
     const { description, summary, jsDocTags } = extractComponentDescription(

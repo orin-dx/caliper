@@ -132,8 +132,8 @@ describe('createDocgenProvider', () => {
   it('reads dependencies and lists inherited props unless told not to, and passes the HTML attribute choice on', async () => {
     const seen: unknown[] = []
     const spy = (fake: FakeBinding) => {
-      const init = fake.initializeSession
-      fake.initializeSession = async (id: number, options: unknown) => {
+      const init = fake.initializeSessionIndex
+      fake.initializeSessionIndex = async (id: number, options: unknown) => {
         seen.push(options)
         return init(id, options as never)
       }

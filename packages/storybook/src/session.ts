@@ -1,17 +1,11 @@
-import { readdir, stat } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import type * as Napi from 'caliper-docgen-napi'
-import type { Diagnostic, ExtractionOutput, IncrementalUpdate, RdtComponentDoc } from 'caliper-docgen-napi'
+import type { Diagnostic, IncrementalUpdate, RdtComponentDoc } from 'caliper-docgen-napi'
 
 /** The binding calls the session makes, so tests can stand in for the native module. */
 export type SessionBinding = Pick<
   typeof Napi,
-  | 'createSession'
-  | 'initializeSession'
-  | 'extractFileIncremental'
-  | 'sessionDocgenInfo'
-  | 'closeSession'
-  | 'resolutionConfigFiles'
+  'createSession' | 'initializeSessionIndex' | 'ensureFresh' | 'sessionDocgenInfo' | 'closeSession'
 >
 
 export interface SessionOptions {
@@ -30,37 +24,17 @@ interface ComponentRef {
   displayName: string
 }
 
-const SOURCE_FILE = /\.(ts|tsx)$/
-
-/** A file's identity for change detection: a save changes its mtime or its size. */
-async function signature(path: string): Promise<string | undefined> {
-  try {
-    const stats = await stat(path)
-    return `${stats.mtimeMs}:${stats.size}`
-  } catch {
-    return undefined
-  }
+/** What `keyOf` and `degradedBy` read, derived from the components and diagnostics. */
+interface Lookups {
+  byFile: Map<string, string[]>
+  byName: Map<string, string[]>
+  degradedBy: Map<string, Set<string>>
 }
 
-/** Every `.ts`/`.tsx` file under `dir` and its signature, skipping `node_modules` and dot-directories. */
-async function scan(dir: string, into: Map<string, string>): Promise<void> {
-  let entries
-  try {
-    entries = await readdir(dir, { withFileTypes: true })
-  } catch {
-    return
-  }
-  await Promise.all(
-    entries.map(async (entry) => {
-      const path = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        if (entry.name !== 'node_modules' && !entry.name.startsWith('.')) await scan(path, into)
-      } else if (SOURCE_FILE.test(entry.name)) {
-        const sig = await signature(path)
-        if (sig) into.set(path, sig)
-      }
-    }),
-  )
+function push(map: Map<string, string[]>, at: string, key: string): void {
+  const keys = map.get(at)
+  if (keys) keys.push(key)
+  else map.set(at, [key])
 }
 
 function diagnosticId(diagnostic: Diagnostic): string {
@@ -69,13 +43,15 @@ function diagnosticId(diagnostic: Diagnostic): string {
 
 /**
  * One watch session over the source directories, created on first use. Storybook gives no file events to a docgen
- * worker, so `fresh()` compares every source file's mtime and size with the last look and applies the changed ones
- * before a request is answered: an answer never trails a saved edit.
+ * worker, so `fresh()` has the native session compare every source file's mtime and size with the last look and apply
+ * the changed ones before a request is answered: an answer never trails a saved edit. The session holds the props;
+ * this class holds only where each component lives and which ones a diagnostic says are incomplete.
  */
 export class DocgenSession {
   private readonly components = new Map<string, ComponentRef>()
   private readonly diagnostics = new Map<string, Diagnostic>()
-  private files = new Map<string, string>()
+  /** Rebuilt from `components` and `diagnostics` on the first lookup after either changes. */
+  private index: Lookups | undefined
   private sessionId: number | undefined
   private ready: Promise<void> | undefined
   private checking: Promise<void> | undefined
@@ -100,34 +76,23 @@ export class DocgenSession {
     }
   }
 
-  private async scanAll(): Promise<Map<string, string>> {
-    const files = new Map<string, string>()
-    await Promise.all(this.options.srcDirs.map((dir) => scan(dir, files)))
-    // A tsconfig, `package.json` or lockfile changes how every import resolves; a change to one rebuilds the session.
-    if (this.sessionId !== undefined) {
-      await Promise.all(
-        this.napi.resolutionConfigFiles(this.sessionId).map(async (path) => {
-          const sig = await signature(path)
-          if (sig) files.set(path, sig)
-        }),
-      )
-    }
-    return files
-  }
-
   private async initialize(): Promise<void> {
     this.sessionId = this.napi.createSession(this.napiOptions())
-    this.files = await this.scanAll()
-    const output = JSON.parse(await this.napi.initializeSession(this.sessionId, this.napiOptions())) as ExtractionOutput
+    const output = JSON.parse(await this.napi.initializeSessionIndex(this.sessionId, this.napiOptions())) as {
+      components: Record<string, ComponentRef>
+      diagnostics: Diagnostic[]
+    }
     for (const [key, entry] of Object.entries(output.components)) {
       this.components.set(key, { filePath: resolve(entry.filePath), displayName: entry.displayName })
     }
     for (const diagnostic of output.diagnostics) this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
+    this.index = undefined
   }
 
   private apply(update: IncrementalUpdate): void {
     if (update.revision <= this.latestRevision) return
     this.latestRevision = update.revision
+    this.index = undefined
     for (const key of update.removedKeys) this.components.delete(key)
     update.updatedKeys.forEach((key, i) => {
       const entry = update.updatedComponents[i]
@@ -138,16 +103,7 @@ export class DocgenSession {
   }
 
   private async check(): Promise<void> {
-    const now = await this.scanAll()
-    const changed = [...now].filter(([path, sig]) => this.files.get(path) !== sig).map(([path]) => path)
-    const removed = [...this.files.keys()].filter((path) => !now.has(path))
-    this.files = now
-    for (const file of [...changed, ...removed]) {
-      // One at a time: each update is a delta from the revision before it.
-      // oxlint-disable-next-line no-await-in-loop
-      const json = await this.napi.extractFileIncremental(file, this.sessionId!, this.napiOptions())
-      this.apply(JSON.parse(json) as IncrementalUpdate)
-    }
+    this.apply(JSON.parse(await this.napi.ensureFresh(this.sessionId!)) as IncrementalUpdate)
   }
 
   /**
@@ -184,21 +140,41 @@ export class DocgenSession {
     }
   }
 
+  private lookups(): Lookups {
+    if (this.index) return this.index
+    const byFile = new Map<string, string[]>()
+    const byName = new Map<string, string[]>()
+    for (const [key, ref] of this.components) {
+      push(byFile, ref.filePath, key)
+      push(byName, ref.displayName, key)
+    }
+    const degradedBy = new Map<string, Set<string>>()
+    for (const diagnostic of this.diagnostics.values()) {
+      if (diagnostic.severity === 'info') continue
+      for (const key of diagnostic.affects ?? []) {
+        const messages = degradedBy.get(key) ?? new Set<string>()
+        messages.add(diagnostic.message)
+        degradedBy.set(key, messages)
+      }
+    }
+    return (this.index = { byFile, byName, degradedBy })
+  }
+
   /**
    * The key of the component `exportName` names in `path`. A file's only component answers for its default export;
    * a path with no components (a barrel that re-exports them) falls back to the one component with that name.
    */
   keyOf(path: string, exportName: string): string | undefined {
-    const file = resolve(path)
-    const inFile = [...this.components].filter(([, ref]) => ref.filePath === file)
-    if (inFile.length > 0) {
-      const named = inFile.find(([, ref]) => ref.displayName === exportName)
-      if (named) return named[0]
-      return inFile.length === 1 && exportName === 'default' ? inFile[0]![0] : undefined
+    const { byFile, byName } = this.lookups()
+    const inFile = byFile.get(resolve(path))
+    if (inFile) {
+      const named = inFile.find((key) => this.components.get(key)?.displayName === exportName)
+      if (named) return named
+      return inFile.length === 1 && exportName === 'default' ? inFile[0] : undefined
     }
     if (exportName === 'default') return undefined
-    const byName = [...this.components].filter(([, ref]) => ref.displayName === exportName)
-    return byName.length === 1 ? byName[0]![0] : undefined
+    const sameName = byName.get(exportName)
+    return sameName?.length === 1 ? sameName[0] : undefined
   }
 
   /** Whether a warning or error says `key`'s props may be incomplete. */
@@ -208,11 +184,7 @@ export class DocgenSession {
 
   /** The messages of the warnings and errors that say `key`'s props may be incomplete. */
   degradedBy(key: string): string[] {
-    const messages = new Set<string>()
-    for (const diagnostic of this.diagnostics.values()) {
-      if (diagnostic.severity !== 'info' && diagnostic.affects?.includes(key)) messages.add(diagnostic.message)
-    }
-    return [...messages]
+    return [...(this.lookups().degradedBy.get(key) ?? [])]
   }
 
   docgenInfo(key: string): RdtComponentDoc | undefined {
