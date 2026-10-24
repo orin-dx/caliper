@@ -205,17 +205,17 @@ pub(super) fn resolve_base_as_chain(
         }
         // `SlotRecipeProps<"avatar">`'s branch, `Recipes["avatar"]["__type"]`: evaluated when the operands are known.
         CollectedType::Conditional { .. } | CollectedType::IndexedAccess { .. }
-            if super::evaluate::reduce(base, file_path, ctx, depth).is_some() =>
+            if super::evaluate::reduce(base, file_path, ctx, 0).is_some() =>
         {
-            let Some((reduced, reduced_file)) = super::evaluate::reduce(base, file_path, ctx, depth) else {
+            let Some((reduced, reduced_file)) = super::evaluate::reduce(base, file_path, ctx, 0) else {
                 return ResolvedChain::empty();
             };
             resolve_base_as_chain(&reduced, &reduced_file, mapping, ctx, state, depth + 1)
         }
         CollectedType::Mapped { param, key_type, value_type, optional }
-            if super::evaluate::mapped_keys(key_type, file_path, ctx, depth).is_some() =>
+            if super::evaluate::mapped_keys(key_type, file_path, ctx, 0).is_some() =>
         {
-            let keys = super::evaluate::mapped_keys(key_type, file_path, ctx, depth).unwrap_or_default();
+            let keys = super::evaluate::mapped_keys(key_type, file_path, ctx, 0).unwrap_or_default();
             resolve_mapped_chain(param, &keys, value_type, *optional, file_path, ctx, state, depth)
         }
         // None of these can ever provide a props chain (a props type must be

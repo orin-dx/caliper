@@ -3,6 +3,10 @@
 //! an indexed access (`Recipes["button"]["__type"]`, generic interface members included), and the keys a mapped type
 //! ranges over (`{ [K in keyof Variant]?: … }`). Anything that needs a checker (an unknown operand, a generic left
 //! unbound, an inferred type) evaluates to `None`, and the caller keeps its existing handling.
+//!
+//! Its `depth` counts only its own steps: it reads declarations and never re-enters the resolver, so callers start it
+//! at 0 instead of passing the resolver's depth, which a deep chain (csstype's `Fallback<…>` under Chakra's style
+//! props) would exhaust first.
 
 use camino::{Utf8Path, Utf8PathBuf};
 use compact_str::CompactString;
@@ -36,7 +40,8 @@ pub(super) fn reduce(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContex
             let branch = if extends(check, extends_type, file, ctx, depth)? { true_type } else { false_type };
             Some((branch.as_ref().clone(), file.to_owned()))
         }
-        CollectedType::IndexedAccess { obj, key } => member(obj, &literal(key)?, file, ctx, depth + 1),
+        // Same depth: `member` counts its own steps, and at 0 it answers from the run's cache.
+        CollectedType::IndexedAccess { obj, key } => member(obj, &literal(key)?, file, ctx, depth),
         _ => None,
     }
 }
@@ -60,7 +65,9 @@ pub(super) fn mapped_keys(
     }
 }
 
-/// Whether the literal `check` is assignable to `extends_type`; `None` when either side isn't known.
+/// Whether `check` is assignable to `extends_type`; `None` when either side isn't known. `check` is a literal, or a
+/// member read whose type is a set of literals (`Factory["variant"] extends string`): a member read is not a naked
+/// type parameter, so the conditional doesn't distribute and the whole set must be assignable.
 fn extends(
     check: &CollectedType,
     extends_type: &CollectedType,
@@ -68,14 +75,82 @@ fn extends(
     ctx: &ResolutionContext,
     depth: u8,
 ) -> Option<bool> {
-    let value = literal(check)?;
+    let values = check_values(check, file, ctx, depth + 1)?;
+    let literal_value = |value: &CheckValue| match value {
+        CheckValue::Literal(s) => Some(s.clone()),
+        CheckValue::String | CheckValue::Undefined => None,
+    };
     match unwrap_at_file(extends_type) {
         (CollectedType::KeyOf(target), target_file) => {
             let keys = keys_of(target, target_file.unwrap_or(file), ctx, depth + 1)?;
-            Some(keys.iter().any(|key| key.name == value))
+            Some(values.iter().all(|value| literal_value(value).is_some_and(|v| keys.iter().any(|key| key.name == v))))
         }
-        (CollectedType::String, _) => Some(true),
-        (other, _) => Some(literal_set(other)?.contains(&value)),
+        (CollectedType::String, _) => Some(values.iter().all(|value| !matches!(value, CheckValue::Undefined))),
+        (other, _) => {
+            let allowed = literal_set(other)?;
+            Some(values.iter().all(|value| literal_value(value).is_some_and(|v| allowed.contains(&v))))
+        }
+    }
+}
+
+/// One type a conditional's check can stand for.
+enum CheckValue {
+    Literal(String),
+    String,
+    /// A member the object type doesn't declare, which reads as nothing assignable to a string.
+    Undefined,
+}
+
+/// What a conditional's check stands for: one literal, or the types a member read's type lists.
+fn check_values(check: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> Option<Vec<CheckValue>> {
+    match check {
+        CollectedType::AtFile { file, inner } => check_values(inner, file, ctx, depth + 1),
+        CollectedType::IndexedAccess { obj, key } => match reduce(check, file, ctx, depth + 1) {
+            Some((member, member_file)) => string_values(&member, &member_file, ctx, depth + 1),
+            // `Payload["variant"]` on a payload object that declares no `variant` (Mantine's factories).
+            None if lacks_member(obj, &literal(key)?, file, ctx, depth + 1) => Some(vec![CheckValue::Undefined]),
+            None => None,
+        },
+        other => Some(vec![CheckValue::Literal(literal(other)?)]),
+    }
+}
+
+/// The string types `ty` is a union of, following aliases; `None` when any member is something else.
+fn string_values(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> Option<Vec<CheckValue>> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    match ty {
+        CollectedType::AtFile { file, inner } => string_values(inner, file, ctx, depth + 1),
+        CollectedType::StringLiteral(s) => Some(vec![CheckValue::Literal(s.to_string())]),
+        CollectedType::String => Some(vec![CheckValue::String]),
+        CollectedType::Union(members) => {
+            let mut all = Vec::new();
+            for member in members {
+                all.extend(string_values(member, file, ctx, depth + 1)?);
+            }
+            Some(all)
+        }
+        CollectedType::Named { name, args } => {
+            let (body, body_file) = alias_body(name, args, file, ctx)?;
+            string_values(&body, &body_file, ctx, depth + 1)
+        }
+        _ => None,
+    }
+}
+
+/// Whether `obj` is an object type, through aliases, whose fields are all known and none is `key`.
+fn lacks_member(obj: &CollectedType, key: &str, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> bool {
+    if depth > MAX_DEPTH {
+        return false;
+    }
+    match obj {
+        CollectedType::AtFile { file, inner } => lacks_member(inner, key, file, ctx, depth + 1),
+        // An index signature isn't recorded, so an object with no fields may still have the member.
+        CollectedType::Object(fields) => !fields.is_empty() && !fields.iter().any(|f| f.name == key),
+        CollectedType::Named { name, args } => alias_body(name, args, file, ctx)
+            .is_some_and(|(body, body_file)| lacks_member(&body, key, &body_file, ctx, depth + 1)),
+        _ => false,
     }
 }
 
@@ -139,6 +214,37 @@ pub(super) fn member(
     ctx: &ResolutionContext,
     depth: u8,
 ) -> Option<Located> {
+    // A read from the top of a walk depends only on the declarations, so a run answers it once (`member_reads`).
+    if let (CollectedType::Named { name, args }, 0) = (obj, depth) {
+        let name: Box<str> = if args.is_empty() { Box::from(name.as_str()) } else { obj.to_raw_string().into() };
+        let cache_key = (Box::from(file.as_str()), name, Box::from(key));
+        if let Some(read) = ctx.member_reads.get(&cache_key) {
+            super::deps::replay(&read.deps);
+            return read.found.clone();
+        }
+        let (found, deps) = super::deps::capturing(|| member_uncached(obj, key, file, ctx, depth));
+        ctx.member_reads.insert(cache_key, MemberRead { found: found.clone(), deps });
+        return found;
+    }
+    member_uncached(obj, key, file, ctx, depth)
+}
+
+/// `(file, type as written, key)` of a cached member read.
+pub(crate) type MemberReadKey = (Box<str>, Box<str>, Box<str>);
+
+/// A cached `member` answer and the files it read.
+pub(crate) struct MemberRead {
+    found: Option<Located>,
+    deps: super::deps::Dependencies,
+}
+
+fn member_uncached(
+    obj: &CollectedType,
+    key: &str,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+    depth: u8,
+) -> Option<Located> {
     if depth > MAX_DEPTH {
         return None;
     }
@@ -156,6 +262,22 @@ pub(super) fn member(
             }
             let (body, body_file) = alias_body(name, args, file, ctx)?;
             member(&body, key, &body_file, ctx, depth + 1)
+        }
+        // `{ [P in keyof T]: T[P] | … }["width"]` (csstype's `Fallback<T>`): the value with the key bound, when the keys
+        // include it. Over `keyof T` the key's presence is a member read of `T`, which avoids listing all of T's keys.
+        CollectedType::Mapped { param, key_type, value_type, .. } => {
+            let present = match unwrap_at_file(key_type) {
+                (CollectedType::KeyOf(target), target_file) => {
+                    member(target, key, target_file.unwrap_or(file), ctx, depth + 1).is_some()
+                }
+                _ => mapped_keys(key_type, file, ctx, depth + 1)?.iter().any(|k| k.name == key),
+            };
+            if !present {
+                return None;
+            }
+            let bound = [CollectedType::StringLiteral(key.into())];
+            let subst = build_substitution(std::slice::from_ref(param), &bound, file, &mut Vec::new());
+            Some((substitute_type(value_type, &subst), file.to_owned()))
         }
         // `A["x"]["y"]`, `(T extends … ? A : B)["x"]`.
         CollectedType::IndexedAccess { .. } | CollectedType::Conditional { .. } => {
@@ -202,10 +324,18 @@ fn interface_member(
             ExtendsRef::Imported { local_name, type_args, .. } => (local_name, type_args),
             ExtendsRef::Builtin { .. } => return None,
         };
-        let (file, name) = canonical(name, &iface.file_path, ctx);
-        let parent = lookup_interface(ctx, file.as_str(), &name).or_else(|| react_interface(ctx, &file, &name))?;
+        let (parent_file, parent_name) = canonical(name, &iface.file_path, ctx);
         let type_args: Vec<CollectedType> = type_args.iter().map(&bind).collect();
-        interface_member(parent, &type_args, key, &iface.file_path, ctx, depth + 1)
+        match lookup_interface(ctx, parent_file.as_str(), &parent_name)
+            .or_else(|| react_interface(ctx, &parent_file, &parent_name))
+        {
+            Some(parent) => interface_member(parent, &type_args, key, &iface.file_path, ctx, depth + 1),
+            // An interface may extend an alias (csstype's `StandardLonghandPropertiesFallback = Fallback<…>`).
+            None => {
+                let parent = CollectedType::Named { name: name.clone(), args: type_args };
+                member(&parent, key, &iface.file_path, ctx, depth + 1)
+            }
+        }
     })
 }
 
