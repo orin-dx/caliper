@@ -12,7 +12,10 @@ use std::collections::BTreeMap;
 use oxc_ast::ast::*;
 use oxc_span::Span;
 
-use crate::types::{CollectedType, CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode, TypeName};
+use crate::types::{
+    CollectedType, CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode, FunctionResult, TypeName,
+    WrapperCallee,
+};
 
 use super::evidence::{renders, FunctionShape, ReactBinding};
 use super::SourceDataCollector;
@@ -29,6 +32,7 @@ pub(crate) struct PendingWrapper {
     /// The only evidence was a tag name, so the props must come from a factory payload.
     needs_payload: bool,
     type_args: Vec<WrapperTypeArg>,
+    callee: WrapperCallee,
     description: String,
     tags: BTreeMap<String, String>,
     span: Span,
@@ -125,11 +129,13 @@ impl<'src> SourceDataCollector<'src> {
             .iter()
             .map(|ty| WrapperTypeArg { reference: self.extract_type_name_from_type(ty) })
             .collect();
+        let Some(callee) = self.wrapper_callee(call) else { return false };
         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
         self.pending_wrappers.push(PendingWrapper {
             name: name.to_owned(),
             needs_payload,
             type_args,
+            callee,
             description,
             tags,
             span: decl.span,
@@ -186,9 +192,38 @@ impl<'src> SourceDataCollector<'src> {
                     DetectionRule::WrapperTypeArgument,
                 )
                 .with_props_type_args(props_args)
-                .with_doc(pending.description, pending.tags),
+                .with_doc(pending.description, pending.tags)
+                .with_wrapper_callee(pending.callee),
             );
         }
+    }
+
+    /// The callee of a generic call that builds a component, and its type arguments, for the props its result type
+    /// adds (`resolver::callee`). `None` for a call without type arguments.
+    pub(super) fn wrapper_callee<'a>(&mut self, call: &CallExpression<'a>) -> Option<WrapperCallee> {
+        let type_arguments = call.type_arguments.as_ref()?;
+        let name = self.extract_callee_name(call)?;
+        Some(WrapperCallee {
+            name: name.as_str().into(),
+            type_args: type_arguments.params.iter().map(|ty| self.ts_type_to_collected(ty)).collect(),
+        })
+    }
+
+    /// Record what a generic function declaration returns: its return annotation, or the type its one top-level
+    /// `return … as T` asserts (`return Component as MantineComponent<Payload>`). A wrapper call to it then gets the
+    /// props that type adds (`resolver::callee`).
+    pub(super) fn record_function_result<'a>(&mut self, func: &Function<'a>) {
+        let (Some(id), Some(type_parameters)) = (&func.id, func.type_parameters.as_deref()) else { return };
+        let result = match &func.return_type {
+            Some(annotation) => self.ts_type_to_collected(&annotation.type_annotation),
+            None => {
+                let Some(ty) = asserted_return_type(func) else { return };
+                self.ts_type_to_collected(ty)
+            }
+        };
+        let type_params = super::type_param_names(Some(type_parameters));
+        let key = self.scoped_key(id.name.as_str());
+        self.data.function_results.insert(key, FunctionResult { type_params, result });
     }
 
     /// Pick the props type from a wrapper call's type arguments, last first (the props usually follow the element).
@@ -248,4 +283,21 @@ enum PropsSelection {
         alias: TypeName,
     },
     None,
+}
+
+/// The type the function's only top-level `return` asserts with `as` (the outermost one of `x as unknown as T`).
+fn asserted_return_type<'f, 'a>(func: &'f Function<'a>) -> Option<&'f TSType<'a>> {
+    let mut returns = func.body.as_ref()?.statements.iter().filter_map(|statement| match statement {
+        Statement::ReturnStatement(ret) => Some(ret.argument.as_ref()),
+        _ => None,
+    });
+    let only = returns.next()??;
+    if returns.next().is_some() {
+        return None;
+    }
+    match only.without_parentheses() {
+        Expression::TSAsExpression(assertion) => Some(&assertion.type_annotation),
+        Expression::TSTypeAssertion(assertion) => Some(&assertion.type_annotation),
+        _ => None,
+    }
 }

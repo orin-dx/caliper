@@ -69,6 +69,11 @@ pub(super) fn resolve_to_canonical(
     Some(follow_reexports(resolved_file, member, ctx, diagnostics, &mut visited, 0))
 }
 
+/// Whether `file` itself declares `name`: a type, or a generic function a wrapper call can name as its callee.
+fn declares(ctx: &ResolutionContext, file: &Utf8Path, name: &str) -> bool {
+    ctx.named_types.is_declared_at(file, name) || ctx.global.function_results.contains_key(&format!("{file}:{name}"))
+}
+
 /// A directly-imported name may land on a barrel file (`export { X } from
 /// './x'` or `export * from './x'`) that doesn't declare `name` itself —
 /// ubiquitous in real component libraries' `index.ts` files. Follow the
@@ -92,7 +97,7 @@ fn follow_reexports(
     }
 
     super::deps::record(&file);
-    if depth >= MAX_REEXPORT_DEPTH || ctx.named_types.is_declared_at(&file, &name) {
+    if depth >= MAX_REEXPORT_DEPTH || declares(ctx, &file, &name) {
         return (file, name);
     }
     // A package's re-export stubs are not in the layer; the loader's answer for them stands in (ADR 0011).
@@ -123,7 +128,7 @@ fn follow_reexports(
                     continue;
                 };
                 let resolved = follow_reexports(candidate_file, name.clone(), ctx, diagnostics, visited, depth + 1);
-                if ctx.named_types.is_declared_at(&resolved.0, &resolved.1) {
+                if declares(ctx, &resolved.0, &resolved.1) {
                     return resolved;
                 }
             }

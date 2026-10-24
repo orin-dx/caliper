@@ -2777,3 +2777,95 @@ fn without_custom_conditions_a_source_only_workspace_package_does_not_resolve() 
     let unresolved = output.diagnostics.iter().find(|d| d.code == DiagnosticCode::UnresolvableImport);
     assert!(unresolved.is_some_and(|d| d.message.contains("@acme/ui")), "{:#?}", output.diagnostics);
 }
+
+/// Mantine's shape, through two barrels: `factory<Payload>` returns `MantineComponent<Payload>`, a component type whose
+/// props add `component` and `renderRoot` to the payload's props. The wrapper-built component gets them; its own props
+/// win a name clash, and a callee with no known result adds nothing.
+#[test]
+fn a_wrapper_built_component_gets_the_props_its_callees_result_type_adds() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("core/factory")).unwrap();
+    write_file(&tmp, "core/factory/factory.tsx", CALLEE_FACTORY);
+    write_file(
+        &tmp,
+        "core/factory/index.ts",
+        "export { factory, opaque } from './factory';\nexport type { Factory } from './factory';\n",
+    );
+    write_file(&tmp, "core/index.ts", "export * from './factory';\n");
+    write_file(
+        &tmp,
+        "Button.tsx",
+        r#"
+import { factory, opaque, Factory } from "./core";
+export interface ButtonProps { label: string }
+export interface LinkProps { label: string; component: "a" | "span" }
+export type ButtonFactory = Factory<{ props: ButtonProps; ref: HTMLButtonElement }>;
+export type LinkFactory = Factory<{ props: LinkProps; ref: HTMLAnchorElement }>;
+export const Button = factory<ButtonFactory>((props) => <button>{props.label}</button>);
+export const Link = factory<LinkFactory>((props) => <a>{props.label}</a>);
+export const Plain = opaque<ButtonFactory>((props) => <button>{props.label}</button>);
+export const Typed = factory<ButtonFactory>((props: ButtonProps) => <button>{props.label}</button>);
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let props = |component: &str| {
+        output.components[component]
+            .props
+            .values()
+            .map(|p| (p.name.clone(), p.prop_type.raw_string(), p.required, p.description.clone()))
+            .collect::<Vec<_>>()
+    };
+    let prop = |name: &str, ty: &str, required: bool, description: &str| {
+        (name.to_owned(), ty.to_owned(), required, description.to_owned())
+    };
+    let render_root = prop("renderRoot", "(props: Record<string, any>) => React.ReactNode", false, "");
+    assert_eq!(
+        props("Button"),
+        [
+            prop("component", "any", false, "Root element or component."),
+            prop("label", "string", true, ""),
+            render_root.clone()
+        ]
+    );
+    assert_eq!(
+        props("Link"),
+        [prop("component", "\"a\" | \"span\"", true, ""), prop("label", "string", true, ""), render_root]
+    );
+    assert_eq!(props("Plain"), [prop("label", "string", true, "")]);
+    // A typed render function makes this a HOC-wrapper detection; the callee still adds its props.
+    assert_eq!(props("Typed"), props("Button"));
+    let warnings: Vec<&str> = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity != DiagnosticSeverity::Info)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(warnings, Vec::<&str>::new());
+}
+
+/// A factory module in Mantine's shape: `factory` asserts its result type, `opaque` declares none.
+pub(crate) const CALLEE_FACTORY: &str = r#"
+import * as React from "react";
+export interface FactoryPayload { props: Record<string, any>; ref?: any }
+export type Factory<Payload extends FactoryPayload> = Payload;
+export type MantineComponent<Payload extends FactoryPayload> = React.NamedExoticComponent<
+  Payload["props"] & React.RefAttributes<Payload["ref"]> & {
+    /** Root element or component. */
+    component?: any;
+    renderRoot?: (props: Record<string, any>) => React.ReactNode;
+  }
+> & { extend: (input: any) => any };
+export function factory<Payload extends FactoryPayload>(ui: (props: Payload["props"]) => React.ReactNode) {
+  const Component = ui as any;
+  return Component as MantineComponent<Payload>;
+}
+export function opaque<Payload extends FactoryPayload>(ui: (props: Payload["props"]) => React.ReactNode) {
+  return ui;
+}
+"#;

@@ -24,6 +24,7 @@ use crate::react_types;
 use crate::types::*;
 
 mod alias;
+mod callee;
 mod chain;
 mod collected;
 mod deps;
@@ -685,9 +686,10 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
         0,
     );
 
-    // Build props BTreeMap — own props win over inherited props with same name.
+    // Build props BTreeMap — own props win over inherited props with same name, and both over what a wrapper call's
+    // callee adds.
     let mut props: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
-    for prop in chain.props {
+    for prop in chain.props.into_iter().chain(callee::result_props(mapping, ctx, &mut state)) {
         props.entry(prop.name.clone()).or_insert(prop);
     }
 

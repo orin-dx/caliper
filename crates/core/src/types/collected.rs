@@ -589,6 +589,26 @@ pub struct SourceData {
     /// TypeScript syntax errors). Drained into the pipeline's top-level diagnostics
     /// during `GlobalSourceData` merge — never dropped silently.
     pub diagnostics: Vec<Diagnostic>,
+
+    /// What each generic function declared in this file returns (see [`FunctionResult`]).
+    /// Key: "${absolute_file_path}:${name}"
+    pub function_results: FxHashMap<std::string::String, FunctionResult>,
+}
+
+/// What a generic function returns, declared or asserted by its one top-level `return … as T`: the shape of the
+/// component a wrapper call such as `factory<Payload>(render)` builds, with the call's type arguments bound to
+/// `type_params`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionResult {
+    pub type_params: Vec<TypeName>,
+    pub result: CollectedType,
+}
+
+/// The generic function a wrapper call invokes, as the call names it, and the type arguments it passes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WrapperCallee {
+    pub name: TypeName,
+    pub type_args: Vec<CollectedType>,
 }
 
 /// A collected interface declaration.
@@ -794,6 +814,9 @@ pub struct ComponentMapping {
     pub rule: DetectionRule,
     /// Whether its module exports it, directly or as a sub-component attached to an exported component.
     pub exported: bool,
+    /// For a component built by a generic call (`WrapperTypeArgument`, or a `HocWrapper` call with type arguments),
+    /// that call: its result type can add props the selected props type lacks.
+    pub wrapper_callee: Option<WrapperCallee>,
 }
 
 impl ComponentMapping {
@@ -818,7 +841,14 @@ impl ComponentMapping {
             param_defaults: FxHashMap::default(),
             rule,
             exported: false,
+            wrapper_callee: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_wrapper_callee(mut self, callee: WrapperCallee) -> Self {
+        self.wrapper_callee = Some(callee);
+        self
     }
 
     #[must_use]
