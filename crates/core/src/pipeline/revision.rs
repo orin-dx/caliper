@@ -26,6 +26,21 @@ use super::{
     IncrementalUpdate, PipelineOptions,
 };
 
+/// `@types/react` indexed on its own, for curated mode's HTML-attribute lookups: a prop that an HTML layer's element
+/// also declares has both types, as in Full mode, while every other name still resolves without React's declarations.
+/// No `@types/react` means no lookups, as before, and no diagnostic: curated mode never needed it.
+fn curated_react_types(
+    options: &PipelineOptions,
+    cache: &DtsCache,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<Arc<NamedTypeIndex>> {
+    let from_dir = canonicalize_first_src_dir(&options.src_dirs)?;
+    let react_dts = Utf8PathBuf::from(crate::resolver::resolve_package_dts_path(&from_dir, "react", options)?);
+    let mut react = GlobalSourceData::default();
+    merge_cached_dts_file(&react_dts, cache, &mut react, diagnostics);
+    Some(Arc::new(NamedTypeIndex::build(&react)))
+}
+
 /// A component's identity across revisions: its file, its name, and which same-named declaration in that file it is.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ComponentId {
@@ -79,6 +94,8 @@ pub(crate) struct Revision {
     named_types: Arc<NamedTypeIndex>,
     /// The loaded dependency declarations, with `load_dependencies`.
     dependencies: Option<Arc<DependencyLayer>>,
+    /// React's own declarations in curated mode, indexed apart for HTML-attribute lookups (ADR 0010).
+    react_types: Option<Arc<NamedTypeIndex>>,
     ambient_global_files: Vec<Utf8PathBuf>,
     /// Source-directory and discovery diagnostics.
     head_diagnostics: Vec<Diagnostic>,
@@ -223,6 +240,9 @@ impl Revision {
                 ),
             }
         }
+        let react_types = (options.html_attributes == HtmlAttributeMode::Curated)
+            .then(|| curated_react_types(options, &cache, &mut lib_diagnostics))
+            .flatten();
         // Ambient globals (Date, Element, ...) live in TS's lib files and are never imported, so merge them in every
         // mode. An install missing a lib file (TS 7 without its platform package) is reported here.
         if let Some(from_dir) = canonicalize_first_src_dir(&options.src_dirs) {
@@ -245,7 +265,8 @@ impl Revision {
             ambient_global_files.clone(),
             named_types.clone(),
         )
-        .with_dependencies(dependencies.clone());
+        .with_dependencies(dependencies.clone())
+        .with_react_types(react_types.clone());
         lib_diagnostics.extend(ctx.tsconfig_diagnostic.clone());
         let resolved = resolve_all(&component_ids(&global, options), &ctx);
         let files = Arc::new(src_files.into_iter().collect());
@@ -264,6 +285,7 @@ impl Revision {
             global,
             named_types,
             dependencies,
+            react_types,
             ambient_global_files,
             head_diagnostics,
             file_diagnostics,
@@ -349,7 +371,8 @@ impl Revision {
             self.ambient_global_files.clone(),
             named_types.clone(),
         )
-        .with_dependencies(dependencies.clone());
+        .with_dependencies(dependencies.clone())
+        .with_react_types(self.react_types.clone());
         let fresh = resolve_all(&stale, &ctx);
         let mut resolved: FxHashMap<ComponentId, Arc<Resolved>> =
             kept.into_iter().filter_map(|(id, _)| self.resolved.get(&id).map(|r| (id, r.clone()))).collect();
@@ -361,6 +384,7 @@ impl Revision {
             global,
             named_types,
             dependencies,
+            react_types: self.react_types.clone(),
             ambient_global_files: self.ambient_global_files.clone(),
             head_diagnostics: self.head_diagnostics.clone(),
             file_diagnostics,

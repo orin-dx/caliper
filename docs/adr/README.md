@@ -19,6 +19,7 @@ One line per ADR, with what it guards. Add a line when you add an ADR.
 - [10. Load dependency declarations by name, before resolution, into a shared layer](0010-load-dependency-declarations-by-name.md) — do not load dependency files by import closure, resolve against them lazily during resolution, emit their components or enums, or let them outrank a known shortcut.
 - [11. Find dependency declarations through a per-package export index, not the parse cache](0011-per-package-export-index.md) — do not put dependency files in the `DtsCache` or reuse an index whose package's `package.json` changed.
 - [12. Collapse large inherited dependency sources, as Storybook does](0012-collapse-large-dependency-sources.md) — do not resolve a collapsed source's props, or collapse a component's own props.
+- [13. Read React's attribute declarations in curated mode, in an index of their own](0013-curated-mode-reads-react-attributes-apart.md) — do not merge React into the project index outside Full mode, or make the React index a lookup fallback.
 
 Changing any of these needs a new ADR.
 
