@@ -179,7 +179,7 @@ pub(super) fn resolve_base_as_chain(
                 } else {
                     resolve_collected_type(&field.collected_type, file_path, ctx, state, depth)
                 };
-                chain.props.push(Arc::new(ParsedProp::new(
+                chain.props.push(ctx.share(ParsedProp::new(
                     field.name.clone(),
                     prop_type,
                     field.required,
@@ -301,7 +301,7 @@ fn resolve_mapped_chain(
                 depth + 1,
             )
         };
-        chain.props.push(Arc::new(ParsedProp::new(
+        chain.props.push(ctx.share(ParsedProp::new(
             key.name.clone(),
             prop_type,
             optional.map_or(key.required, |optional| !optional),
@@ -336,7 +336,7 @@ fn resolve_intersection_chain(
             for prop in member.props.iter_mut().filter(|prop| !listed.contains(prop.name.as_str())) {
                 for layer in &layers {
                     if let Some(attribute) = layer_attribute(layer, &prop.name, ctx, state, depth) {
-                        *prop = Arc::new(super::intersect_declarations(&attribute, prop));
+                        *prop = ctx.share(super::intersect_declarations(&attribute, prop));
                     }
                 }
             }
@@ -352,7 +352,7 @@ fn resolve_intersection_chain(
             for prop in chain.props.iter_mut().filter(|prop| !own.contains(prop.name.as_str())) {
                 for layer in &new_layers {
                     if let Some(attribute) = layer_attribute(layer, &prop.name, ctx, state, depth) {
-                        *prop = Arc::new(super::intersect_declarations(prop, &attribute));
+                        *prop = ctx.share(super::intersect_declarations(prop, &attribute));
                     }
                 }
             }

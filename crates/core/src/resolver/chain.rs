@@ -303,7 +303,7 @@ fn collapsed_source(
             let prop_type = resolve_collected_type(&ty, file, ctx, state, depth);
             let (parents, parent) = (vec![parent.clone()], Some(parent.clone()));
             let tags = Default::default();
-            Arc::new(ParsedProp::new(
+            ctx.share(ParsedProp::new(
                 name.to_owned(),
                 prop_type,
                 required,
@@ -459,7 +459,7 @@ fn resolve_interface_chain_uncached(
                 None,
                 vec![],
             );
-            chain.props.push(Arc::new(prop));
+            chain.props.push(ctx.share(prop));
             continue;
         }
         let prop_type = match &substitution {
@@ -504,7 +504,7 @@ fn resolve_interface_chain_uncached(
             Some(_) | None => raw_prop.description.clone(),
         };
 
-        chain.props.push(Arc::new(ParsedProp::new(
+        chain.props.push(ctx.share(ParsedProp::new(
             raw_prop.name.clone(),
             prop_type,
             raw_prop.required,
