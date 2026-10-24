@@ -96,6 +96,10 @@ export class FakeBinding implements SessionBinding {
   sessionDocgenInfo = (_sessionId: number, keys: string[]): string =>
     JSON.stringify(Object.fromEntries(keys.filter((key) => key in this.docs).map((key) => [key, this.docs[key]])))
 
+  configFiles: string[] = []
+
+  resolutionConfigFiles = (): string[] => this.configFiles
+
   closeSession = (): void => {
     this.closed = true
   }

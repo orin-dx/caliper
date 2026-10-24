@@ -39,7 +39,9 @@ import.meta.hot?.on(
 
 A change to a tsconfig, `package.json` or lockfile in or above `srcDirs` (installing a package, editing `paths`) re-extracts everything and arrives as an ordinary update event.
 
-Pass `loadDependencies: true` to resolve the types your props import from installed packages; by default they stay named references.
+Pass `loadDependencies: true` to resolve the types your props import from installed packages; by default they stay named references. `htmlAttributes: 'curated' | 'full' | 'none'` chooses which HTML attributes a component inherits from its element to list (`skipHtmlProps` is `'none'`).
+
+Extraction diagnostics are logged once each: errors and warnings by default. `logLevel: 'error' | 'warn' | 'info' | 'silent'` changes that, and `onDiagnostic(diagnostic)` receives every one.
 
 In `vite build --watch`, a change to any file under `srcDirs`, or to that configuration, triggers a rebuild, even one no bundle module imports. A build fails if extraction fails.
 

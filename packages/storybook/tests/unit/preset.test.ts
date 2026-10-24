@@ -14,6 +14,9 @@ describe('preset', () => {
       exclude: undefined,
       tsconfigPath: undefined,
       skipHtmlProps: undefined,
+      htmlAttributes: undefined,
+      loadDependencies: undefined,
+      collapseInheritedProps: undefined,
       fallback: 'never',
     })
     expect(ours?.moduleSpecifier).toMatch(/provider\.(js|ts)$/)
