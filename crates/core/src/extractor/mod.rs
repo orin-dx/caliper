@@ -235,6 +235,11 @@ pub(super) struct SourceDataCollector<'src> {
     /// How many function bodies enclose the node being visited. A component declared inside one exists per call (a
     /// factory's returned component, a story's local helper), so no module imports it under that name.
     pub(super) function_depth: u32,
+    /// The span and type parameters of each generic function in the file, for `ComponentMapping::type_params`.
+    pub(super) function_type_params: Vec<(u32, u32, Vec<CompactString>)>,
+    /// `(scoped key, name, type parameters)` of each named class: a class is also a type, recorded in `finish` as an
+    /// interface with no members unless the file declares an interface or alias of that name.
+    pub(super) pending_classes: Vec<(String, CompactString, Vec<CompactString>)>,
 }
 
 impl<'src> SourceDataCollector<'src> {
@@ -258,6 +263,8 @@ impl<'src> SourceDataCollector<'src> {
             exported_locals: FxHashSet::default(),
             attached_to: Vec::new(),
             function_depth: 0,
+            function_type_params: Vec::new(),
+            pending_classes: Vec::new(),
         }
     }
 
@@ -289,6 +296,18 @@ impl<'src> SourceDataCollector<'src> {
             format!("{}:{}", self.file_path, name)
         } else {
             format!("{}:{}.{}", self.file_path, self.namespace_stack.join("."), name)
+        }
+    }
+
+    pub(super) fn record_function_type_params(
+        &mut self,
+        span: Span,
+        type_parameters: Option<&oxc_ast::ast::TSTypeParameterDeclaration<'_>>,
+    ) {
+        let Some(declaration) = type_parameters else { return };
+        let names: Vec<CompactString> = declaration.params.iter().map(|p| p.name.name.as_str().into()).collect();
+        if !names.is_empty() {
+            self.function_type_params.push((span.start, span.end, names));
         }
     }
 
@@ -344,6 +363,26 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     fn finish(mut self) -> SourceData {
+        for (key, name, params) in std::mem::take(&mut self.pending_classes) {
+            if self.data.interfaces.contains_key(&key) || self.data.type_aliases.contains_key(&key) {
+                continue;
+            }
+            self.data.interfaces.insert(
+                key.clone(),
+                crate::types::CollectedInterface {
+                    scoped_key: key.clone(),
+                    name,
+                    file_path: self.file_path.clone(),
+                    props: Vec::new(),
+                    extends: Vec::new(),
+                    description: String::new(),
+                    tags: Default::default(),
+                },
+            );
+            if !params.is_empty() {
+                self.data.interface_type_params.insert(key, params);
+            }
+        }
         self.promote_wrapper_calls();
         self.promote_reexported_imports();
         // Filtered by original identifier first, before any displayName rename
@@ -368,6 +407,15 @@ impl<'src> SourceDataCollector<'src> {
         self.drop_functions_used_only_as_functions(&exported);
         for mapping in &mut self.data.component_mappings {
             mapping.exported = exported.contains(mapping.component_name.as_str());
+            for (start, end, params) in &self.function_type_params {
+                if *start >= mapping.span_start && *end <= mapping.span_end {
+                    for param in params {
+                        if !mapping.type_params.contains(param) {
+                            mapping.type_params.push(param.clone());
+                        }
+                    }
+                }
+            }
         }
         for (obj_name, display_name) in self.pending_display_name_renames.drain(..) {
             if let Some(mapping) = self.data.component_mappings.iter_mut().find(|m| m.component_name == obj_name) {

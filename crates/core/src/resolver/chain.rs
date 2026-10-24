@@ -278,7 +278,9 @@ pub(super) fn resolve_props_chain(
 
     // HTML attribute interfaces (`InputHTMLAttributes`, ...) are terminal in curated mode, like the builtins above: the
     // element's notable attributes come from the inheritance layer, not from expanding the interface.
-    if react_types::html_element_for(type_name_bare).is_some() {
+    if react_types::html_element_for(type_name_bare).is_some()
+        || super::declared_by_react(type_name, &canonical_name, consuming_file, ctx)
+    {
         return ResolvedChain::empty_with_compose(type_name.to_owned());
     }
 

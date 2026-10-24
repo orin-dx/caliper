@@ -153,6 +153,24 @@ pub(super) fn may_be_react_builtin(name: &str, file: &Utf8Path, ctx: &Resolution
     }
 }
 
+/// Whether `name` in `file` is a type React declares (`UIEventHandler`, `Key`, `AriaRole`, …) that no builtin list names:
+/// it is bound to React, or to nothing, and React's own declarations have it. Such a reference is React's type, not an
+/// unresolvable one.
+pub(super) fn declared_by_react(name: &str, canonical_name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> bool {
+    if !may_be_react_builtin(name, file, ctx) {
+        return false;
+    }
+    let react_file = react::resolve_react_types_file(file, ctx);
+    let react_file = Utf8Path::new(&react_file);
+    let index = ctx.react_index();
+    // The name as written, or the one it is imported under (`import { DOMAttributes as ReactDOMAttributes }`).
+    [name.strip_prefix("React.").unwrap_or(name), canonical_name.strip_prefix("React.").unwrap_or(canonical_name)]
+        .into_iter()
+        .any(|bare| {
+            index.lookup_interface(react_file, bare).is_some() || index.lookup_type_alias(react_file, bare).is_some()
+        })
+}
+
 /// Reports that a builtin name bound to something else was given React's meaning because that binding didn't resolve.
 pub(super) fn builtin_fallback_diagnostic(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> Diagnostic {
     let bound_to = match name_binding(name, file, ctx) {
@@ -611,6 +629,11 @@ pub struct TsLibs {
 
 const TS_LIB_FILES: [&str; 2] = ["lib.es5.d.ts", "lib.dom.d.ts"];
 
+/// The ES2015 collections and iteration (`Iterable`, `Set`, `Map`), which props name (`items?: Iterable<T>`). An install
+/// without one is not reported: they are not what a project's `lib` setting always includes.
+const TS_OPTIONAL_LIB_FILES: [&str; 3] =
+    ["lib.es2015.iterable.d.ts", "lib.es2015.collection.d.ts", "lib.es2015.promise.d.ts"];
+
 /// Locate `lib.es5.d.ts`/`lib.dom.d.ts`, which declare the ambient globals (`Date`, `Element`, ...). TS ≤6 keeps them
 /// in `typescript/lib`; TS 7 moves them into an optional `@typescript/typescript-<platform>` package whose `exports`
 /// hide `lib/`, so they're read off disk. They're identical across platforms, so the first installed package (by name)
@@ -627,18 +650,21 @@ pub fn resolve_ts_lib_paths(from_dir: &camino::Utf8Path) -> TsLibs {
     let mut platform_dirs = None;
     let mut paths = Vec::new();
     let mut missing = Vec::new();
-    for file in TS_LIB_FILES {
-        let found = lib_file_in(ts_dir, file).or_else(|| {
+    let mut find = |file: &str| {
+        lib_file_in(ts_dir, file).or_else(|| {
             platform_dirs
                 .get_or_insert_with(|| installed_platform_package_dirs(&resolver, ts_dir).unwrap_or_default())
                 .iter()
                 .find_map(|dir| lib_file_in(dir, file))
-        });
-        match found {
+        })
+    };
+    for file in TS_LIB_FILES {
+        match find(file) {
             Some(path) => paths.push(path.to_string_lossy().into_owned()),
             None => missing.push(file),
         }
     }
+    paths.extend(TS_OPTIONAL_LIB_FILES.iter().filter_map(|file| find(file)).map(|p| p.to_string_lossy().into_owned()));
 
     let diagnostic = (!missing.is_empty()).then(|| missing_lib_diagnostic(&missing, ts_dir));
     TsLibs { paths, diagnostic }
@@ -722,6 +748,7 @@ pub(crate) fn resolve_component_shared(
     ctx: &ResolutionContext,
 ) -> (ComponentEntry, ResolvedDiagnostics) {
     let mut state = ResolveState::default();
+    state.add_type_params(mapping.type_params.iter());
 
     // A component a generic call builds has the props its callee's result type declares; the props type the extractor
     // selected is for a callee whose result isn't known.

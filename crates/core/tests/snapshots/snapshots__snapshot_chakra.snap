@@ -3393,7 +3393,7 @@ expression: value
     "componentsExtracted": 8,
     "componentsSkipped": 0,
     "filesParsed": 3,
-    "dtsFilesParsed": 5,
+    "dtsFilesParsed": 8,
     "dtsCacheHits": 0,
     "durationMs": 0,
     "tier1Count": 0,
