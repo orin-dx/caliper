@@ -28,6 +28,8 @@ pub(super) struct Key {
     pub(super) name: String,
     pub(super) required: bool,
     pub(super) description: String,
+    /// The JSDoc tags of the source member (`@default "md"`).
+    pub(super) tags: std::collections::BTreeMap<String, String>,
 }
 
 /// `ty` with a decidable conditional replaced by its branch, or an indexed access by the member it reads. `None` when
@@ -58,10 +60,32 @@ pub(super) fn mapped_keys(
     match constraint {
         CollectedType::AtFile { file, inner } => mapped_keys(inner, file, ctx, depth + 1),
         CollectedType::KeyOf(target) => keys_of(target, file, ctx, depth + 1),
+        // `(typeof NODES)[number]` over `declare const NODES: readonly ["a", "b"]`: the tuple's elements.
+        CollectedType::IndexedAccess { obj, key } if matches!(key.as_ref(), CollectedType::Number) => {
+            let (CollectedType::TypeOf(array), array_file) = unwrap_at_file(obj) else { return None };
+            let array_file = array_file.unwrap_or(file);
+            let (_, alias) = lookup_type_alias(ctx, array_file.as_str(), &format!("typeof {array}"))?;
+            let CollectedTypeAlias::Passthrough { target: CollectedType::Tuple(elements), .. } = alias else {
+                return None;
+            };
+            // A tuple's elements come through as the source text of a literal (`"a"`).
+            let names = elements.iter().map(|element| match element {
+                CollectedType::StringLiteral(name) => Some(name.to_string()),
+                CollectedType::Raw(text) => Some(text.trim().strip_prefix('"')?.strip_suffix('"')?.to_owned()),
+                _ => None,
+            });
+            Some(
+                names
+                    .map(|name| {
+                        Some(Key { name: name?, required: true, description: String::new(), tags: Default::default() })
+                    })
+                    .collect::<Option<_>>()?,
+            )
+        }
         other => Some(
             literal_set(other)?
                 .into_iter()
-                .map(|name| Key { name, required: true, description: String::new() })
+                .map(|name| Key { name, required: true, description: String::new(), tags: Default::default() })
                 .collect(),
         ),
     }
@@ -228,7 +252,12 @@ fn keys_of(target: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, dep
         CollectedType::Object(fields) => Some(
             fields
                 .iter()
-                .map(|f| Key { name: f.name.clone(), required: f.required, description: f.description.clone() })
+                .map(|f| Key {
+                    name: f.name.clone(),
+                    required: f.required,
+                    description: f.description.clone(),
+                    tags: Default::default(),
+                })
                 .collect(),
         ),
         CollectedType::Named { name, args } => {
@@ -249,7 +278,12 @@ fn keys_of(target: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, dep
 fn interface_keys(iface: &CollectedInterface, ctx: &ResolutionContext, depth: u8, keys: &mut Vec<Key>) {
     for prop in &iface.props {
         if !keys.iter().any(|key| key.name == prop.name) {
-            keys.push(Key { name: prop.name.clone(), required: prop.required, description: prop.description.clone() });
+            keys.push(Key {
+                name: prop.name.clone(),
+                required: prop.required,
+                description: prop.description.clone(),
+                tags: prop.tags.clone(),
+            });
         }
     }
     if depth > MAX_DEPTH {

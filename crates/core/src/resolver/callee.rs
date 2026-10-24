@@ -12,7 +12,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use crate::types::*;
 
 use super::alias::resolve_base_as_chain;
-use super::import::{lookup_type_alias, resolve_to_canonical};
+use super::import::{lookup_interface, lookup_type_alias, resolve_to_canonical};
 use super::substitute::{build_substitution, substitute_alias, substitute_type};
 use super::ResolutionContext;
 
@@ -59,6 +59,41 @@ pub(super) fn result_chain(
     Some(chain)
 }
 
+/// The props of a member of a value declared with a mapped type: `Primitive.div` for `declare const Primitive:
+/// Primitives`, `type Primitives = { [E in (typeof NODES)[number]]: PrimitiveForwardRefComponent<E> }`. The member's
+/// type is the mapped type's value with the key variable bound to the member name, and its props are those of the
+/// React component type that describes. `base` is the value as `file` writes it.
+pub(super) fn value_member_props(
+    base: &str,
+    member: &str,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+) -> Option<(CollectedType, Utf8PathBuf)> {
+    let mut ignored = Vec::new();
+    let (base_file, base_name) =
+        resolve_to_canonical(base, file, ctx, &mut ignored).unwrap_or_else(|| (file.to_owned(), base.to_owned()));
+    let (_, declared) = lookup_type_alias(ctx, base_file.as_str(), &format!("typeof {base_name}"))?;
+    let CollectedTypeAlias::Passthrough { target: CollectedType::Named { name, .. }, .. } = declared else {
+        return None;
+    };
+    let (mapped_file, mapped_name) = resolve_to_canonical(name, &base_file, ctx, &mut ignored)
+        .unwrap_or_else(|| (base_file.clone(), name.to_string()));
+    let (_, mapped) = lookup_type_alias(ctx, mapped_file.as_str(), &mapped_name)?;
+    let CollectedTypeAlias::Passthrough { target: CollectedType::Mapped { param, key_type, value_type, .. }, .. } =
+        mapped
+    else {
+        return None;
+    };
+    let keys = super::evaluate::mapped_keys(key_type, &mapped_file, ctx, 0)?;
+    if !keys.iter().any(|key| key.name == member) {
+        return None;
+    }
+    let mut bindings = super::substitute::Substitution::default();
+    bindings.insert(param.as_str(), CollectedType::StringLiteral(member.into()));
+    let value = substitute_type(value_type, &bindings);
+    component_props_type(&value, &mapped_file, ctx, 0)
+}
+
 /// The props parameter of the React component type `ty` describes, and the file its names resolve in.
 fn component_props_type(
     ty: &CollectedType,
@@ -82,6 +117,24 @@ fn component_props_type(
             let mut ignored = Vec::new();
             let (alias_file, alias_name) = resolve_to_canonical(name, file, ctx, &mut ignored)
                 .unwrap_or_else(|| (file.to_owned(), name.to_string()));
+            // `interface PrimitiveForwardRefComponent<E> extends React.ForwardRefExoticComponent<Props<E>> {}`.
+            if let Some(iface) = lookup_interface(ctx, alias_file.as_str(), &alias_name) {
+                let bindings = ctx
+                    .named_types
+                    .lookup_interface_type_params_for(iface)
+                    .map(|params| build_substitution(params, args, file, &mut ignored));
+                return iface.extends.iter().find_map(|extends| {
+                    let (ExtendsRef::SameFile { name: base, type_args }
+                    | ExtendsRef::Imported { local_name: base, type_args, .. }
+                    | ExtendsRef::Builtin { name: base, type_args, .. }) = extends;
+                    if !COMPONENT_TYPES.contains(&base.strip_prefix("React.").unwrap_or(base)) {
+                        return None;
+                    }
+                    let props = type_args.first()?;
+                    let props = bindings.as_ref().map_or_else(|| props.clone(), |b| substitute_type(props, b));
+                    Some((props, alias_file.clone()))
+                });
+            }
             let (matched, alias) = lookup_type_alias(ctx, alias_file.as_str(), &alias_name)?;
             let alias = match ctx.named_types.lookup_type_alias_params(&alias_file, &matched) {
                 Some(params) => substitute_alias(alias, &build_substitution(params, args, file, &mut ignored)),

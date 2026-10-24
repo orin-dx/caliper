@@ -2032,7 +2032,7 @@ expression: value
     "componentsExtracted": 2,
     "componentsSkipped": 0,
     "filesParsed": 2,
-    "dtsFilesParsed": 5,
+    "dtsFilesParsed": 8,
     "dtsCacheHits": 0,
     "durationMs": 0,
     "tier1Count": 0,

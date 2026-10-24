@@ -330,21 +330,32 @@ function compareProps(ours, theirs, into, story) {
       continue
     }
     into.sharedProps++
-    if (a.kind !== b.kind) into.kindDiffers++
+    const where = basename(story)
+    if (a.kind !== b.kind) {
+      into.kindDiffers++
+      into.details.kind.push({ story: where, prop: name, ours: a.kind, theirs: b.kind, oursType: a.type, theirsType: b.type })
+    }
     if (a.options && !b.options) into.optionsOnlyOurs++
     else if (!a.options && b.options) into.optionsOnlyTheirs++
     else if (a.options && b.options && a.options.toSorted().join('|') !== b.options.toSorted().join('|'))
       into.optionsDiffer++
     if (a.required !== b.required) into.requiredDiffers++
     if (a.default && !b.default) into.defaultOnlyOurs++
-    else if (!a.default && b.default) into.defaultOnlyTheirs++
+    else if (!a.default && b.default) {
+      into.defaultOnlyTheirs++
+      into.details.defaults.push({ story: where, prop: name, theirs: b.default })
+    }
     else if (a.default && b.default && a.default.replaceAll(/['"]/g, '') !== b.default.replaceAll(/['"]/g, ''))
       into.defaultDiffers++
     if (a.described && !b.described) into.describedOnlyOurs++
     else if (!a.described && b.described) into.describedOnlyTheirs++
     if (a.type === b.type) into.sameTypeText++
   }
-  for (const name of Object.keys(theirs)) if (!(name in ours)) into.missingProps++
+  for (const name of Object.keys(theirs)) {
+    if (name in ours) continue
+    into.missingProps++
+    into.details.missing.push({ story: basename(story), prop: name, theirs: theirs[name].type })
+  }
 }
 
 function diff(ours, baseline) {
@@ -372,6 +383,8 @@ function diff(ours, baseline) {
     propsOnStoriesOnlyWeAnswer: 0,
     examples: [],
     storiesWithMissing: 0,
+    // Every disagreement, by story and prop, in the JSON report.
+    details: { kind: [], defaults: [], missing: [] },
   }
   for (const [path, a] of Object.entries(ours.stories)) {
     const b = baseline.stories[path]

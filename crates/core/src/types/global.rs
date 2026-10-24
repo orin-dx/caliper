@@ -34,6 +34,9 @@ pub(crate) struct ResolveState {
     /// it returns — the textbook DFS "on this path" set, which catches real
     /// self-reference while never flagging legitimate repeated reuse.
     pub(crate) named_in_progress: FxHashSet<CompactString>,
+    /// The most names `named_in_progress` has held since a recording began (`resolver::memo`), to bound how deep a
+    /// replayed resolution would go from a deeper state.
+    pub(crate) named_high: usize,
     /// Accumulated non-fatal issues.
     pub(crate) diagnostics: Vec<Diagnostic>,
     /// Diagnostics of replayed or recorded interface chains, shared with the recording instead of copied.
@@ -116,6 +119,7 @@ impl ResolveState {
         ResolveState {
             visited: self.visited.clone(),
             named_in_progress: self.named_in_progress.clone(),
+            named_high: self.named_in_progress.len(),
             diagnostics: Vec::new(),
             shared_diagnostics: Vec::new(),
             in_scope_type_params: self.in_scope_type_params.clone(),
@@ -142,6 +146,7 @@ impl ResolveState {
     /// stay with the branch.
     pub(crate) fn absorb(&mut self, branch: ResolveState) {
         self.absorb_reads(&branch, true);
+        self.named_high = self.named_high.max(branch.named_high);
         self.diagnostics.extend(branch.diagnostics);
         self.shared_diagnostics.extend(branch.shared_diagnostics);
         self.named_unevaluated |= branch.named_unevaluated;
@@ -150,6 +155,7 @@ impl ResolveState {
     /// `absorb` for a `detached` state.
     pub(crate) fn absorb_detached(&mut self, detached: ResolveState) {
         self.absorb_reads(&detached, false);
+        self.named_high = self.named_high.max(self.named_in_progress.len() + detached.named_high);
         self.diagnostics.extend(detached.diagnostics);
         self.shared_diagnostics.extend(detached.shared_diagnostics);
         self.named_unevaluated |= detached.named_unevaluated;
@@ -175,10 +181,15 @@ impl ResolveState {
 
     /// Enter `key` into `named_in_progress`; false if it was already there.
     pub(crate) fn enter_named(&mut self, key: CompactString) -> bool {
-        let Some(reads) = self.reads.as_mut() else { return self.named_in_progress.insert(key) };
+        let Some(reads) = self.reads.as_mut() else {
+            let inserted = self.named_in_progress.insert(key);
+            self.named_high = self.named_high.max(self.named_in_progress.len());
+            return inserted;
+        };
         let shared: Arc<str> = Arc::from(key.as_str());
         let inserted = self.named_in_progress.insert(key);
         reads.named.push((shared, !inserted));
+        self.named_high = self.named_high.max(self.named_in_progress.len());
         inserted
     }
 

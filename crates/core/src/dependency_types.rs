@@ -394,6 +394,10 @@ impl Loader<'_> {
         if declares(&data, module, name) {
             return Some((module.to_owned(), CompactString::from(name)));
         }
+        // A member of a value the module declares (`Primitive.div`): its declaration is the value's.
+        if name.split_once('.').is_some_and(|(head, _)| declares(&data, module, head)) {
+            return Some((module.to_owned(), CompactString::from(name)));
+        }
         let (head, rest) = match name.split_once('.') {
             Some((head, rest)) => (head, Some(rest)),
             None => (name, None),
@@ -487,7 +491,10 @@ impl Loader<'_> {
         }
         let react = Self::is_react(&file);
         let Some(data) = self.parse(&file) else { return };
-        let mut stack = vec![name];
+        // `Primitive.div` is a member of the value `Primitive`, whose declared type has it.
+        let mut stack: Vec<CompactString> =
+            name.split_once('.').map(|(head, _)| CompactString::from(head)).into_iter().collect();
+        stack.push(name);
         while let Some(name) = stack.pop() {
             if !self.claimed.insert((PathKey::from(file.as_path()), name.clone())) {
                 continue;
@@ -497,12 +504,20 @@ impl Loader<'_> {
             } else {
                 self.declaring.insert(PathKey::from(file.as_path()));
             }
+            // The type a value is declared with (`declare const Primitive: Primitives`) goes with the value.
+            let value_type = CompactString::from(format!("typeof {name}"));
+            if declares(&data, &file, &value_type) {
+                stack.push(value_type);
+            }
             let mut refs = FxHashSet::default();
             declaration_refs(&data, &file, &name, &mut refs);
             for reference in refs {
                 let qualified = react.then(|| CompactString::from(format!("React.{reference}")));
                 if declares(&data, &file, &reference) {
                     stack.push(reference);
+                } else if declares(&data, &file, &format!("typeof {reference}")) {
+                    // `typeof NODES` names a value that has only its declared type.
+                    stack.push(CompactString::from(format!("typeof {reference}")));
                 } else if let Some(qualified) = qualified.filter(|q| declares(&data, &file, q)) {
                     stack.push(qualified);
                 } else if let Some(demand) = imported_demand(&file, &data.imports, &reference) {
@@ -535,6 +550,8 @@ fn declares(data: &SourceData, file: &Utf8Path, name: &str) -> bool {
         || data.enums.contains_key(&key)
         || data.const_arrays.contains_key(&key)
         || data.component_mappings.iter().any(|m| m.component_name == name)
+        // A constant declared by its type alone (`declare const Primitive: Primitives`).
+        || data.type_aliases.contains_key(&format!("{file}:typeof {name}"))
 }
 
 /// The names `(file, name)`'s declaration references, without its own type parameters.

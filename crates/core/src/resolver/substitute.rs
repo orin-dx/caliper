@@ -46,6 +46,16 @@ pub(super) fn build_substitution<'a>(
     bind_args(params, None, args, origin_file, origin_file, diagnostics)
 }
 
+/// `ty` pinned to the `file` it was written in. A type that is already pinned names its own file, and wrapping it
+/// again would make a recursive alias's arguments (`CssVars<V> = ... | CssVars<V>[]`) a new type at every level, so
+/// the cycle through it would never be found.
+fn pinned_to(file: &Utf8Path, ty: CollectedType) -> CollectedType {
+    match ty {
+        CollectedType::AtFile { .. } => ty,
+        other => CollectedType::AtFile { file: file.to_owned(), inner: Box::new(other) },
+    }
+}
+
 /// `params` bound to `args`, written in `args_file`, with a parameter the reference omits taking its declared default
 /// (`defaults`, written in `declared_file`), as TypeScript's `fillMissingTypeArguments` does. A default may name an
 /// earlier parameter (`<T, U = T[]>`), so it is bound with the parameters before it. A parameter with neither stays
@@ -62,16 +72,10 @@ pub(super) fn bind_args<'a>(
     let mut unfilled: Vec<&str> = Vec::new();
     for (i, param) in params.iter().enumerate() {
         if let Some(arg) = args.get(i) {
-            subst.insert(
-                param.as_str(),
-                CollectedType::AtFile { file: args_file.to_owned(), inner: Box::new(arg.clone()) },
-            );
+            subst.insert(param.as_str(), pinned_to(args_file, arg.clone()));
         } else if let Some(default) = defaults.and_then(|d| d.get(i)).and_then(Option::as_ref) {
             let bound = substitute_type(default, &subst);
-            subst.insert(
-                param.as_str(),
-                CollectedType::AtFile { file: declared_file.to_owned(), inner: Box::new(bound) },
-            );
+            subst.insert(param.as_str(), pinned_to(declared_file, bound));
         } else {
             unfilled.push(param.as_str());
         }
