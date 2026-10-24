@@ -665,8 +665,8 @@ fn missing_lib_diagnostic(missing: &[&str], ts_dir: &std::path::Path) -> Diagnos
 pub(crate) fn resolve_component_tracked(
     mapping: &ComponentMapping,
     ctx: &ResolutionContext,
-) -> (ComponentEntry, Vec<Diagnostic>, Dependencies) {
-    let ((entry, diagnostics), mut deps) = deps::recording(|| resolve_component(mapping, ctx));
+) -> (ComponentEntry, ResolvedDiagnostics, Dependencies) {
+    let ((entry, diagnostics), mut deps) = deps::recording(|| resolve_component_shared(mapping, ctx));
     deps.files.insert(crate::path_key::PathKey::from(mapping.file_path.as_path()));
     (entry, diagnostics, deps)
 }
@@ -674,7 +674,17 @@ pub(crate) fn resolve_component_tracked(
 /// Resolve a `ComponentMapping` to a complete `ComponentEntry`.
 ///
 /// Called in parallel via rayon — must be `Send + Sync` (all data is owned/Arc'd).
+#[cfg(test)]
 pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) -> (ComponentEntry, Vec<Diagnostic>) {
+    let (entry, diagnostics) = resolve_component_shared(mapping, ctx);
+    (entry, diagnostics.flatten())
+}
+
+/// `resolve_component`, with the diagnostics of replayed interface chains shared rather than copied.
+pub(crate) fn resolve_component_shared(
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+) -> (ComponentEntry, ResolvedDiagnostics) {
     let mut state = ResolveState::default();
 
     // A component a generic call builds has the props its callee's result type declares; the props type the extractor
@@ -762,7 +772,7 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
             detected_by: mapping.rule,
             exported: mapping.exported,
         },
-        state.diagnostics,
+        ResolvedDiagnostics { own: state.diagnostics, shared: state.shared_diagnostics },
     )
 }
 

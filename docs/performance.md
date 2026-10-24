@@ -75,6 +75,7 @@ Whether `--load-dependencies` can become the default (ADR 0010). The five repos 
 | spectrum | 97.1% → 97.1% | 174 → 166 | 0 / 0 | 116 → 121 | 191 → 215 |
 
 - **Accuracy passes.** Coverage of RDT's props rises and unresolved names fall; of about 59,000 props both modes report, 11 stop matching RDT's text. All 11 are a named object or union type from a package that now prints expanded (`{ type: "file"; … }` for `FileUIPart`), which is how a project-declared object alias already prints (#104); RDT prints the name.
+- **Fixed in #136: 497 ms and 1.3 GB became 255 ms and 0.3 GB.** Most of the cost was `keyof` walks resolving every member's type when only the names are read, and memo replays copying each recording's diagnostics into every component.
 - **Chakra's cost blocks the default.** Loaded dependencies let each of Chakra's 600 components reach its own ~705-prop style system: 398,000 props, 497 ms and 1.3 GB (RDT: 637,000 props, 27 s, 2.7 GB). `--collapse-inherited-props all` cuts that to 5,515 props but still 281 ms and 835 MiB, so most of the cost is not the listed props.
 
 RDT (`withCustomConfig`, `shouldExtractLiteralValuesFromEnum`, `shouldRemoveUndefinedFromOptional`) took 1.6 to 27 s and 0.6 to 2.7 GB per repo. The fixture harness also gained the switch: `CALIPER_LOAD_DEPENDENCIES=1 pnpm --filter caliper-docgen-validate run:ours`, then `parity.ts caliper-docgen`.

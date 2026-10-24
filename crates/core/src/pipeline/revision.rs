@@ -52,13 +52,13 @@ pub(crate) struct ComponentId {
 /// A resolved component, the diagnostics its resolution produced, and what that resolution depended on.
 pub(crate) struct Resolved {
     entry: ComponentEntry,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: ResolvedDiagnostics,
     depends_on: Dependencies,
 }
 
 impl Resolved {
     /// The entry and diagnostics, moved out when nothing else shares this resolution.
-    fn into_parts(shared: Arc<Resolved>) -> (ComponentEntry, Vec<Diagnostic>) {
+    fn into_parts(shared: Arc<Resolved>) -> (ComponentEntry, ResolvedDiagnostics) {
         match Arc::try_unwrap(shared) {
             Ok(resolved) => (resolved.entry, resolved.diagnostics),
             Err(shared) => (shared.entry.clone(), shared.diagnostics.clone()),
@@ -463,7 +463,7 @@ impl Revision {
     fn assemble(
         &self,
         options: &PipelineOptions,
-        mut take: impl FnMut(&ComponentId) -> Option<(ComponentEntry, Vec<Diagnostic>)>,
+        mut take: impl FnMut(&ComponentId) -> Option<(ComponentEntry, ResolvedDiagnostics)>,
     ) -> (ExtractionOutput, FxHashMap<ComponentId, String>) {
         let mut diagnostics = DiagnosticSet::default();
         diagnostics.extend(self.head_diagnostics.iter().cloned(), None);
@@ -503,7 +503,10 @@ impl Revision {
                     None,
                 );
             }
-            diagnostics.extend(resolved_diagnostics, Some(&key));
+            diagnostics.extend(resolved_diagnostics.own, Some(&key));
+            for chunk in &resolved_diagnostics.shared {
+                diagnostics.extend_shared(chunk, &key);
+            }
             keys.insert(id, key);
         }
 
@@ -565,6 +568,8 @@ pub(crate) fn output_delta(
 struct DiagnosticSet {
     index: FxHashMap<Diagnostic, usize>,
     items: Vec<Diagnostic>,
+    /// Where each shared chunk's diagnostics are in `items`, so a chunk many components share is hashed once.
+    chunks: FxHashMap<*const Diagnostic, Vec<usize>>,
 }
 
 impl DiagnosticSet {
@@ -579,6 +584,30 @@ impl DiagnosticSet {
         };
         if let Some(key) = component {
             self.items[at].affects.push(key.to_owned());
+        }
+    }
+
+    fn extend_shared(&mut self, chunk: &Arc<[Diagnostic]>, component: &str) {
+        let at = match self.chunks.get(&chunk.as_ptr()) {
+            Some(at) => at.clone(),
+            None => {
+                let at: Vec<usize> = chunk
+                    .iter()
+                    .map(|diagnostic| match self.index.get(diagnostic) {
+                        Some(&at) => at,
+                        None => {
+                            self.index.insert(diagnostic.clone(), self.items.len());
+                            self.items.push(diagnostic.clone());
+                            self.items.len() - 1
+                        }
+                    })
+                    .collect();
+                self.chunks.insert(chunk.as_ptr(), at.clone());
+                at
+            }
+        };
+        for at in at {
+            self.items[at].affects.push(component.to_owned());
         }
     }
 

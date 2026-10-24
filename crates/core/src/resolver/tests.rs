@@ -2652,8 +2652,11 @@ fn resolve_shared(
     let mut results = BTreeMap::new();
     for name in components {
         let fresh = parsed_ctx(dir, files);
-        let alone = resolve_component_tracked(&mapping(&fresh, name), &fresh);
-        let reused = resolve_component_tracked(&mapping(&shared, name), &shared);
+        let flat = |(entry, diagnostics, deps): (ComponentEntry, ResolvedDiagnostics, deps::Dependencies)| {
+            (entry, diagnostics.flatten(), deps)
+        };
+        let alone = flat(resolve_component_tracked(&mapping(&fresh, name), &fresh));
+        let reused = flat(resolve_component_tracked(&mapping(&shared, name), &shared));
         assert_eq!(serde_json::to_value(&reused.0).unwrap(), serde_json::to_value(&alone.0).unwrap(), "{name}");
         let firsts = |diagnostics: &[Diagnostic]| {
             let mut seen = FxHashSet::default();

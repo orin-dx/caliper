@@ -36,6 +36,8 @@ pub(crate) struct ResolveState {
     pub(crate) named_in_progress: FxHashSet<CompactString>,
     /// Accumulated non-fatal issues.
     pub(crate) diagnostics: Vec<Diagnostic>,
+    /// Diagnostics of replayed or recorded interface chains, shared with the recording instead of copied.
+    pub(crate) shared_diagnostics: Vec<Arc<[Diagnostic]>>,
     /// Declared generic type parameter names (`TData`, `T`, `U`, ...) seen so far
     /// while resolving this component — accumulated as interfaces/aliases with
     /// their own type parameters are entered, never removed. A bare reference to
@@ -48,6 +50,9 @@ pub(crate) struct ResolveState {
     /// Expand every source, collapsing none (ADR 0012): set while resolving `Pick`'s base or a `keyof` operand, whose
     /// props are selected or counted by name. Interface chains are not shared while it is set.
     pub(crate) expand_all: bool,
+    /// Only prop names are wanted (a `keyof` operand): members' types are not resolved. Interface chains recorded with
+    /// it set answer only states with it set.
+    pub(crate) keys_only: bool,
     /// What resolution read from this state while an interface chain is being recorded for reuse, `None` otherwise —
     /// see `resolver::memo`. Every read of the three sets above goes through the methods below so none is missed.
     pub(crate) reads: Option<Box<StateReads>>,
@@ -89,6 +94,21 @@ impl StateReads {
     }
 }
 
+/// A component's resolution diagnostics: its own, and chunks shared with the interface-chain recordings it replayed.
+#[derive(Clone, Default, Debug)]
+pub(crate) struct ResolvedDiagnostics {
+    pub(crate) own: Vec<Diagnostic>,
+    pub(crate) shared: Vec<Arc<[Diagnostic]>>,
+}
+
+impl ResolvedDiagnostics {
+    /// Every diagnostic, copied out.
+    #[cfg(test)]
+    pub(crate) fn flatten(&self) -> Vec<Diagnostic> {
+        self.own.iter().chain(self.shared.iter().flat_map(|chunk| chunk.iter())).cloned().collect()
+    }
+}
+
 impl ResolveState {
     /// A state for an independent sibling branch (an extends entry, a union member): same cycle sets and in-scope
     /// parameters, its own diagnostics. Merge it back with `absorb`.
@@ -97,9 +117,11 @@ impl ResolveState {
             visited: self.visited.clone(),
             named_in_progress: self.named_in_progress.clone(),
             diagnostics: Vec::new(),
+            shared_diagnostics: Vec::new(),
             in_scope_type_params: self.in_scope_type_params.clone(),
             named_unevaluated: false,
             expand_all: self.expand_all,
+            keys_only: self.keys_only,
             reads: self.reads.as_ref().map(|_| Box::default()),
         }
     }
@@ -110,6 +132,7 @@ impl ResolveState {
         ResolveState {
             in_scope_type_params: self.in_scope_type_params.clone(),
             expand_all: self.expand_all,
+            keys_only: self.keys_only,
             reads: self.reads.as_ref().map(|_| Box::default()),
             ..Self::default()
         }
@@ -120,6 +143,7 @@ impl ResolveState {
     pub(crate) fn absorb(&mut self, branch: ResolveState) {
         self.absorb_reads(&branch, true);
         self.diagnostics.extend(branch.diagnostics);
+        self.shared_diagnostics.extend(branch.shared_diagnostics);
         self.named_unevaluated |= branch.named_unevaluated;
     }
 
@@ -127,6 +151,7 @@ impl ResolveState {
     pub(crate) fn absorb_detached(&mut self, detached: ResolveState) {
         self.absorb_reads(&detached, false);
         self.diagnostics.extend(detached.diagnostics);
+        self.shared_diagnostics.extend(detached.shared_diagnostics);
         self.named_unevaluated |= detached.named_unevaluated;
     }
 

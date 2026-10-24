@@ -283,7 +283,7 @@ pub(super) fn canonicalize_first_src_dir(src_dirs: &[Utf8PathBuf]) -> Option<Utf
 pub(super) fn resolve_guarded(
     mappings: &[&ComponentMapping],
     ctx: &ResolutionContext,
-) -> Vec<(ComponentEntry, Vec<Diagnostic>, crate::resolver::Dependencies)> {
+) -> Vec<(ComponentEntry, ResolvedDiagnostics, crate::resolver::Dependencies)> {
     mappings
         .par_iter()
         .copied()
@@ -315,7 +315,7 @@ pub(super) fn resolve_guarded(
                 // A panicked resolution re-runs on any edit to its own file.
                 let mut deps = crate::resolver::Dependencies::default();
                 deps.files.insert(crate::path_key::PathKey::from(mapping.file_path.as_path()));
-                (stub, vec![diag], deps)
+                (stub, ResolvedDiagnostics { own: vec![diag], shared: Vec::new() }, deps)
             })
         })
         .collect()
