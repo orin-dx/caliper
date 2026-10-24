@@ -48,6 +48,35 @@ Caliper runs in RDT's format with `--html-attributes full --include-unexported`,
 
 RDT's memory is its process's peak RSS; Caliper's time includes process start and RDT's excludes Node's. The full report, loss patterns included, is in `scripts/parity-baseline.json`.
 
+## TypeScript's checker as the oracle
+
+RDT is a second implementation with its own mistakes (on Spectrum it types `items` as its parent interface, `AriaMenuProps<T>`). `scripts/parity.py oracle` asks TypeScript 7.1's checker instead: `apps/validate/src/oracle.ts`, through the official `typescript/sync` client of `7.1.0-beta`, reads each prop's type for the components it finds the way RDT does, and compares it structurally with Caliper's canonical `--json` (with `--load-dependencies`). Both sides are reduced to kind, literal values, union members, object fields, function parameters (optional and rest included) and index signatures; the checker side also keeps the type's alias or declaring name. It is test-only: the semantic backend in `docs/type-checker-integration.md` is a separate, experimental opt-in.
+
+Each prop React's `@types/react` doesn't declare gets one verdict:
+
+| Verdict | Meaning |
+| --- | --- |
+| Identical | Both sides describe the same type |
+| Spelled | The same type, Caliper by name where the checker expands it (`StyleProp<MantineSpacing>`, `ReactNode`) |
+| Less precise | Caliper's type is looser or left unevaluated: an opaque type, `string` for a literal union, a name the checker resolves further, an unbound parameter, a lost optional or rest marker, a missing field or index signature |
+| Wrong | Caliper's type describes something else, such as a literal union missing members or `number` where csstype's `ZIndex` also allows strings |
+| Checker any/error | The checker has no type: an error, `any`, or a top-level `unknown` where Caliper has one |
+
+Checker types are normalized once per type id and verdicts made once per pair, so Chakra's 470,878 shared props cost 1,241 comparisons. `--check` against `scripts/oracle-baseline.json` fails when identical-or-spelled falls, wrong rises, or components matched falls, by more than 0.05 points. The fixtures directory is a sixth corpus, read in place.
+
+`main` at `7bc120f4` against `7.1.0-beta`:
+
+| Corpus | Components matched | Shared props | Identical | Spelled | Less precise | Wrong | Checker any/error | Checker time |
+| --- | --: | --: | --: | --: | --: | --: | --: | --: |
+| fixtures | 33/40 | 308 | 66.2% | 26.9% | 6.2% | 0.3% | 0.3% | 0.6 s |
+| mantine | 332/370 | 19,752 | 16.7% | 73.3% | 9.6% | 0.3% | 0.0% | 1.2 s |
+| chakra | 598/790 | 470,878 | 0.9% | 99.1% | 0.0% | 0.0% | 0.0% | 4.1 s |
+| shadcn | 1531/1580 | 5,160 | 61.3% | 23.1% | 14.5% | 0.1% | 1.1% | 1.6 s |
+| antd | 185/310 | 2,751 | 55.9% | 36.0% | 7.9% | 0.3% | 0.0% | 1.1 s |
+| spectrum | 598/1454 | 11,663 | 20.2% | 47.6% | 30.2% | 0.0% | 2.0% | 1.6 s |
+
+The checker finds more components than Caliper on antd and Spectrum because, like RDT, it counts every exported function with one parameter. "Less precise" on Spectrum is mostly `Responsive<DimensionValue>` printed without its object form. The beta needs two workarounds, both in `oracle.ts`: compiler options must come from `parseConfigFile` (its server panics on string-valued enum options passed to `createProgram`), and `true`/`false` literal types carry no `value`, so they are read with `typeToString`.
+
 ## Running it
 
 ```bash
@@ -56,6 +85,7 @@ pnpm install                                     # RDT, from apps/validate
 python3 scripts/parity.py setup                  # about 10 GB of installs into .parity/
 python3 scripts/parity.py run --bin target/release/caliper-docgen --markdown parity.md
 python3 scripts/parity.py run --bin NEW --base-bin OLD --baseline scripts/parity-baseline.json --check
+python3 scripts/parity.py oracle --bin NEW --baseline scripts/oracle-baseline.json --check
 ```
 
 `--corpus NAME` limits a run to some corpora, and `--no-timing` skips the timed runs. RDT's dump is made once per commit, in `.parity/rdt`.
