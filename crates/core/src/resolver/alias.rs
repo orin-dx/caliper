@@ -191,11 +191,16 @@ pub(super) fn resolve_base_as_chain(
                 } else {
                     resolve_collected_type(&field.collected_type, file_path, ctx, state, depth)
                 };
+                // The component's own defaults apply to an inline field as to a declared one (`props: IconProps &
+                // { size?: 'S' | 'M' }` with `let { size = 'M' } = props`).
+                let default_value = state
+                    .param_default(mapping, &field.name)
+                    .map(|code| DefaultValue { value: code.value.clone(), computed: code.computed });
                 chain.props.push(ctx.share(ParsedProp::new(
                     field.name.clone(),
                     prop_type,
                     field.required,
-                    None,
+                    default_value,
                     field.description.clone(),
                     Default::default(),
                     None,
@@ -333,13 +338,19 @@ fn resolve_mapped_chain(
                 depth + 1,
             )
         };
+        // A tag on the source member (`/** @default "md" */ size: …` in a recipe's variants) carries over.
+        let default_value = key
+            .tags
+            .get("default")
+            .or_else(|| key.tags.get("defaultValue"))
+            .map(|value| DefaultValue { value: value.trim().to_owned(), computed: false });
         chain.props.push(ctx.share(ParsedProp::new(
             key.name.clone(),
             prop_type,
             optional.map_or(key.required, |optional| !optional),
-            None,
+            default_value,
             key.description.clone(),
-            Default::default(),
+            key.tags.clone(),
             None,
             vec![],
         )));

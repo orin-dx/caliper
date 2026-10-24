@@ -2623,6 +2623,38 @@ fn a_mapped_type_over_an_elements_attributes_is_that_elements_layer() {
     assert!(layer("Box").1.contains(&"className".to_owned()));
 }
 
+/// Spectrum's illustrations: `props: IconProps & { size?: 'S' | 'M' }` and `let { size = 'M', ...rest } = props` in the
+/// body. The inline field has the default as a declared one does.
+#[test]
+fn an_inline_object_field_takes_the_default_the_body_destructures() {
+    let output = extract_one(&[(
+        "Apps.tsx",
+        "interface Base { tone?: string }\n\
+         export default function Apps(props: Base & { size?: 'S' | 'M' }) {\n\
+           let { size = 'M', ...rest } = props;\n  return null;\n}\n",
+    )]);
+
+    let size = &output.components["Apps"].props["size"];
+    assert_eq!(size.default_value.as_ref().map(|d| d.value.as_str()), Some("'M'"));
+    assert_eq!(output.components["Apps"].props["tone"].default_value, None);
+}
+
+/// Chakra's recipes: `{ [K in keyof Variant]?: … }` over an interface whose members carry `@default "md"`; the mapped
+/// props keep the tag and so the default.
+#[test]
+fn a_mapped_type_keeps_the_default_tag_of_the_member_it_maps() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "interface Variant {\n  /**\n   * The size.\n   * @default \"md\"\n   */\n  size: \"sm\" | \"md\" | \"lg\";\n  tone: \"a\" | \"b\";\n}\n\
+         type VariantProps = { [K in keyof Variant]?: Variant[K] };\n\
+         export function Box(props: VariantProps & { own?: number }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    assert_eq!(props["size"].default_value.as_ref().map(|d| d.value.as_str()), Some("\"md\""));
+    assert_eq!(props["tone"].default_value, None);
+}
+
 /// A generic component's own type parameters are placeholders, the way an interface's are, and an ES2015 global
 /// (`Iterable`) is TypeScript's.
 #[test]

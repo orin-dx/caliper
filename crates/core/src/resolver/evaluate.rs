@@ -28,6 +28,8 @@ pub(super) struct Key {
     pub(super) name: String,
     pub(super) required: bool,
     pub(super) description: String,
+    /// The JSDoc tags of the source member (`@default "md"`).
+    pub(super) tags: std::collections::BTreeMap<String, String>,
 }
 
 /// `ty` with a decidable conditional replaced by its branch, or an indexed access by the member it reads. `None` when
@@ -74,14 +76,16 @@ pub(super) fn mapped_keys(
             });
             Some(
                 names
-                    .map(|name| Some(Key { name: name?, required: true, description: String::new() }))
+                    .map(|name| {
+                        Some(Key { name: name?, required: true, description: String::new(), tags: Default::default() })
+                    })
                     .collect::<Option<_>>()?,
             )
         }
         other => Some(
             literal_set(other)?
                 .into_iter()
-                .map(|name| Key { name, required: true, description: String::new() })
+                .map(|name| Key { name, required: true, description: String::new(), tags: Default::default() })
                 .collect(),
         ),
     }
@@ -248,7 +252,12 @@ fn keys_of(target: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, dep
         CollectedType::Object(fields) => Some(
             fields
                 .iter()
-                .map(|f| Key { name: f.name.clone(), required: f.required, description: f.description.clone() })
+                .map(|f| Key {
+                    name: f.name.clone(),
+                    required: f.required,
+                    description: f.description.clone(),
+                    tags: Default::default(),
+                })
                 .collect(),
         ),
         CollectedType::Named { name, args } => {
@@ -269,7 +278,12 @@ fn keys_of(target: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, dep
 fn interface_keys(iface: &CollectedInterface, ctx: &ResolutionContext, depth: u8, keys: &mut Vec<Key>) {
     for prop in &iface.props {
         if !keys.iter().any(|key| key.name == prop.name) {
-            keys.push(Key { name: prop.name.clone(), required: prop.required, description: prop.description.clone() });
+            keys.push(Key {
+                name: prop.name.clone(),
+                required: prop.required,
+                description: prop.description.clone(),
+                tags: prop.tags.clone(),
+            });
         }
     }
     if depth > MAX_DEPTH {
