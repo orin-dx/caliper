@@ -63,6 +63,24 @@ export interface JsExtractOptions {
   loadDependencies?: boolean
   /** Which inherited sources of more than 30 props to list as one layer (default `'dependencies'`). */
   collapseInheritedProps?: 'dependencies' | 'all' | 'none'
+  /**
+   * Session only (`createSession`, `initializeSession`, `extractFileIncremental`): parse and index every file, and
+   * resolve a component when `sessionDocgenInfo` asks for it (off by default; ADR 0016). `initializeSession` then
+   * returns an output with no components.
+   */
+  lazy?: boolean
+}
+
+/** What a lazy session has indexed and resolved so far. `None` for an eager, unknown or uninitialized session. */
+export interface JsLazyStats {
+  revision: number
+  files: number
+  /** Components found by parsing. */
+  components: number
+  /** Components resolved since the last edit that could change them. */
+  resolved: number
+  /** Dependency declaration files loaded for the names resolved components reached. */
+  dependencyFiles: number
 }
 
 /**
@@ -73,8 +91,16 @@ export interface JsExtractOptions {
 export declare function resolutionConfigFiles(sessionId: number): Array<string>
 
 /**
+ * Every component key `sessionDocgenInfo` answers, sorted. A lazy session resolves only imported-member aliases to
+ * decide; the rest come from parsing alone. Empty for an unknown or uninitialized session.
+ */
+export declare function sessionComponentKeys(sessionId: number): Array<string>
+
+/**
  * The session's components with these keys as react-docgen-typescript documents them (`__docgenInfo`, which
  * Storybook converts to argTypes), as a JSON object keyed by component key. A key the session doesn't have is left
  * out; so is every key before the session is initialized.
  */
 export declare function sessionDocgenInfo(sessionId: number, keys: Array<string>): string
+
+export declare function sessionStats(sessionId: number): JsLazyStats | null

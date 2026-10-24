@@ -325,9 +325,16 @@ pub(super) fn displayed_member(
 pub(crate) type MemberReadKey = (Box<str>, Box<str>, Box<str>);
 
 /// A cached `member` answer and the files it read.
+#[derive(Clone)]
 pub(crate) struct MemberRead {
     found: Option<Arc<Located>>,
     deps: super::deps::Dependencies,
+}
+
+impl MemberRead {
+    pub(super) fn deps(&self) -> &super::deps::Dependencies {
+        &self.deps
+    }
 }
 
 fn member_uncached(

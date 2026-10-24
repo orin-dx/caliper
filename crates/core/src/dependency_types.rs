@@ -238,6 +238,11 @@ pub(crate) struct DependencyLayer {
 }
 
 impl DependencyLayer {
+    /// How many declaration files this layer holds.
+    pub(crate) fn file_count(&self) -> usize {
+        self.files.len()
+    }
+
     pub(crate) fn is_dependency_file(&self, file: &Utf8Path) -> bool {
         self.files.contains(file.as_str())
     }
@@ -255,6 +260,21 @@ impl DependencyLayer {
     /// Why the loader found no declaration for `name` imported from `specifier` by a file in `dir`, if it didn't.
     pub(crate) fn unresolved_reason(&self, dir: &Utf8Path, specifier: &str, name: &str) -> Option<Unresolved> {
         self.unresolved.get(&(Box::from(dir.as_str()), Box::from(specifier), CompactString::from(name))).copied()
+    }
+
+    /// Whether `other`, a layer this one was extended from, resolves every name the way this one does: extending only
+    /// adds, so equal counts mean nothing was added.
+    pub(crate) fn resolves_like(&self, other: &DependencyLayer) -> bool {
+        self.files.len() == other.files.len()
+            && self.react_files.len() == other.react_files.len()
+            && self.exports.len() == other.exports.len()
+            && self.resolutions.len() == other.resolutions.len()
+            && self.unresolved.len() == other.unresolved.len()
+    }
+
+    /// Whether this layer has followed every one of `demands`.
+    pub(crate) fn covers(&self, demands: &[Demand]) -> bool {
+        demands.iter().all(|d| self.demands.contains(&d.key()))
     }
 
     /// The demands of `demands` this layer has not followed.

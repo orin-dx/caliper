@@ -361,6 +361,26 @@ impl ResolutionContext {
         }
     }
 
+    /// Add to this context the memos of `from` that a context over a larger dependency layer would compute again
+    /// identically (ADR 0016): file-system answers, shared props, and the interface chains and member reads whose
+    /// dependencies `keep` accepts, given the file each was read in, which a layer lacking a name they reached would
+    /// otherwise have poisoned.
+    pub(crate) fn inherit_memos(&self, from: &ResolutionContext, keep: impl Fn(&Dependencies, &str) -> bool) {
+        from.interface_chains.copy_into(&self.interface_chains, &keep);
+        for entry in from.member_reads.iter().filter(|entry| keep(entry.value().deps(), &entry.key().0)) {
+            self.member_reads.insert(entry.key().clone(), entry.value().clone());
+        }
+        for entry in from.shared_props.iter() {
+            self.shared_props.insert(*entry.key(), entry.value().clone());
+        }
+        for entry in from.module_resolutions.iter() {
+            self.module_resolutions.insert(entry.key().clone(), entry.value().clone());
+        }
+        for entry in from.react_types_files.iter() {
+            self.react_types_files.insert(entry.key().clone(), entry.value().clone());
+        }
+    }
+
     /// `prop` as the run's one shared allocation of it: an equal prop built earlier, or `prop` itself.
     pub(crate) fn share(&self, prop: ParsedProp) -> Arc<ParsedProp> {
         use std::hash::Hasher;

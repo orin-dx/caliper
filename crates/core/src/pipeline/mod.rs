@@ -17,7 +17,8 @@ pub mod rdt;
 mod revision;
 pub mod watch;
 
-pub use watch::WatchSession;
+pub use revision::ComponentAnswer;
+pub use watch::{LazyStats, WatchSession};
 
 /// Filename that trips a simulated panic in the Phase 2 parse closure —
 /// exists only to let tests exercise `panic_guard::contain_panic`'s
