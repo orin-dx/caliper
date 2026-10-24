@@ -1307,17 +1307,40 @@ fn an_update_reports_the_keys_it_changed_and_removed() {
     assert!(second.revision > first.revision, "revisions increase: {} then {}", first.revision, second.revision);
 }
 
-/// The prop ids a canonical component JSON refers to.
-fn referenced_ids(components: &[&serde_json::Value]) -> std::collections::BTreeSet<String> {
-    components
-        .iter()
-        .flat_map(|c| [&c["props"], &c["notableInherited"]])
-        .flat_map(|ids| ids.as_object().unwrap().values().map(|id| id.as_str().unwrap().to_owned()))
-        .collect()
+/// The strings in a JSON array.
+fn strings<'a>(array: &'a serde_json::Value) -> impl Iterator<Item = &'a str> {
+    array.as_array().unwrap().iter().map(|id| id.as_str().unwrap())
 }
 
-/// What a client does with an update's JSON: drop removed keys, set updated ones, merge the update's props, then drop
-/// props no component refers to any more.
+/// The ids of the prop sets and omitted-name lists a canonical component JSON refers to.
+fn referenced_tables(components: &[&serde_json::Value]) -> (Vec<String>, Vec<String>) {
+    let sets = components.iter().flat_map(|c| strings(&c["props"])).map(str::to_owned).collect();
+    let lists = components
+        .iter()
+        .flat_map(|c| c["inheritance"].as_array().unwrap())
+        .map(|layer| layer["omitted"].as_str().unwrap().to_owned())
+        .collect();
+    (sets, lists)
+}
+
+/// The prop ids a canonical component JSON refers to, through `tables`' prop sets.
+fn referenced_ids(tables: &serde_json::Value, components: &[&serde_json::Value]) -> std::collections::BTreeSet<String> {
+    let (sets, _) = referenced_tables(components);
+    let in_sets = sets.iter().flat_map(|set| tables["propSets"][set].as_object().unwrap().values());
+    let notable = components.iter().flat_map(|c| c["notableInherited"].as_object().unwrap().values());
+    in_sets.chain(notable).map(|id| id.as_str().unwrap().to_owned()).collect()
+}
+
+/// A component's prop id for `name`, through the prop sets of `output`.
+fn prop_id(output: &serde_json::Value, key: &str, name: &str) -> serde_json::Value {
+    strings(&output["components"][key]["props"])
+        .find_map(|set| output["propSets"][set].get(name))
+        .cloned()
+        .unwrap_or(serde_json::Value::Null)
+}
+
+/// What a client does with an update's JSON: drop removed keys, set updated ones, merge the update's tables, then drop
+/// the table entries nothing refers to any more.
 fn apply_canonical_update(output: &mut serde_json::Value, update: &serde_json::Value) {
     let components = output["components"].as_object_mut().unwrap();
     for key in update["removedKeys"].as_array().unwrap() {
@@ -1327,10 +1350,19 @@ fn apply_canonical_update(output: &mut serde_json::Value, update: &serde_json::V
     for (key, component) in updated {
         components.insert(key.as_str().unwrap().to_owned(), component.clone());
     }
-    let referenced = referenced_ids(&components.values().collect::<Vec<_>>());
-    let table = output["props"].as_object_mut().unwrap();
-    table.extend(update["props"].as_object().unwrap().clone());
-    table.retain(|id, _| referenced.contains(id));
+    let current: Vec<serde_json::Value> = components.values().cloned().collect();
+    let current: Vec<&serde_json::Value> = current.iter().collect();
+    let (sets, mut lists) = referenced_tables(&current);
+    lists.extend(
+        output["diagnostics"].as_array().unwrap().iter().filter_map(|d| d["affects"].as_str().map(str::to_owned)),
+    );
+    for table in ["props", "propSets", "nameLists"] {
+        output[table].as_object_mut().unwrap().extend(update[table].as_object().unwrap().clone());
+    }
+    output["propSets"].as_object_mut().unwrap().retain(|id, _| sets.contains(id));
+    output["nameLists"].as_object_mut().unwrap().retain(|id, _| lists.contains(id));
+    let referenced = referenced_ids(output, &current);
+    output["props"].as_object_mut().unwrap().retain(|id, _| referenced.contains(id));
 }
 
 #[test]
@@ -1348,7 +1380,7 @@ fn an_updates_props_are_exactly_the_ones_its_components_refer_to_and_applying_it
     }
     let session = WatchSession::new(PipelineOptions { src_dirs: vec![dir], ..Default::default() });
     let mut client = serde_json::to_value(session.initialize()).unwrap();
-    let label = |output: &serde_json::Value, key: &str| output["components"][key]["props"]["label"].clone();
+    let label = |output: &serde_json::Value, key: &str| prop_id(output, key, "label");
     assert_eq!(label(&client, "Button"), label(&client, "Chip"), "an inherited prop has one id: {client:#}");
 
     std::fs::write(&base, "export interface BaseProps { label: string; tone?: 'info' | 'warn'; }\n")
@@ -1357,12 +1389,18 @@ fn an_updates_props_are_exactly_the_ones_its_components_refer_to_and_applying_it
 
     assert_eq!(update["updatedKeys"], serde_json::json!(["Button", "Chip"]));
     let carried: std::collections::BTreeSet<String> = update["props"].as_object().unwrap().keys().cloned().collect();
-    assert_eq!(carried, referenced_ids(&update["updatedComponents"].as_array().unwrap().iter().collect::<Vec<_>>()));
+    let updated = update["updatedComponents"].as_array().unwrap().iter().collect::<Vec<_>>();
+    assert_eq!(carried, referenced_ids(&update, &updated));
+    let carried_sets: std::collections::BTreeSet<&String> = update["propSets"].as_object().unwrap().keys().collect();
+    let referenced_sets: std::collections::BTreeSet<String> = referenced_tables(&updated).0.into_iter().collect();
+    assert_eq!(carried_sets, referenced_sets.iter().collect());
 
     apply_canonical_update(&mut client, &update);
     let session_now = serde_json::to_value(session.snapshot()).unwrap();
     assert_eq!(client["components"], session_now["components"]);
     assert_eq!(client["props"], session_now["props"]);
+    assert_eq!(client["propSets"], session_now["propSets"]);
+    assert_eq!(client["nameLists"], session_now["nameLists"]);
 }
 
 #[test]

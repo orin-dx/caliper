@@ -1,9 +1,10 @@
 import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import type * as Napi from 'caliper-docgen-napi'
-import type { Diagnostic, IncrementalUpdate, RdtComponentDoc } from 'caliper-docgen-napi'
+import type { Diagnostic, IncrementalUpdate, RdtComponentDoc, SessionIndex } from 'caliper-docgen-napi'
 import { localNameOf } from './exports.js'
 import { buildLookups, diagnosticId, incompleteMessages, type ComponentRef, type Lookups } from './lookups.js'
+import { assertSchemaVersion, expandDiagnostics } from './schema.js'
 
 /** The binding calls the session makes, so tests can stand in for the native module. */
 export type SessionBinding = Pick<
@@ -107,15 +108,15 @@ export class DocgenSession {
 
   /** Reads where every component is declared (and, for an eager session, which diagnostics affect them). */
   private async reindex(): Promise<void> {
-    const output = JSON.parse(await this.napi.initializeSessionIndex(this.sessionId!, this.napiOptions())) as {
-      components: Record<string, ComponentRef>
-      diagnostics: Diagnostic[]
-    }
+    const json = await this.napi.initializeSessionIndex(this.sessionId!, this.napiOptions())
+    const output = assertSchemaVersion(JSON.parse(json) as SessionIndex, 'session index')
     this.components.clear()
     for (const [key, entry] of Object.entries(output.components)) {
       this.components.set(key, { filePath: resolve(entry.filePath), displayName: entry.displayName })
     }
-    for (const diagnostic of output.diagnostics) this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
+    for (const diagnostic of expandDiagnostics(output.diagnostics, output.nameLists)) {
+      this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
+    }
     this.index = undefined
   }
 
@@ -128,12 +129,17 @@ export class DocgenSession {
       const entry = update.updatedComponents[i]
       if (entry) this.components.set(key, { filePath: resolve(entry.filePath), displayName: entry.displayName })
     })
-    for (const diagnostic of update.removedDiagnostics) this.diagnostics.delete(diagnosticId(diagnostic))
-    for (const diagnostic of update.diagnostics) this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
+    for (const diagnostic of expandDiagnostics(update.removedDiagnostics, update.nameLists)) {
+      this.diagnostics.delete(diagnosticId(diagnostic))
+    }
+    for (const diagnostic of expandDiagnostics(update.diagnostics, update.nameLists)) {
+      this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
+    }
   }
 
   private async check(): Promise<void> {
-    const update = JSON.parse(await this.napi.ensureFresh(this.sessionId!)) as IncrementalUpdate
+    const json = await this.napi.ensureFresh(this.sessionId!)
+    const update = assertSchemaVersion(JSON.parse(json) as IncrementalUpdate, 'update')
     if (this.lazy) {
       // A lazy update names the keys an edit can change but carries no component to place them, so look again at where
       // the components are; resolving none of them, that costs a parse-level listing.
