@@ -1,10 +1,10 @@
 # Semantic backend (TypeScript 7)
 
-**Status:** designed, not implemented ([ADR 0006](adr/0006-semantic-backend-as-second-resolver.md)). It will ship as an experimental opt-in, off by default (decided 2026-10-23); structural extraction stays the default. `PipelineOptions::resolve_complex_types` exists and does nothing. Separately, TypeScript 7.1's checker already runs as a test-only oracle for structural prop types (`scripts/parity.py oracle`, `docs/parity.md`). **Last verified:** 2026-09-27 for measurements, each naming its nightly; 2026-10-22 for the API table against the `7.1.0-beta` package; 2026-10-23 for the fixture-corpus parity on `7.1.0-beta`.
+**Status:** slice 1 implemented as an experimental opt-in, off by default ([ADR 0006](adr/0006-semantic-backend-as-second-resolver.md), [ADR 0007](adr/0007-backend-discovers-components-and-compiles-in.md)): `extract --experimental-semantic-types` (see "Slice 1" below). Structural extraction stays the default and the fallback. `PipelineOptions::resolve_complex_types` exists and does nothing. Separately, TypeScript 7.1's checker runs as a test-only oracle for structural prop types (`scripts/parity.py oracle`, `docs/parity.md`). **Last verified:** 2026-10-23 for slice 1 against `7.1.0-beta`; 2026-09-27 for the Cost measurements, each naming its nightly; 2026-10-22 for the API table against the `7.1.0-beta` package; 2026-10-23 for the fixture-corpus parity on `7.1.0-beta`.
 
 ## Next step
 
-The Rust client exists (`crates/tsc-client`) and covers the Lifecycle cases below. Next: close the open Lifecycle items in the Gates table, then re-measure Cost with the Rust client. The client is not wired into `crates/core`, the CLI or the NAPI binding yet, which waits on the "Open decisions" below.
+Slice 1 below covers function components by their export. Next, in order: carry what `PropType` cannot (optional and rest parameters, index signatures, `readonly`), per-prop `tags` and `parent`, class and generic components, `batchRequests` to cut round trips, watch-mode notifications, then the NAPI binding. The client's open Lifecycle items in the Gates table still stand.
 
 Some props can't be resolved from the AST alone. An opt-in backend asks TypeScript's checker instead, using the algorithm react-docgen-typescript (RDT) uses, and merges the answer into the structural result. Structural extraction stays the default.
 
@@ -56,6 +56,31 @@ The structural result is complete on its own and returns first. The semantic pas
 ### Delivery (proposed)
 
 The structural result returns immediately. The semantic result follows: the CLI waits for it behind an opt-in flag, and the NAPI binding exposes a second async call so the Vite plugin can patch when it resolves. Spawn `tsc` at the start of the run so it loads while extraction runs. Each result carries a content hash, and a stale one is dropped.
+
+## Slice 1 (experimental, off by default)
+
+`caliper-docgen extract --experimental-semantic-types [--tsc-path PATH]`, or `experimentalSemanticTypes` and `tscPath` in `docgen.config.ts`. `crates/semantic` spawns the project's `node_modules/typescript/bin/tsc --api` (version pinned to `7.1.0-beta`), builds one program over the files of the components the structural pass found, and asks for each exported function component its call signature's first parameter and that type's properties. The CLI then calls core's `merge_semantic`. Not wired into watch, `check`, `inspect` or the NAPI binding.
+
+- **Merge:** props present, `type` and `required` from the checker; `defaultValue`, `parent`, `declarations`, `tags`, inheritance layers and curated inherited props stay structural. The checker is asked for a prop's description only when the structural pass has none (65% of Mantine's requests otherwise). Props `@types/react` declares are excluded by declaring file. Identical merged props are shared, as in the structural result.
+- **Output type:** no new `PropType` variant and no schema change. Primitives, literals, unions (with `boolean` collapsed and `undefined` dropped from optional props), arrays, tuples, inline objects of up to 16 fields and single-signature functions map onto existing variants; `ReactNode`, `ElementType`, `CSSProperties` and `ReactElement` map to their terminals; anything else (named interfaces, enums, generics, overloads, anything past depth 4) is `Named` with the checker's own text. Union members keep the checker's order, which is creation order, not source order.
+- **Provenance:** `Info` diagnostics with code `SEMANTIC_BACKEND` whose `affects` lists the output keys: one for the components the checker resolved, one per fallback reason. A first-class per-component field would change the canonical JSON and needs an output schema version first.
+- **Fallback:** a missing, unpinned, crashed or timed-out `tsc` gives the structural result plus one `SEMANTIC_BACKEND` warning, never an error. Per component, the structural result stands for: not exported, class or non-function, overloaded, no props parameter, `any`/`unknown`/generic/union props type, export not found by name (a display name such as `@mantine/core/Accordion` also tries its last segment), or a request the checker rejected. Each is listed with its reason.
+- **Not carried:** optional and rest parameters, index signatures, `readonly`, generic parameters of functions, per-prop `tags`, `parent`/`declarations` from the checker. Default exports match by `default` when no export has the component's name.
+- **Tests:** `crates/semantic/tests/replay.rs` runs the backend against `replay-tsc`, which answers from a recording of the real `7.1.0-beta` (`tests/fixtures/recording.json`, refreshed by `cargo run -p caliper-docgen-semantic --example record_fixture -- <typescript package dir>`); a request the recording lacks fails the test. Fallbacks (no `tsc`, unpinned version, bad path, crash, hang) are asserted as the structural output plus one warning. The CLI test asserts the default output has no `SEMANTIC_BACKEND` diagnostic.
+
+Measured on `7.1.0-beta`, `extract --json` (best of 2 to 3), flag on against off, plus the base commit's output compared byte for byte (identical apart from `durationMs` on all five corpora, with and without `--load-dependencies`). Peak RSS is the larger of the two processes; on Chakra Caliper is 117 MiB and `tsc` 945 MiB.
+
+| Corpus   | Components resolved by the checker |            Off |              On |
+| -------- | ---------------------------------: | -------------: | --------------: |
+| mantine  |                          332 / 344 |  47 ms, 82 MiB | 588 ms, 287 MiB |
+| chakra   |                          598 / 598 |  38 ms, 68 MiB |  9.3 s, 975 MiB |
+| shadcn   |                      1,693 / 1,884 |  48 ms, 81 MiB |  1.5 s, 874 MiB |
+| antd     |                          206 / 248 |  36 ms, 69 MiB | 508 ms, 443 MiB |
+| spectrum |                      1,153 / 1,356 | 71 ms, 118 MiB | 618 ms, 381 MiB |
+
+Chakra's time is `tsc` computing 470,000 shared props' types, not round trips. Before shared props were interned in the merge, Caliper itself held 7.4 GiB on Chakra.
+
+Against the oracle (`scripts/parity.py oracle`, flag on, `7.1.0-beta`), wrong verdicts fall to 0.0% on every corpus but antd (0.1%), but the identical-or-spelled share also falls: mantine 91.3% to 22.0%, chakra 100% to 16.4%, shadcn 85.2% to 52.3%, antd 91.9% to 82.3%, spectrum 83.2% to 28.3%. The oracle credits the structural result for keeping a type's name (`StyleProp<MantineSpacing>`); the checker's answer is expanded to its members and compared as "less precise". Keeping the alias name and arguments needs a `PropType` that carries them, which is an output change.
 
 ## The algorithm
 
@@ -147,7 +172,7 @@ Pass only the files you need as roots. The API's checker is lazy, and diagnostic
 ## Boundaries
 
 - **`crates/core`** owns the semantic result type, the merge and the diagnostics. It has no I/O, no async and no protocol types. The merge lives here because `OpaqueDetail` and `ParsedProp` internals are `pub(crate)`.
-- **Backend crate** (feature-gated, off by default) spawns `tsc --api`, speaks the protocol, and handles timeouts and supervision. `config.rs` has none of these today.
+- **Backend crate** (`crates/semantic`, always compiled in and enabled at run time, ADR 0007) spawns `tsc --api` through `crates/tsc-client`, runs the algorithm, and handles timeouts. Core never depends on it: the CLI runs the backend and calls core's `merge_semantic`.
 - **CLI and NAPI** only switch it on. Neither calls JS.
 - **Not a `DocgenPlugin`.** The hook is synchronous and runs on the cold path only. `WatchSession::update_file` skips plugins.
 - **Failure** leaves the structural result and adds a diagnostic. It never fails extraction.

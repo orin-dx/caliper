@@ -17,7 +17,8 @@ pub mod rdt;
 mod revision;
 pub mod watch;
 
-pub use watch::WatchSession;
+pub use revision::ComponentAnswer;
+pub use watch::{LazyStats, WatchSession};
 
 /// Filename that trips a simulated panic in the Phase 2 parse closure —
 /// exists only to let tests exercise `panic_guard::contain_panic`'s
@@ -116,6 +117,14 @@ pub struct PipelineOptions {
     pub load_dependencies: bool,
     /// Which large inherited sources to record as a layer instead of expanding.
     pub collapse_inherited_props: CollapseInheritedProps,
+    /// Ask the TypeScript 7.1 checker for each component's props and merge them over the structural result
+    /// (`docs/type-checker-integration.md`). Off by default and experimental. `extract` ignores it: the checker
+    /// backend lives in `caliper-docgen-semantic`, which depends on this crate, so the embedding (the CLI) runs it and
+    /// calls [`crate::types::semantic::merge_semantic`].
+    pub experimental_semantic_types: bool,
+    /// The `tsc` binary the semantic backend spawns. When unset it finds `node_modules/typescript/bin/tsc` above the
+    /// first source directory.
+    pub semantic_tsc_path: Option<Utf8PathBuf>,
 }
 
 impl Default for PipelineOptions {
@@ -131,6 +140,8 @@ impl Default for PipelineOptions {
             plugins: crate::plugin::PluginRegistry::default(),
             load_dependencies: false,
             collapse_inherited_props: CollapseInheritedProps::default(),
+            experimental_semantic_types: false,
+            semantic_tsc_path: None,
         }
     }
 }

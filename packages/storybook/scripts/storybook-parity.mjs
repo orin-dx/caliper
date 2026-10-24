@@ -136,7 +136,7 @@ async function runStories(variant, corpus, options) {
       warnings.push(String(message))
       capture(message)
     }
-    const { createDocgenProvider } = await import(pathToFileURL(join(here, '../dist/provider.js')).href)
+    const { createDocgenProvider } = await import(pathToFileURL(join(options.dist, 'provider.js')).href)
     provider = createDocgenProvider({
       srcDirs: [src].flat(),
       tsconfigPath: options.tsconfig,
@@ -202,7 +202,7 @@ async function runSession(variant, corpus, options) {
   const { root, src } = CORPORA[corpus]
   const rootDir = resolve(options.corpora, root)
   process.chdir(rootDir)
-  const { DocgenSession } = await import(pathToFileURL(join(here, '../dist/session.js')).href)
+  const { DocgenSession } = await import(pathToFileURL(join(options.dist, 'session.js')).href)
   const napi = await import('caliper-docgen-napi')
   const session = new DocgenSession(
     {
@@ -260,6 +260,7 @@ function child(mode, variant, corpus, options) {
     options.corpora,
   ]
   if (options.files) args.push('--files', options.files)
+  args.push('--dist', options.dist)
   args.push('--typescript', options.typescript)
   if (options.tsconfig) args.push('--tsconfig', options.tsconfig)
   const result = spawnSync(process.execPath, args, { encoding: 'utf8', maxBuffer: 1 << 30, cwd: here })
@@ -518,6 +519,7 @@ async function main() {
       limit: { type: 'string' },
       sample: { type: 'string' },
       files: { type: 'string' },
+      dist: { type: 'string' },
       typescript: { type: 'string' },
       tsconfig: { type: 'string' },
       child: { type: 'string' },
@@ -532,6 +534,8 @@ async function main() {
     limit: values.limit ? Number(values.limit) : Infinity,
     sample: values.sample ? Number(values.sample) : 100,
     files: values.files,
+    // The addon build to measure; another build of the package runs the same stories for a before/after.
+    dist: resolve(values.dist ?? join(here, '../dist')),
     typescript: resolve(
       values.typescript ?? join(here, '../../../apps/validate/node_modules/typescript/lib/typescript.js'),
     ),

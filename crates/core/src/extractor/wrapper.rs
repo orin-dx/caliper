@@ -143,6 +143,19 @@ impl<'src> SourceDataCollector<'src> {
         true
     }
 
+    /// Whether a generic call names the props type of the component it builds in its type arguments, as in
+    /// `withContext<HTMLDivElement, OverlayProps>(BaseOverlay, …)`. The call's own props then replace those of the
+    /// component it receives.
+    pub(super) fn call_names_props_type<'a>(&mut self, call: &CallExpression<'a>) -> bool {
+        let Some(type_arguments) = call.type_arguments.as_ref() else { return false };
+        let type_args: Vec<WrapperTypeArg> = type_arguments
+            .params
+            .iter()
+            .map(|ty| WrapperTypeArg { reference: self.extract_type_name_from_type(ty) })
+            .collect();
+        matches!(self.select_wrapper_props(&type_args), PropsSelection::Found { from_payload: false, .. })
+    }
+
     /// Turn the recorded candidates into mappings, now that every declaration in the file is known.
     pub(super) fn promote_wrapper_calls(&mut self) {
         for pending in std::mem::take(&mut self.pending_wrappers) {

@@ -19,6 +19,8 @@ struct DocgenConfigSchema {
     extra_builtins: Option<Vec<String>>,
     load_dependencies: Option<bool>,
     collapse_inherited_props: Option<String>,
+    experimental_semantic_types: Option<bool>,
+    tsc_path: Option<String>,
 }
 
 impl DocgenConfigSchema {
@@ -55,6 +57,12 @@ impl DocgenConfigSchema {
             opts.collapse_inherited_props = CollapseInheritedProps::parse(mode).map_err(|bad| {
                 format!("collapseInheritedProps is '{bad}', expected \"dependencies\", \"all\" or \"none\"")
             })?;
+        }
+        if let Some(on) = self.experimental_semantic_types {
+            opts.experimental_semantic_types = on;
+        }
+        if let Some(path) = self.tsc_path {
+            opts.semantic_tsc_path = Some(path.into());
         }
         Ok(opts)
     }
@@ -157,7 +165,7 @@ pub fn try_load_config(path: &std::path::Path) -> Result<Option<PipelineOptions>
             help = "Check docgen.config.ts's exported fields against the supported schema \
                     (srcDirs, excludePatterns, excludePrefixes, reactVersion, crossPackage, \
                     pandacssOutdir, variantFunctions, htmlAttributes, tsconfigPath, \
-                    vanillaExtract, cacheDir, extraBuiltins, loadDependencies, collapseInheritedProps).",
+                    vanillaExtract, cacheDir, extraBuiltins, loadDependencies, collapseInheritedProps, experimentalSemanticTypes, tscPath).",
             "docgen.config.ts at {} doesn't match the expected shape: {}",
             path.display(),
             e,

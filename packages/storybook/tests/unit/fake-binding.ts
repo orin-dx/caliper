@@ -52,13 +52,15 @@ export function warning(affects: string[], severity: Diagnostic['severity'] = 'w
   }
 }
 
-/** A stand-in for the native binding: a fixed cold output, then one queued update per changed file. */
+/** A stand-in for the native binding: a fixed cold index, then one queued update per look at the files. */
 export class FakeBinding implements SessionBinding {
-  readonly changed: string[] = []
-  readonly updates = new Map<string, Partial<IncrementalUpdate>>()
+  /** How many times the files were looked at. */
+  looks = 0
+  /** The updates the next looks return, in order; a look with none queued finds nothing changed. */
+  readonly updates: Partial<IncrementalUpdate>[] = []
   docs: Record<string, RdtComponentDoc> = {}
-  /** Runs while a change is being extracted, before its update is returned. */
-  duringExtraction: (() => void) | undefined
+  /** Runs while a look is under way, before its update is returned. */
+  duringLook: (() => void) | undefined
   initializations = 0
   closed = false
   private revision = 1
@@ -67,38 +69,35 @@ export class FakeBinding implements SessionBinding {
 
   createSession = (): number => 7
 
-  initializeSession = async (): Promise<string> => {
+  initializeSessionIndex = async (): Promise<string> => {
     this.initializations++
-    return JSON.stringify({ components: {}, props: {}, enums: {}, diagnostics: [], ...this.output })
+    return JSON.stringify({ components: {}, diagnostics: [], ...this.output })
   }
 
-  extractFileIncremental = async (filePath: string): Promise<string> => {
-    this.changed.push(filePath)
-    const during = this.duringExtraction
-    this.duringExtraction = undefined
+  ensureFresh = async (): Promise<string> => {
+    this.looks++
+    const during = this.duringLook
+    this.duringLook = undefined
     during?.()
     await Promise.resolve()
+    const next = this.updates.shift()
     const update: IncrementalUpdate = {
-      revision: ++this.revision,
+      revision: next ? ++this.revision : this.revision,
       updatedComponents: [],
       props: {},
       updatedKeys: [],
       removedKeys: [],
       removedDiagnostics: [],
-      affectedFiles: [filePath],
+      affectedFiles: [],
       diagnostics: [],
       durationMs: 0,
-      ...this.updates.get(filePath),
+      ...next,
     }
     return JSON.stringify(update)
   }
 
   sessionDocgenInfo = (_sessionId: number, keys: string[]): string =>
     JSON.stringify(Object.fromEntries(keys.filter((key) => key in this.docs).map((key) => [key, this.docs[key]])))
-
-  configFiles: string[] = []
-
-  resolutionConfigFiles = (): string[] => this.configFiles
 
   closeSession = (): void => {
     this.closed = true

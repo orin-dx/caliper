@@ -4,12 +4,13 @@ use std::time::{Duration, Instant, SystemTime};
 
 use arc_swap::ArcSwapOption;
 use camino::{Utf8Path, Utf8PathBuf};
+use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
 use crate::types::*;
 
 use super::discover::{discover_dirs, discover_files};
-use super::revision::{empty_output, output_delta, Revision};
+use super::revision::{empty_output, output_delta, ComponentAnswer, Revision};
 use super::{IncrementalUpdate, PipelineOptions};
 
 /// Canonicalize `path`, falling back to canonicalizing its parent directory
@@ -116,9 +117,12 @@ fn stamp_since(path: &Utf8Path, built_at: SystemTime) -> Stamp {
     }
 }
 
+/// Stamping is a stat call per path, thousands of them for a large project: done in parallel here and in `ensure_fresh`.
 fn stamps_of(paths: impl IntoIterator<Item = Utf8PathBuf>, built_at: SystemTime) -> FxHashMap<Utf8PathBuf, Stamp> {
     paths
         .into_iter()
+        .collect::<Vec<_>>()
+        .into_par_iter()
         .map(|path| {
             let stamp = stamp_since(&path, built_at);
             (path, stamp)
@@ -163,22 +167,122 @@ fn unchanged(revision: u64) -> IncrementalUpdate {
     }
 }
 
+/// The keys several lazy updates, applied one after another, left changed or gone.
+fn merge_lazy_updates(steps: Vec<IncrementalUpdate>, revision: u64, start: Instant) -> IncrementalUpdate {
+    let mut updated: std::collections::BTreeSet<String> = Default::default();
+    let mut removed: std::collections::BTreeSet<String> = Default::default();
+    let mut affected_files: Vec<Utf8PathBuf> = Vec::new();
+    for step in steps {
+        for key in step.removed_keys {
+            updated.remove(&key);
+            removed.insert(key);
+        }
+        for key in step.updated_keys {
+            removed.remove(&key);
+            updated.insert(key);
+        }
+        affected_files.extend(step.affected_files);
+    }
+    affected_files.sort();
+    affected_files.dedup();
+    IncrementalUpdate {
+        updated_keys: updated.into_iter().collect(),
+        removed_keys: removed.into_iter().collect(),
+        affected_files,
+        duration_ms: start.elapsed().as_millis() as u64,
+        ..unchanged(revision)
+    }
+}
+
 /// Stateful session for incremental watch-mode extraction.
 ///
 /// The session holds one immutable `Revision` at a time. `update_file` builds the next revision from the current one
 /// (re-parsing the changed file, re-resolving the components whose resolution read it) and publishes it with a single
 /// atomic store, so a reader always sees one complete revision, never parts of two. Writers are serialized; readers
 /// never wait on them.
+///
+/// A lazy session ([`WatchSession::lazy`], ADR 0016) parses and indexes every file and resolves a component only when
+/// [`WatchSession::component`] asks for it; the rest of this API behaves as for an eager one.
 pub struct WatchSession {
     pub options: PipelineOptions,
     current: ArcSwapOption<Revision>,
     writer: Mutex<Freshness>,
+    lazy: bool,
+}
+
+/// What a lazy session has indexed and answered so far.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LazyStats {
+    pub revision: u64,
+    pub files: usize,
+    /// Components found by parsing.
+    pub components: usize,
+    /// Components resolved since the last edit that could change them.
+    pub resolved: usize,
+    /// Dependency declaration files loaded so far, for the names resolved components reached.
+    pub dependency_files: usize,
 }
 
 impl WatchSession {
     /// Create an empty WatchSession (call `initialize()` before first use).
     pub fn new(options: PipelineOptions) -> Self {
-        Self { options, current: ArcSwapOption::empty(), writer: Mutex::new(Freshness::cold(SystemTime::UNIX_EPOCH)) }
+        Self {
+            options,
+            current: ArcSwapOption::empty(),
+            writer: Mutex::new(Freshness::cold(SystemTime::UNIX_EPOCH)),
+            lazy: false,
+        }
+    }
+
+    /// Create an empty lazy session (call `initialize()` before first use). Its `initialize` parses and indexes every
+    /// file and returns an output with no components; [`Self::component`] resolves one on request.
+    ///
+    /// This is the entry point for a host that links the library and asks about one component at a time (an editor
+    /// server, a Storybook addon, an MCP server). The session is `Send + Sync`: share it behind an `Arc` and call it
+    /// from any thread. Answers are owned values with the component's own diagnostics; no parser type crosses the
+    /// API. Memory is bounded by the project and the dependencies it reaches (ADR 0016).
+    ///
+    /// ```
+    /// use caliper_docgen_core::pipeline::{PipelineOptions, WatchSession};
+    ///
+    /// # let dir = tempfile::tempdir()?;
+    /// # std::fs::write(
+    /// #     dir.path().join("Button.tsx"),
+    /// #     "export function Button(props: { /** Shown on the button. */ label: string; size?: 'sm' | 'lg' }) { return null; }",
+    /// # )?;
+    /// # let root = camino::Utf8PathBuf::from(dir.path().to_str().unwrap());
+    /// let session = WatchSession::lazy(PipelineOptions {
+    ///     src_dirs: vec![root.clone()],
+    ///     // Resolve the types the project imports from packages, only for the names a request reaches.
+    ///     load_dependencies: true,
+    ///     ..Default::default()
+    /// });
+    /// let _ = session.initialize(); // parses and indexes every file; resolves nothing
+    ///
+    /// // By key, or by file and name when the key isn't known.
+    /// let button = session.component("Button").expect("Button is a component");
+    /// assert_eq!(button.entry.props.keys().collect::<Vec<_>>(), ["label", "size"]);
+    /// assert!(button.diagnostics.is_empty());
+    /// assert_eq!(session.component_in(&root.join("Button.tsx"), "Button"), Some(button));
+    ///
+    /// // As react-docgen-typescript documents it, for Storybook's argTypes.
+    /// let docgen = session.docgen_info("Button").expect("Button is a component");
+    /// assert_eq!(docgen["displayName"], "Button");
+    ///
+    /// // After an edit, only the components that read the file are resolved again.
+    /// std::fs::write(root.join("Button.tsx"), "export function Button(props: { label: string }) { return null; }")?;
+    /// let update = session.update_file(&root.join("Button.tsx"));
+    /// assert_eq!(update.updated_keys, ["Button"]);
+    /// assert_eq!(session.component("Button").map(|b| b.entry.props.len()), Some(1));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn lazy(options: PipelineOptions) -> Self {
+        Self { lazy: true, ..Self::new(options) }
+    }
+
+    /// Whether this session resolves components on request rather than all at once.
+    pub fn is_lazy(&self) -> bool {
+        self.lazy
     }
 
     /// Run a full cold extraction to populate this session.
@@ -205,7 +309,10 @@ impl WatchSession {
     /// Extract everything as revision `id` and publish it. The caller holds the writer lock.
     fn cold(&self, writer: &mut Freshness, id: u64) -> Arc<Revision> {
         *writer = Freshness::cold(SystemTime::now());
-        let revision = Arc::new(Revision::cold(&self.options, id));
+        let revision = Arc::new(match self.lazy {
+            true => Revision::cold_lazy(&self.options, id),
+            false => Revision::cold(&self.options, id),
+        });
         self.current.store(Some(revision.clone()));
         revision
     }
@@ -227,6 +334,74 @@ impl WatchSession {
     /// The current output, shared rather than copied. `None` before `initialize`.
     pub fn current_output(&self) -> Option<Arc<ExtractionOutput>> {
         self.current.load_full().map(|revision| revision.output.clone())
+    }
+
+    /// The component published under `key`, with its own diagnostics. A lazy session resolves it now, or answers from
+    /// what an earlier request resolved; the answer is the one a batch extraction of the same files publishes under
+    /// that key. `None` for a key with no component, and before `initialize`.
+    pub fn component(&self, key: &str) -> Option<ComponentAnswer> {
+        let revision = self.current.load_full()?;
+        match revision.is_lazy() {
+            true => revision.lazy_component(&self.options, key),
+            false => revision.published_component(key),
+        }
+    }
+
+    /// The component `name` declared in `file`, found without knowing its key (which depends on what else the project
+    /// names the same). `file` may be relative or reach the project through a symlink. `None` when the file declares
+    /// no such component, and before `initialize`.
+    pub fn component_in(&self, file: &Utf8Path, name: &str) -> Option<ComponentAnswer> {
+        let file = canonicalize_best_effort(file);
+        let revision = self.current.load_full()?;
+        let key = match revision.is_lazy() {
+            true => revision.lazy_key_in(&self.options, &file, name)?,
+            false => revision
+                .output
+                .components
+                .iter()
+                .find(|(_, entry)| entry.display_name == name && entry.file_path == file)
+                .map(|(key, _)| key.clone())?,
+        };
+        self.component(&key)
+    }
+
+    /// The component published under `key` as react-docgen-typescript documents it (`__docgenInfo`, the shape
+    /// Storybook converts to argTypes), resolving it first in a lazy session.
+    pub fn docgen_info(&self, key: &str) -> Option<serde_json::Value> {
+        Some(super::rdt::docgen_info(&self.component(key)?.entry))
+    }
+
+    /// [`Self::component`] for each of `keys`, resolved in parallel.
+    pub fn components(&self, keys: &[String]) -> Vec<Option<ComponentAnswer>> {
+        use rayon::prelude::*;
+        let Some(revision) = self.current.load_full() else { return vec![None; keys.len()] };
+        match revision.is_lazy() {
+            true => revision.lazy_components(&self.options, keys),
+            false => keys.par_iter().map(|key| revision.published_component(key)).collect(),
+        }
+    }
+
+    /// Every key [`Self::component`] answers, sorted. A lazy session resolves only the imported-member aliases to
+    /// decide; the rest come from parsing alone.
+    pub fn component_keys(&self) -> Vec<String> {
+        let Some(revision) = self.current.load_full() else { return Vec::new() };
+        match revision.is_lazy() {
+            true => revision.lazy_keys(&self.options),
+            false => revision.output.components.keys().cloned().collect(),
+        }
+    }
+
+    /// What a lazy session has indexed and resolved. `None` for an eager session, and before `initialize`.
+    pub fn lazy_stats(&self) -> Option<LazyStats> {
+        let revision = self.current.load_full()?;
+        let (components, resolved, dependency_files) = revision.lazy_counts()?;
+        Some(LazyStats {
+            revision: revision.id,
+            files: revision.source_files().len(),
+            components,
+            resolved,
+            dependency_files,
+        })
     }
 
     /// Whether a change to `path` can alter how imports resolve, so the session must be rebuilt rather than updated: a
@@ -314,7 +489,7 @@ impl WatchSession {
         };
 
         let dirs: FxHashMap<Utf8PathBuf, Stamp> =
-            recorded.dirs.iter().map(|(dir, was)| (dir.clone(), stamp_like(dir, Some(was)))).collect();
+            recorded.dirs.par_iter().map(|(dir, was)| (dir.clone(), stamp_like(dir, Some(was)))).collect();
         let (dirs, inner_configs, discovered) = if dirs == recorded.dirs {
             (dirs, recorded.inner_configs.clone(), None)
         } else {
@@ -331,17 +506,21 @@ impl WatchSession {
         }
 
         let mut files = recorded.files;
-        let mut changed: Vec<(Utf8PathBuf, Stamp)> = files
-            .keys()
-            .chain(discovered.iter().flatten().filter(|path| !files.contains_key(*path)))
-            .map(|path| (path.clone(), stamp_like(path, files.get(path))))
-            .filter(|(path, now)| files.get(path) != Some(now))
+        let paths: Vec<&Utf8PathBuf> =
+            files.keys().chain(discovered.iter().flatten().filter(|path| !files.contains_key(*path))).collect();
+        let mut changed: Vec<(Utf8PathBuf, Stamp)> = paths
+            .into_par_iter()
+            .map(|path| (path, stamp_like(path, files.get(path))))
+            .filter(|(path, now)| files.get(*path) != Some(now))
+            .map(|(path, now)| (path.clone(), now))
             .collect();
         changed.sort_by(|a, b| a.0.cmp(&b.0));
         let mut next = current.clone();
+        let mut steps = Vec::new();
         for (path, now) in changed {
-            if let Some((revision, _)) = next.next(&self.options, &path) {
+            if let Some((revision, update)) = next.next(&self.options, &path) {
                 next = Arc::new(revision);
+                steps.push(update);
             }
             if next.source_files().contains(&path) {
                 files.insert(path, now);
@@ -354,7 +533,10 @@ impl WatchSession {
             return unchanged(current.id);
         }
         self.current.store(Some(next.clone()));
-        output_delta(&current.output, &next.output, next.id, start)
+        match next.is_lazy() {
+            true => merge_lazy_updates(steps, next.id, start),
+            false => output_delta(&current.output, &next.output, next.id, start),
+        }
     }
 
     /// Rebuild from `current` after a resolution config changed. The caller holds the writer lock.
@@ -382,12 +564,14 @@ impl WatchSession {
     fn config_stamps(
         &self,
         inner_configs: &[Utf8PathBuf],
-        stamp: impl Fn(&Utf8Path) -> Stamp,
+        stamp: impl Fn(&Utf8Path) -> Stamp + Sync,
     ) -> FxHashMap<Utf8PathBuf, Stamp> {
         inner_configs
             .iter()
             .cloned()
             .chain(self.resolution_config_files())
+            .collect::<Vec<_>>()
+            .into_par_iter()
             .map(|path| {
                 let stamp = stamp(&path);
                 (path, stamp)
@@ -396,5 +580,7 @@ impl WatchSession {
     }
 }
 
+#[cfg(test)]
+mod lazy_tests;
 #[cfg(test)]
 mod tests;

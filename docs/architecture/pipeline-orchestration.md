@@ -1,6 +1,6 @@
 # Pipeline orchestration
 
-**Source:** `crates/core/src/pipeline/mod.rs`, `crates/core/src/pipeline/revision.rs`, `crates/core/src/pipeline/discover.rs`, `crates/core/src/pipeline/watch.rs`, `crates/core/src/resolver/deps.rs`, `crates/core/src/cache.rs`, `crates/core/src/import_map.rs`, `crates/core/src/dependency_types.rs`, `crates/core/src/panic_guard.rs`, `crates/core/src/plugin.rs`
+**Source:** `crates/core/src/pipeline/mod.rs`, `crates/core/src/pipeline/revision.rs`, `crates/core/src/pipeline/revision/lazy.rs`, `crates/core/src/pipeline/discover.rs`, `crates/core/src/pipeline/watch.rs`, `crates/core/src/resolver/deps.rs`, `crates/core/src/cache.rs`, `crates/core/src/import_map.rs`, `crates/core/src/dependency_types.rs`, `crates/core/src/panic_guard.rs`, `crates/core/src/plugin.rs`
 
 This is the orchestration layer: it owns nothing about _how_ a component is parsed or resolved (that's `extractor/` and `resolver/`), only _when_ and _in what order_ files get discovered, parsed, merged, and resolved, and how failures at any step degrade instead of propagating.
 
@@ -41,6 +41,24 @@ Each resolution records what it read (`resolver/deps.rs`, a thread-local recorde
 | A source file | interface, alias and template lookups, re-export walks, resolved import targets, the consuming file | that file is edited, created or deleted |
 | A bare enum or const-array name | `typeof X` and `(typeof X)[number]` lookups through the project-wide bare-name indexes | the changed file declared that name before or after the change |
 | Module resolution | `resolve_import_specifier` | a new source file appears (it can redirect or satisfy a specifier) |
+
+## Lazy sessions (ADR 0016)
+
+`WatchSession::lazy(options)` builds `Revision::cold_lazy()`: phases 0 to 3.6 of the cold run (`Indexed::build`, shared with `Revision::cold()`), then nothing. No component is resolved and no dependency is loaded, except the names the project takes from `react` (see below). `WatchSession::component(key)`, `components(keys)` and `component_keys()` are the request API; an eager session answers the same calls from its published output.
+
+**Request.** `component(key)` finds the same-named group (`Revision::lazy.by_name`), decides which of its members a batch run publishes under which key (the first keeps the bare name, later ones `Name (file)`; only an imported-member alias can be left out, so only those are resolved to decide), resolves the target if the memo lacks it, and returns `ComponentAnswer { key, entry, diagnostics }`. The entry is run through `on_component_resolved` as `assemble()` does, and `diagnostics` holds what a batch run attaches to that key, each with `affects == [key]`.
+
+**Demand-driven dependencies.** `Lazy.demands` keeps each project file's `project_demands`. A resolution records the project files it read (`Dependencies::files`); the demands of those files not yet in the layer (`DependencyLayer::missing`) are the names the component reaches. If there are any, `Revision::grow` extends the layer with `dependency_types::load(missing, options, Some(layer))` under a lock, builds a new `Engine` (layer plus `ResolutionContext`) and resolves again. A resolution is memoized only when it found nothing missing, so the memo holds results whose closure was complete. The component's own file's demands are loaded before the first resolution, which saves one in most requests.
+
+**Memos across growth.** A `ResolutionContext`'s interface-chain recordings and member reads are computed against its layer. When the layer grows, `ResolutionContext::inherit_memos` copies into the new context the ones whose recorded files, and the file they were keyed in, have all their demands in the old layer; the rest stay behind, because a lookup that missed a name would otherwise answer the next component. File-system answers and shared props always carry over.
+
+**Invalidation.** `Revision::next_lazy` applies the change with `apply_change` (shared with `next()`), keeps every memoized `Resolved` for which `id.file != changed && !affected_by(change)` and still exists, and reports the keys of the touched names as `updated_keys`/`removed_keys`; it resolves nothing and loads nothing. `updated_components` is empty: the consumer asks again. `ensure_fresh()` merges the per-file updates; `rebuilt` starts a new lazy revision and reports every memoized name.
+
+**Bounds.** The memo holds at most one `Resolved` per component, and each revision starts a new one from the entries the edit left valid; a context's memos reset with the revision and are bounded by the project's and its dependencies' declarations. The dependency layer only grows within a session, as in watch mode.
+
+**Concurrency.** Requests run on the caller's thread (`components()` on rayon's pool). The memo is a `DashMap`; the engine is an `ArcSwap`; layer growth takes one `Mutex`, so concurrent requests load a name once and a request that raced a growth re-checks against the new layer.
+
+**Stays batch.** `extract()` and the CLI `extract`, `check` and `inspect` commands resolve everything with `Revision::cold_output`; the Vite plugin's snapshot uses `initialize_session`.
 
 ## Key types (verbatim)
 
@@ -113,6 +131,8 @@ Cross-referencing `docs/edge-cases.md` and `docs/root-cause-analysis.md` for pip
 - DTS cache staleness: mtime+size keys missed same-length edits within one clock tick (replaced by a content hash), and extractor changes without a schema bump served stale entries (fixed by the build fingerprint, ADR 0008).
 
 **Still open** (deliberately deferred, not oversights):
+
+- **A lazy answer depends on every project file's demands, not on a type checker.** A name a component's resolution reads that no project file's `project_demands` mentions (a type used only inside a function body, say) is loaded by a batch run when some other file mentions it, and by a lazy session only if the component's own closure does. `lazy_parity` found two such cases (React's imports, and memos computed before a name loaded) and fixed them; it checks every component of the fixtures and five corpora, in both orders.
 
 - **The dependency layer only grows during a watch session.** A demand an edit removes leaves its declarations loaded; they change no output (a name nothing references is never looked up), and a rebuild (a configuration change below, or `rebuild()`) starts from a fresh layer.
 
