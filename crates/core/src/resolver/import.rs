@@ -69,9 +69,13 @@ pub(super) fn resolve_to_canonical(
     Some(follow_reexports(resolved_file, member, ctx, diagnostics, &mut visited, 0))
 }
 
-/// Whether `file` itself declares `name`: a type, or a generic function a wrapper call can name as its callee.
-fn declares(ctx: &ResolutionContext, file: &Utf8Path, name: &str) -> bool {
-    ctx.named_types.is_declared_at(file, name) || ctx.global.function_results.contains_key(&format!("{file}:{name}"))
+/// The name `file` itself declares `name` under: a type, or any value it exports (`export function f`,
+/// `export { g as f }` gives `g`). `None` when the file only re-exports it, or doesn't have it.
+fn declared_name(ctx: &ResolutionContext, file: &Utf8Path, name: &str) -> Option<String> {
+    if ctx.named_types.is_declared_at(file, name) {
+        return Some(name.to_owned());
+    }
+    ctx.import_map.local_export(file, name)
 }
 
 /// A directly-imported name may land on a barrel file (`export { X } from
@@ -97,8 +101,11 @@ fn follow_reexports(
     }
 
     super::deps::record(&file);
-    if depth >= MAX_REEXPORT_DEPTH || declares(ctx, &file, &name) {
+    if depth >= MAX_REEXPORT_DEPTH {
         return (file, name);
+    }
+    if let Some(declared) = declared_name(ctx, &file, &name) {
+        return (file, declared);
     }
     // A package's re-export stubs are not in the layer; the loader's answer for them stands in (ADR 0011).
     if let Some(answer) = ctx.dependencies.as_ref().and_then(|layer| layer.export_of(&file, &name)) {
@@ -127,9 +134,11 @@ fn follow_reexports(
                 let Some(candidate_file) = resolve_import_specifier(specifier, &file, ctx, diagnostics) else {
                     continue;
                 };
-                let resolved = follow_reexports(candidate_file, name.clone(), ctx, diagnostics, visited, depth + 1);
-                if declares(ctx, &resolved.0, &resolved.1) {
-                    return resolved;
+                let (resolved_file, resolved_name) =
+                    follow_reexports(candidate_file, name.clone(), ctx, diagnostics, visited, depth + 1);
+                // A hop that found the declaration renames it to its local name; one that didn't returns `name`.
+                if resolved_name != name || declared_name(ctx, &resolved_file, &resolved_name).is_some() {
+                    return (resolved_file, resolved_name);
                 }
             }
             (file, name)

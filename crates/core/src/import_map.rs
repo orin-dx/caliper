@@ -91,6 +91,20 @@ impl ImportResolutionMap {
         }
     }
 
+    /// The local name of the declaration `file` itself exports as `name` (`export function f`, `export { g as f }`),
+    /// whatever kind of declaration it is.
+    pub fn local_export(&self, file: &Utf8Path, name: &str) -> Option<String> {
+        let Some(exports) = self.re_exports.get(file.as_str()) else {
+            return self.fallback.as_ref()?.local_export(file, name);
+        };
+        exports.iter().find_map(|export| match export {
+            LexedExport::LocalDeclaration { name: exported, declared_as, .. } if exported == name => {
+                Some(declared_as.clone().unwrap_or_else(|| exported.clone()))
+            }
+            _ => None,
+        })
+    }
+
     /// Walk one step of the re-export chain for `barrel_file`.
     ///
     /// - If a `ReExportNamed` entry matches `exported_name`, returns `Named { .. }`.

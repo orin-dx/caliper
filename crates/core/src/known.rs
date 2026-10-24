@@ -1,10 +1,8 @@
 //! Resolution of known generic type patterns.
 //!
-//! These are types that appear across many libraries and need special handling
-//! because static analysis alone cannot fully resolve them, OR because their
-//! full expansion is noise for docgen purposes.
-//!
-//! To add a new pattern: add a match arm. That's it.
+//! A pattern stands in for a declaration that isn't available (its package isn't loaded), or that evaluates to nothing
+//! structurally; a declaration that resolves always wins (ADR 0014). Add one only when that fallback measurably beats
+//! leaving the name unresolved, against react-docgen-typescript on code that uses the library.
 
 use compact_str::CompactString;
 use rustc_hash::FxHashMap;
@@ -84,29 +82,10 @@ pub fn resolve_known(
         // PandaCSS: RecipeVariantProps<typeof buttonStyle>
         // vanilla-extract: RecipeVariants<typeof buttonRecipe>
         // tailwind-variants: VariantProps<typeof tv(...)>
+        // The real declarations infer from the function's parameters (`Parameters<T>[0]`), which needs a checker, so
+        // this also stands in when they are loaded (ADR 0014).
         "VariantProps" | "RecipeVariantProps" | "RecipeVariants" => {
             resolve_cva_variant_props(args, global, enum_bare_index)
-        }
-
-        // ── MUI styling ─────────────────────────────────────────────────────
-        // SxProps is a massive conditional type — surface as opaque
-        "SxProps" | "SystemStyleObject" | "SystemCssProperties" => Some(KnownPatternResult::Type(PropType::SxProps)),
-
-        // ── MUI-specific ─────────────────────────────────────────────────────
-        // OverridableStringUnion requires type checker — degrade gracefully
-        "OverridableStringUnion" => {
-            // First arg is the base union, second is the Overrides interface.
-            if let Some(base) = args.first() {
-                Some(KnownPatternResult::Type(PropType::Union(vec![
-                    base.clone(),
-                    OpaqueDetail::new("/* module augmentation */", OpaqueReason::ModuleAugmentation),
-                ])))
-            } else {
-                Some(KnownPatternResult::Type(OpaqueDetail::new(
-                    "OverridableStringUnion",
-                    OpaqueReason::ModuleAugmentation,
-                )))
-            }
         }
 
         // ── React Aria ───────────────────────────────────────────────────────
@@ -118,22 +97,6 @@ pub fn resolve_known(
         // ── Chakra / Ark / Styled System ────────────────────────────────────
         // HTMLChakraProps<'button'> → same as ComponentPropsWithoutRef<'button'>
         "HTMLChakraProps" | "HTMLArkProps" | "HTMLStyledProps" => html_attrs_from_first_arg(args),
-
-        // ThemingProps is runtime-dependent on the chakra theme
-        "ThemingProps" => Some(KnownPatternResult::Type(OpaqueDetail::new(
-            "ThemingProps",
-            OpaqueReason::RuntimeDependent { function_name: "chakra".into() },
-        ))),
-
-        // ── Mantine ─────────────────────────────────────────────────────────
-        // StylesApiProps is runtime-dependent on createStyles
-        "StylesApiProps" => Some(KnownPatternResult::Type(OpaqueDetail::new(
-            "StylesApiProps",
-            OpaqueReason::RuntimeDependent { function_name: "createStyles".into() },
-        ))),
-
-        // MantineColor/Size/Radius are string aliases — let resolver handle as Named
-        "MantineColor" | "MantineSize" | "MantineRadius" => None,
 
         // ── React standard ───────────────────────────────────────────────────
         "PropsWithChildren" => props_with_children(args),
@@ -326,10 +289,23 @@ fn simple_prop(name: &str, prop_type: PropType, required: bool, description: &st
 mod tests {
     use super::*;
 
+    /// Library types whose declaration measured better than a shortcut, or whose shortcut only hid them, resolve like
+    /// any other name: their declaration when it is loaded, otherwise an unresolved named reference (ADR 0014).
     #[test]
-    fn test_sx_props_is_opaque() {
-        let result = resolve_known("SxProps", &[], &GlobalSourceData::default(), &FxHashMap::default());
-        assert!(matches!(result, Some(KnownPatternResult::Type(PropType::SxProps))));
+    fn library_types_with_a_usable_declaration_are_not_shortcuts() {
+        for name in [
+            "SxProps",
+            "SystemStyleObject",
+            "SystemCssProperties",
+            "OverridableStringUnion",
+            "ThemingProps",
+            "StylesApiProps",
+            "MantineColor",
+            "MantineSize",
+            "MantineRadius",
+        ] {
+            assert!(resolve_known(name, &[], &GlobalSourceData::default(), &FxHashMap::default()).is_none(), "{name}");
+        }
     }
 
     #[test]
@@ -373,38 +349,6 @@ mod tests {
     }
 
     #[test]
-    fn test_system_style_object_is_sx_props() {
-        let result = resolve_known("SystemStyleObject", &[], &GlobalSourceData::default(), &FxHashMap::default());
-        assert!(matches!(result, Some(KnownPatternResult::Type(PropType::SxProps))));
-    }
-
-    #[test]
-    fn test_system_css_properties_is_sx_props() {
-        let result = resolve_known("SystemCssProperties", &[], &GlobalSourceData::default(), &FxHashMap::default());
-        assert!(matches!(result, Some(KnownPatternResult::Type(PropType::SxProps))));
-    }
-
-    #[test]
-    fn test_overridable_string_union_with_base_arg() {
-        let args = vec![PropType::Union(vec![
-            PropType::StringLiteral("contained".into()),
-            PropType::StringLiteral("outlined".into()),
-        ])];
-        let result =
-            resolve_known("OverridableStringUnion", &args, &GlobalSourceData::default(), &FxHashMap::default());
-        assert!(matches!(result, Some(KnownPatternResult::Type(PropType::Union(_)))));
-    }
-
-    #[test]
-    fn test_overridable_string_union_no_args() {
-        let result = resolve_known("OverridableStringUnion", &[], &GlobalSourceData::default(), &FxHashMap::default());
-        assert!(matches!(
-            result,
-            Some(KnownPatternResult::Type(PropType::Opaque(ref d))) if d.reason() == &OpaqueReason::ModuleAugmentation
-        ));
-    }
-
-    #[test]
     fn test_slot_props_returns_slot_prop() {
         let result = resolve_known("SlotProps", &[], &GlobalSourceData::default(), &FxHashMap::default());
         let Some(KnownPatternResult::Props(props)) = result else { panic!("expected Props result") };
@@ -429,44 +373,6 @@ mod tests {
         assert!(
             matches!(result, Some(KnownPatternResult::Type(PropType::HtmlAttributes { ref element, .. })) if element == "span")
         );
-    }
-
-    #[test]
-    fn test_theming_props_is_runtime_dependent() {
-        let result = resolve_known("ThemingProps", &[], &GlobalSourceData::default(), &FxHashMap::default());
-        assert!(matches!(
-            result,
-            Some(KnownPatternResult::Type(PropType::Opaque(ref d)))
-                if matches!(d.reason(), OpaqueReason::RuntimeDependent { .. })
-        ));
-    }
-
-    #[test]
-    fn test_styles_api_props_is_runtime_dependent() {
-        let result = resolve_known("StylesApiProps", &[], &GlobalSourceData::default(), &FxHashMap::default());
-        assert!(matches!(
-            result,
-            Some(KnownPatternResult::Type(PropType::Opaque(ref d)))
-                if matches!(d.reason(), OpaqueReason::RuntimeDependent { .. })
-        ));
-    }
-
-    #[test]
-    fn test_mantine_color_returns_none() {
-        let result = resolve_known("MantineColor", &[], &GlobalSourceData::default(), &FxHashMap::default());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_mantine_size_returns_none() {
-        let result = resolve_known("MantineSize", &[], &GlobalSourceData::default(), &FxHashMap::default());
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_mantine_radius_returns_none() {
-        let result = resolve_known("MantineRadius", &[], &GlobalSourceData::default(), &FxHashMap::default());
-        assert!(result.is_none());
     }
 
     #[test]

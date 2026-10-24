@@ -2776,11 +2776,11 @@ fn without_custom_conditions_a_source_only_workspace_package_does_not_resolve() 
 }
 
 /// Mantine's shape, through two barrels: `factory<Payload>` returns `MantineComponent<Payload>`, a component type whose
-/// props add `component` and `renderRoot` to the payload's props. The wrapper-built component gets them; its own props
-/// win a name clash, and a callee with no known result adds nothing.
+/// props are the payload's props plus `component` and `renderRoot`. The wrapper-built component has those props, a name
+/// both declare intersects as in TypeScript, and a callee with no known result leaves the payload's props.
 #[test]
 fn a_wrapper_built_component_gets_the_props_its_callees_result_type_adds() {
-    let tmp = TempDir::new().unwrap();
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
     fs::create_dir_all(tmp.path().join("core/factory")).unwrap();
     write_file(&tmp, "core/factory/factory.tsx", CALLEE_FACTORY);
     write_file(
@@ -2830,13 +2830,58 @@ export const Typed = factory<ButtonFactory>((props: ButtonProps) => <button>{pro
             render_root.clone()
         ]
     );
+    // The payload's `component` and the result type's intersect, and `any` absorbs the intersection.
     assert_eq!(
         props("Link"),
-        [prop("component", "\"a\" | \"span\"", true, ""), prop("label", "string", true, ""), render_root]
+        [prop("component", "any", true, "Root element or component."), prop("label", "string", true, ""), render_root,]
     );
     assert_eq!(props("Plain"), [prop("label", "string", true, "")]);
     // A typed render function makes this a HOC-wrapper detection; the callee still adds its props.
     assert_eq!(props("Typed"), props("Button"));
+    let warnings: Vec<&str> = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity != DiagnosticSeverity::Info)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(warnings, Vec::<&str>::new());
+}
+
+/// An `export *` barrel reaches any exported value, not only types: `ComponentProps<typeof Button>` finds a component
+/// declared as a const two barrels away, renamed exports included.
+#[test]
+fn an_export_star_barrel_reaches_an_exported_value() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    fs::create_dir_all(tmp.path().join("ui/button")).unwrap();
+    write_file(
+        &tmp,
+        "ui/button/button.tsx",
+        "export interface ButtonProps { label: string }\n\
+         export const Button = (props: ButtonProps) => <button>{props.label}</button>;\n\
+         const Ghost = (props: { faint?: boolean }) => <button />;\nexport { Ghost as GhostButton };\n",
+    );
+    write_file(&tmp, "ui/button/index.ts", "export * from './button';\n");
+    write_file(&tmp, "ui/index.ts", "export * from './button';\n");
+    write_file(
+        &tmp,
+        "App.tsx",
+        r#"
+import * as React from "react";
+import { Button, GhostButton } from "./ui";
+export function Fancy(props: React.ComponentProps<typeof Button> & { extra?: boolean }) { return null; }
+export function Faint(props: React.ComponentProps<typeof GhostButton>) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let names = |component: &str| output.components[component].props.keys().cloned().collect::<Vec<_>>();
+    assert_eq!(names("Fancy"), ["extra", "label"]);
+    assert_eq!(names("Faint"), ["faint"]);
     let warnings: Vec<&str> = output
         .diagnostics
         .iter()

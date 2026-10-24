@@ -47,15 +47,9 @@ pub(super) fn resolve_source_defined_or_known<'g>(
     let (canonical_file, canonical_name) = resolve_to_canonical(name, consuming_file, ctx, &mut state.diagnostics)
         .unwrap_or_else(|| (consuming_file.to_owned(), name.to_owned()));
 
-    // A project declaration, then a known shortcut, then a dependency's own declaration (ADR 0010): the shortcuts exist
-    // because those declarations (cva's `VariantProps`, MUI's `SxProps`) are conditional or mapped types this resolver
-    // can't expand.
-    if ctx.is_dependency_file(&canonical_file) {
-        if let Some(result) = resolve_known(name, resolved_args, &ctx.global, &ctx.enum_bare_index) {
-            return (canonical_file, canonical_name, Some(SourceOrKnownMatch::Known(result)));
-        }
-    }
-
+    // A declaration, the project's or a loaded dependency's, before a known shortcut (ADR 0014): a shortcut stands in
+    // for a declaration that isn't available, or, at the props-chain level, one that evaluates to nothing
+    // (`chain::known_fallback`).
     if let Some((matched_key, alias)) = lookup_type_alias(ctx, canonical_file.as_str(), &canonical_name) {
         return (
             canonical_file,

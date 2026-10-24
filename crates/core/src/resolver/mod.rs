@@ -677,20 +677,23 @@ pub(crate) fn resolve_component_tracked(
 pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) -> (ComponentEntry, Vec<Diagnostic>) {
     let mut state = ResolveState::default();
 
-    let chain = chain::resolve_props_chain(
-        mapping.props_type_name.as_str(),
-        &mapping.props_type_args,
-        &mapping.file_path,
-        mapping,
-        ctx,
-        &mut state,
-        0,
-    );
+    // A component a generic call builds has the props its callee's result type declares; the props type the extractor
+    // selected is for a callee whose result isn't known.
+    let chain = callee::result_chain(mapping, ctx, &mut state).unwrap_or_else(|| {
+        chain::resolve_props_chain(
+            mapping.props_type_name.as_str(),
+            &mapping.props_type_args,
+            &mapping.file_path,
+            mapping,
+            ctx,
+            &mut state,
+            0,
+        )
+    });
 
-    // Build props BTreeMap — own props win over inherited props with same name, and both over what a wrapper call's
-    // callee adds.
+    // Build props BTreeMap — own props win over inherited props with same name.
     let mut props: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
-    for prop in chain.props.into_iter().chain(callee::result_props(mapping, ctx, &mut state)) {
+    for prop in chain.props {
         props.entry(prop.name.clone()).or_insert(prop);
     }
 
@@ -884,9 +887,14 @@ fn intersect_declarations(first: &ParsedProp, second: &ParsedProp) -> ParsedProp
             types.push(member);
         }
     }
-    let prop_type = match <[PropType; 1]>::try_from(types) {
-        Ok([only]) => only,
-        Err(types) => common_literals(&types).unwrap_or(PropType::Intersection(types)),
+    // `any` absorbs an intersection, as in TypeScript.
+    let prop_type = if types.contains(&PropType::Any) {
+        PropType::Any
+    } else {
+        match <[PropType; 1]>::try_from(types) {
+            Ok([only]) => only,
+            Err(types) => common_literals(&types).unwrap_or(PropType::Intersection(types)),
+        }
     };
     let documented = if first.description.is_empty() && first.tags.is_empty() { second } else { first };
     let mut declarations = first.declarations.clone();

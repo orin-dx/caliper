@@ -132,8 +132,10 @@ fn without_the_flag_package_types_stay_unresolved() {
     );
 }
 
+/// cva's `VariantProps` is `Omit<OmitUndefined<Parameters<C>[0]>, …>`, which needs inference: loaded, it evaluates to
+/// nothing, so the shortcut stands in for it (ADR 0014).
 #[test]
-fn a_curated_shortcut_still_wins_over_the_packages_own_declaration() {
+fn a_shortcut_stands_in_for_a_loaded_declaration_that_evaluates_to_nothing() {
     let source = "import { cva, type VariantProps } from 'class-variance-authority';\n\
         const variants = cva('', { variants: { intent: { primary: '', danger: '' } } });\n\
         export function Pill(props: VariantProps<typeof variants>) { return null; }\n";
@@ -144,6 +146,37 @@ fn a_curated_shortcut_still_wins_over_the_packages_own_declaration() {
 
     assert_eq!(prop_types(&on, "Pill"), prop_types(&off, "Pill"));
     assert_eq!(prop_types(&on, "Pill"), [("intent".into(), "\"primary\" | \"danger\" | null".into())]);
+}
+
+/// A loaded declaration that resolves wins over a shortcut of the same name (ADR 0014); without it, the shortcut (an
+/// HTML layer for the element) is the fallback.
+#[test]
+fn a_loaded_declaration_wins_over_a_shortcut_of_the_same_name() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/style-kit/package.json",
+            r#"{ "name": "style-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        ("node_modules/style-kit/index.d.ts", "export interface HTMLChakraProps<T> { tone?: \"calm\" | \"loud\" }\n"),
+        (
+            "src/Panel.tsx",
+            "import type { HTMLChakraProps } from 'style-kit';\n\
+             export interface PanelProps extends HTMLChakraProps<'div'> { label: string }\n\
+             export function Panel(props: PanelProps) { return null; }\n",
+        ),
+    ]);
+
+    let on = extract(&options(&root, true));
+    let off = extract(&options(&root, false));
+
+    assert_eq!(
+        prop_types(&on, "Panel"),
+        [("label".into(), "string".into()), ("tone".into(), "\"calm\" | \"loud\"".into())]
+    );
+    assert_eq!(prop_types(&off, "Panel"), [("label".into(), "string".into())]);
+    let layers: Vec<Option<&str>> =
+        off.components["Panel"].inheritance.iter().map(|layer| layer.html_element.as_deref()).collect();
+    assert_eq!(layers, [Some("div")]);
 }
 
 /// `z.infer<typeof schema>` indexes the type of a runtime value, which no static reading evaluates: it keeps its name
