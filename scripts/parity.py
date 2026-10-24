@@ -15,11 +15,19 @@ with and without --load-dependencies, and reports per corpus:
   - best-of-N wall time and peak RSS of `extract --json`, without and with --load-dependencies, next to RDT's.
 
 --check against --baseline fails when coverage, agreement or same-control rates drop, a loss pattern grows, or BIN is
-more than 1.1x slower than --base-bin (timed interleaved on the same machine). docs/parity.md explains the measures.
+more than 1.1x slower than --base-bin (timed interleaved on the same machine).
+
+`oracle` compares Caliper's canonical prop types with TypeScript 7.1's checker on the same corpora and the repo's
+fixtures (apps/validate/src/oracle.ts), one verdict per shared prop: identical, spelled differently, less precise,
+wrong, or no checker type. Its --check fails when agreement falls or wrong verdicts rise. It is test-only.
+
+docs/parity.md explains the measures.
 
 Usage: scripts/parity.py setup [--corpora DIR] [--corpus NAME]...
        scripts/parity.py run --bin BIN [--base-bin BIN] [--corpora DIR] [--rdt-dir DIR] [--corpus NAME]...
                              [--runs N] [--no-timing] [--out FILE] [--markdown FILE] [--baseline FILE] [--check]
+       scripts/parity.py oracle --bin BIN [--corpora DIR] [--corpus NAME | fixtures]... [--work DIR] [--out FILE]
+                                [--markdown FILE] [--baseline FILE] [--check]
 """
 import argparse
 import json
@@ -387,28 +395,34 @@ def timings(binaries, src, runs):
     return result
 
 
+def program_inputs(name, src, out_dir):
+    """The component files (every `.tsx` under the source directory) and a tsconfig rooted there: the one program
+    both RDT and the checker parse."""
+    os.makedirs(out_dir, exist_ok=True)
+    files = []
+    for current, dirs, names in os.walk(src):
+        dirs[:] = [d for d in dirs if d != 'node_modules']
+        files += [os.path.join(current, n) for n in names if n.endswith('.tsx')]
+    list_file = os.path.join(out_dir, f'{name}.files.txt')
+    with open(list_file, 'w') as f:
+        f.write('\n'.join(sorted(files)) + '\n')
+    tsconfig = os.path.join(out_dir, f'{name}.tsconfig.json')
+    with open(tsconfig, 'w') as f:
+        json.dump({
+            'include': [f'{src}/**/*.ts', f'{src}/**/*.tsx'],
+            'compilerOptions': {
+                'target': 'ES2022', 'module': 'ESNext', 'moduleResolution': 'bundler', 'jsx': 'react-jsx',
+                'strict': True, 'skipLibCheck': True, 'noEmit': True,
+            },
+        }, f, indent=2)
+    return list_file, tsconfig
+
+
 def rdt_dump(corpus, src, clone_root, rdt_dir):
     """RDT's dump for this corpus, made once per commit."""
-    os.makedirs(rdt_dir, exist_ok=True)
     out = os.path.join(rdt_dir, f"{corpus['name']}-{corpus['commit'][:12]}.json")
     if not os.path.exists(out):
-        files = []
-        for current, dirs, names in os.walk(src):
-            dirs[:] = [d for d in dirs if d != 'node_modules']
-            files += [os.path.join(current, n) for n in names if n.endswith('.tsx')]
-        list_file = os.path.join(rdt_dir, f"{corpus['name']}.files.txt")
-        with open(list_file, 'w') as f:
-            f.write('\n'.join(sorted(files)) + '\n')
-        # The source directory as its own program: the same component files RDT's dumps here have always used.
-        tsconfig = os.path.join(rdt_dir, f"{corpus['name']}.tsconfig.json")
-        with open(tsconfig, 'w') as f:
-            json.dump({
-                'include': [f'{src}/**/*.ts', f'{src}/**/*.tsx'],
-                'compilerOptions': {
-                    'target': 'ES2022', 'module': 'ESNext', 'moduleResolution': 'bundler', 'jsx': 'react-jsx',
-                    'strict': True, 'skipLibCheck': True, 'noEmit': True,
-                },
-            }, f, indent=2)
+        list_file, tsconfig = program_inputs(corpus['name'], src, rdt_dir)
         print(f"{corpus['name']}: dumping RDT", file=sys.stderr, flush=True)
         subprocess.run(['node', '--max-old-space-size=8192', os.path.join(ROOT, 'scripts', 'parity-rdt.mjs'),
                         list_file, tsconfig, out], check=True)
@@ -424,6 +438,86 @@ def relative(path, root):
     """`path` relative to `root`, both through symlinks: Caliper reports canonical paths (`/private/var/...` on
     macOS), RDT the ones it was given."""
     return os.path.relpath(os.path.realpath(path), os.path.realpath(root))
+
+
+def oracle_targets(names, corpora_dir):
+    """(name, root, source dir) for the oracle: the five corpora and the repo's own fixtures, read in place."""
+    targets = []
+    if not names or 'fixtures' in names:
+        targets.append(('fixtures', ROOT, os.path.join(ROOT, 'fixtures')))
+    for corpus in selected([n for n in names if n != 'fixtures']) if names != ['fixtures'] else []:
+        clone_root = os.path.join(corpora_dir, corpus['clone'])
+        targets.append((corpus['name'], clone_root, os.path.join(clone_root, corpus['src'])))
+    return targets
+
+
+def oracle(args):
+    """TypeScript 7.1's checker against Caliper's canonical prop types (apps/validate/src/oracle.ts)."""
+    corpora_dir = os.path.abspath(args.corpora)
+    work = os.path.abspath(args.work)
+    os.makedirs(work, exist_ok=True)
+    validate = os.path.join(ROOT, 'apps', 'validate')
+    with open(os.path.join(validate, 'node_modules', 'typescript-beta', 'package.json')) as f:
+        typescript = json.load(f)['version']
+    version = subprocess.run([args.bin, '--version'], capture_output=True, text=True).stdout.strip()
+    report = {'caliper': version, 'typescript': typescript, 'corpora': {}}
+    for name, root, src in oracle_targets(args.corpus, corpora_dir):
+        if not os.path.isdir(src):
+            sys.exit(f'{name}: {src} is missing; run `scripts/parity.py setup` first')
+        caliper_json = os.path.join(work, f'{name}.caliper.json')
+        with open(caliper_json, 'w') as f:
+            subprocess.run([args.bin, 'extract', '--src', src, '--json', '--html-attributes', 'full',
+                            '--include-unexported', '--load-dependencies', '--quiet'], stdout=f, check=True)
+        list_file, tsconfig = program_inputs(name, src, work)
+        verdicts = os.path.join(work, f'{name}.oracle.json')
+        print(f'{name}: asking the checker', file=sys.stderr, flush=True)
+        start = time.time()
+        subprocess.run(['pnpm', '--dir', validate, 'exec', 'tsx', 'src/oracle.ts', '--root', root, '--src', src,
+                        '--tsconfig', tsconfig, '--caliper', caliper_json, '--out', verdicts, '--files', list_file],
+                       check=True)
+        with open(verdicts) as f:
+            entry = json.load(f)
+        entry['wall_ms'] = round((time.time() - start) * 1000)
+        report['corpora'][name] = entry
+    return report
+
+
+ORACLE_VERDICTS = ['identical', 'spelled', 'less precise', 'wrong', 'checker any/error']
+
+
+def oracle_markdown(report):
+    lines = [f"Caliper {report['caliper']} against TypeScript {report['typescript']}'s checker, with "
+             '--load-dependencies.', '',
+             '| Corpus | Components matched | Shared props | ' + ' | '.join(v.capitalize() for v in ORACLE_VERDICTS)
+             + ' | Distinct comparisons | Checker time |',
+             '| --- | --: | --: |' + ' --: |' * len(ORACLE_VERDICTS) + ' --: | --: |']
+    for name, e in report['corpora'].items():
+        cells = [pct(e['verdicts'][v], e['props_shared']) for v in ORACLE_VERDICTS]
+        lines.append(f"| {name} | {e['components_matched']}/{e['components_checker']} | {e['props_shared']:,} | "
+                     + ' | '.join(cells) + f" | {e['distinct_comparisons']:,} | {e['wall_ms'] / 1000:.1f} s |")
+    return '\n'.join(lines) + '\n'
+
+
+def oracle_check(report, baseline):
+    """Each oracle gate that fails: fewer props agreeing with the checker, or more that it contradicts."""
+    failures = []
+    for name, e in report['corpora'].items():
+        old = baseline.get('corpora', {}).get(name)
+        if old is None:
+            continue
+        agree = lambda x: rate(x['verdicts']['identical'] + x['verdicts']['spelled'], x['props_shared'])
+        wrong = lambda x: rate(x['verdicts']['wrong'], x['props_shared'])
+        matched = lambda x: rate(x['components_matched'], x['components_checker'])
+        if agree(e) < agree(old) - RATE_TOLERANCE:
+            failures.append(f'{name}: props agreeing with the checker fell from {100 * agree(old):.2f}% to '
+                            f'{100 * agree(e):.2f}%')
+        if wrong(e) > wrong(old) + RATE_TOLERANCE:
+            failures.append(f'{name}: props the checker contradicts rose from {100 * wrong(old):.2f}% to '
+                            f'{100 * wrong(e):.2f}%')
+        if matched(e) < matched(old) - RATE_TOLERANCE:
+            failures.append(f'{name}: components matched fell from {100 * matched(old):.2f}% to '
+                            f'{100 * matched(e):.2f}%')
+    return failures
 
 
 def selected(names):
@@ -564,13 +658,26 @@ def main():
     p_run.add_argument('--markdown')
     p_run.add_argument('--baseline')
     p_run.add_argument('--check', action='store_true')
+    p_oracle = sub.add_parser('oracle', help="compare a build's prop types with TypeScript 7.1's checker")
+    p_oracle.add_argument('--bin', required=True)
+    p_oracle.add_argument('--corpora', default=default_corpora)
+    p_oracle.add_argument('--corpus', action='append', default=[], help='a corpus name, or fixtures')
+    p_oracle.add_argument('--work', default=os.path.join(ROOT, '.parity', 'oracle'))
+    p_oracle.add_argument('--out')
+    p_oracle.add_argument('--markdown')
+    p_oracle.add_argument('--baseline')
+    p_oracle.add_argument('--check', action='store_true')
     args = parser.parse_args()
 
     if args.command == 'setup':
         setup(args)
         return
-    report = run(args)
-    table = markdown(report)
+    if args.command == 'oracle':
+        report = oracle(args)
+        table, gates = oracle_markdown(report), oracle_check
+    else:
+        report = run(args)
+        table, gates = markdown(report), check
     print(table, flush=True)
     if args.out:
         with open(args.out, 'w') as f:
@@ -583,7 +690,7 @@ def main():
         if not args.baseline:
             sys.exit('--check needs --baseline')
         with open(args.baseline) as f:
-            failures = check(report, json.load(f))
+            failures = gates(report, json.load(f))
         if failures:
             print('\nGates failed:\n' + '\n'.join(f'- {f}' for f in failures), file=sys.stderr)
             sys.exit(1)

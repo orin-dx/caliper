@@ -1,6 +1,6 @@
 # Semantic backend (TypeScript 7)
 
-**Status:** designed, not implemented ([ADR 0006](adr/0006-semantic-backend-as-second-resolver.md)). `PipelineOptions::resolve_complex_types` exists and does nothing. **Last verified:** 2026-09-27 for measurements, each naming its nightly; 2026-10-22 for the API table against the `7.1.0-beta` package.
+**Status:** designed, not implemented ([ADR 0006](adr/0006-semantic-backend-as-second-resolver.md)). It will ship as an experimental opt-in, off by default (decided 2026-10-23); structural extraction stays the default. `PipelineOptions::resolve_complex_types` exists and does nothing. Separately, TypeScript 7.1's checker already runs as a test-only oracle for structural prop types (`scripts/parity.py oracle`, `docs/parity.md`). **Last verified:** 2026-09-27 for measurements, each naming its nightly; 2026-10-22 for the API table against the `7.1.0-beta` package; 2026-10-23 for the fixture-corpus parity on `7.1.0-beta`.
 
 ## Next step
 
@@ -83,7 +83,7 @@ RDT also emits any exported symbol that has a JSDoc comment but no props. We don
 | Positions | UTF-16 code units. OXC offsets are UTF-8 bytes |
 | Surface | 177 methods in `7.1.0-beta` (`APIMethodInfo` in `dist/api/proto.generated.d.ts`), up from 157 on 2026-09-19, mostly with TS 6 checker names. Every call in "The algorithm" is present |
 
-**Beta re-probe (2026-10-21, `7.1.0-beta`).** `crates/tsc-client`'s smoke example spawned the beta's `bin/tsc --api`, completed the `initialize` round trip (`caseSensitivity`, `currentDirectory`) and shut down cleanly with exit status 0, so framing and shutdown behave as the fake-tsc harness assumes. `TSC_PACKAGE_DIR=<dir> cargo run -p caliper-docgen-tsc-client --example smoke_real_tsc` repeats it against any installed `typescript`. The beta's `proto.generated.d.ts` still exposes every checker call the algorithm uses: `getTypeAtLocation`, `getTypeOfSymbol`, `getDeclaredTypeOfSymbol`, `getSignaturesOfType`, `getResolvedSignature`, `getReturnTypeOfSignature`, `getBaseTypes` and `getPropertiesOfType`. Not yet re-run on the beta: the 13-component parity run below and discovery over a whole project.
+**Beta re-probe (2026-10-21, `7.1.0-beta`).** `crates/tsc-client`'s smoke example spawned the beta's `bin/tsc --api`, completed the `initialize` round trip (`caseSensitivity`, `currentDirectory`) and shut down cleanly with exit status 0, so framing and shutdown behave as the fake-tsc harness assumes. `TSC_PACKAGE_DIR=<dir> cargo run -p caliper-docgen-tsc-client --example smoke_real_tsc` repeats it against any installed `typescript`. The beta's `proto.generated.d.ts` still exposes every checker call the algorithm uses: `getTypeAtLocation`, `getTypeOfSymbol`, `getDeclaredTypeOfSymbol`, `getSignaturesOfType`, `getResolvedSignature`, `getReturnTypeOfSignature`, `getBaseTypes` and `getPropertiesOfType`. The fixture-corpus parity run below was re-run on the beta on 2026-10-23 (`apps/validate` now imports `typescript-beta`, `npm:typescript@7.1.0-beta`, since the `unstable/*` entry points are gone). Two beta behaviors to know: the server panics (`interface conversion: interface {} is string, not float64`) when `createProgram` gets string-valued enum options such as `target: 'es2022'`, so pass options from `parseConfigFile`; and `true`/`false` literal types carry neither `value` nor `intrinsicName`, so read them with `typeToString`. Discovery over a whole project ran in the oracle: 33 to 1,531 components per corpus.
 
 **Churn.** About 20 commits touched the protocol definition (`proto.go`) between 2026-08-20 and 2026-09-18. `updateSnapshot`, project IDs and `createProgram` params were reshaped on 09-17 and 09-18. Every call the algorithm uses ran unchanged on the 09-20 and 09-26 nightlies. Re-verify on the beta.
 
@@ -97,7 +97,7 @@ With the notification, the dependent component's props updated (0.5 ms update, 2
 
 ## Evidence
 
-Method: RDT 2.4.0 on typescript@6.0.3 (`apps/validate`'s RDT is pinned to a TS6 API — see "The RDT oracle" below) with the harness options (`shouldExtractLiteralValuesFromEnum`, `shouldRemoveUndefinedFromOptional`, `propFilter: { skipPropsWithoutDoc: false }`), against the algorithm above via `apps/validate/src/run-semantic.ts` on typescript@next. Run with `pnpm --filter caliper-docgen-validate parity`.
+Method: RDT 2.4.0 on typescript@6.0.3 (`apps/validate`'s RDT is pinned to a TS6 API — see "The RDT oracle" below) with the harness options (`shouldExtractLiteralValuesFromEnum`, `shouldRemoveUndefinedFromOptional`, `propFilter: { skipPropsWithoutDoc: false }`), against the algorithm above via `apps/validate/src/run-semantic.ts` on the nightly named in each row, or `7.1.0-beta`. Run with `pnpm --filter caliper-docgen-validate parity` (`PARITY_SHOW=all` lists every mismatch).
 
 | Check | Result | Nightly |
 | --- | --- | --- |
@@ -107,6 +107,7 @@ Method: RDT 2.4.0 on typescript@6.0.3 (`apps/validate`'s RDT is pinned to a TS6 
 | Fixture corpus, 55 files in one program | 70 components in common, equal prop counts on 70/70 | 09-20 |
 | Class components | 2/2 on a synthetic file. The corpus has none | 09-20 |
 | Full fixture corpus, 44 files / 47 components / 5554 props, one program | 5 missing, 27 extra. `required` 5508/5522. Type strings 5265/5522. Descriptions 47/47 | 09-26 |
+| The same run | 5 missing, 27 extra. `required` 5508/5522. Type strings 5266/5522. Descriptions 47/47. Of the 13 components above, the two nested `ref` unions and ark-ui `SelectRoot.ids` differ | `7.1.0-beta` |
 
 Type strings match after two normalizations. tsc prints union members in internal type-id order, which differs from TS 5.9, so members are compared as a set. RDT also runs `.replace(' | undefined', '')` twice, which turns a nested `=> string | undefined` into `=> string` and loses information. Canonical output keeps it. The 2 remaining differences are nested `ref` unions in fluentui and base-ui.
 
@@ -164,7 +165,7 @@ Pass only the files you need as roots. The API's checker is lazy, and diagnostic
 
 ## The RDT oracle
 
-`apps/validate` depends on `typescript@next` directly (for `run-semantic.ts`'s own `tsc --api` probe), but RDT 2.4.0 crashes on import against it (`ts.JsxEmit` is undefined). RDT now resolves its `typescript` peer to `typescript@6.0.3` instead, via the aliased `typescript-next` package dependency `run-semantic.ts` imports from — no pnpm override needed, since pnpm overrides don't reliably rewrite a peer dependency's resolution (tried `pnpm-workspace.yaml`'s `overrides: { "react-docgen-typescript>typescript": ... }`; the lockfile recorded it but RDT kept resolving against whatever `typescript` apps/validate depended on directly).
+`apps/validate` depends on TypeScript 7.1 directly (for `run-semantic.ts`'s own `tsc --api` probe and the oracle), but RDT 2.4.0 crashes on import against it (`ts.JsxEmit` is undefined). RDT now resolves its `typescript` peer to `typescript@6.0.3` instead, via the aliased `typescript-beta` dependency (`npm:typescript@7.1.0-beta`, pinned exactly) the probe and oracle import from — no pnpm override needed, since pnpm overrides don't reliably rewrite a peer dependency's resolution (tried `pnpm-workspace.yaml`'s `overrides: { "react-docgen-typescript>typescript": ... }`; the lockfile recorded it but RDT kept resolving against whatever `typescript` apps/validate depended on directly).
 
 `compare.ts`/`analyze.ts` (caliper-docgen vs RDT/react-docgen) still compare only name, `required`, type and default, and render our types themselves in `run-ours.ts` (objects print as `{ ... }`). Their type mismatches mix resolver and renderer differences, and description, `parent` and `declarations` are never compared. `parity.ts` (RDT vs the semantic algorithm) compares description too.
 
