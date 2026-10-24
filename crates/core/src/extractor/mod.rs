@@ -232,6 +232,9 @@ pub(super) struct SourceDataCollector<'src> {
     /// `(sub-component, parent)` for each component attached to another (`Parent.Sub = Sub`,
     /// `Object.assign(Parent, { Sub })`): exported when its parent is.
     pub(super) attached_to: Vec<(CompactString, CompactString)>,
+    /// How many function bodies enclose the node being visited. A component declared inside one exists per call (a
+    /// factory's returned component, a story's local helper), so no module imports it under that name.
+    pub(super) function_depth: u32,
 }
 
 impl<'src> SourceDataCollector<'src> {
@@ -254,6 +257,7 @@ impl<'src> SourceDataCollector<'src> {
             takes_a_second_parameter: FxHashSet::default(),
             exported_locals: FxHashSet::default(),
             attached_to: Vec::new(),
+            function_depth: 0,
         }
     }
 
@@ -268,6 +272,15 @@ impl<'src> SourceDataCollector<'src> {
             Diagnostic::new(DiagnosticSeverity::Info, code, message)
                 .with_file(self.file_path.to_string())
                 .with_position(line, column),
+        );
+    }
+
+    /// A component declared inside a function body: reported, not mapped (see `function_depth`).
+    pub(super) fn skip_local_component(&mut self, name: &str, span: Span) {
+        self.record_skip(
+            DiagnosticCode::SkippedCandidate,
+            format!("'{name}' is declared inside a function body, so no module can import it"),
+            span,
         );
     }
 
