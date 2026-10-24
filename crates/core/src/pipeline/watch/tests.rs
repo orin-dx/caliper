@@ -1391,6 +1391,36 @@ fn editing_a_file_a_shared_interface_chain_reads_re_resolves_every_component_tha
 }
 
 #[test]
+fn editing_a_recipe_updates_the_props_its_mapped_type_lists() {
+    let (tmp, options) = write_project(&[
+        ("recipes.ts", crate::pipeline::tests::RECIPES),
+        (
+            "Button.tsx",
+            "import type { RecipeProps } from './recipes';\n\
+             export interface ButtonProps extends RecipeProps<'button'> {}\n\
+             export function Button(props: ButtonProps) { return <button />; }\n",
+        ),
+    ]);
+    let session = WatchSession::new(options.clone());
+    let _initial = session.initialize();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(tmp.path()).unwrap()).unwrap();
+    let recipes = root.join("recipes.ts");
+
+    let edited = crate::pipeline::tests::RECIPES.replace(
+        "variant?: \"solid\" | \"outline\" | undefined;",
+        "variant?: \"solid\" | \"outline\" | undefined;\n  shape?: \"square\" | undefined;",
+    );
+    std::fs::write(&recipes, edited).unwrap();
+    let update = session.update_file(&recipes);
+
+    assert_eq!(update.updated_keys, vec!["Button".to_owned()]);
+    let snapshot = session.snapshot();
+    let props: Vec<&String> = snapshot.components["Button"].props.keys().collect();
+    assert_eq!(props, ["recipe", "shape", "size", "variant"]);
+    assert_eq!(visible(&session.snapshot()), visible(&crate::pipeline::extract(&options)));
+}
+
+#[test]
 fn editing_a_wrapper_callees_result_type_updates_the_components_it_builds() {
     let (tmp, options) = write_project(&[
         ("core/factory.tsx", crate::pipeline::tests::CALLEE_FACTORY),

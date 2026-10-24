@@ -1725,8 +1725,10 @@ fn test_conditional_type_is_opaque() {
 fn test_mapped_type_is_opaque() {
     let ctx = empty_ctx();
     let ct = CollectedType::Mapped {
+        param: "K".into(),
         key_type: Box::new(CollectedType::String),
         value_type: Box::new(CollectedType::Boolean),
+        optional: None,
     };
     let result = resolve_type(&ct, &ctx);
     assert!(
@@ -1934,8 +1936,10 @@ fn test_mapped_type_opaque_emits_diagnostic() {
     let ctx = empty_ctx();
     let mut state = ResolveState::default();
     let ct = CollectedType::Mapped {
+        param: "P".into(),
         key_type: Box::new(CollectedType::Named { name: "K".into(), args: vec![] }),
         value_type: Box::new(CollectedType::String),
+        optional: None,
     };
     let result = super::collected::resolve_collected_type(&ct, Utf8Path::new("/test/button.tsx"), &ctx, &mut state, 0);
     assert!(matches!(result, PropType::Opaque(_)));

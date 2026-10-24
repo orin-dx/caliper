@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use camino::Utf8Path;
-use rustc_hash::FxHashSet;
+use compact_str::CompactString;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::types::*;
 
@@ -197,6 +198,21 @@ pub(super) fn resolve_base_as_chain(
             // last instead of a proper union across all branches.
             resolve_union_alias(members, file_path, mapping, ctx, state, depth)
         }
+        // `SlotRecipeProps<"avatar">`'s branch, `Recipes["avatar"]["__type"]`: evaluated when the operands are known.
+        CollectedType::Conditional { .. } | CollectedType::IndexedAccess { .. }
+            if super::evaluate::reduce(base, file_path, ctx, depth).is_some() =>
+        {
+            let Some((reduced, reduced_file)) = super::evaluate::reduce(base, file_path, ctx, depth) else {
+                return ResolvedChain::empty();
+            };
+            resolve_base_as_chain(&reduced, &reduced_file, mapping, ctx, state, depth + 1)
+        }
+        CollectedType::Mapped { param, key_type, value_type, optional }
+            if super::evaluate::mapped_keys(key_type, file_path, ctx, depth).is_some() =>
+        {
+            let keys = super::evaluate::mapped_keys(key_type, file_path, ctx, depth).unwrap_or_default();
+            resolve_mapped_chain(param, &keys, value_type, *optional, file_path, ctx, state, depth)
+        }
         // None of these can ever provide a props chain (a props type must be
         // object-like — an interface, intersection, union, or inline object).
         // Named explicitly, not via a wildcard, so a future CollectedType
@@ -248,6 +264,39 @@ pub(super) fn resolve_base_as_chain(
             ResolvedChain::empty_with_compose(base.to_raw_string())
         }
     }
+}
+
+/// One prop per key of a mapped type: `{ [K in keyof Variant]?: ConditionalValue<Variant[K]> }` gives each of
+/// `Variant`'s members the value type with `K` bound to its name. Without a `?`/`-?` modifier a key keeps its source
+/// member's optionality, as TypeScript's homomorphic mapped types do, and its description.
+#[allow(clippy::too_many_arguments)]
+fn resolve_mapped_chain(
+    param: &CompactString,
+    keys: &[super::evaluate::Key],
+    value_type: &CollectedType,
+    optional: Option<bool>,
+    file_path: &Utf8Path,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> ResolvedChain {
+    let mut chain = ResolvedChain::empty();
+    for key in keys {
+        let bound = FxHashMap::from_iter([(param.as_str(), CollectedType::StringLiteral(key.name.as_str().into()))]);
+        let value = super::substitute::substitute_type(value_type, &bound);
+        let prop_type = resolve_collected_type(&value, file_path, ctx, state, depth + 1);
+        chain.props.push(Arc::new(ParsedProp::new(
+            key.name.clone(),
+            prop_type,
+            optional.map_or(key.required, |optional| !optional),
+            None,
+            key.description.clone(),
+            Default::default(),
+            None,
+            vec![],
+        )));
+    }
+    chain
 }
 
 /// Resolve an intersection's members and merge them as TypeScript does (`ResolvedChain::intersect_member`). An HTML layer

@@ -205,10 +205,23 @@ pub(super) fn substitute_type(ct: &CollectedType, subst: &Substitution) -> Colle
             true_type: Box::new(substitute_type(true_type, subst)),
             false_type: Box::new(substitute_type(false_type, subst)),
         },
-        CollectedType::Mapped { key_type, value_type } => CollectedType::Mapped {
-            key_type: Box::new(substitute_type(key_type, subst)),
-            value_type: Box::new(substitute_type(value_type, subst)),
-        },
+        CollectedType::Mapped { param, key_type, value_type, optional } => {
+            // The key variable shadows an outer parameter of the same name inside the value type.
+            let shadowed;
+            let value_subst = if subst.contains_key(param.as_str()) {
+                shadowed =
+                    subst.iter().filter(|(name, _)| **name != param.as_str()).map(|(k, v)| (*k, v.clone())).collect();
+                &shadowed
+            } else {
+                subst
+            };
+            CollectedType::Mapped {
+                param: param.clone(),
+                key_type: Box::new(substitute_type(key_type, subst)),
+                value_type: Box::new(substitute_type(value_type, value_subst)),
+                optional: *optional,
+            }
+        }
         // Leaves that can't structurally reference a type parameter.
         CollectedType::String
         | CollectedType::Number

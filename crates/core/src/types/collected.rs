@@ -105,10 +105,14 @@ pub enum CollectedType {
         false_type: Box<CollectedType>,
     },
 
-    // ── Mapped: { [K in Keys]: Value } — cannot resolve statically
+    // ── Mapped: { [K in Keys]: Value } — expanded as a props base when its keys are known (`resolver::evaluate`)
     Mapped {
+        /// The key variable (`K`), which `value_type` refers to.
+        param: CompactString,
         key_type: Box<CollectedType>,
         value_type: Box<CollectedType>,
+        /// `?` or `+?` (`Some(true)`), `-?` (`Some(false)`), or no modifier, which keeps each key's own optionality.
+        optional: Option<bool>,
     },
 
     // ── Fallback for syntax we don't recognise
@@ -198,8 +202,13 @@ impl CollectedType {
                 true_type.to_raw_string(),
                 false_type.to_raw_string()
             ),
-            CollectedType::Mapped { key_type, value_type } => {
-                format!("{{ [K in {}]: {} }}", key_type.to_raw_string(), value_type.to_raw_string())
+            CollectedType::Mapped { param, key_type, value_type, optional } => {
+                let modifier = match optional {
+                    Some(true) => "?",
+                    Some(false) => "-?",
+                    None => "",
+                };
+                format!("{{ [{param} in {}]{modifier}: {} }}", key_type.to_raw_string(), value_type.to_raw_string())
             }
             CollectedType::Tuple(members) => {
                 format!("[{}]", members.iter().map(|m| m.to_raw_string()).collect::<Vec<_>>().join(", "))
@@ -308,9 +317,14 @@ impl CollectedType {
                     }
                 })
             }
-            // Mapped: {"mapped": {k, v}}
-            CollectedType::Mapped { key_type, value_type } => serde_json::json!({
-                "mapped": {"k": key_type.to_json_value(), "v": value_type.to_json_value()}
+            // Mapped: {"mapped": {p, k, v, o}}
+            CollectedType::Mapped { param, key_type, value_type, optional } => serde_json::json!({
+                "mapped": {
+                    "p": param.as_str(),
+                    "k": key_type.to_json_value(),
+                    "v": value_type.to_json_value(),
+                    "o": optional,
+                }
             }),
             // Raw fallback: {"raw": s}
             CollectedType::Raw(s) => serde_json::json!({"raw": s}),
@@ -458,7 +472,12 @@ impl CollectedType {
                 if let Some(inner) = map.get("mapped") {
                     let k = Self::from_json_value(inner.get("k").unwrap_or(&serde_json::Value::Null))?;
                     let vt = Self::from_json_value(inner.get("v").unwrap_or(&serde_json::Value::Null))?;
-                    return Ok(CollectedType::Mapped { key_type: Box::new(k), value_type: Box::new(vt) });
+                    return Ok(CollectedType::Mapped {
+                        param: inner.get("p").and_then(|p| p.as_str()).unwrap_or("K").into(),
+                        key_type: Box::new(k),
+                        value_type: Box::new(vt),
+                        optional: inner.get("o").and_then(serde_json::Value::as_bool),
+                    });
                 }
                 if let Some(s) = map.get("raw").and_then(|v| v.as_str()) {
                     return Ok(CollectedType::Raw(s.to_owned()));

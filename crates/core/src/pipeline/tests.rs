@@ -785,7 +785,7 @@ fn test_unresolvable_intersection_member_records_raw_type_in_composes() {
         &tmp,
         "Comp.tsx",
         r#"
-export type Weird<T> = T extends string ? { a: string } : { b: number };
+export type Weird<T> = T extends { kind: infer K } ? { a: K } : { b: number };
 export type CompProps = Weird<'x'> & { c: boolean };
 export function Comp(props: CompProps) { return null; }
 "#,
@@ -806,11 +806,8 @@ export function Comp(props: CompProps) { return null; }
         !comp.composes.is_empty(),
         "expected the unresolvable Weird<'x'> member to be recorded in `composes` instead of silently vanishing"
     );
-    assert!(
-        comp.composes[0].contains("extends") && comp.composes[0].contains("string"),
-        "expected composes to carry the actual conditional-type expression, got {:?}",
-        comp.composes
-    );
+    // An `infer` needs a checker, so the conditional stays unevaluated.
+    assert_eq!(comp.composes, ["\"x\" extends { ... } ? { ... } : { ... }"]);
 }
 
 // ── test_same_display_name_across_files_with_identical_stem_does_not_collide ─
@@ -2848,6 +2845,81 @@ export const Typed = factory<ButtonFactory>((props: ButtonProps) => <button>{pro
         .collect();
     assert_eq!(warnings, Vec::<&str>::new());
 }
+
+/// Chakra's recipe props: a conditional on a literal picks its branch, indexed accesses read a generic interface's
+/// member, and a mapped type over `keyof` an interface lists one prop per key. Every step is evaluated from known
+/// operands, so nothing warns.
+#[test]
+fn recipe_props_evaluate_through_conditional_indexed_and_mapped_types() {
+    let tmp = TempDir::new().unwrap();
+    write_file(&tmp, "recipes.ts", RECIPES);
+    write_file(
+        &tmp,
+        "Button.tsx",
+        r#"
+import type { RecipeProps } from "./recipes";
+export interface ButtonProps extends RecipeProps<"button"> { loading?: boolean }
+export function Button(props: ButtonProps) { return <button />; }
+export interface OtherProps extends RecipeProps<"nope"> { label: string }
+export function Other(props: OtherProps) { return <div />; }
+export type FlagsProps = { [K in "compact" | "dense"]: boolean };
+export function Flags(props: FlagsProps) { return <div />; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let props = |component: &str| {
+        output.components[component]
+            .props
+            .values()
+            .map(|p| (p.name.clone(), p.prop_type.raw_string(), p.required, p.description.clone()))
+            .collect::<Vec<_>>()
+    };
+    let prop = |name: &str, ty: &str, required: bool, description: &str| {
+        (name.to_owned(), ty.to_owned(), required, description.to_owned())
+    };
+    let recipe = prop("recipe", "string", false, "");
+    assert_eq!(
+        props("Button"),
+        [
+            prop("loading", "boolean", false, ""),
+            recipe.clone(),
+            prop("size", "ConditionalValue<\"sm\" | \"md\" | \"lg\" | undefined>", false, "The button's size."),
+            prop("variant", "ConditionalValue<\"solid\" | \"outline\" | undefined>", false, ""),
+        ]
+    );
+    assert_eq!(props("Other"), [prop("label", "string", true, ""), recipe]);
+    assert_eq!(props("Flags"), [prop("compact", "boolean", true, ""), prop("dense", "boolean", true, "")]);
+    let warnings: Vec<&str> = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity != DiagnosticSeverity::Info)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(warnings, Vec::<&str>::new());
+}
+
+/// Recipe types in Chakra's shape (`styled-system/generated/recipes.gen.ts`).
+pub(crate) const RECIPES: &str = r#"
+export interface SystemRecipeFn<VP, VM> { __type: Partial<VP>; variantMap: VM }
+export interface ButtonVariant {
+  /** The button's size. */
+  size?: "sm" | "md" | "lg" | undefined;
+  variant?: "solid" | "outline" | undefined;
+}
+export interface Conditions { _hover: string; md: string }
+export type ConditionalValue<V> = V | Array<V | null> | { [K in keyof Conditions]?: ConditionalValue<V> };
+export type ButtonVariantProps = { [K in keyof ButtonVariant]?: ConditionalValue<ButtonVariant[K]> | undefined };
+export interface ConfigRecipes { button: SystemRecipeFn<ButtonVariantProps, unknown> }
+export type RecipeProps<T> = T extends keyof ConfigRecipes
+  ? ConfigRecipes[T]["__type"] & { recipe?: string | undefined }
+  : { recipe?: string | undefined };
+"#;
 
 /// A factory module in Mantine's shape: `factory` asserts its result type, `opaque` declares none.
 pub(crate) const CALLEE_FACTORY: &str = r#"
