@@ -230,6 +230,26 @@ pub(super) fn resolve_base_as_chain(
             let keys = super::evaluate::mapped_keys(key_type, file_path, ctx, 0).unwrap_or_default();
             resolve_mapped_chain(param, &keys, value_type, *optional, file_path, ctx, state, depth)
         }
+        // `{ [K in keyof ComponentPropsWithRef<"div">]: Wrap<ComponentPropsWithRef<"div">[K]> }` (Base UI): the
+        // element's attributes, each in a wrapper this does not apply, so it is listed as the element's own.
+        CollectedType::Mapped { key_type, .. } if element_props_of(key_type).is_some() => {
+            let Some(element_props) = element_props_of(key_type) else { return ResolvedChain::empty() };
+            state.diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Info,
+                message: format!(
+                    "'{}' is a mapped type over an element's attributes: they are listed as the element's, without \
+                     the wrapper its values apply",
+                    base.to_raw_string()
+                ),
+                file: Some(file_path.to_string()),
+                line: None,
+                column: None,
+                help: None,
+                code: DiagnosticCode::OpaqueType,
+                affects: Vec::new(),
+            });
+            resolve_base_as_chain(&element_props, file_path, mapping, ctx, state, depth + 1)
+        }
         // None of these can ever provide a props chain (a props type must be
         // object-like — an interface, intersection, union, or inline object).
         // Named explicitly, not via a wildcard, so a future CollectedType
@@ -373,6 +393,24 @@ fn resolve_intersection_chain(
         chain.intersect_member(member);
     }
     chain
+}
+
+/// `ComponentProps<"div">`, when `key_type` is `keyof` it: the type the mapped type ranges over.
+fn element_props_of(key_type: &CollectedType) -> Option<CollectedType> {
+    match key_type {
+        CollectedType::AtFile { inner, .. } => element_props_of(inner),
+        CollectedType::KeyOf(target) => match target.as_ref() {
+            CollectedType::AtFile { inner, .. } => element_props_of(&CollectedType::KeyOf(inner.clone())),
+            CollectedType::Named { name, args } => {
+                let bare = name.strip_prefix("React.").unwrap_or(name);
+                let component_props =
+                    matches!(bare, "ComponentProps" | "ComponentPropsWithRef" | "ComponentPropsWithoutRef");
+                (component_props && args.len() == 1).then(|| target.as_ref().clone())
+            }
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn has_element(layer: &InheritedLayer, element: &str, ctx: &ResolutionContext) -> bool {

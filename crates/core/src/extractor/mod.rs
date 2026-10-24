@@ -299,6 +299,26 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
+    /// `declare const Primitive: Primitives`: the type of a value declared without an initializer, as the alias
+    /// `typeof Primitive` (a name no source can write), so `typeof Primitive.div` and `(typeof NODES)[number]` can be
+    /// read from it.
+    pub(super) fn record_declared_value_type(&mut self, declarator: &VariableDeclarator<'_>) {
+        let (BindingPattern::BindingIdentifier(id), Some(annotation)) = (&declarator.id, &declarator.type_annotation)
+        else {
+            return;
+        };
+        let target = self.ts_type_to_collected(&annotation.type_annotation);
+        // Object types stay out: `lib.dom.d.ts` and every package's typings would add their whole shape here.
+        if !matches!(target, crate::types::CollectedType::Named { .. } | crate::types::CollectedType::Tuple(_)) {
+            return;
+        }
+        let key = self.scoped_key(&format!("typeof {}", id.name));
+        self.data
+            .type_aliases
+            .entry(key)
+            .or_insert(crate::types::CollectedTypeAlias::Passthrough { target, file_path: self.file_path.clone() });
+    }
+
     pub(super) fn record_function_type_params(
         &mut self,
         span: Span,

@@ -2597,6 +2597,32 @@ fn a_type_declared_by_react_is_not_unresolvable_even_when_no_builtin_list_names_
     assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
 }
 
+/// Base UI's `{ [K in keyof ComponentPropsWithRef<"div">]: Wrap<ComponentPropsWithRef<"div">[K]> } & Own`: the
+/// element's attributes, as `ComponentProps<"div">` lists them, beside the component's own props.
+#[test]
+fn a_mapped_type_over_an_elements_attributes_is_that_elements_layer() {
+    let output = extract_with_installed_libs(&[(
+        "Box.tsx",
+        "import type * as React from 'react';\n\
+         type Wrap<T> = T;\n\
+         type Own = { own?: number };\n\
+         export function Box(props: { [K in keyof React.ComponentPropsWithRef<\"div\">]: Wrap<React.ComponentPropsWithRef<\"div\">[K]> } & Own) { return null; }\n\
+         export function Plain(props: React.ComponentPropsWithRef<\"div\"> & Own) { return null; }\n",
+    )]);
+
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+    let layer = |name: &str| {
+        let component = &output.components[name];
+        (
+            component.props.keys().cloned().collect::<Vec<_>>(),
+            component.notable_inherited.keys().cloned().collect::<Vec<_>>(),
+        )
+    };
+    assert_eq!(layer("Box"), layer("Plain"));
+    assert_eq!(layer("Box").0, vec!["own".to_owned()]);
+    assert!(layer("Box").1.contains(&"className".to_owned()));
+}
+
 /// A generic component's own type parameters are placeholders, the way an interface's are, and an ES2015 global
 /// (`Iterable`) is TypeScript's.
 #[test]

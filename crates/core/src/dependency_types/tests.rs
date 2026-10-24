@@ -168,6 +168,71 @@ fn a_shortcut_stands_in_for_an_evaluated_to_nothing_declaration_inside_an_inters
     assert_eq!(on.diagnostics, off.diagnostics);
 }
 
+/// Radix's `Primitive`: `declare const Primitive: Primitives`, a mapped type over `(typeof NODES)[number]` whose value
+/// is an interface extending `ForwardRefExoticComponent<PrimitivePropsWithRef<E>>`. `typeof Primitive.div` has the
+/// props of that component with `E` bound to `"div"`.
+#[test]
+fn component_props_of_a_member_of_a_value_with_a_mapped_type_bind_the_key() {
+    let (_tmp, root) = project(&[
+        ("node_modules/prim-kit/package.json", r#"{ "name": "prim-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        (
+            "node_modules/prim-kit/index.d.ts",
+            "import * as React from 'react';\n\
+             declare const NODES: readonly [\"a\", \"div\"];\n\
+             type Primitives = { [E in (typeof NODES)[number]]: PrimitiveForwardRefComponent<E> };\n\
+             type PrimitivePropsWithRef<E extends React.ElementType> = Own<E> & { asChild?: boolean };\n\
+             interface Own<E> { tag?: E }\n\
+             interface PrimitiveForwardRefComponent<E extends React.ElementType> \
+             extends React.ForwardRefExoticComponent<PrimitivePropsWithRef<E>> {}\n\
+             declare const Primitive: Primitives;\n\
+             export { Primitive };\n",
+        ),
+        (
+            "src/Box.tsx",
+            "import { Primitive } from 'prim-kit';\nimport * as React from 'react';\n\
+             export function Box(props: React.ComponentProps<typeof Primitive.div> & { extra?: number }) { return null; }\n",
+        ),
+    ]);
+
+    let on = extract(&options(&root, true));
+
+    assert_eq!(
+        prop_types(&on, "Box"),
+        [("asChild".into(), "boolean".into()), ("extra".into(), "number".into()), ("tag".into(), "\"div\"".into())]
+    );
+}
+
+/// antd's `ComponentProps<typeof RcTooltip>`: the package's default export is an imported component re-exported as
+/// the default, declared as `declare const Tooltip: ForwardRefExoticComponent<TooltipProps & RefAttributes<R>>`.
+#[test]
+fn component_props_of_a_default_exported_package_component_resolve_through_its_barrel() {
+    let (_tmp, root) = project(&[
+        ("node_modules/tip-kit/package.json", r#"{ "name": "tip-kit", "version": "1.0.0", "types": "es/index.d.ts" }"#),
+        ("node_modules/tip-kit/es/index.d.ts", "import Tooltip from './Tooltip';\nexport default Tooltip;\n"),
+        (
+            "node_modules/tip-kit/es/Tooltip.d.ts",
+            "import * as React from 'react';\n\
+             export interface TooltipProps { overlay: string; visible?: boolean }\n\
+             declare const Tooltip: React.ForwardRefExoticComponent<TooltipProps & React.RefAttributes<HTMLDivElement>>;\n\
+             export default Tooltip;\n",
+        ),
+        (
+            "src/Tip.tsx",
+            "import RcTooltip from 'tip-kit';\nimport * as React from 'react';\n\
+             export function Tip(props: React.ComponentProps<typeof RcTooltip> & { extra?: number }) { return null; }\n",
+        ),
+    ]);
+
+    let on = extract(&options(&root, true));
+
+    assert_eq!(
+        prop_types(&on, "Tip"),
+        [("extra".into(), "number".into()), ("overlay".into(), "string".into()), ("visible".into(), "boolean".into())]
+    );
+    // The test project has no `react`; nothing else is unresolved.
+    assert!(on.diagnostics.iter().all(|d| d.message.contains("'react'")), "{:?}", on.diagnostics);
+}
+
 /// `export const HiddenInput = Ark.HiddenInput` documents the imported component's props when its package is loaded,
 /// and is left out when it isn't (there is nothing to show).
 #[test]

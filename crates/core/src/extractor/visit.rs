@@ -293,6 +293,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             // Pattern 5: declare const Button: React.ForwardRefExoticComponent<ButtonProps & RefAttributes<E>>
             // Common in .d.ts files — no initializer, just a type annotation
             if declarator.init.is_none() {
+                if node.kind.is_const() {
+                    self.record_declared_value_type(declarator);
+                }
                 if let Some(name) = self.extract_pascal_name(declarator) {
                     if let Some(mapping) = self.try_forward_ref_exotic_decl(declarator, &name) {
                         self.data.component_mappings.push(mapping);
@@ -479,7 +482,17 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             },
         };
         match local {
-            Some(name) => self.record_exported_local(name),
+            Some(name) => {
+                self.record_exported_local(name);
+                // `export default Tooltip`: the module's default is `Tooltip`, which `finish` turns into a re-export
+                // when it is an import, as `export { Tooltip as default }` is.
+                self.pending_local_exports.push((self.data.exports.len(), name.to_owned()));
+                self.data.exports.push(LexedExport::LocalDeclaration {
+                    name: "default".to_owned(),
+                    is_type_only: false,
+                    declared_as: Some(name.to_owned()),
+                });
+            }
             None => {
                 if let Some(name) = super::component::pascal_case_from_file_stem(&self.file_path) {
                     self.record_exported_local(&name);

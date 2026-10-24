@@ -58,6 +58,26 @@ pub(super) fn mapped_keys(
     match constraint {
         CollectedType::AtFile { file, inner } => mapped_keys(inner, file, ctx, depth + 1),
         CollectedType::KeyOf(target) => keys_of(target, file, ctx, depth + 1),
+        // `(typeof NODES)[number]` over `declare const NODES: readonly ["a", "b"]`: the tuple's elements.
+        CollectedType::IndexedAccess { obj, key } if matches!(key.as_ref(), CollectedType::Number) => {
+            let (CollectedType::TypeOf(array), array_file) = unwrap_at_file(obj) else { return None };
+            let array_file = array_file.unwrap_or(file);
+            let (_, alias) = lookup_type_alias(ctx, array_file.as_str(), &format!("typeof {array}"))?;
+            let CollectedTypeAlias::Passthrough { target: CollectedType::Tuple(elements), .. } = alias else {
+                return None;
+            };
+            // A tuple's elements come through as the source text of a literal (`"a"`).
+            let names = elements.iter().map(|element| match element {
+                CollectedType::StringLiteral(name) => Some(name.to_string()),
+                CollectedType::Raw(text) => Some(text.trim().strip_prefix('"')?.strip_suffix('"')?.to_owned()),
+                _ => None,
+            });
+            Some(
+                names
+                    .map(|name| Some(Key { name: name?, required: true, description: String::new() }))
+                    .collect::<Option<_>>()?,
+            )
+        }
         other => Some(
             literal_set(other)?
                 .into_iter()
