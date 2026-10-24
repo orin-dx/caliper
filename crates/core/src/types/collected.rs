@@ -1028,6 +1028,9 @@ pub struct ComponentMapping {
     /// For a component built by a generic call (`WrapperTypeArgument`, or a `HocWrapper` call with type arguments),
     /// that call: its result type can add props the selected props type lacks.
     pub wrapper_callee: Option<WrapperCallee>,
+    /// The type parameters of the functions the declaration contains (`function ActionBar<T extends object>(props:
+    /// ActionBarProps<T>)`): placeholders in the props type, not unresolvable names.
+    pub type_params: Vec<TypeName>,
 }
 
 impl ComponentMapping {
@@ -1053,6 +1056,7 @@ impl ComponentMapping {
             rule,
             exported: false,
             wrapper_callee: None,
+            type_params: Vec::new(),
         }
     }
 

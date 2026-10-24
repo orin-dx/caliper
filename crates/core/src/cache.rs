@@ -34,7 +34,8 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 /// 19: a mapped type records its key variable and `?` modifier.
 /// 20: type parameter defaults.
 /// 21: the `ImportedMemberAlias` detection rule.
-const CACHE_SCHEMA_VERSION: u32 = 21;
+/// 22: component mappings record the type parameters of the functions they contain.
+const CACHE_SCHEMA_VERSION: u32 = 22;
 
 const DATA_FILE: &str = "dts.msgpack";
 

@@ -144,6 +144,13 @@ pub(super) fn component_props_of(
             state,
             depth + 1,
         ),
+        // `typeof Primitive.div`: a member of a value whose declared type is a mapped type over its keys.
+        None if let Some((props, props_file)) = name
+            .rsplit_once('.')
+            .and_then(|(base, member)| super::callee::value_member_props(base, member, file, ctx)) =>
+        {
+            super::alias::resolve_base_as_chain(&props, &props_file, mapping, ctx, state, depth + 1)
+        }
         None => {
             state.diagnostics.push(
                 Diagnostic::new(

@@ -290,9 +290,13 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     }
                 }
             }
+            self.record_body_defaults(declarator);
             // Pattern 5: declare const Button: React.ForwardRefExoticComponent<ButtonProps & RefAttributes<E>>
             // Common in .d.ts files — no initializer, just a type annotation
             if declarator.init.is_none() {
+                if node.kind.is_const() {
+                    self.record_declared_value_type(declarator);
+                }
                 if let Some(name) = self.extract_pascal_name(declarator) {
                     if let Some(mapping) = self.try_forward_ref_exotic_decl(declarator, &name) {
                         self.data.component_mappings.push(mapping);
@@ -315,8 +319,17 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         walk::walk_variable_declaration(self, node);
     }
 
+    fn visit_arrow_function_expression(&mut self, arrow: &ArrowFunctionExpression<'a>) {
+        self.record_function_type_params(arrow.span, arrow.type_parameters.as_deref());
+        self.props_params.push((first_param_name(&arrow.params), arrow.span.start, arrow.span.end));
+        walk::walk_arrow_function_expression(self, arrow);
+        self.props_params.pop();
+    }
+
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
         self.record_function_result(func);
+        self.record_function_type_params(func.span, func.type_parameters.as_deref());
+        self.props_params.push((first_param_name(&func.params), func.span.start, func.span.end));
         // Pattern 4: `function Button(props: ButtonProps) { ... }`
         if self.is_tsx {
             if let Some(id) = &func.id {
@@ -389,6 +402,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             }
         }
         walk::walk_function(self, func, flags);
+        self.props_params.pop();
     }
 
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
@@ -403,6 +417,14 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         // an anonymous ClassExpression (no `class.id`) is instead picked up by
         // `try_class_expression_wrapped` in `visit_variable_declaration`'s
         // detector chain, from the outer binding's name.
+        if let Some(id) = &class.id {
+            let params = class
+                .type_parameters
+                .as_ref()
+                .map(|declaration| declaration.params.iter().map(|p| p.name.name.as_str().into()).collect())
+                .unwrap_or_default();
+            self.pending_classes.push((self.scoped_key(id.name.as_str()), id.name.as_str().into(), params));
+        }
         if self.is_tsx && self.function_depth > 0 {
             if let Some(id) = &class.id {
                 let name = id.name.as_str();
@@ -465,7 +487,17 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             },
         };
         match local {
-            Some(name) => self.record_exported_local(name),
+            Some(name) => {
+                self.record_exported_local(name);
+                // `export default Tooltip`: the module's default is `Tooltip`, which `finish` turns into a re-export
+                // when it is an import, as `export { Tooltip as default }` is.
+                self.pending_local_exports.push((self.data.exports.len(), name.to_owned()));
+                self.data.exports.push(LexedExport::LocalDeclaration {
+                    name: "default".to_owned(),
+                    is_type_only: false,
+                    declared_as: Some(name.to_owned()),
+                });
+            }
             None => {
                 if let Some(name) = super::component::pascal_case_from_file_stem(&self.file_path) {
                     self.record_exported_local(&name);
@@ -514,5 +546,13 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             self.try_scan_object_assign_sub_components(node);
         }
         walk::walk_expression_statement(self, node);
+    }
+}
+
+/// The name of a function's first parameter, when it is a plain identifier (`props`).
+fn first_param_name(params: &FormalParameters<'_>) -> Option<compact_str::CompactString> {
+    match &params.items.first()?.pattern {
+        BindingPattern::BindingIdentifier(id) => Some(id.name.as_str().into()),
+        _ => None,
     }
 }

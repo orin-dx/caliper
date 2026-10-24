@@ -191,11 +191,16 @@ pub(super) fn resolve_base_as_chain(
                 } else {
                     resolve_collected_type(&field.collected_type, file_path, ctx, state, depth)
                 };
+                // The component's own defaults apply to an inline field as to a declared one (`props: IconProps &
+                // { size?: 'S' | 'M' }` with `let { size = 'M' } = props`).
+                let default_value = state
+                    .param_default(mapping, &field.name)
+                    .map(|code| DefaultValue { value: code.value.clone(), computed: code.computed });
                 chain.props.push(ctx.share(ParsedProp::new(
                     field.name.clone(),
                     prop_type,
                     field.required,
-                    None,
+                    default_value,
                     field.description.clone(),
                     Default::default(),
                     None,
@@ -229,6 +234,26 @@ pub(super) fn resolve_base_as_chain(
         {
             let keys = super::evaluate::mapped_keys(key_type, file_path, ctx, 0).unwrap_or_default();
             resolve_mapped_chain(param, &keys, value_type, *optional, file_path, ctx, state, depth)
+        }
+        // `{ [K in keyof ComponentPropsWithRef<"div">]: Wrap<ComponentPropsWithRef<"div">[K]> }` (Base UI): the
+        // element's attributes, each in a wrapper this does not apply, so it is listed as the element's own.
+        CollectedType::Mapped { key_type, .. } if element_props_of(key_type).is_some() => {
+            let Some(element_props) = element_props_of(key_type) else { return ResolvedChain::empty() };
+            state.diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Info,
+                message: format!(
+                    "'{}' is a mapped type over an element's attributes: they are listed as the element's, without \
+                     the wrapper its values apply",
+                    base.to_raw_string()
+                ),
+                file: Some(file_path.to_string()),
+                line: None,
+                column: None,
+                help: None,
+                code: DiagnosticCode::OpaqueType,
+                affects: Vec::new(),
+            });
+            resolve_base_as_chain(&element_props, file_path, mapping, ctx, state, depth + 1)
         }
         // None of these can ever provide a props chain (a props type must be
         // object-like — an interface, intersection, union, or inline object).
@@ -313,13 +338,19 @@ fn resolve_mapped_chain(
                 depth + 1,
             )
         };
+        // A tag on the source member (`/** @default "md" */ size: …` in a recipe's variants) carries over.
+        let default_value = key
+            .tags
+            .get("default")
+            .or_else(|| key.tags.get("defaultValue"))
+            .map(|value| DefaultValue { value: value.trim().to_owned(), computed: false });
         chain.props.push(ctx.share(ParsedProp::new(
             key.name.clone(),
             prop_type,
             optional.map_or(key.required, |optional| !optional),
-            None,
+            default_value,
             key.description.clone(),
-            Default::default(),
+            key.tags.clone(),
             None,
             vec![],
         )));
@@ -375,6 +406,24 @@ fn resolve_intersection_chain(
     chain
 }
 
+/// `ComponentProps<"div">`, when `key_type` is `keyof` it: the type the mapped type ranges over.
+fn element_props_of(key_type: &CollectedType) -> Option<CollectedType> {
+    match key_type {
+        CollectedType::AtFile { inner, .. } => element_props_of(inner),
+        CollectedType::KeyOf(target) => match target.as_ref() {
+            CollectedType::AtFile { inner, .. } => element_props_of(&CollectedType::KeyOf(inner.clone())),
+            CollectedType::Named { name, args } => {
+                let bare = name.strip_prefix("React.").unwrap_or(name);
+                let component_props =
+                    matches!(bare, "ComponentProps" | "ComponentPropsWithRef" | "ComponentPropsWithoutRef");
+                (component_props && args.len() == 1).then(|| target.as_ref().clone())
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn has_element(layer: &InheritedLayer, element: &str, ctx: &ResolutionContext) -> bool {
     super::html::intrinsic_element(element, Utf8Path::new(&layer.file_name), ctx).is_some()
 }
@@ -391,7 +440,10 @@ fn layer_attribute(
         return None;
     }
     let element = layer.html_element.as_deref()?;
-    super::html::react_attribute(element, name, Utf8Path::new(&layer.file_name), ctx, state, depth)
+    let key = format!("{}\0{element}\0{name}", layer.file_name);
+    ctx.attribute_reads.get_or_resolve(&key, depth, state, None, |state| {
+        super::html::react_attribute(element, name, Utf8Path::new(&layer.file_name), ctx, state, depth)
+    })
 }
 
 /// Resolve a `CollectedTypeAlias::Union` — detect discriminated union if possible.
