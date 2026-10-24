@@ -345,6 +345,22 @@ fn load_dependencies_comes_from_the_config_and_the_flag_turns_it_on() {
 }
 
 #[test]
+fn the_experimental_semantic_backend_is_off_unless_the_config_turns_it_on() {
+    let options = |json: &str| {
+        let schema: DocgenConfigSchema = serde_json::from_str(json).expect("valid config JSON");
+        schema.into_pipeline_options().unwrap()
+    };
+
+    let off = options("{}");
+    assert!(!off.experimental_semantic_types);
+    assert_eq!(off.semantic_tsc_path, None);
+
+    let on = options(r#"{ "experimentalSemanticTypes": true, "tscPath": "node_modules/typescript/bin/tsc" }"#);
+    assert!(on.experimental_semantic_types);
+    assert_eq!(on.semantic_tsc_path, Some("node_modules/typescript/bin/tsc".into()));
+}
+
+#[test]
 fn collapse_inherited_props_comes_from_the_config_or_the_flag_and_names_a_bad_value() {
     for (json, expected) in [
         ("{}", CollapseInheritedProps::Dependencies),
