@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { SUPPORTED_SCHEMA_VERSION } from '../../src/schema.js'
 import { DocgenSession } from '../../src/session.js'
 import { FakeBinding, entry, warning } from './fake-binding.js'
 
@@ -101,6 +102,7 @@ describe('DocgenSession.fresh', () => {
     binding.updates.push({ removedKeys: ['Button'] })
     await session.fresh()
     const stale = {
+      schemaVersion: SUPPORTED_SCHEMA_VERSION,
       revision: 2,
       updatedKeys: ['Button'],
       updatedComponents: [entry('Button', join(src, 'Button.tsx'))],

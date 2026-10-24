@@ -1,5 +1,7 @@
+import type { Diagnostic, WireDiagnostic } from 'caliper-docgen-napi'
+
 /** The output schema version this package reads (ADR 0017). A different major is a different shape. */
-export const SUPPORTED_SCHEMA_VERSION = 1
+export const SUPPORTED_SCHEMA_VERSION = 2
 
 /**
  * Returns `output` once its `schemaVersion` is one this package reads, and throws otherwise. Output without a version
@@ -14,4 +16,14 @@ export function assertSchemaVersion<T extends { schemaVersion?: number }>(output
     )
   }
   return output
+}
+
+/** Resolves each diagnostic's `affects` list id against `nameLists`. */
+export function expandDiagnostics(diagnostics: WireDiagnostic[], nameLists: Record<string, string[]>): Diagnostic[] {
+  return diagnostics.map(({ affects, ...rest }) => {
+    if (affects === undefined) return rest
+    const names = nameLists[affects]
+    if (!names) throw new Error(`The caliper-docgen output refers to name list ${affects}, which its nameLists lacks.`)
+    return { ...rest, affects: names }
+  })
 }

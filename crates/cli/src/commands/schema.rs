@@ -10,10 +10,20 @@ fn schema_value() -> serde_json::Value {
         "title": "ExtractionOutput",
         "description": "Output schema for caliper-docgen component prop extraction",
         "type": "object",
-        "required": ["schemaVersion", "components", "props", "enums", "diagnostics", "stats"],
+        "required": ["schemaVersion", "components", "props", "propSets", "nameLists", "enums", "diagnostics", "stats"],
         "definitions": {
             "propId": {
                 "description": "A prop's key in the top-level `props` table: the FNV-1a 64 hash of its compact JSON (ADR 0009)",
+                "type": "string",
+                "pattern": "^[0-9a-f]{16}$"
+            },
+            "propSetId": {
+                "description": "A prop set's key in the top-level `propSets` table: the hash of its (name, prop id) entries (ADR 0018)",
+                "type": "string",
+                "pattern": "^[0-9a-f]{16}$"
+            },
+            "nameListId": {
+                "description": "A list's key in the top-level `nameLists` table: the hash of its names, in order (ADR 0018)",
                 "type": "string",
                 "pattern": "^[0-9a-f]{16}$"
             },
@@ -48,9 +58,9 @@ fn schema_value() -> serde_json::Value {
                         "filePath": { "type": "string" },
                         "description": { "type": ["string", "null"] },
                         "props": {
-                            "description": "Prop name to prop id",
-                            "type": "object",
-                            "additionalProperties": { "$ref": "#/definitions/propId" }
+                            "description": "The prop sets that together hold the component's props; a prop name is in one",
+                            "type": "array",
+                            "items": { "$ref": "#/definitions/propSetId" }
                         },
                         "inheritance": {
                             "type": "array",
@@ -59,7 +69,7 @@ fn schema_value() -> serde_json::Value {
                                 "properties": {
                                     "typeName": { "type": "string" },
                                     "fileName": { "type": "string" },
-                                    "omitted": { "type": "array", "items": { "type": "string" } },
+                                    "omitted": { "$ref": "#/definitions/nameListId" },
                                     "htmlElement": { "type": ["string", "null"] },
                                     "totalProps": { "type": "integer" }
                                 }
@@ -97,6 +107,19 @@ fn schema_value() -> serde_json::Value {
                 "type": "object",
                 "additionalProperties": { "$ref": "#/definitions/prop" }
             },
+            "propSets": {
+                "description": "Every prop set the components refer to, by id: prop name to prop id",
+                "type": "object",
+                "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": { "$ref": "#/definitions/propId" }
+                }
+            },
+            "nameLists": {
+                "description": "Every list of names the components and diagnostics refer to, by id",
+                "type": "object",
+                "additionalProperties": { "type": "array", "items": { "type": "string" } }
+            },
             "enums": { "type": "object" },
             "diagnostics": {
                 "type": "array",
@@ -111,7 +134,10 @@ fn schema_value() -> serde_json::Value {
                         "column": { "type": ["integer", "null"] },
                         "help": { "type": ["string", "null"] },
                         "code": { "type": "string" },
-                        "affects": { "type": "array", "items": { "type": "string" } }
+                        "affects": {
+                            "description": "The components whose resolution reported this diagnostic: a list id in `nameLists`",
+                            "$ref": "#/definitions/nameListId"
+                        }
                     }
                 }
             },
@@ -244,7 +270,8 @@ mod tests {
         if let Some(obj) = value["components"]["Button"].as_object() {
             real_fields.extend(obj.keys().cloned());
         }
-        let variant_id = value["components"]["Button"]["props"]["variant"].as_str().expect("props hold ids");
+        let set_id = value["components"]["Button"]["props"][0].as_str().expect("props list prop set ids");
+        let variant_id = value["propSets"][set_id]["variant"].as_str().expect("prop sets hold prop ids");
         if let Some(obj) = value["props"][variant_id].as_object() {
             real_fields.extend(obj.keys().cloned());
         }
