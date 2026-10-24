@@ -114,6 +114,15 @@ pub struct ExtractArgs {
     /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
+
+    /// Experimental: ask TypeScript 7.1's `tsc --api` for each component's props and merge them over the structural
+    /// result, which stands wherever the checker cannot answer (off by default)
+    #[arg(long)]
+    pub experimental_semantic_types: bool,
+
+    /// The `tsc` binary `--experimental-semantic-types` runs, instead of `node_modules/typescript/bin/tsc`
+    #[arg(long, requires = "experimental_semantic_types")]
+    pub tsc_path: Option<String>,
 }
 
 #[derive(clap::ValueEnum, Clone)]
