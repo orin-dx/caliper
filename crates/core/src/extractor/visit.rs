@@ -206,6 +206,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     fn visit_ts_namespace_declaration(&mut self, node: &TSNamespaceDeclaration<'a>) {
         self.namespace_stack.push(node.id.name.as_str().into());
         walk::walk_ts_namespace_declaration(self, node);
+        self.qualify_namespace_references();
         self.namespace_stack.pop();
     }
 
