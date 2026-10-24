@@ -558,6 +558,34 @@ impl<'src> SourceDataCollector<'src> {
         true
     }
 
+    /// Record `const X = Imported.Member` as a component whose props are the imported member's
+    /// (`ComponentProps<typeof Imported.Member>`), when `Imported` is an import binding and `Member` is PascalCase.
+    pub(super) fn try_record_imported_member_alias<'a>(&mut self, decl: &Binding<'_, 'a>, name: &str) -> bool {
+        let Some(init) = decl.init.as_ref() else { return false };
+        let Expression::StaticMemberExpression(member) = peel_expr(init) else { return false };
+        let Expression::Identifier(object) = &member.object else { return false };
+        let property = member.property.name.as_str();
+        if !self.imported_names.contains(object.name.as_str()) || !is_pascal_case(property) {
+            return false;
+        }
+        let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
+        self.data.component_mappings.push(
+            ComponentMapping::new(
+                name.to_owned(),
+                "ComponentProps".into(),
+                self.file_path.clone(),
+                decl.span.start,
+                decl.span.end,
+                DetectionRule::ImportedMemberAlias,
+            )
+            .with_props_type_args(vec![crate::types::CollectedType::TypeOf(
+                format!("{}.{property}", object.name).into(),
+            )])
+            .with_doc(description, tags),
+        );
+        true
+    }
+
     /// Extract the callee name of a call expression (simple ident or member expr).
     pub(super) fn extract_callee_name<'a>(&self, call: &CallExpression<'a>) -> Option<String> {
         match &call.callee {

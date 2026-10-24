@@ -477,6 +477,13 @@ impl Revision {
         let mut seen_names: FxHashMap<String, u32> = FxHashMap::default();
         for (id, _) in component_ids(&self.global, options) {
             let Some((mut entry, resolved_diagnostics)) = take(&id) else { continue };
+            // An alias of an imported component whose package isn't loaded has nothing to document.
+            if entry.detected_by == DetectionRule::ImportedMemberAlias
+                && entry.props.is_empty()
+                && entry.inheritance.is_empty()
+            {
+                continue;
+            }
             let base_name = entry.display_name.clone();
             let count = seen_names.entry(base_name.clone()).or_insert(0);
             *count += 1;
