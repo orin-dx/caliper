@@ -28,13 +28,31 @@ pub(super) fn resolve_union(
 /// can be equal here although their source differs (`T[] | readonly T[]`, or two aliases that both resolve to
 /// `ReactNode | null`).
 pub(super) fn union_of(members: impl IntoIterator<Item = PropType>) -> PropType {
-    fn push(members: impl IntoIterator<Item = PropType>, flat: &mut Vec<PropType>) {
-        for member in members {
-            match member {
-                PropType::Union(inner) => push(inner, flat),
-                PropType::LiteralUnion { members, .. } => push(members.into_iter().map(PropType::StringLiteral), flat),
-                member if !flat.contains(&member) => flat.push(member),
-                _ => {}
+    /// The members collected so far; string literals, which make up the long keyword unions, are looked up in a set
+    /// instead of compared with every earlier member.
+    #[derive(Default)]
+    struct Flat {
+        members: Vec<PropType>,
+        strings: rustc_hash::FxHashSet<String>,
+    }
+    impl Flat {
+        fn push(&mut self, members: impl IntoIterator<Item = PropType>) {
+            for member in members {
+                match member {
+                    PropType::Union(inner) => self.push(inner),
+                    PropType::LiteralUnion { members, .. } => {
+                        self.push(members.into_iter().map(PropType::StringLiteral))
+                    }
+                    PropType::StringLiteral(s) => {
+                        if self.strings.insert(s.clone()) {
+                            self.members.push(PropType::StringLiteral(s));
+                        }
+                    }
+                    // `never` contributes nothing to a union.
+                    PropType::Never => {}
+                    member if !self.members.contains(&member) => self.members.push(member),
+                    _ => {}
+                }
             }
         }
     }
@@ -42,79 +60,25 @@ pub(super) fn union_of(members: impl IntoIterator<Item = PropType>) -> PropType 
     if let [PropType::LiteralUnion { .. }] = members.as_slice() {
         return members.remove(0);
     }
-    let mut flat = Vec::new();
-    push(members, &mut flat);
-    if flat.len() == 1 {
-        flat.remove(0)
-    } else {
-        PropType::Union(flat)
+    let mut flat = Flat::default();
+    flat.push(members);
+    // A union of nothing is `never`.
+    match flat.members.len() {
+        0 => PropType::Never,
+        1 => flat.members.remove(0),
+        _ => PropType::Union(flat.members),
     }
 }
 
-/// `Exclude<T, U>`, `Extract<T, U>` and `NonNullable<T>` as TypeScript evaluates them: each member of `T` kept or
-/// dropped by whether it is assignable to `U`, or to `null | undefined`. `None` when assignability needs more than
-/// literals and primitives (an object member, a type parameter), so the caller prints the type as written.
-pub(super) fn evaluate_filter(name: &str, args: &[PropType]) -> Option<PropType> {
-    let (members, targets, keep_assignable) = match (name, args) {
-        ("NonNullable", [t]) => (members_of(t), vec![PropType::Null, PropType::Undefined], false),
-        ("Exclude", [t, u]) => (members_of(t), members_of(u), false),
-        ("Extract", [t, u]) => (members_of(t), members_of(u), true),
-        _ => return None,
-    };
-    let mut kept = Vec::new();
-    for member in members {
-        // `boolean` is `false | true`, which a boolean literal target splits.
-        let split =
-            matches!(member, PropType::Boolean) && targets.iter().any(|t| matches!(t, PropType::BoolLiteral(_)));
-        let parts = if split { vec![PropType::BoolLiteral(false), PropType::BoolLiteral(true)] } else { vec![member] };
-        for part in parts {
-            if assignable(&part, &targets)? == keep_assignable {
-                kept.push(part);
-            }
-        }
-    }
-    Some(if kept.is_empty() { PropType::Never } else { union_of(kept) })
-}
-
-fn members_of(ty: &PropType) -> Vec<PropType> {
+/// `ty` with `null` and `undefined` removed from it, as intersecting it with `{}` does.
+fn without_nullish(ty: PropType) -> PropType {
     match ty {
-        PropType::Union(members) => members.clone(),
-        PropType::LiteralUnion { members, .. } => members.iter().cloned().map(PropType::StringLiteral).collect(),
-        other => vec![other.clone()],
+        PropType::Null | PropType::Undefined => PropType::Never,
+        PropType::Union(members) => {
+            union_of(members.into_iter().filter(|m| !matches!(m, PropType::Null | PropType::Undefined)))
+        }
+        other => other,
     }
-}
-
-/// Whether `member` is assignable to one of `targets`; `None` unless both are literals or primitives.
-fn assignable(member: &PropType, targets: &[PropType]) -> Option<bool> {
-    let simple = |t: &PropType| {
-        matches!(
-            t,
-            PropType::String
-                | PropType::Number
-                | PropType::Boolean
-                | PropType::Null
-                | PropType::Undefined
-                | PropType::StringLiteral(_)
-                | PropType::NumberLiteral(_)
-                | PropType::BoolLiteral(_)
-        )
-    };
-    // Removing `null`/`undefined` is decidable for any member whose type is known: nothing else is assignable to them.
-    // A name (an unexpanded alias, a type parameter) may stand for either, so it isn't.
-    let nullish_only = targets.iter().all(|t| matches!(t, PropType::Null | PropType::Undefined))
-        && !matches!(member, PropType::Named { .. } | PropType::Opaque(_) | PropType::Any | PropType::Unknown);
-    if !(nullish_only || simple(member) && targets.iter().all(simple)) {
-        return None;
-    }
-    Some(targets.iter().any(|target| {
-        member == target
-            || matches!(
-                (member, target),
-                (PropType::StringLiteral(_), PropType::String)
-                    | (PropType::NumberLiteral(_), PropType::Number)
-                    | (PropType::BoolLiteral(_), PropType::Boolean)
-            )
-    }))
 }
 
 pub(super) fn resolve_intersection(
@@ -131,7 +95,9 @@ pub(super) fn resolve_intersection(
         members.iter().filter(|m| !matches!(m, CollectedType::Object(f) if f.is_empty())).collect();
 
     if non_empty.len() == 1 {
-        return resolve_collected_type(non_empty[0], consuming_file, ctx, state, depth + 1);
+        let resolved = resolve_collected_type(non_empty[0], consuming_file, ctx, state, depth + 1);
+        // `T & {}` is `T` without `null` and `undefined` (lib's `NonNullable`), whatever else it is.
+        return if non_empty.len() < members.len() { without_nullish(resolved) } else { resolved };
     }
 
     let resolved: Vec<PropType> =
@@ -170,8 +136,8 @@ pub(super) fn resolve_indexed_access(
     // The member as its declaration reads, ancestors and type arguments included: React's `CSSProperties` reaches
     // csstype's `Property.ZIndex` when dependencies are loaded.
     if !key_str.is_empty() {
-        if let Some((member, member_file)) = super::evaluate::member(obj, key_str, consuming_file, ctx, 0) {
-            return resolve_collected_type(&member, &member_file, ctx, state, depth + 1);
+        if let Some(found) = super::evaluate::member_shared(obj, key_str, consuming_file, ctx, 0) {
+            return resolve_collected_type(&found.0, &found.1, ctx, state, depth + 1);
         }
     }
 

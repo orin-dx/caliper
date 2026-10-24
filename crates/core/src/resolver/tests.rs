@@ -1705,9 +1705,10 @@ fn test_template_literal_expansion() {
 
 #[test]
 fn test_conditional_type_is_opaque() {
+    // An unbound type parameter as the check: nothing decides it without a checker.
     let ctx = empty_ctx();
     let ct = CollectedType::Conditional {
-        check: Box::new(CollectedType::String),
+        check: Box::new(CollectedType::Named { name: "T".into(), args: vec![] }),
         extends_type: Box::new(CollectedType::String),
         true_type: Box::new(CollectedType::Boolean),
         false_type: Box::new(CollectedType::Number),
@@ -1717,6 +1718,31 @@ fn test_conditional_type_is_opaque() {
         matches!(&result, PropType::Opaque(d) if matches!(d.reason(), OpaqueReason::ConditionalType)),
         "Expected ConditionalType opaque, got {:?}",
         result
+    );
+}
+
+#[test]
+fn a_conditional_over_known_types_takes_its_branch() {
+    let ctx = empty_ctx();
+    let conditional = |check: CollectedType, extends_type: CollectedType| CollectedType::Conditional {
+        check: Box::new(check),
+        extends_type: Box::new(extends_type),
+        true_type: Box::new(CollectedType::Boolean),
+        false_type: Box::new(CollectedType::Number),
+    };
+    let literal = |s: &str| CollectedType::StringLiteral(s.into());
+    assert_eq!(resolve_type(&conditional(CollectedType::String, CollectedType::String), &ctx), PropType::Boolean);
+    assert_eq!(resolve_type(&conditional(literal("a"), CollectedType::String), &ctx), PropType::Boolean);
+    assert_eq!(resolve_type(&conditional(CollectedType::String, literal("a")), &ctx), PropType::Number);
+    assert_eq!(
+        resolve_type(
+            &conditional(
+                CollectedType::Null,
+                CollectedType::Union(vec![CollectedType::Null, CollectedType::Undefined])
+            ),
+            &ctx
+        ),
+        PropType::Boolean
     );
 }
 

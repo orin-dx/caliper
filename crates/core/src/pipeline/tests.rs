@@ -3099,12 +3099,78 @@ export function Badge(props: {
     assert_eq!(text("picked"), "\"small\" | \"medium\" | \"large\"");
     assert_eq!(text("level"), "1 | 2");
     assert_eq!(text("heading"), "\"h1\" | \"h2\" | \"h3\"");
-    assert_eq!(
-        text("align"),
-        "Conditional<\"start\" | \"end\" | undefined | NonNullable<\"start\" | \"end\" | undefined>[]>"
-    );
+    assert_eq!(text("align"), "Conditional<\"start\" | \"end\" | undefined | (\"start\" | \"end\")[]>");
     assert_eq!(text("variant"), "\"solid\" | \"ghost\" | \"custom\"");
     assert_eq!(text("plain"), "string");
+}
+
+#[test]
+fn a_conditional_alias_distributes_over_the_members_of_its_argument() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "sizes.ts",
+        "export type Size = \"xs\" | \"sm\" | \"md\";\nexport const TONES = [\"a\", \"b\", \"c\"] as const;\n",
+    );
+    write_file(
+        &tmp,
+        "Tag.tsx",
+        r#"
+import type { Size, TONES } from "./sizes";
+type Without<T, U> = T extends U ? never : T;
+type OnlyStrings<T> = T extends string ? T : never;
+type Tone = (typeof TONES)[number];
+export function Tag(props: {
+    size: Exclude<Size, "xs">;
+    own: Without<Size | 4 | null, "sm" | null>;
+    strings: OnlyStrings<Size | boolean | 7>;
+    tone: Exclude<Tone, "b">;
+    maybe: NonNullable<string | null | undefined>;
+    flag: Exclude<boolean, true>;
+    all: Exclude<Size, Size>;
+}) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let text = |prop: &str| output.components["Tag"].props[prop].prop_type.raw_string();
+    assert_eq!(text("size"), "\"sm\" | \"md\"");
+    assert_eq!(text("own"), "\"xs\" | \"md\" | 4");
+    assert_eq!(text("strings"), "\"xs\" | \"sm\" | \"md\"");
+    assert_eq!(text("tone"), "\"a\" | \"c\"");
+    assert_eq!(text("maybe"), "string");
+    assert_eq!(text("flag"), "false");
+    assert_eq!(text("all"), "never");
+}
+
+#[test]
+fn a_generic_alias_with_a_long_expansion_is_shown_by_name_with_its_arguments() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    let keys: Vec<String> = (0..80).map(|i| format!("\"k{i}\"")).collect();
+    write_file(
+        &tmp,
+        "Grid.tsx",
+        &format!(
+            "type Key = {keys};\ntype Small = \"a\" | \"b\";\ntype Responsive<T> = T | T[] | {{ [bp: string]: T }};\n\
+             export function Grid(props: {{ big: Responsive<Key>; small: Responsive<Small> }}) {{ return null; }}\n",
+            keys = keys.join(" | ")
+        ),
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let text = |prop: &str| output.components["Grid"].props[prop].prop_type.raw_string();
+    assert_eq!(text("big"), "Responsive<Key>");
+    assert!(text("small").starts_with("\"a\" | \"b\" | "), "got {}", text("small"));
 }
 
 #[test]

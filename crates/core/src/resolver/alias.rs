@@ -561,9 +561,7 @@ pub(super) fn resolve_type_alias_type(
             union_of(members.iter().map(|m| resolve_collected_type(m, file_path, ctx, state, depth + 1)))
         }
         CollectedTypeAlias::Intersection { members, .. } => {
-            let resolved: Vec<PropType> =
-                members.iter().map(|m| resolve_collected_type(m, file_path, ctx, state, depth + 1)).collect();
-            PropType::Intersection(resolved)
+            super::primitives::resolve_intersection(members, file_path, ctx, state, depth)
         }
         CollectedTypeAlias::Partial { base, .. } | CollectedTypeAlias::Required { base, .. } => {
             resolve_collected_type(base, file_path, ctx, state, depth + 1)

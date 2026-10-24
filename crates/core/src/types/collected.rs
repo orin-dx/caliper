@@ -120,6 +120,76 @@ pub enum CollectedType {
 }
 
 impl CollectedType {
+    /// Feed `hasher` everything that tells two types apart, without building their text: a cycle or cache key made of
+    /// this is a few bytes where the debug text of a long union is kilobytes.
+    pub fn structural_hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
+        use std::hash::Hash;
+        std::mem::discriminant(self).hash(hasher);
+        let all = |hasher: &mut H, members: &[CollectedType]| {
+            members.len().hash(hasher);
+            members.iter().for_each(|member| member.structural_hash(hasher));
+        };
+        match self {
+            CollectedType::String
+            | CollectedType::Number
+            | CollectedType::Boolean
+            | CollectedType::Null
+            | CollectedType::Undefined
+            | CollectedType::Any
+            | CollectedType::Never
+            | CollectedType::Unknown
+            | CollectedType::Void
+            | CollectedType::BigInt
+            | CollectedType::Symbol => {}
+            CollectedType::StringLiteral(s) | CollectedType::TypeOf(s) => s.hash(hasher),
+            CollectedType::NumberLiteral(n) => n.to_bits().hash(hasher),
+            CollectedType::BoolLiteral(b) => b.hash(hasher),
+            CollectedType::Union(members)
+            | CollectedType::Intersection(members)
+            | CollectedType::Tuple(members)
+            | CollectedType::TemplateLiteral(members) => all(hasher, members),
+            CollectedType::Array(inner) | CollectedType::KeyOf(inner) => inner.structural_hash(hasher),
+            CollectedType::Object(fields) => {
+                fields.len().hash(hasher);
+                for field in fields {
+                    field.name.hash(hasher);
+                    field.required.hash(hasher);
+                    field.collected_type.structural_hash(hasher);
+                }
+            }
+            CollectedType::Named { name, args } => {
+                name.hash(hasher);
+                all(hasher, args);
+            }
+            CollectedType::AtFile { file, inner } => {
+                file.hash(hasher);
+                inner.structural_hash(hasher);
+            }
+            CollectedType::IndexedAccess { obj, key } => {
+                obj.structural_hash(hasher);
+                key.structural_hash(hasher);
+            }
+            CollectedType::Function { type_params, params, param_names, return_type } => {
+                type_params.hash(hasher);
+                all(hasher, params);
+                param_names.hash(hasher);
+                return_type.structural_hash(hasher);
+            }
+            CollectedType::Conditional { check, extends_type, true_type, false_type } => {
+                for part in [check, extends_type, true_type, false_type] {
+                    part.structural_hash(hasher);
+                }
+            }
+            CollectedType::Mapped { param, key_type, value_type, optional } => {
+                param.hash(hasher);
+                key_type.structural_hash(hasher);
+                value_type.structural_hash(hasher);
+                optional.hash(hasher);
+            }
+            CollectedType::Raw(s) => s.hash(hasher),
+        }
+    }
+
     /// True if this type requires the TypeScript type checker to resolve.
     pub fn needs_type_checker(&self) -> bool {
         matches!(self, CollectedType::Conditional { .. } | CollectedType::Mapped { .. })
