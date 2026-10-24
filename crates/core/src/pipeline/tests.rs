@@ -2563,6 +2563,77 @@ fn extract_one(files: &[(&str, &str)]) -> ExtractionOutput {
     })
 }
 
+/// The project is a directory inside the crate, so `react` and `typescript` resolve from the workspace's `node_modules`.
+fn extract_with_installed_libs(files: &[(&str, &str)]) -> ExtractionOutput {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    for (name, body) in files {
+        write_file(&tmp, name, body);
+    }
+    extract(&PipelineOptions { html_attributes: HtmlAttributeMode::Curated, ..full_mode_options_for(&tmp) })
+}
+
+fn severe(output: &ExtractionOutput) -> Vec<&crate::types::Diagnostic> {
+    output.diagnostics.iter().filter(|d| d.severity != DiagnosticSeverity::Info).collect()
+}
+
+/// A type React declares that no builtin list names is React's, imported under its name or another.
+#[test]
+fn a_type_declared_by_react_is_not_unresolvable_even_when_no_builtin_list_names_it() {
+    let output = extract_with_installed_libs(&[(
+        "Box.tsx",
+        "import type { UIEventHandler, Key, DOMAttributes as ReactDOMAttributes } from 'react';\n\
+         export function Box(props: { onScroll?: UIEventHandler<HTMLDivElement>; id?: Key; dom?: ReactDOMAttributes<Element> }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    assert_eq!(
+        props["onScroll"].prop_type,
+        PropType::Named {
+            name: "UIEventHandler".into(),
+            args: vec![PropType::Named { name: "HTMLDivElement".into(), args: vec![] }]
+        }
+    );
+    assert_eq!(props["id"].prop_type, PropType::Named { name: "Key".into(), args: vec![] });
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+}
+
+/// A generic component's own type parameters are placeholders, the way an interface's are, and an ES2015 global
+/// (`Iterable`) is TypeScript's.
+#[test]
+fn a_generic_components_type_parameter_and_an_es2015_global_are_not_unresolvable() {
+    let output = extract_with_installed_libs(&[(
+        "List.tsx",
+        "interface ListProps<T> { items?: Iterable<T>; render?: (item: T) => null }\n\
+         export function List<T extends object>(props: ListProps<T>) { return null; }\n\
+         export const Wrapped = (function Inner<T extends object>(props: ListProps<T>) { return null; });\n",
+    )]);
+
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+    assert_eq!(
+        output.components["List"].props["items"].prop_type,
+        PropType::Named { name: "Iterable".into(), args: vec![PropType::Named { name: "T".into(), args: vec![] }] }
+    );
+}
+
+/// A class is also a type: `value: CalendarDate` names it, and nothing else about it is needed to print the name.
+#[test]
+fn a_class_used_as_a_type_is_declared() {
+    let output = extract_one(&[
+        ("date.ts", "export class CalendarDate { year = 0 }\n"),
+        (
+            "Cell.tsx",
+            "import { CalendarDate } from './date';\n\
+             export function Cell(props: { value: CalendarDate }) { return null; }\n",
+        ),
+    ]);
+
+    assert_eq!(
+        output.components["Cell"].props["value"].prop_type,
+        PropType::Named { name: "CalendarDate".into(), args: vec![] }
+    );
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+}
+
 /// A namespace member names its siblings bare (csstype's `DataType.Color`), and the union keeps every member.
 #[test]
 fn a_namespace_sibling_in_an_alias_body_resolves_to_its_members() {

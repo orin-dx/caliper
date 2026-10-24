@@ -315,8 +315,14 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         walk::walk_variable_declaration(self, node);
     }
 
+    fn visit_arrow_function_expression(&mut self, arrow: &ArrowFunctionExpression<'a>) {
+        self.record_function_type_params(arrow.span, arrow.type_parameters.as_deref());
+        walk::walk_arrow_function_expression(self, arrow);
+    }
+
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
         self.record_function_result(func);
+        self.record_function_type_params(func.span, func.type_parameters.as_deref());
         // Pattern 4: `function Button(props: ButtonProps) { ... }`
         if self.is_tsx {
             if let Some(id) = &func.id {
@@ -403,6 +409,14 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         // an anonymous ClassExpression (no `class.id`) is instead picked up by
         // `try_class_expression_wrapped` in `visit_variable_declaration`'s
         // detector chain, from the outer binding's name.
+        if let Some(id) = &class.id {
+            let params = class
+                .type_parameters
+                .as_ref()
+                .map(|declaration| declaration.params.iter().map(|p| p.name.name.as_str().into()).collect())
+                .unwrap_or_default();
+            self.pending_classes.push((self.scoped_key(id.name.as_str()), id.name.as_str().into(), params));
+        }
         if self.is_tsx && self.function_depth > 0 {
             if let Some(id) = &class.id {
                 let name = id.name.as_str();

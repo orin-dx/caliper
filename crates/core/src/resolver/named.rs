@@ -237,6 +237,11 @@ fn resolve_named_uncycled(
         };
     }
 
+    // ── 6.8 A type React declares that the builtin list doesn't name ──────────
+    if super::declared_by_react(name, &canonical_name, consuming_file, ctx) {
+        return react_type_to_prop_type(name.as_str(), args, consuming_file, ctx, state, depth);
+    }
+
     // ── 7. Unresolvable — emit diagnostic, return Named ───────────────────────
     let location_note =
         super::unresolved_location_note(name.as_str(), consuming_file, &canonical_file, &canonical_name);
