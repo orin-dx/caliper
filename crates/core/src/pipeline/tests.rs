@@ -2610,6 +2610,21 @@ fn a_chain_of_aliases_longer_than_the_expression_depth_limit_resolves() {
     assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
 }
 
+/// Mantine's `CssVars<V = CssVariable> = ... | CssVars<V>[]`: the argument of the recursive reference is the same type
+/// at every level, so the cycle is found at the second one, as information, not by running out of depth.
+#[test]
+fn a_recursive_alias_with_a_defaulted_parameter_is_a_cycle_not_a_depth_overrun() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "type Vars<V extends string = 'a'> = Record<V, string> | Vars<V>[];\n\
+         export function Box(props: { vars?: Vars }) { return null; }\n",
+    )]);
+
+    let severe: Vec<_> = output.diagnostics.iter().filter(|d| d.severity != DiagnosticSeverity::Info).collect();
+    assert!(severe.is_empty(), "{severe:?}");
+    assert!(output.diagnostics.iter().any(|d| d.code == DiagnosticCode::CircularReference), "{:?}", output.diagnostics);
+}
+
 #[test]
 fn a_project_declaration_named_like_a_builtin_is_that_declaration() {
     let output = extract_one(&[(
