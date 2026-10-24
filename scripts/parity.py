@@ -314,7 +314,7 @@ def measure(rdt, mine, clone_root):
     """The coverage, agreement and loss-pattern counts of one Caliper run against RDT's dump."""
     by_file = {}
     for c in mine.values():
-        rel = os.path.relpath(c['filePath'], clone_root)
+        rel = relative(c['filePath'], clone_root)
         by_file.setdefault(rel, []).append((norm_name(c['displayName']), c))
     counts = {
         'rdt_components': 0, 'components_matched': 0, 'rdt_props': 0, 'props_reported': 0,
@@ -326,8 +326,7 @@ def measure(rdt, mine, clone_root):
         if not comp['props']:
             continue
         counts['rdt_components'] += 1
-        rel = os.path.relpath(comp['file'], clone_root) if os.path.isabs(comp['file']) else comp['file']
-        m = next((c for n, c in by_file.get(rel, []) if n == norm_name(comp['name'])), None)
+        m = next((c for n, c in by_file.get(comp['file'], []) if n == norm_name(comp['name'])), None)
         if m is None:
             continue
         counts['components_matched'] += 1
@@ -417,8 +416,14 @@ def rdt_dump(corpus, src, clone_root, rdt_dir):
         dump = json.load(f)
     # Paths relative to the clone, so a dump made in another checkout location still matches.
     for comp in dump['components']:
-        comp['file'] = os.path.relpath(comp['file'], clone_root)
+        comp['file'] = relative(comp['file'], clone_root)
     return dump
+
+
+def relative(path, root):
+    """`path` relative to `root`, both through symlinks: Caliper reports canonical paths (`/private/var/...` on
+    macOS), RDT the ones it was given."""
+    return os.path.relpath(os.path.realpath(path), os.path.realpath(root))
 
 
 def selected(names):
