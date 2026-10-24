@@ -887,6 +887,9 @@ pub enum DetectionRule {
     /// `const Button = wrapper<ButtonFactory>(...)` or `wrapper<El, ButtonProps>(...)`: a generic call whose type
     /// arguments carry the props type, chosen by shape from declarations in the same file.
     WrapperTypeArgument,
+    /// `const HiddenInput = ArkCheckbox.HiddenInput`: a PascalCase member of an imported module, re-exported under a
+    /// name of the project's own. Its props are the imported component's.
+    ImportedMemberAlias,
 }
 
 /// A component → prop type mapping.

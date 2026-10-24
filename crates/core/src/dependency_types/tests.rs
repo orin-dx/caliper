@@ -148,6 +148,35 @@ fn a_shortcut_stands_in_for_a_loaded_declaration_that_evaluates_to_nothing() {
     assert_eq!(prop_types(&on, "Pill"), [("intent".into(), "\"primary\" | \"danger\" | null".into())]);
 }
 
+/// `export const HiddenInput = Ark.HiddenInput` documents the imported component's props when its package is loaded,
+/// and is left out when it isn't (there is nothing to show).
+#[test]
+fn a_member_alias_of_an_imported_component_takes_that_components_props() {
+    let (_tmp, root) = project(&[
+        ("node_modules/ark-kit/package.json", r#"{ "name": "ark-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        (
+            "node_modules/ark-kit/index.d.ts",
+            "import * as React from 'react';\n\
+             export interface HiddenInputProps { asChild?: boolean; name?: string }\n\
+             export declare const HiddenInput: React.ForwardRefExoticComponent<HiddenInputProps>;\n",
+        ),
+        (
+            "src/Checkbox.tsx",
+            "import * as Ark from 'ark-kit';\nexport const CheckboxHiddenInput = Ark.HiddenInput;\nexport const lower = Ark.hidden;\n",
+        ),
+    ]);
+
+    let on = extract(&options(&root, true));
+    let off = extract(&options(&root, false));
+
+    assert_eq!(
+        prop_types(&on, "CheckboxHiddenInput"),
+        [("asChild".into(), "boolean".into()), ("name".into(), "string".into())]
+    );
+    assert_eq!(on.components["CheckboxHiddenInput"].detected_by, crate::types::DetectionRule::ImportedMemberAlias);
+    assert_eq!(off.components.keys().collect::<Vec<_>>(), Vec::<&String>::new());
+}
+
 /// A loaded declaration that resolves wins over a shortcut of the same name (ADR 0014); without it, the shortcut (an
 /// HTML layer for the element) is the fallback.
 #[test]
