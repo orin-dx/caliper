@@ -109,10 +109,33 @@ describe('createDocgenProvider', () => {
     expect(listed.looks).toBe(1)
   })
 
+  it('documents a member of a named import as the sub-component with that display name', async () => {
+    const fake = binding()
+    fake.output.components!['Select.Option'] = entry('Select.Option', join(components, 'Select.tsx'))
+    fake.docs['Select.Option'] = rdtDoc('Select.Option', ['value'])
+    const { payload, nextCalls } = await request(fake, story('Option'))
+    expect(nextCalls).toBe(0)
+    expect(Object.keys(payload?.argTypes ?? {})).toEqual(['value'])
+  })
+
   it('asks the next provider when the session has no such component', async () => {
     const fake = binding()
     delete fake.output.components!.Card
     expect(await request(fake, story('Card'))).toEqual({ payload: NEXT, nextCalls: 1 })
+  })
+
+  it('says which components the file has when none matches the import', async () => {
+    const debug = vi.spyOn(logger, 'debug').mockImplementation(() => {})
+    const fake = binding()
+    fake.output.components = {
+      Header: entry('Header', join(components, 'Card.tsx')),
+      Footer: entry('Footer', join(components, 'Card.tsx')),
+    }
+    await request(fake, story('Card'))
+    expect(debug.mock.calls.map(([message]) => message)).toEqual([
+      `[caliper-docgen] ./src/stories/Card.stories.tsx: caliper-docgen found no component default in ${resolve(components, 'Card.tsx')}; its components are Header, Footer; asking the next docgen provider`,
+    ])
+    debug.mockRestore()
   })
 
   it('asks the next provider for a degraded component unless fallback is never', async () => {
