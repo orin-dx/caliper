@@ -1,5 +1,16 @@
 # cargo/caliper-docgen
 
+## 0.6.0
+
+- **Experimental `--experimental-semantic-types`:** `extract` asks TypeScript 7.1's `tsc --api` (`typescript@beta`, found at `node_modules/typescript/bin/tsc` or `--tsc-path`) for each exported function component's props and merges the checker's props, types and required flags over the structural result. Config keys `experimentalSemanticTypes` and `tscPath`. Off by default, and without the flag the output is byte-identical.
+  
+  The structural result stands wherever the checker cannot answer: a missing, unpinned, crashed or timed-out `tsc` adds one `SEMANTIC_BACKEND` warning; a class, overloaded, generic or union-props component, or one the module does not export, keeps its props and is listed by an `Info` diagnostic whose `affects` names it. The components the checker resolved are listed the same way. Checker types map onto the existing `PropType`; what it cannot represent (optional and rest parameters, index signatures, `readonly`) is not yet carried.
+- - **Chakra with `--load-dependencies` resolves instead of giving up:** the share of its components with a warning drops from 92% to 3%. Three causes, all fixed:
+    - A type declared inside `namespace X {}` that names a sibling (csstype's `DataType.Color = ColorBase | ...`) now finds it. Its members were lost before, in project sources as well as dependencies.
+    - `T extends unknown ? Omit<T, K> : never`, the idiom that distributes over a union, takes its true branch, so a props base written that way is no longer opaque.
+    - The nesting limit counts one type expression. An alias body starts again at 0, and the declarations a reference passes through are bounded by the names in progress, so a prop 15 levels down no longer runs out of depth inside four csstype aliases.
+  - The parse cache schema is unchanged.
+
 ## 0.5.0
 
 - **Curated mode also gives a prop beside `ComponentProps<"div">` the element attribute's type:** recharts' `onTimeUpdate` next to a div's attributes is now `ReactEventHandler<HTMLDivElement>` intersected with recharts' handler in the default curated mode too, not only in Full mode. Curated mode reads React's declarations for this lookup only (ADR 0013), so nothing else in its output changes.
