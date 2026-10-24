@@ -155,7 +155,19 @@ pub(super) fn resolve_base_as_chain(
                 ctx,
                 &mut state.diagnostics,
             ) {
-                return resolve_type_alias_chain(&alias, file_path, mapping, ctx, state, depth + 1);
+                let mut attempt = state.branch();
+                let chain = resolve_type_alias_chain(&alias, file_path, mapping, ctx, &mut attempt, depth + 1);
+                return super::chain::known_fallback_for_alias(
+                    chain,
+                    attempt,
+                    name.as_str(),
+                    args,
+                    file_path,
+                    mapping,
+                    ctx,
+                    state,
+                    depth + 1,
+                );
             }
 
             resolve_props_chain(name.as_str(), args, file_path, mapping, ctx, state, depth + 1)

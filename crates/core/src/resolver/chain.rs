@@ -32,10 +32,7 @@ fn known_fallback(
     state: &mut ResolveState,
     depth: u8,
 ) -> ResolvedChain {
-    let evaluated_to_nothing = chain.props.is_empty()
-        && chain.inheritance.is_empty()
-        && (!chain.composes.is_empty() || !attempt.diagnostics.is_empty() || !attempt.shared_diagnostics.is_empty());
-    if evaluated_to_nothing {
+    if evaluated_to_nothing(&chain, &attempt) {
         let bare = type_name.strip_prefix("React.").unwrap_or(type_name);
         if let Some(result) = crate::known::resolve_known(bare, resolved_args, &ctx.global, &ctx.enum_bare_index) {
             return known_chain(result, type_name, consuming_file, mapping, ctx, state, depth);
@@ -43,6 +40,35 @@ fn known_fallback(
     }
     state.absorb(attempt);
     chain
+}
+
+fn evaluated_to_nothing(chain: &ResolvedChain, attempt: &ResolveState) -> bool {
+    chain.props.is_empty()
+        && chain.inheritance.is_empty()
+        && (!chain.composes.is_empty() || !attempt.diagnostics.is_empty() || !attempt.shared_diagnostics.is_empty())
+}
+
+/// [`known_fallback`] for a generic alias expanded where it is written (`VariantProps<typeof buttonVariants>` inside
+/// an intersection), whose arguments are resolved only when the expansion came to nothing.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn known_fallback_for_alias(
+    chain: ResolvedChain,
+    attempt: ResolveState,
+    type_name: &str,
+    type_args: &[CollectedType],
+    consuming_file: &Utf8Path,
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> ResolvedChain {
+    if !evaluated_to_nothing(&chain, &attempt) {
+        state.absorb(attempt);
+        return chain;
+    }
+    let resolved_args: Vec<PropType> =
+        type_args.iter().map(|a| resolve_collected_type(a, consuming_file, ctx, state, depth + 1)).collect();
+    known_fallback(chain, attempt, type_name, &resolved_args, consuming_file, mapping, ctx, state, depth)
 }
 
 /// The props chain a known shortcut gives `type_name`.

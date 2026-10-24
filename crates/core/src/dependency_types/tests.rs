@@ -148,6 +148,26 @@ fn a_shortcut_stands_in_for_a_loaded_declaration_that_evaluates_to_nothing() {
     assert_eq!(prop_types(&on, "Pill"), [("intent".into(), "\"primary\" | \"danger\" | null".into())]);
 }
 
+/// The same fallback where `VariantProps<…>` is a member of an intersection (shadcn's `Button`): the alias is expanded
+/// where it is written, a sibling of the props-chain path above, and gives way to the shortcut the same way.
+#[test]
+fn a_shortcut_stands_in_for_an_evaluated_to_nothing_declaration_inside_an_intersection() {
+    let source = "import { cva, type VariantProps } from 'class-variance-authority';\n\
+        const variants = cva('', { variants: { intent: { primary: '', danger: '' } } });\n\
+        export function Pill(props: VariantProps<typeof variants> & { asChild?: boolean }) { return null; }\n";
+    let (_tmp, root) = project(&[("src/Pill.tsx", source)]);
+
+    let off = extract(&options(&root, false));
+    let on = extract(&options(&root, true));
+
+    assert_eq!(prop_types(&on, "Pill"), prop_types(&off, "Pill"));
+    assert_eq!(
+        prop_types(&on, "Pill"),
+        [("asChild".into(), "boolean".into()), ("intent".into(), "\"primary\" | \"danger\" | null".into())]
+    );
+    assert_eq!(on.diagnostics, off.diagnostics);
+}
+
 /// `export const HiddenInput = Ark.HiddenInput` documents the imported component's props when its package is loaded,
 /// and is left out when it isn't (there is nothing to show).
 #[test]
