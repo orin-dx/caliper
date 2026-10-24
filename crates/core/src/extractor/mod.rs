@@ -235,6 +235,16 @@ pub(super) struct SourceDataCollector<'src> {
     /// How many function bodies enclose the node being visited. A component declared inside one exists per call (a
     /// factory's returned component, a story's local helper), so no module imports it under that name.
     pub(super) function_depth: u32,
+    /// The span and type parameters of each generic function in the file, for `ComponentMapping::type_params`.
+    pub(super) function_type_params: Vec<(u32, u32, Vec<CompactString>)>,
+    /// `(scoped key, name, type parameters)` of each named class: a class is also a type, recorded in `finish` as an
+    /// interface with no members unless the file declares an interface or alias of that name.
+    pub(super) pending_classes: Vec<(String, CompactString, Vec<CompactString>)>,
+    /// The first parameter's name of each function being visited, innermost last: `const { size = 'md' } = props` in
+    /// the body destructures it.
+    pub(super) props_params: Vec<(Option<CompactString>, u32, u32)>,
+    /// `(start, end)` of a function whose body destructures its props parameter, with the defaults it declares there.
+    pub(super) body_defaults: Vec<(u32, u32, rustc_hash::FxHashMap<String, crate::types::RawDefault>)>,
 }
 
 impl<'src> SourceDataCollector<'src> {
@@ -258,6 +268,10 @@ impl<'src> SourceDataCollector<'src> {
             exported_locals: FxHashSet::default(),
             attached_to: Vec::new(),
             function_depth: 0,
+            function_type_params: Vec::new(),
+            pending_classes: Vec::new(),
+            props_params: Vec::new(),
+            body_defaults: Vec::new(),
         }
     }
 
@@ -289,6 +303,57 @@ impl<'src> SourceDataCollector<'src> {
             format!("{}:{}", self.file_path, name)
         } else {
             format!("{}:{}.{}", self.file_path, self.namespace_stack.join("."), name)
+        }
+    }
+
+    /// `declare const Primitive: Primitives`: the type of a value declared without an initializer, as the alias
+    /// `typeof Primitive` (a name no source can write), so `typeof Primitive.div` and `(typeof NODES)[number]` can be
+    /// read from it.
+    pub(super) fn record_declared_value_type(&mut self, declarator: &VariableDeclarator<'_>) {
+        let (BindingPattern::BindingIdentifier(id), Some(annotation)) = (&declarator.id, &declarator.type_annotation)
+        else {
+            return;
+        };
+        let target = self.ts_type_to_collected(&annotation.type_annotation);
+        // Object types stay out: `lib.dom.d.ts` and every package's typings would add their whole shape here.
+        if !matches!(target, crate::types::CollectedType::Named { .. } | crate::types::CollectedType::Tuple(_)) {
+            return;
+        }
+        let key = self.scoped_key(&format!("typeof {}", id.name));
+        self.data
+            .type_aliases
+            .entry(key)
+            .or_insert(crate::types::CollectedTypeAlias::Passthrough { target, file_path: self.file_path.clone() });
+    }
+
+    /// `const { size = 'md' } = props` in the body of a function whose first parameter is `props`: the defaults the
+    /// component declares there, like a destructured parameter's.
+    pub(super) fn record_body_defaults(&mut self, declarator: &VariableDeclarator<'_>) {
+        let (BindingPattern::ObjectPattern(pattern), Some(Expression::Identifier(init))) =
+            (&declarator.id, &declarator.init)
+        else {
+            return;
+        };
+        let Some((Some(props), start, end)) = self.props_params.last() else { return };
+        if props.as_str() != init.name.as_str() {
+            return;
+        }
+        let (start, end) = (*start, *end);
+        let defaults = self.pattern_defaults(pattern);
+        if !defaults.is_empty() {
+            self.body_defaults.push((start, end, defaults));
+        }
+    }
+
+    pub(super) fn record_function_type_params(
+        &mut self,
+        span: Span,
+        type_parameters: Option<&oxc_ast::ast::TSTypeParameterDeclaration<'_>>,
+    ) {
+        let Some(declaration) = type_parameters else { return };
+        let names: Vec<CompactString> = declaration.params.iter().map(|p| p.name.name.as_str().into()).collect();
+        if !names.is_empty() {
+            self.function_type_params.push((span.start, span.end, names));
         }
     }
 
@@ -344,6 +409,26 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     fn finish(mut self) -> SourceData {
+        for (key, name, params) in std::mem::take(&mut self.pending_classes) {
+            if self.data.interfaces.contains_key(&key) || self.data.type_aliases.contains_key(&key) {
+                continue;
+            }
+            self.data.interfaces.insert(
+                key.clone(),
+                crate::types::CollectedInterface {
+                    scoped_key: key.clone(),
+                    name,
+                    file_path: self.file_path.clone(),
+                    props: Vec::new(),
+                    extends: Vec::new(),
+                    description: String::new(),
+                    tags: Default::default(),
+                },
+            );
+            if !params.is_empty() {
+                self.data.interface_type_params.insert(key, params);
+            }
+        }
         self.promote_wrapper_calls();
         self.promote_reexported_imports();
         // Filtered by original identifier first, before any displayName rename
@@ -368,6 +453,22 @@ impl<'src> SourceDataCollector<'src> {
         self.drop_functions_used_only_as_functions(&exported);
         for mapping in &mut self.data.component_mappings {
             mapping.exported = exported.contains(mapping.component_name.as_str());
+            for (start, end, defaults) in &self.body_defaults {
+                if *start >= mapping.span_start && *end <= mapping.span_end {
+                    for (name, default) in defaults {
+                        mapping.param_defaults.entry(name.clone()).or_insert_with(|| default.clone());
+                    }
+                }
+            }
+            for (start, end, params) in &self.function_type_params {
+                if *start >= mapping.span_start && *end <= mapping.span_end {
+                    for param in params {
+                        if !mapping.type_params.contains(param) {
+                            mapping.type_params.push(param.clone());
+                        }
+                    }
+                }
+            }
         }
         for (obj_name, display_name) in self.pending_display_name_renames.drain(..) {
             if let Some(mapping) = self.data.component_mappings.iter_mut().find(|m| m.component_name == obj_name) {

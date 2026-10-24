@@ -77,6 +77,54 @@ export function createDocgenProvider(
     logger.warn(`[caliper-docgen] ${key}: ${reason}; Storybook's own docgen answers instead`)
   }
 
+  /** The session key and file `target`'s component points at, or an error that says what the session had instead. */
+  async function locate(
+    session: DocgenSession,
+    target: CsfFile,
+    storyPath: string,
+  ): Promise<{ key: string; path: string }> {
+    const resolution = resolveMeta(target, storyPath)
+    if ('component' in resolution) {
+      const { path, exportName, localName } = resolution.component
+      if (!path) throw new Error(`no file for the import of ${exportName}`)
+      const key = await session.resolveExport(path, exportName, localName)
+      if (key) return { key, path }
+      const names = session.namesIn(path)
+      const choice = names.length > 0 ? `; its components are ${names.join(', ')}` : ''
+      throw new Error(`caliper-docgen found no component ${exportName} in ${path}${choice}`)
+    }
+    // Storybook reads `Namespace.Member` only for `import * as Namespace`; `Select.Option` of a named import is common.
+    const member = memberComponent(session, target, storyPath)
+    if (member) return member
+    throw new Error(`meta.component: ${resolution.reason}`)
+  }
+
+  /** The sub-component a `Namespace.Member` expression names, when `Namespace` is a named or default import. */
+  function memberComponent(
+    session: DocgenSession,
+    csf: CsfFile,
+    storyPath: string,
+  ): { key: string; path: string } | undefined {
+    const node = csf._metaAnnotations.component as
+      | {
+          type?: string
+          computed?: boolean
+          object?: { type?: string; name?: string }
+          property?: { type?: string; name?: string }
+        }
+      | undefined
+    if (node?.type !== 'MemberExpression' || node.computed) return undefined
+    if (node.object?.type !== 'Identifier' || !node.object.name || !node.property?.name) return undefined
+    const owner = resolveMeta(
+      { _metaAnnotations: { component: node.object }, _file: csf._file } as unknown as CsfFile,
+      storyPath,
+    )
+    if (!('component' in owner) || !owner.component.path) return undefined
+    const { path, exportName, localName } = owner.component
+    const key = session.keyOfMember([localName, exportName], node.property.name, path)
+    return key ? { key, path } : undefined
+  }
+
   /**
    * The session key and file of the component `name` (default: `meta.component`) names, or why there is none. The
    * caller has brought the session up to date for this request.
@@ -85,13 +133,8 @@ export function createDocgenProvider(
     const target = name
       ? ({ _metaAnnotations: { component: expressionFor(name) }, _file: csf._file } as unknown as CsfFile)
       : csf
-    const resolution = resolveMeta(target, storyPath)
-    if (!('component' in resolution)) throw new Error(`meta.component: ${resolution.reason}`)
-    const { path, exportName } = resolution.component
-    if (!path) throw new Error(`no file for the import of ${exportName}`)
     const session = await getSession()
-    const key = session.keyOf(path, exportName)
-    if (!key) throw new Error(`caliper-docgen found no component ${exportName} in ${path}`)
+    const { key, path } = await locate(session, target, storyPath)
     if (fallback === 'degraded') {
       const reasons = session.degradedBy(key)
       if (reasons.length > 0) {

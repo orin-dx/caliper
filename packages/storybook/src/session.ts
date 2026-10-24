@@ -1,6 +1,8 @@
-import { resolve } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
 import type * as Napi from 'caliper-docgen-napi'
 import type { Diagnostic, IncrementalUpdate, RdtComponentDoc, SessionIndex } from 'caliper-docgen-napi'
+import { localNameOf } from './exports.js'
 import { assertSchemaVersion, expandDiagnostics } from './schema.js'
 
 /** The binding calls the session makes, so tests can stand in for the native module. */
@@ -181,6 +183,41 @@ export class DocgenSession {
     if (exportName === 'default') return undefined
     const sameName = byName.get(exportName)
     return sameName?.length === 1 ? sameName[0] : undefined
+  }
+
+  /**
+   * `keyOf`, and when the file holds several components and none has the export's name, the component the module's
+   * source exports under it (`export default Card`, `export { Inner as Card }`), then, for a default import, the one
+   * named as the story named its import (`importedAs`).
+   */
+  async resolveExport(path: string, exportName: string, importedAs?: string): Promise<string | undefined> {
+    const key = this.keyOf(path, exportName)
+    if (key) return key
+    const file = resolve(path)
+    const inFile = this.lookups().byFile.get(file)
+    if (!inFile) return undefined
+    const named = (name: string | undefined) => inFile.find((each) => this.components.get(each)?.displayName === name)
+    const source = await readFile(file, 'utf8').catch(() => '')
+    return named(localNameOf(source, exportName)) ?? (exportName === 'default' ? named(importedAs) : undefined)
+  }
+
+  /**
+   * The key of the sub-component `property` of `namespace` (`Select.Option`): the component with that display name,
+   * the one beside `near` if several share it.
+   */
+  keyOfMember(namespaces: string[], property: string, near: string): string | undefined {
+    const { byName } = this.lookups()
+    const matches = [...new Set(namespaces.flatMap((namespace) => byName.get(`${namespace}.${property}`) ?? []))]
+    if (matches.length <= 1) return matches[0]
+    const dir = dirname(resolve(near))
+    const beside = matches.filter((key) => dirname(this.components.get(key)?.filePath ?? '') === dir)
+    return beside.length === 1 ? beside[0] : undefined
+  }
+
+  /** The display names of the components in `path`, to say what a failed lookup had to choose from. */
+  namesIn(path: string): string[] {
+    const keys = this.lookups().byFile.get(resolve(path)) ?? []
+    return keys.flatMap((key) => this.components.get(key)?.displayName ?? [])
   }
 
   /** Whether a warning or error says `key`'s props may be incomplete. */

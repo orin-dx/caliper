@@ -2563,6 +2563,135 @@ fn extract_one(files: &[(&str, &str)]) -> ExtractionOutput {
     })
 }
 
+/// The project is a directory inside the crate, so `react` and `typescript` resolve from the workspace's `node_modules`.
+fn extract_with_installed_libs(files: &[(&str, &str)]) -> ExtractionOutput {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    for (name, body) in files {
+        write_file(&tmp, name, body);
+    }
+    extract(&PipelineOptions { html_attributes: HtmlAttributeMode::Curated, ..full_mode_options_for(&tmp) })
+}
+
+fn severe(output: &ExtractionOutput) -> Vec<&crate::types::Diagnostic> {
+    output.diagnostics.iter().filter(|d| d.severity != DiagnosticSeverity::Info).collect()
+}
+
+/// A type React declares that no builtin list names is React's, imported under its name or another.
+#[test]
+fn a_type_declared_by_react_is_not_unresolvable_even_when_no_builtin_list_names_it() {
+    let output = extract_with_installed_libs(&[(
+        "Box.tsx",
+        "import type { UIEventHandler, Key, DOMAttributes as ReactDOMAttributes } from 'react';\n\
+         export function Box(props: { onScroll?: UIEventHandler<HTMLDivElement>; id?: Key; dom?: ReactDOMAttributes<Element> }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    assert_eq!(
+        props["onScroll"].prop_type,
+        PropType::Named {
+            name: "UIEventHandler".into(),
+            args: vec![PropType::Named { name: "HTMLDivElement".into(), args: vec![] }]
+        }
+    );
+    assert_eq!(props["id"].prop_type, PropType::Named { name: "Key".into(), args: vec![] });
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+}
+
+/// Base UI's `{ [K in keyof ComponentPropsWithRef<"div">]: Wrap<ComponentPropsWithRef<"div">[K]> } & Own`: the
+/// element's attributes, as `ComponentProps<"div">` lists them, beside the component's own props.
+#[test]
+fn a_mapped_type_over_an_elements_attributes_is_that_elements_layer() {
+    let output = extract_with_installed_libs(&[(
+        "Box.tsx",
+        "import type * as React from 'react';\n\
+         type Wrap<T> = T;\n\
+         type Own = { own?: number };\n\
+         export function Box(props: { [K in keyof React.ComponentPropsWithRef<\"div\">]: Wrap<React.ComponentPropsWithRef<\"div\">[K]> } & Own) { return null; }\n\
+         export function Plain(props: React.ComponentPropsWithRef<\"div\"> & Own) { return null; }\n",
+    )]);
+
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+    let layer = |name: &str| {
+        let component = &output.components[name];
+        (
+            component.props.keys().cloned().collect::<Vec<_>>(),
+            component.notable_inherited.keys().cloned().collect::<Vec<_>>(),
+        )
+    };
+    assert_eq!(layer("Box"), layer("Plain"));
+    assert_eq!(layer("Box").0, vec!["own".to_owned()]);
+    assert!(layer("Box").1.contains(&"className".to_owned()));
+}
+
+/// Spectrum's illustrations: `props: IconProps & { size?: 'S' | 'M' }` and `let { size = 'M', ...rest } = props` in the
+/// body. The inline field has the default as a declared one does.
+#[test]
+fn an_inline_object_field_takes_the_default_the_body_destructures() {
+    let output = extract_one(&[(
+        "Apps.tsx",
+        "interface Base { tone?: string }\n\
+         export default function Apps(props: Base & { size?: 'S' | 'M' }) {\n\
+           let { size = 'M', ...rest } = props;\n  return null;\n}\n",
+    )]);
+
+    let size = &output.components["Apps"].props["size"];
+    assert_eq!(size.default_value.as_ref().map(|d| d.value.as_str()), Some("'M'"));
+    assert_eq!(output.components["Apps"].props["tone"].default_value, None);
+}
+
+/// Chakra's recipes: `{ [K in keyof Variant]?: … }` over an interface whose members carry `@default "md"`; the mapped
+/// props keep the tag and so the default.
+#[test]
+fn a_mapped_type_keeps_the_default_tag_of_the_member_it_maps() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "interface Variant {\n  /**\n   * The size.\n   * @default \"md\"\n   */\n  size: \"sm\" | \"md\" | \"lg\";\n  tone: \"a\" | \"b\";\n}\n\
+         type VariantProps = { [K in keyof Variant]?: Variant[K] };\n\
+         export function Box(props: VariantProps & { own?: number }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    assert_eq!(props["size"].default_value.as_ref().map(|d| d.value.as_str()), Some("\"md\""));
+    assert_eq!(props["tone"].default_value, None);
+}
+
+/// A generic component's own type parameters are placeholders, the way an interface's are, and an ES2015 global
+/// (`Iterable`) is TypeScript's.
+#[test]
+fn a_generic_components_type_parameter_and_an_es2015_global_are_not_unresolvable() {
+    let output = extract_with_installed_libs(&[(
+        "List.tsx",
+        "interface ListProps<T> { items?: Iterable<T>; render?: (item: T) => null }\n\
+         export function List<T extends object>(props: ListProps<T>) { return null; }\n\
+         export const Wrapped = (function Inner<T extends object>(props: ListProps<T>) { return null; });\n",
+    )]);
+
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+    assert_eq!(
+        output.components["List"].props["items"].prop_type,
+        PropType::Named { name: "Iterable".into(), args: vec![PropType::Named { name: "T".into(), args: vec![] }] }
+    );
+}
+
+/// A class is also a type: `value: CalendarDate` names it, and nothing else about it is needed to print the name.
+#[test]
+fn a_class_used_as_a_type_is_declared() {
+    let output = extract_one(&[
+        ("date.ts", "export class CalendarDate { year = 0 }\n"),
+        (
+            "Cell.tsx",
+            "import { CalendarDate } from './date';\n\
+             export function Cell(props: { value: CalendarDate }) { return null; }\n",
+        ),
+    ]);
+
+    assert_eq!(
+        output.components["Cell"].props["value"].prop_type,
+        PropType::Named { name: "CalendarDate".into(), args: vec![] }
+    );
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+}
+
 /// A namespace member names its siblings bare (csstype's `DataType.Color`), and the union keeps every member.
 #[test]
 fn a_namespace_sibling_in_an_alias_body_resolves_to_its_members() {
@@ -2608,6 +2737,21 @@ fn a_chain_of_aliases_longer_than_the_expression_depth_limit_resolves() {
     let expected = ["x".to_owned(), "y".to_owned()].into_iter().chain((1..40).map(|level| format!("z{level}")));
     assert_eq!(output.components["Box"].props["chain"].prop_type, literals(expected.collect()));
     assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+}
+
+/// Mantine's `CssVars<V = CssVariable> = ... | CssVars<V>[]`: the argument of the recursive reference is the same type
+/// at every level, so the cycle is found at the second one, as information, not by running out of depth.
+#[test]
+fn a_recursive_alias_with_a_defaulted_parameter_is_a_cycle_not_a_depth_overrun() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "type Vars<V extends string = 'a'> = Record<V, string> | Vars<V>[];\n\
+         export function Box(props: { vars?: Vars }) { return null; }\n",
+    )]);
+
+    let severe: Vec<_> = output.diagnostics.iter().filter(|d| d.severity != DiagnosticSeverity::Info).collect();
+    assert!(severe.is_empty(), "{severe:?}");
+    assert!(output.diagnostics.iter().any(|d| d.code == DiagnosticCode::CircularReference), "{:?}", output.diagnostics);
 }
 
 #[test]
