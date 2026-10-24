@@ -110,7 +110,9 @@ console.log(ratio('type strings', typeMatched, typeTotal))
 console.log(ratio('descriptions', descriptionMatched, descriptionTotal))
 
 if (mismatches.length > 0) {
-  console.log(chalk.dim(`\n${mismatches.length} mismatches (first 50):`))
-  for (const m of mismatches.slice(0, 50)) console.log(chalk.dim(`  ${m}`))
-  if (mismatches.length > 50) console.log(chalk.dim(`  ... and ${mismatches.length - 50} more`))
+  // PARITY_SHOW=all lists every mismatch.
+  const shown = process.env.PARITY_SHOW === 'all' ? mismatches.length : 50
+  console.log(chalk.dim(`\n${mismatches.length} mismatches (first ${Math.min(shown, mismatches.length)}):`))
+  for (const m of mismatches.slice(0, shown)) console.log(chalk.dim(`  ${m}`))
+  if (mismatches.length > shown) console.log(chalk.dim(`  ... and ${mismatches.length - shown} more`))
 }

@@ -23,7 +23,7 @@
     "react-docgen": "^8.0.4",
     "react-docgen-typescript": "^2.4.0",
     "typescript": "^6.0.3",
-    "typescript-next": "npm:typescript@next"
+    "typescript-beta": "npm:typescript@7.1.0-beta"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
