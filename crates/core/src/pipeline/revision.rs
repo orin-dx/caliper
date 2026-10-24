@@ -27,7 +27,7 @@ use super::{
     canonicalize_first_src_dir, collect_public_enums, merge_cached_dts_file, resolve_guarded, HtmlAttributeMode,
     IncrementalUpdate, PipelineOptions,
 };
-pub use lazy::ComponentAnswer;
+pub use lazy::{ComponentAnswer, ComponentLocation};
 
 /// `@types/react` indexed on its own, for curated mode's HTML-attribute lookups: a prop that an HTML layer's element
 /// also declares has both types, as in Full mode, while every other name still resolves without React's declarations.

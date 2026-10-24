@@ -17,6 +17,8 @@ describe('preset', () => {
       htmlAttributes: undefined,
       loadDependencies: undefined,
       collapseInheritedProps: undefined,
+      lazy: undefined,
+      warmUp: undefined,
       fallback: 'never',
     })
     expect(ours?.moduleSpecifier).toMatch(/provider\.(js|ts)$/)

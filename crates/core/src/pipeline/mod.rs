@@ -17,7 +17,7 @@ pub mod rdt;
 mod revision;
 pub mod watch;
 
-pub use revision::ComponentAnswer;
+pub use revision::{ComponentAnswer, ComponentLocation};
 pub use watch::{LazyStats, WatchSession};
 
 /// Filename that trips a simulated panic in the Phase 2 parse closure —

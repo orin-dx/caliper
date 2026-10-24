@@ -41,6 +41,14 @@ const VARIANTS = {
 /** The session alone does not depend on the fallback rule. */
 const SESSION_VARIANTS = ['caliper', 'caliper-nodeps', 'caliper-curated']
 
+/** The lazy session is the default; the eager ones resolve every component at start, as the addon did before it. */
+Object.assign(VARIANTS, {
+  'caliper-eager': { loadDependencies: true, collapseInheritedProps: 'none', lazy: false },
+  'caliper-nodeps-eager': { loadDependencies: false, collapseInheritedProps: 'none', lazy: false },
+  // Lazy without the background warm-up of the dependencies every story reaches.
+  'caliper-cold': { loadDependencies: true, collapseInheritedProps: 'none', warmUp: false },
+})
+
 function walk(dir, found = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.name === 'node_modules' || entry.name.startsWith('.git')) continue
@@ -224,18 +232,18 @@ async function runSession(variant, corpus, options) {
   const keys = [...session.components.keys()]
   const reasons = {}
   let degraded = 0
+  let props = 0
+  const docStart = performance.now()
   for (const key of keys) {
-    const why = session.degradedBy(key)
-    if (why.length === 0) continue
+    const { doc, degradedBy } = await session.documentation(key)
+    props += Object.keys(doc?.props ?? {}).length
+    if (degradedBy.length === 0) continue
     degraded++
-    for (const message of new Set(why.map(shape))) reasons[message] = (reasons[message] ?? 0) + 1
+    for (const message of new Set(degradedBy.map(shape))) reasons[message] = (reasons[message] ?? 0) + 1
   }
   const topReasons = Object.entries(reasons)
     .toSorted((a, b) => b[1] - a[1])
     .slice(0, 8)
-  const docStart = performance.now()
-  let props = 0
-  for (const key of keys) props += Object.keys(session.docgenInfo(key)?.props ?? {}).length
   return {
     variant,
     corpus,
@@ -273,6 +281,22 @@ function child(mode, variant, corpus, options) {
   if (result.status !== 0) return { variant, corpus, failed: (result.stderr || result.stdout).slice(-600) }
   if (!result.stdout.includes('@@RESULT@@')) return { variant, corpus, failed: 'no result' }
   return JSON.parse(result.stdout.slice(result.stdout.lastIndexOf('\n@@RESULT@@\n') + 12))
+}
+
+/**
+ * Whether the lazy and the eager session answered every story alike: the same status, argTypes and fallback reason.
+ * Returns the stories that differ per variant against `caliper-eager`; absent unless that variant ran.
+ */
+function sameAnswers(runs) {
+  const eager = runs.find((r) => r.variant === 'caliper-eager' && !r.failed)
+  if (!eager) return undefined
+  const differing = {}
+  for (const run of runs.filter((r) => r.variant !== 'caliper-eager' && r.variant.startsWith('caliper') && !r.failed)) {
+    differing[run.variant] = Object.keys(eager.stories).filter(
+      (file) => JSON.stringify(run.stories[file]) !== JSON.stringify(eager.stories[file]),
+    )
+  }
+  return differing
 }
 
 /** Real story files that name a component. */
@@ -458,12 +482,13 @@ function markdown(report) {
           'errors',
           'handed-on reasons',
           'total s',
+          'first ms',
           'median ms',
           'peak RSS MB',
         ],
         ...entry.runs.map((r) =>
           r.failed
-            ? [r.variant, 'failed', '', '', '', r.failed.slice(0, 80), '', '', '']
+            ? [r.variant, 'failed', '', '', '', r.failed.slice(0, 80), '', '', '', '']
             : [
                 r.variant,
                 r.files,
@@ -474,6 +499,7 @@ function markdown(report) {
                   .map(([k, v]) => `${k} ${v}`)
                   .join(', '),
                 (r.totalMs / 1000).toFixed(1),
+                r.firstRequestMs,
                 r.medianMs,
                 r.maxRssMb,
               ],
@@ -481,6 +507,14 @@ function markdown(report) {
       ]),
       '',
     )
+    for (const [variant, differing] of Object.entries(entry.sameAnswers ?? {})) {
+      lines.push(
+        differing.length === 0
+          ? `\`${variant}\` answers every story as \`caliper-eager\` does.`
+          : `\`${variant}\` differs from \`caliper-eager\` on ${differing.length} stories: ${differing.slice(0, 5).join(', ')}`,
+        '',
+      )
+    }
     for (const [variant, d] of Object.entries(entry.diffs)) {
       lines.push(`### ${corpus}: ${variant} against Storybook's docgen`, '')
       lines.push(
@@ -532,6 +566,9 @@ async function main() {
       variant: { type: 'string' },
       corpus: { type: 'string' },
       'no-baseline': { type: 'boolean', default: false },
+      // Which story variants to run (default: all), and whether to run only the one session that lists components.
+      variants: { type: 'string' },
+      'one-session': { type: 'boolean', default: false },
     },
   })
   if (!values.corpora) throw new Error('--corpora <dir holding the cloned repositories> is required')
@@ -562,7 +599,7 @@ async function main() {
   )
   const report = { generated: new Date().toISOString().slice(0, 10), sessions: [], stories: {} }
   for (const corpus of names) {
-    for (const variant of SESSION_VARIANTS) {
+    for (const variant of values['one-session'] ? ['caliper'] : SESSION_VARIANTS) {
       console.error(`session ${corpus} ${variant}`)
       report.sessions.push(child('session', variant, corpus, options))
     }
@@ -580,7 +617,8 @@ async function main() {
         const listing = join(dir, 'files.json')
         writeFileSync(listing, JSON.stringify(files))
         const runs = []
-        const variants = values['no-baseline'] ? Object.keys(VARIANTS) : ['baseline', ...Object.keys(VARIANTS)]
+        const chosen = values.variants ? values.variants.split(',') : Object.keys(VARIANTS)
+        const variants = values['no-baseline'] ? chosen : ['baseline', ...chosen]
         for (const variant of variants) {
           console.error(`stories ${title} ${variant}`)
           runs.push(child('stories', variant, corpus, { ...options, files: listing }))
@@ -592,7 +630,11 @@ async function main() {
           for (const run of runs.filter((r) => r.variant !== 'baseline' && !r.failed))
             diffs[run.variant] = diff(run, baseline)
         }
-        report.stories[title] = { runs: runs.map(({ stories, ...rest }) => rest), diffs }
+        report.stories[title] = {
+          runs: runs.map(({ stories, ...rest }) => rest),
+          diffs,
+          sameAnswers: sameAnswers(runs),
+        }
       }
     } finally {
       for (const path of generated) rmSync(path, { force: true })

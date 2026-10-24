@@ -25,6 +25,14 @@ pub struct ComponentAnswer {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// Where a component is declared, for a host that finds one by file and name before it asks for the props.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ComponentLocation {
+    pub key: String,
+    pub file_path: Utf8PathBuf,
+    pub display_name: String,
+}
+
 /// The dependency layer a context was built over, and the context. Replaced whole when the layer grows: the context's
 /// memos (interface chains, member reads) were computed against the old layer and must not outlive it.
 struct Engine {
@@ -417,6 +425,24 @@ impl Revision {
         let mut keys: Vec<String> = lazy.by_name.keys().flat_map(|name| self.group_keys(options, name, true)).collect();
         keys.sort();
         keys
+    }
+
+    /// Where each key [`Self::lazy_keys`] lists is declared, sorted by key. Parsing alone answers it; nothing is
+    /// resolved.
+    pub(crate) fn lazy_index(&self, options: &PipelineOptions) -> Vec<ComponentLocation> {
+        let Some(lazy) = &self.lazy else { return Vec::new() };
+        let mut index: Vec<ComponentLocation> = lazy
+            .by_name
+            .iter()
+            .flat_map(|(name, group)| {
+                self.group_positions(options, name, true).into_iter().filter_map(|(key, position)| {
+                    let (id, _) = group.get(position)?;
+                    Some(ComponentLocation { key, file_path: id.file.clone(), display_name: id.name.clone() })
+                })
+            })
+            .collect();
+        index.sort_by(|a, b| a.key.cmp(&b.key));
+        index
     }
 
     /// [`Self::lazy_component`] for each of `keys`. The dependency names of every requested component's own file are

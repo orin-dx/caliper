@@ -60,6 +60,29 @@ fn a_component_is_found_by_file_and_name_as_by_key() {
     }
 }
 
+#[test]
+fn the_index_says_where_each_key_is_declared_without_resolving_any() {
+    let item = "export function Item(props: { a: string }) { return null; }\n";
+    let (_tmp, root) = project(&[("src/a/Item.tsx", item), ("src/b/Item.tsx", item), ("src/Card.tsx", CARD)]);
+    let eager = WatchSession::new(options(&root, false));
+    let lazy = WatchSession::lazy(options(&root, false));
+    assert_eq!(lazy.component_index(), Vec::new(), "nothing is indexed before initialize");
+    drop(eager.initialize());
+    drop(lazy.initialize());
+
+    let index = lazy.component_index();
+    assert_eq!(index, eager.component_index());
+    let located: Vec<(&str, &str, &str)> =
+        index.iter().map(|at| (at.key.as_str(), at.file_path.as_str(), at.display_name.as_str())).collect();
+    let (a, b, card) = (root.join("src/a/Item.tsx"), root.join("src/b/Item.tsx"), root.join("src/Card.tsx"));
+    let second = format!("Item ({b})");
+    assert_eq!(
+        located,
+        [("Card", card.as_str(), "Card"), ("Item", a.as_str(), "Item"), (second.as_str(), b.as_str(), "Item")]
+    );
+    assert_eq!(lazy.lazy_stats().unwrap().resolved, 0, "indexing resolves nothing");
+}
+
 const TYPES: &str = "export interface BaseProps { size?: 'sm' | 'lg' }\n";
 const BUTTON: &str = "import type { BaseProps } from './types';\n\
     export function Button(props: BaseProps & { label: string }) { return null; }\n";

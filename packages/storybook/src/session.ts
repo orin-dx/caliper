@@ -7,7 +7,13 @@ import { localNameOf } from './exports.js'
 /** The binding calls the session makes, so tests can stand in for the native module. */
 export type SessionBinding = Pick<
   typeof Napi,
-  'createSession' | 'initializeSessionIndex' | 'ensureFresh' | 'sessionDocgenInfo' | 'closeSession'
+  | 'createSession'
+  | 'initializeSessionIndex'
+  | 'ensureFresh'
+  | 'sessionDocgenInfo'
+  | 'sessionComponentAnswers'
+  | 'sessionWarmUp'
+  | 'closeSession'
 >
 
 export interface SessionOptions {
@@ -19,6 +25,26 @@ export interface SessionOptions {
   htmlAttributes?: Napi.JsExtractOptions['htmlAttributes']
   loadDependencies?: boolean
   collapseInheritedProps?: Napi.JsExtractOptions['collapseInheritedProps']
+  /**
+   * Resolve a component when a story asks for it rather than every component at start. Default: `true`. The answers
+   * are the same; a session that serves a few components of many starts and holds less.
+   */
+  lazy?: boolean
+  /**
+   * After a lazy session starts, resolve a few components in the background so the dependency declarations and memos
+   * the stories share are loaded before the first one asks. Default: `true`.
+   */
+  warmUp?: boolean
+}
+
+/** How many components the background warm-up resolves, spread over the project. */
+const WARM_UP_COMPONENTS = 8
+
+/** What the session says about one component: its documentation and why its props may be incomplete. */
+export interface Documentation {
+  doc: RdtComponentDoc | undefined
+  /** The messages of the warnings and errors that say the props may be incomplete; empty when none does. */
+  degradedBy: string[]
 }
 
 interface ComponentRef {
@@ -39,6 +65,11 @@ function push(map: Map<string, string[]>, at: string, key: string): void {
   else map.set(at, [key])
 }
 
+/** The distinct messages of the warnings and errors among `diagnostics`; info says nothing about the props. */
+function incompleteMessages(diagnostics: Diagnostic[]): string[] {
+  return [...new Set(diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').map((d) => d.message))]
+}
+
 function diagnosticId(diagnostic: Diagnostic): string {
   return JSON.stringify(diagnostic)
 }
@@ -47,7 +78,8 @@ function diagnosticId(diagnostic: Diagnostic): string {
  * One watch session over the source directories, created on first use. Storybook gives no file events to a docgen
  * worker, so `fresh()` has the native session compare every source file's mtime and size with the last look and apply
  * the changed ones before a request is answered: an answer never trails a saved edit. The session holds the props;
- * this class holds only where each component lives and which ones a diagnostic says are incomplete.
+ * this class holds only where each component lives and, for an eager session, which ones a diagnostic says are
+ * incomplete. A lazy session (the default) resolves a component when `documentation` asks, and holds no answers.
  */
 export class DocgenSession {
   private readonly components = new Map<string, ComponentRef>()
@@ -75,15 +107,30 @@ export class DocgenSession {
       htmlAttributes: this.options.htmlAttributes ?? (this.options.skipHtmlProps ? 'none' : undefined),
       loadDependencies: this.options.loadDependencies,
       collapseInheritedProps: this.options.collapseInheritedProps,
+      lazy: this.lazy,
     }
+  }
+
+  private get lazy(): boolean {
+    return this.options.lazy ?? true
   }
 
   private async initialize(): Promise<void> {
     this.sessionId = this.napi.createSession(this.napiOptions())
-    const output = JSON.parse(await this.napi.initializeSessionIndex(this.sessionId, this.napiOptions())) as {
+    await this.reindex()
+    if (this.lazy && this.options.warmUp !== false) {
+      // Not awaited: the first story answers as soon as it can, and shares what the warm-up has loaded by then.
+      this.napi.sessionWarmUp(this.sessionId, WARM_UP_COMPONENTS).catch(() => {})
+    }
+  }
+
+  /** Reads where every component is declared (and, for an eager session, which diagnostics affect them). */
+  private async reindex(): Promise<void> {
+    const output = JSON.parse(await this.napi.initializeSessionIndex(this.sessionId!, this.napiOptions())) as {
       components: Record<string, ComponentRef>
       diagnostics: Diagnostic[]
     }
+    this.components.clear()
     for (const [key, entry] of Object.entries(output.components)) {
       this.components.set(key, { filePath: resolve(entry.filePath), displayName: entry.displayName })
     }
@@ -105,7 +152,17 @@ export class DocgenSession {
   }
 
   private async check(): Promise<void> {
-    this.apply(JSON.parse(await this.napi.ensureFresh(this.sessionId!)) as IncrementalUpdate)
+    const update = JSON.parse(await this.napi.ensureFresh(this.sessionId!)) as IncrementalUpdate
+    if (this.lazy) {
+      // A lazy update names the keys an edit can change but carries no component to place them, so look again at where
+      // the components are; resolving none of them, that costs a parse-level listing.
+      if (update.revision > this.latestRevision) {
+        this.latestRevision = update.revision
+        if (update.updatedKeys.length > 0 || update.removedKeys.length > 0) await this.reindex()
+      }
+      return
+    }
+    this.apply(update)
   }
 
   /**
@@ -214,7 +271,7 @@ export class DocgenSession {
     return keys.flatMap((key) => this.components.get(key)?.displayName ?? [])
   }
 
-  /** Whether a warning or error says `key`'s props may be incomplete. */
+  /** Whether a warning or error says `key`'s props may be incomplete. An eager session only: see `documentation`. */
   degraded(key: string): boolean {
     return this.degradedBy(key).length > 0
   }
@@ -222,6 +279,21 @@ export class DocgenSession {
   /** The messages of the warnings and errors that say `key`'s props may be incomplete. */
   degradedBy(key: string): string[] {
     return [...(this.lookups().degradedBy.get(key) ?? [])]
+  }
+
+  /**
+   * The documentation of `key` and why its props may be incomplete. A lazy session resolves the component now, or
+   * answers from what an earlier story resolved; nothing is kept here, so an edit cannot leave a stale answer behind.
+   */
+  async documentation(key: string): Promise<Documentation> {
+    if (!this.lazy) return { doc: this.docgenInfo(key), degradedBy: this.degradedBy(key) }
+    if (this.sessionId === undefined) return { doc: undefined, degradedBy: [] }
+    const answers = JSON.parse(this.napi.sessionComponentAnswers(this.sessionId, [key])) as Record<
+      string,
+      { docgenInfo: RdtComponentDoc; diagnostics: Diagnostic[] }
+    >
+    const answer = answers[key]
+    return { doc: answer?.docgenInfo, degradedBy: answer ? incompleteMessages(answer.diagnostics) : [] }
   }
 
   docgenInfo(key: string): RdtComponentDoc | undefined {

@@ -21,6 +21,16 @@ export interface CaliperStorybookOptions {
    */
   collapseInheritedProps?: 'dependencies' | 'all' | 'none'
   /**
+   * Resolve a component when a story asks for it instead of every component when Storybook starts. Default: `true`.
+   * The props are the same; the session starts sooner and holds only the components your stories use.
+   */
+  lazy?: boolean
+  /**
+   * With a lazy session, resolve a few components in the background after it starts, so the first story does not
+   * load the dependencies stories share. Default: `true`.
+   */
+  warmUp?: boolean
+  /**
    * When a component's resolution reported a warning or an error, its props may be incomplete. `'degraded'` (the
    * default) hands such a component to the next docgen provider, React's own; `'never'` always answers.
    */

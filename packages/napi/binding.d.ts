@@ -99,6 +99,14 @@ export interface JsLazyStats {
 export declare function resolutionConfigFiles(sessionId: number): Array<string>
 
 /**
+ * What a host needs to answer for one component: its documentation as `sessionDocgenInfo` returns it, and its own
+ * diagnostics, each with `affects` set to the key. `{ key: { docgenInfo, diagnostics } }`; a key the session has no
+ * component under is left out. A lazy session resolves each requested component now (in parallel), so a host learns
+ * whether a component's props may be incomplete from the same call that returns them.
+ */
+export declare function sessionComponentAnswers(sessionId: number, keys: Array<string>): string
+
+/**
  * Every component key `sessionDocgenInfo` answers, sorted. A lazy session resolves only imported-member aliases to
  * decide; the rest come from parsing alone. Empty for an unknown or uninitialized session.
  */
@@ -112,3 +120,11 @@ export declare function sessionComponentKeys(sessionId: number): Array<string>
 export declare function sessionDocgenInfo(sessionId: number, keys: Array<string>): string
 
 export declare function sessionStats(sessionId: number): JsLazyStats | null
+
+/**
+ * Resolves `count` components spread evenly over the session's keys, without returning them: a lazy session then
+ * holds the dependency declarations and resolver memos that components share, so the first request a host answers
+ * does not load them. Runs off the calling thread and returns how many components it resolved. An eager session, an
+ * unknown session and a count of 0 resolve nothing.
+ */
+export declare function sessionWarmUp(sessionId: number, count: number): Promise<number>
