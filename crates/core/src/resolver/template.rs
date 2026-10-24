@@ -66,6 +66,8 @@ pub(super) fn try_expand_template_literal(
             CollectedType::StringLiteral(s) => {
                 per_part.push(vec![s.to_string()]);
             }
+            CollectedType::NumberLiteral(n) => per_part.push(vec![n.to_string()]),
+            CollectedType::BoolLiteral(b) => per_part.push(vec![b.to_string()]),
             CollectedType::Named { name, .. } => {
                 // Look up in global type aliases for a LiteralUnion.
                 // `None`: this template literal has no finite string expansion.
@@ -73,17 +75,17 @@ pub(super) fn try_expand_template_literal(
             }
             _ => {
                 let pt = resolve_collected_type(part, consuming_file, ctx, state, depth + 1);
+                // A literal's text, as `${1}` and `${true}` spell it.
+                let text = |m: &PropType| match m {
+                    PropType::StringLiteral(s) => Some(s.clone()),
+                    PropType::NumberLiteral(n) => Some(n.to_string()),
+                    PropType::BoolLiteral(b) => Some(b.to_string()),
+                    _ => None,
+                };
                 match &pt {
-                    PropType::StringLiteral(s) => per_part.push(vec![s.clone()]),
                     PropType::LiteralUnion { members, .. } => per_part.push(members.clone()),
-                    PropType::Union(members) => {
-                        let strs: Option<Vec<String>> = members
-                            .iter()
-                            .map(|m| if let PropType::StringLiteral(s) = m { Some(s.clone()) } else { None })
-                            .collect();
-                        per_part.push(strs?);
-                    }
-                    _ => return None,
+                    PropType::Union(members) => per_part.push(members.iter().map(text).collect::<Option<_>>()?),
+                    other => per_part.push(vec![text(other)?]),
                 }
             }
         }

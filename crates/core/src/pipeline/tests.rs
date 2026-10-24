@@ -3019,6 +3019,52 @@ export function opaque<Payload extends FactoryPayload>(ui: (props: Payload["prop
 "#;
 
 #[test]
+fn literal_types_evaluate_as_typescript_does() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "Badge.tsx",
+        r#"
+type Size = "small" | "medium" | "large";
+type Fallback<T> = { [P in keyof T]: T[P] | NonNullable<T[P]>[] };
+interface Longhand { align?: "start" | "end" | undefined }
+interface Styles extends Fallback<Longhand> {}
+type Conditional<T> = T extends infer U ? U | U[] : never;
+type WithVariant = { variant: "solid" | "ghost" };
+type WithoutVariant = { props: string };
+type VariantOf<P> = P["variant"] extends string ? P["variant"] | "custom" : string;
+export function Badge(props: {
+    size: Exclude<Size, "large"> | "default";
+    picked: Extract<Size | number, string>;
+    level: NonNullable<1 | 2 | null | undefined>;
+    heading: `h${1 | 2 | 3}`;
+    align: Conditional<Styles["align"]>;
+    variant: VariantOf<WithVariant>;
+    plain: VariantOf<WithoutVariant>;
+}) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let text = |prop: &str| output.components["Badge"].props[prop].prop_type.raw_string();
+    assert_eq!(text("size"), "\"small\" | \"medium\" | \"default\"");
+    assert_eq!(text("picked"), "\"small\" | \"medium\" | \"large\"");
+    assert_eq!(text("level"), "1 | 2");
+    assert_eq!(text("heading"), "\"h1\" | \"h2\" | \"h3\"");
+    assert_eq!(
+        text("align"),
+        "Conditional<\"start\" | \"end\" | undefined | NonNullable<\"start\" | \"end\" | undefined>[]>"
+    );
+    assert_eq!(text("variant"), "\"solid\" | \"ghost\" | \"custom\"");
+    assert_eq!(text("plain"), "string");
+}
+
+#[test]
 fn an_indexed_member_reads_through_imported_generic_ancestors_with_their_arguments_bound() {
     let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
     write_file(&tmp, "base.ts", "export interface Base<T> { value?: T; tone?: \"a\" | \"b\" }\n");
