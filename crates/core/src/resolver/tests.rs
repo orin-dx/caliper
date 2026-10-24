@@ -1920,7 +1920,10 @@ fn test_known_opaque_result_emits_diagnostic_at_type_level() {
     );
 
     assert!(matches!(result, PropType::Opaque(_)), "expected Opaque, got {:?}", result);
-    assert!(!state.diagnostics.is_empty(), "expected a diagnostic for VariantProps without variants, got none");
+    // A named type's diagnostics are shared with its recording (`memo`), not copied into the state.
+    let diagnostics: Vec<_> =
+        state.diagnostics.iter().chain(state.shared_diagnostics.iter().flat_map(|chunk| chunk.iter())).collect();
+    assert!(!diagnostics.is_empty(), "expected a diagnostic for VariantProps without variants, got none");
 }
 
 #[test]
@@ -2759,6 +2762,31 @@ fn a_shared_interface_chain_resolves_like_a_fresh_one_for_every_component() {
     assert!(!Arc::ptr_eq(prop("A", "tone"), prop("C", "tone")));
     let default_of = |component: &str| prop(component, "tone").default_value.as_ref().map(|d| d.value.clone());
     assert_eq!((default_of("A"), default_of("B"), default_of("C")), (None, None, Some("\"b\"".to_owned())));
+}
+
+#[test]
+fn a_named_type_is_resolved_once_and_every_component_that_names_it_gets_the_same_answer() {
+    // `resolve_shared` asserts that each component resolves identically with and without the shared recordings,
+    // diagnostics and dependencies included; A and B name `Tone`, and A also names a self-referential `Loop`.
+    let (_tmp, dir) = canonical_temp_dir();
+    let source = r#"
+type Tone = "a" | "b" | NotDeclaredAnywhere;
+type Loop = { next?: Loop } | "end";
+export function A(props: { tone?: Tone; loop?: Loop }) { return null; }
+export function B(props: { tone?: Tone }) { return null; }
+"#;
+    let (shared, results) = resolve_shared(&dir, &[("Comp.tsx", source)], &["A", "B"]);
+
+    for name in ["A", "B"] {
+        let unresolved = results[name].1.iter().filter(|d| d.message.contains("NotDeclaredAnywhere")).count();
+        assert_eq!(unresolved, 1, "{name}: {:?}", results[name].1);
+    }
+    let tone_recordings: usize = memo::recording_counts(&shared.named_results)
+        .into_iter()
+        .filter(|(key, _)| key.contains("Comp.tsx:Tone<"))
+        .map(|(_, count)| count)
+        .sum();
+    assert_eq!(tone_recordings, 1);
 }
 
 #[test]

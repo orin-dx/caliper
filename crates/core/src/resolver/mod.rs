@@ -55,6 +55,9 @@ const MAX_DEPTH: u8 = 20;
 /// Maximum named types being resolved at once: the declarations a reference passes through to reach another.
 const MAX_NAMED_NESTING: usize = 64;
 
+/// The most state reads a named type's recording may hold and still be kept (`memo::Memo::max_reads`).
+const NAMED_RESULT_MAX_READS: usize = 24;
+
 /// Shared "max resolution depth exceeded" diagnostic — every recursive
 /// resolver entry point (resolve_named, resolve_props_chain,
 /// resolve_collected_type) hits this same guard, and previously each built
@@ -293,6 +296,10 @@ pub struct ResolutionContext {
     pub(crate) tsconfig_diagnostic: Option<Diagnostic>,
     /// Interface chains already resolved this run, shared by the components that inherit them.
     pub(crate) interface_chains: memo::InterfaceChains,
+    /// Named types resolved once per run (`resolve_named`), shared by every component that names them.
+    pub(crate) named_results: memo::NamedResults,
+    /// An HTML element's attribute declarations (`html::react_attribute`), read once per element and name.
+    pub(crate) attribute_reads: memo::Memo<Option<ParsedProp>>,
     /// Loaded dependency declarations (`PipelineOptions::load_dependencies`, ADR 0010).
     pub(crate) dependencies: Option<Arc<crate::dependency_types::DependencyLayer>>,
     /// React's own declarations in curated mode, which only HTML-attribute lookups read (`react_index`).
@@ -376,6 +383,8 @@ impl ResolutionContext {
             shared_props: Default::default(),
             member_reads: Default::default(),
             interface_chains: Default::default(),
+            named_results: memo::NamedResults::with_max_reads(NAMED_RESULT_MAX_READS),
+            attribute_reads: memo::Memo::with_max_reads(NAMED_RESULT_MAX_READS),
             dependencies: None,
             react_types: None,
             collapse_inherited_props: options.collapse_inherited_props,
@@ -844,7 +853,7 @@ pub(crate) fn resolve_component_shared(
 /// Result of resolving a props chain (including extends). Props are shared: a parent's props move into every chain
 /// that inherits them, and into the component, without being copied.
 #[derive(Clone)]
-struct ResolvedChain {
+pub(crate) struct ResolvedChain {
     /// Resolved props (may include inherited props).
     props: Vec<Arc<ParsedProp>>,
     /// Inheritance layers, outermost first.

@@ -374,7 +374,7 @@ pub(super) fn resolve_interface_chain(
     if generic {
         return resolve_interface_chain_uncached(iface, type_args, consuming_file, mapping, ctx, state, depth);
     }
-    ctx.interface_chains.get_or_resolve(&iface.scoped_key, depth, state, mapping, |state| {
+    ctx.interface_chains.get_or_resolve(&iface.scoped_key, depth, state, Some(mapping), |state| {
         resolve_interface_chain_uncached(iface, type_args, consuming_file, mapping, ctx, state, depth)
     })
 }

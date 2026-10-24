@@ -391,7 +391,10 @@ fn layer_attribute(
         return None;
     }
     let element = layer.html_element.as_deref()?;
-    super::html::react_attribute(element, name, Utf8Path::new(&layer.file_name), ctx, state, depth)
+    let key = format!("{}\0{element}\0{name}", layer.file_name);
+    ctx.attribute_reads.get_or_resolve(&key, depth, state, None, |state| {
+        super::html::react_attribute(element, name, Utf8Path::new(&layer.file_name), ctx, state, depth)
+    })
 }
 
 /// Resolve a `CollectedTypeAlias::Union` — detect discriminated union if possible.

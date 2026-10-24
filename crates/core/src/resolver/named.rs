@@ -37,26 +37,30 @@ pub(super) fn resolve_named(
         format!("{}:{}<{:x}>", consuming_file, name, hasher.finish()).into()
     };
 
-    if !state.enter_named(visit_key.clone()) {
-        state.diagnostics.push(Diagnostic {
-            severity: DiagnosticSeverity::Info,
-            message: format!(
-                "Circular type reference detected resolving '{}' in '{}' — stopping here to avoid infinite recursion",
-                name, consuming_file
-            ),
-            file: Some(consuming_file.to_string()),
-            line: None,
-            column: None,
-            help: Some("This type (directly or indirectly) references itself.".into()),
-            code: DiagnosticCode::CircularReference,
-            affects: Vec::new(),
-        });
-        return OpaqueDetail::new(name.to_string(), OpaqueReason::DepthExceeded);
-    }
+    // The same reference resolves the same way in any state that answers the reads it made (`resolver::memo`), and
+    // Chakra's style props name a few thousand distinct ones a million times.
+    ctx.named_results.get_or_resolve(&visit_key, depth, state, None, |state| {
+        if !state.enter_named(visit_key.clone()) {
+            state.diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Info,
+                message: format!(
+                    "Circular type reference detected resolving '{}' in '{}' — stopping here to avoid infinite recursion",
+                    name, consuming_file
+                ),
+                file: Some(consuming_file.to_string()),
+                line: None,
+                column: None,
+                help: Some("This type (directly or indirectly) references itself.".into()),
+                code: DiagnosticCode::CircularReference,
+                affects: Vec::new(),
+            });
+            return OpaqueDetail::new(name.to_string(), OpaqueReason::DepthExceeded);
+        }
 
-    let result = resolve_named_uncycled(name, args, consuming_file, ctx, state, depth);
-    state.named_in_progress.remove(&visit_key);
-    result
+        let result = resolve_named_uncycled(name, args, consuming_file, ctx, state, depth);
+        state.named_in_progress.remove(&visit_key);
+        result
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
