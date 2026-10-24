@@ -241,6 +241,9 @@ pub struct ResolutionContext {
         dashmap::DashMap<(Box<str>, Box<str>), import::ModuleResolution, rustc_hash::FxBuildHasher>,
     /// React's declaration file by importing directory, cached as `module_resolutions` is.
     pub(crate) react_types_files: dashmap::DashMap<Box<str>, String, rustc_hash::FxBuildHasher>,
+    /// Props already built this run, by structural hash. A design system builds the same prop for hundreds of
+    /// components (Chakra: 470,000 props, ~1,200 distinct), and `ComponentEntry` shares them by `Arc` (`share`).
+    pub(crate) shared_props: dashmap::DashMap<u64, Vec<Arc<ParsedProp>>, rustc_hash::FxBuildHasher>,
     /// Member reads of a named type (`CssProperties["marker"]`) by `(file, name, key)`, with the files each depended
     /// on: Chakra's style props read the same csstype members once per component (`evaluate::member`).
     pub(crate) member_reads: dashmap::DashMap<evaluate::MemberReadKey, evaluate::MemberRead, rustc_hash::FxBuildHasher>,
@@ -349,12 +352,35 @@ impl ResolutionContext {
             ambient_global_files,
             module_resolutions: Default::default(),
             react_types_files: Default::default(),
+            shared_props: Default::default(),
             member_reads: Default::default(),
             interface_chains: Default::default(),
             dependencies: None,
             react_types: None,
             collapse_inherited_props: options.collapse_inherited_props,
         }
+    }
+
+    /// `prop` as the run's one shared allocation of it: an equal prop built earlier, or `prop` itself.
+    pub(crate) fn share(&self, prop: ParsedProp) -> Arc<ParsedProp> {
+        use std::hash::Hasher;
+        let mut hasher = rustc_hash::FxHasher::default();
+        prop.structural_hash(&mut hasher);
+        let key = hasher.finish();
+        // Nearly every call finds the prop already built, so look under the shard's shared lock first.
+        if let Some(bucket) = self.shared_props.get(&key) {
+            if let Some(found) = bucket.iter().find(|shared| ***shared == prop) {
+                return Arc::clone(found);
+            }
+        }
+        let mut bucket = self.shared_props.entry(key).or_default();
+        // Another thread may have added it between the two locks.
+        if let Some(found) = bucket.iter().find(|shared| ***shared == prop) {
+            return Arc::clone(found);
+        }
+        let shared = Arc::new(prop);
+        bucket.push(Arc::clone(&shared));
+        shared
     }
 
     /// This context with React's own declarations indexed apart from the project's, for an HTML layer's attribute
@@ -737,7 +763,7 @@ pub(crate) fn resolve_component_shared(
                 let prop_type = html::infer_html_attr_prop_type(attr_name);
                 notable_inherited.insert(
                     attr_name.to_string(),
-                    Arc::new(ParsedProp::new(
+                    ctx.share(ParsedProp::new(
                         attr_name.to_string(),
                         prop_type,
                         false,

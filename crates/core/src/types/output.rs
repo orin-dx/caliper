@@ -186,6 +186,24 @@ pub struct ParsedProp {
 struct Seal;
 
 impl ParsedProp {
+    /// Feed `hasher` everything `==` compares, so equal props hash equal (`ResolutionContext::share`).
+    pub(crate) fn structural_hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
+        use std::hash::Hash;
+        self.name.hash(hasher);
+        self.prop_type.structural_hash(hasher);
+        self.required.hash(hasher);
+        if let Some(default) = &self.default_value {
+            default.value.hash(hasher);
+            default.computed.hash(hasher);
+        }
+        self.description.hash(hasher);
+        self.tags.hash(hasher);
+        for parent in self.parent.iter().chain(&self.declarations) {
+            parent.name.hash(hasher);
+            parent.file_name.hash(hasher);
+        }
+    }
+
     /// Constructs a `ParsedProp`, normalizing the `required`/`default_value`
     /// relationship: RDT convention is that a supplied default value makes a
     /// prop effectively optional regardless of what `required` was computed
@@ -392,6 +410,75 @@ impl OpaqueDetail {
 }
 
 impl PropType {
+    /// Feed `hasher` everything that tells two types apart, so equal types hash equal. The resolver shares identical
+    /// props by this hash (`ResolutionContext::share`).
+    pub(crate) fn structural_hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
+        use std::hash::Hash;
+        std::mem::discriminant(self).hash(hasher);
+        let all = |hasher: &mut H, members: &[PropType]| {
+            members.len().hash(hasher);
+            members.iter().for_each(|member| member.structural_hash(hasher));
+        };
+        match self {
+            PropType::String
+            | PropType::Number
+            | PropType::Boolean
+            | PropType::Null
+            | PropType::Undefined
+            | PropType::Any
+            | PropType::Never
+            | PropType::Unknown
+            | PropType::Void
+            | PropType::ReactNode
+            | PropType::CssProperties
+            | PropType::ElementType
+            | PropType::SxProps => {}
+            PropType::StringLiteral(s) => s.hash(hasher),
+            PropType::NumberLiteral(n) => n.to_bits().hash(hasher),
+            PropType::BoolLiteral(b) => b.hash(hasher),
+            PropType::Union(members) | PropType::Intersection(members) | PropType::Tuple(members) => {
+                all(hasher, members)
+            }
+            PropType::Array(inner) => inner.structural_hash(hasher),
+            PropType::Object(fields) => {
+                fields.len().hash(hasher);
+                for field in fields {
+                    field.name.hash(hasher);
+                    field.required.hash(hasher);
+                    field.description.hash(hasher);
+                    field.prop_type.structural_hash(hasher);
+                }
+            }
+            PropType::Named { name, args } => {
+                name.hash(hasher);
+                all(hasher, args);
+            }
+            PropType::Function { type_params, params, return_type } => {
+                type_params.hash(hasher);
+                params.len().hash(hasher);
+                for param in params {
+                    param.name.hash(hasher);
+                    param.param_type.structural_hash(hasher);
+                }
+                return_type.structural_hash(hasher);
+            }
+            PropType::Ref { element } => element.hash(hasher),
+            PropType::HtmlAttributes { element, omitted } => {
+                element.hash(hasher);
+                omitted.hash(hasher);
+            }
+            PropType::LiteralUnion { members, has_default } => {
+                members.hash(hasher);
+                has_default.hash(hasher);
+            }
+            // Rare, and its reason has no cheap hash of its own.
+            PropType::Opaque(detail) => {
+                detail.raw.hash(hasher);
+                format!("{:?}", detail.reason).hash(hasher);
+            }
+        }
+    }
+
     /// Whether a conditional, mapped or indexed access type the static resolver can't evaluate appears anywhere in this
     /// type, so its text would include that type's source.
     pub(crate) fn holds_unevaluated_type(&self) -> bool {

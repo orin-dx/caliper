@@ -2709,6 +2709,29 @@ fn canonical_temp_dir() -> (tempfile::TempDir, Utf8PathBuf) {
 }
 
 #[test]
+fn equal_props_built_for_different_components_are_one_allocation() {
+    // A generic interface's chain is resolved per instantiation, so each component builds its own `value` prop; the two
+    // `string` ones are equal and share an allocation, the `number` one is not.
+    let (_tmp, dir) = canonical_temp_dir();
+    let source = r#"
+interface Box<T> { /** held */ value: T; label?: string }
+interface AProps extends Box<string> {}
+interface BProps extends Box<string> {}
+interface CProps extends Box<number> {}
+export function A(props: AProps) { return null; }
+export function B(props: BProps) { return null; }
+export function C(props: CProps) { return null; }
+"#;
+    let (_shared, results) = resolve_shared(&dir, &[("Comp.tsx", source)], &["A", "B", "C"]);
+
+    let prop = |component: &str, name: &str| &results[component].0.props[name];
+    assert!(Arc::ptr_eq(prop("A", "value"), prop("B", "value")));
+    assert!(Arc::ptr_eq(prop("A", "label"), prop("C", "label")));
+    assert!(!Arc::ptr_eq(prop("A", "value"), prop("C", "value")));
+    assert_eq!(prop("C", "value").prop_type, PropType::Number);
+}
+
+#[test]
 fn a_shared_interface_chain_resolves_like_a_fresh_one_for_every_component() {
     let (_tmp, dir) = canonical_temp_dir();
     let tone = "export type Tone = \"a\" | \"b\";\n";

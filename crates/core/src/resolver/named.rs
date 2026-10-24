@@ -3,13 +3,14 @@
 use camino::Utf8Path;
 use compact_str::CompactString;
 
-use crate::known::{push_known_opaque_diagnostic, KnownPatternResult};
+use crate::known::{push_known_opaque_diagnostic, resolve_known, KnownPatternResult};
 use crate::react_types;
 use crate::types::*;
 
 use super::alias::resolve_type_alias_type;
 use super::collected::resolve_collected_type;
 use super::import::{lookup_ambient_global, AmbientGlobalLookup};
+use super::precedence::Declared;
 use super::react::react_type_to_prop_type;
 use super::{ResolutionContext, MAX_DEPTH};
 
@@ -81,14 +82,25 @@ fn resolve_named_uncycled(
         return react_type_to_prop_type(name.as_str(), args, consuming_file, ctx, state, depth);
     }
 
-    // Resolve type arguments eagerly — needed for both source lookups and known patterns.
-    let resolved_args: Vec<PropType> =
-        args.iter().map(|a| resolve_collected_type(a, consuming_file, ctx, state, depth + 1)).collect();
-
     // ── 2-5. Try the project's own source before a known-pattern shortcut ────
     // See `resolver::precedence` — the shared, single-source-of-truth order.
-    let (canonical_file, canonical_name, matched) =
-        super::precedence::resolve_source_defined_or_known(name.as_str(), &resolved_args, consuming_file, ctx, state);
+    let (canonical_file, canonical_name, declared) =
+        super::precedence::find_declaration(name.as_str(), consuming_file, ctx, state);
+    // The arguments of everything but an alias are resolved here; an alias's are resolved once, where its expansion
+    // reads them, instead of here as well.
+    let resolved_args: Vec<PropType> = if matches!(declared, Some(Declared::TypeAlias { .. })) {
+        Vec::new()
+    } else {
+        args.iter().map(|a| resolve_collected_type(a, consuming_file, ctx, state, depth + 1)).collect()
+    };
+    let matched = match declared {
+        Some(Declared::TypeAlias { matched_key, alias }) => {
+            Some(super::precedence::SourceOrKnownMatch::TypeAlias { matched_key, alias: *alias })
+        }
+        Some(Declared::Interface(iface)) => Some(super::precedence::SourceOrKnownMatch::Interface(iface)),
+        None => resolve_known(name, &resolved_args, &ctx.global, &ctx.enum_bare_index)
+            .map(super::precedence::SourceOrKnownMatch::Known),
+    };
 
     match matched {
         Some(super::precedence::SourceOrKnownMatch::TypeAlias { matched_key, alias }) => {
