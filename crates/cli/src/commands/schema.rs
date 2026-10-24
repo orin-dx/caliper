@@ -10,7 +10,7 @@ fn schema_value() -> serde_json::Value {
         "title": "ExtractionOutput",
         "description": "Output schema for caliper-docgen component prop extraction",
         "type": "object",
-        "required": ["components", "props", "enums", "diagnostics", "stats"],
+        "required": ["schemaVersion", "components", "props", "enums", "diagnostics", "stats"],
         "definitions": {
             "propId": {
                 "description": "A prop's key in the top-level `props` table: the FNV-1a 64 hash of its compact JSON (ADR 0009)",
@@ -33,6 +33,11 @@ fn schema_value() -> serde_json::Value {
             }
         },
         "properties": {
+            "schemaVersion": {
+                "description": "The shape of this JSON (ADR 0017). A reader checks it equals the version it was written for",
+                "type": "integer",
+                "const": caliper_docgen_core::types::SCHEMA_VERSION
+            },
             "components": {
                 "type": "object",
                 "additionalProperties": {

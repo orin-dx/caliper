@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import type * as Napi from 'caliper-docgen-napi'
 import type { Diagnostic, IncrementalUpdate, RdtComponentDoc } from 'caliper-docgen-napi'
+import { assertSchemaVersion } from './schema.js'
 
 /** The binding calls the session makes, so tests can stand in for the native module. */
 export type SessionBinding = Pick<
@@ -78,10 +79,15 @@ export class DocgenSession {
 
   private async initialize(): Promise<void> {
     this.sessionId = this.napi.createSession(this.napiOptions())
-    const output = JSON.parse(await this.napi.initializeSessionIndex(this.sessionId, this.napiOptions())) as {
-      components: Record<string, ComponentRef>
-      diagnostics: Diagnostic[]
-    }
+    const json = await this.napi.initializeSessionIndex(this.sessionId, this.napiOptions())
+    const output = assertSchemaVersion(
+      JSON.parse(json) as {
+        schemaVersion?: number
+        components: Record<string, ComponentRef>
+        diagnostics: Diagnostic[]
+      },
+      'session index',
+    )
     for (const [key, entry] of Object.entries(output.components)) {
       this.components.set(key, { filePath: resolve(entry.filePath), displayName: entry.displayName })
     }
@@ -103,7 +109,8 @@ export class DocgenSession {
   }
 
   private async check(): Promise<void> {
-    this.apply(JSON.parse(await this.napi.ensureFresh(this.sessionId!)) as IncrementalUpdate)
+    const json = await this.napi.ensureFresh(this.sessionId!)
+    this.apply(assertSchemaVersion(JSON.parse(json) as IncrementalUpdate, 'update'))
   }
 
   /**

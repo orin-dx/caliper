@@ -188,7 +188,8 @@ impl Serialize for IncrementalUpdate {
         let (ids, props) = intern::<S::Error>(&entries)?;
         let components: Vec<InternedComponent<'_>> =
             entries.iter().zip(&ids).map(|(entry, ids)| InternedComponent { entry, ids }).collect();
-        let mut out = serializer.serialize_struct("IncrementalUpdate", 9)?;
+        let mut out = serializer.serialize_struct("IncrementalUpdate", 10)?;
+        out.serialize_field("schemaVersion", &crate::types::SCHEMA_VERSION)?;
         out.serialize_field("revision", revision)?;
         out.serialize_field("updatedComponents", &components)?;
         out.serialize_field("props", &props)?;

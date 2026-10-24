@@ -4,6 +4,15 @@
 
 This tool's canonical, lossless representation is `ExtractionOutput` — the struct tree in `crates/core/src/types/`, whose JSON writes each distinct prop once and refers to it by id (ADR 0009; see `types-and-output-contract.md`). Everything in this document is a _consumer-facing projection_ of that canonical form: two formats reshape it for specific downstream tools (`--format rdt`, `--format toon`), and one (`schema.rs`) describes its shape for external validators. None of the three is the source of truth; `ExtractionOutput` is.
 
+## Schema version
+
+The canonical JSON (`ExtractionOutput`, `IncrementalUpdate`, the session index) carries `schemaVersion` (ADR 0017); `SCHEMA_VERSION` in `crates/core/src/types/output.rs` is the one definition, and `schema.rs` requires it. The shape ADR 0009 describes is version 1.
+
+- **Bump** when a reader of the previous version would misread or lose data: a field removed, renamed or retyped, its meaning changed, or references and tables restructured. A new field, a new `detectedBy` value or a new diagnostic code is not a bump; readers must tolerate them.
+- **A bump ships** in a changeset marked breaking for the core crate and every package that reads the JSON.
+- **Readers** (`ExtractionOutput`'s `Deserialize`, `packages/vite-plugin/src/schema.ts`, `packages/storybook/src/schema.ts`) accept their own version, reject any other with an error naming both, and read output with no `schemaVersion` as version 1.
+- `--format rdt`, `--format storybook` and `--format toon` carry no version; they have other tools' shapes. The parse cache has its own `CACHE_SCHEMA_VERSION`.
+
 ## Where this code lives, and why that's not a AGENTS.md violation
 
 `crates/core/AGENTS.md` says "no terminal/display code in `crates/core`." The RDT projection (`pipeline/rdt.rs`) and `toon.rs` (`render_output_toon`, `render_component_toon`, `format_type_compact`) live in **`crates/core`**, and both are serialization formats, not extraction logic.

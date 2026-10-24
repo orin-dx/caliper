@@ -6,6 +6,7 @@ $ caliper-docgen schema
   "description": "Output schema for caliper-docgen component prop extraction",
   "type": "object",
   "required": [
+    "schemaVersion",
     "components",
     "props",
     "enums",
@@ -63,6 +64,11 @@ $ caliper-docgen schema
     }
   },
   "properties": {
+    "schemaVersion": {
+      "description": "The shape of this JSON (ADR 0017). A reader checks it equals the version it was written for",
+      "type": "integer",
+      "const": 1
+    },
     "components": {
       "type": "object",
       "additionalProperties": {

@@ -5,6 +5,7 @@ import type {
   IncrementalUpdate,
   RdtComponentDoc,
 } from 'caliper-docgen-napi'
+import { SUPPORTED_SCHEMA_VERSION } from '../../src/schema.js'
 import type { SessionBinding } from '../../src/session.js'
 
 export function entry(displayName: string, filePath: string): ComponentEntry {
@@ -71,7 +72,7 @@ export class FakeBinding implements SessionBinding {
 
   initializeSessionIndex = async (): Promise<string> => {
     this.initializations++
-    return JSON.stringify({ components: {}, diagnostics: [], ...this.output })
+    return JSON.stringify({ schemaVersion: SUPPORTED_SCHEMA_VERSION, components: {}, diagnostics: [], ...this.output })
   }
 
   ensureFresh = async (): Promise<string> => {
@@ -82,6 +83,7 @@ export class FakeBinding implements SessionBinding {
     await Promise.resolve()
     const next = this.updates.shift()
     const update: IncrementalUpdate = {
+      schemaVersion: SUPPORTED_SCHEMA_VERSION,
       revision: next ? ++this.revision : this.revision,
       updatedComponents: [],
       props: {},

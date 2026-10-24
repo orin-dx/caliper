@@ -178,6 +178,8 @@ export interface RdtComponentDoc {
 }
 
 export interface ExtractionOutput {
+  /** The shape of this JSON (ADR 0017). A reader checks it is a version it reads. */
+  schemaVersion: number
   components: Record<string, ComponentEntry>
   /** Every distinct prop the components refer to, written once (ADR 0009). */
   props: Record<PropId, ParsedProp>
@@ -187,6 +189,8 @@ export interface ExtractionOutput {
 }
 
 export interface IncrementalUpdate {
+  /** The shape of this JSON, as in `ExtractionOutput`. */
+  schemaVersion: number
   /** The session revision this update produced; drop an update older than one already applied. */
   revision: number
   /** Components re-resolved by this change, in the same order as `updatedKeys`. */

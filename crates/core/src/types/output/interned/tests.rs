@@ -100,7 +100,7 @@ fn expanding_the_ids_gives_exactly_the_component_entry_json() {
     assert_eq!(written, serde_json::to_value(&entry).unwrap());
     assert_eq!(
         json.as_object().unwrap().keys().collect::<Vec<_>>(),
-        ["components", "props", "enums", "diagnostics", "stats"]
+        ["schemaVersion", "components", "props", "enums", "diagnostics", "stats"]
     );
 }
 
@@ -147,4 +147,30 @@ fn two_different_props_with_one_id_fail_instead_of_sharing_an_entry() {
     let message = clash.unwrap_err().to_string();
     assert!(message.starts_with("prop 'tone' and a different prop have the same id 0000000000000007: "), "{message}");
     assert_eq!(table.entries.len(), 1);
+}
+
+#[test]
+fn the_output_names_the_schema_version_it_is_written_in() {
+    let json = serde_json::to_value(output(vec![])).unwrap();
+    assert_eq!(json["schemaVersion"], json!(crate::types::SCHEMA_VERSION));
+}
+
+#[test]
+fn output_with_no_version_reads_as_the_first_and_a_version_this_build_does_not_read_fails() {
+    let out = output(vec![component("Button", &[prop("size", None)], &[])]);
+    let mut json = serde_json::to_value(&out).unwrap();
+
+    json.as_object_mut().unwrap().remove("schemaVersion");
+    assert_eq!(serde_json::from_value::<ExtractionOutput>(json.clone()).unwrap(), out);
+
+    json["schemaVersion"] = json!(crate::types::SCHEMA_VERSION + 1);
+    let error = serde_json::from_value::<ExtractionOutput>(json).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "output schema version {} is not the version {} this build reads",
+            crate::types::SCHEMA_VERSION + 1,
+            crate::types::SCHEMA_VERSION
+        )
+    );
 }

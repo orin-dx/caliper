@@ -11,6 +11,11 @@ use super::global::ResolveState;
 
 pub(crate) mod interned;
 
+/// The version of the canonical JSON shape (ADR 0017): `schemaVersion` in an [`ExtractionOutput`], an
+/// [`IncrementalUpdate`](crate::pipeline::IncrementalUpdate) and a session index. Bumped whenever a reader of the
+/// previous shape would misread or lose data from the new one; never by an addition it can ignore.
+pub const SCHEMA_VERSION: u32 = 1;
+
 // ─── Top-level output ─────────────────────────────────────────────────────────
 
 /// The complete extraction output — top-level return type of the pipeline. Its JSON writes each distinct prop once

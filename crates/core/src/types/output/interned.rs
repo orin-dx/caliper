@@ -187,7 +187,8 @@ impl Serialize for ExtractionOutput {
         let entries: Vec<&ComponentEntry> = components.values().collect();
         let (ids, props) = intern::<S::Error>(&entries)?;
         let components = InternedComponents { keys: components.keys().map(String::as_str).collect(), entries, ids };
-        let mut out = serializer.serialize_struct("ExtractionOutput", 5)?;
+        let mut out = serializer.serialize_struct("ExtractionOutput", 6)?;
+        out.serialize_field("schemaVersion", &super::SCHEMA_VERSION)?;
         out.serialize_field("components", &components)?;
         out.serialize_field("props", &props)?;
         out.serialize_field("enums", enums)?;
@@ -204,13 +205,25 @@ impl<'de> Deserialize<'de> for ExtractionOutput {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Wire {
+            // Output written before the version existed has the shape of version 1.
+            #[serde(default = "first_version")]
+            schema_version: u32,
             components: BTreeMap<String, serde_json::Value>,
             props: BTreeMap<String, serde_json::Value>,
             enums: BTreeMap<String, Vec<EnumEntry>>,
             diagnostics: Vec<Diagnostic>,
             stats: ExtractionStats,
         }
-        let Wire { components, props, enums, diagnostics, stats } = Wire::deserialize(deserializer)?;
+        fn first_version() -> u32 {
+            1
+        }
+        let Wire { schema_version, components, props, enums, diagnostics, stats } = Wire::deserialize(deserializer)?;
+        if schema_version != super::SCHEMA_VERSION {
+            return Err(D::Error::custom(format!(
+                "output schema version {schema_version} is not the version {} this build reads",
+                super::SCHEMA_VERSION
+            )));
+        }
         let components = components
             .into_iter()
             .map(|(key, component)| Ok((key, expand(component, &props).map_err(D::Error::custom)?)))
