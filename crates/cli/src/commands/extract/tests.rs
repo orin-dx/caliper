@@ -488,7 +488,14 @@ export function Button(props: ButtonProps) { return null; }
     assert_eq!(cmd_extract(args, false, None).unwrap(), 0);
 
     let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(out).unwrap()).unwrap();
-    written["components"]["Button"].clone()
+    // Name to prop id, merged from the prop sets the component lists.
+    let mut button = written["components"]["Button"].clone();
+    let mut props = serde_json::Map::new();
+    for set in button["props"].as_array().unwrap() {
+        props.extend(written["propSets"][set.as_str().unwrap()].as_object().unwrap().clone());
+    }
+    button["props"] = serde_json::Value::Object(props);
+    button
 }
 
 fn keys(component: &serde_json::Value, field: &str) -> Vec<String> {

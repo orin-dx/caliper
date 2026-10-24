@@ -13,8 +13,9 @@ pub(crate) mod interned;
 
 /// The version of the canonical JSON shape (ADR 0017): `schemaVersion` in an [`ExtractionOutput`], an
 /// [`IncrementalUpdate`](crate::pipeline::IncrementalUpdate) and a session index. Bumped whenever a reader of the
-/// previous shape would misread or lose data from the new one; never by an addition it can ignore.
-pub const SCHEMA_VERSION: u32 = 1;
+/// previous shape would misread or lose data from the new one; never by an addition it can ignore. Version 2 writes a
+/// component's props as prop set ids and an inheritance layer's `omitted` as a name list id (ADR 0018).
+pub const SCHEMA_VERSION: u32 = 2;
 
 // ─── Top-level output ─────────────────────────────────────────────────────────
 

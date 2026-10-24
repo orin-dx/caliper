@@ -5,7 +5,7 @@ import { DiagnosticReporter } from './diagnostics.js'
 import { ComponentFiles, docgenAssignments, invalidateDeclaringModules } from './docgen-info.js'
 import type { CaliperDocgenOptions } from './options.js'
 import { isAbsolute, toPosix } from './paths.js'
-import { assertSchemaVersion } from './schema.js'
+import { assertSchemaVersion, expandDiagnostics } from './schema.js'
 import { updatePayload } from './update.js'
 
 const VIRTUAL_ID = 'virtual:caliper-docgen'
@@ -83,7 +83,9 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
     const update = assertSchemaVersion(JSON.parse(json) as IncrementalUpdate, 'update')
     if (update.revision <= latestRevision) return undefined
     latestRevision = update.revision
-    reporter.report(update.diagnostics, update.removedDiagnostics)
+    const added = expandDiagnostics(update.diagnostics, update.nameLists)
+    const removed = expandDiagnostics(update.removedDiagnostics, update.nameLists)
+    reporter.report(added, removed)
     componentFiles.apply(update)
     return update
   }
@@ -135,7 +137,7 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
       try {
         const json = await napi.initializeSession(sessionId, napiOptions())
         const output = assertSchemaVersion(JSON.parse(json) as ExtractionOutput, 'output')
-        reporter.report(output.diagnostics)
+        reporter.report(expandDiagnostics(output.diagnostics, output.nameLists))
         componentFiles.index(output)
         extracted = true
       } catch (error) {
@@ -170,7 +172,7 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
         .initializeSession(sessionId, napiOptions())
         .then((json) => {
           const output = assertSchemaVersion(JSON.parse(json) as ExtractionOutput, 'output')
-          reporter.report(output.diagnostics)
+          reporter.report(expandDiagnostics(output.diagnostics, output.nameLists))
           componentFiles.index(output)
           // environments.client.hot is Vite 6+ API; cast avoids typing fight across patch versions
           ;(server as any).environments?.client?.hot?.send('caliper-docgen:ready', { components: output.components })

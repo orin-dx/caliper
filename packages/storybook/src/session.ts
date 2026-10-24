@@ -1,7 +1,7 @@
 import { resolve } from 'node:path'
 import type * as Napi from 'caliper-docgen-napi'
-import type { Diagnostic, IncrementalUpdate, RdtComponentDoc } from 'caliper-docgen-napi'
-import { assertSchemaVersion } from './schema.js'
+import type { Diagnostic, IncrementalUpdate, RdtComponentDoc, SessionIndex } from 'caliper-docgen-napi'
+import { assertSchemaVersion, expandDiagnostics } from './schema.js'
 
 /** The binding calls the session makes, so tests can stand in for the native module. */
 export type SessionBinding = Pick<
@@ -80,18 +80,13 @@ export class DocgenSession {
   private async initialize(): Promise<void> {
     this.sessionId = this.napi.createSession(this.napiOptions())
     const json = await this.napi.initializeSessionIndex(this.sessionId, this.napiOptions())
-    const output = assertSchemaVersion(
-      JSON.parse(json) as {
-        schemaVersion?: number
-        components: Record<string, ComponentRef>
-        diagnostics: Diagnostic[]
-      },
-      'session index',
-    )
+    const output = assertSchemaVersion(JSON.parse(json) as SessionIndex, 'session index')
     for (const [key, entry] of Object.entries(output.components)) {
       this.components.set(key, { filePath: resolve(entry.filePath), displayName: entry.displayName })
     }
-    for (const diagnostic of output.diagnostics) this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
+    for (const diagnostic of expandDiagnostics(output.diagnostics, output.nameLists)) {
+      this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
+    }
     this.index = undefined
   }
 
@@ -104,8 +99,12 @@ export class DocgenSession {
       const entry = update.updatedComponents[i]
       if (entry) this.components.set(key, { filePath: resolve(entry.filePath), displayName: entry.displayName })
     })
-    for (const diagnostic of update.removedDiagnostics) this.diagnostics.delete(diagnosticId(diagnostic))
-    for (const diagnostic of update.diagnostics) this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
+    for (const diagnostic of expandDiagnostics(update.removedDiagnostics, update.nameLists)) {
+      this.diagnostics.delete(diagnosticId(diagnostic))
+    }
+    for (const diagnostic of expandDiagnostics(update.diagnostics, update.nameLists)) {
+      this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
+    }
   }
 
   private async check(): Promise<void> {

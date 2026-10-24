@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const SNAPSHOT = JSON.stringify({
+  schemaVersion: 2,
   components: { Button: { displayName: 'Button', filePath: '/project/src/Button.tsx' } },
   enums: {},
   diagnostics: [],
@@ -22,9 +23,12 @@ const component = (displayName: string, description = '') => ({
 
 const update = (revision: number, updated: string[], removed: string[] = [], description = '') =>
   JSON.stringify({
+    schemaVersion: 2,
     revision,
     updatedComponents: updated.map((name) => component(name, description)),
     props: {},
+    propSets: {},
+    nameLists: {},
     updatedKeys: updated,
     removedKeys: removed,
     affectedFiles: [],
@@ -220,6 +224,8 @@ describe('caliperDocgen', () => {
           updatedKeys: ['Panel'],
           updatedComponents: [component('Panel')],
           props: {},
+          propSets: {},
+          nameLists: {},
           removedKeys: ['Card'],
           diagnostics: [],
           removedDiagnostics: [],
@@ -654,6 +660,7 @@ describe('caliperDocgen', () => {
       code: 'x',
     })
     const output = JSON.stringify({
+      schemaVersion: 2,
       components: {},
       enums: {},
       stats: {},
