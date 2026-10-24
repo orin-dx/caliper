@@ -60,7 +60,7 @@ Apple Silicon laptop, macOS, load average 8 to 12, 10 runs per corpus, branch `c
 
 Scaling: one copy of mantine 26 ms, two copies 46 ms (1.77×).
 
-RDT's component and prop counts are not comparable with Caliper's here: without dependencies it reports every exported function and expands what it can of `@types/react`. Recall and precision against RDT are in `docs/precision.md` and `docs/projects/architecture-roadmap.md`.
+RDT's component and prop counts are not comparable with Caliper's here: without dependencies it reports every exported function and expands what it can of `@types/react`. Recall and precision against RDT are in `docs/precision.md` and `docs/projects/architecture-roadmap.md`; agreement with RDT on installed repos, gated weekly, is in `docs/parity.md`.
 
 ## Dependency loading against RDT, 2026-10-23
 

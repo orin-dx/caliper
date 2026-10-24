@@ -1,0 +1,94 @@
+name: Parity
+
+# Caliper against react-docgen-typescript on five public repos with their dependencies installed (docs/parity.md).
+# The installs are heavy, so this runs weekly and by hand rather than on every pull request. It compares this commit's
+# build with main's, timed interleaved in one job, and gates on scripts/parity-baseline.json.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Ref to compare against (default main)
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  parity:
+    name: Parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: rust
+        run: echo "version=$(sed -n 's/^rust = "\(.*\)"/\1/p' .prototools)" >> "$GITHUB_OUTPUT"
+      - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+      # RDT runs from apps/validate's react-docgen-typescript.
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+        with:
+          auto-install: true
+      - uses: orin-dx/actions/setup-pnpm-cache@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+      - run: pnpm install --frozen-lockfile
+      - id: base
+        env:
+          BASE: ${{ inputs.base }}
+        run: |
+          ref="origin/${BASE:-main}"
+          git rev-parse --verify --quiet "$ref^{commit}" >/dev/null || ref="$BASE"
+          echo "sha=$(git rev-parse --verify "$ref^{commit}")" >> "$GITHUB_OUTPUT"
+      - name: Build this commit and the base
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+        run: |
+          cargo build --release --locked -p caliper-docgen
+          cp target/release/caliper-docgen "$RUNNER_TEMP/caliper-head"
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
+          cargo build --release --locked -p caliper-docgen --manifest-path "$RUNNER_TEMP/base/Cargo.toml" --target-dir target
+          cp target/release/caliper-docgen "$RUNNER_TEMP/caliper-base"
+      # About 10 GB of installed node_modules is too large to cache; the package managers' stores and RDT's dumps,
+      # which are keyed by commit, are not.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .parity/caches
+            .parity/rdt
+          key: parity-${{ hashFiles('scripts/parity.py', 'scripts/parity-rdt.mjs', 'pnpm-lock.yaml') }}
+      - name: Fetch and install the corpora
+        run: python3 scripts/parity.py setup
+      - name: Measure and gate
+        run: >-
+          python3 scripts/parity.py run --bin "$RUNNER_TEMP/caliper-head" --base-bin "$RUNNER_TEMP/caliper-base"
+          --baseline scripts/parity-baseline.json --out parity.json --markdown parity.md --check
+      # TypeScript 7.1's checker as the oracle for prop types (test-only; apps/validate/src/oracle.ts).
+      - name: Compare prop types with TypeScript's checker
+        if: ${{ !cancelled() }}
+        run: >-
+          python3 scripts/parity.py oracle --bin "$RUNNER_TEMP/caliper-head" --baseline scripts/oracle-baseline.json
+          --out oracle.json --markdown oracle.md --check
+      - if: always()
+        run: cat parity.md oracle.md >> "$GITHUB_STEP_SUMMARY" || true
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: parity
+          path: |
+            parity.json
+            parity.md
+            oracle.json
+            oracle.md
+            .parity/logs

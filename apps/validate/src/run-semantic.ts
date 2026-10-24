@@ -1,5 +1,5 @@
-import { API, SignatureKind, SymbolFlags, TypeFlags } from 'typescript-next/unstable/async'
-import { SyntaxKind } from 'typescript-next/unstable/ast'
+import { API, SignatureKind, SymbolFlags, TypeFlags } from 'typescript-beta/async'
+import { SyntaxKind } from 'typescript-beta/ast'
 import { discoverFixtures, FIXTURES_ROOT } from './fixtures.ts'
 import type { ToolResult, NormalizedProp } from './types.ts'
 
@@ -63,7 +63,9 @@ async function collectProps(propsType: any): Promise<Map<string, any>> {
 // alias) as its member values, not the alias name — matches Evidence's "type strings" check.
 async function literalUnionString(type: any): Promise<string | undefined> {
   if (!(type.flags & TypeFlags.Union)) return undefined
-  const members = (await type.getTypes()) ?? []
+  // An optional prop's `| undefined`, which RDT's `shouldRemoveUndefinedFromOptional` drops; 7.1.0-beta keeps it in
+  // the type where the 2026-09 nightlies didn't.
+  const members = ((await type.getTypes()) ?? []).filter((m: any) => !(m.flags & TypeFlags.Undefined))
   if (members.length === 0 || !members.every((m: any) => m.flags & (TypeFlags.StringLiteral | TypeFlags.NumberLiteral)))
     return undefined
   return members.map((m: any) => (typeof m.value === 'string' ? JSON.stringify(m.value) : String(m.value))).join(' | ')
