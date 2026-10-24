@@ -187,7 +187,11 @@ fn imported_demand(file: &Utf8Path, imports: &[ImportBinding], reference: &str) 
         Some((head, rest)) => (head, Some(rest)),
         None => (reference, None),
     };
-    let binding = imports.iter().find(|binding| binding.local_name == head)?;
+    let Some(binding) = imports.iter().find(|binding| binding.local_name == head) else {
+        // `@types/react`'s UMD global (`export as namespace React`): `React.CSSProperties` without an import.
+        let name = rest.filter(|_| head == "React")?;
+        return Some(Demand { from: file.to_owned(), specifier: Box::from("react"), name: CompactString::from(name) });
+    };
     let name = match (binding.exported_name.as_str(), rest) {
         ("*", Some(rest)) => CompactString::from(rest),
         ("*", None) => return None,
@@ -225,6 +229,8 @@ pub(crate) struct DependencyLayer {
     /// `(directory, specifier)` → module, for every resolution the loader made.
     resolutions: FxHashMap<(Box<str>, Box<str>), Result<Utf8PathBuf, Unresolved>>,
     files: FxHashSet<PathKey>,
+    /// React's files whose declarations' imports were followed; their imports are in `import_map`.
+    react_files: FxHashSet<PathKey>,
     demands: FxHashSet<DemandKey>,
     unresolved: FxHashMap<DemandKey, Unresolved>,
     /// Every parsed file's data (stubs included), so a watch revision's extension reuses them.
@@ -267,6 +273,7 @@ struct Loader<'a> {
     exports: FxDashMap<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>>,
     claimed: FxDashSet<(PathKey, CompactString)>,
     declaring: FxDashSet<PathKey>,
+    react_files: FxDashSet<PathKey>,
     demands: FxDashSet<DemandKey>,
     unresolved: FxDashMap<DemandKey, Unresolved>,
     /// Package directory of each directory asked about, for grouping the index.
@@ -431,7 +438,15 @@ impl Loader<'_> {
                 return;
             }
         };
-        if self.in_project(&module) || Self::is_react(&module) {
+        if self.in_project(&module) {
+            return;
+        }
+        if Self::is_react(&module) {
+            // `@types/react` declares its exports inside `declare namespace React` (`export = React`).
+            let qualified = CompactString::from(format!("React.{}", demand.name));
+            if self.parse(&module).is_some_and(|data| declares(&data, &module, &qualified)) {
+                self.load_declaration(scope, module, qualified);
+            }
             return;
         }
         match self.find_export(&module, &demand.name) {
@@ -443,23 +458,33 @@ impl Loader<'_> {
     }
 
     /// Mark `(file, name)` loaded and follow the names its declaration references: same-file ones in place, imported
-    /// ones as new demands.
+    /// ones as new demands. React's own declarations stay with the resolver's React handling (builtins, curated HTML
+    /// attributes), so React's files never enter the layer, but what they import does: `CSSProperties` extends
+    /// csstype's `Properties`.
     fn load_declaration<'s>(&'s self, scope: &rayon::Scope<'s>, file: Utf8PathBuf, name: CompactString) {
-        if Self::is_react(&file) || self.in_project(&file) {
+        if self.in_project(&file) {
             return;
         }
+        let react = Self::is_react(&file);
         let Some(data) = self.parse(&file) else { return };
         let mut stack = vec![name];
         while let Some(name) = stack.pop() {
             if !self.claimed.insert((PathKey::from(file.as_path()), name.clone())) {
                 continue;
             }
-            self.declaring.insert(PathKey::from(file.as_path()));
+            if react {
+                self.react_files.insert(PathKey::from(file.as_path()));
+            } else {
+                self.declaring.insert(PathKey::from(file.as_path()));
+            }
             let mut refs = FxHashSet::default();
             declaration_refs(&data, &file, &name, &mut refs);
             for reference in refs {
+                let qualified = react.then(|| CompactString::from(format!("React.{reference}")));
                 if declares(&data, &file, &reference) {
                     stack.push(reference);
+                } else if let Some(qualified) = qualified.filter(|q| declares(&data, &file, q)) {
+                    stack.push(qualified);
                 } else if let Some(demand) = imported_demand(&file, &data.imports, &reference) {
                     scope.spawn(move |scope| self.demand(scope, demand));
                 }
@@ -533,6 +558,7 @@ pub(crate) fn load(
         exports: DashMap::default(),
         claimed: DashSet::default(),
         declaring: DashSet::default(),
+        react_files: DashSet::default(),
         demands: DashSet::default(),
         unresolved: DashMap::default(),
         packages: DashMap::default(),
@@ -558,6 +584,9 @@ pub(crate) fn load(
             }
             for file in &previous.files {
                 loader.declaring.insert(file.clone());
+            }
+            for file in &previous.react_files {
+                loader.react_files.insert(file.clone());
             }
         }
         None => read_index(&index_path, &loader),
@@ -586,6 +615,15 @@ pub(crate) fn load(
     }
     global.component_mappings.sort_by(|a, b| (&a.file_path, a.span_start).cmp(&(&b.file_path, b.span_start)));
     let named_types = Arc::new(NamedTypeIndex::build(&global));
+    // React's declarations reference what React imports (`CSS.Properties`), so those imports must resolve too; its
+    // declarations stay out of `named_types`.
+    let react_files: FxHashSet<PathKey> = loader.react_files.into_iter().collect();
+    for file in &react_files {
+        let path = Utf8Path::new(std::borrow::Borrow::<str>::borrow(file));
+        if let Some(Some(data)) = loader.parsed.get(file).and_then(|cell| cell.get().cloned()) {
+            global.merge(path, SourceData { imports: data.imports.clone(), ..SourceData::default() });
+        }
+    }
     let import_map = Arc::new(ImportResolutionMap::build(&global));
     DependencyLayer {
         global,
@@ -594,6 +632,7 @@ pub(crate) fn load(
         exports: loader.exports.into_iter().collect(),
         resolutions: loader.resolutions.into_iter().collect(),
         files: files.into_iter().collect(),
+        react_files,
         demands: loader.demands.into_iter().collect(),
         unresolved: loader.unresolved.into_iter().collect(),
         parsed: loader.parsed.into_iter().map(|(key, cell)| (key, cell.get().cloned().flatten())).collect(),

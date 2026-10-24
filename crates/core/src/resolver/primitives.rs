@@ -5,9 +5,7 @@ use camino::Utf8Path;
 use crate::types::*;
 
 use super::collected::resolve_collected_type;
-use super::import::{lookup_interface, lookup_interface_including_ambient, resolve_to_canonical};
-use super::substitute::{build_substitution, substitute_type};
-use super::{ResolutionContext, MAX_DEPTH};
+use super::ResolutionContext;
 
 pub(super) fn resolve_union(
     members: &[CollectedType],
@@ -25,18 +23,24 @@ pub(super) fn resolve_union(
     union_of(to_resolve.iter().map(|m| resolve_collected_type(m, consuming_file, ctx, state, depth + 1)))
 }
 
-/// The union of `members` as TypeScript forms it: a member that is itself a union contributes its members, a member
-/// equal to an earlier one is dropped, and a single member stands alone. Two members can be equal here although their
-/// source differs (`T[] | readonly T[]`, or two aliases that both resolve to `ReactNode | null`).
+/// The union of `members` as TypeScript forms it: a member that is itself a union, a literal union alias's included,
+/// contributes its members, a member equal to an earlier one is dropped, and a single member stands alone. Two members
+/// can be equal here although their source differs (`T[] | readonly T[]`, or two aliases that both resolve to
+/// `ReactNode | null`).
 pub(super) fn union_of(members: impl IntoIterator<Item = PropType>) -> PropType {
     fn push(members: impl IntoIterator<Item = PropType>, flat: &mut Vec<PropType>) {
         for member in members {
             match member {
                 PropType::Union(inner) => push(inner, flat),
+                PropType::LiteralUnion { members, .. } => push(members.into_iter().map(PropType::StringLiteral), flat),
                 member if !flat.contains(&member) => flat.push(member),
                 _ => {}
             }
         }
+    }
+    let mut members: Vec<PropType> = members.into_iter().collect();
+    if let [PropType::LiteralUnion { .. }] = members.as_slice() {
+        return members.remove(0);
     }
     let mut flat = Vec::new();
     push(members, &mut flat);
@@ -97,7 +101,15 @@ pub(super) fn resolve_indexed_access(
         _ => "",
     };
 
-    // Known table lookup — avoids needing the type checker for common cases.
+    // The member as its declaration reads, ancestors and type arguments included: React's `CSSProperties` reaches
+    // csstype's `Property.ZIndex` when dependencies are loaded.
+    if !key_str.is_empty() {
+        if let Some((member, member_file)) = super::evaluate::member(obj, key_str, consuming_file, ctx, depth + 1) {
+            return resolve_collected_type(&member, &member_file, ctx, state, depth + 1);
+        }
+    }
+
+    // A shortcut for React's own types when their declarations aren't loaded (ADR 0014).
     let known = match (obj_name, key_str) {
         (
             "CSSProperties" | "React.CSSProperties",
@@ -141,41 +153,6 @@ pub(super) fn resolve_indexed_access(
         }
     }
 
-    // A generic interface referenced with concrete args (e.g.
-    // `RenderableProps<FieldRenderProps<FieldValue, T>>["children"]`) resolves
-    // to a bare `PropType::Named` at the type level — interfaces are never
-    // expanded there (only at the chain/component level) — so the
-    // `PropType::Object` fallback below never matches an interface's own
-    // fields. Look the field up directly on the interface's declaration
-    // instead, substituting its declared type parameters with the caller's
-    // concrete arguments before resolving.
-    if let CollectedType::Named { name: obj_type_name, args: obj_args } = obj {
-        let (canonical_file, canonical_name) =
-            resolve_to_canonical(obj_type_name.as_str(), consuming_file, ctx, &mut state.diagnostics)
-                .unwrap_or_else(|| (consuming_file.to_owned(), obj_type_name.to_string()));
-        if let Some(iface) = lookup_interface_including_ambient(ctx, canonical_file.as_str(), &canonical_name) {
-            if let Some(field) = iface.props.iter().find(|f| f.name == key_str) {
-                let field_type = match ctx.named_types.lookup_interface_type_params_for(iface) {
-                    Some(params) if !params.is_empty() && !obj_args.is_empty() => {
-                        let subst = build_substitution(params, obj_args, consuming_file, &mut state.diagnostics);
-                        substitute_type(&field.collected_type, &subst)
-                    }
-                    _ => field.collected_type.clone(),
-                };
-                let iface_file_path = iface.file_path.clone();
-                return resolve_collected_type(&field_type, &iface_file_path, ctx, state, depth + 1);
-            }
-            // Not declared directly on this interface — DOM/ambient interfaces
-            // commonly inherit shared attributes through `extends` (e.g.
-            // `HTMLDivElement extends HTMLElement`, which declares `dir`/`lang`/
-            // `title`), so walk the chain before giving up.
-            if let Some((field, owner)) = find_field_in_ancestors(iface, key_str, ctx, depth) {
-                let owner_file_path = owner.file_path.clone();
-                return resolve_collected_type(&field.collected_type, &owner_file_path, ctx, state, depth + 1);
-            }
-        }
-    }
-
     // Try to resolve the object type and look for the key.
     let obj_resolved = resolve_collected_type(obj, consuming_file, ctx, state, depth + 1);
     if let PropType::Object(fields) = &obj_resolved {
@@ -196,36 +173,6 @@ pub(super) fn resolve_indexed_access(
         affects: Vec::new(),
     };
     OpaqueDetail::give_up(state, expression.clone(), OpaqueReason::IndexedAccess { expression }, diagnostic)
-}
-
-/// Search an interface's `extends` chain (depth-first) for a field, returning
-/// it alongside the interface that actually declares it. Only `SameFile`
-/// ancestors are followed — TypeScript's own ambient lib files (the only
-/// callers of this today) declare their whole DOM interface hierarchy in one
-/// file, so cross-file ancestry never applies here.
-fn find_field_in_ancestors<'g>(
-    iface: &'g CollectedInterface,
-    key_str: &str,
-    ctx: &'g ResolutionContext,
-    depth: u8,
-) -> Option<(&'g RawProp, &'g CollectedInterface)> {
-    if depth > MAX_DEPTH {
-        return None;
-    }
-    for extends_ref in &iface.extends {
-        let parent = match extends_ref {
-            ExtendsRef::SameFile { name, .. } => lookup_interface(ctx, iface.file_path.as_str(), name.as_str()),
-            ExtendsRef::Imported { .. } | ExtendsRef::Builtin { .. } => None,
-        };
-        let Some(parent) = parent else { continue };
-        if let Some(field) = parent.props.iter().find(|f| f.name == key_str) {
-            return Some((field, parent));
-        }
-        if let Some(found) = find_field_in_ancestors(parent, key_str, ctx, depth + 1) {
-            return Some(found);
-        }
-    }
-    None
 }
 
 #[cfg(test)]

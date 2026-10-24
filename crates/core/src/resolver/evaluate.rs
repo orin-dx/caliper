@@ -132,7 +132,13 @@ fn interface_keys(iface: &CollectedInterface, ctx: &ResolutionContext, depth: u8
 }
 
 /// The type of member `key` of `obj`, read as `obj[key]` reads it.
-fn member(obj: &CollectedType, key: &str, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> Option<Located> {
+pub(super) fn member(
+    obj: &CollectedType,
+    key: &str,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+    depth: u8,
+) -> Option<Located> {
     if depth > MAX_DEPTH {
         return None;
     }
@@ -143,7 +149,9 @@ fn member(obj: &CollectedType, key: &str, file: &Utf8Path, ctx: &ResolutionConte
         }
         CollectedType::Named { name, args } => {
             let (canonical_file, canonical_name) = canonical(name, file, ctx);
-            if let Some(iface) = lookup_interface_including_ambient(ctx, canonical_file.as_str(), &canonical_name) {
+            let found = lookup_interface_including_ambient(ctx, canonical_file.as_str(), &canonical_name)
+                .or_else(|| react_interface(ctx, &canonical_file, &canonical_name));
+            if let Some(iface) = found {
                 return interface_member(iface, args, key, file, ctx, depth + 1);
             }
             let (body, body_file) = alias_body(name, args, file, ctx)?;
@@ -167,14 +175,23 @@ fn interface_member(
     ctx: &ResolutionContext,
     depth: u8,
 ) -> Option<Located> {
+    let params = ctx
+        .named_types
+        .lookup_interface_type_params_for(iface)
+        .or_else(|| ctx.react_types.as_deref()?.lookup_interface_type_params_for(iface));
+    let subst = match params {
+        Some(params) if !params.is_empty() && !args.is_empty() => {
+            Some(build_substitution(params, args, args_file, &mut Vec::new()))
+        }
+        _ => None,
+    };
+    // A member's type, or a parent's arguments (`extends StandardProperties<TLength>`), bound to `args`.
+    let bind = |ty: &CollectedType| match &subst {
+        Some(subst) => substitute_type(ty, subst),
+        None => ty.clone(),
+    };
     if let Some(prop) = iface.props.iter().find(|p| p.name == key) {
-        let ty = match ctx.named_types.lookup_interface_type_params_for(iface) {
-            Some(params) if !params.is_empty() && !args.is_empty() => {
-                substitute_type(&prop.collected_type, &build_substitution(params, args, args_file, &mut Vec::new()))
-            }
-            _ => prop.collected_type.clone(),
-        };
-        return Some((ty, iface.file_path.clone()));
+        return Some((bind(&prop.collected_type), iface.file_path.clone()));
     }
     if depth > MAX_DEPTH {
         return None;
@@ -186,8 +203,9 @@ fn interface_member(
             ExtendsRef::Builtin { .. } => return None,
         };
         let (file, name) = canonical(name, &iface.file_path, ctx);
-        let parent = lookup_interface(ctx, file.as_str(), &name)?;
-        interface_member(parent, type_args, key, &iface.file_path, ctx, depth + 1)
+        let parent = lookup_interface(ctx, file.as_str(), &name).or_else(|| react_interface(ctx, &file, &name))?;
+        let type_args: Vec<CollectedType> = type_args.iter().map(&bind).collect();
+        interface_member(parent, &type_args, key, &iface.file_path, ctx, depth + 1)
     })
 }
 
@@ -218,8 +236,21 @@ fn alias_body(
     Some((body, alias_file))
 }
 
+/// An interface of React's that curated mode indexes apart from the run's declarations (ADR 0013): reading a member
+/// of one reads its declaration, as Full mode does.
+fn react_interface<'c>(ctx: &'c ResolutionContext, file: &Utf8Path, name: &str) -> Option<&'c CollectedInterface> {
+    ctx.react_types.as_deref()?.lookup_interface(file, name)
+}
+
 fn canonical(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> (Utf8PathBuf, String) {
-    resolve_to_canonical(name, file, ctx, &mut Vec::new()).unwrap_or_else(|| (file.to_owned(), name.to_owned()))
+    if let Some(found) = resolve_to_canonical(name, file, ctx, &mut Vec::new()) {
+        return found;
+    }
+    // `@types/react`'s UMD global (`export as namespace React`): `React.CSSProperties` without an import.
+    match name.strip_prefix("React.") {
+        Some(member) => (super::react::resolve_react_types_file(file, ctx).into(), member.to_owned()),
+        None => (file.to_owned(), name.to_owned()),
+    }
 }
 
 /// The string a literal type denotes.

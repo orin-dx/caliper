@@ -2515,8 +2515,10 @@ fn a_generic_alias_in_prop_position_takes_the_call_sites_arguments() {
     let output = extract(&options);
 
     let props = &output.components["Box"].props;
+    // The alias's members join the union; inside the array it stays the alias's own enum.
     let size = PropType::LiteralUnion { members: vec!["sm".into(), "lg".into()], has_default: false };
-    assert_eq!(props["size"].prop_type, PropType::Union(vec![size.clone(), PropType::Array(Box::new(size))]));
+    let (sm, lg) = (PropType::StringLiteral("sm".into()), PropType::StringLiteral("lg".into()));
+    assert_eq!(props["size"].prop_type, PropType::Union(vec![sm, lg, PropType::Array(Box::new(size))]));
     assert_eq!(props["label"].prop_type, PropType::Union(vec![PropType::String, PropType::Null]));
 }
 
@@ -2986,6 +2988,35 @@ export function opaque<Payload extends FactoryPayload>(ui: (props: Payload["prop
   return ui;
 }
 "#;
+
+#[test]
+fn an_indexed_member_reads_through_imported_generic_ancestors_with_their_arguments_bound() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(&tmp, "base.ts", "export interface Base<T> { value?: T; tone?: \"a\" | \"b\" }\n");
+    write_file(
+        &tmp,
+        "Field.tsx",
+        r#"
+import type { Base } from "./base";
+interface Mid<U> extends Base<U> {}
+interface Leaf extends Mid<number> {}
+export function Field(props: { value: Leaf["value"]; tone: Leaf["tone"] }) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let props = &output.components["Field"].props;
+    assert_eq!(props["value"].prop_type, PropType::Number);
+    assert_eq!(
+        props["tone"].prop_type,
+        PropType::Union(vec![PropType::StringLiteral("a".into()), PropType::StringLiteral("b".into())])
+    );
+}
 
 #[test]
 fn a_union_lists_each_member_once_however_it_was_spelled() {

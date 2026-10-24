@@ -98,8 +98,14 @@ pub(super) fn react_type_to_prop_type(
 /// Best-effort path to the @types/react .d.ts file for RDT propFilter compat.
 /// Falls back to a synthetic path if @types/react is not installed.
 pub(super) fn resolve_react_types_file(from_file: &Utf8Path, ctx: &ResolutionContext) -> String {
-    resolve_package_types_file(&ctx.oxc_resolver, &ctx.types_first_resolver, from_file, "react")
-        .unwrap_or_else(|| "node_modules/@types/react/index.d.ts".to_owned())
+    let dir = from_file.parent().map_or("", Utf8Path::as_str);
+    if let Some(found) = ctx.react_types_files.get(dir) {
+        return found.clone();
+    }
+    let found = resolve_package_types_file(&ctx.oxc_resolver, &ctx.types_first_resolver, from_file, "react")
+        .unwrap_or_else(|| "node_modules/@types/react/index.d.ts".to_owned());
+    ctx.react_types_files.insert(Box::from(dir), found.clone());
+    found
 }
 
 /// Resolve `package_name` to its declaration file the way TypeScript does. `oxc_resolver`'s `resolve_dts` stops at the

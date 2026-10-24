@@ -239,6 +239,8 @@ pub struct ResolutionContext {
     /// context, so nothing outlives one revision.
     pub(crate) module_resolutions:
         dashmap::DashMap<(Box<str>, Box<str>), import::ModuleResolution, rustc_hash::FxBuildHasher>,
+    /// React's declaration file by importing directory, cached as `module_resolutions` is.
+    pub(crate) react_types_files: dashmap::DashMap<Box<str>, String, rustc_hash::FxBuildHasher>,
     pub extra_builtins: FxHashSet<CompactString>,
     /// Bare name → full scoped key ("file:name") index over `global.enums`,
     /// built once per resolution pass so `resolve_typeof` and
@@ -343,6 +345,7 @@ impl ResolutionContext {
             html_attributes: options.html_attributes,
             ambient_global_files,
             module_resolutions: Default::default(),
+            react_types_files: Default::default(),
             interface_chains: Default::default(),
             dependencies: None,
             react_types: None,
