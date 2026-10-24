@@ -864,6 +864,38 @@ fn a_namespace_sibling_is_referenced_by_its_qualified_name() {
     assert_eq!(extends, [("DataType.Frame".to_owned(), vec!["DataType.Base".to_owned()])]);
 }
 
+/// antd's `Badge`: the defaults are declared in the body, `const { dot = false, overflowCount = 99 } = props`, and a
+/// renamed one (`tone: t = 'a'`) is the prop `tone`, not the local `t`.
+#[test]
+fn defaults_destructured_from_the_props_parameter_in_the_body_are_the_components() {
+    let source = r#"
+        import * as React from "react";
+        interface BadgeProps { dot?: boolean; overflowCount?: number; tone?: string; other?: number }
+        export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>((props, ref) => {
+            const { dot = false, overflowCount = 99, tone: t = 'a', other } = props;
+            const { shadow = 1 } = somethingElse;
+            return <span ref={ref} />;
+        });
+        export function Plain(props: BadgeProps) {
+            const { dot = true } = props;
+            function inner(props: { dot?: boolean }) { const { dot = 'nested' } = props; return dot; }
+            return null;
+        }
+    "#;
+    let data = parse_file(Utf8Path::new("/test/badge.tsx"), source);
+
+    let defaults = |component: &str| {
+        let mapping = data.component_mappings.iter().find(|m| m.component_name == component).unwrap();
+        let mut found: Vec<_> = mapping.param_defaults.iter().map(|(k, v)| (k.clone(), v.value.clone())).collect();
+        found.sort();
+        found
+    };
+    let owned =
+        |pairs: &[(&str, &str)]| pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect::<Vec<_>>();
+    assert_eq!(defaults("Badge"), owned(&[("dot", "false"), ("overflowCount", "99"), ("tone", "'a'")]));
+    assert_eq!(defaults("Plain"), owned(&[("dot", "true")]));
+}
+
 /// `declare const Primitive: Primitives` has no initializer to read; its declared type is kept as the alias
 /// `typeof Primitive`, and a tuple-typed constant (`NODES`) the same, so a member or an element type can be read.
 #[test]

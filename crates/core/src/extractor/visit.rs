@@ -290,6 +290,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     }
                 }
             }
+            self.record_body_defaults(declarator);
             // Pattern 5: declare const Button: React.ForwardRefExoticComponent<ButtonProps & RefAttributes<E>>
             // Common in .d.ts files — no initializer, just a type annotation
             if declarator.init.is_none() {
@@ -320,12 +321,15 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
 
     fn visit_arrow_function_expression(&mut self, arrow: &ArrowFunctionExpression<'a>) {
         self.record_function_type_params(arrow.span, arrow.type_parameters.as_deref());
+        self.props_params.push((first_param_name(&arrow.params), arrow.span.start, arrow.span.end));
         walk::walk_arrow_function_expression(self, arrow);
+        self.props_params.pop();
     }
 
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
         self.record_function_result(func);
         self.record_function_type_params(func.span, func.type_parameters.as_deref());
+        self.props_params.push((first_param_name(&func.params), func.span.start, func.span.end));
         // Pattern 4: `function Button(props: ButtonProps) { ... }`
         if self.is_tsx {
             if let Some(id) = &func.id {
@@ -398,6 +402,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             }
         }
         walk::walk_function(self, func, flags);
+        self.props_params.pop();
     }
 
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
@@ -541,5 +546,13 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             self.try_scan_object_assign_sub_components(node);
         }
         walk::walk_expression_statement(self, node);
+    }
+}
+
+/// The name of a function's first parameter, when it is a plain identifier (`props`).
+fn first_param_name(params: &FormalParameters<'_>) -> Option<compact_str::CompactString> {
+    match &params.items.first()?.pattern {
+        BindingPattern::BindingIdentifier(id) => Some(id.name.as_str().into()),
+        _ => None,
     }
 }

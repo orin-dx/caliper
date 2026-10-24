@@ -217,7 +217,10 @@ expression: value
             "kind": "number"
           },
           "required": false,
-          "defaultValue": null,
+          "defaultValue": {
+            "value": "40",
+            "computed": false
+          },
           "description": "Avatar diameter in pixels. @default 40",
           "tags": {},
           "parent": {
