@@ -91,12 +91,19 @@ fn resolve_named_uncycled(
             // `Foo<string>`). Parameters left unfilled stay expected, unexpandable placeholders, not unresolvable
             // types, so they are registered for step 7 below.
             let params = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key);
+            let defaults = ctx.named_types.lookup_type_param_defaults(&canonical_file, &matched_key);
             let outer_named_unevaluated = std::mem::take(&mut state.named_unevaluated);
             let expanded = match params {
-                Some(params) if !args.is_empty() => {
+                Some(params) if !args.is_empty() || defaults.is_some() => {
                     state.add_type_params(params.iter());
-                    let subst =
-                        super::substitute::build_substitution(params, args, consuming_file, &mut state.diagnostics);
+                    let subst = super::substitute::bind_args(
+                        params,
+                        defaults,
+                        args,
+                        consuming_file,
+                        &canonical_file,
+                        &mut state.diagnostics,
+                    );
                     resolve_type_alias_type(&super::substitute::substitute_alias(&alias, &subst), ctx, state, depth)
                 }
                 Some(params) => {

@@ -529,6 +529,10 @@ fn declaration_refs(data: &SourceData, file: &Utf8Path, name: &str, out: &mut Fx
     for mapping in data.component_mappings.iter().filter(|m| m.component_name == name) {
         mapping_refs(mapping, out);
     }
+    // A reference that omits an argument reads the default (`DOMAttributes<T = FocusableElement>`).
+    for default in data.type_param_defaults.get(&key).into_iter().flatten().flatten() {
+        type_refs(default, out);
+    }
     for params in [data.interface_type_params.get(&key), data.type_alias_params.get(&key)].into_iter().flatten() {
         for param in params {
             out.remove(param.as_str());

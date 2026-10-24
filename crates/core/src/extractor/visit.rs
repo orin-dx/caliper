@@ -172,6 +172,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         if let Some(type_parameters) = &node.type_parameters {
             let params: Vec<TypeName> = type_parameters.params.iter().map(|p| p.name.name.as_str().into()).collect();
             if !params.is_empty() {
+                self.record_type_param_defaults(&key, &type_parameters.params);
                 self.data.interface_type_params.insert(key, params);
             }
         }
@@ -194,6 +195,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         if let Some(type_parameters) = &node.type_parameters {
             let params: Vec<TypeName> = type_parameters.params.iter().map(|p| p.name.name.as_str().into()).collect();
             if !params.is_empty() {
+                self.record_type_param_defaults(&key, &type_parameters.params);
                 self.data.type_alias_params.insert(key, params);
             }
         }
