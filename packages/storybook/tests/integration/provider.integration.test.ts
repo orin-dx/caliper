@@ -70,7 +70,7 @@ describe.skipIf(!bindingAvailable)('provider in a worker thread', () => {
         raw: '"primary" | "secondary" | "ghost"',
         value: ['primary', 'secondary', 'ghost'],
       },
-      table: { type: { summary: '"primary" | "secondary" | "ghost"' }, defaultValue: { summary: '"primary"' } },
+      table: { type: { summary: '"primary" | "secondary" | "ghost"' }, defaultValue: { summary: "'primary'" } },
     })
     expect(payload.argTypes.label.type).toEqual({ required: true, name: 'string' })
   })
