@@ -189,6 +189,12 @@ async function runStories(variant, corpus, options) {
     files: files.length,
     ...counts,
     fallbackReasons: fallbacks,
+    // Which story each hand-off was and why, so a bucket can be read, not only counted.
+    fallbackStories: Object.fromEntries(
+      Object.entries(stories)
+        .filter(([, story]) => story.status === 'fallback' || story.status === 'error')
+        .map(([file, story]) => [file, story.reason]),
+    ),
     totalMs: Math.round(totalMs),
     firstRequestMs: Math.round(initMs),
     medianMs: Math.round(times[Math.floor(times.length / 2)] ?? 0),
