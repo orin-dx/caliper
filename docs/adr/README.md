@@ -22,6 +22,7 @@ One line per ADR, with what it guards. Add a line when you add an ADR.
 - [13. Read React's attribute declarations in curated mode, in an index of their own](0013-curated-mode-reads-react-attributes-apart.md) — do not merge React into the project index outside Full mode, or make the React index a lookup fallback.
 - [14. A loaded declaration wins over a known shortcut; shortcuts are fallbacks](0014-declarations-before-shortcuts.md) — do not check a shortcut before a declaration, or add one without measuring it against the declaration on consumer code.
 - [15. A member read through React's types reads React's declaration and what it imports](0015-member-reads-of-react-types-read-their-declarations.md) — do not answer an indexed access from a table before its declaration, or add React's own files to the dependency layer. Narrows 0013's "only HTML-attribute lookups read the React index" and 0010's "the loader doesn't read React".
+- [16. Resolve components on request, and load dependencies for the names their resolution reaches](0016-resolve-components-on-request.md) — do not make a lazy answer differ from batch extraction's for the same key, memoize a resolution that found a dependency name missing, or expose a parser type from the session API. Extends 0010's loading from "before resolution" to "before the resolution that answers".
 
 Changing any of these needs a new ADR.
 

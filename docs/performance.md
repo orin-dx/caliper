@@ -117,3 +117,21 @@ python3 scripts/scorecard.py --bin NEW --base-bin OLD --rdt --check   # the CI g
 ```
 
 Corpora are cached in `.scorecard/corpora` (gitignored). In CI, run the workflow by hand on a branch to gate it against main, or pass `base` to compare with another ref.
+
+## Lazy sessions, 2026-10-24
+
+`WatchSession::lazy` (ADR 0016) against `WatchSession::new(..).initialize()` on the corpora above, with `load_dependencies` and full HTML attributes (the richest answer). `cargo run --release -p caliper-docgen-core --example lazy_bench` runs one scenario per process; 50 components are chosen by a fixed seed. Apple Silicon laptop, parse cache and dependency index warm, best of 5 interleaved runs (spectrum: best of 3 to 5 before merging main, so a range).
+
+| Corpus | Components | Batch start | Lazy start | 1 component | 10 | 50, one at a time | 50 at once | Batch peak | Lazy peak after 50 |
+| --- | --: | --: | --: | --: | --: | --: | --: | --: | --: |
+| mantine | 344 | 68 ms | 40 ms | 52 ms | 67 ms | 81 ms | 68 ms | 108 MiB | 89 MiB |
+| chakra | 609 | 352 ms | 45 ms | 172 ms | 249 ms | 566 ms | 310 ms | 532 MiB | 137 MiB |
+| shadcn | 1,892 | 111 ms | 67 ms | 67 ms | 128 ms | 353 ms | 96 ms | 162 MiB | 134 MiB |
+| antd | 248 | 71 ms | 60 ms | 66 ms | 114 ms | 213 ms | 141 ms | 119 MiB | 119 MiB |
+| spectrum | 1,356 | 102 to 145 ms | 66 to 110 ms | 66 to 110 ms | 179 to 230 ms | 375 to 465 ms | not run | 135 to 178 MiB | 122 to 144 MiB |
+
+Times are time from process start to the last answer (start plus requests); peak is the process's peak RSS (`/usr/bin/time -l`). Without dependencies and with curated attributes, lazy start is 28 to 85 ms against 39 to 107 ms for batch, peak memory is 50 to 114 MiB against 69 to 146 MiB, and 50 components cost 3 to 25 ms.
+
+Every answer the example returned matched the batch run's for the same key (a hash of the full entries and diagnostics), serially and at once. `crates/core/tests/lazy_parity.rs` checks every component of the fixtures and of the five corpora, both settings, at once and one at a time in reverse order.
+
+Not measured: Spectrum with the options on after merging main, runs through the NAPI binding (the example calls the Rust API the binding wraps), and more than 50 components.

@@ -93,6 +93,18 @@ impl Recording {
 }
 
 impl InterfaceChains {
+    /// Add to `into` the recordings whose dependencies `keep` accepts, given the file declaring their interface.
+    pub(super) fn copy_into(&self, into: &InterfaceChains, keep: &impl Fn(&Dependencies, &str) -> bool) {
+        for entry in self.recordings.iter() {
+            // The key is the interface's `file:name`; a file path may hold a `:` itself, so split from the right.
+            let file = entry.key().0.rsplit_once(':').map_or("", |(file, _)| file);
+            let kept: Vec<Arc<Recording>> = entry.value().iter().filter(|r| keep(&r.deps, file)).cloned().collect();
+            if !kept.is_empty() {
+                into.recordings.insert(entry.key().clone(), kept);
+            }
+        }
+    }
+
     /// The chain of the interface `key` reached at `depth`: replayed from a recording that applies to `state`, or
     /// resolved by `resolve` and recorded.
     pub(super) fn get_or_resolve(

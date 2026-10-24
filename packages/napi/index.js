@@ -787,4 +787,6 @@ module.exports.initializeSession = nativeBinding.initializeSession
 module.exports.initializeSessionIndex = nativeBinding.initializeSessionIndex
 module.exports.isResolutionConfig = nativeBinding.isResolutionConfig
 module.exports.resolutionConfigFiles = nativeBinding.resolutionConfigFiles
+module.exports.sessionComponentKeys = nativeBinding.sessionComponentKeys
 module.exports.sessionDocgenInfo = nativeBinding.sessionDocgenInfo
+module.exports.sessionStats = nativeBinding.sessionStats
