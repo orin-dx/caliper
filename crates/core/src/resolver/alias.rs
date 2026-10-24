@@ -11,6 +11,7 @@ use crate::types::*;
 
 use super::chain::resolve_props_chain;
 use super::collected::resolve_collected_type;
+use super::primitives::union_of;
 use super::{ResolutionContext, ResolvedChain};
 
 /// Resolve a `CollectedTypeAlias` as a props chain.
@@ -461,7 +462,7 @@ pub(super) fn resolve_union_alias(
                 Some(t) => t,
                 None => continue,
             },
-            _ => PropType::Union(types),
+            _ => union_of(types),
         };
 
         if let Some(entry) = merged_props.get_mut(&name) {
@@ -480,7 +481,7 @@ pub(super) fn resolve_union_alias(
             .collect();
 
         if let Some(disc_prop) = merged_props.get_mut(disc_name) {
-            disc_prop.prop_type = PropType::Union(disc_literals);
+            disc_prop.prop_type = union_of(disc_literals);
         }
     }
 
@@ -557,9 +558,7 @@ pub(super) fn resolve_type_alias_type(
             resolve_collected_type(target, file_path, ctx, state, depth + 1)
         }
         CollectedTypeAlias::Union { members, .. } => {
-            let resolved: Vec<PropType> =
-                members.iter().map(|m| resolve_collected_type(m, file_path, ctx, state, depth + 1)).collect();
-            PropType::Union(resolved)
+            union_of(members.iter().map(|m| resolve_collected_type(m, file_path, ctx, state, depth + 1)))
         }
         CollectedTypeAlias::Intersection { members, .. } => {
             let resolved: Vec<PropType> =

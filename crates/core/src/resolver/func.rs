@@ -5,6 +5,7 @@ use compact_str::CompactString;
 
 use crate::types::*;
 
+use super::primitives::union_of;
 use super::ResolutionContext;
 
 /// A function type with its parameters and return type as written. A signature names its types (`(mode: CalendarMode)
@@ -47,7 +48,7 @@ pub(super) fn as_written(ct: &CollectedType) -> PropType {
         CollectedType::StringLiteral(s) => PropType::StringLiteral(s.to_string()),
         CollectedType::NumberLiteral(n) => PropType::NumberLiteral(*n),
         CollectedType::BoolLiteral(b) => PropType::BoolLiteral(*b),
-        CollectedType::Union(members) => PropType::Union(members.iter().map(as_written).collect()),
+        CollectedType::Union(members) => union_of(members.iter().map(as_written)),
         CollectedType::Intersection(members) => PropType::Intersection(members.iter().map(as_written).collect()),
         CollectedType::Array(inner) => PropType::Array(Box::new(as_written(inner))),
         CollectedType::Tuple(members) => PropType::Tuple(members.iter().map(as_written).collect()),
