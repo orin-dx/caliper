@@ -29,7 +29,12 @@ pub(super) fn resolve_named(
 ) -> PropType {
     // Structural arguments: their display form abbreviates object types to `{ ... }`, which collided distinct
     // instantiations into a false cycle.
-    let visit_key: CompactString = format!("{}:{}<{:?}>", consuming_file, name, args).into();
+    let visit_key: CompactString = {
+        use std::hash::Hasher;
+        let mut hasher = rustc_hash::FxHasher::default();
+        args.iter().for_each(|arg| arg.structural_hash(&mut hasher));
+        format!("{}:{}<{:x}>", consuming_file, name, hasher.finish()).into()
+    };
 
     if !state.enter_named(visit_key.clone()) {
         state.diagnostics.push(Diagnostic {
@@ -96,15 +101,7 @@ fn resolve_named_uncycled(
             let expanded = match params {
                 Some(params) if !args.is_empty() || defaults.is_some() => {
                     state.add_type_params(params.iter());
-                    let subst = super::substitute::bind_args(
-                        params,
-                        defaults,
-                        args,
-                        consuming_file,
-                        &canonical_file,
-                        &mut state.diagnostics,
-                    );
-                    resolve_type_alias_type(&super::substitute::substitute_alias(&alias, &subst), ctx, state, depth)
+                    expand_alias(&alias, params, defaults, args, consuming_file, &canonical_file, ctx, state, depth)
                 }
                 Some(params) => {
                     state.add_type_params(params.iter());
@@ -114,9 +111,15 @@ fn resolve_named_uncycled(
             };
             let unevaluated = state.named_unevaluated || expanded.holds_unevaluated_type();
             state.named_unevaluated = outer_named_unevaluated || unevaluated;
+            // Printed as its name when it can't be evaluated, or when a generic instantiation expands to a long union, as
+            // TypeScript prints it; its arguments are then shown as far as they evaluate.
+            let by_name = unevaluated || (!args.is_empty() && exceeds_expanded_size(&expanded));
+            if matches!(expanded, PropType::Object(_)) || !by_name {
+                return expanded;
+            }
             let args: Vec<CollectedType> =
                 args.iter().map(|arg| displayed_arg(arg, consuming_file, ctx, state, depth)).collect();
-            return alias_display(name, &args, expanded, unevaluated);
+            return PropType::Named { name: name.clone(), args: args.iter().map(super::func::as_written).collect() };
         }
         Some(super::precedence::SourceOrKnownMatch::Interface(_)) => {
             // At the prop-TYPE level (not chain level), an interface name is returned as Named.
@@ -162,8 +165,11 @@ fn resolve_named_uncycled(
     // attribute types all appear as prop types in real-world .d.ts files but
     // cannot be expanded without a type-checker. Return Named silently.
     let bare = name.strip_prefix("React.").unwrap_or(name.as_str());
-    if let Some(filtered) = super::primitives::evaluate_filter(bare, &resolved_args) {
-        return filtered;
+    // A lib alias that evaluates (`Exclude`, `Extract`, `NonNullable`) is read from TypeScript's own definition.
+    if !args.is_empty() {
+        if let Some(evaluated) = evaluate_lib_alias(bare, args, consuming_file, ctx, state, depth) {
+            return evaluated;
+        }
     }
     if super::is_ts_utility_type(bare)
         || matches!(
@@ -244,6 +250,127 @@ fn resolve_named_uncycled(
 /// evaluate, or an alias named for that reason — shows as its name with its arguments as written
 /// (`StyleProp<MantineSpacing>`), the way TypeScript prints it, rather than as that type's source text. An object
 /// expansion stays: its fields still read, and only the unevaluated field shows source.
+/// A generic alias with `args` bound, its omitted parameters at their defaults. An alias that is a conditional over a bare
+/// type parameter (`type Exclude<T, U> = T extends U ? never : T`) distributes over the members of the argument bound to
+/// it, each evaluated alone and the results united, as TypeScript does.
+#[allow(clippy::too_many_arguments)]
+fn expand_alias(
+    alias: &CollectedTypeAlias,
+    params: &[CompactString],
+    defaults: Option<&[Option<CollectedType>]>,
+    args: &[CollectedType],
+    args_file: &Utf8Path,
+    declared_file: &Utf8Path,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> PropType {
+    let subst = super::substitute::bind_args(params, defaults, args, args_file, declared_file, &mut state.diagnostics);
+    if let Some(param) = super::evaluate::distributive_param(alias) {
+        if let Some(bound) = subst.get(param) {
+            let members = literal_members(super::evaluate::union_members(bound, args_file, ctx, 0), ctx, state, depth);
+            if members.len() != 1 {
+                let results = members.into_iter().map(|(member, member_file)| {
+                    let mut one = subst.clone();
+                    one.insert(param, CollectedType::AtFile { file: member_file, inner: Box::new(member) });
+                    resolve_type_alias_type(&super::substitute::substitute_alias(alias, &one), ctx, state, depth)
+                });
+                return super::primitives::union_of(results.collect::<Vec<_>>());
+            }
+        }
+    }
+    resolve_type_alias_type(&super::substitute::substitute_alias(alias, &subst), ctx, state, depth)
+}
+
+/// `members` with each one that is not already a literal or primitive resolved (`(typeof SIZES)[number]`, a template
+/// literal), replaced by the literals it comes to; one that comes to something else stays as written.
+fn literal_members(
+    members: Vec<super::evaluate::Located>,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> Vec<super::evaluate::Located> {
+    let mut out = Vec::with_capacity(members.len());
+    for (member, file) in members {
+        let plain = matches!(
+            member,
+            CollectedType::StringLiteral(_)
+                | CollectedType::NumberLiteral(_)
+                | CollectedType::BoolLiteral(_)
+                | CollectedType::String
+                | CollectedType::Number
+                | CollectedType::Boolean
+                | CollectedType::Null
+                | CollectedType::Undefined
+        );
+        if plain {
+            out.push((member, file));
+            continue;
+        }
+        let resolved = resolve_collected_type(&member, &file, ctx, state, depth + 1);
+        match literals_of(&resolved) {
+            Some(literals) => out.extend(literals.into_iter().map(|literal| (literal, file.clone()))),
+            None => out.push((member, file)),
+        }
+    }
+    out
+}
+
+/// The literals and primitives `ty` is a union of, as collected types; `None` when any member is something else.
+fn literals_of(ty: &PropType) -> Option<Vec<CollectedType>> {
+    Some(match ty {
+        PropType::StringLiteral(s) => vec![CollectedType::StringLiteral(s.as_str().into())],
+        PropType::NumberLiteral(n) => vec![CollectedType::NumberLiteral(*n)],
+        PropType::BoolLiteral(b) => vec![CollectedType::BoolLiteral(*b)],
+        PropType::LiteralUnion { members, .. } => {
+            members.iter().map(|m| CollectedType::StringLiteral(m.as_str().into())).collect()
+        }
+        PropType::Null => vec![CollectedType::Null],
+        PropType::Undefined => vec![CollectedType::Undefined],
+        PropType::String => vec![CollectedType::String],
+        PropType::Number => vec![CollectedType::Number],
+        PropType::Boolean => vec![CollectedType::Boolean],
+        PropType::Never => vec![],
+        PropType::Union(members) => {
+            let mut all = Vec::new();
+            for member in members {
+                all.extend(literals_of(member)?);
+            }
+            all
+        }
+        _ => return None,
+    })
+}
+
+/// `name` as TypeScript's lib declares it, when that is a conditional or an intersection and every part of it evaluates
+/// with `args` (`Exclude`, `Extract`, `NonNullable`). A lib alias that needs inference (`ReturnType`) or a mapped type
+/// (`Partial`) leaves its result unevaluated, and the caller keeps its shortcut.
+fn evaluate_lib_alias(
+    name: &str,
+    args: &[CollectedType],
+    consuming_file: &Utf8Path,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> Option<PropType> {
+    let (lib_file, alias) = ctx.named_types.lookup_ambient_alias(&ctx.ambient_global_files, name)?;
+    let can_evaluate = matches!(
+        alias,
+        CollectedTypeAlias::Intersection { .. }
+            | CollectedTypeAlias::Passthrough { target: CollectedType::Conditional { .. }, .. }
+    );
+    let params = ctx.named_types.lookup_type_alias_params(lib_file, name).filter(|_| can_evaluate)?;
+    let defaults = ctx.named_types.lookup_type_param_defaults(lib_file, name);
+    // Its diagnostics are the lib's, not the project's: kept only when the whole alias evaluates.
+    let mut branch = state.detached();
+    let expanded = expand_alias(alias, params, defaults, args, consuming_file, lib_file, ctx, &mut branch, depth);
+    if branch.named_unevaluated || expanded.holds_unevaluated_type() {
+        return None;
+    }
+    state.absorb_detached(branch);
+    Some(expanded)
+}
+
 /// An alias argument as TypeScript prints it: a member read (`Variant["size"]`) shows as the member's type and a finite
 /// template literal as its strings, union members included; anything else as written.
 fn displayed_arg(
@@ -258,14 +385,19 @@ fn displayed_arg(
     }
     match arg {
         // What the member read reads may itself read a member (csstype's `Fallback<T>` gives `T[P] | …`).
-        CollectedType::IndexedAccess { .. } => match super::evaluate::reduce(arg, file, ctx, 0) {
-            Some((reduced, reduced_file)) => displayed_arg(&reduced, &reduced_file, ctx, state, depth + 1),
+        CollectedType::IndexedAccess { .. } => match super::evaluate::displayed_member(arg, file, ctx) {
+            Some(found) => displayed_arg(&found.0, &found.1, ctx, state, depth + 1),
             None => arg.clone(),
         },
-        CollectedType::Named { name, args } if !args.is_empty() => CollectedType::Named {
-            name: name.clone(),
-            args: args.iter().map(|a| displayed_arg(a, file, ctx, state, depth + 1)).collect(),
-        },
+        CollectedType::Named { name, args } if !args.is_empty() => {
+            let args: Vec<CollectedType> = args.iter().map(|a| displayed_arg(a, file, ctx, state, depth + 1)).collect();
+            // A lib alias over what the arguments came to (`NonNullable<Property.Filter | undefined>`) is its value.
+            let bare = name.strip_prefix("React.").unwrap_or(name.as_str());
+            match evaluate_lib_alias(bare, &args, file, ctx, state, depth + 1).as_ref().and_then(literals_of) {
+                Some(literals) if !literals.is_empty() => CollectedType::Union(literals),
+                _ => CollectedType::Named { name: name.clone(), args },
+            }
+        }
         CollectedType::Array(inner) => {
             CollectedType::Array(Box::new(displayed_arg(inner, file, ctx, state, depth + 1)))
         }
@@ -288,9 +420,31 @@ fn displayed_arg(
     }
 }
 
-fn alias_display(name: &CompactString, args: &[CollectedType], expanded: PropType, unevaluated: bool) -> PropType {
-    if matches!(expanded, PropType::Object(_)) || !unevaluated {
-        return expanded;
+/// The most nodes a generic alias's expansion may have to be shown instead of its name (`ConditionalValue<…>` over
+/// csstype's keyword unions has hundreds). Its arguments say as much, and a copy of the union for every style prop of
+/// every component is most of a large design system's memory.
+const MAX_EXPANDED_NODES: usize = 64;
+
+/// Whether `ty` has more than `MAX_EXPANDED_NODES` nodes, counting no further once it does.
+fn exceeds_expanded_size(ty: &PropType) -> bool {
+    fn count(ty: &PropType, budget: &mut usize) -> bool {
+        if *budget == 0 {
+            return true;
+        }
+        *budget -= 1;
+        match ty {
+            PropType::Union(members) | PropType::Intersection(members) | PropType::Tuple(members) => {
+                members.iter().any(|member| count(member, budget))
+            }
+            PropType::LiteralUnion { members, .. } => {
+                *budget = budget.saturating_sub(members.len());
+                *budget == 0
+            }
+            PropType::Array(inner) => count(inner, budget),
+            PropType::Object(fields) => fields.iter().any(|field| count(&field.prop_type, budget)),
+            PropType::Named { args, .. } => args.iter().any(|arg| count(arg, budget)),
+            _ => false,
+        }
     }
-    PropType::Named { name: name.clone(), args: args.iter().map(super::func::as_written).collect() }
+    count(ty, &mut MAX_EXPANDED_NODES.clone())
 }

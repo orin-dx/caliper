@@ -8,6 +8,8 @@
 //! at 0 instead of passing the resolver's depth, which a deep chain (csstype's `Fallback<…>` under Chakra's style
 //! props) would exhaust first.
 
+use std::sync::Arc;
+
 use camino::{Utf8Path, Utf8PathBuf};
 use compact_str::CompactString;
 
@@ -65,9 +67,62 @@ pub(super) fn mapped_keys(
     }
 }
 
-/// Whether `check` is assignable to `extends_type`; `None` when either side isn't known. `check` is a literal, or a
-/// member read whose type is a set of literals (`Factory["variant"] extends string`): a member read is not a naked
-/// type parameter, so the conditional doesn't distribute and the whole set must be assignable.
+/// One type that assignability here can decide: a literal, a primitive, `null` or `undefined`. `boolean` is its two
+/// literals.
+#[derive(Clone, PartialEq)]
+enum Atom {
+    Str(String),
+    Num(String),
+    Bool(bool),
+    String,
+    Number,
+    Null,
+    Undefined,
+}
+
+impl Atom {
+    fn assignable_to(&self, targets: &[Atom]) -> bool {
+        targets.iter().any(|target| {
+            self == target || matches!((self, target), (Atom::Str(_), Atom::String) | (Atom::Num(_), Atom::Number))
+        })
+    }
+}
+
+/// The atoms `ty` is a union of, following aliases; `None` when any member is something else (an object, a type
+/// parameter, `any`). `never` is none.
+fn atoms(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> Option<Vec<Atom>> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    Some(match ty {
+        CollectedType::AtFile { file, inner } => return atoms(inner, file, ctx, depth + 1),
+        CollectedType::StringLiteral(s) => vec![Atom::Str(s.to_string())],
+        CollectedType::NumberLiteral(n) => vec![Atom::Num(n.to_string())],
+        CollectedType::BoolLiteral(b) => vec![Atom::Bool(*b)],
+        CollectedType::Boolean => vec![Atom::Bool(false), Atom::Bool(true)],
+        CollectedType::String => vec![Atom::String],
+        CollectedType::Number => vec![Atom::Number],
+        CollectedType::Null => vec![Atom::Null],
+        CollectedType::Undefined => vec![Atom::Undefined],
+        CollectedType::Never => vec![],
+        CollectedType::Union(members) => {
+            let mut all = Vec::new();
+            for member in members {
+                all.extend(atoms(member, file, ctx, depth + 1)?);
+            }
+            all
+        }
+        CollectedType::Named { name, args } => {
+            let (body, body_file) = alias_body(name, args, file, ctx)?;
+            return atoms(&body, &body_file, ctx, depth + 1);
+        }
+        _ => return None,
+    })
+}
+
+/// Whether `check` is assignable to `extends_type`; `None` when either side isn't known. `check` is a type made of
+/// atoms, or a member read whose type is: a member read is not a naked type parameter, so the conditional doesn't
+/// distribute and the whole set must be assignable (`Factory["variant"] extends string`).
 fn extends(
     check: &CollectedType,
     extends_type: &CollectedType,
@@ -75,67 +130,71 @@ fn extends(
     ctx: &ResolutionContext,
     depth: u8,
 ) -> Option<bool> {
-    let values = check_values(check, file, ctx, depth + 1)?;
-    let literal_value = |value: &CheckValue| match value {
-        CheckValue::Literal(s) => Some(s.clone()),
-        CheckValue::String | CheckValue::Undefined => None,
-    };
+    let values = check_atoms(check, file, ctx, depth + 1)?;
+    if values.is_empty() {
+        return None;
+    }
     match unwrap_at_file(extends_type) {
         (CollectedType::KeyOf(target), target_file) => {
             let keys = keys_of(target, target_file.unwrap_or(file), ctx, depth + 1)?;
-            Some(values.iter().all(|value| literal_value(value).is_some_and(|v| keys.iter().any(|key| key.name == v))))
+            Some(values.iter().all(|value| matches!(value, Atom::Str(s) if keys.iter().any(|key| &key.name == s))))
         }
-        (CollectedType::String, _) => Some(values.iter().all(|value| !matches!(value, CheckValue::Undefined))),
-        (other, _) => {
-            let allowed = literal_set(other)?;
-            Some(values.iter().all(|value| literal_value(value).is_some_and(|v| allowed.contains(&v))))
+        _ => {
+            let targets = atoms(extends_type, file, ctx, depth + 1)?;
+            Some(values.iter().all(|value| value.assignable_to(&targets)))
         }
     }
 }
 
-/// One type a conditional's check can stand for.
-enum CheckValue {
-    Literal(String),
-    String,
-    /// A member the object type doesn't declare, which reads as nothing assignable to a string.
-    Undefined,
-}
-
-/// What a conditional's check stands for: one literal, or the types a member read's type lists.
-fn check_values(check: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> Option<Vec<CheckValue>> {
+/// What a conditional's check stands for: its atoms, or those of the member a member read reads.
+fn check_atoms(check: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> Option<Vec<Atom>> {
     match check {
-        CollectedType::AtFile { file, inner } => check_values(inner, file, ctx, depth + 1),
+        CollectedType::AtFile { file, inner } => check_atoms(inner, file, ctx, depth + 1),
         CollectedType::IndexedAccess { obj, key } => match reduce(check, file, ctx, depth + 1) {
-            Some((member, member_file)) => string_values(&member, &member_file, ctx, depth + 1),
+            Some((member, member_file)) => atoms(&member, &member_file, ctx, depth + 1),
             // `Payload["variant"]` on a payload object that declares no `variant` (Mantine's factories).
-            None if lacks_member(obj, &literal(key)?, file, ctx, depth + 1) => Some(vec![CheckValue::Undefined]),
+            None if lacks_member(obj, &literal(key)?, file, ctx, depth + 1) => Some(vec![Atom::Undefined]),
             None => None,
         },
-        other => Some(vec![CheckValue::Literal(literal(other)?)]),
+        other => atoms(other, file, ctx, depth + 1),
     }
 }
 
-/// The string types `ty` is a union of, following aliases; `None` when any member is something else.
-fn string_values(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> Option<Vec<CheckValue>> {
-    if depth > MAX_DEPTH {
+/// The bare type parameter an alias's conditional is over (`type Exclude<T, U> = T extends U ? never : T`): the
+/// argument bound to it is distributed over, member by member, as TypeScript does for a naked type parameter.
+pub(super) fn distributive_param(alias: &CollectedTypeAlias) -> Option<&str> {
+    let CollectedTypeAlias::Passthrough { target: CollectedType::Conditional { check, .. }, .. } = alias else {
         return None;
-    }
-    match ty {
-        CollectedType::AtFile { file, inner } => string_values(inner, file, ctx, depth + 1),
-        CollectedType::StringLiteral(s) => Some(vec![CheckValue::Literal(s.to_string())]),
-        CollectedType::String => Some(vec![CheckValue::String]),
-        CollectedType::Union(members) => {
-            let mut all = Vec::new();
-            for member in members {
-                all.extend(string_values(member, file, ctx, depth + 1)?);
-            }
-            Some(all)
-        }
-        CollectedType::Named { name, args } => {
-            let (body, body_file) = alias_body(name, args, file, ctx)?;
-            string_values(&body, &body_file, ctx, depth + 1)
-        }
+    };
+    match check.as_ref() {
+        CollectedType::Named { name, args } if args.is_empty() => Some(name.as_str()),
         _ => None,
+    }
+}
+
+/// The members `arg` is a union of, each with the file it is written in: through aliases, with `boolean` as `false |
+/// true` and `never` as none. A type that is not a union is its own one member.
+pub(super) fn union_members(arg: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> Vec<Located> {
+    if depth > MAX_DEPTH {
+        return vec![(arg.clone(), file.to_owned())];
+    }
+    match arg {
+        CollectedType::AtFile { file, inner } => union_members(inner, file, ctx, depth + 1),
+        CollectedType::Union(members) => {
+            members.iter().flat_map(|member| union_members(member, file, ctx, depth + 1)).collect()
+        }
+        CollectedType::Never => vec![],
+        CollectedType::Boolean => vec![
+            (CollectedType::BoolLiteral(false), file.to_owned()),
+            (CollectedType::BoolLiteral(true), file.to_owned()),
+        ],
+        CollectedType::Named { name, args } => match alias_body(name, args, file, ctx) {
+            Some((body, body_file)) if matches!(body, CollectedType::Union(_)) => {
+                union_members(&body, &body_file, ctx, depth + 1)
+            }
+            _ => vec![(arg.clone(), file.to_owned())],
+        },
+        other => vec![(other.clone(), file.to_owned())],
     }
 }
 
@@ -214,6 +273,18 @@ pub(super) fn member(
     ctx: &ResolutionContext,
     depth: u8,
 ) -> Option<Located> {
+    member_shared(obj, key, file, ctx, depth).map(Arc::unwrap_or_clone)
+}
+
+/// `member`, sharing the answer instead of copying it: csstype's keyword unions have dozens of members, and every style
+/// prop of every component reads one.
+pub(super) fn member_shared(
+    obj: &CollectedType,
+    key: &str,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+    depth: u8,
+) -> Option<Arc<Located>> {
     // A read from the top of a walk depends only on the declarations, so a run answers it once (`member_reads`).
     if let (CollectedType::Named { name, args }, 0) = (obj, depth) {
         let name: Box<str> = if args.is_empty() { Box::from(name.as_str()) } else { obj.to_raw_string().into() };
@@ -223,10 +294,31 @@ pub(super) fn member(
             return read.found.clone();
         }
         let (found, deps) = super::deps::capturing(|| member_uncached(obj, key, file, ctx, depth));
+        let found = found.map(Arc::new);
         ctx.member_reads.insert(cache_key, MemberRead { found: found.clone(), deps });
         return found;
     }
-    member_uncached(obj, key, file, ctx, depth)
+    member_uncached(obj, key, file, ctx, depth).map(Arc::new)
+}
+
+/// The most members a member read's union may have to be shown in place of the read (`Variant["size"]` becomes its
+/// literals). A longer one, such as csstype's keyword unions, stays as written, the way TypeScript truncates a long
+/// type when it prints one.
+pub(super) const MAX_DISPLAYED_MEMBERS: usize = 32;
+
+/// The type an indexed access reads, shared, when it has at most `MAX_DISPLAYED_MEMBERS` union members.
+pub(super) fn displayed_member(
+    access: &CollectedType,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+) -> Option<Arc<Located>> {
+    let CollectedType::IndexedAccess { obj, key } = access else { return None };
+    let found = member_shared(obj, &literal(key)?, file, ctx, 0)?;
+    let members = match unwrap_at_file(&found.0).0 {
+        CollectedType::Union(members) => members.len(),
+        _ => 1,
+    };
+    (members <= MAX_DISPLAYED_MEMBERS).then_some(found)
 }
 
 /// `(file, type as written, key)` of a cached member read.
@@ -234,7 +326,7 @@ pub(crate) type MemberReadKey = (Box<str>, Box<str>, Box<str>);
 
 /// A cached `member` answer and the files it read.
 pub(crate) struct MemberRead {
-    found: Option<Located>,
+    found: Option<Arc<Located>>,
     deps: super::deps::Dependencies,
 }
 

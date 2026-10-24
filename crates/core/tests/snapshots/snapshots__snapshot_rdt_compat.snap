@@ -1551,11 +1551,8 @@ expression: value
         "derived": {
           "name": "derived",
           "type": {
-            "kind": "opaque",
-            "raw": "string extends \"a\" ? \"yes\" : \"no\"",
-            "reason": {
-              "type": "conditionalType"
-            }
+            "kind": "stringLiteral",
+            "value": "no"
           },
           "required": false,
           "defaultValue": null,
@@ -1764,18 +1761,6 @@ expression: value
       "code": "DISCRIMINATED_UNION",
       "affects": [
         "Accordion"
-      ]
-    },
-    {
-      "severity": "info",
-      "message": "'string extends \"a\" ? \"yes\" : \"no\"' is a conditional type and can't be statically resolved — it will appear as opaque",
-      "file": "[ROOT]/fixtures/rdt-compat/types.tsx",
-      "line": null,
-      "column": null,
-      "help": null,
-      "code": "OPAQUE_TYPE",
-      "affects": [
-        "TypeSampler"
       ]
     },
     {

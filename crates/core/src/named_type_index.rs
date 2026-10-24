@@ -276,6 +276,18 @@ impl NamedTypeIndex {
         None
     }
 
+    /// A type alias of TypeScript's own lib files by bare name, with the lib file declaring it (for its parameters).
+    pub(crate) fn lookup_ambient_alias<'a>(
+        &'a self,
+        ambient_global_files: &'a [Utf8PathBuf],
+        name: &str,
+    ) -> Option<(&'a Utf8Path, &'a CollectedTypeAlias)> {
+        ambient_global_files.iter().find_map(|lib_file| {
+            let alias = self.type_aliases.get(lib_file.as_str())?.get(name)?;
+            Some((lib_file.as_path(), alias))
+        })
+    }
+
     /// Look up an interface directly by canonical `(file, name)` — no
     /// bare/`React.`-qualified fallback. Used where the caller already has
     /// an exact, known-good key (e.g. `real_html_attrs_chain`'s merged
