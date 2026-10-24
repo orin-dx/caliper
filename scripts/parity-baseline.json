@@ -1,0 +1,401 @@
+{
+  "caliper": "caliper-docgen 0.4.0",
+  "runs": 7,
+  "corpora": {
+    "mantine": {
+      "commit": "e47e45af06427b3b2497100c2b849935c23af30d",
+      "rdt": {
+        "ms": 1306.3,
+        "rss_mib": 457.5
+      },
+      "modes": {
+        "off": {
+          "rdt_components": 389,
+          "components_matched": 331,
+          "rdt_props": 19662,
+          "props_reported": 19595,
+          "shared": 19595,
+          "same_text": 9404,
+          "same_or_cosmetic": 9972,
+          "same_control": 18243,
+          "loss": {
+            "member read left as X[\"k\"]": 6542,
+            "readonly lost": 0,
+            "rest parameter lost": 355,
+            "unbound type parameter": 6,
+            "utility type left as written": 29,
+            "conditional left as source": 226,
+            "template literal left": 469,
+            "RefObject shown as Ref": 10,
+            "typeof left in output": 11,
+            "unreduced & string": 0,
+            "index signature dropped": 0,
+            "optional parameter lost": 0,
+            "any/unknown where RDT is concrete": 2
+          },
+          "rdt_loss": {
+            "enum RDT lists as string": 0,
+            "RDT any/unknown where Caliper is concrete": 7
+          }
+        },
+        "on": {
+          "rdt_components": 389,
+          "components_matched": 331,
+          "rdt_props": 19662,
+          "props_reported": 19595,
+          "shared": 19595,
+          "same_text": 9403,
+          "same_or_cosmetic": 9971,
+          "same_control": 18242,
+          "loss": {
+            "member read left as X[\"k\"]": 6542,
+            "readonly lost": 0,
+            "rest parameter lost": 355,
+            "unbound type parameter": 6,
+            "utility type left as written": 29,
+            "conditional left as source": 226,
+            "template literal left": 469,
+            "RefObject shown as Ref": 10,
+            "typeof left in output": 11,
+            "unreduced & string": 0,
+            "index signature dropped": 0,
+            "optional parameter lost": 0,
+            "any/unknown where RDT is concrete": 2
+          },
+          "rdt_loss": {
+            "enum RDT lists as string": 0,
+            "RDT any/unknown where Caliper is concrete": 7
+          }
+        }
+      },
+      "timing": {
+        "head": {
+          "off": {
+            "ms": 52.6,
+            "rss_mib": 106.0
+          },
+          "on": {
+            "ms": 55.3,
+            "rss_mib": 109.3
+          }
+        }
+      }
+    },
+    "chakra": {
+      "commit": "fa9696f328ea5a0df8685c6d8460edbd779b63b9",
+      "rdt": {
+        "ms": 24848.6,
+        "rss_mib": 1549.8
+      },
+      "modes": {
+        "off": {
+          "rdt_components": 773,
+          "components_matched": 592,
+          "rdt_props": 476677,
+          "props_reported": 557,
+          "shared": 557,
+          "same_text": 492,
+          "same_or_cosmetic": 494,
+          "same_control": 549,
+          "loss": {
+            "member read left as X[\"k\"]": 25,
+            "readonly lost": 27,
+            "rest parameter lost": 1,
+            "unbound type parameter": 169,
+            "utility type left as written": 0,
+            "conditional left as source": 0,
+            "template literal left": 0,
+            "RefObject shown as Ref": 0,
+            "typeof left in output": 0,
+            "unreduced & string": 0,
+            "index signature dropped": 0,
+            "optional parameter lost": 0,
+            "any/unknown where RDT is concrete": 0
+          },
+          "rdt_loss": {
+            "enum RDT lists as string": 0,
+            "RDT any/unknown where Caliper is concrete": 0
+          }
+        },
+        "on": {
+          "rdt_components": 773,
+          "components_matched": 592,
+          "rdt_props": 476677,
+          "props_reported": 470009,
+          "shared": 470009,
+          "same_text": 91103,
+          "same_or_cosmetic": 91109,
+          "same_control": 469987,
+          "loss": {
+            "member read left as X[\"k\"]": 378118,
+            "readonly lost": 353030,
+            "rest parameter lost": 14993,
+            "unbound type parameter": 171,
+            "utility type left as written": 1,
+            "conditional left as source": 3,
+            "template literal left": 1,
+            "RefObject shown as Ref": 0,
+            "typeof left in output": 1,
+            "unreduced & string": 0,
+            "index signature dropped": 0,
+            "optional parameter lost": 0,
+            "any/unknown where RDT is concrete": 0
+          },
+          "rdt_loss": {
+            "enum RDT lists as string": 0,
+            "RDT any/unknown where Caliper is concrete": 2
+          }
+        }
+      },
+      "timing": {
+        "head": {
+          "off": {
+            "ms": 50.9,
+            "rss_mib": 82.5
+          },
+          "on": {
+            "ms": 550.0,
+            "rss_mib": 1461.3
+          }
+        }
+      }
+    },
+    "shadcn": {
+      "commit": "ba1503c64472b82256d9de95e2e62c5901a38e8b",
+      "rdt": {
+        "ms": 3971.2,
+        "rss_mib": 1148.8
+      },
+      "modes": {
+        "off": {
+          "rdt_components": 1594,
+          "components_matched": 1519,
+          "rdt_props": 12994,
+          "props_reported": 830,
+          "shared": 830,
+          "same_text": 540,
+          "same_or_cosmetic": 717,
+          "same_control": 818,
+          "loss": {
+            "member read left as X[\"k\"]": 19,
+            "readonly lost": 5,
+            "rest parameter lost": 0,
+            "unbound type parameter": 1,
+            "utility type left as written": 5,
+            "conditional left as source": 0,
+            "template literal left": 1,
+            "RefObject shown as Ref": 14,
+            "typeof left in output": 28,
+            "unreduced & string": 0,
+            "index signature dropped": 0,
+            "optional parameter lost": 0,
+            "any/unknown where RDT is concrete": 0
+          },
+          "rdt_loss": {
+            "enum RDT lists as string": 0,
+            "RDT any/unknown where Caliper is concrete": 44
+          }
+        },
+        "on": {
+          "rdt_components": 1594,
+          "components_matched": 1519,
+          "rdt_props": 12994,
+          "props_reported": 5134,
+          "shared": 5134,
+          "same_text": 3146,
+          "same_or_cosmetic": 3835,
+          "same_control": 4453,
+          "loss": {
+            "member read left as X[\"k\"]": 202,
+            "readonly lost": 85,
+            "rest parameter lost": 8,
+            "unbound type parameter": 1299,
+            "utility type left as written": 14,
+            "conditional left as source": 2,
+            "template literal left": 8,
+            "RefObject shown as Ref": 73,
+            "typeof left in output": 30,
+            "unreduced & string": 2,
+            "index signature dropped": 0,
+            "optional parameter lost": 0,
+            "any/unknown where RDT is concrete": 0
+          },
+          "rdt_loss": {
+            "enum RDT lists as string": 249,
+            "RDT any/unknown where Caliper is concrete": 79
+          }
+        }
+      },
+      "timing": {
+        "head": {
+          "off": {
+            "ms": 75.5,
+            "rss_mib": 106.1
+          },
+          "on": {
+            "ms": 115.1,
+            "rss_mib": 181.0
+          }
+        }
+      }
+    },
+    "antd": {
+      "commit": "ba7ccbaa7b4b58ac1ff8e6fe2e78dfa10bfb5538",
+      "rdt": {
+        "ms": 2369.8,
+        "rss_mib": 1033.1
+      },
+      "modes": {
+        "off": {
+          "rdt_components": 258,
+          "components_matched": 162,
+          "rdt_props": 2983,
+          "props_reported": 2142,
+          "shared": 2142,
+          "same_text": 1515,
+          "same_or_cosmetic": 1683,
+          "same_control": 2040,
+          "loss": {
+            "member read left as X[\"k\"]": 162,
+            "readonly lost": 21,
+            "rest parameter lost": 139,
+            "unbound type parameter": 3737,
+            "utility type left as written": 39,
+            "conditional left as source": 0,
+            "template literal left": 0,
+            "RefObject shown as Ref": 0,
+            "typeof left in output": 6,
+            "unreduced & string": 0,
+            "index signature dropped": 0,
+            "optional parameter lost": 12,
+            "any/unknown where RDT is concrete": 0
+          },
+          "rdt_loss": {
+            "enum RDT lists as string": 0,
+            "RDT any/unknown where Caliper is concrete": 1
+          }
+        },
+        "on": {
+          "rdt_components": 258,
+          "components_matched": 162,
+          "rdt_props": 2983,
+          "props_reported": 2395,
+          "shared": 2395,
+          "same_text": 1667,
+          "same_or_cosmetic": 1880,
+          "same_control": 2270,
+          "loss": {
+            "member read left as X[\"k\"]": 156,
+            "readonly lost": 26,
+            "rest parameter lost": 140,
+            "unbound type parameter": 3742,
+            "utility type left as written": 39,
+            "conditional left as source": 0,
+            "template literal left": 0,
+            "RefObject shown as Ref": 0,
+            "typeof left in output": 7,
+            "unreduced & string": 0,
+            "index signature dropped": 1,
+            "optional parameter lost": 14,
+            "any/unknown where RDT is concrete": 0
+          },
+          "rdt_loss": {
+            "enum RDT lists as string": 0,
+            "RDT any/unknown where Caliper is concrete": 2
+          }
+        }
+      },
+      "timing": {
+        "head": {
+          "off": {
+            "ms": 73.4,
+            "rss_mib": 112.7
+          },
+          "on": {
+            "ms": 85.6,
+            "rss_mib": 127.3
+          }
+        }
+      }
+    },
+    "spectrum": {
+      "commit": "797762ed3526ea12f089e321bd3891066affad70",
+      "rdt": {
+        "ms": 2204.4,
+        "rss_mib": 827.9
+      },
+      "modes": {
+        "off": {
+          "rdt_components": 1408,
+          "components_matched": 1087,
+          "rdt_props": 16374,
+          "props_reported": 16322,
+          "shared": 16322,
+          "same_text": 11005,
+          "same_or_cosmetic": 11245,
+          "same_control": 15820,
+          "loss": {
+            "member read left as X[\"k\"]": 33,
+            "readonly lost": 33,
+            "rest parameter lost": 12,
+            "unbound type parameter": 5303,
+            "utility type left as written": 513,
+            "conditional left as source": 0,
+            "template literal left": 0,
+            "RefObject shown as Ref": 8,
+            "typeof left in output": 1,
+            "unreduced & string": 0,
+            "index signature dropped": 19,
+            "optional parameter lost": 0,
+            "any/unknown where RDT is concrete": 0
+          },
+          "rdt_loss": {
+            "enum RDT lists as string": 0,
+            "RDT any/unknown where Caliper is concrete": 90
+          }
+        },
+        "on": {
+          "rdt_components": 1408,
+          "components_matched": 1087,
+          "rdt_props": 16374,
+          "props_reported": 16324,
+          "shared": 16324,
+          "same_text": 11007,
+          "same_or_cosmetic": 11247,
+          "same_control": 15822,
+          "loss": {
+            "member read left as X[\"k\"]": 33,
+            "readonly lost": 33,
+            "rest parameter lost": 12,
+            "unbound type parameter": 5303,
+            "utility type left as written": 513,
+            "conditional left as source": 0,
+            "template literal left": 0,
+            "RefObject shown as Ref": 8,
+            "typeof left in output": 1,
+            "unreduced & string": 0,
+            "index signature dropped": 19,
+            "optional parameter lost": 0,
+            "any/unknown where RDT is concrete": 0
+          },
+          "rdt_loss": {
+            "enum RDT lists as string": 0,
+            "RDT any/unknown where Caliper is concrete": 90
+          }
+        }
+      },
+      "timing": {
+        "head": {
+          "off": {
+            "ms": 114.3,
+            "rss_mib": 191.3
+          },
+          "on": {
+            "ms": 130.0,
+            "rss_mib": 219.4
+          }
+        }
+      }
+    }
+  }
+}
