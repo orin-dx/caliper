@@ -239,7 +239,8 @@ impl Serialize for SessionIndex<'_> {
     }
 }
 
-/// Serialize a session's index (see [`SessionIndex`]) to a JSON string.
+/// Serialize a session's index to a JSON string: `schemaVersion`, where each component lives (`components`), and the
+/// run's `diagnostics` with the `nameLists` they refer to. The props stay in the session.
 pub fn session_index_to_json(output: &ExtractionOutput) -> Result<String, serde_json::Error> {
     serde_json::to_string(&SessionIndex(output))
 }
