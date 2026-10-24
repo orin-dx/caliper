@@ -2563,6 +2563,53 @@ fn extract_one(files: &[(&str, &str)]) -> ExtractionOutput {
     })
 }
 
+/// A namespace member names its siblings bare (csstype's `DataType.Color`), and the union keeps every member.
+#[test]
+fn a_namespace_sibling_in_an_alias_body_resolves_to_its_members() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "namespace DataType { type Base = 'red' | 'blue'; export type Color = Base | 'green'; }\n\
+         export function Box(props: { color: DataType.Color }) { return null; }\n",
+    )]);
+
+    let members = ["red", "blue", "green"].map(|m| PropType::StringLiteral(m.to_owned())).to_vec();
+    assert_eq!(output.components["Box"].props["color"].prop_type, PropType::Union(members));
+    assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+}
+
+/// `T extends unknown ? Omit<T, K> : never`, the idiom that distributes over a union, is the true branch.
+#[test]
+fn everything_extends_unknown_so_a_distributing_props_base_takes_its_true_branch() {
+    let output = extract_one(&[(
+        "Card.tsx",
+        "type Distribute<T, K extends keyof any> = T extends unknown ? Omit<T, K> : never;\n\
+         interface Base { id: string; hidden: boolean }\n\
+         export function Card(props: Distribute<Base, 'hidden'> & { title: string }) { return null; }\n",
+    )]);
+
+    let mut card: Vec<&str> = output.components["Card"].props.keys().map(String::as_str).collect();
+    card.sort_unstable();
+    assert_eq!(card, vec!["id", "title"]);
+    assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+}
+
+/// The nesting limit counts one type expression; aliases referring to aliases are declarations, bounded by the names in
+/// progress, so a chain longer than the expression limit still resolves.
+#[test]
+fn a_chain_of_aliases_longer_than_the_expression_depth_limit_resolves() {
+    let mut source = String::from("type A0 = 'x' | 'y';\n");
+    for level in 1..40 {
+        source.push_str(&format!("type A{level} = A{} | 'z{level}';\n", level - 1));
+    }
+    source.push_str("export function Box(props: { chain: A39 }) { return null; }\n");
+    let output = extract_one(&[("Box.tsx", &source)]);
+
+    let literals = |names: Vec<String>| PropType::Union(names.into_iter().map(PropType::StringLiteral).collect());
+    let expected = ["x".to_owned(), "y".to_owned()].into_iter().chain((1..40).map(|level| format!("z{level}")));
+    assert_eq!(output.components["Box"].props["chain"].prop_type, literals(expected.collect()));
+    assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+}
+
 #[test]
 fn a_project_declaration_named_like_a_builtin_is_that_declaration() {
     let output = extract_one(&[(

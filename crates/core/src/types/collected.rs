@@ -754,6 +754,120 @@ pub enum ExtendsRef {
     },
 }
 
+impl CollectedType {
+    /// This type with each reference `rename` maps (a name with no type arguments of its own, or with them) replaced by
+    /// the name it returns. A type parameter or mapped key variable that shadows a name is left alone inside its scope.
+    #[must_use]
+    pub(crate) fn rename_named(&self, rename: &dyn Fn(&str) -> Option<TypeName>) -> CollectedType {
+        let all = |members: &[CollectedType]| members.iter().map(|m| m.rename_named(rename)).collect::<Vec<_>>();
+        match self {
+            CollectedType::Named { name, args } => {
+                CollectedType::Named { name: rename(name).unwrap_or_else(|| name.clone()), args: all(args) }
+            }
+            CollectedType::Union(members) => CollectedType::Union(all(members)),
+            CollectedType::Intersection(members) => CollectedType::Intersection(all(members)),
+            CollectedType::Tuple(members) => CollectedType::Tuple(all(members)),
+            CollectedType::TemplateLiteral(parts) => CollectedType::TemplateLiteral(all(parts)),
+            CollectedType::Array(inner) => CollectedType::Array(Box::new(inner.rename_named(rename))),
+            CollectedType::KeyOf(inner) => CollectedType::KeyOf(Box::new(inner.rename_named(rename))),
+            CollectedType::AtFile { file, inner } => {
+                CollectedType::AtFile { file: file.clone(), inner: Box::new(inner.rename_named(rename)) }
+            }
+            CollectedType::Object(fields) => CollectedType::Object(
+                fields
+                    .iter()
+                    .map(|f| CollectedObjectField {
+                        name: f.name.clone(),
+                        collected_type: f.collected_type.rename_named(rename),
+                        required: f.required,
+                        description: f.description.clone(),
+                    })
+                    .collect(),
+            ),
+            CollectedType::IndexedAccess { obj, key } => CollectedType::IndexedAccess {
+                obj: Box::new(obj.rename_named(rename)),
+                key: Box::new(key.rename_named(rename)),
+            },
+            CollectedType::Function { type_params, params, param_names, return_type } => {
+                let scoped = |name: &str| if type_params.iter().any(|p| p == name) { None } else { rename(name) };
+                CollectedType::Function {
+                    type_params: type_params.clone(),
+                    params: params.iter().map(|p| p.rename_named(&scoped)).collect(),
+                    param_names: param_names.clone(),
+                    return_type: Box::new(return_type.rename_named(&scoped)),
+                }
+            }
+            CollectedType::Conditional { check, extends_type, true_type, false_type } => CollectedType::Conditional {
+                check: Box::new(check.rename_named(rename)),
+                extends_type: Box::new(extends_type.rename_named(rename)),
+                true_type: Box::new(true_type.rename_named(rename)),
+                false_type: Box::new(false_type.rename_named(rename)),
+            },
+            CollectedType::Mapped { param, key_type, value_type, optional } => {
+                let scoped = |name: &str| if param == name { None } else { rename(name) };
+                CollectedType::Mapped {
+                    param: param.clone(),
+                    key_type: Box::new(key_type.rename_named(rename)),
+                    value_type: Box::new(value_type.rename_named(&scoped)),
+                    optional: *optional,
+                }
+            }
+            CollectedType::String
+            | CollectedType::Number
+            | CollectedType::Boolean
+            | CollectedType::Null
+            | CollectedType::Undefined
+            | CollectedType::Any
+            | CollectedType::Never
+            | CollectedType::Unknown
+            | CollectedType::Void
+            | CollectedType::BigInt
+            | CollectedType::Symbol
+            | CollectedType::StringLiteral(_)
+            | CollectedType::NumberLiteral(_)
+            | CollectedType::BoolLiteral(_)
+            | CollectedType::TypeOf(_)
+            | CollectedType::Raw(_) => self.clone(),
+        }
+    }
+}
+
+impl CollectedTypeAlias {
+    /// This alias with [`CollectedType::rename_named`] applied to every type in its body.
+    #[must_use]
+    pub(crate) fn rename_named(&self, rename: &dyn Fn(&str) -> Option<TypeName>) -> CollectedTypeAlias {
+        let all = |members: &[CollectedType]| members.iter().map(|m| m.rename_named(rename)).collect::<Vec<_>>();
+        match self {
+            CollectedTypeAlias::Omit { base, keys, file_path } => CollectedTypeAlias::Omit {
+                base: base.rename_named(rename),
+                keys: keys.rename_named(rename),
+                file_path: file_path.clone(),
+            },
+            CollectedTypeAlias::Pick { base, keys, file_path } => CollectedTypeAlias::Pick {
+                base: base.rename_named(rename),
+                keys: keys.rename_named(rename),
+                file_path: file_path.clone(),
+            },
+            CollectedTypeAlias::Partial { base, file_path } => {
+                CollectedTypeAlias::Partial { base: base.rename_named(rename), file_path: file_path.clone() }
+            }
+            CollectedTypeAlias::Required { base, file_path } => {
+                CollectedTypeAlias::Required { base: base.rename_named(rename), file_path: file_path.clone() }
+            }
+            CollectedTypeAlias::Union { members, file_path } => {
+                CollectedTypeAlias::Union { members: all(members), file_path: file_path.clone() }
+            }
+            CollectedTypeAlias::Intersection { members, file_path } => {
+                CollectedTypeAlias::Intersection { members: all(members), file_path: file_path.clone() }
+            }
+            CollectedTypeAlias::LiteralUnion { .. } => self.clone(),
+            CollectedTypeAlias::Passthrough { target, file_path } => {
+                CollectedTypeAlias::Passthrough { target: target.rename_named(rename), file_path: file_path.clone() }
+            }
+        }
+    }
+}
+
 impl ExtendsRef {
     /// This reference with each type argument rewritten by `f`.
     #[must_use]
