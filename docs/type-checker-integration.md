@@ -70,13 +70,13 @@ The structural result returns immediately. The semantic result follows: the CLI 
 
 Measured on `7.1.0-beta`, `extract --json` (best of 2 to 3), flag on against off, plus the base commit's output compared byte for byte (identical apart from `durationMs` on all five corpora, with and without `--load-dependencies`). Peak RSS is the larger of the two processes; on Chakra Caliper is 117 MiB and `tsc` 945 MiB.
 
-| Corpus | Components resolved by the checker | Off | On |
-| --- | --: | --: | --: |
-| mantine | 332 / 344 | 47 ms, 82 MiB | 588 ms, 287 MiB |
-| chakra | 598 / 598 | 38 ms, 68 MiB | 9.3 s, 975 MiB |
-| shadcn | 1,693 / 1,884 | 48 ms, 81 MiB | 1.5 s, 874 MiB |
-| antd | 206 / 248 | 36 ms, 69 MiB | 508 ms, 443 MiB |
-| spectrum | 1,153 / 1,356 | 71 ms, 118 MiB | 618 ms, 381 MiB |
+| Corpus   | Components resolved by the checker |            Off |              On |
+| -------- | ---------------------------------: | -------------: | --------------: |
+| mantine  |                          332 / 344 |  47 ms, 82 MiB | 588 ms, 287 MiB |
+| chakra   |                          598 / 598 |  38 ms, 68 MiB |  9.3 s, 975 MiB |
+| shadcn   |                      1,693 / 1,884 |  48 ms, 81 MiB |  1.5 s, 874 MiB |
+| antd     |                          206 / 248 |  36 ms, 69 MiB | 508 ms, 443 MiB |
+| spectrum |                      1,153 / 1,356 | 71 ms, 118 MiB | 618 ms, 381 MiB |
 
 Chakra's time is `tsc` computing 470,000 shared props' types, not round trips. Before shared props were interned in the merge, Caliper itself held 7.4 GiB on Chakra.
 
