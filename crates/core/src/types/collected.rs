@@ -612,6 +612,11 @@ pub struct SourceData {
     /// What each generic function declared in this file returns (see [`FunctionResult`]).
     /// Key: "${absolute_file_path}:${name}"
     pub function_results: FxHashMap<std::string::String, FunctionResult>,
+
+    /// Each declared type parameter's default (`interface DOMAttributes<T = FocusableElement>`), in declaration order,
+    /// for the generic aliases and interfaces that declare at least one. Keyed as `type_alias_params` and
+    /// `interface_type_params`; a reference that omits trailing arguments takes these, as TypeScript does.
+    pub type_param_defaults: FxHashMap<std::string::String, Vec<Option<CollectedType>>>,
 }
 
 /// What a generic function returns, declared or asserted by its one top-level `return … as T`: the shape of the

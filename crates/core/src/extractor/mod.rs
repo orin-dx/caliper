@@ -429,6 +429,15 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
+    /// Record the defaults of a declaration's type parameters (`<TLength = string | 0, TTime = string>`), when any has one.
+    pub(super) fn record_type_param_defaults<'a>(&mut self, key: &str, params: &[TSTypeParameter<'a>]) {
+        let defaults: Vec<Option<CollectedType>> =
+            params.iter().map(|p| p.default.as_ref().map(|d| self.ts_type_to_collected(d))).collect();
+        if defaults.iter().any(Option::is_some) {
+            self.data.type_param_defaults.insert(key.to_owned(), defaults);
+        }
+    }
+
     // ─── TSType → CollectedType ───────────────────────────────────────────────
 
     pub(super) fn ts_type_to_collected<'a>(&mut self, ty: &TSType<'a>) -> CollectedType {

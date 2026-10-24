@@ -32,7 +32,8 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 /// 17: component mappings record whether they are exported.
 /// 18: generic functions' result types, and the callee of a wrapper-built component.
 /// 19: a mapped type records its key variable and `?` modifier.
-const CACHE_SCHEMA_VERSION: u32 = 19;
+/// 20: type parameter defaults.
+const CACHE_SCHEMA_VERSION: u32 = 20;
 
 const DATA_FILE: &str = "dts.msgpack";
 

@@ -21,7 +21,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::path_key::PathKey;
 
-use crate::types::{CollectedInterface, CollectedTypeAlias, GlobalSourceData, SourceData, TypeName};
+use crate::types::{CollectedInterface, CollectedType, CollectedTypeAlias, GlobalSourceData, SourceData, TypeName};
 
 #[derive(Clone, Default)]
 pub(crate) struct NamedTypeIndex {
@@ -29,6 +29,8 @@ pub(crate) struct NamedTypeIndex {
     type_aliases: FxHashMap<PathKey, FxHashMap<CompactString, CollectedTypeAlias>>,
     type_alias_params: FxHashMap<PathKey, FxHashMap<CompactString, Vec<TypeName>>>,
     interface_type_params: FxHashMap<PathKey, FxHashMap<CompactString, Vec<TypeName>>>,
+    /// Type parameter defaults of the aliases and interfaces above (`SourceData::type_param_defaults`).
+    type_param_defaults: FxHashMap<PathKey, FxHashMap<CompactString, Vec<Option<CollectedType>>>>,
     /// Files declaring `React.`-qualified names (`@types/react`), the only ones a qualified fallback can match.
     react_namespaced: FxHashSet<PathKey>,
     /// Loaded dependency declarations (ADR 0010), consulted for a file this index holds nothing for. Shared by every
@@ -60,6 +62,7 @@ impl NamedTypeIndex {
             type_aliases: FxHashMap::default(),
             type_alias_params: FxHashMap::default(),
             interface_type_params: FxHashMap::default(),
+            type_param_defaults: FxHashMap::default(),
             react_namespaced: FxHashSet::default(),
             fallback: None,
         };
@@ -68,6 +71,7 @@ impl NamedTypeIndex {
             &global.interface_type_params,
             &global.type_aliases,
             &global.type_alias_params,
+            &global.type_param_defaults,
         );
         index
     }
@@ -88,6 +92,7 @@ impl NamedTypeIndex {
         self.type_aliases.remove(file.as_str());
         self.type_alias_params.remove(file.as_str());
         self.interface_type_params.remove(file.as_str());
+        self.type_param_defaults.remove(file.as_str());
         self.react_namespaced.remove(file.as_str());
     }
 
@@ -101,6 +106,7 @@ impl NamedTypeIndex {
             &data.interface_type_params,
             &data.type_aliases,
             &data.type_alias_params,
+            &data.type_param_defaults,
         );
     }
 
@@ -118,7 +124,13 @@ impl NamedTypeIndex {
         interface_type_params: &FxHashMap<std::string::String, Vec<TypeName>>,
         type_aliases: &FxHashMap<std::string::String, CollectedTypeAlias>,
         type_alias_params: &FxHashMap<std::string::String, Vec<TypeName>>,
+        type_param_defaults: &FxHashMap<std::string::String, Vec<Option<CollectedType>>>,
     ) {
+        for (key, defaults) in type_param_defaults {
+            let Some((file, name)) = key.rsplit_once(':') else { continue };
+            let file = PathKey::from(Utf8Path::new(file));
+            self.type_param_defaults.entry(file).or_default().insert(CompactString::from(name), defaults.clone());
+        }
         for (key, iface) in interfaces {
             let Some((file, name)) = key.rsplit_once(':') else { continue };
             let file = PathKey::from(Utf8Path::new(file));
@@ -197,6 +209,21 @@ impl NamedTypeIndex {
     /// those lookups do.
     pub(crate) fn is_declared_at(&self, file: &Utf8Path, name: &str) -> bool {
         self.lookup_interface(file, name).is_some() || self.lookup_type_alias(file, name).is_some()
+    }
+
+    /// The declared defaults of `name`'s type parameters at `file`, when any has one. `name` is the exact key, as
+    /// `lookup_type_alias` returns it or an interface's `scoped_key` ends.
+    pub(crate) fn lookup_type_param_defaults(&self, file: &Utf8Path, name: &str) -> Option<&[Option<CollectedType>]> {
+        self.layer_for(file).type_param_defaults.get(file.as_str())?.get(name).map(Vec::as_slice)
+    }
+
+    /// `lookup_type_param_defaults` for an interface the caller already has in hand.
+    pub(crate) fn lookup_interface_param_defaults_for(
+        &self,
+        iface: &CollectedInterface,
+    ) -> Option<&[Option<CollectedType>]> {
+        let name = iface.scoped_key.rsplit_once(':').map(|(_, name)| name).unwrap_or(&iface.scoped_key);
+        self.lookup_type_param_defaults(&iface.file_path, name)
     }
 
     pub(crate) fn lookup_type_alias_params(&self, file: &Utf8Path, name: &str) -> Option<&Vec<TypeName>> {

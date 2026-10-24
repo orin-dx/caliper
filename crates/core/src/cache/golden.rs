@@ -68,6 +68,7 @@ fn fixture_populates_every_source_data_field() {
         exports,
         diagnostics,
         function_results,
+        type_param_defaults,
     } = fixture();
     let fields = [
         ("interfaces", interfaces.is_empty()),
@@ -81,6 +82,7 @@ fn fixture_populates_every_source_data_field() {
         ("exports", exports.is_empty()),
         ("diagnostics", diagnostics.is_empty()),
         ("function_results", function_results.is_empty()),
+        ("type_param_defaults", type_param_defaults.is_empty()),
     ];
     let empty: Vec<&str> = fields.iter().filter(|(_, is_empty)| *is_empty).map(|(name, _)| *name).collect();
     assert_eq!(empty, Vec::<&str>::new(), "extend FIXTURE so the golden bytes cover these fields");
