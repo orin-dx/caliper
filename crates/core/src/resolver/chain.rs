@@ -370,10 +370,19 @@ fn resolve_interface_chain_uncached(
     if let Some(params) = declared_params {
         state.add_type_params(params.iter());
     }
-    // Supplied arguments replace the parameters; with none supplied the parameters stay placeholders.
+    // Supplied arguments replace the parameters, and an omitted one takes its default; a parameter with neither stays
+    // a placeholder.
+    let defaults = ctx.named_types.lookup_interface_param_defaults_for(iface);
     let substitution = match declared_params {
-        Some(params) if !params.is_empty() && !type_args.is_empty() => {
-            Some(super::substitute::build_substitution(params, type_args, consuming_file, &mut state.diagnostics))
+        Some(params) if !params.is_empty() && (!type_args.is_empty() || defaults.is_some()) => {
+            Some(super::substitute::bind_args(
+                params,
+                defaults,
+                type_args,
+                consuming_file,
+                &iface.file_path,
+                &mut state.diagnostics,
+            ))
         }
         _ => None,
     };

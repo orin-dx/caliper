@@ -3019,6 +3019,49 @@ export function opaque<Payload extends FactoryPayload>(ui: (props: Payload["prop
 "#;
 
 #[test]
+fn an_omitted_type_argument_takes_the_parameters_default() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "dom.ts",
+        "export type FocusableElement = Element;\n\
+         export interface DOMAttributes<T = FocusableElement> { onFocus?: (event: { currentTarget: T }) => void }\n",
+    );
+    write_file(
+        &tmp,
+        "Field.tsx",
+        r#"
+import type { DOMAttributes } from "./dom";
+type Pair<A, B = A[]> = { first: A; second: B };
+interface FieldProps extends DOMAttributes { label?: string }
+interface InputProps extends DOMAttributes<HTMLInputElement> {}
+interface Unbound<T> { value: T }
+export function Field(props: FieldProps & { pair: Pair<string>; both: Pair<number, boolean>; unbound: Unbound<number> }) { return null; }
+export function Input(props: InputProps) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let text = |component: &str, prop: &str| output.components[component].props[prop].prop_type.raw_string();
+    assert_eq!(text("Field", "onFocus"), "(event: { currentTarget: FocusableElement }) => void");
+    assert_eq!(text("Input", "onFocus"), "(event: { currentTarget: HTMLInputElement }) => void");
+    assert_eq!(text("Field", "pair"), "{ first: string; second: string[] }");
+    assert_eq!(text("Field", "both"), "{ first: number; second: boolean }");
+    let warnings: Vec<&str> = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity != DiagnosticSeverity::Info)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(warnings, Vec::<&str>::new());
+}
+
+#[test]
 fn literal_types_evaluate_as_typescript_does() {
     let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
     write_file(

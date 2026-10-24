@@ -7,8 +7,8 @@ use compact_str::CompactString;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::collected::{
-    CollectedInterface, CollectedTypeAlias, ComponentMapping, EnumEntry, EnumValue, FunctionResult, ImportBinding,
-    LexedExport, RawDefault, SourceData, TypeName,
+    CollectedInterface, CollectedType, CollectedTypeAlias, ComponentMapping, EnumEntry, EnumValue, FunctionResult,
+    ImportBinding, LexedExport, RawDefault, SourceData, TypeName,
 };
 use super::diagnostic::Diagnostic;
 
@@ -255,6 +255,10 @@ pub struct GlobalSourceData {
     /// Generic functions' result types across all files — see `SourceData::function_results`.
     /// Key: "${absolute_file_path}:${name}"
     pub function_results: FxHashMap<String, FunctionResult>,
+
+    /// Type parameter defaults across all files — see `SourceData::type_param_defaults`.
+    /// Key: "${absolute_file_path}:${name}"
+    pub type_param_defaults: FxHashMap<String, Vec<Option<CollectedType>>>,
 }
 
 impl GlobalSourceData {
@@ -279,6 +283,7 @@ impl GlobalSourceData {
         self.enums.extend(data.enums);
         self.const_arrays.extend(data.const_arrays);
         self.function_results.extend(data.function_results);
+        self.type_param_defaults.extend(data.type_param_defaults);
         self.import_map.insert(file_path.to_owned(), data.imports);
         self.re_export_map.insert(file_path.to_owned(), data.exports);
         self.component_mappings.extend(data.component_mappings);
@@ -294,6 +299,7 @@ impl GlobalSourceData {
         self.enums.retain(|k, _| !k.starts_with(&prefix));
         self.const_arrays.retain(|k, _| !k.starts_with(&prefix));
         self.function_results.retain(|k, _| !k.starts_with(&prefix));
+        self.type_param_defaults.retain(|k, _| !k.starts_with(&prefix));
         self.import_map.remove(file_path);
         self.re_export_map.remove(file_path);
         self.component_mappings.retain(|m| m.file_path != file_path);
