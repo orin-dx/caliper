@@ -1,5 +1,21 @@
 # caliper-docgen-storybook
 
+## 0.6.0
+
+- - **The Storybook addon documents more by default:** it reads dependency types (`loadDependencies`, default `true`) and lists every inherited prop (`collapseInheritedProps`, default `'none'`), so library-typed props resolve and fewer components fall back to Storybook's own docgen. New options: `htmlAttributes` (`'curated'` | `'full'` | `'none'`), `loadDependencies`, `collapseInheritedProps`.
+  - **Fallbacks are visible:** a component handed to Storybook's docgen is logged once as a warning with the diagnostics that caused it.
+  - **Edits to a tsconfig, `package.json` or lockfile reach the addon** like a source edit, instead of being missed until restart.
+  - **The Vite plugin logs extraction diagnostics** once each (`logLevel`, `onDiagnostic`) and takes `htmlAttributes`.
+  - **Windows paths work in the Vite plugin:** `C:\` source directories and backslash file paths are recognised.
+- - **Chakra with `--load-dependencies` resolves instead of giving up:** the share of its components with a warning drops from 92% to 3%. Three causes, all fixed:
+    - A type declared inside `namespace X {}` that names a sibling (csstype's `DataType.Color = ColorBase | ...`) now finds it. Its members were lost before, in project sources as well as dependencies.
+    - `T extends unknown ? Omit<T, K> : never`, the idiom that distributes over a union, takes its true branch, so a props base written that way is no longer opaque.
+    - The nesting limit counts one type expression. An alias body starts again at 0, and the declarations a reference passes through are bounded by the names in progress, so a prop 15 levels down no longer runs out of depth inside four csstype aliases.
+  - The parse cache schema is unchanged.
+- - **The Storybook addon answers a story up to 3.5× faster on large projects:** it no longer sweeps every source file from JavaScript on each request. The native session checks the files, in parallel, once per story (Spectrum's 129 real stories: 2.2 s → 0.6 s, 15 ms → 4 ms per story).
+  - **Session start no longer serializes every prop:** the new `initializeSessionIndex` returns only each component's file, name and the diagnostics. Chakra with dependencies skips a 25 MB JSON round trip.
+  - **The native binding uses mimalloc:** session start is 15–30% faster, and Chakra with dependencies peaks 9% lower (small projects peak 20–30 MB higher).
+
 ## 0.5.0
 
 - **Curated mode also gives a prop beside `ComponentProps<"div">` the element attribute's type:** recharts' `onTimeUpdate` next to a div's attributes is now `ReactEventHandler<HTMLDivElement>` intersected with recharts' handler in the default curated mode too, not only in Full mode. Curated mode reads React's declarations for this lookup only (ADR 0013), so nothing else in its output changes.
