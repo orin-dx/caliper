@@ -257,6 +257,7 @@ dependencies = [
  "camino",
  "compact_str",
  "dashmap",
+ "mimalloc",
  "napi",
  "napi-build",
  "napi-derive",

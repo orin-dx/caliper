@@ -20,6 +20,7 @@ camino.workspace       = true
 compact_str.workspace  = true
 tokio.workspace        = true
 serde_json.workspace   = true
+mimalloc               = { version = "0.1", default-features = false }
 
 [build-dependencies]
 napi-build = "2"

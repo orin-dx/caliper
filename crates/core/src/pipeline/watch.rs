@@ -4,6 +4,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use arc_swap::ArcSwapOption;
 use camino::{Utf8Path, Utf8PathBuf};
+use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
 use crate::types::*;
@@ -116,9 +117,12 @@ fn stamp_since(path: &Utf8Path, built_at: SystemTime) -> Stamp {
     }
 }
 
+/// Stamping is a stat call per path, thousands of them for a large project: done in parallel here and in `ensure_fresh`.
 fn stamps_of(paths: impl IntoIterator<Item = Utf8PathBuf>, built_at: SystemTime) -> FxHashMap<Utf8PathBuf, Stamp> {
     paths
         .into_iter()
+        .collect::<Vec<_>>()
+        .into_par_iter()
         .map(|path| {
             let stamp = stamp_since(&path, built_at);
             (path, stamp)
@@ -314,7 +318,7 @@ impl WatchSession {
         };
 
         let dirs: FxHashMap<Utf8PathBuf, Stamp> =
-            recorded.dirs.iter().map(|(dir, was)| (dir.clone(), stamp_like(dir, Some(was)))).collect();
+            recorded.dirs.par_iter().map(|(dir, was)| (dir.clone(), stamp_like(dir, Some(was)))).collect();
         let (dirs, inner_configs, discovered) = if dirs == recorded.dirs {
             (dirs, recorded.inner_configs.clone(), None)
         } else {
@@ -331,11 +335,13 @@ impl WatchSession {
         }
 
         let mut files = recorded.files;
-        let mut changed: Vec<(Utf8PathBuf, Stamp)> = files
-            .keys()
-            .chain(discovered.iter().flatten().filter(|path| !files.contains_key(*path)))
-            .map(|path| (path.clone(), stamp_like(path, files.get(path))))
-            .filter(|(path, now)| files.get(path) != Some(now))
+        let paths: Vec<&Utf8PathBuf> =
+            files.keys().chain(discovered.iter().flatten().filter(|path| !files.contains_key(*path))).collect();
+        let mut changed: Vec<(Utf8PathBuf, Stamp)> = paths
+            .into_par_iter()
+            .map(|path| (path, stamp_like(path, files.get(path))))
+            .filter(|(path, now)| files.get(*path) != Some(now))
+            .map(|(path, now)| (path.clone(), now))
             .collect();
         changed.sort_by(|a, b| a.0.cmp(&b.0));
         let mut next = current.clone();
@@ -382,12 +388,14 @@ impl WatchSession {
     fn config_stamps(
         &self,
         inner_configs: &[Utf8PathBuf],
-        stamp: impl Fn(&Utf8Path) -> Stamp,
+        stamp: impl Fn(&Utf8Path) -> Stamp + Sync,
     ) -> FxHashMap<Utf8PathBuf, Stamp> {
         inner_configs
             .iter()
             .cloned()
             .chain(self.resolution_config_files())
+            .collect::<Vec<_>>()
+            .into_par_iter()
             .map(|path| {
                 let stamp = stamp(&path);
                 (path, stamp)

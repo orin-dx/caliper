@@ -81,6 +81,32 @@ Whether `--load-dependencies` can become the default (ADR 0010). The five repos 
 
 RDT (`withCustomConfig`, `shouldExtractLiteralValuesFromEnum`, `shouldRemoveUndefinedFromOptional`) took 1.6 to 27 s and 0.6 to 2.7 GB per repo. The fixture harness also gained the switch: `CALIPER_LOAD_DEPENDENCIES=1 pnpm --filter caliper-docgen-validate run:ours`, then `parity.ts caliper-docgen`.
 
+## Storybook addon request path, 2026-10-24
+
+Where the addon's time went, and what changed. Method: `packages/storybook/scripts/storybook-parity.mjs --no-baseline`, the `caliper-never` variant (it answers every component), before (`--dist` of the previous build and its binding) interleaved with after, best of 3, Apple silicon. Peak RSS is the child process's.
+
+| Corpus, story set                 | Metric           | Before     | After      |
+| --------------------------------- | ---------------- | ---------- | ---------- |
+| Spectrum, 129 real stories        | total            | 2.17 s     | 0.63 s     |
+|                                   | median per story | 15 ms      | 4 ms       |
+|                                   | first request    | 200 ms     | 150 ms     |
+|                                   | peak RSS         | 354 MB     | 322 MB     |
+| Spectrum, 90 sampled              | total            | 1.67 s     | 0.42 s     |
+| shadcn, sampled                   | total / median   | 641 / 5 ms | 335 / 2 ms |
+| antd, sampled                     | total / median   | 421 / 4 ms | 273 / 2 ms |
+| Mantine, sampled                  | total / median   | 164 / 6 ms | 134 / 2 ms |
+| Chakra with dependencies, sampled | total            | 1.16 s     | 0.80 s     |
+|                                   | first request    | 527 ms     | 342 ms     |
+|                                   | peak RSS         | 828 MB     | 681 MB     |
+
+What the profile found:
+
+- **The per-request file sweep was the cost.** `fresh()` listed every directory and stat'ed every source file from JavaScript on each story request (16–22 ms on Spectrum), and again for each subcomponent. The session now does one native check per story (`ensureFresh`), stat calls in parallel: 3–5 ms on Spectrum. `look at the files` is still the largest per-story cost on a large project.
+- **Session start parsed every prop.** `initializeSession` returned all components' props as JSON for JavaScript to read two fields from: 25 MB and about 120 ms of `JSON.parse` for Chakra with dependencies. `initializeSessionIndex` returns the file, name and diagnostics only.
+- **Allocation.** `mimalloc` in the binding cuts session start by 15–30% (Chakra with dependencies 441–561 ms → 312–391 ms) and Chakra's peak by 9%. On small projects the peak is 20–30 MB higher.
+- **Left to the resolver.** On Chakra with dependencies the time is in resolution: the largest self-time entries are `StateReads::append` (dependency read tracking), `ParsedProp` map building (773 props per component) and memcpy. Sampled with `sample(1)`; not changed here.
+- **Not a cost:** `keyOf` and `degradedBy` (microseconds, now indexed), `docgenInfo` (0.05–0.1 ms per component, 2–3 ms on Chakra's 358 KB documents), the JavaScript side of a story (about 4 ms of CPU, the rest is waiting on native work).
+
 ## Running it
 
 ```bash
