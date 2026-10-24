@@ -20,7 +20,7 @@ A session resolved every component before it answered one. The Storybook addon, 
 
 ## Consequences
 
-- Measured on the five corpora (RESULTS), session start and peak memory fall with dependencies and full HTML attributes loaded; the first component pays for the cold memos a batch run amortizes, and fifty serial requests cost about what a whole-project batch does.
+- With `load_dependencies` and full HTML attributes, a lazy session starts in 40 to 67 ms where a batch one takes 68 to 352 ms, and holds 89 to 137 MiB after 50 components where batch holds 108 to 532 MiB (table in `docs/performance.md`). The first component pays for the cold memos a batch run amortizes (Chakra: 126 ms). Fifty components asked for one at a time cost about what the whole project costs in a batch on Chakra (566 ms against 352 ms) and less everywhere else; asked for at once they cost 310 ms. Without those options, start is 28 to 85 ms against 39 to 107 ms and a request is under 4 ms.
 - A lazy answer depends on which names the project's files demand, not on a type checker. A name a resolution reads that no demand list mentions is loaded by a batch run when some other file mentions it, and by a lazy session only through the component's own closure. Parity testing found two such cases (React's imports; memos computed before a name loaded) and fixed them. Other cases may exist; a parity test over a new corpus finds them.
 - Layer growth costs 2 to 7 ms per request that reaches new names.
 - Hosts must not hold the answer of a key across an update that reports it in `updated_keys`.
