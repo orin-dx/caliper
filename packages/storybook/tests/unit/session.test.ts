@@ -135,3 +135,33 @@ describe('DocgenSession.fresh', () => {
     expect(binding.changed).toEqual([join(src, 'Button.tsx'), join(src, 'Button.tsx')])
   })
 })
+
+describe('DocgenSession.fresh and resolution config', () => {
+  it('applies a changed tsconfig, package.json or lockfile like a source file', async () => {
+    const config = join(dir, 'tsconfig.json')
+    writeFileSync(config, '{}')
+    const fake = new FakeBinding({})
+    fake.configFiles = [config]
+    const session = new DocgenSession({ srcDirs: [src] }, fake)
+    await session.fresh()
+    expect(fake.changed).toEqual([])
+    touch(config, '{"compilerOptions":{}}')
+    await session.fresh()
+    expect(fake.changed).toEqual([config])
+  })
+
+  it('passes the extraction options to the binding', async () => {
+    const fake = new FakeBinding({})
+    const seen: unknown[] = []
+    fake.createSession = ((options: unknown) => (seen.push(options), 7)) as never
+    const session = new DocgenSession(
+      { srcDirs: [src], skipHtmlProps: true, loadDependencies: true, collapseInheritedProps: 'none' },
+      fake,
+    )
+    await session.fresh()
+    expect(seen[0]).toMatchObject({ htmlAttributes: 'none', loadDependencies: true, collapseInheritedProps: 'none' })
+    const full = new DocgenSession({ srcDirs: [src], skipHtmlProps: true, htmlAttributes: 'full' }, fake)
+    await full.fresh()
+    expect(seen[1]).toMatchObject({ htmlAttributes: 'full' })
+  })
+})

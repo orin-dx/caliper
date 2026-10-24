@@ -6,7 +6,12 @@ import type { Diagnostic, ExtractionOutput, IncrementalUpdate, RdtComponentDoc }
 /** The binding calls the session makes, so tests can stand in for the native module. */
 export type SessionBinding = Pick<
   typeof Napi,
-  'createSession' | 'initializeSession' | 'extractFileIncremental' | 'sessionDocgenInfo' | 'closeSession'
+  | 'createSession'
+  | 'initializeSession'
+  | 'extractFileIncremental'
+  | 'sessionDocgenInfo'
+  | 'closeSession'
+  | 'resolutionConfigFiles'
 >
 
 export interface SessionOptions {
@@ -15,6 +20,9 @@ export interface SessionOptions {
   exclude?: string[]
   tsconfigPath?: string
   skipHtmlProps?: boolean
+  htmlAttributes?: Napi.JsExtractOptions['htmlAttributes']
+  loadDependencies?: boolean
+  collapseInheritedProps?: Napi.JsExtractOptions['collapseInheritedProps']
 }
 
 interface ComponentRef {
@@ -86,19 +94,30 @@ export class DocgenSession {
       srcDirs: this.options.srcDirs,
       exclude: this.options.exclude,
       tsconfigPath: this.options.tsconfigPath,
-      htmlAttributes: this.options.skipHtmlProps ? 'none' : undefined,
+      htmlAttributes: this.options.htmlAttributes ?? (this.options.skipHtmlProps ? 'none' : undefined),
+      loadDependencies: this.options.loadDependencies,
+      collapseInheritedProps: this.options.collapseInheritedProps,
     }
   }
 
   private async scanAll(): Promise<Map<string, string>> {
     const files = new Map<string, string>()
     await Promise.all(this.options.srcDirs.map((dir) => scan(dir, files)))
+    // A tsconfig, `package.json` or lockfile changes how every import resolves; a change to one rebuilds the session.
+    if (this.sessionId !== undefined) {
+      await Promise.all(
+        this.napi.resolutionConfigFiles(this.sessionId).map(async (path) => {
+          const sig = await signature(path)
+          if (sig) files.set(path, sig)
+        }),
+      )
+    }
     return files
   }
 
   private async initialize(): Promise<void> {
-    this.files = await this.scanAll()
     this.sessionId = this.napi.createSession(this.napiOptions())
+    this.files = await this.scanAll()
     const output = JSON.parse(await this.napi.initializeSession(this.sessionId, this.napiOptions())) as ExtractionOutput
     for (const [key, entry] of Object.entries(output.components)) {
       this.components.set(key, { filePath: resolve(entry.filePath), displayName: entry.displayName })
@@ -184,10 +203,16 @@ export class DocgenSession {
 
   /** Whether a warning or error says `key`'s props may be incomplete. */
   degraded(key: string): boolean {
+    return this.degradedBy(key).length > 0
+  }
+
+  /** The messages of the warnings and errors that say `key`'s props may be incomplete. */
+  degradedBy(key: string): string[] {
+    const messages = new Set<string>()
     for (const diagnostic of this.diagnostics.values()) {
-      if (diagnostic.severity !== 'info' && diagnostic.affects?.includes(key)) return true
+      if (diagnostic.severity !== 'info' && diagnostic.affects?.includes(key)) messages.add(diagnostic.message)
     }
-    return false
+    return [...messages]
   }
 
   docgenInfo(key: string): RdtComponentDoc | undefined {
