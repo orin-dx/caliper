@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path'
 import type * as Napi from 'caliper-docgen-napi'
 import type { Diagnostic, IncrementalUpdate, RdtComponentDoc } from 'caliper-docgen-napi'
 import { localNameOf } from './exports.js'
+import { buildLookups, diagnosticId, incompleteMessages, type ComponentRef, type Lookups } from './lookups.js'
 
 /** The binding calls the session makes, so tests can stand in for the native module. */
 export type SessionBinding = Pick<
@@ -45,33 +46,6 @@ export interface Documentation {
   doc: RdtComponentDoc | undefined
   /** The messages of the warnings and errors that say the props may be incomplete; empty when none does. */
   degradedBy: string[]
-}
-
-interface ComponentRef {
-  filePath: string
-  displayName: string
-}
-
-/** What `keyOf` and `degradedBy` read, derived from the components and diagnostics. */
-interface Lookups {
-  byFile: Map<string, string[]>
-  byName: Map<string, string[]>
-  degradedBy: Map<string, Set<string>>
-}
-
-function push(map: Map<string, string[]>, at: string, key: string): void {
-  const keys = map.get(at)
-  if (keys) keys.push(key)
-  else map.set(at, [key])
-}
-
-/** The distinct messages of the warnings and errors among `diagnostics`; info says nothing about the props. */
-function incompleteMessages(diagnostics: Diagnostic[]): string[] {
-  return [...new Set(diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').map((d) => d.message))]
-}
-
-function diagnosticId(diagnostic: Diagnostic): string {
-  return JSON.stringify(diagnostic)
 }
 
 /**
@@ -118,9 +92,16 @@ export class DocgenSession {
   private async initialize(): Promise<void> {
     this.sessionId = this.napi.createSession(this.napiOptions())
     await this.reindex()
-    if (this.lazy && this.options.warmUp !== false) {
-      // Not awaited: the first story answers as soon as it can, and shares what the warm-up has loaded by then.
-      this.napi.sessionWarmUp(this.sessionId, WARM_UP_COMPONENTS).catch(() => {})
+    // Not awaited: the first story answers as soon as it can, and shares what the warm-up has loaded by then.
+    if (this.lazy && this.options.warmUp !== false) void this.warmUp(this.sessionId)
+  }
+
+  /** Best effort: a warm-up that fails costs the first story the time it would have saved. */
+  private async warmUp(sessionId: number): Promise<void> {
+    try {
+      await this.napi.sessionWarmUp(sessionId, WARM_UP_COMPONENTS)
+    } catch {
+      // The stories resolve what they need themselves.
     }
   }
 
@@ -200,23 +181,7 @@ export class DocgenSession {
   }
 
   private lookups(): Lookups {
-    if (this.index) return this.index
-    const byFile = new Map<string, string[]>()
-    const byName = new Map<string, string[]>()
-    for (const [key, ref] of this.components) {
-      push(byFile, ref.filePath, key)
-      push(byName, ref.displayName, key)
-    }
-    const degradedBy = new Map<string, Set<string>>()
-    for (const diagnostic of this.diagnostics.values()) {
-      if (diagnostic.severity === 'info') continue
-      for (const key of diagnostic.affects ?? []) {
-        const messages = degradedBy.get(key) ?? new Set<string>()
-        messages.add(diagnostic.message)
-        degradedBy.set(key, messages)
-      }
-    }
-    return (this.index = { byFile, byName, degradedBy })
+    return (this.index ??= buildLookups(this.components, this.diagnostics.values()))
   }
 
   /**
@@ -285,7 +250,7 @@ export class DocgenSession {
    * The documentation of `key` and why its props may be incomplete. A lazy session resolves the component now, or
    * answers from what an earlier story resolved; nothing is kept here, so an edit cannot leave a stale answer behind.
    */
-  async documentation(key: string): Promise<Documentation> {
+  documentation(key: string): Documentation {
     if (!this.lazy) return { doc: this.docgenInfo(key), degradedBy: this.degradedBy(key) }
     if (this.sessionId === undefined) return { doc: undefined, degradedBy: [] }
     const answers = JSON.parse(this.napi.sessionComponentAnswers(this.sessionId, [key])) as Record<

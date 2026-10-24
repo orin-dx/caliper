@@ -141,7 +141,7 @@ export function createDocgenProvider(
       : csf
     const session = await getSession()
     const { key, path } = await locate(session, target, storyPath)
-    const { doc, degradedBy } = await session.documentation(key)
+    const { doc, degradedBy } = session.documentation(key)
     if (fallback === 'degraded' && degradedBy.length > 0) {
       const reason = degradedBy.join('; ')
       reportFallback(key, reason)
