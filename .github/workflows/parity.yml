@@ -93,8 +93,15 @@ jobs:
         run: >-
           python3 scripts/parity.py oracle --bin "$RUNNER_TEMP/caliper-head" --baseline scripts/oracle-baseline.json
           --out oracle.json --markdown oracle.md --check
+      # Does this commit publish what the base does? All five corpora, four configurations, and the lazy session
+      # against batch extraction (scripts/equivalence.py).
+      - name: Compare output with the base
+        if: ${{ !cancelled() }}
+        run: >-
+          python3 scripts/equivalence.py "$RUNNER_TEMP/caliper-base" --bin "$RUNNER_TEMP/caliper-head"
+          --markdown equivalence.md
       - if: always()
-        run: cat parity.md oracle.md >> "$GITHUB_STEP_SUMMARY" || true
+        run: cat parity.md oracle.md equivalence.md >> "$GITHUB_STEP_SUMMARY" || true
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -104,4 +111,5 @@ jobs:
             parity.md
             oracle.json
             oracle.md
+            equivalence.md
             .parity/logs
