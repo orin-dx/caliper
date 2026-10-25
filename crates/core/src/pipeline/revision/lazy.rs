@@ -15,6 +15,66 @@ use crate::path_key::PathKey;
 
 use super::*;
 
+/// Runs `work`, which may use rayon, on a thread and a pool of its own, and waits for it.
+///
+/// `grow` holds a lock while it loads dependencies, and the load fans out with `rayon::scope`. Called on a pool worker,
+/// that wait steals other queued jobs, and a stolen request calls `grow` and blocks on the lock its own thread holds;
+/// the other workers block on it too, so the scope's tasks have no worker left to run on. A plain thread blocks
+/// without stealing, and its own pool keeps workers free for the load.
+fn off_pool<R: Send>(work: impl FnOnce() -> R + Send) -> R {
+    static POOL: std::sync::OnceLock<Option<rayon::ThreadPool>> = std::sync::OnceLock::new();
+    let pool = POOL
+        .get_or_init(|| {
+            rayon::ThreadPoolBuilder::new().thread_name(|index| format!("caliper-deps-{index}")).build().ok()
+        })
+        .as_ref();
+    let outcome = std::thread::scope(|scope| {
+        scope
+            .spawn(|| match pool {
+                Some(pool) => pool.install(work),
+                None => work(),
+            })
+            .join()
+    });
+    outcome.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
+#[cfg(test)]
+mod off_pool_tests {
+    use super::off_pool;
+
+    fn thread_name() -> String {
+        std::thread::current().name().unwrap_or_default().to_owned()
+    }
+
+    /// The deadlock needs the thread that waits for the loader's scope to steal an unrelated request, which only a
+    /// worker of the caller's pool does. So the guarantee is where the work runs, scoped tasks included.
+    #[test]
+    fn scoped_work_runs_on_the_loader_pool_not_the_callers() {
+        let caller = rayon::ThreadPoolBuilder::new().num_threads(2).build().expect("a small pool");
+        let (own, scoped) = caller.install(|| {
+            assert!(!thread_name().starts_with("caliper-deps-"), "the test starts on the caller's pool");
+            off_pool(|| {
+                let mut names = [String::new(), String::new(), String::new()];
+                rayon::scope(|scope| {
+                    for name in &mut names {
+                        scope.spawn(move |_| *name = thread_name());
+                    }
+                });
+                (thread_name(), names)
+            })
+        });
+        assert!(own.starts_with("caliper-deps-"), "the work runs on a loader thread, not on {own}");
+        assert!(scoped.iter().all(|name| name.starts_with("caliper-deps-")), "scoped tasks ran on {scoped:?}");
+    }
+
+    #[test]
+    fn a_panic_in_the_work_reaches_the_caller() {
+        let outcome = std::panic::catch_unwind(|| off_pool(|| -> usize { panic!("the loader failed") }));
+        assert!(outcome.is_err());
+    }
+}
+
 /// What a session answers for one key: the component as a batch run publishes it, and the diagnostics that run attaches
 /// to that key.
 #[derive(Clone, Debug, PartialEq)]
@@ -358,7 +418,7 @@ impl Revision {
         if missing.is_empty() {
             return;
         }
-        let extended = Arc::new(dependency_types::load(missing, options, Some(layer)));
+        let extended = Arc::new(off_pool(|| dependency_types::load(missing, options, Some(layer))));
         // Names that were already loaded, or that no package declares, add nothing the resolver reads, so the
         // context and its memos stay; only the record of what was asked for moves on.
         if extended.resolves_like(layer) {
