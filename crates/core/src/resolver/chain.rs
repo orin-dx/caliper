@@ -34,7 +34,8 @@ fn known_fallback(
 ) -> ResolvedChain {
     if evaluated_to_nothing(&chain, &attempt) {
         let bare = type_name.strip_prefix("React.").unwrap_or(type_name);
-        if let Some(result) = crate::known::resolve_known(bare, resolved_args, &ctx.global, &ctx.enum_bare_index) {
+        let enum_key = |name: &str| ctx.enum_key_for(name, consuming_file);
+        if let Some(result) = crate::known::resolve_known(bare, resolved_args, &ctx.global, &enum_key) {
             return known_chain(result, type_name, consuming_file, mapping, ctx, state, depth);
         }
     }

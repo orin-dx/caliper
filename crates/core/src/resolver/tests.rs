@@ -1947,6 +1947,49 @@ fn test_known_opaque_result_emits_diagnostic_at_chain_level() {
     assert!(!state.diagnostics.is_empty(), "expected a diagnostic for VariantProps without variants, got none");
 }
 
+// `VariantProps<typeof itemVariants>` reads the variants of the `itemVariants` its own file declares: shadcn keeps a
+// copy of every component per registry, each with variants of its own, and the bare name alone gave all of them the
+// first file's by path.
+#[test]
+fn test_variant_props_reads_the_variants_its_own_file_declares() {
+    use crate::types::{EnumEntry, EnumValue};
+
+    let entry = |name: &str, value: &str| EnumEntry {
+        name: name.into(),
+        value: EnumValue::String(value.into()),
+        description: String::new(),
+    };
+    let mut global = GlobalSourceData::default();
+    global.enums.insert("/a/item.tsx:itemVariants".into(), vec![entry("size", "default"), entry("size", "sm")]);
+    global.enums.insert(
+        "/b/item.tsx:itemVariants".into(),
+        vec![entry("size", "default"), entry("size", "sm"), entry("size", "xs")],
+    );
+    let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
+    let args = [CollectedType::TypeOf("itemVariants".into())];
+
+    let sizes_in = |path: &str| {
+        let file_path = Utf8PathBuf::from(path);
+        let mapping = ComponentMapping::new(
+            "Item".into(),
+            "VariantProps".into(),
+            file_path.clone(),
+            0,
+            0,
+            crate::types::DetectionRule::FunctionDeclaration,
+        );
+        let mut state = ResolveState::default();
+        let chain = super::chain::resolve_props_chain("VariantProps", &args, &file_path, &mapping, &ctx, &mut state, 0);
+        let size = chain.props.iter().find(|p| p.name == "size").unwrap_or_else(|| panic!("no size prop in {path}"));
+        let PropType::Union(members) = &size.prop_type else { panic!("size is {:?}", size.prop_type) };
+        let PropType::LiteralUnion { members, .. } = &members[0] else { panic!("size is {:?}", size.prop_type) };
+        members.clone()
+    };
+
+    assert_eq!(sizes_in("/a/item.tsx"), ["default", "sm"]);
+    assert_eq!(sizes_in("/b/item.tsx"), ["default", "sm", "xs"]);
+}
+
 // ── Test 21: collected.rs's Conditional/Mapped/KeyOf/Raw-fallback Opaque
 // constructions must each emit a diagnostic ─────────────────────────────────
 
@@ -2857,4 +2900,28 @@ export function Q(props: Y) { return null; }
     let names = |component: &str| results[component].0.props.keys().map(String::as_str).collect::<Vec<_>>();
     assert_eq!((names("P"), names("Q")), (vec!["b", "l"], vec!["b", "l", "z"]));
     assert_eq!(memo::recording_counts(&shared.interface_chains)[&format!("{dir}/Comp.tsx:Base")], 2);
+}
+
+// `import React from "react"` of an `export =` module binds the module's namespace, as `import * as React` does, so
+// `React.CSSProperties` names the same member under either spelling (antd imports React the first way).
+#[test]
+fn a_default_import_names_a_namespace_member_as_a_namespace_import_does() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+    write(root.as_std_path(), "lib.ts", "export interface Options { size: string }\n");
+    let canonical_of = |import: &str| {
+        let source = format!("{import}\nexport const x = 1;\n");
+        let consumer = root.join("c.tsx");
+        write(root.as_std_path(), "c.tsx", &source);
+        let mut global = GlobalSourceData::default();
+        for path in [root.join("lib.ts"), consumer.clone()] {
+            let text = std::fs::read_to_string(&path).unwrap();
+            global.merge(&path, crate::extractor::parse_file(&path, &text));
+        }
+        let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
+        super::import::resolve_to_canonical("Lib.Options", &consumer, &ctx, &mut Vec::new())
+    };
+    let expected = Some((root.join("lib.ts"), "Options".to_owned()));
+    assert_eq!(canonical_of(r#"import * as Lib from "./lib";"#), expected, "the namespace spelling");
+    assert_eq!(canonical_of(r#"import Lib from "./lib";"#), expected, "the default spelling");
 }
