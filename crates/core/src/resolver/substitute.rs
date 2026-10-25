@@ -344,19 +344,37 @@ pub(super) fn synthesize_utility_alias(
         "Required" if !args.is_empty() => {
             Some(CollectedTypeAlias::Required { base: args[0].clone(), file_path: file_path.to_owned() })
         }
-        // `PropsWithChildren<P>` is `P & { children?: ReactNode }`.
-        "PropsWithChildren" if !args.is_empty() => Some(CollectedTypeAlias::Intersection {
-            members: vec![
-                args[0].clone(),
-                CollectedType::Object(vec![CollectedObjectField {
-                    name: "children".into(),
-                    collected_type: CollectedType::Named { name: "React.ReactNode".into(), args: vec![] },
-                    required: false,
-                    description: String::new(),
-                }]),
-            ],
-            file_path: file_path.to_owned(),
-        }),
+        // `PropsWithChildren<P>` is `P & { children?: ReactNode }`, and with no argument (`P = unknown`) only the
+        // children.
+        "PropsWithChildren" => {
+            let children = CollectedType::Object(vec![CollectedObjectField {
+                name: "children".into(),
+                collected_type: CollectedType::Named { name: "React.ReactNode".into(), args: vec![] },
+                required: false,
+                description: String::new(),
+            }]);
+            Some(match args.first() {
+                Some(props) => CollectedTypeAlias::Intersection {
+                    members: vec![props.clone(), children],
+                    file_path: file_path.to_owned(),
+                },
+                None => CollectedTypeAlias::Passthrough { target: children, file_path: file_path.to_owned() },
+            })
+        }
+        // `Record<K, V>` is `{ [P in K]: V }`: one prop per member of a key union. A `string`, `number` or `symbol`
+        // key is an index signature, which names no prop to list.
+        "Record" if args.len() >= 2 => {
+            let target = match &args[0] {
+                CollectedType::String | CollectedType::Number | CollectedType::Symbol => CollectedType::Object(vec![]),
+                keys => CollectedType::Mapped {
+                    param: "K".into(),
+                    key_type: Box::new(keys.clone()),
+                    value_type: Box::new(args[1].clone()),
+                    optional: None,
+                },
+            };
+            Some(CollectedTypeAlias::Passthrough { target, file_path: file_path.to_owned() })
+        }
         "Readonly" | "PropsWithRef" if !args.is_empty() => {
             Some(CollectedTypeAlias::Passthrough { target: args[0].clone(), file_path: file_path.to_owned() })
         }

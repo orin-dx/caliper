@@ -57,13 +57,36 @@ pub(super) fn mapped_keys(
     ctx: &ResolutionContext,
     depth: u8,
 ) -> Option<Vec<Key>> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
     match constraint {
         CollectedType::AtFile { file, inner } => mapped_keys(inner, file, ctx, depth + 1),
+        // `Record<Breakpoint, V>`: an alias for a union of literals, here or in another file.
+        CollectedType::Named { name, args } => {
+            let (body, body_file) = alias_body(name, args, file, ctx)?;
+            mapped_keys(&body, &body_file, ctx, depth + 1)
+        }
         CollectedType::KeyOf(target) => keys_of(target, file, ctx, depth + 1),
         // `(typeof NODES)[number]` over `declare const NODES: readonly ["a", "b"]`: the tuple's elements.
         CollectedType::IndexedAccess { obj, key } if matches!(key.as_ref(), CollectedType::Number) => {
             let (CollectedType::TypeOf(array), array_file) = unwrap_at_file(obj) else { return None };
             let array_file = array_file.unwrap_or(file);
+            // `export const responsiveArray = ['xxxl', 'xxl'] as const`: its string values, when it holds nothing else.
+            if let Some(values) = ctx.named_types.lookup_const_array(array_file, array) {
+                return values
+                    .iter()
+                    .map(|value| match value {
+                        EnumValue::String(name) => Some(Key {
+                            name: name.clone(),
+                            required: true,
+                            description: String::new(),
+                            tags: Default::default(),
+                        }),
+                        _ => None,
+                    })
+                    .collect();
+            }
             let (_, alias) = lookup_type_alias(ctx, array_file.as_str(), &format!("typeof {array}"))?;
             let CollectedTypeAlias::Passthrough { target: CollectedType::Tuple(elements), .. } = alias else {
                 return None;
@@ -435,6 +458,48 @@ fn interface_member(
     ctx: &ResolutionContext,
     depth: u8,
 ) -> Option<Located> {
+    interface_prop(iface, args, key, args_file, ctx, depth).map(|prop| (prop.ty, prop.file))
+}
+
+/// A member as its interface declares it: the type with the interface's parameters bound, whether it is required, and
+/// its documentation.
+pub(super) struct DeclaredProp {
+    pub(super) ty: CollectedType,
+    pub(super) required: bool,
+    pub(super) description: String,
+    pub(super) file: Utf8PathBuf,
+    /// The interface that declares it, which may be an ancestor of the one read.
+    pub(super) declared_by: String,
+}
+
+/// Whether `name` (as written in `file`) is one of React's interfaces, which `react_declared_prop` can read.
+pub(super) fn is_react_interface(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> bool {
+    let (canonical_file, canonical_name) = canonical(name, file, ctx);
+    react_interface(ctx, &canonical_file, &canonical_name).is_some()
+}
+
+/// React's own interface `name` (as written in `file`, `React.AriaAttributes` or `AriaAttributes`), read from its
+/// declaration whether or not React's declarations were merged into the run (`html_attributes` other than `full`).
+pub(super) fn react_declared_prop(
+    name: &str,
+    args: &[CollectedType],
+    key: &str,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+) -> Option<DeclaredProp> {
+    let (canonical_file, canonical_name) = canonical(name, file, ctx);
+    let iface = react_interface(ctx, &canonical_file, &canonical_name)?;
+    interface_prop(iface, args, key, file, ctx, 0)
+}
+
+fn interface_prop(
+    iface: &CollectedInterface,
+    args: &[CollectedType],
+    key: &str,
+    args_file: &Utf8Path,
+    ctx: &ResolutionContext,
+    depth: u8,
+) -> Option<DeclaredProp> {
     let params = ctx
         .named_types
         .lookup_interface_type_params_for(iface)
@@ -455,7 +520,13 @@ fn interface_member(
         None => ty.clone(),
     };
     if let Some(prop) = iface.props.iter().find(|p| p.name == key) {
-        return Some((bind(&prop.collected_type), iface.file_path.clone()));
+        return Some(DeclaredProp {
+            ty: bind(&prop.collected_type),
+            required: prop.required,
+            description: prop.description.clone(),
+            file: iface.file_path.clone(),
+            declared_by: iface.name.to_string(),
+        });
     }
     if depth > MAX_DEPTH {
         return None;
@@ -464,18 +535,26 @@ fn interface_member(
         let (name, type_args) = match parent {
             ExtendsRef::SameFile { name, type_args } => (name, type_args),
             ExtendsRef::Imported { local_name, type_args, .. } => (local_name, type_args),
-            ExtendsRef::Builtin { .. } => return None,
+            // React's own interfaces name their parents by the spelling the extractor recognizes as React's
+            // (`HTMLAttributes<T> extends AriaAttributes, DOMAttributes<T>`).
+            ExtendsRef::Builtin { name, type_args, .. } => (name, type_args),
         };
         let (parent_file, parent_name) = canonical(name, &iface.file_path, ctx);
         let type_args: Vec<CollectedType> = type_args.iter().map(&bind).collect();
         match lookup_interface(ctx, parent_file.as_str(), &parent_name)
             .or_else(|| react_interface(ctx, &parent_file, &parent_name))
         {
-            Some(parent) => interface_member(parent, &type_args, key, &iface.file_path, ctx, depth + 1),
+            Some(parent) => interface_prop(parent, &type_args, key, &iface.file_path, ctx, depth + 1),
             // An interface may extend an alias (csstype's `StandardLonghandPropertiesFallback = Fallback<…>`).
             None => {
                 let parent = CollectedType::Named { name: name.clone(), args: type_args };
-                member(&parent, key, &iface.file_path, ctx, depth + 1)
+                member(&parent, key, &iface.file_path, ctx, depth + 1).map(|(ty, file)| DeclaredProp {
+                    ty,
+                    required: false,
+                    description: String::new(),
+                    file,
+                    declared_by: name.to_string(),
+                })
             }
         }
     })
