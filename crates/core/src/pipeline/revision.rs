@@ -417,6 +417,7 @@ impl Revision {
         .with_react_types(react_types.clone());
         lib_diagnostics.extend(ctx.tsconfig_diagnostic.clone());
         let resolved = resolve_all(&component_ids(&global, options), &ctx);
+        free_in_background(ctx);
         let files = Arc::new(src_files.into_iter().collect());
 
         let (dts_files_parsed, dts_cache_hits) = cache.counts();
