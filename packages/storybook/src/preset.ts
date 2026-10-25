@@ -15,6 +15,7 @@ function workerOptions(options: CaliperStorybookOptions): CaliperStorybookOption
     collapseInheritedProps,
     lazy,
     warmUp,
+    fillAfter,
     fallback,
   } = options
   return {
@@ -28,6 +29,7 @@ function workerOptions(options: CaliperStorybookOptions): CaliperStorybookOption
     collapseInheritedProps,
     lazy,
     warmUp,
+    fillAfter,
     fallback,
   }
 }
