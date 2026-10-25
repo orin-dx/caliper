@@ -1,0 +1,75 @@
+name: Equivalence
+
+# Does a change to the resolver, extractor, types or pipeline alter what Caliper publishes? Runs scripts/equivalence.py
+# against the pull request's base branch on two of the parity corpora (chakra, shadcn) with their dependencies loaded (docs/parity.md). Non-blocking for now:
+# `continue-on-error` keeps a diff or a slow install from failing the pull request until the job has run long enough to
+# trust. The aim is under six minutes; the corpus installs dominate and are cached by their package managers' stores.
+# The full set runs in the weekly parity workflow.
+on:
+  pull_request:
+    paths:
+      - "crates/core/src/resolver/**"
+      - "crates/core/src/extractor/**"
+      - "crates/core/src/types/**"
+      - "crates/core/src/pipeline/**"
+      - "scripts/equivalence*"
+      - "scripts/parity.py"
+      - ".github/workflows/equivalence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  equivalence:
+    name: Equivalence
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: rust
+        run: echo "version=$(sed -n 's/^rust = "\(.*\)"/\1/p' .prototools)" >> "$GITHUB_OUTPUT"
+      - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+        with:
+          auto-install: true
+      - uses: orin-dx/actions/setup-pnpm-cache@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .parity/caches
+          key: equivalence-${{ hashFiles('scripts/parity.py') }}
+      # Two pnpm corpora: yarn 4.18, which mantine and spectrum pin, crashes under the repo's Node 26
+      # ("Dynamic require of "util" is not supported"), so those two run only where their installs are cached.
+      - name: Fetch and install two corpora
+        run: python3 scripts/parity.py setup --corpus chakra --corpus shadcn
+      # The pull request's own base, so a stacked pull request shows only its own change, not its parents'.
+      - name: Compare with the base branch
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
+        run: >-
+          python3 scripts/equivalence.py "origin/$BASE_REF" --corpus chakra --corpus shadcn
+          --config deps --config deps+html-full --lazy fixtures --markdown equivalence.md
+      - if: always()
+        run: cat equivalence.md >> "$GITHUB_STEP_SUMMARY" || true
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: equivalence
+          path: |
+            equivalence.md
+            .parity/logs

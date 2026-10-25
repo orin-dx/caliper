@@ -21,7 +21,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::path_key::PathKey;
 
-use crate::types::{CollectedInterface, CollectedType, CollectedTypeAlias, GlobalSourceData, SourceData, TypeName};
+use crate::types::{
+    CollectedInterface, CollectedType, CollectedTypeAlias, EnumValue, GlobalSourceData, SourceData, TypeName,
+};
 
 #[derive(Clone, Default)]
 pub(crate) struct NamedTypeIndex {
@@ -31,6 +33,9 @@ pub(crate) struct NamedTypeIndex {
     interface_type_params: FxHashMap<PathKey, FxHashMap<CompactString, Vec<TypeName>>>,
     /// Type parameter defaults of the aliases and interfaces above (`SourceData::type_param_defaults`).
     type_param_defaults: FxHashMap<PathKey, FxHashMap<CompactString, Vec<Option<CollectedType>>>>,
+    /// The array-typed consts each file declares, by their literal members (`SourceData::const_arrays`): what
+    /// `(typeof X)[number]` reads as the symbol `X` in scope in the file that wrote the type.
+    const_arrays: FxHashMap<PathKey, FxHashMap<CompactString, Vec<EnumValue>>>,
     /// Files declaring `React.`-qualified names (`@types/react`), the only ones a qualified fallback can match.
     react_namespaced: FxHashSet<PathKey>,
     /// Loaded dependency declarations (ADR 0010), consulted for a file this index holds nothing for. Shared by every
@@ -63,6 +68,7 @@ impl NamedTypeIndex {
             type_alias_params: FxHashMap::default(),
             interface_type_params: FxHashMap::default(),
             type_param_defaults: FxHashMap::default(),
+            const_arrays: FxHashMap::default(),
             react_namespaced: FxHashSet::default(),
             fallback: None,
         };
@@ -73,6 +79,7 @@ impl NamedTypeIndex {
             &global.type_alias_params,
             &global.type_param_defaults,
         );
+        index.insert_const_arrays(&global.const_arrays);
         index
     }
 
@@ -93,6 +100,7 @@ impl NamedTypeIndex {
         self.type_alias_params.remove(file.as_str());
         self.interface_type_params.remove(file.as_str());
         self.type_param_defaults.remove(file.as_str());
+        self.const_arrays.remove(file.as_str());
         self.react_namespaced.remove(file.as_str());
     }
 
@@ -108,6 +116,7 @@ impl NamedTypeIndex {
             &data.type_alias_params,
             &data.type_param_defaults,
         );
+        self.insert_const_arrays(&data.const_arrays);
     }
 
     /// Splits each flat `"{file}:{name}"` key on its *last* `:` — the same
@@ -156,6 +165,14 @@ impl NamedTypeIndex {
         }
     }
 
+    fn insert_const_arrays(&mut self, const_arrays: &FxHashMap<std::string::String, Vec<EnumValue>>) {
+        for (key, values) in const_arrays {
+            let Some((file, name)) = key.rsplit_once(':') else { continue };
+            let file = PathKey::from(Utf8Path::new(file));
+            self.const_arrays.entry(file).or_default().insert(CompactString::from(name), values.clone());
+        }
+    }
+
     /// The index holding `file`'s declarations: this one, or the dependency fallback for a file this one doesn't hold.
     /// Project and dependency files never overlap, so a file is in exactly one of them.
     fn layer_for(&self, file: &Utf8Path) -> &NamedTypeIndex {
@@ -201,6 +218,15 @@ impl NamedTypeIndex {
         }
         let qualified = format!("React.{name}");
         per_file.get(qualified.as_str()).map(|alias| (CompactString::from(qualified), alias))
+    }
+
+    /// The members of the array-typed const `name` declared at `file`, in this index or the dependency fallback.
+    pub(crate) fn lookup_const_array(&self, file: &Utf8Path, name: &str) -> Option<&[EnumValue]> {
+        self.const_arrays
+            .get(file.as_str())
+            .and_then(|per_file| per_file.get(name))
+            .map(Vec::as_slice)
+            .or_else(|| self.fallback.as_ref()?.lookup_const_array(file, name))
     }
 
     /// Whether `name` is actually declared at `file` — mirrors the bare/
