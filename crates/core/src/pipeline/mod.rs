@@ -108,7 +108,9 @@ pub struct PipelineOptions {
     pub tsconfig_path: Option<Utf8PathBuf>,
     /// Additional builtin type names beyond the React standard set.
     pub extra_builtins: FxHashSet<compact_str::CompactString>,
-    /// Cache directory. Defaults to `node_modules/.cache/caliper-docgen`.
+    /// Cache directory. Defaults to `node_modules/.cache/caliper-docgen` under the nearest ancestor of the first source
+    /// directory that has a `node_modules` or a `package.json` (a directory in the OS temp directory when there is
+    /// none), so the CLI, the Vite plugin and the Storybook addon share one cache whatever directory they run from.
     pub cache_dir: Option<Utf8PathBuf>,
     /// Custom docgen extension plugins.
     pub plugins: crate::plugin::PluginRegistry,
@@ -142,6 +144,31 @@ impl Default for PipelineOptions {
             collapse_inherited_props: CollapseInheritedProps::default(),
             experimental_semantic_types: false,
             semantic_tsc_path: None,
+        }
+    }
+}
+
+impl PipelineOptions {
+    /// Where the parse and dependency caches live: `cache_dir` when set, else `node_modules/.cache/caliper-docgen`
+    /// under the nearest ancestor of the first source directory that has a `node_modules` or a `package.json`, so
+    /// running from another directory neither misses the project's cache nor creates a `node_modules` there. A source
+    /// directory in no project gets a directory in the OS temp directory.
+    pub(crate) fn effective_cache_dir(&self) -> Utf8PathBuf {
+        if let Some(dir) = &self.cache_dir {
+            return dir.clone();
+        }
+        const CACHE: &str = "node_modules/.cache/caliper-docgen";
+        let root = canonicalize_first_src_dir(&self.src_dirs).and_then(|src| {
+            src.ancestors()
+                .find(|dir| dir.join("node_modules").is_dir() || dir.join("package.json").is_file())
+                .map(Utf8Path::to_owned)
+        });
+        match root {
+            Some(root) => root.join(CACHE),
+            None => {
+                let temp = std::env::temp_dir();
+                Utf8PathBuf::from_path_buf(temp).unwrap_or_else(|_| Utf8PathBuf::from(".")).join("caliper-docgen-cache")
+            }
         }
     }
 }

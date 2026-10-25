@@ -42,6 +42,26 @@ fn merge_cached_dts_file_does_not_drop_parse_diagnostics() {
 }
 
 #[test]
+fn the_default_cache_dir_is_under_the_project_the_source_directory_is_in() {
+    let tmp = TempDir::new().unwrap();
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+    write_file(&tmp, "package.json", "{}");
+    fs::create_dir_all(tmp.path().join("packages/ui/src")).unwrap();
+    let options = PipelineOptions { src_dirs: vec![root.join("packages/ui/src")], ..Default::default() };
+
+    // The nearest ancestor with a `package.json` or a `node_modules`, wherever the process runs.
+    assert_eq!(options.effective_cache_dir(), root.join("node_modules/.cache/caliper-docgen"));
+
+    // A `node_modules` nearer the source directory is the project's root.
+    fs::create_dir_all(tmp.path().join("packages/ui/node_modules")).unwrap();
+    assert_eq!(options.effective_cache_dir(), root.join("packages/ui/node_modules/.cache/caliper-docgen"));
+
+    // An explicit directory always wins.
+    let explicit = PipelineOptions { cache_dir: Some(root.join("elsewhere")), ..options };
+    assert_eq!(explicit.effective_cache_dir(), root.join("elsewhere"));
+}
+
+#[test]
 fn parsing_a_dts_file_apart_from_merging_it_gives_what_merging_it_in_one_step_gives() {
     // A cold run parses the lib files while it parses the project's, then merges them in order: the split must lose
     // nothing the one-step merge keeps, diagnostics included.
