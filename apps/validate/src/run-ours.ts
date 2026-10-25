@@ -148,7 +148,8 @@ const HTML_ATTRIBUTES_MODE = process.env.HTML_ATTRIBUTES_MODE ?? 'full'
 // The fixtures are single copied files with no installed packages, so the harness pins dependency loading off
 // (it is on by default, ADR 0019). `CALIPER_LOAD_DEPENDENCIES=1` runs with `--load-dependencies` (ADR 0010), which
 // RDT's checker always does in effect.
-const LOAD_DEPENDENCIES = process.env.CALIPER_LOAD_DEPENDENCIES === '1' ? ' --load-dependencies' : ' --no-load-dependencies'
+const LOAD_DEPENDENCIES =
+  process.env.CALIPER_LOAD_DEPENDENCIES === '1' ? ' --load-dependencies' : ' --no-load-dependencies'
 
 const libraries = discoverLibraries()
 const results: ToolResult[] = []
