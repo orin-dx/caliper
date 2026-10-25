@@ -68,6 +68,10 @@ pub(crate) struct ResolveState {
     /// Set when an alias is shown by its name because its expansion holds a type the resolver can't evaluate, so an
     /// alias whose expansion contains that one is shown by name too — see `resolver::named::alias_display`.
     pub(crate) named_unevaluated: bool,
+    /// Set when `visit` or `enter_named` found its key already in a cycle set: the resolution met a cycle (or a key an
+    /// enclosing resolution holds). A resolution that ends with it unset walked an acyclic part of the type graph, which
+    /// is what lets `resolver::memo` reuse its recording without checking the cycle sets.
+    pub(crate) cut_seen: bool,
     /// Expand every source, collapsing none (ADR 0012): set while resolving `Pick`'s base or a `keyof` operand, whose
     /// props are selected or counted by name. Interface chains are not shared while it is set.
     pub(crate) expand_all: bool,
@@ -166,6 +170,7 @@ impl ResolveState {
             shared_diagnostics: Vec::new(),
             in_scope_type_params: self.in_scope_type_params.clone(),
             named_unevaluated: false,
+            cut_seen: false,
             expand_all: self.expand_all,
             keys_only: self.keys_only,
             reads: self.reads.as_ref().map(|_| Box::default()),
@@ -193,6 +198,7 @@ impl ResolveState {
         self.diagnostics.extend(branch.diagnostics);
         self.shared_diagnostics.extend(branch.shared_diagnostics);
         self.named_unevaluated |= branch.named_unevaluated;
+        self.cut_seen |= branch.cut_seen;
     }
 
     /// `absorb` for a `detached` state.
@@ -203,6 +209,7 @@ impl ResolveState {
         self.diagnostics.extend(detached.diagnostics);
         self.shared_diagnostics.extend(detached.shared_diagnostics);
         self.named_unevaluated |= detached.named_unevaluated;
+        self.cut_seen |= detached.cut_seen;
     }
 
     fn absorb_reads(&mut self, theirs: Option<Box<StateReads>>, same_cycle_sets: bool) {
@@ -215,6 +222,7 @@ impl ResolveState {
     pub(crate) fn visit(&mut self, key: CompactString) -> bool {
         let id = key_id(&key);
         let inserted = self.visited.insert(id);
+        self.cut_seen |= !inserted;
         if let Some(reads) = self.reads.as_mut() {
             if inserted {
                 reads.visited_added.push(id);
@@ -228,6 +236,7 @@ impl ResolveState {
     pub(crate) fn enter_named(&mut self, key: &str) -> bool {
         let id = key_id(key);
         let inserted = self.named_in_progress.insert(id);
+        self.cut_seen |= !inserted;
         if let Some(reads) = self.reads.as_mut() {
             reads.named.push((id, !inserted));
         }

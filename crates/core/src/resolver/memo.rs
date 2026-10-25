@@ -124,6 +124,12 @@ struct Recording<T> {
     depth_reach: u8,
     /// A check hit the limit: the result holds a depth-exceeded stop, which only the same starting depth reproduces.
     depth_fired: bool,
+    /// The resolution met a cycle set key already present (`ResolveState::cut_seen`). A replay sets it again.
+    cut: bool,
+    /// The cycle-set lookups of a pure recording, which `reads` no longer holds, to check in debug builds that dropping
+    /// them was sound: every one answers "absent" in any state the recording is replayed in.
+    #[cfg(debug_assertions)]
+    shadow: Option<(Vec<(u32, bool)>, Vec<(u32, bool)>)>,
 }
 
 /// Keep the first read of each key: what the state held on entry. A later read may see the resolution's own
@@ -165,6 +171,9 @@ impl<T: Clone> Recording<T> {
 
     /// Apply the recorded resolution's effects to `state` and return its value.
     fn replay(&self, state: &mut ResolveState, depth: u8) -> T {
+        #[cfg(debug_assertions)]
+        self.check_pure(state);
+        state.cut_seen |= self.cut;
         state.named_high = state.named_high.max(state.named_in_progress.len() + self.reach);
         state.depth_high = state.depth_high.max(depth.saturating_add(self.depth_reach));
         if let Some(reads) = state.reads.as_mut() {
@@ -176,6 +185,24 @@ impl<T: Clone> Recording<T> {
         state.named_unevaluated |= self.named_unevaluated;
         super::deps::replay(&self.deps);
         self.value.clone()
+    }
+}
+
+#[cfg(debug_assertions)]
+impl<T> Recording<T> {
+    /// A pure recording was stored without its cycle-set lookups; replaying it must be what the full check would have
+    /// allowed. A violation means the purity argument (no cut in the walk, so no cycle through anything it reached)
+    /// does not hold for some state: panic in tests, report on stderr otherwise.
+    fn check_pure(&self, state: &ResolveState) {
+        let Some((visited, named)) = &self.shadow else { return };
+        let sound = visited.iter().all(|(key, present)| state.visited.contains(key) == *present)
+            && named.iter().all(|(key, present)| state.named_in_progress.contains(key) == *present);
+        if !sound {
+            #[cfg(test)]
+            panic!("a pure recording was replayed in a state that holds one of the keys it entered");
+            #[cfg(not(test))]
+            eprintln!("PURE-VIOLATION: a pure recording was replayed in a state that holds one of the keys it entered");
+        }
     }
 }
 
@@ -245,6 +272,7 @@ impl<T: Clone> Memo<T> {
         let enclosing_depth_high = std::mem::replace(&mut state.depth_high, depth);
         let enclosing = state.reads.replace(Box::default());
         let entry_unevaluated = std::mem::take(&mut state.named_unevaluated);
+        let entry_cut = std::mem::take(&mut state.cut_seen);
         let diagnostics_before = state.diagnostics.len();
         let shared_before = state.shared_diagnostics.len();
         let (value, deps) = super::deps::capturing(|| resolve(state));
@@ -257,6 +285,22 @@ impl<T: Clone> Memo<T> {
         reads.named = first_reads(reads.named);
         reads.in_scope = first_reads(reads.in_scope);
         reads.defaults = first_reads(reads.defaults);
+        let cut = state.cut_seen;
+        state.cut_seen = entry_cut || cut;
+        // No cycle-set key was met already present, here or in anything replayed or absorbed, and no depth stop cut the
+        // walk short: the resolution walked every type reachable from this one, and none of them reaches back to an
+        // ancestor. A state holding one of those keys as an ancestor would have it reach this type and this type reach
+        // it again, which the walk would have met as a cut. So no state can make a lookup answer "present", and the
+        // lookups need neither be checked nor kept (Chakra's recordings held a million of them).
+        let depth_fired = depth_high > MAX_DEPTH;
+        let pure = !cut && !depth_fired;
+        #[cfg(debug_assertions)]
+        let shadow = pure.then(|| (reads.visited.clone(), reads.named.clone()));
+        if pure {
+            debug_assert!(reads.visited.iter().chain(&reads.named).all(|(_, present)| !present));
+            reads.visited = Vec::new();
+            reads.named = Vec::new();
+        }
         let named_unevaluated = state.named_unevaluated;
         state.named_unevaluated = entry_unevaluated || named_unevaluated;
         state.reads = enclosing;
@@ -291,7 +335,10 @@ impl<T: Clone> Memo<T> {
             keys_only: state.keys_only,
             entry_depth: depth,
             depth_reach: depth_high.saturating_sub(depth),
-            depth_fired: depth_high > MAX_DEPTH,
+            depth_fired,
+            cut,
+            #[cfg(debug_assertions)]
+            shadow,
         };
         let mut recordings = self.recordings.entry(map_key).or_default();
         let same = |r: &Recording<T>| {
