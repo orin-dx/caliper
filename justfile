@@ -160,6 +160,11 @@ ci: lint test deny typos zizmor doc-check machete semver msrv (coverage "90")
 compare:
     moon run validate:compare
 
+# Does this build publish the same documentation as BASE (a git ref, default origin/main, or an executable)? Needs
+# `scripts/parity.py setup`; see docs/parity.md. Pass --oracle for TypeScript 7.1's checker, --lazy off|fixtures|all.
+equivalence *args:
+    python3 scripts/equivalence.py {{args}}
+
 # Clean build artifacts
 clean:
     moon clean

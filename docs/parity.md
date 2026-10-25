@@ -77,6 +77,27 @@ Checker types are normalized once per type id and verdicts made once per pair, s
 
 The checker finds more components than Caliper on antd and Spectrum because, like RDT, it counts every exported function with one parameter. "Less precise" on Spectrum is mostly `Responsive<DimensionValue>` printed without its object form. The beta needs two workarounds, both in `oracle.ts`: compiler options must come from `parseConfigFile` (its server panics on string-valued enum options passed to `createProgram`), and `true`/`false` literal types carry no `value`, so they are read with `typeToString`.
 
+## Equivalence with a base build
+
+A change to how the resolver works (memos, interning, scheduling) should change speed, not output. `scripts/equivalence.py` checks that: it runs `extract --json` from a base build and from this checkout on the corpora, in four configurations (default, `--load-dependencies`, `--html-attributes full`, both; unexported components included), and compares the canonical forms. Canonical means the interned `props`, `propSets` and `nameLists` tables are expanded where they are used, and `durationMs` and the declaration-cache counters are dropped. Nothing else is ignored.
+
+For each corpus and configuration it prints `identical`, or the differences by kind: `component-added`/`removed`, `prop-added`/`removed`, `prop-type-changed`, `prop-field-changed` (required, default, description, tags, parent, declarations), `notable-added`/`removed`/`changed` (the inherited attributes a component lists), `component-field-changed`, `diagnostic-added`/`removed`, `enum-changed`, `stat-changed`, with the first `--examples` of each. Any difference exits non-zero.
+
+A change that is meant to alter output lists exactly what it alters in `scripts/equivalence-allow.json`, as fnmatch patterns over the printed `<corpus>/<config> <kind> <item>`, for example `shadcn/* prop-added Button*.size`. The file is empty on `main`; an entry belongs to the pull request that changes the output and goes with it.
+
+Two further stages:
+
+- `--lazy {off,fixtures,all}` runs `crates/core/tests/lazy_parity.rs`, the lazy session against batch extraction: the fixtures, and with `all` the selected corpora's sources (`CALIPER_PARITY_SRC`).
+- `--oracle` compares the build with TypeScript 7.1's checker as `parity.py oracle` does and fails when agreement falls or the props the checker contradicts rise past `scripts/oracle-baseline.json`. It prints the wrong and less-precise rates next to the baseline's. A change that moves cycle or depth behavior needs this, because the snapshots cannot say whether the new output is closer to the checker.
+
+```bash
+python3 scripts/parity.py setup --corpus mantine --corpus shadcn
+just equivalence origin/main --corpus mantine --corpus shadcn --lazy fixtures    # a git ref is built once per commit
+just equivalence ./caliper-before --bin target/release/caliper-docgen --oracle   # or an executable
+```
+
+`.github/workflows/equivalence.yml` runs it on pull requests that touch `crates/core/src/{resolver,extractor,types,pipeline}`: chakra and shadcn with dependencies loaded, against `main` (the two pnpm corpora: yarn 4.18, which mantine and spectrum pin, crashes under Node 26 with `Dynamic require of "util" is not supported`). It is non-blocking (`continue-on-error`) until it has run long enough to trust, and its time is not yet measured in CI; the corpus installs are the cost. The weekly parity workflow runs all five corpora and the lazy parity over their sources.
+
 ## Running it
 
 ```bash
