@@ -495,6 +495,31 @@ fn output_is_the_same_on_any_thread_count_and_with_a_cold_or_warm_index() {
     }
 }
 
+/// The project's own imports are resolved on every run and never reach the index, so a run that learned nothing from
+/// a package leaves the index file alone instead of writing the same answers again.
+#[test]
+fn a_warm_run_does_not_rewrite_the_index() {
+    let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
+    let index = || {
+        let path = root
+            .join("cache")
+            .read_dir_utf8()
+            .unwrap()
+            .map(|entry| entry.unwrap().path().to_owned())
+            .find(|path| path.file_name().is_some_and(|name| name.starts_with("dependency-index-")))
+            .expect("the cold run writes the index");
+        (std::fs::metadata(&path).unwrap().modified().unwrap(), std::fs::read(&path).unwrap())
+    };
+
+    let cold = extract(&options(&root, true));
+    let written = index();
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    let warm = extract(&options(&root, true));
+
+    assert_eq!(index(), written, "the warm run neither rewrote the index file nor changed it");
+    assert_eq!((warm.components, warm.diagnostics), (cold.components, cold.diagnostics));
+}
+
 /// A package's changed `package.json` invalidates its answers, so an updated install is walked again.
 #[test]
 fn a_changed_package_is_walked_again_instead_of_answered_from_the_index() {
