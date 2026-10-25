@@ -4,9 +4,6 @@
 //! structurally; a declaration that resolves always wins (ADR 0014). Add one only when that fallback measurably beats
 //! leaving the name unresolved, against react-docgen-typescript on code that uses the library.
 
-use compact_str::CompactString;
-use rustc_hash::FxHashMap;
-
 use crate::types::*;
 
 /// Result of recognizing a known type pattern.
@@ -66,15 +63,14 @@ pub fn push_known_opaque_diagnostic(
 /// Returns `None` if this type is not recognized — caller should continue
 /// with normal resolution.
 ///
-/// `enum_bare_index` is the resolver's precomputed bare-name → scoped-key
-/// index over `global.enums` (see `ResolutionContext::enum_bare_index`) —
-/// passed through explicitly rather than as part of a resolver-owned context
-/// type, since this module must not depend on `resolver` (no reverse deps).
+/// `enum_key` maps a name to its scoped key in `global.enums`, as the file that wrote the name sees it
+/// (`ResolutionContext::enum_key_for`) — passed in rather than a resolver-owned context type, since this module must
+/// not depend on `resolver` (no reverse deps). Two files can each declare a `buttonVariants`.
 pub fn resolve_known(
     name: &str,
     args: &[PropType],
     global: &GlobalSourceData,
-    enum_bare_index: &FxHashMap<CompactString, CompactString>,
+    enum_key: &dyn Fn(&str) -> Option<String>,
 ) -> Option<KnownPatternResult> {
     match name {
         // ── Variant systems ──────────────────────────────────────────────────
@@ -84,9 +80,7 @@ pub fn resolve_known(
         // tailwind-variants: VariantProps<typeof tv(...)>
         // The real declarations infer from the function's parameters (`Parameters<T>[0]`), which needs a checker, so
         // this also stands in when they are loaded (ADR 0014).
-        "VariantProps" | "RecipeVariantProps" | "RecipeVariants" => {
-            resolve_cva_variant_props(args, global, enum_bare_index)
-        }
+        "VariantProps" | "RecipeVariantProps" | "RecipeVariants" => resolve_cva_variant_props(args, global, enum_key),
 
         // ── React Aria ───────────────────────────────────────────────────────
         // RenderProps<ButtonRenderProps> → className, style and children, each a value or a function of the state
@@ -118,7 +112,7 @@ pub fn resolve_known(
 fn resolve_cva_variant_props(
     args: &[PropType],
     global: &GlobalSourceData,
-    enum_bare_index: &FxHashMap<CompactString, CompactString>,
+    enum_key: &dyn Fn(&str) -> Option<String>,
 ) -> Option<KnownPatternResult> {
     // The arg is typeof buttonVariants — a Named type reference to a cva() call result.
     // We stored the cva() call variants in global.enums during extraction.
@@ -129,11 +123,8 @@ fn resolve_cva_variant_props(
 
     match args.first() {
         Some(PropType::Named { name, .. }) => {
-            // Look up by bare name via the precomputed index (O(1)) instead of
-            // scanning every enum/cva/tv/recipe entry in the project with a
-            // fresh `format!()` allocation per candidate.
             let name_str = name.as_str();
-            let found = enum_bare_index.get(name_str).and_then(|key| global.enums.get_key_value(key.as_str()));
+            let found = enum_key(name_str).and_then(|key| global.enums.get_key_value(key.as_str()));
 
             match found {
                 Some((_key, enum_entries)) => {
@@ -288,6 +279,7 @@ fn simple_prop(name: &str, prop_type: PropType, required: bool, description: &st
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rustc_hash::FxHashMap;
 
     /// Library types whose declaration measured better than a shortcut, or whose shortcut only hid them, resolve like
     /// any other name: their declaration when it is loaded, otherwise an unresolved named reference (ADR 0014).
@@ -304,15 +296,14 @@ mod tests {
             "MantineSize",
             "MantineRadius",
         ] {
-            assert!(resolve_known(name, &[], &GlobalSourceData::default(), &FxHashMap::default()).is_none(), "{name}");
+            assert!(resolve_known(name, &[], &GlobalSourceData::default(), &|_| None).is_none(), "{name}");
         }
     }
 
     #[test]
     fn test_component_props_without_ref_string_literal() {
         let args = vec![PropType::StringLiteral("button".into())];
-        let result =
-            resolve_known("ComponentPropsWithoutRef", &args, &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("ComponentPropsWithoutRef", &args, &GlobalSourceData::default(), &|_| None);
         assert!(
             matches!(result, Some(KnownPatternResult::Type(PropType::HtmlAttributes { ref element, .. })) if element == "button")
         );
@@ -321,7 +312,7 @@ mod tests {
     #[test]
     fn test_html_chakra_props() {
         let args = vec![PropType::StringLiteral("input".into())];
-        let result = resolve_known("HTMLChakraProps", &args, &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("HTMLChakraProps", &args, &GlobalSourceData::default(), &|_| None);
         assert!(
             matches!(result, Some(KnownPatternResult::Type(PropType::HtmlAttributes { ref element, .. })) if element == "input")
         );
@@ -330,19 +321,19 @@ mod tests {
     #[test]
     fn test_props_with_children_aliases() {
         let args = vec![PropType::Named { name: "ButtonProps".into(), args: vec![] }];
-        let result = resolve_known("PropsWithChildren", &args, &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("PropsWithChildren", &args, &GlobalSourceData::default(), &|_| None);
         assert!(matches!(result, Some(KnownPatternResult::Alias { ref name, .. }) if name == "ButtonProps"));
     }
 
     #[test]
     fn test_partial_returns_none() {
-        let result = resolve_known("Partial", &[], &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("Partial", &[], &GlobalSourceData::default(), &|_| None);
         assert!(result.is_none());
     }
 
     #[test]
     fn test_render_props_returns_two_props() {
-        let result = resolve_known("RenderProps", &[], &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("RenderProps", &[], &GlobalSourceData::default(), &|_| None);
         let Some(KnownPatternResult::Props(props)) = result else { panic!("expected Props result") };
         assert!(props.iter().any(|p| p.name == "className"));
         assert!(props.iter().any(|p| p.name == "style"));
@@ -350,7 +341,7 @@ mod tests {
 
     #[test]
     fn test_slot_props_returns_slot_prop() {
-        let result = resolve_known("SlotProps", &[], &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("SlotProps", &[], &GlobalSourceData::default(), &|_| None);
         let Some(KnownPatternResult::Props(props)) = result else { panic!("expected Props result") };
         assert_eq!(props.len(), 1);
         assert_eq!(props[0].name, "slot");
@@ -360,7 +351,7 @@ mod tests {
     #[test]
     fn test_html_ark_props() {
         let args = vec![PropType::StringLiteral("div".into())];
-        let result = resolve_known("HTMLArkProps", &args, &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("HTMLArkProps", &args, &GlobalSourceData::default(), &|_| None);
         assert!(
             matches!(result, Some(KnownPatternResult::Type(PropType::HtmlAttributes { ref element, .. })) if element == "div")
         );
@@ -369,7 +360,7 @@ mod tests {
     #[test]
     fn test_html_styled_props() {
         let args = vec![PropType::StringLiteral("span".into())];
-        let result = resolve_known("HTMLStyledProps", &args, &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("HTMLStyledProps", &args, &GlobalSourceData::default(), &|_| None);
         assert!(
             matches!(result, Some(KnownPatternResult::Type(PropType::HtmlAttributes { ref element, .. })) if element == "span")
         );
@@ -378,22 +369,21 @@ mod tests {
     #[test]
     fn test_props_with_ref_aliases() {
         let args = vec![PropType::Named { name: "InputProps".into(), args: vec![] }];
-        let result = resolve_known("PropsWithRef", &args, &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("PropsWithRef", &args, &GlobalSourceData::default(), &|_| None);
         assert!(matches!(result, Some(KnownPatternResult::Alias { ref name, .. }) if name == "InputProps"));
     }
 
     #[test]
     fn test_component_props_without_ref_named_type() {
         let args = vec![PropType::Named { name: "MyComponent".into(), args: vec![] }];
-        let result =
-            resolve_known("ComponentPropsWithoutRef", &args, &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("ComponentPropsWithoutRef", &args, &GlobalSourceData::default(), &|_| None);
         assert!(matches!(result, Some(KnownPatternResult::Alias { ref name, .. }) if name == "MyComponent"));
     }
 
     #[test]
     fn test_component_props_with_ref() {
         let args = vec![PropType::StringLiteral("a".into())];
-        let result = resolve_known("ComponentPropsWithRef", &args, &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("ComponentPropsWithRef", &args, &GlobalSourceData::default(), &|_| None);
         assert!(
             matches!(result, Some(KnownPatternResult::Type(PropType::HtmlAttributes { ref element, .. })) if element == "a")
         );
@@ -401,49 +391,49 @@ mod tests {
 
     #[test]
     fn test_element_ref_returns_ref() {
-        let result = resolve_known("ElementRef", &[], &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("ElementRef", &[], &GlobalSourceData::default(), &|_| None);
         assert!(matches!(result, Some(KnownPatternResult::Type(PropType::Ref { element: None }))));
     }
 
     #[test]
     fn test_required_returns_none() {
-        let result = resolve_known("Required", &[], &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("Required", &[], &GlobalSourceData::default(), &|_| None);
         assert!(result.is_none());
     }
 
     #[test]
     fn test_readonly_returns_none() {
-        let result = resolve_known("Readonly", &[], &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("Readonly", &[], &GlobalSourceData::default(), &|_| None);
         assert!(result.is_none());
     }
 
     #[test]
     fn test_non_nullable_returns_none() {
-        let result = resolve_known("NonNullable", &[], &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("NonNullable", &[], &GlobalSourceData::default(), &|_| None);
         assert!(result.is_none());
     }
 
     #[test]
     fn test_omit_returns_none() {
-        let result = resolve_known("Omit", &[], &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("Omit", &[], &GlobalSourceData::default(), &|_| None);
         assert!(result.is_none());
     }
 
     #[test]
     fn test_pick_returns_none() {
-        let result = resolve_known("Pick", &[], &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("Pick", &[], &GlobalSourceData::default(), &|_| None);
         assert!(result.is_none());
     }
 
     #[test]
     fn test_unknown_type_returns_none() {
-        let result = resolve_known("SomeRandomType", &[], &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("SomeRandomType", &[], &GlobalSourceData::default(), &|_| None);
         assert!(result.is_none());
     }
 
     #[test]
     fn test_recipe_variant_props_no_args_is_opaque() {
-        let result = resolve_known("RecipeVariantProps", &[], &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("RecipeVariantProps", &[], &GlobalSourceData::default(), &|_| None);
         assert!(matches!(
             result,
             Some(KnownPatternResult::Type(PropType::Opaque(ref d)))
@@ -454,7 +444,7 @@ mod tests {
     #[test]
     fn test_variant_props_named_not_in_global_is_opaque() {
         let args = vec![PropType::Named { name: "buttonVariants".into(), args: vec![] }];
-        let result = resolve_known("VariantProps", &args, &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("VariantProps", &args, &GlobalSourceData::default(), &|_| None);
         assert!(matches!(
             result,
             Some(KnownPatternResult::Type(PropType::Opaque(ref d)))
@@ -484,11 +474,10 @@ mod tests {
 
         let global = GlobalSourceData { enums, ..Default::default() };
 
-        let mut enum_bare_index: FxHashMap<CompactString, CompactString> = FxHashMap::default();
-        enum_bare_index.insert("buttonVariants".into(), "/src/button.ts:buttonVariants".into());
+        let enum_key = |name: &str| (name == "buttonVariants").then(|| "/src/button.ts:buttonVariants".to_owned());
 
         let args = vec![PropType::Named { name: "buttonVariants".into(), args: vec![] }];
-        let result = resolve_known("VariantProps", &args, &global, &enum_bare_index);
+        let result = resolve_known("VariantProps", &args, &global, &enum_key);
         let Some(KnownPatternResult::Props(props)) = result else {
             panic!("expected Props result, got something else")
         };
@@ -500,13 +489,13 @@ mod tests {
 
     #[test]
     fn test_component_props_no_args_returns_none() {
-        let result = resolve_known("ComponentProps", &[], &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("ComponentProps", &[], &GlobalSourceData::default(), &|_| None);
         assert!(result.is_none());
     }
 
     #[test]
     fn test_html_chakra_props_no_args_returns_none() {
-        let result = resolve_known("HTMLChakraProps", &[], &GlobalSourceData::default(), &FxHashMap::default());
+        let result = resolve_known("HTMLChakraProps", &[], &GlobalSourceData::default(), &|_| None);
         assert!(result.is_none());
     }
 }
