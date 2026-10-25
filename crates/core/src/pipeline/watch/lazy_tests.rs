@@ -328,6 +328,24 @@ fn a_few_requests_load_only_the_names_they_reach() {
 }
 
 #[test]
+fn growing_the_layer_does_not_copy_the_projects_index() {
+    let (_tmp, root) = many_packages(8);
+    let options = options(&root, true);
+    let session = WatchSession::lazy(options.clone());
+    drop(session.initialize());
+    let revision = session.current.load_full().unwrap();
+    assert_eq!(revision.context_shares_project_index(), Some(true), "before any growth");
+
+    // Each request grows the layer by its own package, and the context after each still holds the project's index.
+    for n in 0..2 {
+        assert_eq!(prop_names(&session.component(&format!("C{n}"))), [format!("p{n}")]);
+        assert_eq!(revision.context_shares_project_index(), Some(true), "after request {n}");
+    }
+    assert!(revision.layer_growths() >= 2, "each request grew the layer");
+    assert_matches_batch(&session, &options);
+}
+
+#[test]
 fn reading_a_project_end_to_end_stops_growing_the_layer_once_the_rest_of_it_loads() {
     let (_tmp, root) = many_packages(8);
     let options = options(&root, true);

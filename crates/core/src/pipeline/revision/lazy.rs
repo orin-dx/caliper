@@ -125,9 +125,14 @@ impl Engine {
     }
 }
 
-/// How many times the layer grows for requests before the rest of the project's names load in the background. Three
-/// keeps a session that looks at a few components at the layer they reach (shadcn holds 181 declaration files after 50
-/// requests that way, 450 once every name is loaded) and moves one that reads on within three requests.
+/// How many times the layer grows for requests before the rest of the project's names load in the background. A
+/// growth is cheap (it shares the project's indexes with the context it replaces), so a session that looks at a few
+/// dozen components holds only the names they reach (shadcn: 181 declaration files after 50 requests, 450 once every
+/// name is loaded, 30 MB more); one that reads across the project, as a static build does, reaches this and loads the
+/// rest once instead of growing for every new component. Tests use a small project, so a small count.
+#[cfg(not(test))]
+const WHOLE_DEMAND_AFTER_GROWTHS: usize = 48;
+#[cfg(test)]
 const WHOLE_DEMAND_AFTER_GROWTHS: usize = 3;
 
 pub(super) struct Lazy {
@@ -461,6 +466,14 @@ impl Revision {
         if let Some(handle) = handle {
             drop(handle.join());
         }
+    }
+
+    /// Whether the session's current context holds this revision's own project index, not a copy of it: growing the
+    /// layer must not clone the project's declarations.
+    #[cfg(test)]
+    pub(crate) fn context_shares_project_index(&self) -> Option<bool> {
+        let lazy = self.lazy.as_ref()?;
+        Some(lazy.engine.load().ctx.named_types.shares_declarations_with(&self.named_types))
     }
 
     /// How many times the dependency layer grew since this revision was built.
