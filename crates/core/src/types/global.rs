@@ -14,13 +14,28 @@ use super::diagnostic::Diagnostic;
 
 // ─── ResolveState ─────────────────────────────────────────────────────────────
 
+/// The id of a cycle-set key, the same for every state in the process. The keys are `file:name<arguments>` strings tens
+/// of bytes long; the sets and the read logs of the interface-chain recordings (`resolver::memo`) hold ids instead,
+/// so copying a set or a log copies numbers, and no reference count is shared between the threads resolving components.
+/// Ids are never reused, so equal ids are equal keys.
+fn key_id(key: &str) -> u32 {
+    static IDS: std::sync::OnceLock<dashmap::DashMap<Box<str>, u32, rustc_hash::FxBuildHasher>> =
+        std::sync::OnceLock::new();
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let ids = IDS.get_or_init(Default::default);
+    if let Some(id) = ids.get(key) {
+        return *id;
+    }
+    *ids.entry(key.into()).or_insert_with(|| NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+}
+
 /// Mutable resolution state threaded through all resolver functions.
 /// Bundles the two fields that every recursive resolver function needs,
 /// eliminating long argument signatures.
 #[derive(Default)]
 pub(crate) struct ResolveState {
-    /// Cycle-detection set: "${file}:${type_name}" keys.
-    pub(crate) visited: FxHashSet<CompactString>,
+    /// Cycle-detection set: ids (`key_id`) of "${file}:${type_name}" keys.
+    pub(crate) visited: FxHashSet<u32>,
     /// `resolve_named`'s own cycle-detection set — deliberately separate from
     /// `visited` above. `visited` is chain.rs's, permanent for the rest of a
     /// given branch's resolution (with per-sibling-branch cloning to avoid
@@ -33,10 +48,13 @@ pub(crate) struct ResolveState {
     /// live call stack — inserted on entry to `resolve_named`, removed before
     /// it returns — the textbook DFS "on this path" set, which catches real
     /// self-reference while never flagging legitimate repeated reuse.
-    pub(crate) named_in_progress: FxHashSet<CompactString>,
+    pub(crate) named_in_progress: FxHashSet<u32>,
     /// The most names `named_in_progress` has held since a recording began (`resolver::memo`), to bound how deep a
     /// replayed resolution would go from a deeper state.
     pub(crate) named_high: usize,
+    /// The deepest resolution depth checked against the limit since a recording began (`resolver::past_max_depth`), to
+    /// bound how deep a replayed resolution would go from a different starting depth.
+    pub(crate) depth_high: u8,
     /// Accumulated non-fatal issues.
     pub(crate) diagnostics: Vec<Diagnostic>,
     /// Diagnostics of replayed or recorded interface chains, shared with the recording instead of copied.
@@ -64,17 +82,17 @@ pub(crate) struct ResolveState {
 /// The reads a recorded resolution made, so another component's state can be checked to give the same answers.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct StateReads {
-    /// Cycle-set keys looked up, each with whether it was already there. The keys are long and every enclosing
-    /// recording keeps them again, so they are shared.
-    pub(crate) visited: Vec<(Arc<str>, bool)>,
+    /// Cycle-set keys looked up, each with whether it was already there. Ids, not the long key strings: every enclosing
+    /// recording keeps them again, and copying a number needs no reference count shared between threads.
+    pub(crate) visited: Vec<(u32, bool)>,
     /// `named_in_progress` keys looked up, each with whether it was already there.
-    pub(crate) named: Vec<(Arc<str>, bool)>,
+    pub(crate) named: Vec<(u32, bool)>,
     /// In-scope type parameter names looked up, each with whether it was in scope.
     pub(crate) in_scope: Vec<(CompactString, bool)>,
     /// Prop names whose component default was looked up, with the default found.
     pub(crate) defaults: Vec<(CompactString, Option<(std::string::String, bool)>)>,
     /// Cycle-set keys this state itself added (a branch's own additions are dropped with the branch).
-    pub(crate) visited_added: Vec<Arc<str>>,
+    pub(crate) visited_added: Vec<u32>,
     /// In-scope type parameters this state itself added.
     pub(crate) in_scope_added: Vec<CompactString>,
 }
@@ -143,6 +161,7 @@ impl ResolveState {
             visited: self.visited.clone(),
             named_in_progress: self.named_in_progress.clone(),
             named_high: self.named_in_progress.len(),
+            depth_high: 0,
             diagnostics: Vec::new(),
             shared_diagnostics: Vec::new(),
             in_scope_type_params: self.in_scope_type_params.clone(),
@@ -170,6 +189,7 @@ impl ResolveState {
     pub(crate) fn absorb(&mut self, mut branch: ResolveState) {
         self.absorb_reads(branch.reads.take(), true);
         self.named_high = self.named_high.max(branch.named_high);
+        self.depth_high = self.depth_high.max(branch.depth_high);
         self.diagnostics.extend(branch.diagnostics);
         self.shared_diagnostics.extend(branch.shared_diagnostics);
         self.named_unevaluated |= branch.named_unevaluated;
@@ -179,6 +199,7 @@ impl ResolveState {
     pub(crate) fn absorb_detached(&mut self, mut detached: ResolveState) {
         self.absorb_reads(detached.reads.take(), false);
         self.named_high = self.named_high.max(self.named_in_progress.len() + detached.named_high);
+        self.depth_high = self.depth_high.max(detached.depth_high);
         self.diagnostics.extend(detached.diagnostics);
         self.shared_diagnostics.extend(detached.shared_diagnostics);
         self.named_unevaluated |= detached.named_unevaluated;
@@ -192,28 +213,31 @@ impl ResolveState {
 
     /// Enter `key` into the cycle set; false if it was already there.
     pub(crate) fn visit(&mut self, key: CompactString) -> bool {
-        let Some(reads) = self.reads.as_mut() else { return self.visited.insert(key) };
-        let shared: Arc<str> = Arc::from(key.as_str());
-        let inserted = self.visited.insert(key);
-        if inserted {
-            reads.visited_added.push(Arc::clone(&shared));
+        let id = key_id(&key);
+        let inserted = self.visited.insert(id);
+        if let Some(reads) = self.reads.as_mut() {
+            if inserted {
+                reads.visited_added.push(id);
+            }
+            reads.visited.push((id, !inserted));
         }
-        reads.visited.push((shared, !inserted));
         inserted
     }
 
     /// Enter `key` into `named_in_progress`; false if it was already there.
-    pub(crate) fn enter_named(&mut self, key: CompactString) -> bool {
-        let Some(reads) = self.reads.as_mut() else {
-            let inserted = self.named_in_progress.insert(key);
-            self.named_high = self.named_high.max(self.named_in_progress.len());
-            return inserted;
-        };
-        let shared: Arc<str> = Arc::from(key.as_str());
-        let inserted = self.named_in_progress.insert(key);
-        reads.named.push((shared, !inserted));
+    pub(crate) fn enter_named(&mut self, key: &str) -> bool {
+        let id = key_id(key);
+        let inserted = self.named_in_progress.insert(id);
+        if let Some(reads) = self.reads.as_mut() {
+            reads.named.push((id, !inserted));
+        }
         self.named_high = self.named_high.max(self.named_in_progress.len());
         inserted
+    }
+
+    /// Take `key` out of `named_in_progress`: its resolution has returned.
+    pub(crate) fn leave_named(&mut self, key: &str) {
+        self.named_in_progress.remove(&key_id(key));
     }
 
     /// Whether `name` is a type parameter in scope.
@@ -346,11 +370,11 @@ mod tests {
 
     fn reads(tag: &str) -> StateReads {
         StateReads {
-            visited: vec![(Arc::from(format!("{tag}-visited").as_str()), true)],
-            named: vec![(Arc::from(format!("{tag}-named").as_str()), false)],
+            visited: vec![(key_id(&format!("{tag}-visited")), true)],
+            named: vec![(key_id(&format!("{tag}-named")), false)],
             in_scope: vec![(CompactString::from(format!("{tag}-param")), true)],
             defaults: vec![(CompactString::from(format!("{tag}-prop")), Some(("1".to_owned(), false)))],
-            visited_added: vec![Arc::from(format!("{tag}-added").as_str())],
+            visited_added: vec![key_id(&format!("{tag}-added"))],
             in_scope_added: vec![CompactString::from(format!("{tag}-param-added"))],
         }
     }
@@ -384,12 +408,23 @@ mod tests {
         assert!(!branch.has_type_param("T"));
         parent.absorb(branch);
         let reads = parent.reads.as_ref().map(|reads| format!("{reads:?}"));
+        let id = key_id("a.ts:Props");
         assert_eq!(
             reads.as_deref(),
             Some(
-                "StateReads { visited: [(\"a.ts:Props\", false)], named: [], in_scope: [(\"T\", false)], defaults: [], \
-                 visited_added: [], in_scope_added: [] }"
+                format!(
+                    "StateReads {{ visited: [({id}, false)], named: [], in_scope: [(\"T\", false)], defaults: [], \
+                     visited_added: [], in_scope_added: [] }}"
+                )
+                .as_str()
             )
         );
+    }
+
+    #[test]
+    fn a_key_has_one_id_and_two_keys_have_two() {
+        let a = key_id("a.ts:A<1>");
+        assert_eq!(a, key_id("a.ts:A<1>"));
+        assert_ne!(a, key_id("a.ts:A<2>"));
     }
 }
