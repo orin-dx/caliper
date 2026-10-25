@@ -373,7 +373,11 @@ fn resolve_intersection_chain(
     // HTML layers merged so far whose element's declarations this run has.
     let mut layers: Vec<InheritedLayer> = Vec::new();
     for member in members {
-        let mut member = resolve_base_as_chain(member, file_path, mapping, ctx, state, depth);
+        // Each member is its own branch: a type two members both reach (`Pick<P, K> & Omit<P, K>`, which is Ark's
+        // `Optional`) is not circular, and the cycle set must hold only the members' ancestors, as for an extends entry.
+        let mut branch = state.branch();
+        let mut member = resolve_base_as_chain(member, file_path, mapping, ctx, &mut branch, depth);
+        state.absorb(branch);
         if !layers.is_empty() && !state.keys_only {
             let listed: FxHashSet<&str> = chain.props.iter().map(|prop| prop.name.as_str()).collect();
             for prop in member.props.iter_mut().filter(|prop| !listed.contains(prop.name.as_str())) {
