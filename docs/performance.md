@@ -140,12 +140,12 @@ The earlier lazy-session measurements did not cover Spectrum with both options o
 
 On the five installed parity corpora, `lazy_bench` with dependency loading and full HTML attributes, best of three runs per scenario. `random50` asks 50 seeded components one at a time; `all` asks every listed component in key order. Peak RSS is per process. The comparison uses the same build with the whole-demand threshold at three or 48 growths; this change sets the threshold to three (ADR 0020).
 
-| Corpus | 50 requests: 3 → 48 growths | Peak MB: 3 → 48 | All requests: 3 → 48 | Peak MB: 3 → 48 |
-| --- | --: | --: | --: | --: |
-| Mantine | 30 → 27 ms | 68 → 67 | 163 → 170 ms | 88 → 84 |
-| Chakra | 234 → 271 ms | 107 → 105 | 2,117 → 2,384 ms | 317 → 317 |
-| shadcn | 52 → 72 ms | 144 → 94 | 213 → 272 ms | 159 → 159 |
-| antd | 18 → 46 ms | 71 → 73 | 56 → 126 ms | 81 → 84 |
-| Spectrum | 20 → 47 ms | 102 → 90 | 162 → 222 ms | 134 → 134 |
+| Corpus   | 50 requests: 3 → 48 growths | Peak MB: 3 → 48 | All requests: 3 → 48 | Peak MB: 3 → 48 |
+| -------- | --------------------------: | --------------: | -------------------: | --------------: |
+| Mantine  |                  30 → 27 ms |         68 → 67 |         163 → 170 ms |         88 → 84 |
+| Chakra   |                234 → 271 ms |       107 → 105 |     2,117 → 2,384 ms |       317 → 317 |
+| shadcn   |                  52 → 72 ms |        144 → 94 |         213 → 272 ms |       159 → 159 |
+| antd     |                  18 → 46 ms |         71 → 73 |          56 → 126 ms |         81 → 84 |
+| Spectrum |                  20 → 47 ms |        102 → 90 |         162 → 222 ms |       134 → 134 |
 
 All ten output digests match across thresholds and the pre-chain build. The three-growth chain is also faster than the pre-chain three-growth build on 50 requests for all five corpora: 42 → 30 ms on Mantine, 313 → 234 on Chakra, 61 → 52 on shadcn, 23 → 18 on antd, and 27 → 20 on Spectrum. A file first parsed as a re-export stub must be indexed when later claimed; without that step, 28 shadcn components lost props in the whole-project run. The regression test and forward-order corpus parity check cover it.
