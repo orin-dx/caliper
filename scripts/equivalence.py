@@ -18,8 +18,13 @@ Two optional stages:
   --oracle                   TypeScript 7.1's checker against this build (scripts/parity.py oracle), failing when
                              agreement falls or contradicted props rise past scripts/oracle-baseline.json.
 
+Every stage has a time limit (--timeout-build, --timeout-extract, --timeout-lazy, --timeout-oracle, in seconds). A
+stage that runs over is killed with its whole process group and reported by name with the tail of its output, and the
+run fails: a hung build, child process or deadlocked test can never stall CI silently.
+
 Usage: scripts/equivalence.py [BASE] [--bin BIN] [--corpora DIR] [--corpus NAME]... [--config NAME]... [--lazy MODE]
                               [--oracle] [--examples N] [--allow FILE] [--work DIR] [--out FILE] [--markdown FILE]
+                              [--timeout-build S] [--timeout-extract S] [--timeout-lazy S] [--timeout-oracle S]
   BASE   a git ref (default origin/main; built once per commit in a scratch worktree) or an executable.
   --bin  this build (default: `cargo build --release -p caliper-docgen` in this checkout).
 """
@@ -29,6 +34,7 @@ import fnmatch
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -53,16 +59,43 @@ DEFAULT_ALLOW = os.path.join(ROOT, 'scripts', 'equivalence-allow.json')
 # ─── Builds ───────────────────────────────────────────────────────────────────
 
 
-def run(*args, cwd=ROOT, **kwargs):
-    return subprocess.run(args, cwd=cwd, check=True, **kwargs)
+class StageTimeout(Exception):
+    """A stage ran past its limit and was killed."""
 
 
-def build_head():
-    run('cargo', 'build', '--release', '--locked', '-p', 'caliper-docgen')
+def run_bounded(command, *, stage, timeout, cwd=ROOT, env=None, check=True):
+    """`command` with a hard time limit, no stdin and its own process group, so a timeout kills its children too.
+
+    Returns the CompletedProcess (stdout and stderr captured as text). Raises StageTimeout naming `stage` and showing the
+    tail of what the command printed, or CalledProcessError when `check` and the command fails.
+    """
+    process = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True, start_new_session=True)
+    try:
+        out, err = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        out, err = process.communicate()
+        tail = '\n'.join(((out or '') + (err or '')).strip().splitlines()[-15:])
+        raise StageTimeout(f'{stage} did not finish within {timeout}s and was killed. Last output:\n{tail}') from None
+    if check and process.returncode != 0:
+        raise subprocess.CalledProcessError(process.returncode, command, out, err)
+    return subprocess.CompletedProcess(command, process.returncode, out, err)
+
+
+def run(*args, cwd=ROOT, timeout=None, **kwargs):
+    """A git or cargo step; `timeout` (seconds) bounds it the way `run_bounded` does."""
+    if timeout is None:
+        return subprocess.run(args, cwd=cwd, check=True, **kwargs)
+    return run_bounded(list(args), stage=' '.join(args[:3]), timeout=timeout, cwd=cwd)
+
+
+def build_head(timeout):
+    run('cargo', 'build', '--release', '--locked', '-p', 'caliper-docgen', timeout=timeout)
     return os.path.join(ROOT, 'target', 'release', 'caliper-docgen')
 
 
-def resolve_base(base, work):
+def resolve_base(base, work, timeout):
     """An executable as given; a git ref built once per commit in a scratch worktree, then cached by commit."""
     if os.path.isfile(base) and os.access(base, os.X_OK):
         return os.path.abspath(base)
@@ -77,7 +110,7 @@ def resolve_base(base, work):
     try:
         # One target directory for both builds: the dependencies are shared, only this workspace's crates rebuild.
         run('cargo', 'build', '--release', '--locked', '-p', 'caliper-docgen', '--manifest-path',
-            os.path.join(tree, 'Cargo.toml'), '--target-dir', os.path.join(work, 'base-target'))
+            os.path.join(tree, 'Cargo.toml'), '--target-dir', os.path.join(work, 'base-target'), timeout=timeout)
     finally:
         run('git', 'worktree', 'remove', '--force', tree, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     os.makedirs(os.path.dirname(cached), exist_ok=True)
@@ -88,9 +121,9 @@ def resolve_base(base, work):
 # ─── Canonical form ───────────────────────────────────────────────────────────
 
 
-def extract(binary, src, flags, cache_dir):
-    out = subprocess.run([binary, 'extract', '--src', src, '--cache-dir', cache_dir, *COMMON, *flags],
-                         capture_output=True, text=True, check=True).stdout
+def extract(binary, src, flags, cache_dir, timeout):
+    command = [binary, 'extract', '--src', src, '--cache-dir', cache_dir, *COMMON, *flags]
+    out = run_bounded(command, stage=f'extract {os.path.basename(src)}', timeout=timeout).stdout
     return json.loads(out[out.index('{'):])
 
 
@@ -219,7 +252,7 @@ def compare(args, base_bin, head_bin, patterns):
             for tag, binary in (('base', base_bin), ('head', head_bin)):
                 cache = os.path.join(args.work, 'cache', tag)
                 os.makedirs(cache, exist_ok=True)
-                outputs.append(canonical(extract(binary, src, CONFIGS[name], cache)))
+                outputs.append(canonical(extract(binary, src, CONFIGS[name], cache, args.timeout_extract)))
             found = diff(*outputs)
             unexpected = [d for d in found if not allowed(label, d[0], d[1], patterns)]
             n_components = len(outputs[1]['components'])
@@ -253,15 +286,19 @@ def lazy_parity(args, mode):
         env['CALIPER_PARITY_SRC'] = os.pathsep.join(
             os.path.join(args.corpora, c['clone'], c['src']) for c in parity.selected(args.corpus))
         command.append('--include-ignored')
-    result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True)
+    result = run_bounded(command, stage=f'lazy parity ({mode})', timeout=args.timeout_lazy, env=env, check=False)
     summary = [line for line in result.stdout.splitlines() if line.startswith('test result') or ' FAILED' in line]
     detail = '\n'.join(summary) or result.stderr[-2000:]
+    failures = result.stdout[result.stdout.find('failures:'):] if result.returncode != 0 and 'failures:' in result.stdout else ''
+    if failures:
+        # The panic message of each failed test: without it a failed gate says that it failed and not why.
+        detail += '\n' + failures[:3000]
     return result.returncode == 0, f'lazy parity ({mode}): {"ok" if result.returncode == 0 else "FAILED"}\n{detail}'
 
 
 def oracle_stage(args, head_bin):
     ns = argparse.Namespace(bin=head_bin, corpora=args.corpora, corpus=args.corpus,
-                            work=os.path.join(args.work, 'oracle'))
+                            work=os.path.join(args.work, 'oracle'), timeout=args.timeout_oracle)
     current = parity.oracle(ns)
     with open(args.oracle_baseline) as f:
         baseline = json.load(f)
@@ -295,6 +332,9 @@ def main():
     parser.add_argument('--work', default=os.path.join(ROOT, '.parity', 'equivalence'))
     parser.add_argument('--out')
     parser.add_argument('--markdown')
+    for stage, default in (('build', 2400), ('extract', 600), ('lazy', 1800), ('oracle', 3600)):
+        parser.add_argument(f'--timeout-{stage}', type=int, default=default, metavar='S',
+                            help=f'seconds the {stage} stage may take (default {default})')
     args = parser.parse_args()
     args.corpora = os.path.abspath(args.corpora)
     args.work = os.path.abspath(args.work)
@@ -302,17 +342,25 @@ def main():
 
     with open(args.allow) as f:
         patterns = json.load(f)['allow']
-    head_bin = os.path.abspath(args.bin) if args.bin else build_head()
-    base_bin = resolve_base(args.base, args.work)
+    try:
+        head_bin = os.path.abspath(args.bin) if args.bin else build_head(args.timeout_build)
+        base_bin = resolve_base(args.base, args.work, args.timeout_build)
+    except StageTimeout as timeout:
+        sys.exit(f'{timeout}')
 
-    failures, lines = compare(args, base_bin, head_bin, patterns)
-    ok = failures == 0
-    if args.lazy != 'off':
-        good, text = lazy_parity(args, args.lazy)
-        ok, lines = ok and good, lines + [text]
-    if args.oracle:
-        good, text = oracle_stage(args, head_bin)
-        ok, lines = ok and good, lines + [text]
+    ok, lines = True, []
+    for name, stage in (
+        ('compare', lambda: (lambda f, l: (f == 0, l))(*compare(args, base_bin, head_bin, patterns))),
+        ('lazy', lambda: lazy_parity(args, args.lazy) if args.lazy != 'off' else (True, [])),
+        ('oracle', lambda: oracle_stage(args, head_bin) if args.oracle else (True, [])),
+    ):
+        # A stage that hangs fails the run with its name, and the stages after it still run and report.
+        try:
+            good, text = stage()
+        except (StageTimeout, subprocess.TimeoutExpired) as timeout:
+            good, text = False, f'{name} stage: TIMED OUT\n{timeout}'
+        ok = ok and good
+        lines += text if isinstance(text, list) else [text] if text else []
 
     verdict = 'Output is equivalent to the base.' if ok else 'Output differs from the base, or a gate failed.'
     text = '\n'.join(lines + ['', verdict])

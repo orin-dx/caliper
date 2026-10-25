@@ -45,6 +45,7 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
       srcDirs: resolvedSrcDirs,
       exclude: options.exclude,
       htmlAttributes: options.htmlAttributes ?? (options.skipHtmlProps ? ('none' as const) : undefined),
+      cache: options.cache,
       loadDependencies: options.loadDependencies,
       collapseInheritedProps: options.collapseInheritedProps,
     }

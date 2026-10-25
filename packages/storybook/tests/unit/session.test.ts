@@ -211,6 +211,15 @@ describe('DocgenSession.fresh', () => {
     await full.fresh()
     expect(seen[1]).toMatchObject({ htmlAttributes: 'full' })
   })
+
+  it('turns the on-disk caches off when told to, and leaves them to the binding otherwise', async () => {
+    const fake = new FakeBinding({})
+    const seen: unknown[] = []
+    fake.createSession = ((options: unknown) => (seen.push(options), 7)) as never
+    await new DocgenSession({ srcDirs: [src], cache: false }, fake).fresh()
+    await new DocgenSession({ srcDirs: [src] }, fake).fresh()
+    expect(seen).toMatchObject([{ cache: false }, { cache: undefined }])
+  })
 })
 
 describe('DocgenSession, lazy', () => {

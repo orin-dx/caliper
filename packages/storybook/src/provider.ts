@@ -56,6 +56,7 @@ export function createDocgenProvider(
     tsconfigPath: options.tsconfigPath && resolve(cwd, options.tsconfigPath),
     skipHtmlProps: options.skipHtmlProps,
     htmlAttributes: options.htmlAttributes,
+    cache: options.cache,
     // Richer than Storybook's own docgen by default: caliper-docgen is fast enough to read the dependencies' types.
     loadDependencies: options.loadDependencies ?? true,
     collapseInheritedProps: options.collapseInheritedProps ?? 'none',

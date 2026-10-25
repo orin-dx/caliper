@@ -99,6 +99,9 @@ pub struct JsExtractOptions {
     pub tsconfig_path: Option<String>,
     pub extra_builtins: Option<Vec<String>>,
     pub cache_dir: Option<String>,
+    /// Read and write the on-disk caches (default `true`). `false` reads and writes nothing under `cacheDir`; the
+    /// output is the same.
+    pub cache: Option<bool>,
     /// Load the dependency type declarations project types reference (off by default).
     pub load_dependencies: Option<bool>,
     /// Which inherited sources of more than 30 props to list as one layer (default `'dependencies'`).
@@ -148,6 +151,9 @@ impl TryFrom<JsExtractOptions> for PipelineOptions {
         }
         if let Some(dir) = js.cache_dir {
             opts.cache_dir = Some(dir.into());
+        }
+        if let Some(cache) = js.cache {
+            opts.use_cache = cache;
         }
         if let Some(load) = js.load_dependencies {
             opts.load_dependencies = load;
@@ -526,6 +532,7 @@ mod tests {
             tsconfig_path: None,
             extra_builtins: None,
             cache_dir: None,
+            cache: None,
             load_dependencies: None,
             collapse_inherited_props: None,
             lazy: None,
@@ -540,6 +547,10 @@ mod tests {
         assert_eq!(opts.html_attributes, defaults.html_attributes);
         assert_eq!(opts.extra_builtins, defaults.extra_builtins);
         assert_eq!(opts.cache_dir, defaults.cache_dir);
+        assert!(opts.use_cache, "the cache is on unless asked off");
+        let off =
+            PipelineOptions::try_from(JsExtractOptions { cache: Some(false), ..base_options() }).expect("convert");
+        assert!(!off.use_cache, "`cache: false` turns it off");
         assert_eq!(opts.load_dependencies, defaults.load_dependencies);
     }
 

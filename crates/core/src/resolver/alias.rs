@@ -708,7 +708,7 @@ fn resolve_key_set(
     state: &mut ResolveState,
     depth: u8,
 ) -> Option<Vec<String>> {
-    if depth > super::MAX_DEPTH {
+    if super::past_max_depth(state, depth) {
         return None;
     }
     match keys {

@@ -32,6 +32,7 @@ fn start_session(
     let options = build_options(BuildOptionsArgs {
         src: &args.src,
         cache_dir: None,
+        no_cache: false,
         html_attributes: None,
         config_path,
         extra_builtins: &[],

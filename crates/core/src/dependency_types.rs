@@ -333,7 +333,7 @@ impl Loader<'_> {
             ModuleResolution::File(_) => Err(Unresolved::NoTypes),
             ModuleResolution::Unresolved(_) => Err(Unresolved::Unresolvable),
         };
-        self.learned.store(true, Ordering::Relaxed);
+        self.learn(Utf8Path::new(dir));
         self.resolutions.insert(key, result.clone());
         result
     }
@@ -377,7 +377,9 @@ impl Loader<'_> {
         if own_cut {
             *cut = true;
         } else {
-            self.learned.store(true, Ordering::Relaxed);
+            if let Some(dir) = module.parent() {
+                self.learn(dir);
+            }
             self.exports.insert(key, found.clone());
         }
         found
@@ -527,6 +529,14 @@ impl Loader<'_> {
         }
     }
 
+    /// Note that an answer about `dir` is new, when `write_index` would keep it. A project file's own imports are
+    /// resolved on every run and never reach the index, so they must not make a warm run rewrite it.
+    fn learn(&self, dir: &Utf8Path) {
+        if dir.as_str().contains("/node_modules/") && self.package_of(dir).is_some() {
+            self.learned.store(true, Ordering::Relaxed);
+        }
+    }
+
     fn package_of(&self, dir: &Utf8Path) -> Option<Box<str>> {
         if let Some(found) = self.packages.get(dir.as_str()) {
             return found.clone();
@@ -605,7 +615,8 @@ pub(crate) fn load(
         packages: DashMap::default(),
         learned: AtomicBool::new(false),
     };
-    let index_path = index_path(options);
+    // With the cache off the index is neither read nor written, and the run learns everything again.
+    let index_path = options.use_cache.then(|| index_path(options));
     match previous {
         Some(previous) => {
             for (key, value) in &previous.resolutions {
@@ -630,7 +641,11 @@ pub(crate) fn load(
                 loader.react_files.insert(file.clone());
             }
         }
-        None => read_index(&index_path, &loader),
+        None => {
+            if let Some(path) = &index_path {
+                read_index(path, &loader);
+            }
+        }
     }
     rayon::scope(|scope| {
         for demand in demands {
@@ -641,8 +656,10 @@ pub(crate) fn load(
             });
         }
     });
-    if previous.is_none() && loader.learned.load(Ordering::Relaxed) {
-        write_index(&index_path, &loader);
+    if let (None, Some(path)) = (previous, &index_path) {
+        if loader.learned.load(Ordering::Relaxed) {
+            write_index(path, &loader);
+        }
     }
 
     let mut files: Vec<PathKey> = loader.declaring.iter().map(|f| f.clone()).collect();
@@ -707,7 +724,7 @@ struct IndexFile {
 /// Next to the parse cache, named by the resolution fingerprint so a changed configuration or build never reads
 /// another's answers.
 fn index_path(options: &PipelineOptions) -> (Utf8PathBuf, u64) {
-    let dir = options.cache_dir.clone().unwrap_or_else(|| Utf8PathBuf::from("node_modules/.cache/caliper-docgen"));
+    let dir = options.effective_cache_dir();
     let fingerprint = crate::resolver::resolution_fingerprint(options);
     (dir.join(format!("dependency-index-{fingerprint:016x}.msgpack")), fingerprint)
 }

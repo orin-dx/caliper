@@ -67,6 +67,11 @@ export interface JsExtractOptions {
   tsconfigPath?: string
   extraBuiltins?: Array<string>
   cacheDir?: string
+  /**
+   * Read and write the on-disk caches (default `true`). `false` reads and writes nothing under `cacheDir`; the
+   * output is the same.
+   */
+  cache?: boolean
   /** Load the dependency type declarations project types reference (off by default). */
   loadDependencies?: boolean
   /** Which inherited sources of more than 30 props to list as one layer (default `'dependencies'`). */

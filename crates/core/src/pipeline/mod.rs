@@ -108,8 +108,13 @@ pub struct PipelineOptions {
     pub tsconfig_path: Option<Utf8PathBuf>,
     /// Additional builtin type names beyond the React standard set.
     pub extra_builtins: FxHashSet<compact_str::CompactString>,
-    /// Cache directory. Defaults to `node_modules/.cache/caliper-docgen`.
+    /// Cache directory. Defaults to `node_modules/.cache/caliper-docgen` under the nearest ancestor of the first source
+    /// directory that has a `node_modules` or a `package.json` (a directory in the OS temp directory when there is
+    /// none), so the CLI, the Vite plugin and the Storybook addon share one cache whatever directory they run from.
     pub cache_dir: Option<Utf8PathBuf>,
+    /// Read and write the on-disk caches (the declaration parse cache and the dependency index) under `cache_dir`.
+    /// Off, a run reads and writes nothing there and parses everything; its output is the same. On by default.
+    pub use_cache: bool,
     /// Custom docgen extension plugins.
     pub plugins: crate::plugin::PluginRegistry,
     /// Load the dependency declarations project types reference, by name, before resolving (ADR 0010). Off by default:
@@ -137,11 +142,37 @@ impl Default for PipelineOptions {
             tsconfig_path: None,
             extra_builtins: Default::default(),
             cache_dir: None,
+            use_cache: true,
             plugins: crate::plugin::PluginRegistry::default(),
             load_dependencies: false,
             collapse_inherited_props: CollapseInheritedProps::default(),
             experimental_semantic_types: false,
             semantic_tsc_path: None,
+        }
+    }
+}
+
+impl PipelineOptions {
+    /// Where the parse and dependency caches live: `cache_dir` when set, else `node_modules/.cache/caliper-docgen`
+    /// under the nearest ancestor of the first source directory that has a `node_modules` or a `package.json`, so
+    /// running from another directory neither misses the project's cache nor creates a `node_modules` there. A source
+    /// directory in no project gets a directory in the OS temp directory.
+    pub(crate) fn effective_cache_dir(&self) -> Utf8PathBuf {
+        if let Some(dir) = &self.cache_dir {
+            return dir.clone();
+        }
+        const CACHE: &str = "node_modules/.cache/caliper-docgen";
+        let root = canonicalize_first_src_dir(&self.src_dirs).and_then(|src| {
+            src.ancestors()
+                .find(|dir| dir.join("node_modules").is_dir() || dir.join("package.json").is_file())
+                .map(Utf8Path::to_owned)
+        });
+        match root {
+            Some(root) => root.join(CACHE),
+            None => {
+                let temp = std::env::temp_dir();
+                Utf8PathBuf::from_path_buf(temp).unwrap_or_else(|_| Utf8PathBuf::from(".")).join("caliper-docgen-cache")
+            }
         }
     }
 }
@@ -293,26 +324,43 @@ pub fn extract(options: &PipelineOptions) -> ExtractionOutput {
 /// directly with no diagnostics drain at all: an excessive-nesting trip or a
 /// parse error while parsing either file would have been silently discarded,
 /// since `GlobalSourceData` itself has no diagnostics field to catch it later.
+#[cfg(test)]
 pub(super) fn merge_cached_dts_file(
     path: &Utf8Path,
     cache: &DtsCache,
     global: &mut GlobalSourceData,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // An unreadable file is reported and skipped; parsing "" instead would cache an empty result under this path.
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) => {
-            diagnostics.push(Diagnostic::io_read_error(path, &error));
-            return;
-        }
-    };
-    let mut data = match cache.get(path, &source) {
+    merge_parsed_dts_file(path, parse_cached_dts_file(path, cache), global, diagnostics);
+}
+
+/// Read and parse one declaration file through the cache. An unreadable file is an error and is not parsed: parsing ""
+/// instead would cache an empty result under this path.
+pub(super) fn parse_cached_dts_file(path: &Utf8Path, cache: &DtsCache) -> Result<SourceData, Diagnostic> {
+    let source = std::fs::read_to_string(path).map_err(|error| Diagnostic::io_read_error(path, &error))?;
+    Ok(match cache.get(path, &source) {
         Some(cached) => cached,
         None => {
             let data = crate::extractor::parse_file(path, &source);
             cache.insert(path, &source, data.clone());
             data
+        }
+    })
+}
+
+/// [`parse_cached_dts_file`]'s result merged into `global`, with the parse's diagnostics (or the read error) added to
+/// `diagnostics`. Split from the parse so a run can parse these files while it parses the project's.
+pub(super) fn merge_parsed_dts_file(
+    path: &Utf8Path,
+    parsed: Result<SourceData, Diagnostic>,
+    global: &mut GlobalSourceData,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut data = match parsed {
+        Ok(data) => data,
+        Err(diagnostic) => {
+            diagnostics.push(diagnostic);
+            return;
         }
     };
     diagnostics.append(&mut data.diagnostics);

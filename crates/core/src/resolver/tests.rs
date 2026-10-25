@@ -2902,6 +2902,51 @@ export function Q(props: Y) { return null; }
     assert_eq!(memo::recording_counts(&shared.interface_chains)[&format!("{dir}/Comp.tsx:Base")], 2);
 }
 
+#[test]
+fn an_interface_chain_reached_at_different_depths_is_one_recording_with_the_same_answer() {
+    // A reaches Base at depth 1 and B at depth 3; nothing in Base's resolution is near the depth limit, so one recording
+    // answers both (the key once held the depth, and Base was resolved again at each one).
+    let (_tmp, dir) = canonical_temp_dir();
+    let source = r#"
+interface Base { label: string; size?: number }
+interface M2 extends Base { m2?: boolean }
+interface M1 extends M2 { m1?: boolean }
+interface AProps extends Base { a?: string }
+interface BProps extends M1 { b?: string }
+export function A(props: AProps) { return null; }
+export function B(props: BProps) { return null; }
+"#;
+    let (shared, results) = resolve_shared(&dir, &[("Comp.tsx", source)], &["A", "B"]);
+
+    let names = |component: &str| results[component].0.props.keys().map(String::as_str).collect::<Vec<_>>();
+    assert_eq!(names("A"), ["a", "label", "size"]);
+    assert_eq!(names("B"), ["b", "label", "m1", "m2", "size"]);
+    assert_eq!(memo::recording_counts(&shared.interface_chains)[&format!("{dir}/Comp.tsx:Base")], 1);
+}
+
+#[test]
+fn an_interface_chain_that_hit_the_depth_limit_is_not_reused_from_a_shallower_start() {
+    // P walks a 25-interface extends chain from the top and stops at the limit, so its recording of the chain from L10
+    // holds a depth-exceeded stop; Q starts at L10 itself and reaches the bottom. `resolve_shared` checks that each
+    // resolves as it does alone.
+    let (_tmp, dir) = canonical_temp_dir();
+    let interfaces: String = (0..25)
+        .map(|i| match i {
+            24 => format!("interface L{i} {{ p{i}?: string }}\n"),
+            _ => format!("interface L{i} extends L{} {{ p{i}?: string }}\n", i + 1),
+        })
+        .collect();
+    let source = format!(
+        "{interfaces}export function P(props: L0) {{ return null; }}\nexport function Q(props: L10) {{ return null; }}\n"
+    );
+    let (_shared, results) = resolve_shared(&dir, &[("Comp.tsx", &source)], &["P", "Q"]);
+
+    let count = |component: &str| results[component].0.props.len();
+    assert_eq!((count("P"), count("Q")), (21, 15));
+    assert!(results["P"].1.iter().any(|d| d.message.contains("Max resolution depth")), "{:?}", results["P"].1);
+    assert!(results["Q"].1.iter().all(|d| !d.message.contains("Max resolution depth")), "{:?}", results["Q"].1);
+}
+
 // `import React from "react"` of an `export =` module binds the module's namespace, as `import * as React` does, so
 // `React.CSSProperties` names the same member under either spelling (antd imports React the first way).
 #[test]

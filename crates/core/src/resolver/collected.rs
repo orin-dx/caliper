@@ -8,7 +8,7 @@ use super::func::{resolve_function_type, resolve_typeof};
 use super::named::resolve_named;
 use super::primitives::{resolve_indexed_access, resolve_intersection, resolve_union};
 use super::template::resolve_template_literal;
-use super::{ResolutionContext, MAX_DEPTH};
+use super::ResolutionContext;
 
 /// Central dispatch: convert a `CollectedType` to a `PropType`.
 /// Never re-parses strings — everything is already structured.
@@ -20,7 +20,7 @@ pub fn resolve_collected_type(
     state: &mut ResolveState,
     depth: u8,
 ) -> PropType {
-    if depth > MAX_DEPTH {
+    if super::past_max_depth(state, depth) {
         let diag = super::max_depth_diagnostic(&format!("type '{}'", ct.to_raw_string()), consuming_file);
         return OpaqueDetail::give_up(state, ct.to_raw_string(), OpaqueReason::DepthExceeded, diag);
     }

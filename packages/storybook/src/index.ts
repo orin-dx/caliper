@@ -11,6 +11,11 @@ export interface CaliperStorybookOptions {
    */
   htmlAttributes?: 'curated' | 'full' | 'none'
   /**
+   * Read and write the on-disk caches under `node_modules/.cache`. Default: `true`; `false` reads and writes nothing
+   * there and parses everything every run. The output is the same.
+   */
+  cache?: boolean
+  /**
    * Load the type declarations your props reference from installed packages, so props typed by a library resolve
    * instead of degrading. Default: `true`; `false` skips the extra work.
    */

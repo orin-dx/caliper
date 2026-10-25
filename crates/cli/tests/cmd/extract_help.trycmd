@@ -24,6 +24,11 @@ Options:
       --cache-dir <CACHE_DIR>
           Cache directory
 
+      --no-cache
+          Neither read nor write the on-disk caches (the declaration parse cache
+          and the dependency index); the output is the same, a run just parses
+          everything
+
       --html-attributes <HTML_ATTRIBUTES>
           How much of an inherited HTML element's attributes to expose
 
@@ -43,20 +48,23 @@ Options:
           omits them by default as react-docgen-typescript does. Canonical
           output always keeps them, marked `exported: false`
 
+  -v, --verbose...
+          Verbose output (repeat for more: -v, -vv)
+
   -j, --json
           Machine-readable JSON output: the canonical schema, compact, always to
           stdout, ignoring --out/--format (which govern the human/RDT/TOON paths
           below), and suppresses the human-readable summary/diagnostics
 
-  -v, --verbose...
-          Verbose output (repeat for more: -v, -vv)
+  -q, --quiet
+          Suppress all non-error output
+
+      --config <CONFIG>
+          Path to docgen.config.ts
 
       --load-dependencies
           Load the type declarations props reference from installed packages
           (off by default)
-
-  -q, --quiet
-          Suppress all non-error output
 
       --collapse-inherited-props <COLLAPSE_INHERITED_PROPS>
           Which inherited sources of more than 30 props to list as one inherited
@@ -66,9 +74,6 @@ Options:
           - dependencies: Sources from loaded dependencies (default)
           - all:          Dependency and project sources
           - none:         List every prop
-
-      --config <CONFIG>
-          Path to docgen.config.ts
 
       --experimental-semantic-types
           Experimental: ask TypeScript 7.1's `tsc --api` for each component's

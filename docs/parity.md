@@ -79,6 +79,12 @@ Checker types are normalized once per type id and verdicts made once per pair, s
 
 The checker finds more components than Caliper on antd and Spectrum because, like RDT, it counts every exported function with one parameter. "Less precise" on Spectrum is mostly `Responsive<DimensionValue>` printed without its object form. The beta needs two workarounds, both in `oracle.ts`: compiler options must come from `parseConfigFile` (its server panics on string-valued enum options passed to `createProgram`), and `true`/`false` literal types carry no `value`, so they are read with `typeToString`.
 
+## Setting up the corpora
+
+`parity.py setup` fetches each repo at its pinned commit and installs it with its own package manager (corepack shims at the versions each `packageManager` field pins). A corpus that fails to fetch or install is named on stderr with the tail of its install log (`.parity/logs/install-<name>.log`), as a GitHub annotation and in the job summary; the other corpora still install, and the command exits non-zero naming the failed ones.
+
+`--install-node-dir DIR` runs only the corpora's installs with the `node` in `DIR`. The weekly workflow uses it to install under Node 24, because Yarn 4.18, which Mantine and React Spectrum pin, crashes under the repository's Node 26 with `Dynamic require of "util" is not supported`. Everything else in the job keeps the toolchain's Node.
+
 ## Equivalence with a base build
 
 A change to how the resolver works (memos, interning, scheduling) should change speed, not output. `scripts/equivalence.py` checks that: it runs `extract --json` from a base build and from this checkout on the corpora, in four configurations (default, `--load-dependencies`, `--html-attributes full`, both; unexported components included), and compares the canonical forms. Canonical means the interned `props`, `propSets` and `nameLists` tables are expanded where they are used, and `durationMs` and the declaration-cache counters are dropped. Nothing else is ignored.
@@ -91,6 +97,8 @@ Two further stages:
 
 - `--lazy {off,fixtures,all}` runs `crates/core/tests/lazy_parity.rs`, the lazy session against batch extraction: the fixtures, and with `all` the selected corpora's sources (`CALIPER_PARITY_SRC`).
 - `--oracle` compares the build with TypeScript 7.1's checker as `parity.py oracle` does and fails when agreement falls or the props the checker contradicts rise past `scripts/oracle-baseline.json`. It prints the wrong and less-precise rates next to the baseline's. A change that moves cycle or depth behavior needs this, because the snapshots cannot say whether the new output is closer to the checker.
+
+Every stage has a time limit: `--timeout-build` (default 2400 s), `--timeout-extract` (600), `--timeout-lazy` (1800) and `--timeout-oracle` (3600). A stage that runs over is killed together with its child processes, reported by name with the tail of its output, and fails the run; the stages after it still run. The children get no stdin. A stage that waits for input or deadlocks can no longer stall CI silently. `python3 -I -B scripts/test_equivalence.py` tests the limits.
 
 ```bash
 python3 scripts/parity.py setup --corpus mantine --corpus shadcn

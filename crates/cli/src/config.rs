@@ -16,6 +16,7 @@ struct DocgenConfigSchema {
     html_attributes: Option<String>,
     tsconfig_path: Option<String>,
     cache_dir: Option<String>,
+    cache: Option<bool>,
     extra_builtins: Option<Vec<String>>,
     load_dependencies: Option<bool>,
     collapse_inherited_props: Option<String>,
@@ -46,6 +47,9 @@ impl DocgenConfigSchema {
         }
         if let Some(dir) = self.cache_dir {
             opts.cache_dir = Some(dir.into());
+        }
+        if let Some(cache) = self.cache {
+            opts.use_cache = cache;
         }
         if let Some(names) = self.extra_builtins {
             opts.extra_builtins = names.into_iter().map(Into::into).collect();
@@ -182,6 +186,8 @@ pub fn try_load_config(path: &std::path::Path) -> Result<Option<PipelineOptions>
 pub struct BuildOptionsArgs<'a> {
     pub src: &'a [String],
     pub cache_dir: Option<&'a str>,
+    /// `--no-cache`: turns the on-disk caches off over the config; absent leaves the config's choice.
+    pub no_cache: bool,
     pub html_attributes: Option<&'a str>,
     pub config_path: Option<&'a str>,
     pub extra_builtins: &'a [String],
@@ -205,6 +211,9 @@ pub fn build_options(args: BuildOptionsArgs) -> Result<PipelineOptions> {
     }
     if let Some(dir) = args.cache_dir {
         opts.cache_dir = Some(dir.into());
+    }
+    if args.no_cache {
+        opts.use_cache = false;
     }
     if let Some(mode) = args.html_attributes {
         opts.html_attributes = HtmlAttributeMode::parse(mode).map_err(|bad| {

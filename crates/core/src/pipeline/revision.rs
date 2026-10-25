@@ -24,8 +24,8 @@ use super::discover::{discover_files, is_source_file, should_skip};
 
 mod lazy;
 use super::{
-    canonicalize_first_src_dir, collect_public_enums, merge_cached_dts_file, resolve_guarded, HtmlAttributeMode,
-    IncrementalUpdate, PipelineOptions,
+    canonicalize_first_src_dir, collect_public_enums, merge_parsed_dts_file, parse_cached_dts_file, resolve_guarded,
+    HtmlAttributeMode, IncrementalUpdate, PipelineOptions,
 };
 pub use lazy::{ComponentAnswer, ComponentLocation};
 
@@ -33,15 +33,64 @@ pub use lazy::{ComponentAnswer, ComponentLocation};
 /// also declares has both types, as in Full mode, while every other name still resolves without React's declarations.
 /// No `@types/react` means no lookups, as before, and no diagnostic: curated mode never needed it.
 fn curated_react_types(
-    options: &PipelineOptions,
-    cache: &DtsCache,
+    react_dts: &Utf8Path,
+    parsed: Result<SourceData, Diagnostic>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Option<Arc<NamedTypeIndex>> {
-    let from_dir = canonicalize_first_src_dir(&options.src_dirs)?;
-    let react_dts = Utf8PathBuf::from(crate::resolver::resolve_package_dts_path(&from_dir, "react", options)?);
+) -> Arc<NamedTypeIndex> {
     let mut react = GlobalSourceData::default();
-    merge_cached_dts_file(&react_dts, cache, &mut react, diagnostics);
-    Some(Arc::new(NamedTypeIndex::build(&react)))
+    merge_parsed_dts_file(react_dts, parsed, &mut react, diagnostics);
+    Arc::new(NamedTypeIndex::build(&react))
+}
+
+/// The declaration files every cold run merges besides the project's own, found and parsed. They depend on nothing the
+/// project's parse produces, so a run does this while it parses the project (see [`Indexed::build`]).
+struct AmbientDts {
+    react: ReactDts,
+    /// TypeScript's lib files, in merge order, parsed.
+    libs: Vec<(Utf8PathBuf, Result<SourceData, Diagnostic>)>,
+    /// Set when the installed `typescript` lacks a lib file.
+    libs_diagnostic: Option<Diagnostic>,
+}
+
+/// `@types/react`, as far as the HTML attribute mode needs it.
+enum ReactDts {
+    /// The mode does not use it, so it was not looked for.
+    NotWanted,
+    /// Looked for and not found; Full mode reports it.
+    Missing,
+    Found(Box<(Utf8PathBuf, Result<SourceData, Diagnostic>)>),
+}
+
+impl AmbientDts {
+    fn load(options: &PipelineOptions, cache: &DtsCache) -> AmbientDts {
+        let from_dir = canonicalize_first_src_dir(&options.src_dirs);
+        // Full mode falls back to the current directory; curated mode needs a source directory.
+        let react_from = match options.html_attributes {
+            HtmlAttributeMode::Full => Some(from_dir.clone().unwrap_or_else(|| Utf8PathBuf::from("."))),
+            HtmlAttributeMode::Curated => from_dir.clone(),
+            _ => None,
+        };
+        let react_wanted = react_from.is_some();
+        let react_path = react_from
+            .and_then(|from| crate::resolver::resolve_package_dts_path(&from, "react", options).map(Utf8PathBuf::from));
+        let (lib_paths, libs_diagnostic) = match &from_dir {
+            Some(from_dir) => {
+                let libs = crate::resolver::resolve_ts_lib_paths(from_dir);
+                (libs.paths.into_iter().map(Utf8PathBuf::from).collect::<Vec<_>>(), libs.diagnostic)
+            }
+            None => (Vec::new(), None),
+        };
+        // One pass over react's file and the libs, so they parse side by side.
+        let files: Vec<&Utf8Path> = react_path.iter().chain(&lib_paths).map(Utf8PathBuf::as_path).collect();
+        let mut parsed =
+            files.par_iter().map(|path| parse_cached_dts_file(path, cache)).collect::<Vec<_>>().into_iter();
+        let react = match react_path {
+            Some(path) => parsed.next().map_or(ReactDts::Missing, |parsed| ReactDts::Found(Box::new((path, parsed)))),
+            None if react_wanted => ReactDts::Missing,
+            None => ReactDts::NotWanted,
+        };
+        AmbientDts { react, libs: lib_paths.into_iter().zip(parsed).collect(), libs_diagnostic }
+    }
 }
 
 /// A component's identity across revisions: its file, its name, and which same-named declaration in that file it is.
@@ -122,6 +171,14 @@ pub(crate) struct Revision {
     lazy: Option<lazy::Lazy>,
 }
 
+/// Frees `value` on another thread. Freeing a large project's parsed data or memos one allocation at a time takes tens
+/// of milliseconds, and the caller only wants what it already took out.
+fn free_in_background<T: Send + 'static>(value: T) {
+    let spawned = std::thread::Builder::new().name("caliper-drop".into()).spawn(move || drop(value));
+    // A failed spawn drops the closure, and the value with it, right here.
+    drop(spawned);
+}
+
 /// The mapping identities of `global`, in output order: by file, then by position in the file.
 fn component_ids<'g>(
     global: &'g GlobalSourceData,
@@ -187,7 +244,10 @@ impl Indexed {
         let start = Instant::now();
         let mut head_diagnostics = source_dir_diagnostics(options);
 
-        let cache = Arc::new(DtsCache::load_from_disk(options.cache_dir.as_deref()));
+        let cache = Arc::new(match options.use_cache {
+            true => DtsCache::load_from_disk(Some(&options.effective_cache_dir())),
+            false => DtsCache::in_memory(),
+        });
         head_diagnostics.extend(cache.load_diagnostic().cloned());
 
         let (src_files, discover_diagnostics) = discover_files(&options.src_dirs, &options.exclude_patterns);
@@ -195,21 +255,28 @@ impl Indexed {
 
         // The whole closure body is wrapped in `contain_panic` so one file's parse panicking degrades to a per-file
         // diagnostic instead of poisoning the `.collect()` and crashing the whole extraction run.
-        let parsed: Vec<(Utf8PathBuf, SourceData, Option<Diagnostic>)> = src_files
-            .par_iter()
-            .map(|path| {
-                let label = format!("parse:{path}");
-                crate::panic_guard::contain_panic(&label, || {
-                    #[cfg(test)]
-                    if path.file_name() == Some(super::PARSE_PANIC_TEST_SENTINEL) {
-                        panic!("simulated parse-phase panic (test-only sentinel)");
-                    }
-                    let (data, io_diag) = parse_source_file(path, &cache);
-                    (path.clone(), data, io_diag)
-                })
-                .unwrap_or_else(|diag| (path.clone(), SourceData::default(), Some(diag)))
-            })
-            .collect();
+        // TypeScript's lib files and `@types/react` are the same files whatever the project, and cost 10-12 ms to parse on
+        // a cold cache: parse them alongside the project's files instead of after them.
+        let (ambient, parsed): (AmbientDts, Vec<(Utf8PathBuf, SourceData, Option<Diagnostic>)>) = rayon::join(
+            || AmbientDts::load(options, &cache),
+            || {
+                src_files
+                    .par_iter()
+                    .map(|path| {
+                        let label = format!("parse:{path}");
+                        crate::panic_guard::contain_panic(&label, || {
+                            #[cfg(test)]
+                            if path.file_name() == Some(super::PARSE_PANIC_TEST_SENTINEL) {
+                                panic!("simulated parse-phase panic (test-only sentinel)");
+                            }
+                            let (data, io_diag) = parse_source_file(path, &cache);
+                            (path.clone(), data, io_diag)
+                        })
+                        .unwrap_or_else(|diag| (path.clone(), SourceData::default(), Some(diag)))
+                    })
+                    .collect()
+            },
+        );
 
         let mut global = GlobalSourceData::default();
         let mut file_diagnostics: BTreeMap<Utf8PathBuf, Vec<Diagnostic>> = BTreeMap::new();
@@ -230,34 +297,31 @@ impl Indexed {
         let mut lib_diagnostics = Vec::new();
         // Full HTML attribute mode needs @types/react's real interfaces merged before resolution, so the resolver can
         // look them up like any other interface instead of only recording an InheritedLayer.
-        if options.html_attributes == HtmlAttributeMode::Full {
-            let from_dir = canonicalize_first_src_dir(&options.src_dirs).unwrap_or_else(|| Utf8PathBuf::from("."));
-            match crate::resolver::resolve_package_dts_path(&from_dir, "react", options) {
-                Some(react_dts_path) => {
-                    let react_dts_path = Utf8PathBuf::from(react_dts_path);
-                    merge_cached_dts_file(&react_dts_path, &cache, &mut global, &mut lib_diagnostics);
-                }
-                None => lib_diagnostics.push(
-                    Diagnostic::new(
-                        DiagnosticSeverity::Warning,
-                        DiagnosticCode::MissingTypeLibrary,
-                        "HtmlAttributeMode::Full requested but @types/react could not be resolved",
-                    )
-                    .with_help("Check that @types/react is installed. Falling back to curated attributes."),
-                ),
+        let mut react_types = None;
+        match (ambient.react, options.html_attributes) {
+            (ReactDts::Found(found), HtmlAttributeMode::Full) => {
+                let (path, parsed) = *found;
+                merge_parsed_dts_file(&path, parsed, &mut global, &mut lib_diagnostics);
             }
+            (ReactDts::Found(found), _) => {
+                let (path, parsed) = *found;
+                react_types = Some(curated_react_types(&path, parsed, &mut lib_diagnostics));
+            }
+            (ReactDts::Missing, HtmlAttributeMode::Full) => lib_diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticSeverity::Warning,
+                    DiagnosticCode::MissingTypeLibrary,
+                    "HtmlAttributeMode::Full requested but @types/react could not be resolved",
+                )
+                .with_help("Check that @types/react is installed. Falling back to curated attributes."),
+            ),
+            (ReactDts::Missing | ReactDts::NotWanted, _) => {}
         }
-        let react_types = (options.html_attributes == HtmlAttributeMode::Curated)
-            .then(|| curated_react_types(options, &cache, &mut lib_diagnostics))
-            .flatten();
         // Ambient globals (Date, Element, ...) live in TS's lib files and are never imported, so merge them in every
         // mode. An install missing a lib file (TS 7 without its platform package) is reported here.
-        if let Some(from_dir) = canonicalize_first_src_dir(&options.src_dirs) {
-            let libs = crate::resolver::resolve_ts_lib_paths(&from_dir);
-            lib_diagnostics.extend(libs.diagnostic);
-            for lib_path in libs.paths {
-                merge_cached_dts_file(&Utf8PathBuf::from(lib_path), &cache, &mut global, &mut lib_diagnostics);
-            }
+        lib_diagnostics.extend(ambient.libs_diagnostic);
+        for (lib_path, parsed) in ambient.libs {
+            merge_parsed_dts_file(&lib_path, parsed, &mut global, &mut lib_diagnostics);
         }
 
         Indexed {
@@ -374,10 +438,7 @@ impl Revision {
         let mut revision = Revision::resolve_cold(options, 0);
         let mut resolved = std::mem::take(&mut revision.resolved);
         let (output, _) = revision.assemble(options, |id| resolved.remove(id).map(Resolved::into_parts));
-        // Freeing the parsed project takes milliseconds on a large one, and the caller only wants the output.
-        let spawned = std::thread::Builder::new().name("caliper-drop".into()).spawn(move || drop(revision));
-        // A failed spawn drops the closure, and the revision with it, right here; the output is unaffected.
-        drop(spawned);
+        free_in_background(revision);
         output
     }
 
@@ -412,6 +473,9 @@ impl Revision {
         .with_react_types(react_types.clone());
         lib_diagnostics.extend(ctx.tsconfig_diagnostic.clone());
         let resolved = resolve_all(&component_ids(&global, options), &ctx);
+        // Every component is resolved, so the memos are garbage: free them beside output assembly. A failed spawn
+        // drops the context on this thread instead.
+        drop(std::thread::Builder::new().name("caliper-drop".into()).spawn(move || drop(ctx)));
         let files = Arc::new(src_files.into_iter().collect());
 
         let (dts_files_parsed, dts_cache_hits) = cache.counts();
@@ -732,10 +796,11 @@ impl DiagnosticSet {
     /// The diagnostics by file, position and message; run-wide ones (no file) first.
     fn finish(self) -> Vec<Diagnostic> {
         let mut items = self.items;
-        for diagnostic in &mut items {
-            diagnostic.affects.sort();
+        // Chakra with dependencies lists hundreds of thousands of component keys across its diagnostics.
+        items.par_iter_mut().for_each(|diagnostic| {
+            diagnostic.affects.sort_unstable();
             diagnostic.affects.dedup();
-        }
+        });
         // Severity by explicit rank, worst first, and code by name: neither enum's declaration order is an ordering.
         items.sort_by(|a, b| {
             (&a.file, a.line, a.column, &a.message)

@@ -23,7 +23,7 @@ wrong, or no checker type. Its --check fails when agreement falls or wrong verdi
 
 docs/parity.md explains the measures.
 
-Usage: scripts/parity.py setup [--corpora DIR] [--corpus NAME]...
+Usage: scripts/parity.py setup [--corpora DIR] [--corpus NAME]... [--install-node-dir DIR]
        scripts/parity.py run --bin BIN [--base-bin BIN] [--corpora DIR] [--rdt-dir DIR] [--corpus NAME]...
                              [--runs N] [--no-timing] [--out FILE] [--markdown FILE] [--baseline FILE] [--check]
        scripts/parity.py oracle --bin BIN [--corpora DIR] [--corpus NAME | fixtures]... [--work DIR] [--out FILE]
@@ -154,6 +154,14 @@ def fetch(corpus, checkout):
             time.sleep(5)
 
 
+def tail(path, lines=30):
+    try:
+        with open(path) as f:
+            return ''.join(f.readlines()[-lines:])
+    except OSError:
+        return ''
+
+
 def install(corpus, checkout, base, env, log):
     caches = os.path.join(base, 'caches')
     pnpm = ['--store-dir', os.path.join(caches, 'pnpm-store'), f"--config.cache-dir={os.path.join(caches, 'pnpm-cache')}"]
@@ -166,7 +174,9 @@ def install(corpus, checkout, base, env, log):
     }[corpus['manager']]
     # The lockfile first; a lockfile the pinned package manager rejects falls back to resolving again.
     for command in commands:
-        if subprocess.run(command, cwd=checkout, env=env, stdout=log, stderr=log).returncode == 0:
+        log.write(f"\n$ {' '.join(command)}  (node {subprocess.run(['node', '--version'], env=env, capture_output=True, text=True).stdout.strip()})\n")
+        log.flush()
+        if subprocess.run(command, cwd=checkout, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log).returncode == 0:
             return
     raise RuntimeError(f"{corpus['name']}: dependency install failed, see {log.name}")
 
@@ -195,21 +205,42 @@ def setup(args):
     env = package_manager_env(base)
     with open(os.path.join(base, 'logs', 'corepack.log'), 'w') as log:
         ensure_package_managers(base, env, log)
+    # The corpora's own package managers can need an older Node than this repository's (Yarn 4.18, which Mantine and
+    # React Spectrum pin, crashes under Node 26). Only their installs run under it.
+    install_env = dict(env)
+    if args.install_node_dir:
+        install_env['PATH'] = os.path.abspath(args.install_node_dir) + os.pathsep + env['PATH']
+    failed = []
     for corpus in selected(args.corpus):
         checkout = os.path.join(corpora_dir, corpus['clone'])
         marker = os.path.join(checkout, '.parity-complete')
         if os.path.exists(marker) and open(marker).read() == corpus['commit']:
             print(f"{corpus['name']}: ready at {corpus['commit'][:12]}")
             continue
-        print(f"{corpus['name']}: fetching {corpus['commit'][:12]}", flush=True)
-        fetch(corpus, checkout)
-        print(f"{corpus['name']}: installing with {corpus['manager']}", flush=True)
-        with open(os.path.join(base, 'logs', f"install-{corpus['name']}.log"), 'w') as log:
-            install(corpus, checkout, base, env, log)
-        prune(os.path.join(checkout, corpus['src']))
-        with open(marker, 'w') as f:
-            f.write(corpus['commit'])
-        print(f"{corpus['name']}: ready at {corpus['commit'][:12]}")
+        log_path = os.path.join(base, 'logs', f"install-{corpus['name']}.log")
+        try:
+            print(f"{corpus['name']}: fetching {corpus['commit'][:12]}", flush=True)
+            fetch(corpus, checkout)
+            print(f"{corpus['name']}: installing with {corpus['manager']}", flush=True)
+            with open(log_path, 'w') as log:
+                install(corpus, checkout, base, install_env, log)
+            prune(os.path.join(checkout, corpus['src']))
+            with open(marker, 'w') as f:
+                f.write(corpus['commit'])
+            print(f"{corpus['name']}: ready at {corpus['commit'][:12]}")
+        except (subprocess.CalledProcessError, RuntimeError, OSError) as error:
+            # One corpus failing must not hide the others: say which one and why, then carry on with the rest.
+            failed.append(corpus['name'])
+            reason = f"{corpus['name']}: setup FAILED ({error})"
+            print(f"{reason}\n--- last lines of {log_path}\n{tail(log_path)}---", file=sys.stderr, flush=True)
+            if os.environ.get('GITHUB_ACTIONS'):
+                print(f"::error title=Parity corpus {corpus['name']} failed to set up::{error}", flush=True)
+    if failed:
+        summary = os.environ.get('GITHUB_STEP_SUMMARY')
+        if summary:
+            with open(summary, 'a') as f:
+                f.write(f"### Corpus setup failed\n\n{', '.join(failed)}: see the install logs in the parity artifact.\n")
+        sys.exit(f"setup failed for: {', '.join(failed)}")
 
 
 # ─── Measures ─────────────────────────────────────────────────────────────────
@@ -460,6 +491,9 @@ def oracle(args):
     with open(os.path.join(validate, 'node_modules', 'typescript-beta', 'package.json')) as f:
         typescript = json.load(f)['version']
     version = subprocess.run([args.bin, '--version'], capture_output=True, text=True).stdout.strip()
+    # Each child gets no stdin and, when the caller sets `args.timeout`, a time limit (equivalence.py does): a child
+    # that waits for input or hangs raises TimeoutExpired instead of stalling the run.
+    limits = {'stdin': subprocess.DEVNULL, 'timeout': getattr(args, 'timeout', None)}
     report = {'caliper': version, 'typescript': typescript, 'corpora': {}}
     for name, root, src in oracle_targets(args.corpus, corpora_dir):
         if not os.path.isdir(src):
@@ -467,7 +501,7 @@ def oracle(args):
         caliper_json = os.path.join(work, f'{name}.caliper.json')
         with open(caliper_json, 'w') as f:
             subprocess.run([args.bin, 'extract', '--src', src, '--json', '--html-attributes', 'full',
-                            '--include-unexported', '--load-dependencies', '--quiet'], stdout=f, check=True)
+                            '--include-unexported', '--load-dependencies', '--quiet'], stdout=f, check=True, **limits)
         list_file, tsconfig = program_inputs(name, src, work)
         verdicts = os.path.join(work, f'{name}.oracle.json')
         dump = os.path.join(work, f'{name}.oracle-props.json')
@@ -476,7 +510,7 @@ def oracle(args):
         subprocess.run(['pnpm', '--dir', validate, 'exec', 'tsx', 'src/oracle.ts', '--root', root, '--src', src,
                         '--tsconfig', tsconfig, '--caliper', caliper_json, '--out', verdicts, '--files', list_file,
                         '--dump', dump],
-                       check=True)
+                       check=True, **limits)
         with open(verdicts) as f:
             entry = json.load(f)
         entry['wall_ms'] = round((time.time() - start) * 1000)
@@ -648,6 +682,7 @@ def main():
     p_setup = sub.add_parser('setup', help='fetch, install and prune the corpora')
     p_setup.add_argument('--corpora', default=default_corpora)
     p_setup.add_argument('--corpus', action='append', default=[])
+    p_setup.add_argument('--install-node-dir', help="a directory with the `node` the corpora's installs should use")
     p_run = sub.add_parser('run', help='measure a build against RDT')
     p_run.add_argument('--bin', required=True)
     p_run.add_argument('--base-bin')
