@@ -92,6 +92,8 @@ Two further stages:
 - `--lazy {off,fixtures,all}` runs `crates/core/tests/lazy_parity.rs`, the lazy session against batch extraction: the fixtures, and with `all` the selected corpora's sources (`CALIPER_PARITY_SRC`).
 - `--oracle` compares the build with TypeScript 7.1's checker as `parity.py oracle` does and fails when agreement falls or the props the checker contradicts rise past `scripts/oracle-baseline.json`. It prints the wrong and less-precise rates next to the baseline's. A change that moves cycle or depth behavior needs this, because the snapshots cannot say whether the new output is closer to the checker.
 
+Every stage has a time limit: `--timeout-build` (default 2400 s), `--timeout-extract` (600), `--timeout-lazy` (1800) and `--timeout-oracle` (3600). A stage that runs over is killed together with its child processes, reported by name with the tail of its output, and fails the run; the stages after it still run. The children get no stdin. A stage that waits for input or deadlocks can no longer stall CI silently. `python3 -I -B scripts/test_equivalence.py` tests the limits.
+
 ```bash
 python3 scripts/parity.py setup --corpus mantine --corpus shadcn
 just equivalence origin/main --corpus mantine --corpus shadcn --lazy fixtures    # a git ref is built once per commit

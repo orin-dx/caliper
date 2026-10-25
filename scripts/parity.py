@@ -460,6 +460,9 @@ def oracle(args):
     with open(os.path.join(validate, 'node_modules', 'typescript-beta', 'package.json')) as f:
         typescript = json.load(f)['version']
     version = subprocess.run([args.bin, '--version'], capture_output=True, text=True).stdout.strip()
+    # Each child gets no stdin and, when the caller sets `args.timeout`, a time limit (equivalence.py does): a child
+    # that waits for input or hangs raises TimeoutExpired instead of stalling the run.
+    limits = {'stdin': subprocess.DEVNULL, 'timeout': getattr(args, 'timeout', None)}
     report = {'caliper': version, 'typescript': typescript, 'corpora': {}}
     for name, root, src in oracle_targets(args.corpus, corpora_dir):
         if not os.path.isdir(src):
@@ -467,7 +470,7 @@ def oracle(args):
         caliper_json = os.path.join(work, f'{name}.caliper.json')
         with open(caliper_json, 'w') as f:
             subprocess.run([args.bin, 'extract', '--src', src, '--json', '--html-attributes', 'full',
-                            '--include-unexported', '--load-dependencies', '--quiet'], stdout=f, check=True)
+                            '--include-unexported', '--load-dependencies', '--quiet'], stdout=f, check=True, **limits)
         list_file, tsconfig = program_inputs(name, src, work)
         verdicts = os.path.join(work, f'{name}.oracle.json')
         dump = os.path.join(work, f'{name}.oracle-props.json')
@@ -476,7 +479,7 @@ def oracle(args):
         subprocess.run(['pnpm', '--dir', validate, 'exec', 'tsx', 'src/oracle.ts', '--root', root, '--src', src,
                         '--tsconfig', tsconfig, '--caliper', caliper_json, '--out', verdicts, '--files', list_file,
                         '--dump', dump],
-                       check=True)
+                       check=True, **limits)
         with open(verdicts) as f:
             entry = json.load(f)
         entry['wall_ms'] = round((time.time() - start) * 1000)
