@@ -1,7 +1,7 @@
 name: Equivalence
 
 # Does a change to the resolver, extractor, types or pipeline alter what Caliper publishes? Runs scripts/equivalence.py
-# against main on two of the parity corpora with their dependencies loaded (docs/parity.md). Non-blocking for now:
+# against main on two of the parity corpora (chakra, shadcn) with their dependencies loaded (docs/parity.md). Non-blocking for now:
 # `continue-on-error` keeps a diff or a slow install from failing the pull request until the job has run long enough to
 # trust. The aim is under six minutes; the corpus installs dominate and are cached by their package managers' stores.
 # The full set runs in the weekly parity workflow.
@@ -53,11 +53,13 @@ jobs:
         with:
           path: .parity/caches
           key: equivalence-${{ hashFiles('scripts/parity.py') }}
+      # Two pnpm corpora: yarn 4.18, which mantine and spectrum pin, crashes under the repo's Node 26
+      # ("Dynamic require of "util" is not supported"), so those two run only where their installs are cached.
       - name: Fetch and install two corpora
-        run: python3 scripts/parity.py setup --corpus mantine --corpus shadcn
+        run: python3 scripts/parity.py setup --corpus chakra --corpus shadcn
       - name: Compare with main
         run: >-
-          python3 scripts/equivalence.py origin/main --corpus mantine --corpus shadcn
+          python3 scripts/equivalence.py origin/main --corpus chakra --corpus shadcn
           --config deps --config deps+html-full --lazy fixtures --markdown equivalence.md
       - if: always()
         run: cat equivalence.md >> "$GITHUB_STEP_SUMMARY" || true

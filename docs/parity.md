@@ -96,7 +96,7 @@ just equivalence origin/main --corpus mantine --corpus shadcn --lazy fixtures   
 just equivalence ./caliper-before --bin target/release/caliper-docgen --oracle   # or an executable
 ```
 
-`.github/workflows/equivalence.yml` runs it on pull requests that touch `crates/core/src/{resolver,extractor,types,pipeline}`: mantine and shadcn with dependencies loaded, against `main`. It is non-blocking (`continue-on-error`) until it has run long enough to trust, and its time is not yet measured in CI; the corpus installs are the cost. The weekly parity workflow runs all five corpora and the lazy parity over their sources.
+`.github/workflows/equivalence.yml` runs it on pull requests that touch `crates/core/src/{resolver,extractor,types,pipeline}`: chakra and shadcn with dependencies loaded, against `main` (the two pnpm corpora: yarn 4.18, which mantine and spectrum pin, crashes under Node 26 with `Dynamic require of "util" is not supported`). It is non-blocking (`continue-on-error`) until it has run long enough to trust, and its time is not yet measured in CI; the corpus installs are the cost. The weekly parity workflow runs all five corpora and the lazy parity over their sources.
 
 ## Running it
 
