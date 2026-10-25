@@ -1,12 +1,12 @@
 # CLI commands
 
-**Source:** `crates/cli/src/main.rs`, `crates/cli/src/config.rs`, `crates/cli/src/output.rs`, `crates/cli/src/commands/mod.rs`, `crates/cli/src/commands/extract.rs`, `crates/cli/src/commands/check.rs`, `crates/cli/src/commands/watch.rs`, `crates/cli/src/commands/inspect.rs`, `crates/cli/src/commands/lsp.rs`, `crates/cli/src/commands/schema.rs`, `crates/cli/src/commands/completions.rs`, `crates/cli/AGENTS.md`
+**Source:** `crates/cli/src/main.rs`, `crates/cli/src/config.rs`, `crates/cli/src/output.rs`, `crates/cli/src/commands/mod.rs`, `crates/cli/src/commands/extract.rs`, `crates/cli/src/commands/check.rs`, `crates/cli/src/commands/watch.rs`, `crates/cli/src/commands/inspect.rs`, `crates/cli/src/commands/schema.rs`, `crates/cli/src/commands/completions.rs`, `crates/cli/AGENTS.md`
 
 This is the thin command layer sitting on top of `caliper-docgen-core::pipeline`. It owns nothing about extraction — only argument parsing, calling into the pipeline, formatting output, and deciding the process exit code. Per `crates/cli/AGENTS.md`: "no extraction logic," "no `println!` in command handlers" outside `output.rs`/tracing, and config loading must avoid command injection.
 
 ## Command inventory
 
-Seven subcommands, dispatched in `main.rs:180-197`:
+Six subcommands, dispatched in `main.rs`:
 
 | Command       | Handler                              | Returns       | `--strict`                           |
 | ------------- | ------------------------------------ | ------------- | ------------------------------------ |
@@ -15,7 +15,6 @@ Seven subcommands, dispatched in `main.rs:180-197`:
 | `check`       | `cmd_check` (`check.rs`)             | `Result<i32>` | yes — `exit_code(args.strict)`       |
 | `inspect`     | `cmd_inspect` (`inspect.rs`)         | `Result<i32>` | no flag; always `exit_code(false)`   |
 | `schema`      | `cmd_schema` (`schema.rs`)           | `Result<()>`  | n/a — always exit 0                  |
-| `lsp`         | `cmd_lsp` (`lsp.rs`)                 | `Result<()>`  | n/a — long-running stdio loop        |
 | `completions` | `cmd_completions` (`completions.rs`) | `Result<()>`  | n/a — pure codegen, no pipeline call |
 
 `main()` (`main.rs:175-203`) is the **sole `std::process::exit` call site** in the crate. Every command handler returns a `Result<i32>` (or hardcodes `0` inline for the three that don't call the pipeline), and `main()` maps a non-zero return to `process::exit(exit_code)` after the match. This is stated explicitly in `cmd_extract`'s doc comment (`extract.rs:6-9`) and repeated in `cmd_check`'s (`check.rs:6-8`): keeping the exit decision out of command handlers is what makes it testable — `cmd_extract`/`cmd_check`/`cmd_inspect`/`cmd_watch` all have unit tests that call the handler directly and assert on the returned `i32`, without needing a subprocess harness or capturing a real process exit.
@@ -44,10 +43,6 @@ Seven subcommands, dispatched in `main.rs:180-197`:
 
 11. **`inspect` must still surface Error-severity diagnostics found elsewhere in the source tree, even when the specifically-inspected component is clean.** `inspect.rs:82` calls `output.exit_code(false)` unconditionally after a successful component lookup, using the full `output` from `pipeline::extract`, not a filtered view scoped to just `args.component`. The test `inspect_surfaces_error_exit_code_from_diagnostics_elsewhere_in_the_tree` pins this down with a fixture where the inspected component (`Comp.tsx`) is valid but a sibling file (`Bad.tsx`) has a parse error, asserting exit code `2`.
 
-12. **LSP frame reads must reject an oversized `Content-Length` _before_ allocating the receive buffer.** `lsp.rs:15-25`, `check_content_length`, runs against `MAX_LSP_MESSAGE_BYTES` (16 MiB) before `vec![0u8; len]` (`lsp.rs:98`) ever executes. `Content-Length` is client-controlled input with no inherent upper bound; allocating first and checking after would let a malformed or hostile client trigger an unbounded allocation.
-
-13. **A malformed or headerless LSP frame closes the connection — it must never `continue` past an unconsumed body.** `read_content_length` (`lsp.rs:38-56`) distinguishes `Err(())` (true stream EOF, a normal disconnect) from `Ok(None)` (a header block _was_ read up to the blank-line terminator, but had no usable `Content-Length`). The caller (`lsp.rs:89-94`) treats `Ok(None)` as a hard error and returns, rather than looping again — looping again would desync every subsequent frame, since that message's un-read body bytes would be misinterpreted as the start of the next header block. Tests `test_headerless_frame_is_reported_as_malformed_not_eof` and `test_true_stream_eof_is_distinct_from_a_malformed_header_block` pin the two cases apart.
-
 ## LOCKED DESIGN DECISIONS
 
 **Exit-code logic lives in `core/types/output.rs`, not the CLI crate, despite `crates/core/AGENTS.md`'s "no terminal/display code in `crates/core`" rule.** This looks like a rule violation at first glance — exit codes are a very CLI-flavored concept. It isn't: `docs/root-cause-analysis.md` cluster 11 documents that this was originally a _doc-comment convention re-typed per command_ (`extract.rs` and `check.rs` each independently implemented the same 0/1/2 check with syntactically different code, and `cmd_watch` used to return `()` with `main.rs` hardcoding exit `0` for that arm, and `cmd_inspect` never touched `output.diagnostics` at all). The fix — `impl ExtractionOutput { pub fn exit_code(&self, strict: bool) -> i32 }` in core — was deliberately scoped as "pure data-in/data-out, same category as the existing `html_element()` helper," which is why it doesn't violate the core/no-terminal-code rule: `exit_code()` computes an `i32` from data, it doesn't print anything or touch a terminal. Do not "fix" this by moving the logic into the CLI crate; that would resurrect the exact duplication cluster 11 documents.
@@ -72,11 +67,9 @@ The `composes` field (react-docgen's own "props come from this type, listed by n
 
 `schema_value()` (`schema.rs:7-99`) is a **hand-maintained** JSON Schema for `ExtractionOutput` — there's no `#[derive(JsonSchema)]` generating it from the real struct. The module doc comment names this precedent ("Hand-maintained per ADR-0002-style precedent") and pairs it with `schema_covers_every_field_name_the_real_output_serializes` (`schema.rs:117-211`), which builds a fully-populated real `ExtractionOutput`, serializes it, walks every key name that appears in the real JSON, and asserts each one appears somewhere in the hand-written schema string. This is a **name-presence check, not a shape/type check** — it would catch a field being added to `ComponentEntry` and forgotten in `schema_value()`, but it would not catch the schema describing the wrong _type_ for a field that already has the right _name_. Extending a field's type without touching its name passes this test silently.
 
-## `lsp.rs` — explicit scaffold, not a feature
+## No language server
 
-This command is honestly incomplete by design, not partially-broken. Its module doc comment says only "Provides IDE hover and component prop documentation in editors" as an eventual goal; the actual `initialize` response (`lsp.rs:60-75`) advertises `"hoverProvider": false` with an inline comment explaining exactly why: "No `textDocument/hover` handler exists in the method dispatch below (it falls into the `_ => {}` catch-all) — advertising `true` would make a client's hover request, which carries an `id`, hang forever waiting for a response that never comes." The method dispatch (`lsp.rs:107-133`) only actually implements `initialize`, `shutdown`, and `exit`; everything else — including any real `textDocument/hover` handling that would make this command useful — falls into the silent catch-all.
-
-This scaffold status is the resolution of three items `docs/edge-cases.md` lists as previously-real bugs, all now fixed (cross-reference P1-2, P1-6, P1-7 in that file): the unbounded-allocation risk from an unchecked `Content-Length` (fixed by `check_content_length`, Invariant 10), `hoverProvider` previously advertised as `true` with no handler behind it (fixed — now `false`, with the regression test `test_hover_not_advertised_without_a_handler` pinning it), and the malformed-header desync bug (fixed — now closes rather than continuing, Invariant 11). None of those historical bugs remain; what remains is that hover itself is simply not implemented yet, honestly reflected by the capability flag rather than a stub that pretends to work.
+A `lsp` subcommand existed as a scaffold (framing and the initialize/shutdown/exit lifecycle, `hoverProvider: false`) and was removed: editors already get hover and completion from the TypeScript language server, and the value caliper adds, the documentation view of a component, is served to tools through the lazy session API instead. `docs/edge-cases.md` P1-2, P1-6 and P1-7 and `docs/root-cause-analysis.md` cluster 6 describe bugs in that scaffold and are kept as history. The bounded-framing code that `crates/tsc-client` ported from it lives on there.
 
 ## KNOWN GAPS
 

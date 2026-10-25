@@ -43,24 +43,24 @@ Options:
           Extra type names to treat as recognized/builtin (no "unknown type"
           warning) — e.g. a library-specific type this tool doesn't already know
 
+  -v, --verbose...
+          Verbose output (repeat for more: -v, -vv)
+
       --include-unexported
           Keep components their module doesn't export in `--format rdt`, which
           omits them by default as react-docgen-typescript does. Canonical
           output always keeps them, marked `exported: false`
-
-  -v, --verbose...
-          Verbose output (repeat for more: -v, -vv)
-
-  -j, --json
-          Machine-readable JSON output: the canonical schema, compact, always to
-          stdout, ignoring --out/--format (which govern the human/RDT/TOON paths
-          below), and suppresses the human-readable summary/diagnostics
 
   -q, --quiet
           Suppress all non-error output
 
       --config <CONFIG>
           Path to docgen.config.ts
+
+  -j, --json
+          Machine-readable JSON output: the canonical schema, compact, always to
+          stdout, ignoring --out/--format (which govern the human/RDT/TOON paths
+          below), and suppresses the human-readable summary/diagnostics
 
       --load-dependencies
           Load the type declarations props reference from installed packages
