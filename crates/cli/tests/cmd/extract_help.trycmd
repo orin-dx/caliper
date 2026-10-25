@@ -63,8 +63,13 @@ Options:
           Path to docgen.config.ts
 
       --load-dependencies
-          Load the type declarations props reference from installed packages
-          (off by default)
+          Load the type declarations props reference from installed packages (on
+          by default; this flag turns it back on over a config that sets
+          `loadDependencies: false`)
+
+      --no-load-dependencies
+          Do not load the type declarations props reference from installed
+          packages
 
       --collapse-inherited-props <COLLAPSE_INHERITED_PROPS>
           Which inherited sources of more than 30 props to list as one inherited

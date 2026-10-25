@@ -12,6 +12,7 @@ pub fn cmd_inspect(args: crate::InspectArgs, config_path: Option<&str>) -> Resul
         config_path,
         extra_builtins: &[],
         load_dependencies: args.load_dependencies,
+        no_load_dependencies: args.no_load_dependencies,
         collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
     let output = caliper_docgen_core::pipeline::extract(&options);
@@ -61,6 +62,7 @@ export interface BrokenProps {
             component: "Comp".into(),
             src: vec![dir.to_string()],
             load_dependencies: false,
+            no_load_dependencies: false,
             collapse_inherited_props: None,
         };
         let code = cmd_inspect(args, None).expect("cmd_inspect should find Comp and not error");
@@ -88,6 +90,7 @@ export interface BrokenProps {
             component: "Comp".into(),
             src: vec![dir.to_string()],
             load_dependencies: false,
+            no_load_dependencies: false,
             collapse_inherited_props: None,
         };
         let code = cmd_inspect(args, None).expect("cmd_inspect should find Comp and not error");
@@ -113,6 +116,7 @@ export interface BrokenProps {
             component: "NoSuchComponent".into(),
             src: vec![dir.to_string()],
             load_dependencies: false,
+            no_load_dependencies: false,
             collapse_inherited_props: None,
         };
         let err = cmd_inspect(args, None).expect_err("expected an Err for a component that doesn't exist");
