@@ -177,7 +177,7 @@ pub(super) fn resolve_indexed_access(
     // `const`-asserted array of literals is exactly the array's own values.
     if let (CollectedType::TypeOf(name), CollectedType::Number) = (obj, key) {
         super::deps::record_bare_name(name);
-        if ctx.const_array_bare_index.contains_key(name.as_str()) {
+        if const_array_values(name, consuming_file, ctx).is_some() {
             let mut members = Vec::new();
             collect_const_array_members(name, consuming_file, ctx, state, &mut members, &mut Vec::new());
             return PropType::LiteralUnion { members, has_default: false };
@@ -316,6 +316,21 @@ impl PropsRead {
     }
 }
 
+/// The members of the array-typed const `name`, as the symbol in scope in `consuming_file` (TypeScript reads `typeof X`
+/// from the file that wrote it, project or dependency: Radix's `Align` is `(typeof ALIGN_OPTIONS)[number]` over
+/// `declare const ALIGN_OPTIONS: readonly [...]` in the same `.d.ts`), else the array of that name the project declares
+/// (an import of it, which this does not follow by file).
+fn const_array_values<'a>(
+    name: &str,
+    consuming_file: &Utf8Path,
+    ctx: &'a ResolutionContext,
+) -> Option<&'a [EnumValue]> {
+    ctx.named_types.lookup_const_array(consuming_file, name).or_else(|| {
+        let key = ctx.const_array_bare_index.get(name)?;
+        ctx.global.const_arrays.get(key.as_str()).map(Vec::as_slice)
+    })
+}
+
 /// The values of the `as const` array `name` in order, the elements of an array it spreads (`...PresetColors`) in
 /// place. A spread of an array that is not in the project, or that is already being read (a cycle), leaves its elements
 /// out and says so; the rest of the array stays.
@@ -327,8 +342,7 @@ fn collect_const_array_members(
     members: &mut Vec<String>,
     reading: &mut Vec<String>,
 ) {
-    let Some(values) = ctx.const_array_bare_index.get(name).and_then(|key| ctx.global.const_arrays.get(key.as_str()))
-    else {
+    let Some(values) = const_array_values(name, consuming_file, ctx) else {
         return;
     };
     reading.push(name.to_owned());
@@ -343,7 +357,7 @@ fn collect_const_array_members(
         super::deps::record_bare_name(spread);
         if reading.iter().any(|reading| reading == spread) {
             state.diagnostics.push(const_array_spread_diagnostic(spread, "spreads itself", consuming_file));
-        } else if ctx.const_array_bare_index.contains_key(spread.as_str()) {
+        } else if const_array_values(spread, consuming_file, ctx).is_some() {
             collect_const_array_members(spread, consuming_file, ctx, state, members, reading);
         } else {
             state.diagnostics.push(const_array_spread_diagnostic(
