@@ -95,6 +95,29 @@ impl StateReads {
             self.in_scope_added.extend(other.in_scope_added.iter().cloned());
         }
     }
+
+    /// `append` for an `other` nobody reads again: its entries move instead of being cloned (a refcount bump each) and
+    /// dropped (another).
+    pub(crate) fn append_owned(&mut self, mut other: StateReads, with_cycle_sets: bool, with_effects: bool) {
+        if with_cycle_sets {
+            move_all(&mut self.visited, &mut other.visited);
+            move_all(&mut self.named, &mut other.named);
+        }
+        move_all(&mut self.in_scope, &mut other.in_scope);
+        move_all(&mut self.defaults, &mut other.defaults);
+        if with_effects {
+            move_all(&mut self.visited_added, &mut other.visited_added);
+            move_all(&mut self.in_scope_added, &mut other.in_scope_added);
+        }
+    }
+}
+
+fn move_all<T>(into: &mut Vec<T>, from: &mut Vec<T>) {
+    if into.is_empty() {
+        std::mem::swap(into, from);
+    } else {
+        into.append(from);
+    }
 }
 
 /// A component's resolution diagnostics: its own, and chunks shared with the interface-chain recordings it replayed.
@@ -144,8 +167,8 @@ impl ResolveState {
 
     /// Take a branch's diagnostics and whether it named an unevaluated alias. Its cycle sets and in-scope additions
     /// stay with the branch.
-    pub(crate) fn absorb(&mut self, branch: ResolveState) {
-        self.absorb_reads(&branch, true);
+    pub(crate) fn absorb(&mut self, mut branch: ResolveState) {
+        self.absorb_reads(branch.reads.take(), true);
         self.named_high = self.named_high.max(branch.named_high);
         self.diagnostics.extend(branch.diagnostics);
         self.shared_diagnostics.extend(branch.shared_diagnostics);
@@ -153,17 +176,17 @@ impl ResolveState {
     }
 
     /// `absorb` for a `detached` state.
-    pub(crate) fn absorb_detached(&mut self, detached: ResolveState) {
-        self.absorb_reads(&detached, false);
+    pub(crate) fn absorb_detached(&mut self, mut detached: ResolveState) {
+        self.absorb_reads(detached.reads.take(), false);
         self.named_high = self.named_high.max(self.named_in_progress.len() + detached.named_high);
         self.diagnostics.extend(detached.diagnostics);
         self.shared_diagnostics.extend(detached.shared_diagnostics);
         self.named_unevaluated |= detached.named_unevaluated;
     }
 
-    fn absorb_reads(&mut self, other: &ResolveState, same_cycle_sets: bool) {
-        if let (Some(reads), Some(theirs)) = (self.reads.as_mut(), other.reads.as_ref()) {
-            reads.append(theirs, same_cycle_sets, false);
+    fn absorb_reads(&mut self, theirs: Option<Box<StateReads>>, same_cycle_sets: bool) {
+        if let (Some(reads), Some(theirs)) = (self.reads.as_mut(), theirs) {
+            reads.append_owned(*theirs, same_cycle_sets, false);
         }
     }
 
@@ -314,5 +337,59 @@ impl GlobalSourceData {
         self.import_map.remove(file_path);
         self.re_export_map.remove(file_path);
         self.component_mappings.retain(|m| m.file_path != file_path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reads(tag: &str) -> StateReads {
+        StateReads {
+            visited: vec![(Arc::from(format!("{tag}-visited").as_str()), true)],
+            named: vec![(Arc::from(format!("{tag}-named").as_str()), false)],
+            in_scope: vec![(CompactString::from(format!("{tag}-param")), true)],
+            defaults: vec![(CompactString::from(format!("{tag}-prop")), Some(("1".to_owned(), false)))],
+            visited_added: vec![Arc::from(format!("{tag}-added").as_str())],
+            in_scope_added: vec![CompactString::from(format!("{tag}-param-added"))],
+        }
+    }
+
+    #[test]
+    fn append_owned_takes_what_append_takes_for_every_flag_combination() {
+        for with_cycle_sets in [false, true] {
+            for with_effects in [false, true] {
+                for start_empty in [false, true] {
+                    let start = if start_empty { StateReads::default() } else { reads("mine") };
+                    let theirs = reads("theirs");
+                    let mut cloned = start.clone();
+                    cloned.append(&theirs, with_cycle_sets, with_effects);
+                    let mut moved = start;
+                    moved.append_owned(theirs, with_cycle_sets, with_effects);
+                    assert_eq!(
+                        format!("{moved:?}"),
+                        format!("{cloned:?}"),
+                        "with_cycle_sets={with_cycle_sets} with_effects={with_effects} start_empty={start_empty}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn absorbing_a_branch_moves_its_reads_into_a_recording_parent() {
+        let mut parent = ResolveState { reads: Some(Box::default()), ..ResolveState::default() };
+        let mut branch = parent.branch();
+        assert!(branch.visit(CompactString::from("a.ts:Props")));
+        assert!(!branch.has_type_param("T"));
+        parent.absorb(branch);
+        let reads = parent.reads.as_ref().map(|reads| format!("{reads:?}"));
+        assert_eq!(
+            reads.as_deref(),
+            Some(
+                "StateReads { visited: [(\"a.ts:Props\", false)], named: [], in_scope: [(\"T\", false)], defaults: [], \
+                 visited_added: [], in_scope_added: [] }"
+            )
+        );
     }
 }

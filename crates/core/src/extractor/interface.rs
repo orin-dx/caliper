@@ -23,6 +23,21 @@ fn as_const_literal<'a, 'b>(decl: &'b VariableDeclarator<'a>) -> Option<(std::st
     Some((id.name.as_str().to_owned(), inner))
 }
 
+/// The value a literal type stands for: `"a"`, `1`, `-1`, `true`.
+fn literal_member(ty: &TSType<'_>) -> Option<EnumValue> {
+    let TSType::TSLiteralType(lit) = ty else { return None };
+    match &lit.literal {
+        TSLiteral::StringLiteral(s) => Some(EnumValue::String(s.value.as_str().to_owned())),
+        TSLiteral::NumericLiteral(n) => Some(EnumValue::Number(n.value)),
+        TSLiteral::BooleanLiteral(b) => Some(EnumValue::Bool(b.value)),
+        TSLiteral::UnaryExpression(u) if u.operator == UnaryOperator::UnaryNegation => match &u.argument {
+            Expression::NumericLiteral(n) => Some(EnumValue::Number(-n.value)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 impl<'src> SourceDataCollector<'src> {
     // ─── `const` enum (as-const objects) collection ──────────────────────────
 
@@ -63,24 +78,56 @@ impl<'src> SourceDataCollector<'src> {
     /// separately in `SourceData::const_arrays` — see that field's doc comment
     /// for why it isn't folded into `enums`.
     pub(super) fn try_collect_const_array<'a>(&mut self, decl: &VariableDeclarator<'a>) {
-        let Some((name, arr_expr)) = as_const_literal(decl) else { return };
+        let Some((name, arr_expr)) = as_const_literal(decl) else {
+            self.try_collect_annotated_tuple(decl);
+            return;
+        };
 
         let arr = match arr_expr {
             Expression::ArrayExpression(a) => a,
             _ => return,
         };
 
+        // A spread of a named array (`...PresetColors`) is kept by name; the resolver finds the array it names.
         let values: Vec<EnumValue> = arr
             .elements
             .iter()
-            .filter_map(|el| el.as_expression())
-            .filter_map(|e| self.expression_to_enum_value(e))
+            .filter_map(|el| match el {
+                ArrayExpressionElement::SpreadElement(spread) => match &spread.argument {
+                    Expression::Identifier(id) => Some(EnumValue::Spread { spread: id.name.as_str().to_owned() }),
+                    _ => None,
+                },
+                other => other.as_expression().and_then(|e| self.expression_to_enum_value(e)),
+            })
             .collect();
 
         if !values.is_empty() {
             let key = self.scoped_key(&name);
             self.data.const_arrays.insert(key, values);
         }
+    }
+
+    /// Detect: `declare const X: readonly ["a", "b"]` — the same array as `const X = ["a", "b"] as const`, declared by its
+    /// type instead of its value (what a `.d.ts` says, e.g. Radix's `ALIGN_OPTIONS`). TypeScript reads `typeof X` as the
+    /// declared type of the symbol and `[number]` as the union of the tuple's elements, so the members go where an
+    /// initializer's would. Only a tuple of literals is kept: any other element leaves the const out, as an array
+    /// literal with a computed element would.
+    fn try_collect_annotated_tuple<'a>(&mut self, decl: &VariableDeclarator<'a>) {
+        let BindingPattern::BindingIdentifier(id) = &decl.id else { return };
+        let Some(annotation) = decl.type_annotation.as_ref() else { return };
+        let mut ty = &annotation.type_annotation;
+        while let TSType::TSTypeOperatorType(op) = ty {
+            if op.operator != TSTypeOperatorOperator::Readonly {
+                return;
+            }
+            ty = &op.type_annotation;
+        }
+        let TSType::TSTupleType(tuple) = ty else { return };
+        let values: Option<Vec<EnumValue>> =
+            tuple.element_types.iter().map(|element| element.as_ts_type().and_then(literal_member)).collect();
+        let Some(values) = values.filter(|values| !values.is_empty()) else { return };
+        let key = self.scoped_key(id.name.as_str());
+        self.data.const_arrays.insert(key, values);
     }
 
     /// Detect: `const X = cva(base, { variants: { key: { val: "...", ... } } })`

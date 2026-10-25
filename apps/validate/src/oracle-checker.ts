@@ -56,8 +56,36 @@ export function checkerNormalizer(checker: any): (t: any) => Norm {
     if (f & (TypeFlags.StringLiteral | TypeFlags.NumberLiteral | TypeFlags.BigIntLiteral)) {
       return { k: 'lit', value: String(t.value) }
     }
-    if (f & TypeFlags.TypeParameter) return { k: 'param', name: t.getSymbol()?.name ?? '' }
     return undefined
+  }
+
+  /** A type parameter with what Caliper may have put in its place: its default, and its constraint. */
+  const expanding = new Set<number>()
+  function typeParameter(t: any, depth: number): Norm {
+    const name: string = t.getSymbol()?.name ?? ''
+    // A parameter inside its own default or constraint (`T extends Foo<T>`) is its name.
+    if (expanding.has(t.id)) return { k: 'param', name }
+    expanding.add(t.id)
+    // Its instances sit one level down, but never past the depth limit, where a scalar one still reads.
+    const at = Math.min(depth + 1, MAX_DEPTH)
+    const read = (get: () => any): Norm | undefined => {
+      try {
+        const type = get()
+        return type ? norm(type, at) : undefined
+      } catch {
+        return undefined
+      }
+    }
+    try {
+      return {
+        k: 'param',
+        name,
+        fallback: read(() => checker.getDefaultFromTypeParameter(t)),
+        constraint: read(() => checker.getBaseConstraintOfType(t)),
+      }
+    } finally {
+      expanding.delete(t.id)
+    }
   }
 
   function union(t: any, depth: number, alias: string | undefined): Norm {
@@ -108,6 +136,7 @@ export function checkerNormalizer(checker: any): (t: any) => Norm {
   }
 
   function uncached(t: any, depth: number): Norm {
+    if (t.flags & TypeFlags.TypeParameter) return typeParameter(t, depth)
     const known = scalar(t)
     if (known) return known
     const alias = typeName(t)

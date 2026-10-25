@@ -473,10 +473,12 @@ def oracle(args):
                             '--include-unexported', '--load-dependencies', '--quiet'], stdout=f, check=True, **limits)
         list_file, tsconfig = program_inputs(name, src, work)
         verdicts = os.path.join(work, f'{name}.oracle.json')
+        dump = os.path.join(work, f'{name}.oracle-props.json')
         print(f'{name}: asking the checker', file=sys.stderr, flush=True)
         start = time.time()
         subprocess.run(['pnpm', '--dir', validate, 'exec', 'tsx', 'src/oracle.ts', '--root', root, '--src', src,
-                        '--tsconfig', tsconfig, '--caliper', caliper_json, '--out', verdicts, '--files', list_file],
+                        '--tsconfig', tsconfig, '--caliper', caliper_json, '--out', verdicts, '--files', list_file,
+                        '--dump', dump],
                        check=True, **limits)
         with open(verdicts) as f:
             entry = json.load(f)
