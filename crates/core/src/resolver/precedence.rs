@@ -88,7 +88,8 @@ pub(super) fn resolve_source_defined_or_known<'g>(
         None => {}
     }
 
-    if let Some(result) = resolve_known(name, resolved_args, &ctx.global, &ctx.enum_bare_index) {
+    let enum_key = |name: &str| ctx.enum_key_for(name, consuming_file);
+    if let Some(result) = resolve_known(name, resolved_args, &ctx.global, &enum_key) {
         return (canonical_file, canonical_name, Some(SourceOrKnownMatch::Known(result)));
     }
 
