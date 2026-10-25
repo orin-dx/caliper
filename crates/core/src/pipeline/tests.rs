@@ -3190,6 +3190,83 @@ export function Faint(props: React.ComponentProps<typeof GhostButton>) { return 
     assert_eq!(warnings, Vec::<&str>::new());
 }
 
+/// A destructuring default is the component's default for that prop wherever the prop's type is declared: `variant`
+/// and `size` come through `Pick<ComponentProps<typeof Button>, …>` (shadcn's `AlertDialogCancel`), not from an
+/// interface the component names, and the component that declares them keeps having none.
+#[test]
+fn a_destructuring_default_applies_to_a_prop_another_component_declares() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "Button.tsx",
+        "export interface ButtonProps { variant?: 'default' | 'outline'; size?: 'sm' | 'md'; label?: string }\n\
+         export function Button(props: ButtonProps) { return <button>{props.label}</button>; }\n",
+    );
+    write_file(
+        &tmp,
+        "Cancel.tsx",
+        r#"
+import * as React from "react";
+import { Button } from "./Button";
+export function Cancel({ variant = "outline", size = 'md', ...rest }: Pick<React.ComponentProps<typeof Button>, "variant" | "size">) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let default_of = |component: &str, prop: &str| {
+        output.components[component].props[prop].default_value.as_ref().map(|d| (d.value.clone(), d.computed))
+    };
+    assert_eq!(default_of("Cancel", "variant"), Some(("\"outline\"".to_owned(), false)));
+    assert_eq!(default_of("Cancel", "size"), Some(("'md'".to_owned(), false)));
+    assert_eq!(output.components["Cancel"].props["variant"].required, false);
+    assert_eq!(default_of("Button", "variant"), None);
+    assert_eq!(default_of("Button", "size"), None);
+}
+
+/// Two members of an intersection that both reach one type are not circular: `Optional<T, K>` is
+/// `Pick<Partial<T>, K> & Omit<T, K>` (Ark UI's), and the second member used to be dropped as a cycle.
+#[test]
+fn intersection_members_that_share_a_base_type_each_keep_its_props() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "Field.tsx",
+        r#"
+export interface Base { id: string; value?: string; disabled?: boolean }
+type Optional<T, K extends keyof T> = Pick<Partial<T>, K> & Omit<T, K>;
+export function Field(props: Optional<Base, "id">) { return null; }
+export function Both(props: Pick<Base, "id"> & Pick<Base, "disabled">) { return null; }
+export function Rest(props: Pick<Base, "id"> & Omit<Base, "id">) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let names = |component: &str| output.components[component].props.keys().cloned().collect::<Vec<_>>();
+    assert_eq!(names("Field"), ["disabled", "id", "value"]);
+    assert_eq!(names("Both"), ["disabled", "id"]);
+    assert_eq!(names("Rest"), ["disabled", "id", "value"]);
+    // `id` is required in `Base`, and `Optional` makes it optional.
+    assert_eq!(output.components["Field"].props["id"].required, false);
+    assert_eq!(output.components["Rest"].props["id"].required, true);
+    let circular: Vec<&str> = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::CircularReference)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(circular, Vec::<&str>::new());
+}
+
 /// Chakra's recipe props: a conditional on a literal picks its branch, indexed accesses read a generic interface's
 /// member, and a mapped type over `keyof` an interface lists one prop per key. Every step is evaluated from known
 /// operands, so nothing warns.

@@ -831,6 +831,7 @@ pub(crate) fn resolve_component_shared(
     for prop in chain.props {
         props.entry(prop.name.clone()).or_insert(prop);
     }
+    apply_param_defaults(mapping, &mut props, ctx);
 
     // Populate notable_inherited from HTML element layers and non-HTML inherited layers.
     let mut notable_inherited: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
@@ -899,6 +900,24 @@ pub(crate) fn resolve_component_shared(
         },
         ResolvedDiagnostics { own: state.diagnostics, shared: state.shared_diagnostics },
     )
+}
+
+/// A destructuring default is the component's default for that prop wherever the prop's type was declared, as
+/// TypeScript's docgen reads it. The chain applied it only to props an interface or an object alias declares, so a prop
+/// that arrives through `Pick<ComponentProps<typeof Button>, "variant">` or another resolved type has none yet.
+fn apply_param_defaults(
+    mapping: &ComponentMapping,
+    props: &mut BTreeMap<String, Arc<ParsedProp>>,
+    ctx: &ResolutionContext,
+) {
+    for (name, raw) in &mapping.param_defaults {
+        let Some(prop) = props.get_mut(name) else { continue };
+        if prop.default_value.is_some() {
+            continue;
+        }
+        let default = DefaultValue { value: raw.value.clone(), computed: raw.computed };
+        *prop = ctx.share(prop.with_default_value(default));
+    }
 }
 
 // ─── Intermediate Resolution Result ──────────────────────────────────────────

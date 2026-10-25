@@ -210,6 +210,20 @@ impl ParsedProp {
         }
     }
 
+    /// This prop with `default_value` as its default, and so not required.
+    pub(crate) fn with_default_value(&self, default_value: DefaultValue) -> ParsedProp {
+        ParsedProp::new(
+            self.name.clone(),
+            self.prop_type.clone(),
+            self.required,
+            Some(default_value),
+            self.description.clone(),
+            self.tags.clone(),
+            self.parent.clone(),
+            self.declarations.clone(),
+        )
+    }
+
     /// Constructs a `ParsedProp`, normalizing the `required`/`default_value`
     /// relationship: RDT convention is that a supplied default value makes a
     /// prop effectively optional regardless of what `required` was computed
