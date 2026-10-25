@@ -122,6 +122,14 @@ pub(crate) struct Revision {
     lazy: Option<lazy::Lazy>,
 }
 
+/// Frees `value` on another thread. Freeing a large project's parsed data or memos one allocation at a time takes tens
+/// of milliseconds, and the caller only wants what it already took out.
+fn free_in_background<T: Send + 'static>(value: T) {
+    let spawned = std::thread::Builder::new().name("caliper-drop".into()).spawn(move || drop(value));
+    // A failed spawn drops the closure, and the value with it, right here.
+    drop(spawned);
+}
+
 /// The mapping identities of `global`, in output order: by file, then by position in the file.
 fn component_ids<'g>(
     global: &'g GlobalSourceData,
@@ -374,10 +382,7 @@ impl Revision {
         let mut revision = Revision::resolve_cold(options, 0);
         let mut resolved = std::mem::take(&mut revision.resolved);
         let (output, _) = revision.assemble(options, |id| resolved.remove(id).map(Resolved::into_parts));
-        // Freeing the parsed project takes milliseconds on a large one, and the caller only wants the output.
-        let spawned = std::thread::Builder::new().name("caliper-drop".into()).spawn(move || drop(revision));
-        // A failed spawn drops the closure, and the revision with it, right here; the output is unaffected.
-        drop(spawned);
+        free_in_background(revision);
         output
     }
 
@@ -732,10 +737,11 @@ impl DiagnosticSet {
     /// The diagnostics by file, position and message; run-wide ones (no file) first.
     fn finish(self) -> Vec<Diagnostic> {
         let mut items = self.items;
-        for diagnostic in &mut items {
-            diagnostic.affects.sort();
+        // Chakra with dependencies lists hundreds of thousands of component keys across its diagnostics.
+        items.par_iter_mut().for_each(|diagnostic| {
+            diagnostic.affects.sort_unstable();
             diagnostic.affects.dedup();
-        }
+        });
         // Severity by explicit rank, worst first, and code by name: neither enum's declaration order is an ordering.
         items.sort_by(|a, b| {
             (&a.file, a.line, a.column, &a.message)
