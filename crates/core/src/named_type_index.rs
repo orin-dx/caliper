@@ -193,17 +193,18 @@ impl NamedTypeIndex {
         std::sync::Arc::ptr_eq(&self.maps, &other.maps)
     }
 
-    /// The index holding `file`'s declarations: this one, or the dependency fallback for a file this one doesn't hold.
-    /// Project and dependency files never overlap, so a file is in exactly one of them.
+    /// The index holding `file`'s declarations: this one, or the nearest dependency fallback that holds the file (a
+    /// chain of layers, each holding the files it added). Project and dependency files never overlap, so a file is in
+    /// exactly one of them; a file no layer holds is answered by the last layer, which finds nothing.
     fn layer_for(&self, file: &Utf8Path) -> &NamedTypeIndex {
-        match &self.fallback {
-            Some(fallback)
-                if !self.interfaces.contains_key(file.as_str()) && !self.type_aliases.contains_key(file.as_str()) =>
-            {
-                fallback
+        let mut index = self;
+        while let Some(fallback) = &index.fallback {
+            if index.interfaces.contains_key(file.as_str()) || index.type_aliases.contains_key(file.as_str()) {
+                break;
             }
-            _ => self,
+            index = fallback;
         }
+        index
     }
 
     /// Look up an interface by canonical `(file, name)`, falling back to a

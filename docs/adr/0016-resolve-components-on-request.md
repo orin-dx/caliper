@@ -2,6 +2,8 @@
 
 **Status:** Accepted **Date:** 2026-10-24 **Amended:** 2026-10-25 (the dependency bullet: after 48 layer growths the rest of the project's names load in the background; a growth shares the project's indexes)
 
+The 48-growth threshold and full-layer rebuild described below were superseded by [0020](0020-chain-dependency-layers.md).
+
 ## Context
 
 A session resolved every component before it answered one. The Storybook addon, an editor server and `monokl` (which links `caliper-docgen-core` in-process) ask about one component at a time, and a rich answer (`load_dependencies`, full HTML attributes) is what costs: Chakra starts in 340 ms and 460 MB with both on, 40 ms and 68 MB without. That cost is why consumers have kept the thin answer. Parsing and indexing are cheap (30 to 110 ms on the five corpora); resolution and dependency loading are the rest.

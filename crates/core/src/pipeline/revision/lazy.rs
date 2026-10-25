@@ -130,9 +130,6 @@ impl Engine {
 /// dozen components holds only the names they reach (shadcn: 181 declaration files after 50 requests, 450 once every
 /// name is loaded, 30 MB more); one that reads across the project, as a static build does, reaches this and loads the
 /// rest once instead of growing for every new component. Tests use a small project, so a small count.
-#[cfg(not(test))]
-const WHOLE_DEMAND_AFTER_GROWTHS: usize = 48;
-#[cfg(test)]
 const WHOLE_DEMAND_AFTER_GROWTHS: usize = 3;
 
 pub(super) struct Lazy {
