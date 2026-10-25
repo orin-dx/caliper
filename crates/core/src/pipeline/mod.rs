@@ -112,6 +112,9 @@ pub struct PipelineOptions {
     /// directory that has a `node_modules` or a `package.json` (a directory in the OS temp directory when there is
     /// none), so the CLI, the Vite plugin and the Storybook addon share one cache whatever directory they run from.
     pub cache_dir: Option<Utf8PathBuf>,
+    /// Read and write the on-disk caches (the declaration parse cache and the dependency index) under `cache_dir`.
+    /// Off, a run reads and writes nothing there and parses everything; its output is the same. On by default.
+    pub use_cache: bool,
     /// Custom docgen extension plugins.
     pub plugins: crate::plugin::PluginRegistry,
     /// Load the dependency declarations project types reference, by name, before resolving (ADR 0010). Off by default:
@@ -139,6 +142,7 @@ impl Default for PipelineOptions {
             tsconfig_path: None,
             extra_builtins: Default::default(),
             cache_dir: None,
+            use_cache: true,
             plugins: crate::plugin::PluginRegistry::default(),
             load_dependencies: false,
             collapse_inherited_props: CollapseInheritedProps::default(),

@@ -25,6 +25,8 @@ export interface SessionOptions {
   tsconfigPath?: string
   skipHtmlProps?: boolean
   htmlAttributes?: Napi.JsExtractOptions['htmlAttributes']
+  /** Read and write the on-disk caches. Default: `true`. */
+  cache?: boolean
   loadDependencies?: boolean
   collapseInheritedProps?: Napi.JsExtractOptions['collapseInheritedProps']
   /**
@@ -80,6 +82,7 @@ export class DocgenSession {
       exclude: this.options.exclude,
       tsconfigPath: this.options.tsconfigPath,
       htmlAttributes: this.options.htmlAttributes ?? (this.options.skipHtmlProps ? 'none' : undefined),
+      cache: this.options.cache,
       loadDependencies: this.options.loadDependencies,
       collapseInheritedProps: this.options.collapseInheritedProps,
       lazy: this.lazy,

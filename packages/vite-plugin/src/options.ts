@@ -17,6 +17,11 @@ export interface CaliperDocgenOptions {
   onDiagnostic?: (diagnostic: Diagnostic) => void
   /** Assign each component its react-docgen-typescript docs as `__docgenInfo`, for Storybook without a docgen server. */
   injectDocgenInfo?: boolean
+  /**
+   * Read and write the on-disk caches under `node_modules/.cache`. Default: `true`; `false` reads and writes nothing
+   * there and parses everything every run. The output is the same.
+   */
+  cache?: boolean
   /** Load the type declarations your props reference from installed packages. Off by default. */
   loadDependencies?: boolean
   /**

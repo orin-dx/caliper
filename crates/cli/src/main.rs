@@ -88,6 +88,11 @@ pub struct ExtractArgs {
     #[arg(long)]
     pub cache_dir: Option<String>,
 
+    /// Neither read nor write the on-disk caches (the declaration parse cache and the dependency index); the output is
+    /// the same, a run just parses everything
+    #[arg(long)]
+    pub no_cache: bool,
+
     /// How much of an inherited HTML element's attributes to expose
     #[arg(long, value_enum)]
     pub html_attributes: Option<HtmlAttributeModeArg>,

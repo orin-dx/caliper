@@ -187,6 +187,7 @@ fn build_options_maps_extra_builtins_cli_flag() {
     let opts = build_options(BuildOptionsArgs {
         src: &[],
         cache_dir: None,
+        no_cache: false,
         html_attributes: None,
         config_path: None,
         extra_builtins: &extra_builtins,
@@ -222,6 +223,7 @@ export default {
     let opts = build_options(BuildOptionsArgs {
         src: &[],
         cache_dir: None,
+        no_cache: false,
         html_attributes: None,
         config_path: Some(config_path.to_str().unwrap()),
         extra_builtins: &extra_builtins,
@@ -245,6 +247,7 @@ fn build_options_propagates_a_config_load_failure_as_err() {
     let result = build_options(BuildOptionsArgs {
         src: &[],
         cache_dir: None,
+        no_cache: false,
         html_attributes: None,
         config_path: Some("/nonexistent-parent-dir-xyz/docgen.config.ts"),
         extra_builtins: &[],
@@ -278,6 +281,19 @@ fn config_schema_maps_every_field_onto_pipeline_options() {
 }
 
 #[test]
+fn the_cache_is_on_unless_the_config_or_the_flag_turns_it_off() {
+    let default: DocgenConfigSchema = serde_json::from_str("{}").expect("valid config JSON");
+    assert!(default.into_pipeline_options().unwrap().use_cache);
+
+    let config: DocgenConfigSchema = serde_json::from_str(r#"{ "cache": false }"#).expect("valid config JSON");
+    assert!(!config.into_pipeline_options().unwrap().use_cache, "`cache: false` in the config");
+
+    let flag = build_options(BuildOptionsArgs { no_cache: true, ..no_flags() }).expect("options");
+    assert!(!flag.use_cache, "--no-cache");
+    assert!(build_options(no_flags()).expect("options").use_cache, "no flag leaves it on");
+}
+
+#[test]
 fn html_attributes_mode_names_map_onto_pipeline_options() {
     for (name, expected) in
         [("full", HtmlAttributeMode::Full), ("none", HtmlAttributeMode::None), ("curated", HtmlAttributeMode::Curated)]
@@ -292,6 +308,7 @@ fn no_flags<'a>() -> BuildOptionsArgs<'a> {
     BuildOptionsArgs {
         src: &[],
         cache_dir: None,
+        no_cache: false,
         html_attributes: None,
         config_path: None,
         extra_builtins: &[],

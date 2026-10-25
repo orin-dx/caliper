@@ -20,6 +20,7 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
     let options = build_options(BuildOptionsArgs {
         src: &args.src,
         cache_dir: args.cache_dir.as_deref(),
+        no_cache: args.no_cache,
         html_attributes,
         config_path,
         extra_builtins: &args.extra_builtins,

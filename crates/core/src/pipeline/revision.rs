@@ -236,7 +236,10 @@ impl Indexed {
         let start = Instant::now();
         let mut head_diagnostics = source_dir_diagnostics(options);
 
-        let cache = Arc::new(DtsCache::load_from_disk(Some(&options.effective_cache_dir())));
+        let cache = Arc::new(match options.use_cache {
+            true => DtsCache::load_from_disk(Some(&options.effective_cache_dir())),
+            false => DtsCache::in_memory(),
+        });
         head_diagnostics.extend(cache.load_diagnostic().cloned());
 
         let (src_files, discover_diagnostics) = discover_files(&options.src_dirs, &options.exclude_patterns);
