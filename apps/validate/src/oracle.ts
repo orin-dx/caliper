@@ -16,14 +16,17 @@
 // ~470,000 props cost a few thousand distinct comparisons.
 //
 // Usage: tsx src/oracle.ts --root DIR --src DIR --tsconfig FILE --caliper caliper.json --out verdicts.json
-//                          [--files list.txt]
+//                          [--files list.txt] [--dump props.json]
+//
+// `--dump` writes every prop judged `wrong` or `less precise` (the examples in `--out` stop at 20 per verdict), so two
+// builds' verdicts can be diffed prop by prop.
 import { readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { API, SignatureKind, SymbolFlags } from 'typescript-beta/sync'
 import { checkerNormalizer } from './oracle-checker.ts'
 import { caliperNorm, compare, VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'
 
-const KEYS = ['root', 'src', 'tsconfig', 'caliper', 'out', 'files'] as const
+const KEYS = ['root', 'src', 'tsconfig', 'caliper', 'out', 'files', 'dump'] as const
 const args: Partial<Record<(typeof KEYS)[number], string>> = {}
 for (let i = 2; i < process.argv.length; i += 2) {
   args[process.argv[i].replace(/^--/, '') as (typeof KEYS)[number]] = process.argv[i + 1]
@@ -123,6 +126,8 @@ interface Example {
 const counts = Object.fromEntries(VERDICTS.map((v) => [v, 0])) as Record<Verdict, number>
 const examples = Object.fromEntries(VERDICTS.map((v) => [v, [] as Example[]])) as Record<Verdict, Example[]>
 const verdictCache = new Map<string, Verdict>()
+const dumped: { file: string; component: string; prop: string; verdict: Verdict; caliper: unknown; checker: string }[] =
+  []
 const totals = { componentsChecker: 0, componentsMatched: 0, propsChecker: 0, propsShared: 0, failedExports: 0 }
 
 /** The verdict for one prop, made once per (Caliper prop, checker type). */
@@ -158,7 +163,7 @@ function judge({
 }
 
 /** Every prop of one exported component the checker finds, against Caliper's component of the same name. */
-function visitExport(exported: any, candidates: { name: string; component: any }[]): void {
+function visitExport(exported: any, candidates: { name: string; component: any }[], file: string): void {
   let propsType
   try {
     propsType = propsTypeOf(exported)
@@ -182,7 +187,19 @@ function visitExport(exported: any, candidates: { name: string; component: any }
   const types = checker.getTypeOfSymbol(shared)
   for (const [i, p] of shared.entries()) {
     totals.propsShared++
-    counts[judge({ component: name, prop: p.name, caliperId: match.component.props[p.name], type: types[i] })]++
+    const caliperId = match.component.props[p.name]
+    const verdict = judge({ component: name, prop: p.name, caliperId, type: types[i] })
+    counts[verdict]++
+    if (args.dump && (verdict === 'wrong' || verdict === 'less precise')) {
+      dumped.push({
+        file: rel(file),
+        component: name,
+        prop: p.name,
+        verdict,
+        caliper: caliper.props[caliperId].type,
+        checker: checker.typeToString(types[i]),
+      })
+    }
   }
 }
 
@@ -191,7 +208,7 @@ for (const file of files) {
   const moduleSymbol = checker.getSymbolOfSourceFile(file)
   if (!moduleSymbol) continue
   const candidates = caliperByFile.get(rel(file)) ?? []
-  for (const exported of checker.getExportsOfModule(moduleSymbol)) visitExport(exported, candidates)
+  for (const exported of checker.getExportsOfModule(moduleSymbol)) visitExport(exported, candidates, file)
 }
 const compareMs = performance.now() - start
 
@@ -208,6 +225,7 @@ const report = {
   examples,
 }
 writeFileSync(args.out, JSON.stringify(report, null, 2))
+if (args.dump) writeFileSync(args.dump, JSON.stringify(dumped))
 program.dispose()
 api.close()
 console.error(
