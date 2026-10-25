@@ -1132,6 +1132,19 @@ impl ComponentMapping {
         }
     }
 
+    /// The mapping of no component, for a question about a type asked mid-walk (what a named type's props are, for a
+    /// property read): it has no parameter defaults, wrapper call or type parameters of its own to bring.
+    pub(crate) fn of_no_component(file_path: &camino::Utf8Path) -> Self {
+        Self::new(
+            std::string::String::new(),
+            TypeName::default(),
+            file_path.to_owned(),
+            0,
+            0,
+            DetectionRule::FunctionDeclaration,
+        )
+    }
+
     #[must_use]
     pub fn with_wrapper_callee(mut self, callee: WrapperCallee) -> Self {
         self.wrapper_callee = Some(callee);

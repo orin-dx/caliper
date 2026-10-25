@@ -192,6 +192,16 @@ pub(super) fn resolve_indexed_access(
         }
     }
 
+    // TypeScript resolves the object type of an indexed access by the one path every reference to it takes, then reads
+    // the property from the type that gave (`getIndexedAccessType`). The members of a named type are its props chain,
+    // the one an `extends` of the same type would read: `ComponentPropsWithoutRef<typeof Tooltip>` is `Tooltip`'s props
+    // there, so it is here.
+    if let (CollectedType::Named { name, args }, false) = (obj, key_str.is_empty()) {
+        if let Some(found) = read_from_props_chain(name, args, key_str, consuming_file, ctx, state) {
+            return found;
+        }
+    }
+
     let expression = format!("{}[{}]", obj.to_raw_string(), key.to_raw_string());
     let diagnostic = Diagnostic {
         severity: DiagnosticSeverity::Info,
@@ -204,6 +214,106 @@ pub(super) fn resolve_indexed_access(
         affects: Vec::new(),
     };
     OpaqueDetail::give_up(state, expression.clone(), OpaqueReason::IndexedAccess { expression }, diagnostic)
+}
+
+/// The type of the property `key` of the named type `name<args>`, read from the props its chain resolves to, or `None`
+/// when the chain has no such prop (the caller then reports the access as opaque).
+///
+/// The chain is resolved as a declaration of its own, from depth 0 (the nesting depth of the access says nothing about
+/// the type it reads), in a branch of the caller's state: a type that reads itself meets the cycle sets of the walk it
+/// is part of and stops there, as TypeScript's circular `getIndexedAccessType` does. A chain resolves every member of
+/// the type, and only one was asked for, so the diagnostics about the others are not the access's; they are kept only
+/// when the member read is itself degraded, which is what they would explain.
+fn read_from_props_chain(
+    name: &str,
+    args: &[CollectedType],
+    key: &str,
+    consuming_file: &Utf8Path,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+) -> Option<PropType> {
+    // The read is a question about the type alone, asked in a state of its own: the caller's cycle sets and type
+    // parameters in scope are not part of it, so its answer is the same whichever walk asks, and the run keeps it
+    // (`React.ComponentProps<typeof Button>["variant"]` is read by every variant of every component that forwards it,
+    // and each read resolves all of `Button`'s props). What bounds a type that reads itself is the nesting of reads on
+    // this call stack, since the state that would cut it is not shared.
+    let _nesting = ReadNesting::enter()?;
+    let cache_key: PropsReadKey = {
+        use std::hash::Hasher;
+        let mut hasher = rustc_hash::FxHasher::default();
+        args.iter().for_each(|arg| arg.structural_hash(&mut hasher));
+        (Box::from(consuming_file.as_str()), format!("{name}<{:x}>", hasher.finish()).into(), Box::from(key))
+    };
+    if let Some(read) = ctx.props_reads.get(&cache_key) {
+        super::deps::replay(&read.deps);
+        return Some(read.found.clone());
+    }
+    let mapping = ComponentMapping::of_no_component(consuming_file);
+    let mut asked = ResolveState::default();
+    let (found, deps) = super::deps::capturing(|| {
+        let chain = super::chain::resolve_props_chain(name, args, consuming_file, &mapping, ctx, &mut asked, 0);
+        chain.props.iter().find(|prop| prop.name == key).map(|prop| prop.prop_type.clone())
+    });
+    // A chain resolves every member of the type, and only one was asked for: the diagnostics about the others are not
+    // the access's. They are kept when the member itself is degraded, which is what they would explain.
+    match &found {
+        Some(found) if !found.holds_opaque() => {
+            ctx.props_reads.insert(cache_key, PropsRead { found: found.clone(), deps });
+        }
+        Some(_) => {
+            state.diagnostics.append(&mut asked.diagnostics);
+            state.shared_diagnostics.append(&mut asked.shared_diagnostics);
+            state.named_unevaluated |= asked.named_unevaluated;
+        }
+        None => {}
+    }
+    found
+}
+
+thread_local! {
+    /// How many reads from a props chain this thread's call stack is inside of.
+    static READS_IN_PROGRESS: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
+
+/// The most reads from a props chain that may be inside one another. A type that reads itself
+/// (`function Self(props: { b: ComponentProps<typeof Self>["a"] })`) is circular, which TypeScript reports as an error
+/// and types as `any`; here the read at this depth finds nothing and the access is reported as opaque.
+const MAX_NESTED_PROPS_READS: u8 = 4;
+
+/// One level of `READS_IN_PROGRESS`, left when it is dropped.
+struct ReadNesting;
+
+impl ReadNesting {
+    fn enter() -> Option<Self> {
+        READS_IN_PROGRESS.with(|depth| {
+            (depth.get() < MAX_NESTED_PROPS_READS).then(|| {
+                depth.set(depth.get() + 1);
+                ReadNesting
+            })
+        })
+    }
+}
+
+impl Drop for ReadNesting {
+    fn drop(&mut self) {
+        READS_IN_PROGRESS.with(|depth| depth.set(depth.get().saturating_sub(1)));
+    }
+}
+
+/// `(file, name and structural hash of the arguments, key)` of a cached read from a props chain.
+pub(crate) type PropsReadKey = (Box<str>, Box<str>, Box<str>);
+
+/// A property read from a props chain that came out whole, and the files it read.
+#[derive(Clone)]
+pub(crate) struct PropsRead {
+    found: PropType,
+    deps: super::deps::Dependencies,
+}
+
+impl PropsRead {
+    pub(super) fn deps(&self) -> &super::deps::Dependencies {
+        &self.deps
+    }
 }
 
 /// The values of the `as const` array `name` in order, the elements of an array it spreads (`...PresetColors`) in
