@@ -109,6 +109,13 @@
     "spectrum/* prop-type-changed BreadcrumbMenu.*",
     "spectrum/* prop-type-changed DatePickerField.*",
     "spectrum/* prop-type-changed TabsMenu.*",
-    "shadcn/* prop-type-changed DirectionProvider*.direction"
+    "shadcn/* prop-type-changed DirectionProvider*.direction",
+    "*/* diagnostic-added info OPAQUE_TYPE typeof *",
+    "*/* diagnostic-removed info OPAQUE_TYPE typeof *",
+    "shadcn/* prop-type-changed *.orientation*",
+    "shadcn/* prop-type-changed *.align*",
+    "shadcn/* prop-type-changed *.side*",
+    "shadcn/* prop-type-changed *.collisionPadding*",
+    "spectrum/* prop-type-changed *.styles*"
   ]
 }
