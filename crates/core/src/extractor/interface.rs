@@ -70,11 +70,17 @@ impl<'src> SourceDataCollector<'src> {
             _ => return,
         };
 
+        // A spread of a named array (`...PresetColors`) is kept by name; the resolver finds the array it names.
         let values: Vec<EnumValue> = arr
             .elements
             .iter()
-            .filter_map(|el| el.as_expression())
-            .filter_map(|e| self.expression_to_enum_value(e))
+            .filter_map(|el| match el {
+                ArrayExpressionElement::SpreadElement(spread) => match &spread.argument {
+                    Expression::Identifier(id) => Some(EnumValue::Spread { spread: id.name.as_str().to_owned() }),
+                    _ => None,
+                },
+                other => other.as_expression().and_then(|e| self.expression_to_enum_value(e)),
+            })
             .collect();
 
         if !values.is_empty() {

@@ -601,12 +601,83 @@ pub struct EnumEntry {
 }
 
 /// The value of an enum entry.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", untagged)]
+///
+/// Serialized by hand as the bare value (`"a"`, `1`, `true`), and a spread as a one-element array (`["NAME"]`):
+/// serde's `untagged` cannot read a struct variant back from the cache's positional MessagePack.
+#[derive(Debug, Clone, PartialEq)]
 pub enum EnumValue {
     String(std::string::String),
     Number(f64),
     Bool(bool),
+    /// `...NAME` in a `const X = [...] as const` array: the elements of the array `NAME`, which the resolver looks up
+    /// when `(typeof X)[number]` is read. Only `SourceData::const_arrays` holds one; an enum's values never do.
+    Spread {
+        spread: std::string::String,
+    },
+}
+
+impl Serialize for EnumValue {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        match self {
+            EnumValue::String(s) => serializer.serialize_str(s),
+            EnumValue::Number(n) => serializer.serialize_f64(*n),
+            EnumValue::Bool(b) => serializer.serialize_bool(*b),
+            EnumValue::Spread { spread } => {
+                let mut seq = serializer.serialize_seq(Some(1))?;
+                seq.serialize_element(spread)?;
+                seq.end()
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for EnumValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = EnumValue;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a string, a number, a boolean, or a one-element array naming a spread")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<EnumValue, E> {
+                Ok(EnumValue::String(v.to_owned()))
+            }
+
+            fn visit_string<E: serde::de::Error>(self, v: std::string::String) -> Result<EnumValue, E> {
+                Ok(EnumValue::String(v))
+            }
+
+            fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<EnumValue, E> {
+                Ok(EnumValue::Number(v))
+            }
+
+            #[allow(clippy::cast_precision_loss)]
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<EnumValue, E> {
+                Ok(EnumValue::Number(v as f64))
+            }
+
+            #[allow(clippy::cast_precision_loss)]
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<EnumValue, E> {
+                Ok(EnumValue::Number(v as f64))
+            }
+
+            fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<EnumValue, E> {
+                Ok(EnumValue::Bool(v))
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<EnumValue, A::Error> {
+                let spread: std::string::String =
+                    seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                Ok(EnumValue::Spread { spread })
+            }
+        }
+
+        deserializer.deserialize_any(Visitor)
+    }
 }
 
 impl EnumValue {
@@ -617,6 +688,7 @@ impl EnumValue {
             EnumValue::String(s) => s.clone(),
             EnumValue::Number(n) => n.to_string(),
             EnumValue::Bool(b) => b.to_string(),
+            EnumValue::Spread { spread } => format!("...{spread}"),
         }
     }
 }

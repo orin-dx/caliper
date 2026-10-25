@@ -1,6 +1,14 @@
 {
   "allow": [
     "antd/* prop-type-changed CascaderPanel.*",
+    "antd/* prop-type-changed Button.color",
+    "antd/* prop-type-changed PickerButton.color",
+    "antd/* prop-type-changed Flex.*",
+    "antd/* prop-type-changed FloatButton.target",
+    "antd/* prop-type-changed FloatButtonGroup.target",
+    "antd/* prop-type-changed PurePanel*.target",
+    "antd/* diagnostic-added *INDEXED_ACCESS_OPAQUE*",
+    "antd/* diagnostic-removed *INDEXED_ACCESS_OPAQUE*",
     "shadcn/* prop-type-changed SidebarMenuButton.*",
     "shadcn/* prop-type-changed SidebarMenuSubButton.*",
     "shadcn/* prop-field-changed SidebarMenuButton.*",

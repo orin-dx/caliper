@@ -177,10 +177,9 @@ pub(super) fn resolve_indexed_access(
     // `const`-asserted array of literals is exactly the array's own values.
     if let (CollectedType::TypeOf(name), CollectedType::Number) = (obj, key) {
         super::deps::record_bare_name(name);
-        if let Some(values) =
-            ctx.const_array_bare_index.get(name.as_str()).and_then(|k| ctx.global.const_arrays.get(k.as_str()))
-        {
-            let members: Vec<String> = values.iter().map(EnumValue::to_display_string).collect();
+        if ctx.const_array_bare_index.contains_key(name.as_str()) {
+            let mut members = Vec::new();
+            collect_const_array_members(name, consuming_file, ctx, state, &mut members, &mut Vec::new());
             return PropType::LiteralUnion { members, has_default: false };
         }
     }
@@ -205,6 +204,59 @@ pub(super) fn resolve_indexed_access(
         affects: Vec::new(),
     };
     OpaqueDetail::give_up(state, expression.clone(), OpaqueReason::IndexedAccess { expression }, diagnostic)
+}
+
+/// The values of the `as const` array `name` in order, the elements of an array it spreads (`...PresetColors`) in
+/// place. A spread of an array that is not in the project, or that is already being read (a cycle), leaves its elements
+/// out and says so; the rest of the array stays.
+fn collect_const_array_members(
+    name: &str,
+    consuming_file: &Utf8Path,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    members: &mut Vec<String>,
+    reading: &mut Vec<String>,
+) {
+    let Some(values) = ctx.const_array_bare_index.get(name).and_then(|key| ctx.global.const_arrays.get(key.as_str()))
+    else {
+        return;
+    };
+    reading.push(name.to_owned());
+    for value in values {
+        let EnumValue::Spread { spread } = value else {
+            let display = value.to_display_string();
+            if !members.contains(&display) {
+                members.push(display);
+            }
+            continue;
+        };
+        super::deps::record_bare_name(spread);
+        if reading.iter().any(|reading| reading == spread) {
+            state.diagnostics.push(const_array_spread_diagnostic(spread, "spreads itself", consuming_file));
+        } else if ctx.const_array_bare_index.contains_key(spread.as_str()) {
+            collect_const_array_members(spread, consuming_file, ctx, state, members, reading);
+        } else {
+            state.diagnostics.push(const_array_spread_diagnostic(
+                spread,
+                "is not an array declared in the project",
+                consuming_file,
+            ));
+        }
+    }
+    reading.pop();
+}
+
+fn const_array_spread_diagnostic(spread: &str, why: &str, consuming_file: &Utf8Path) -> Diagnostic {
+    Diagnostic {
+        severity: DiagnosticSeverity::Warning,
+        message: format!("'...{spread}' in an `as const` array {why}; its values are left out of the literal union"),
+        file: Some(consuming_file.to_string()),
+        line: None,
+        column: None,
+        help: Some("Declare the values in the array itself, or load the dependency that declares them.".into()),
+        code: DiagnosticCode::OpaqueType,
+        affects: Vec::new(),
+    }
 }
 
 #[cfg(test)]
