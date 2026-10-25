@@ -2901,3 +2901,27 @@ export function Q(props: Y) { return null; }
     assert_eq!((names("P"), names("Q")), (vec!["b", "l"], vec!["b", "l", "z"]));
     assert_eq!(memo::recording_counts(&shared.interface_chains)[&format!("{dir}/Comp.tsx:Base")], 2);
 }
+
+// `import React from "react"` of an `export =` module binds the module's namespace, as `import * as React` does, so
+// `React.CSSProperties` names the same member under either spelling (antd imports React the first way).
+#[test]
+fn a_default_import_names_a_namespace_member_as_a_namespace_import_does() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+    write(root.as_std_path(), "lib.ts", "export interface Options { size: string }\n");
+    let canonical_of = |import: &str| {
+        let source = format!("{import}\nexport const x = 1;\n");
+        let consumer = root.join("c.tsx");
+        write(root.as_std_path(), "c.tsx", &source);
+        let mut global = GlobalSourceData::default();
+        for path in [root.join("lib.ts"), consumer.clone()] {
+            let text = std::fs::read_to_string(&path).unwrap();
+            global.merge(&path, crate::extractor::parse_file(&path, &text));
+        }
+        let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
+        super::import::resolve_to_canonical("Lib.Options", &consumer, &ctx, &mut Vec::new())
+    };
+    let expected = Some((root.join("lib.ts"), "Options".to_owned()));
+    assert_eq!(canonical_of(r#"import * as Lib from "./lib";"#), expected, "the namespace spelling");
+    assert_eq!(canonical_of(r#"import Lib from "./lib";"#), expected, "the default spelling");
+}
