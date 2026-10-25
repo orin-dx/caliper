@@ -1,7 +1,7 @@
 name: Equivalence
 
 # Does a change to the resolver, extractor, types or pipeline alter what Caliper publishes? Runs scripts/equivalence.py
-# against main on two of the parity corpora (chakra, shadcn) with their dependencies loaded (docs/parity.md). Non-blocking for now:
+# against the pull request's base branch on two of the parity corpora (chakra, shadcn) with their dependencies loaded (docs/parity.md). Non-blocking for now:
 # `continue-on-error` keeps a diff or a slow install from failing the pull request until the job has run long enough to
 # trust. The aim is under six minutes; the corpus installs dominate and are cached by their package managers' stores.
 # The full set runs in the weekly parity workflow.
@@ -57,9 +57,12 @@ jobs:
       # ("Dynamic require of "util" is not supported"), so those two run only where their installs are cached.
       - name: Fetch and install two corpora
         run: python3 scripts/parity.py setup --corpus chakra --corpus shadcn
-      - name: Compare with main
+      # The pull request's own base, so a stacked pull request shows only its own change, not its parents'.
+      - name: Compare with the base branch
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
         run: >-
-          python3 scripts/equivalence.py origin/main --corpus chakra --corpus shadcn
+          python3 scripts/equivalence.py "origin/$BASE_REF" --corpus chakra --corpus shadcn
           --config deps --config deps+html-full --lazy fixtures --markdown equivalence.md
       - if: always()
         run: cat equivalence.md >> "$GITHUB_STEP_SUMMARY" || true
