@@ -25,8 +25,10 @@ use crate::types::{
     CollectedInterface, CollectedType, CollectedTypeAlias, EnumValue, GlobalSourceData, SourceData, TypeName,
 };
 
+/// The project's declarations. Shared behind an `Arc` so a lazy session's context rebuild, which sets a new
+/// dependency `fallback`, copies a pointer and not every interface and alias of the project.
 #[derive(Clone, Default)]
-pub(crate) struct NamedTypeIndex {
+pub(crate) struct IndexMaps {
     interfaces: FxHashMap<PathKey, FxHashMap<CompactString, CollectedInterface>>,
     type_aliases: FxHashMap<PathKey, FxHashMap<CompactString, CollectedTypeAlias>>,
     type_alias_params: FxHashMap<PathKey, FxHashMap<CompactString, Vec<TypeName>>>,
@@ -38,9 +40,22 @@ pub(crate) struct NamedTypeIndex {
     const_arrays: FxHashMap<PathKey, FxHashMap<CompactString, Vec<EnumValue>>>,
     /// Files declaring `React.`-qualified names (`@types/react`), the only ones a qualified fallback can match.
     react_namespaced: FxHashSet<PathKey>,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct NamedTypeIndex {
+    maps: std::sync::Arc<IndexMaps>,
     /// Loaded dependency declarations (ADR 0010), consulted for a file this index holds nothing for. Shared by every
     /// watch revision, never copied.
     pub(crate) fallback: Option<std::sync::Arc<NamedTypeIndex>>,
+}
+
+impl std::ops::Deref for NamedTypeIndex {
+    type Target = IndexMaps;
+
+    fn deref(&self) -> &IndexMaps {
+        &self.maps
+    }
 }
 
 /// What `lookup_ambient` found at a given ambient lib file, mirroring the
@@ -62,16 +77,7 @@ impl NamedTypeIndex {
     /// (`type_alias_params`/`interface_type_params`'s own values carry no
     /// `file_path` of their own to anchor on).
     pub(crate) fn build(global: &GlobalSourceData) -> Self {
-        let mut index = Self {
-            interfaces: FxHashMap::default(),
-            type_aliases: FxHashMap::default(),
-            type_alias_params: FxHashMap::default(),
-            interface_type_params: FxHashMap::default(),
-            type_param_defaults: FxHashMap::default(),
-            const_arrays: FxHashMap::default(),
-            react_namespaced: FxHashSet::default(),
-            fallback: None,
-        };
+        let mut index = Self::default();
         index.insert_flat_maps(
             &global.interfaces,
             &global.interface_type_params,
@@ -95,13 +101,14 @@ impl NamedTypeIndex {
     /// (which resolves every component in one run, not just the few affected
     /// by a single edit).
     pub(crate) fn remove_file(&mut self, file: &Utf8Path) {
-        self.interfaces.remove(file.as_str());
-        self.type_aliases.remove(file.as_str());
-        self.type_alias_params.remove(file.as_str());
-        self.interface_type_params.remove(file.as_str());
-        self.type_param_defaults.remove(file.as_str());
-        self.const_arrays.remove(file.as_str());
-        self.react_namespaced.remove(file.as_str());
+        let maps = std::sync::Arc::make_mut(&mut self.maps);
+        maps.interfaces.remove(file.as_str());
+        maps.type_aliases.remove(file.as_str());
+        maps.type_alias_params.remove(file.as_str());
+        maps.interface_type_params.remove(file.as_str());
+        maps.type_param_defaults.remove(file.as_str());
+        maps.const_arrays.remove(file.as_str());
+        maps.react_namespaced.remove(file.as_str());
     }
 
     /// Insert one freshly re-parsed file's own (not yet merged) interfaces/
@@ -135,20 +142,21 @@ impl NamedTypeIndex {
         type_alias_params: &FxHashMap<std::string::String, Vec<TypeName>>,
         type_param_defaults: &FxHashMap<std::string::String, Vec<Option<CollectedType>>>,
     ) {
+        let maps = std::sync::Arc::make_mut(&mut self.maps);
         for (key, defaults) in type_param_defaults {
             let Some((file, name)) = key.rsplit_once(':') else { continue };
             let file = PathKey::from(Utf8Path::new(file));
-            self.type_param_defaults.entry(file).or_default().insert(CompactString::from(name), defaults.clone());
+            maps.type_param_defaults.entry(file).or_default().insert(CompactString::from(name), defaults.clone());
         }
         for (key, iface) in interfaces {
             let Some((file, name)) = key.rsplit_once(':') else { continue };
             let file = PathKey::from(Utf8Path::new(file));
             if name.starts_with("React.") {
-                self.react_namespaced.insert(file.clone());
+                maps.react_namespaced.insert(file.clone());
             }
-            self.interfaces.entry(file.clone()).or_default().insert(CompactString::from(name), iface.clone());
+            maps.interfaces.entry(file.clone()).or_default().insert(CompactString::from(name), iface.clone());
             if let Some(params) = interface_type_params.get(key) {
-                self.interface_type_params.entry(file).or_default().insert(CompactString::from(name), params.clone());
+                maps.interface_type_params.entry(file).or_default().insert(CompactString::from(name), params.clone());
             }
         }
 
@@ -156,21 +164,33 @@ impl NamedTypeIndex {
             let Some((file, name)) = key.rsplit_once(':') else { continue };
             let file = PathKey::from(Utf8Path::new(file));
             if name.starts_with("React.") {
-                self.react_namespaced.insert(file.clone());
+                maps.react_namespaced.insert(file.clone());
             }
-            self.type_aliases.entry(file.clone()).or_default().insert(CompactString::from(name), alias.clone());
+            maps.type_aliases.entry(file.clone()).or_default().insert(CompactString::from(name), alias.clone());
             if let Some(params) = type_alias_params.get(key) {
-                self.type_alias_params.entry(file).or_default().insert(CompactString::from(name), params.clone());
+                maps.type_alias_params.entry(file).or_default().insert(CompactString::from(name), params.clone());
             }
         }
     }
 
     fn insert_const_arrays(&mut self, const_arrays: &FxHashMap<std::string::String, Vec<EnumValue>>) {
+        let maps = std::sync::Arc::make_mut(&mut self.maps);
         for (key, values) in const_arrays {
             let Some((file, name)) = key.rsplit_once(':') else { continue };
             let file = PathKey::from(Utf8Path::new(file));
-            self.const_arrays.entry(file).or_default().insert(CompactString::from(name), values.clone());
+            maps.const_arrays.entry(file).or_default().insert(CompactString::from(name), values.clone());
         }
+    }
+
+    /// This index with `fallback` as its dependency layer. The project's declarations are shared, not copied.
+    pub(crate) fn with_fallback(&self, fallback: std::sync::Arc<NamedTypeIndex>) -> NamedTypeIndex {
+        NamedTypeIndex { maps: self.maps.clone(), fallback: Some(fallback) }
+    }
+
+    /// Whether `other` shares this index's project declarations, not a copy of them (tests).
+    #[cfg(test)]
+    pub(crate) fn shares_declarations_with(&self, other: &NamedTypeIndex) -> bool {
+        std::sync::Arc::ptr_eq(&self.maps, &other.maps)
     }
 
     /// The index holding `file`'s declarations: this one, or the dependency fallback for a file this one doesn't hold.

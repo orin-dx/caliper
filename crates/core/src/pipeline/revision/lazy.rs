@@ -110,11 +110,7 @@ impl Engine {
         react_types: &Option<Arc<NamedTypeIndex>>,
     ) -> Engine {
         let named_types = match &layer {
-            Some(layer) => {
-                let mut with_fallback = (**named_types).clone();
-                with_fallback.fallback = Some(layer.named_types.clone());
-                Arc::new(with_fallback)
-            }
+            Some(layer) => Arc::new(named_types.with_fallback(layer.named_types.clone())),
             None => named_types.clone(),
         };
         let ctx = ResolutionContext::new_with_cached_ambient_global_files(
@@ -490,14 +486,11 @@ impl Revision {
             lazy.engine.store(Arc::new(Engine { layer: Some(extended), ctx: engine.ctx.clone() }));
             return;
         }
-        let next = Engine::new(
-            &self.global,
-            options,
-            &self.ambient_global_files,
-            &self.named_types,
-            Some(extended),
-            &self.react_types,
-        );
+        // The new context shares the project's index, import map, resolvers and bare-name tables with the old one;
+        // rebuilding them for every growth was most of what a session reading across a project spent.
+        let named_types = Arc::new(self.named_types.with_fallback(extended.named_types.clone()));
+        let ctx = Arc::new(engine.ctx.over_layer(named_types, Some(extended.clone())));
+        let next = Engine { layer: Some(extended), ctx };
         // A memo that reached a project file whose names the old layer lacked was computed without them, and stays
         // behind; the rest hold for the larger layer, so the next component does not rebuild them.
         let covered = |file: &str| lazy.demands.get(file).is_none_or(|demands| layer.covers(demands));
