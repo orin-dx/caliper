@@ -80,6 +80,10 @@ const rel = (path: string) => relative(root, realpathSync(path))
 const caliper = JSON.parse(readFileSync(args.caliper, 'utf8'))
 const caliperByFile = new Map<string, { name: string; component: any }[]>()
 for (const component of Object.values<any>(caliper.components)) {
+  // Schema 2 lists a component's prop set ids, each a map of prop name to prop id; this reads one map of both.
+  if (Array.isArray(component.props)) {
+    component.props = Object.assign({}, ...component.props.map((id: string) => caliper.propSets[id]))
+  }
   const key = rel(component.filePath)
   const list = caliperByFile.get(key) ?? []
   list.push({ name: normComponent(component.displayName), component })
