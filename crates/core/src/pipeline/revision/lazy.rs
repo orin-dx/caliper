@@ -138,6 +138,12 @@ pub(super) struct Lazy {
     engine: ArcSwap<Engine>,
     /// Serializes layer growth, so concurrent requests load a name once.
     growing: Mutex<()>,
+    /// Whether the background load of every name the project takes from a package has started.
+    whole_demand_started: std::sync::atomic::AtomicBool,
+    /// The thread loading them, until [`Revision::wait_for_dependency_load`] joins it.
+    whole_demand_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// How many times the layer grew (and the context was rebuilt or kept), for tests and stats.
+    growths: std::sync::atomic::AtomicUsize,
 }
 
 /// The components of `global` by name, each name's components in output order.
@@ -198,6 +204,9 @@ impl Revision {
             memo: DashMap::default(),
             engine: ArcSwap::from_pointee(engine),
             growing: Mutex::new(()),
+            whole_demand_started: std::sync::atomic::AtomicBool::new(false),
+            whole_demand_thread: Mutex::new(None),
+            growths: std::sync::atomic::AtomicUsize::new(0),
         };
         Revision {
             id,
@@ -321,6 +330,9 @@ impl Revision {
                 memo,
                 engine: ArcSwap::from_pointee(engine),
                 growing: Mutex::new(()),
+                whole_demand_started: std::sync::atomic::AtomicBool::new(false),
+                whole_demand_thread: Mutex::new(None),
+                growths: std::sync::atomic::AtomicUsize::new(0),
             }),
         };
         let update = self.lazy_delta(&next, options, &touched, affected_files, start);
@@ -409,6 +421,49 @@ impl Revision {
         }
     }
 
+    /// After the first answer, load every name the project's files take from a package on a thread of its own, once.
+    ///
+    /// Each growth of the layer rebuilds the resolution context, so a session that grows one request at a time pays
+    /// that rebuild for every new component (Spectrum: 33 rebuilds, about 140 of the 300 ms a project read end to end
+    /// took). The first answer stays quick because it loads only what it reaches; the rest of the project's names are
+    /// loaded while the caller looks at it, and the later requests find them there. A request that needs a name before
+    /// the thread has loaded it waits for the same lock and loads it, as it would have anyway.
+    pub(crate) fn load_whole_demand_in_background(self: &Arc<Self>, options: &PipelineOptions) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let Some(lazy) = &self.lazy else { return };
+        if !options.load_dependencies || lazy.whole_demand_started.swap(true, Relaxed) {
+            return;
+        }
+        let (revision, options) = (self.clone(), options.clone());
+        let spawned = std::thread::Builder::new().name("caliper-whole-demand".into()).spawn(move || {
+            drop(crate::panic_guard::contain_panic("load_whole_demand", || {
+                let Some(lazy) = &revision.lazy else { return };
+                let all: Vec<Demand> = lazy.demands.values().flat_map(|demands| demands.iter().cloned()).collect();
+                revision.grow(&options, lazy, &all);
+            }));
+        });
+        // A thread that cannot start costs the speed-up, never an answer.
+        if let Ok(handle) = spawned {
+            *lazy.whole_demand_thread.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(handle);
+        }
+    }
+
+    /// Wait until the background load [`Self::load_whole_demand_in_background`] started has finished. Without one,
+    /// returns at once.
+    pub(crate) fn wait_for_dependency_load(&self) {
+        let Some(lazy) = &self.lazy else { return };
+        let handle = lazy.whole_demand_thread.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+        if let Some(handle) = handle {
+            drop(handle.join());
+        }
+    }
+
+    /// How many times the dependency layer grew since this revision was built.
+    #[cfg(test)]
+    pub(crate) fn layer_growths(&self) -> usize {
+        self.lazy.as_ref().map_or(0, |lazy| lazy.growths.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
     /// Load `demands` into the dependency layer unless a concurrent request already did.
     fn grow(&self, options: &PipelineOptions, lazy: &Lazy, demands: &[Demand]) {
         let _growing = lazy.growing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -419,6 +474,7 @@ impl Revision {
             return;
         }
         let extended = Arc::new(off_pool(|| dependency_types::load(missing, options, Some(layer))));
+        lazy.growths.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // Names that were already loaded, or that no package declares, add nothing the resolver reads, so the
         // context and its memos stay; only the record of what was asked for moves on.
         if extended.resolves_like(layer) {
