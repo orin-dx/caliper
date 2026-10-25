@@ -488,7 +488,13 @@ pub(super) fn resolve_union_alias(
             let sub = resolve_base_as_chain(member, file_path, mapping, ctx, state, depth);
             if !sub.props.is_empty() {
                 variants += 1;
-                record_variant_props(&sub.props, &mut merged_props, &mut prop_types, &mut seen_count, &mut required_in_all);
+                record_variant_props(
+                    &sub.props,
+                    &mut merged_props,
+                    &mut prop_types,
+                    &mut seen_count,
+                    &mut required_in_all,
+                );
             }
             chain.merge_parent(sub);
         }

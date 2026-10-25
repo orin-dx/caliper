@@ -87,7 +87,7 @@ const WIDENING = new Set(['string', 'number', 'boolean'])
 
 /** Union members without `undefined` (an optional prop's, which both sides treat as optional), flattened, with
  * `true | false` as `boolean`. */
-function members(n: Norm): Norm[] {
+function members(n: Norm, written = false): Norm[] {
   const flat: Norm[] = []
   const push = (m: Norm) => {
     if (m.k === 'union') m.members.forEach(push)
@@ -96,15 +96,17 @@ function members(n: Norm): Norm[] {
   }
   push(n)
   // `'default' | 'large' | string` is `string` to the checker: a literal that a primitive of its kind in the same
-  // union already covers adds nothing, so a union written with it reads the same as one without. A `true`/`false`
-  // literal is boolean's, not string's.
+  // union already covers adds nothing, so a union Caliper wrote with it reads the same as one without. Only Caliper's
+  // (`written`): the checker's `"blue" | … | (string & {})` keeps its literals, which are what a reader sees. A
+  // `true`/`false` literal is boolean's, not string's.
   const has = (name: string) => flat.some((m) => m.k === 'prim' && m.name === name)
   const covered = (m: Norm) =>
+    written &&
     m.k === 'lit' &&
     m.value !== 'true' &&
     m.value !== 'false' &&
     (/^-?\d+(\.\d+)?$/.test(m.value) ? has('number') : has('string'))
-  const kept = flat.some(covered) ? flat.filter((m) => !covered(m)) : flat
+  const kept = flat.filter((m) => !covered(m))
   if (kept.some((m) => isLit(m, 'true')) && kept.some((m) => isLit(m, 'false'))) {
     return [...kept.filter((m) => !isLit(m, 'true') && !isLit(m, 'false')), prim('boolean')]
   }
@@ -223,7 +225,7 @@ export function compare(c: Norm, k: Norm, depth = 0): Verdict {
   }
   // An intersection Caliper left as written, which the checker reduced (`Mode & …` to a literal union).
   if (c.k === 'intersection' && !km.some((m) => m.k === 'intersection')) return 'less precise'
-  const cm = members(c)
+  const cm = members(c, true)
   if (cm.length !== 1 || km.length !== 1) return compareUnions(cm, km, depth)
   const [cOne] = cm
   const [kOne] = km

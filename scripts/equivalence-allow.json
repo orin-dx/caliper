@@ -1,3 +1,11 @@
 {
-  "allow": []
+  "allow": [
+    "antd/* prop-type-changed CascaderPanel.*",
+    "shadcn/* prop-type-changed SidebarMenuButton.*",
+    "shadcn/* prop-type-changed SidebarMenuSubButton.*",
+    "shadcn/* prop-field-changed SidebarMenuButton.*",
+    "shadcn/* prop-field-changed SidebarMenuSubButton.*",
+    "shadcn/* prop-type-changed TraceCollapsible*",
+    "shadcn/* prop-field-changed TraceCollapsible*"
+  ]
 }

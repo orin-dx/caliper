@@ -30,7 +30,9 @@ describe('the oracle comparison', () => {
     const written = union(lit('default'), lit('large'), prim('number'), prim('string'))
     expect(compare(written, optional(union(prim('string'), prim('number'))))).toBe('identical')
     // Without the primitive the literals are still the type.
-    expect(compare(union(lit('default'), lit('large')), optional(union(lit('default'), lit('large'))))).toBe('identical')
+    expect(compare(union(lit('default'), lit('large')), optional(union(lit('default'), lit('large'))))).toBe(
+      'identical',
+    )
     // A numeric literal is covered by `number`, not by `string`.
     expect(compare(union(lit('1'), prim('string')), optional(union(lit('1'), prim('string'))))).toBe('identical')
   })
