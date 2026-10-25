@@ -52,6 +52,13 @@ pub(crate) use import::{resolve_module_with, ModuleResolution};
 /// Prevents infinite loops on circular type references.
 const MAX_DEPTH: u8 = 20;
 
+/// Whether `depth` is past the resolution depth limit. The deepest depth checked is kept in `state`, so a recording
+/// (`memo`) knows how much deeper a state may start and still resolve the same way.
+fn past_max_depth(state: &mut ResolveState, depth: u8) -> bool {
+    state.depth_high = state.depth_high.max(depth);
+    depth > MAX_DEPTH
+}
+
 /// Maximum named types being resolved at once: the declarations a reference passes through to reach another.
 const MAX_NAMED_NESTING: usize = 64;
 

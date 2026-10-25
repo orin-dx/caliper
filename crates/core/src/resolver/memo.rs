@@ -26,7 +26,7 @@ use rustc_hash::FxHashSet;
 use crate::types::{ComponentMapping, Diagnostic, ResolveState, StateReads};
 
 use super::deps::Dependencies;
-use super::{ResolvedChain, MAX_NAMED_NESTING};
+use super::{ResolvedChain, MAX_DEPTH, MAX_NAMED_NESTING};
 use crate::types::PropType;
 
 /// Recordings kept per interface and depth. A component whose state differs from all of them resolves the chain itself.
@@ -117,6 +117,13 @@ struct Recording<T> {
     /// `ResolveState::expand_all` while recording: a chain with collapsed sources must not answer an expanding state.
     expand_all: bool,
     keys_only: bool,
+    /// The depth the resolution started at, and how much deeper than that it checked against the limit. Depth decides
+    /// the result only through the limit and `depth > 0` (ADR 0012's collapse, which the key holds), so a state that
+    /// starts at another depth, shallower or deeper, resolves the same while its deepest check stays within the limit.
+    entry_depth: u8,
+    depth_reach: u8,
+    /// A check hit the limit: the result holds a depth-exceeded stop, which only the same starting depth reproduces.
+    depth_fired: bool,
 }
 
 /// Keep the first read of each key: what the state held on entry. A later read may see the resolution's own
@@ -134,13 +141,19 @@ fn distinct(diagnostics: &[Diagnostic]) -> Vec<Diagnostic> {
 
 impl<T: Clone> Recording<T> {
     /// Whether `state` and `mapping` give the same answer to every read the recorded resolution made.
-    fn applies_to(&self, state: &ResolveState, mapping: Option<&ComponentMapping>) -> bool {
+    fn applies_to(&self, state: &ResolveState, mapping: Option<&ComponentMapping>, depth: u8) -> bool {
         let reads = &self.reads;
-        state.named_in_progress.len() + self.reach <= MAX_NAMED_NESTING
+        let depth_fits = if self.depth_fired {
+            depth == self.entry_depth
+        } else {
+            usize::from(depth) + usize::from(self.depth_reach) <= usize::from(MAX_DEPTH)
+        };
+        depth_fits
+            && state.named_in_progress.len() + self.reach <= MAX_NAMED_NESTING
             && self.expand_all == state.expand_all
             && self.keys_only == state.keys_only
-            && reads.visited.iter().all(|(key, present)| state.visited.contains(&**key) == *present)
-            && reads.named.iter().all(|(key, present)| state.named_in_progress.contains(&**key) == *present)
+            && reads.visited.iter().all(|(key, present)| state.visited.contains(key) == *present)
+            && reads.named.iter().all(|(key, present)| state.named_in_progress.contains(key) == *present)
             && reads.in_scope.iter().all(|(name, present)| state.in_scope_type_params.contains(name) == *present)
             && reads.defaults.iter().all(|(name, found)| {
                 mapping.is_some_and(|mapping| {
@@ -151,12 +164,13 @@ impl<T: Clone> Recording<T> {
     }
 
     /// Apply the recorded resolution's effects to `state` and return its value.
-    fn replay(&self, state: &mut ResolveState) -> T {
+    fn replay(&self, state: &mut ResolveState, depth: u8) -> T {
         state.named_high = state.named_high.max(state.named_in_progress.len() + self.reach);
+        state.depth_high = state.depth_high.max(depth.saturating_add(self.depth_reach));
         if let Some(reads) = state.reads.as_mut() {
             reads.append(&self.reads, true, true);
         }
-        state.visited.extend(self.reads.visited_added.iter().map(|key| CompactString::from(&**key)));
+        state.visited.extend(self.reads.visited_added.iter().copied());
         state.in_scope_type_params.extend(self.reads.in_scope_added.iter().cloned());
         state.shared_diagnostics.extend(self.shared.iter().cloned());
         state.named_unevaluated |= self.named_unevaluated;
@@ -188,16 +202,18 @@ impl<T: Clone> Memo<T> {
         mapping: Option<&ComponentMapping>,
         resolve: impl FnOnce(&mut ResolveState) -> T,
     ) -> T {
-        // The modes never answer each other, so they must not compete for one key's recordings.
-        let mode = depth | (u8::from(state.expand_all) << 6) | (u8::from(state.keys_only) << 7);
+        // The modes never answer each other, so they must not compete for one key's recordings. Depth enters the key
+        // only as whether it is the component's own props type (0): a source reached deeper collapses (ADR 0012), one
+        // reached at 0 does not. The rest of what depth decides, the limit, a recording checks in `applies_to`.
+        let mode = u8::from(depth > 0) | (u8::from(state.expand_all) << 6) | (u8::from(state.keys_only) << 7);
         let map_key = (CompactString::from(key), mode);
         let find = |state: &ResolveState| {
             self.recordings
                 .get(&map_key)
-                .and_then(|recordings| recordings.iter().find(|r| r.applies_to(state, mapping)).cloned())
+                .and_then(|recordings| recordings.iter().find(|r| r.applies_to(state, mapping, depth)).cloned())
         };
         if let Some(recording) = find(state) {
-            return recording.replay(state);
+            return recording.replay(state, depth);
         }
 
         // Another thread already resolving this key finishes it for everyone; wait for it, then look again.
@@ -211,7 +227,7 @@ impl<T: Clone> Memo<T> {
                     flight.wait();
                     self.waiting.remove(&me);
                     if let Some(recording) = find(state) {
-                        return recording.replay(state);
+                        return recording.replay(state, depth);
                     }
                 }
                 None
@@ -226,6 +242,7 @@ impl<T: Clone> Memo<T> {
         // Record: a fresh read log for this resolution, merged into the enclosing one afterwards.
         let entry_nesting = state.named_in_progress.len();
         let enclosing_high = std::mem::replace(&mut state.named_high, entry_nesting);
+        let enclosing_depth_high = std::mem::replace(&mut state.depth_high, depth);
         let enclosing = state.reads.replace(Box::default());
         let entry_unevaluated = std::mem::take(&mut state.named_unevaluated);
         let diagnostics_before = state.diagnostics.len();
@@ -233,6 +250,8 @@ impl<T: Clone> Memo<T> {
         let (value, deps) = super::deps::capturing(|| resolve(state));
         let high = state.named_high;
         state.named_high = enclosing_high.max(high);
+        let depth_high = state.depth_high;
+        state.depth_high = enclosing_depth_high.max(depth_high);
         let mut reads = *state.reads.take().unwrap_or_default();
         reads.visited = first_reads(reads.visited);
         reads.named = first_reads(reads.named);
@@ -270,11 +289,15 @@ impl<T: Clone> Memo<T> {
             reads,
             expand_all: state.expand_all,
             keys_only: state.keys_only,
+            entry_depth: depth,
+            depth_reach: depth_high.saturating_sub(depth),
+            depth_fired: depth_high > MAX_DEPTH,
         };
         let mut recordings = self.recordings.entry(map_key).or_default();
         let same = |r: &Recording<T>| {
             r.expand_all == recording.expand_all
                 && r.keys_only == recording.keys_only
+                && r.depth_fired == recording.depth_fired
                 && r.reads.visited == recording.reads.visited
                 && r.reads.named == recording.reads.named
                 && r.reads.in_scope == recording.reads.in_scope

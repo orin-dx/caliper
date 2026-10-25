@@ -14,7 +14,7 @@ use super::alias::resolve_type_alias_chain;
 use super::collected::resolve_collected_type;
 use super::extends::resolve_extends_ref;
 use super::react::resolve_react_types_file;
-use super::{ResolutionContext, ResolvedChain, MAX_DEPTH};
+use super::{ResolutionContext, ResolvedChain};
 
 /// A declaration's props chain, unless it evaluated to nothing (no props, no inherited layer, and something left
 /// unevaluated: cva's `VariantProps` is `Omit<OmitUndefined<Parameters<…>[0]>, …>`) and a known shortcut covers the
@@ -121,7 +121,7 @@ pub(super) fn resolve_props_chain(
     state: &mut ResolveState,
     depth: u8,
 ) -> ResolvedChain {
-    if depth > MAX_DEPTH {
+    if super::past_max_depth(state, depth) {
         let diag = super::max_depth_diagnostic(&format!("type '{}'", type_name), consuming_file);
         return ResolvedChain::give_up(type_name.to_owned(), Some(diag), state);
     }
