@@ -174,9 +174,9 @@ def diff(base, head):
                 found.append(('component-field-changed', f'{key}.{field}',
                               f'{dump(b.get(field))[:100]} -> {dump(h.get(field))[:100]}'))
     for text, n in sorted((base['diagnostics'] - head['diagnostics']).items()):
-        found.append(('diagnostic-removed', text[:200], f'x{n}'))
+        found.append(('diagnostic-removed', diagnostic_item(text), f'x{n}'))
     for text, n in sorted((head['diagnostics'] - base['diagnostics']).items()):
-        found.append(('diagnostic-added', text[:200], f'x{n}'))
+        found.append(('diagnostic-added', diagnostic_item(text), f'x{n}'))
     for key in sorted(set(base['enums']) | set(head['enums'])):
         if base['enums'].get(key) != head['enums'].get(key):
             found.append(('enum-changed', key, ''))
@@ -184,6 +184,17 @@ def diff(base, head):
         if base['stats'].get(key) != head['stats'].get(key):
             found.append(('stat-changed', key, f"{base['stats'].get(key)} -> {head['stats'].get(key)}"))
     return found
+
+
+def diagnostic_item(text):
+    """A diagnostic as the report names it: severity, code and message first, so an allow pattern can match on them
+    whatever the length of its `affects` list (which sorts first in the canonical JSON), then the JSON itself."""
+    try:
+        d = json.loads(text)
+        head = f"{d['severity']} {d['code']} {str(d['message'])[:100]}"
+    except (ValueError, KeyError, TypeError):
+        return text[:200]
+    return f'{head} | {text[:100]}'
 
 
 def allowed(label, kind, item, patterns):

@@ -271,6 +271,10 @@ pub struct ResolutionContext {
     /// Member reads of a named type (`CssProperties["marker"]`) by `(file, name, key)`, with the files each depended
     /// on: Chakra's style props read the same csstype members once per component (`evaluate::member`).
     pub(crate) member_reads: dashmap::DashMap<evaluate::MemberReadKey, evaluate::MemberRead, rustc_hash::FxBuildHasher>,
+    /// Properties read from a named type's props chain (`ComponentProps<typeof Button>["variant"]`) by `(file, type,
+    /// key)`, with the files each depended on (`primitives::read_from_props_chain`).
+    pub(crate) props_reads:
+        dashmap::DashMap<primitives::PropsReadKey, primitives::PropsRead, rustc_hash::FxBuildHasher>,
     pub extra_builtins: FxHashSet<CompactString>,
     /// Bare name → full scoped key ("file:name") index over `global.enums`,
     /// built once per resolution pass so `resolve_typeof` and
@@ -382,6 +386,7 @@ impl ResolutionContext {
             react_types_files: Default::default(),
             shared_props: Default::default(),
             member_reads: Default::default(),
+            props_reads: Default::default(),
             interface_chains: Default::default(),
             named_results: memo::NamedResults::with_max_reads(NAMED_RESULT_MAX_READS),
             attribute_reads: memo::Memo::with_max_reads(NAMED_RESULT_MAX_READS),
@@ -399,6 +404,9 @@ impl ResolutionContext {
         from.interface_chains.copy_into(&self.interface_chains, &keep);
         for entry in from.member_reads.iter().filter(|entry| keep(entry.value().deps(), &entry.key().0)) {
             self.member_reads.insert(entry.key().clone(), entry.value().clone());
+        }
+        for entry in from.props_reads.iter().filter(|entry| keep(entry.value().deps(), &entry.key().0)) {
+            self.props_reads.insert(entry.key().clone(), entry.value().clone());
         }
         for entry in from.shared_props.iter() {
             self.shared_props.insert(*entry.key(), entry.value().clone());
