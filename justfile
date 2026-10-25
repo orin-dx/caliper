@@ -60,6 +60,7 @@ test-rust:
 test-ts:
     pnpm --filter caliper-docgen-vite-plugin test
     pnpm --filter caliper-docgen-storybook test
+    pnpm --filter caliper-docgen-validate test
 
 # Build the native binding and run the Vite plugin against it
 test-integration:
@@ -110,9 +111,9 @@ machete:
 mutants:
     cargo mutants --workspace --exclude caliper-docgen-napi
 
-ts_src := "'packages/vite-plugin/src/**/*.ts' 'packages/vite-plugin/tests/**/*.ts' 'packages/vite-plugin/vitest.config.ts' 'packages/storybook/src/**/*.ts' 'packages/storybook/tests/**/*.ts' 'packages/storybook/*.config.ts' 'packages/napi/*.d.ts' 'packages/cli/bin/**/*.js' 'apps/validate/src/**/*.ts'"
+ts_src := "'packages/vite-plugin/src/**/*.ts' 'packages/vite-plugin/tests/**/*.ts' 'packages/vite-plugin/vitest.config.ts' 'packages/storybook/src/**/*.ts' 'packages/storybook/tests/**/*.ts' 'packages/storybook/*.config.ts' 'packages/napi/*.d.ts' 'packages/cli/bin/**/*.js' 'apps/validate/src/**/*.ts' 'apps/validate/tests/**/*.ts'"
 ts_src_only := "'packages/vite-plugin/src' 'packages/vite-plugin/vitest.config.ts' 'packages/storybook/src' 'packages/storybook/vitest.config.ts' 'packages/napi/*.d.ts' 'packages/cli/bin/**/*.js' 'apps/validate/src'"
-ts_tests_only := "'packages/vite-plugin/tests' 'packages/storybook/tests'"
+ts_tests_only := "'packages/vite-plugin/tests' 'packages/storybook/tests' 'apps/validate/tests'"
 md_src := "'**/*.md' '!node_modules/**' '!target/**' '!dist/**'"
 
 # Lint and format check
@@ -159,6 +160,11 @@ ci: lint test deny typos zizmor doc-check machete semver msrv (coverage "90")
 # Run moon compare task (accuracy vs react-docgen + react-docgen-typescript)
 compare:
     moon run validate:compare
+
+# Does this build publish the same documentation as BASE (a git ref, default origin/main, or an executable)? Needs
+# `scripts/parity.py setup`; see docs/parity.md. Pass --oracle for TypeScript 7.1's checker, --lazy off|fixtures|all.
+equivalence *args:
+    python3 scripts/equivalence.py {{args}}
 
 # Clean build artifacts
 clean:

@@ -105,7 +105,7 @@ fn resolve_named_uncycled(
             Some(super::precedence::SourceOrKnownMatch::TypeAlias { matched_key, alias: *alias })
         }
         Some(Declared::Interface(iface)) => Some(super::precedence::SourceOrKnownMatch::Interface(iface)),
-        None => resolve_known(name, &resolved_args, &ctx.global, &ctx.enum_bare_index)
+        None => resolve_known(name, &resolved_args, &ctx.global, &|n| ctx.enum_key_for(n, consuming_file))
             .map(super::precedence::SourceOrKnownMatch::Known),
     };
 
