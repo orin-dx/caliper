@@ -17,7 +17,7 @@ pub mod rdt;
 mod revision;
 pub mod watch;
 
-pub use revision::ComponentAnswer;
+pub use revision::{ComponentAnswer, ComponentLocation};
 pub use watch::{LazyStats, WatchSession};
 
 /// Filename that trips a simulated panic in the Phase 2 parse closure —
@@ -207,7 +207,10 @@ impl Serialize for IncrementalUpdate {
 
 /// A session's index: where each component lives and the run's diagnostics, without props. A client that routes by file
 /// and name reads this instead of the whole output.
-struct SessionIndex<'a>(&'a ExtractionOutput);
+struct SessionIndex<'a> {
+    locations: &'a [ComponentLocation],
+    output: &'a ExtractionOutput,
+}
 
 impl Serialize for SessionIndex<'_> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -221,14 +224,12 @@ impl Serialize for SessionIndex<'_> {
             display_name: &'a str,
         }
 
-        let ExtractionOutput { components, diagnostics, .. } = self.0;
         let mut lists = NameLists::new();
-        let diagnostics = InternedDiagnostics::new::<S::Error>(&mut lists, diagnostics)?;
-        let locations: std::collections::BTreeMap<&str, Location<'_>> = components
+        let diagnostics = InternedDiagnostics::new::<S::Error>(&mut lists, &self.output.diagnostics)?;
+        let locations: std::collections::BTreeMap<&str, Location<'_>> = self
+            .locations
             .iter()
-            .map(|(key, entry)| {
-                (key.as_str(), Location { file_path: entry.file_path.as_str(), display_name: &entry.display_name })
-            })
+            .map(|at| (at.key.as_str(), Location { file_path: at.file_path.as_str(), display_name: &at.display_name }))
             .collect();
         let mut out = serializer.serialize_struct("SessionIndex", 4)?;
         out.serialize_field("schemaVersion", &crate::types::SCHEMA_VERSION)?;
@@ -240,9 +241,13 @@ impl Serialize for SessionIndex<'_> {
 }
 
 /// Serialize a session's index to a JSON string: `schemaVersion`, where each component lives (`components`), and the
-/// run's `diagnostics` with the `nameLists` they refer to. The props stay in the session.
-pub fn session_index_to_json(output: &ExtractionOutput) -> Result<String, serde_json::Error> {
-    serde_json::to_string(&SessionIndex(output))
+/// run's `diagnostics` with the `nameLists` they refer to. The props stay in the session. `locations` is
+/// [`WatchSession::component_index`]: a lazy session's output has no components, so the index cannot come from it.
+pub fn session_index_to_json(
+    locations: &[ComponentLocation],
+    output: &ExtractionOutput,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(&SessionIndex { locations, output })
 }
 
 // ─── JSON serialization helpers ──────────────────────────────────────────────

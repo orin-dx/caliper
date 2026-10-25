@@ -10,7 +10,7 @@ use rustc_hash::FxHashMap;
 use crate::types::*;
 
 use super::discover::{discover_dirs, discover_files};
-use super::revision::{empty_output, output_delta, ComponentAnswer, Revision};
+use super::revision::{empty_output, output_delta, ComponentAnswer, ComponentLocation, Revision};
 use super::{IncrementalUpdate, PipelineOptions};
 
 /// Canonicalize `path`, falling back to canonicalizing its parent directory
@@ -388,6 +388,25 @@ impl WatchSession {
         match revision.is_lazy() {
             true => revision.lazy_keys(&self.options),
             false => revision.output.components.keys().cloned().collect(),
+        }
+    }
+
+    /// Where each component [`Self::component_keys`] lists is declared, sorted by key. A lazy session answers from
+    /// parsing alone; nothing is resolved.
+    pub fn component_index(&self) -> Vec<ComponentLocation> {
+        let Some(revision) = self.current.load_full() else { return Vec::new() };
+        match revision.is_lazy() {
+            true => revision.lazy_index(&self.options),
+            false => revision
+                .output
+                .components
+                .iter()
+                .map(|(key, entry)| ComponentLocation {
+                    key: key.clone(),
+                    file_path: entry.file_path.clone(),
+                    display_name: entry.display_name.clone(),
+                })
+                .collect(),
         }
     }
 

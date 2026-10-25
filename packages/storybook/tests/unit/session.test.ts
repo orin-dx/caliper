@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { SUPPORTED_SCHEMA_VERSION } from '../../src/schema.js'
 import { DocgenSession } from '../../src/session.js'
-import { FakeBinding, entry, warning } from './fake-binding.js'
+import { FakeBinding, entry, rdtDoc, warning } from './fake-binding.js'
 
 const src = join('/project', 'src')
 // Modules whose source the session reads to tell which component an export names.
@@ -110,7 +110,7 @@ describe('DocgenSession.degraded', () => {
       components: { Button: entry('Button', join(src, 'Button.tsx')) },
       diagnostics: [warning(['Button']), warning(['Card'], 'info')],
     })
-    const session = new DocgenSession({ srcDirs: [src] }, binding)
+    const session = new DocgenSession({ srcDirs: [src], lazy: false }, binding)
     await session.fresh()
     expect(session.degraded('Button')).toBe(true)
     expect(session.degraded('Card')).toBe(false)
@@ -122,7 +122,7 @@ describe('DocgenSession.degraded', () => {
 
   it('lists each message once, however many diagnostics carry it', async () => {
     const binding = new FakeBinding({ diagnostics: [warning(['Button']), { ...warning(['Button']), line: 3 }] })
-    const session = new DocgenSession({ srcDirs: [src] }, binding)
+    const session = new DocgenSession({ srcDirs: [src], lazy: false }, binding)
     await session.fresh()
     expect(session.degradedBy('Button')).toEqual(['Cannot resolve type'])
   })
@@ -131,7 +131,7 @@ describe('DocgenSession.degraded', () => {
 describe('DocgenSession.fresh', () => {
   it('initializes once and looks at the files on every call', async () => {
     const binding = new FakeBinding({ components: { Button: entry('Button', join(src, 'Button.tsx')) } })
-    const session = new DocgenSession({ srcDirs: [src] }, binding)
+    const session = new DocgenSession({ srcDirs: [src], lazy: false }, binding)
     await session.fresh()
     await session.fresh()
     expect(binding.initializations).toBe(1)
@@ -140,7 +140,7 @@ describe('DocgenSession.fresh', () => {
 
   it('applies a deleted file, and the update removes its components', async () => {
     const binding = new FakeBinding({ components: { Button: entry('Button', join(src, 'Button.tsx')) } })
-    const session = new DocgenSession({ srcDirs: [src] }, binding)
+    const session = new DocgenSession({ srcDirs: [src], lazy: false }, binding)
     await session.fresh()
     binding.updates.push({ removedKeys: ['Button'] })
     await session.fresh()
@@ -149,7 +149,7 @@ describe('DocgenSession.fresh', () => {
 
   it('publishes a renamed component under its new key, and finds it by file and name afterwards', async () => {
     const binding = new FakeBinding({ components: { Button: entry('Button', join(src, 'Button.tsx')) } })
-    const session = new DocgenSession({ srcDirs: [src] }, binding)
+    const session = new DocgenSession({ srcDirs: [src], lazy: false }, binding)
     await session.fresh()
     expect(session.keyOf(join(src, 'Button.tsx'), 'Button')).toBe('Button')
     binding.updates.push({
@@ -164,7 +164,7 @@ describe('DocgenSession.fresh', () => {
 
   it('ignores an update that is not newer than the one applied', async () => {
     const binding = new FakeBinding({ components: { Button: entry('Button', join(src, 'Button.tsx')) } })
-    const session = new DocgenSession({ srcDirs: [src] }, binding)
+    const session = new DocgenSession({ srcDirs: [src], lazy: false }, binding)
     await session.fresh()
     binding.updates.push({ removedKeys: ['Button'] })
     await session.fresh()
@@ -182,7 +182,7 @@ describe('DocgenSession.fresh', () => {
 
   it('shares one look among concurrent callers, and a caller during a look waits for a later one', async () => {
     const binding = new FakeBinding({ components: {} })
-    const session = new DocgenSession({ srcDirs: [src] }, binding)
+    const session = new DocgenSession({ srcDirs: [src], lazy: false }, binding)
     await session.fresh()
     const before = binding.looks
 
@@ -210,5 +210,82 @@ describe('DocgenSession.fresh', () => {
     const full = new DocgenSession({ srcDirs: [src], skipHtmlProps: true, htmlAttributes: 'full' }, fake)
     await full.fresh()
     expect(seen[1]).toMatchObject({ htmlAttributes: 'full' })
+  })
+})
+
+describe('DocgenSession, lazy', () => {
+  it('asks for lazy resolution by default, and not when told otherwise', async () => {
+    const fake = new FakeBinding({})
+    const seen: unknown[] = []
+    fake.createSession = ((options: unknown) => (seen.push(options), 7)) as never
+    await new DocgenSession({ srcDirs: [src] }, fake).fresh()
+    await new DocgenSession({ srcDirs: [src], lazy: false }, fake).fresh()
+    expect(seen).toMatchObject([{ lazy: true }, { lazy: false }])
+  })
+
+  it('resolves a component when documentation asks, and says why its props may be incomplete', async () => {
+    const binding = new FakeBinding({
+      components: { Button: entry('Button', join(src, 'Button.tsx')), Card: entry('Card', join(src, 'Card.tsx')) },
+      diagnostics: [warning(['Button']), warning(['Card'], 'info')],
+    })
+    binding.docs = { Button: rdtDoc('Button', ['label']), Card: rdtDoc('Card', ['title']) }
+    const session = new DocgenSession({ srcDirs: [src] }, binding)
+    await session.fresh()
+    expect(binding.resolved).toEqual([])
+
+    expect(await session.documentation('Button')).toEqual({
+      doc: rdtDoc('Button', ['label']),
+      degradedBy: ['Cannot resolve type'],
+    })
+    expect(await session.documentation('Card')).toEqual({ doc: rdtDoc('Card', ['title']), degradedBy: [] })
+    expect(await session.documentation('Missing')).toEqual({ doc: undefined, degradedBy: [] })
+    expect(binding.resolved).toEqual(['Button', 'Card', 'Missing'])
+  })
+
+  it('warms a lazy session up in the background, unless told not to or eager', async () => {
+    const warmed = async (options: Partial<ConstructorParameters<typeof DocgenSession>[0]>) => {
+      const binding = new FakeBinding({})
+      await new DocgenSession({ srcDirs: [src], ...options }, binding).fresh()
+      return binding.warmUps
+    }
+    expect(await warmed({})).toEqual([8])
+    expect(await warmed({ warmUp: false })).toEqual([])
+    expect(await warmed({ lazy: false })).toEqual([])
+  })
+
+  it('looks again at where components are after an update that changes keys, and only then', async () => {
+    const binding = new FakeBinding({ components: { Button: entry('Button', join(src, 'Button.tsx')) } })
+    const session = new DocgenSession({ srcDirs: [src] }, binding)
+    await session.fresh()
+    expect(binding.initializations).toBe(1)
+
+    await session.fresh()
+    expect(binding.initializations).toBe(1)
+
+    binding.output = { components: { PrimaryButton: entry('PrimaryButton', join(src, 'Button.tsx')) } }
+    binding.updates.push({ removedKeys: ['Button'], updatedKeys: ['PrimaryButton'] })
+    await session.fresh()
+    expect(binding.initializations).toBe(2)
+    expect(session.keyOf(join(src, 'Button.tsx'), 'PrimaryButton')).toBe('PrimaryButton')
+    expect(session.keyOf(join(src, 'Button.tsx'), 'Button')).toBeUndefined()
+
+    binding.updates.push({})
+    await session.fresh()
+    expect(binding.initializations).toBe(2)
+  })
+
+  it('answers an eager session from the index it holds, resolving nothing per request', async () => {
+    const binding = new FakeBinding({
+      components: { Button: entry('Button', join(src, 'Button.tsx')) },
+      diagnostics: [warning(['Button'])],
+    })
+    binding.docs = { Button: rdtDoc('Button', ['label']) }
+    const session = new DocgenSession({ srcDirs: [src], lazy: false }, binding)
+    await session.fresh()
+    expect(await session.documentation('Button')).toEqual({
+      doc: rdtDoc('Button', ['label']),
+      degradedBy: ['Cannot resolve type'],
+    })
+    expect(binding.resolved).toEqual([])
   })
 })

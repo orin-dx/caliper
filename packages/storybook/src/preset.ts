@@ -12,6 +12,8 @@ function workerOptions(options: CaliperStorybookOptions): CaliperStorybookOption
     htmlAttributes,
     loadDependencies,
     collapseInheritedProps,
+    lazy,
+    warmUp,
     fallback,
   } = options
   return {
@@ -22,6 +24,8 @@ function workerOptions(options: CaliperStorybookOptions): CaliperStorybookOption
     htmlAttributes,
     loadDependencies,
     collapseInheritedProps,
+    lazy,
+    warmUp,
     fallback,
   }
 }

@@ -59,6 +59,8 @@ export function createDocgenProvider(
     // Richer than Storybook's own docgen by default: caliper-docgen is fast enough to read the dependencies' types.
     loadDependencies: options.loadDependencies ?? true,
     collapseInheritedProps: options.collapseInheritedProps ?? 'none',
+    lazy: options.lazy,
+    warmUp: options.warmUp,
   }
   // The native binding loads on the first story request, not when Storybook starts the worker.
   let sessionPromise: Promise<DocgenSession> | undefined
@@ -126,31 +128,27 @@ export function createDocgenProvider(
   }
 
   /**
-   * The session key and file of the component `name` (default: `meta.component`) names, or why there is none. The
-   * caller has brought the session up to date for this request.
+   * The session key, file and documentation of the component `name` (default: `meta.component`) names, or why there
+   * is none. The caller has brought the session up to date for this request.
    */
-  async function component(csf: CsfFile, storyPath: string, name?: string): Promise<{ key: string; path: string }> {
+  async function component(
+    csf: CsfFile,
+    storyPath: string,
+    name?: string,
+  ): Promise<{ key: string; path: string; doc: RdtComponentDoc }> {
     const target = name
       ? ({ _metaAnnotations: { component: expressionFor(name) }, _file: csf._file } as unknown as CsfFile)
       : csf
     const session = await getSession()
     const { key, path } = await locate(session, target, storyPath)
-    if (fallback === 'degraded') {
-      const reasons = session.degradedBy(key)
-      if (reasons.length > 0) {
-        const reason = reasons.join('; ')
-        reportFallback(key, reason)
-        throw new Error(`${key}'s props may be incomplete: ${reason}`)
-      }
+    const { doc, degradedBy } = session.documentation(key)
+    if (fallback === 'degraded' && degradedBy.length > 0) {
+      const reason = degradedBy.join('; ')
+      reportFallback(key, reason)
+      throw new Error(`${key}'s props may be incomplete: ${reason}`)
     }
-    return { key, path }
-  }
-
-  async function docgen(key: string): Promise<RdtComponentDoc> {
-    const session = await getSession()
-    const doc = session.docgenInfo(key)
     if (!doc) throw new Error(`${key} left the session`)
-    return doc
+    return { key, path, doc }
   }
 
   async function argTypes(doc: RdtComponentDoc): Promise<DocgenPayload['argTypes']> {
@@ -163,8 +161,7 @@ export function createDocgenProvider(
     { name, componentName }: { name: string; componentName: string },
   ): Promise<Subcomponent> {
     try {
-      const { key, path } = await component(csf, storyPath, componentName)
-      const doc = await docgen(key)
+      const { path, doc } = await component(csf, storyPath, componentName)
       const { description, summary, jsDocTags } = extractComponentDescription(
         undefined,
         doc.description || undefined,
@@ -188,8 +185,7 @@ export function createDocgenProvider(
     // One look at the files for the story and its subcomponents: they are all answered from the same moment.
     const session = await getSession()
     await session.fresh()
-    const { key } = await component(csf, storyPath)
-    const doc = await docgen(key)
+    const { doc } = await component(csf, storyPath)
     const { description, summary, jsDocTags } = extractComponentDescription(
       extractDescription(csf._metaStatement) || undefined,
       doc.description || undefined,

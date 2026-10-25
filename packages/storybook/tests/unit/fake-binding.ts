@@ -129,6 +129,32 @@ export class FakeBinding implements SessionBinding {
   sessionDocgenInfo = (_sessionId: number, keys: string[]): string =>
     JSON.stringify(Object.fromEntries(keys.filter((key) => key in this.docs).map((key) => [key, this.docs[key]])))
 
+  /** Counts the components a lazy session was asked to resolve. */
+  resolved: string[] = []
+
+  sessionComponentAnswers = (_sessionId: number, keys: string[]): string => {
+    this.resolved.push(...keys)
+    const diagnostics = this.output.diagnostics ?? []
+    return JSON.stringify(
+      Object.fromEntries(
+        keys
+          .filter((key) => key in this.docs)
+          .map((key) => [
+            key,
+            { docgenInfo: this.docs[key], diagnostics: diagnostics.filter((each) => each.affects?.includes(key)) },
+          ]),
+      ),
+    )
+  }
+
+  /** The sessions asked to warm up, with how many components. */
+  warmUps: number[] = []
+
+  sessionWarmUp = async (_sessionId: number, count: number): Promise<number> => {
+    this.warmUps.push(count)
+    return count
+  }
+
   closeSession = (): void => {
     this.closed = true
   }

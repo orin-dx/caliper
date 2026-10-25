@@ -298,8 +298,7 @@ pub async fn initialize_session_index(session_id: u32, options: JsExtractOptions
             let session = match SESSIONS.get(&session_id) {
                 Some(s) => s.clone(),
                 None => {
-                    let pipeline_options = PipelineOptions::try_from(options).map_err(napi::Error::from_reason)?;
-                    let s = Arc::new(WatchSession::new(pipeline_options));
+                    let s = new_session(options)?;
                     SESSIONS.insert(session_id, s.clone());
                     s
                 }
@@ -309,7 +308,9 @@ pub async fn initialize_session_index(session_id: u32, options: JsExtractOptions
             let output = session
                 .current_output()
                 .ok_or_else(|| napi::Error::from_reason("the session has no output after initialize".to_owned()))?;
-            caliper_docgen_core::pipeline::session_index_to_json(&output)
+            // A lazy session's output has no components and no component diagnostics: it resolves none of them. Where
+            // each is declared comes from parsing, and a component's diagnostics come with its `sessionComponentAnswers`.
+            caliper_docgen_core::pipeline::session_index_to_json(&session.component_index(), &output)
                 .map_err(|e| napi::Error::from_reason(e.to_string()))
         }) {
             Ok(result) => result,
@@ -354,6 +355,63 @@ pub fn session_docgen_info(session_id: u32, keys: Vec<String>) -> napi::Result<S
         Ok(result) => result,
         Err(diag) => Err(napi::Error::from_reason(diag.to_string())),
     }
+}
+
+/// What a host needs to answer for one component: its documentation as `sessionDocgenInfo` returns it, and its own
+/// diagnostics, each with `affects` set to the key. `{ key: { docgenInfo, diagnostics } }`; a key the session has no
+/// component under is left out. A lazy session resolves each requested component now (in parallel), so a host learns
+/// whether a component's props may be incomplete from the same call that returns them.
+#[napi]
+pub fn session_component_answers(session_id: u32, keys: Vec<String>) -> napi::Result<String> {
+    match caliper_docgen_core::panic_guard::contain_panic("session_component_answers", move || {
+        let session = SESSIONS.get(&session_id).map(|session| session.clone());
+        let answers: serde_json::Map<String, serde_json::Value> = match session {
+            Some(session) => {
+                let answered = session.components(&keys);
+                keys.into_iter()
+                    .zip(answered)
+                    .filter_map(|(key, answer)| {
+                        let answer = answer?;
+                        let answer = serde_json::json!({
+                            "docgenInfo": caliper_docgen_core::pipeline::rdt::docgen_info(&answer.entry),
+                            "diagnostics": answer.diagnostics,
+                        });
+                        Some((key, answer))
+                    })
+                    .collect()
+            }
+            None => serde_json::Map::new(),
+        };
+        serde_json::to_string(&answers).map_err(|e| napi::Error::from_reason(e.to_string()))
+    }) {
+        Ok(result) => result,
+        Err(diag) => Err(napi::Error::from_reason(diag.to_string())),
+    }
+}
+
+/// Resolves `count` components spread evenly over the session's keys, without returning them: a lazy session then
+/// holds the dependency declarations and resolver memos that components share, so the first request a host answers
+/// does not load them. Runs off the calling thread and returns how many components it resolved. An eager session, an
+/// unknown session and a count of 0 resolve nothing.
+#[napi]
+pub async fn session_warm_up(session_id: u32, count: u32) -> napi::Result<u32> {
+    tokio::task::spawn_blocking(move || {
+        match caliper_docgen_core::panic_guard::contain_panic("session_warm_up", move || {
+            let Some(session) = SESSIONS.get(&session_id).map(|session| session.clone()) else { return 0 };
+            if !session.is_lazy() || count == 0 {
+                return 0;
+            }
+            let keys = session.component_keys();
+            let wanted = (count as usize).min(keys.len());
+            let spread: Vec<String> = (0..wanted).filter_map(|n| keys.get(n * keys.len() / wanted).cloned()).collect();
+            session.components(&spread).into_iter().flatten().count() as u32
+        }) {
+            Ok(resolved) => Ok(resolved),
+            Err(diag) => Err(napi::Error::from_reason(diag.to_string())),
+        }
+    })
+    .await
+    .map_err(|e| napi::Error::from_reason(e.to_string()))?
 }
 
 /// Every component key `sessionDocgenInfo` answers, sorted. A lazy session resolves only imported-member aliases to
@@ -833,6 +891,87 @@ mod tests {
         assert_eq!(from_lazy, from_eager);
         assert!(from_lazy.contains(r#""label""#));
         assert_eq!(session_stats(lazy).expect("lazy stats").resolved, 1, "Card was never asked for");
+
+        close_session(eager);
+        close_session(lazy);
+        std::fs::remove_dir_all(&dir).expect("remove temp dir");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_lazy_session_indexes_where_components_are_and_answers_with_their_diagnostics() {
+        let dir = std::env::temp_dir().join(format!("caliper-index-{}-{}", std::process::id(), next_session_id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        std::fs::write(
+            dir.join("Button.tsx"),
+            "export function Button(props: { label: string }) { return null; }\n\
+             export function Card(props: { title: string }) { return null; }\n",
+        )
+        .expect("write fixture");
+        let options = |lazy: Option<bool>| JsExtractOptions {
+            src_dirs: vec![dir.to_string_lossy().into_owned()],
+            cache_dir: Some(dir.join("cache").to_string_lossy().into_owned()),
+            lazy,
+            ..base_options()
+        };
+
+        let eager = create_session(options(None)).expect("eager session");
+        let lazy = create_session(options(Some(true))).expect("lazy session");
+        let from_eager = initialize_session_index(eager, options(None)).await.expect("eager index");
+        let from_lazy = initialize_session_index(lazy, options(Some(true))).await.expect("lazy index");
+
+        let components =
+            |index: &str| serde_json::from_str::<serde_json::Value>(index).expect("json")["components"].clone();
+        assert_eq!(components(&from_lazy), components(&from_eager));
+        assert_eq!(components(&from_lazy)["Card"]["displayName"], "Card");
+        assert_eq!(session_stats(lazy).expect("lazy stats").resolved, 0, "indexing resolves nothing");
+
+        let keys = vec!["Card".to_owned(), "Missing".to_owned()];
+        let answers = |id| {
+            serde_json::from_str::<serde_json::Value>(&session_component_answers(id, keys.clone()).expect("answers"))
+                .expect("json")
+        };
+        let (lazy_answers, eager_answers) = (answers(lazy), answers(eager));
+        assert_eq!(lazy_answers, eager_answers);
+        assert_eq!(lazy_answers["Card"]["docgenInfo"]["displayName"], "Card");
+        assert_eq!(lazy_answers["Card"]["diagnostics"], serde_json::json!([]));
+        assert!(lazy_answers.get("Missing").is_none());
+        assert_eq!(session_stats(lazy).expect("lazy stats").resolved, 1, "Button was never asked for");
+
+        close_session(eager);
+        close_session(lazy);
+        std::fs::remove_dir_all(&dir).expect("remove temp dir");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn warming_up_resolves_a_spread_of_components_in_a_lazy_session_only() {
+        let dir = std::env::temp_dir().join(format!("caliper-warm-{}-{}", std::process::id(), next_session_id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        for name in ["A", "B", "C", "D"] {
+            std::fs::write(
+                dir.join(format!("{name}.tsx")),
+                format!("export function {name}(props: {{ v: string }}) {{ return null; }}\n"),
+            )
+            .expect("write fixture");
+        }
+        let options = |lazy: Option<bool>| JsExtractOptions {
+            src_dirs: vec![dir.to_string_lossy().into_owned()],
+            cache_dir: Some(dir.join("cache").to_string_lossy().into_owned()),
+            lazy,
+            ..base_options()
+        };
+        let eager = create_session(options(None)).expect("eager session");
+        let lazy = create_session(options(Some(true))).expect("lazy session");
+        initialize_session_index(eager, options(None)).await.expect("eager index");
+        initialize_session_index(lazy, options(Some(true))).await.expect("lazy index");
+
+        assert_eq!(session_warm_up(lazy, 0).await.expect("no warm-up"), 0);
+        assert_eq!(session_stats(lazy).expect("stats").resolved, 0);
+        assert_eq!(session_warm_up(lazy, 2).await.expect("warm-up"), 2);
+        assert_eq!(session_stats(lazy).expect("stats").resolved, 2);
+        assert_eq!(session_warm_up(lazy, 99).await.expect("more than there are"), 4);
+        assert_eq!(session_stats(lazy).expect("stats").resolved, 4);
+        assert_eq!(session_warm_up(eager, 2).await.expect("eager"), 0);
+        assert_eq!(session_warm_up(9_999_999, 2).await.expect("unknown"), 0);
 
         close_session(eager);
         close_session(lazy);
