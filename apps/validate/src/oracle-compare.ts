@@ -13,7 +13,7 @@ export type Norm = (
   | { k: 'function'; params: { optional: boolean; rest: boolean; type: Norm }[]; returns: Norm }
   | { k: 'object'; fields: string[]; index: boolean }
   | { k: 'name'; name: string }
-  | { k: 'param'; name: string }
+  | { k: 'param'; name: string; fallback?: Norm; constraint?: Norm }
   | { k: 'opaque' }
   | { k: 'error' }
 ) & { alias?: string }
@@ -164,6 +164,15 @@ function compareOne(c: Norm, k: Norm, depth: number): Verdict {
       if (c.k !== 'intersection') return 'less precise'
       return c.members.length === k.members.length ? 'identical' : 'less precise'
     }
+    case 'param': {
+      // A type parameter of the component itself, which Caliper replaced with an instantiation: its default, as a bare
+      // `AccordionProps` means `AccordionProps<false>`, or its constraint. That is one instance of the parameter,
+      // looser or narrower than the parameter itself, and not another type; a type that is neither instance is.
+      // `c` may be one member of a union Caliper wrote out (`string` of `string | number`), so it must fit one member of
+      // an instance, not all of them.
+      const instances = [k.fallback, k.constraint].filter((i): i is Norm => i !== undefined).flatMap((i) => members(i))
+      return instances.some((i) => compare(c, i, depth + 1) !== 'wrong') ? 'less precise' : 'wrong'
+    }
     default: {
       return 'wrong'
     }
@@ -181,6 +190,8 @@ export function compare(c: Norm, k: Norm, depth = 0): Verdict {
     return depth === 0 ? 'checker any/error' : 'identical'
   }
   const km = members(k)
+  // An optional prop of type `never` reads `undefined` in the checker, which `members` drops as the optional marker.
+  if (km.length === 0 && c.k === 'prim' && c.name === 'never') return 'identical'
   if (c.k === 'name') {
     // An optional prop's checker type is `X | undefined`; the name is X's.
     const target = km.length === 1 ? km[0] : k

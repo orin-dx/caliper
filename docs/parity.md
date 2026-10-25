@@ -62,6 +62,8 @@ Each prop React's `@types/react` doesn't declare gets one verdict:
 | Wrong | Caliper's type describes something else, such as a literal union missing members or `number` where csstype's `ZIndex` also allows strings |
 | Checker any/error | The checker has no type: an error, `any`, or a top-level `unknown` where Caliper has one |
 
+A component's own type parameter that Caliper replaced with an instantiation (`multiple?: Multiple` with `Multiple extends boolean = false`, read as `false`) is "less precise" when Caliper's type is the parameter's default or its constraint, and "wrong" when it is neither; the checker side carries both. An optional prop of type `never` is the checker's `undefined`. `oracle.ts --dump FILE` (which `parity.py oracle` passes) writes every prop judged wrong or less precise, so two builds' verdicts can be diffed prop by prop; `apps/validate/src/oracle-compare.test.ts` holds the comparison's tests.
+
 Checker types are normalized once per type id and verdicts made once per pair, so Chakra's 470,878 shared props cost 1,241 comparisons. `--check` against `scripts/oracle-baseline.json` fails when identical-or-spelled falls, wrong rises, or components matched falls, by more than 0.05 points. The fixtures directory is a sixth corpus, read in place.
 
 `main` at `7bc120f4` against `7.1.0-beta`:

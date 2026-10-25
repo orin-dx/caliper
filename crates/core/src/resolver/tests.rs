@@ -1947,6 +1947,49 @@ fn test_known_opaque_result_emits_diagnostic_at_chain_level() {
     assert!(!state.diagnostics.is_empty(), "expected a diagnostic for VariantProps without variants, got none");
 }
 
+// `VariantProps<typeof itemVariants>` reads the variants of the `itemVariants` its own file declares: shadcn keeps a
+// copy of every component per registry, each with variants of its own, and the bare name alone gave all of them the
+// first file's by path.
+#[test]
+fn test_variant_props_reads_the_variants_its_own_file_declares() {
+    use crate::types::{EnumEntry, EnumValue};
+
+    let entry = |name: &str, value: &str| EnumEntry {
+        name: name.into(),
+        value: EnumValue::String(value.into()),
+        description: String::new(),
+    };
+    let mut global = GlobalSourceData::default();
+    global.enums.insert("/a/item.tsx:itemVariants".into(), vec![entry("size", "default"), entry("size", "sm")]);
+    global.enums.insert(
+        "/b/item.tsx:itemVariants".into(),
+        vec![entry("size", "default"), entry("size", "sm"), entry("size", "xs")],
+    );
+    let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
+    let args = [CollectedType::TypeOf("itemVariants".into())];
+
+    let sizes_in = |path: &str| {
+        let file_path = Utf8PathBuf::from(path);
+        let mapping = ComponentMapping::new(
+            "Item".into(),
+            "VariantProps".into(),
+            file_path.clone(),
+            0,
+            0,
+            crate::types::DetectionRule::FunctionDeclaration,
+        );
+        let mut state = ResolveState::default();
+        let chain = super::chain::resolve_props_chain("VariantProps", &args, &file_path, &mapping, &ctx, &mut state, 0);
+        let size = chain.props.iter().find(|p| p.name == "size").unwrap_or_else(|| panic!("no size prop in {path}"));
+        let PropType::Union(members) = &size.prop_type else { panic!("size is {:?}", size.prop_type) };
+        let PropType::LiteralUnion { members, .. } = &members[0] else { panic!("size is {:?}", size.prop_type) };
+        members.clone()
+    };
+
+    assert_eq!(sizes_in("/a/item.tsx"), ["default", "sm"]);
+    assert_eq!(sizes_in("/b/item.tsx"), ["default", "sm", "xs"]);
+}
+
 // ── Test 21: collected.rs's Conditional/Mapped/KeyOf/Raw-fallback Opaque
 // constructions must each emit a diagnostic ─────────────────────────────────
 

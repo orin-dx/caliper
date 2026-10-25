@@ -411,6 +411,24 @@ impl ResolutionContext {
         }
     }
 
+    /// The key in `global.enums` of the variants (`cva`, `tv`, recipes) `name` stands for as `consuming_file` writes
+    /// it: its own declaration, else the one it imports, else the first file by path that declares the bare name. Two
+    /// files can each declare an `itemVariants` (shadcn keeps a copy of every component per registry), and the bare
+    /// name alone would give both the same one.
+    pub(crate) fn enum_key_for(&self, name: &str, consuming_file: &Utf8Path) -> Option<String> {
+        let own = format!("{consuming_file}:{name}");
+        if self.global.enums.contains_key(&own) {
+            return Some(own);
+        }
+        if let Some((file, canonical)) = import::resolve_to_canonical(name, consuming_file, self, &mut Vec::new()) {
+            let imported = format!("{file}:{canonical}");
+            if self.global.enums.contains_key(&imported) {
+                return Some(imported);
+            }
+        }
+        self.enum_bare_index.get(name).map(|key| key.to_string())
+    }
+
     /// `prop` as the run's one shared allocation of it: an equal prop built earlier, or `prop` itself.
     pub(crate) fn share(&self, prop: ParsedProp) -> Arc<ParsedProp> {
         use std::hash::Hasher;
