@@ -95,10 +95,20 @@ function members(n: Norm): Norm[] {
     else if (!isUndefined(m) && !(m.k === 'intersection' && m.members.some(isUndefined))) flat.push(m)
   }
   push(n)
-  if (flat.some((m) => isLit(m, 'true')) && flat.some((m) => isLit(m, 'false'))) {
-    return [...flat.filter((m) => !isLit(m, 'true') && !isLit(m, 'false')), prim('boolean')]
+  // `'default' | 'large' | string` is `string` to the checker: a literal that a primitive of its kind in the same
+  // union already covers adds nothing, so a union written with it reads the same as one without. A `true`/`false`
+  // literal is boolean's, not string's.
+  const has = (name: string) => flat.some((m) => m.k === 'prim' && m.name === name)
+  const covered = (m: Norm) =>
+    m.k === 'lit' &&
+    m.value !== 'true' &&
+    m.value !== 'false' &&
+    (/^-?\d+(\.\d+)?$/.test(m.value) ? has('number') : has('string'))
+  const kept = flat.some(covered) ? flat.filter((m) => !covered(m)) : flat
+  if (kept.some((m) => isLit(m, 'true')) && kept.some((m) => isLit(m, 'false'))) {
+    return [...kept.filter((m) => !isLit(m, 'true') && !isLit(m, 'false')), prim('boolean')]
   }
-  return flat
+  return kept
 }
 
 /** Two unions: each checker member covered by one of Caliper's (a missing member makes Caliper's type too narrow),
@@ -171,6 +181,9 @@ function compareOne(c: Norm, k: Norm, depth: number): Verdict {
       // `c` may be one member of a union Caliper wrote out (`string` of `string | number`), so it must fit one member of
       // an instance, not all of them.
       const instances = [k.fallback, k.constraint].filter((i): i is Norm => i !== undefined).flatMap((i) => members(i))
+      // A parameter with neither (a generic component cast over `forwardRef`, whose props interface declares the
+      // default) leaves the checker no instance to hold Caliper's to: any one it picked is one value of the parameter.
+      if (instances.length === 0) return 'less precise'
       return instances.some((i) => compare(c, i, depth + 1) !== 'wrong') ? 'less precise' : 'wrong'
     }
     default: {

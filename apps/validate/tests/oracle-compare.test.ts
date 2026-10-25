@@ -16,6 +16,25 @@ describe('the oracle comparison', () => {
     expect(compare(prim('boolean'), optional(multiple))).toBe('less precise')
   })
 
+  it('a parameter with neither a default nor a constraint holds whatever instance Caliper picked', () => {
+    expect.hasAssertions()
+    // antd's `Segmented`: `defaultValue?: ValueType` where the cast over `forwardRef` declares `<ValueType>` bare and
+    // the props interface declares the default Caliper used.
+    const valueType: Norm = { k: 'param', name: 'ValueType' }
+    expect(compare(union(prim('string'), prim('number')), optional(valueType))).toBe('less precise')
+  })
+
+  it('a literal a primitive of its kind in the same union covers adds nothing', () => {
+    expect.hasAssertions()
+    // antd's `DrawerPanel`: `size?: 'default' | 'large' | number | string`, which the checker reduces to `string | number`.
+    const written = union(lit('default'), lit('large'), prim('number'), prim('string'))
+    expect(compare(written, optional(union(prim('string'), prim('number'))))).toBe('identical')
+    // Without the primitive the literals are still the type.
+    expect(compare(union(lit('default'), lit('large')), optional(union(lit('default'), lit('large'))))).toBe('identical')
+    // A numeric literal is covered by `number`, not by `string`.
+    expect(compare(union(lit('1'), prim('string')), optional(union(lit('1'), prim('string'))))).toBe('identical')
+  })
+
   it('a type parameter replaced with its constraint is one instance of it', () => {
     expect.hasAssertions()
     // `value?: Value` with `Value extends string`, which Caliper reads as `string`.
