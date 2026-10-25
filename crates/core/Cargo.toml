@@ -35,6 +35,14 @@ rmp-serde.workspace        = true
 rayon.workspace            = true
 ignore.workspace           = true
 
+[features]
+# Timing code for `examples/skippable_probe.rs`; not part of the library.
+probe = []
+
+[[example]]
+name = "skippable_probe"
+required-features = ["probe"]
+
 [dev-dependencies]
 criterion.workspace        = true
 insta.workspace            = true

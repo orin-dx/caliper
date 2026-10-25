@@ -13,6 +13,9 @@ use crate::resolver::ResolutionContext;
 use crate::types::*;
 
 mod discover;
+#[cfg(feature = "probe")]
+#[doc(hidden)]
+pub mod probe;
 pub mod rdt;
 mod revision;
 pub mod watch;

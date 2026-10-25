@@ -193,11 +193,18 @@ def setup(args):
     base = os.path.dirname(corpora_dir)
     os.makedirs(os.path.join(base, 'logs'), exist_ok=True)
     env = package_manager_env(base)
-    with open(os.path.join(base, 'logs', 'corepack.log'), 'w') as log:
-        ensure_package_managers(base, env, log)
+    if not args.no_install:
+        with open(os.path.join(base, 'logs', 'corepack.log'), 'w') as log:
+            ensure_package_managers(base, env, log)
     for corpus in selected(args.corpus):
         checkout = os.path.join(corpora_dir, corpus['clone'])
         marker = os.path.join(checkout, '.parity-complete')
+        if args.no_install:
+            # Sources only, for timing that reads no dependency; no marker, so a later full setup still installs.
+            print(f"{corpus['name']}: fetching {corpus['commit'][:12]} (no install)", flush=True)
+            fetch(corpus, checkout)
+            prune(os.path.join(checkout, corpus['src']))
+            continue
         if os.path.exists(marker) and open(marker).read() == corpus['commit']:
             print(f"{corpus['name']}: ready at {corpus['commit'][:12]}")
             continue
@@ -646,6 +653,7 @@ def main():
     p_setup = sub.add_parser('setup', help='fetch, install and prune the corpora')
     p_setup.add_argument('--corpora', default=default_corpora)
     p_setup.add_argument('--corpus', action='append', default=[])
+    p_setup.add_argument('--no-install', action='store_true', help='fetch and prune the sources, install nothing')
     p_run = sub.add_parser('run', help='measure a build against RDT')
     p_run.add_argument('--bin', required=True)
     p_run.add_argument('--base-bin')
