@@ -324,7 +324,13 @@ mod tests {
     }
 
     fn prop_names(written: &serde_json::Value, component: &str) -> Vec<String> {
-        written["components"][component]["props"].as_object().unwrap().keys().cloned().collect()
+        let sets = written["components"][component]["props"].as_array().unwrap();
+        let mut names: Vec<String> = sets
+            .iter()
+            .flat_map(|set| written["propSets"][set.as_str().unwrap()].as_object().unwrap().keys().cloned())
+            .collect();
+        names.sort();
+        names
     }
 
     #[test]

@@ -15,6 +15,11 @@ export interface InheritedLayer {
   totalProps: number
 }
 
+/** An inheritance layer in the canonical JSON: `omitted` is the id of a list in the output's `nameLists`. */
+export interface InheritedLayerRef extends Omit<InheritedLayer, 'omitted'> {
+  omitted: NameListId
+}
+
 export interface PropParent {
   name: string
   fileName: string
@@ -95,13 +100,28 @@ export interface ParsedProp {
  */
 export type PropId = string
 
+/**
+ * A prop set's key in a `propSets` table: the props one declaring type contributes to a component, as prop name to
+ * `PropId`. Components that inherit the type share the set. Opaque like `PropId`.
+ */
+export type PropSetId = string
+
+/** A list's key in a `nameLists` table: the prop names an `Omit` removed at one inheritance layer. Opaque like `PropId`. */
+export type NameListId = string
+
+/** Prop name to the prop's id in the output's (or update's) `props` table. */
+export type PropSet = Record<string, PropId>
+
 export interface ComponentEntry {
   displayName: string
   filePath: string
   description: string
-  /** Prop name to the prop's id in the output's (or update's) `props` table. */
-  props: Record<string, PropId>
-  inheritance: InheritedLayer[]
+  /**
+   * The ids of the prop sets, in the output's (or update's) `propSets` table, that together hold the component's
+   * props. A prop name is in one set.
+   */
+  props: PropSetId[]
+  inheritance: InheritedLayerRef[]
   /** Prop name to the prop's id in the output's (or update's) `props` table. */
   notableInherited: Record<string, PropId>
   discriminantProp: string | null
@@ -144,6 +164,22 @@ export interface Diagnostic {
   affects?: string[]
 }
 
+/**
+ * A diagnostic as the canonical JSON writes it: `affects` is the id of a list in the output's (or update's)
+ * `nameLists` table, absent when the diagnostic affects no component.
+ */
+export interface WireDiagnostic extends Omit<Diagnostic, 'affects'> {
+  affects?: NameListId
+}
+
+/** What `initializeSessionIndex` resolves to: where each component lives and the run's diagnostics, without props. */
+export interface SessionIndex {
+  schemaVersion: number
+  components: Record<string, { filePath: string; displayName: string }>
+  nameLists: Record<NameListId, string[]>
+  diagnostics: WireDiagnostic[]
+}
+
 export interface ExtractionStats {
   componentsExtracted: number
   componentsSkipped: number
@@ -178,28 +214,40 @@ export interface RdtComponentDoc {
 }
 
 export interface ExtractionOutput {
+  /** The shape of this JSON (ADR 0017). A reader checks it is a version it reads. */
+  schemaVersion: number
   components: Record<string, ComponentEntry>
   /** Every distinct prop the components refer to, written once (ADR 0009). */
   props: Record<PropId, ParsedProp>
+  /** Every prop set the components refer to, written once (ADR 0018). */
+  propSets: Record<PropSetId, PropSet>
+  /** Every omitted-names list the components' inheritance layers refer to, written once (ADR 0018). */
+  nameLists: Record<NameListId, string[]>
   enums: Record<string, EnumEntry[]>
-  diagnostics: Diagnostic[]
+  diagnostics: WireDiagnostic[]
   stats: ExtractionStats
 }
 
 export interface IncrementalUpdate {
+  /** The shape of this JSON, as in `ExtractionOutput`. */
+  schemaVersion: number
   /** The session revision this update produced; drop an update older than one already applied. */
   revision: number
   /** Components re-resolved by this change, in the same order as `updatedKeys`. */
   updatedComponents: ComponentEntry[]
   /** Every prop `updatedComponents` refer to. Merge it into the output's table; ids nothing refers to can be dropped. */
   props: Record<PropId, ParsedProp>
+  /** The prop sets `updatedComponents` refer to; merge like `props`. */
+  propSets: Record<PropSetId, PropSet>
+  /** The omitted-names lists `updatedComponents` refer to; merge like `props`. */
+  nameLists: Record<NameListId, string[]>
   /** The output key each updated component is published under: a bare name, or `Name (file)` when disambiguated. */
   updatedKeys: string[]
   /** Output keys that no longer exist: the component was renamed, deleted, or stopped being a component. */
   removedKeys: string[]
   /** Diagnostics this revision no longer has; `diagnostics` holds the ones it added. */
-  removedDiagnostics: Diagnostic[]
+  removedDiagnostics: WireDiagnostic[]
   affectedFiles: string[]
-  diagnostics: Diagnostic[]
+  diagnostics: WireDiagnostic[]
   durationMs: number
 }

@@ -23,6 +23,8 @@ One line per ADR, with what it guards. Add a line when you add an ADR.
 - [14. A loaded declaration wins over a known shortcut; shortcuts are fallbacks](0014-declarations-before-shortcuts.md) — do not check a shortcut before a declaration, or add one without measuring it against the declaration on consumer code.
 - [15. A member read through React's types reads React's declaration and what it imports](0015-member-reads-of-react-types-read-their-declarations.md) — do not answer an indexed access from a table before its declaration, or add React's own files to the dependency layer. Narrows 0013's "only HTML-attribute lookups read the React index" and 0010's "the loader doesn't read React".
 - [16. Resolve components on request, and load dependencies for the names their resolution reaches](0016-resolve-components-on-request.md) — do not make a lazy answer differ from batch extraction's for the same key, memoize a resolution that found a dependency name missing, or expose a parser type from the session API. Extends 0010's loading from "before resolution" to "before the resolution that answers".
+- [17. Version the canonical JSON, and make readers reject a version they don't read](0017-version-the-canonical-json.md) — do not change the canonical JSON's shape without bumping `SCHEMA_VERSION`, or let a reader accept a version it was not written for.
+- [18. Write prop sets and name lists once in the canonical output](0018-canonical-output-interns-prop-sets-and-name-lists.md) — do not write a component's props, an inheritance layer's `omitted` or a diagnostic's `affects` inline in canonical JSON. Extends 0009's per-prop table to the lists that repeat across components; `SCHEMA_VERSION` 2.
 
 Changing any of these needs a new ADR.
 

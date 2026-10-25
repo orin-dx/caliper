@@ -171,7 +171,7 @@ pub struct IncrementalUpdate {
 
 impl Serialize for IncrementalUpdate {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use crate::types::output::interned::{intern, InternedComponent};
+        use crate::types::output::interned::{intern, InternedComponent, Tables};
         use serde::ser::SerializeStruct;
 
         let IncrementalUpdate {
@@ -185,21 +185,64 @@ impl Serialize for IncrementalUpdate {
             duration_ms,
         } = self;
         let entries: Vec<&ComponentEntry> = updated_components.iter().collect();
-        let (ids, props) = intern::<S::Error>(&entries)?;
+        let (ids, mut tables) = intern::<S::Error>(&entries)?;
+        let added = tables.intern_affects::<S::Error>(diagnostics)?;
+        let removed = tables.intern_affects::<S::Error>(removed_diagnostics)?;
         let components: Vec<InternedComponent<'_>> =
             entries.iter().zip(&ids).map(|(entry, ids)| InternedComponent { entry, ids }).collect();
-        let mut out = serializer.serialize_struct("IncrementalUpdate", 9)?;
+        let mut out = serializer.serialize_struct("IncrementalUpdate", 9 + Tables::FIELDS)?;
+        out.serialize_field("schemaVersion", &crate::types::SCHEMA_VERSION)?;
         out.serialize_field("revision", revision)?;
         out.serialize_field("updatedComponents", &components)?;
-        out.serialize_field("props", &props)?;
+        tables.write(&mut out)?;
         out.serialize_field("updatedKeys", updated_keys)?;
         out.serialize_field("removedKeys", removed_keys)?;
         out.serialize_field("affectedFiles", affected_files)?;
-        out.serialize_field("diagnostics", diagnostics)?;
-        out.serialize_field("removedDiagnostics", removed_diagnostics)?;
+        out.serialize_field("diagnostics", &added)?;
+        out.serialize_field("removedDiagnostics", &removed)?;
         out.serialize_field("durationMs", duration_ms)?;
         out.end()
     }
+}
+
+/// A session's index: where each component lives and the run's diagnostics, without props. A client that routes by file
+/// and name reads this instead of the whole output.
+struct SessionIndex<'a>(&'a ExtractionOutput);
+
+impl Serialize for SessionIndex<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use crate::types::output::interned::{InternedDiagnostics, NameLists};
+        use serde::ser::SerializeStruct;
+
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Location<'a> {
+            file_path: &'a str,
+            display_name: &'a str,
+        }
+
+        let ExtractionOutput { components, diagnostics, .. } = self.0;
+        let mut lists = NameLists::new();
+        let diagnostics = InternedDiagnostics::new::<S::Error>(&mut lists, diagnostics)?;
+        let locations: std::collections::BTreeMap<&str, Location<'_>> = components
+            .iter()
+            .map(|(key, entry)| {
+                (key.as_str(), Location { file_path: entry.file_path.as_str(), display_name: &entry.display_name })
+            })
+            .collect();
+        let mut out = serializer.serialize_struct("SessionIndex", 4)?;
+        out.serialize_field("schemaVersion", &crate::types::SCHEMA_VERSION)?;
+        out.serialize_field("components", &locations)?;
+        out.serialize_field("nameLists", &lists)?;
+        out.serialize_field("diagnostics", &diagnostics)?;
+        out.end()
+    }
+}
+
+/// Serialize a session's index to a JSON string: `schemaVersion`, where each component lives (`components`), and the
+/// run's `diagnostics` with the `nameLists` they refer to. The props stay in the session.
+pub fn session_index_to_json(output: &ExtractionOutput) -> Result<String, serde_json::Error> {
+    serde_json::to_string(&SessionIndex(output))
 }
 
 // ─── JSON serialization helpers ──────────────────────────────────────────────

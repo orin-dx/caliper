@@ -309,20 +309,7 @@ pub async fn initialize_session_index(session_id: u32, options: JsExtractOptions
             let output = session
                 .current_output()
                 .ok_or_else(|| napi::Error::from_reason("the session has no output after initialize".to_owned()))?;
-            let components: serde_json::Map<String, serde_json::Value> = output
-                .components
-                .iter()
-                .map(|(key, entry)| {
-                    let location = serde_json::json!({
-                        "filePath": entry.file_path.as_str(),
-                        "displayName": entry.display_name,
-                    });
-                    (key.clone(), location)
-                })
-                .collect();
-            let diagnostics =
-                serde_json::to_value(&output.diagnostics).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-            serde_json::to_string(&serde_json::json!({ "components": components, "diagnostics": diagnostics }))
+            caliper_docgen_core::pipeline::session_index_to_json(&output)
                 .map_err(|e| napi::Error::from_reason(e.to_string()))
         }) {
             Ok(result) => result,
@@ -605,7 +592,7 @@ mod tests {
         let second = ensure_fresh(session_id).await.expect("a registered session");
         close_session(session_id);
         let without_duration = |update: &str| update.split_once(r#","durationMs""#).expect("durationMs").0.to_owned();
-        let empty = r#"{"revision":1,"updatedComponents":[],"props":{},"updatedKeys":[],"removedKeys":[],"affectedFiles":[],"diagnostics":[],"removedDiagnostics":[]"#;
+        let empty = r#"{"schemaVersion":2,"revision":1,"updatedComponents":[],"props":{},"propSets":{},"nameLists":{},"updatedKeys":[],"removedKeys":[],"affectedFiles":[],"diagnostics":[],"removedDiagnostics":[]"#;
         assert_eq!((without_duration(&first), without_duration(&second)), (empty.to_owned(), empty.to_owned()));
     }
 
