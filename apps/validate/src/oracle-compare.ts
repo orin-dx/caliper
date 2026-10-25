@@ -87,7 +87,7 @@ const WIDENING = new Set(['string', 'number', 'boolean'])
 
 /** Union members without `undefined` (an optional prop's, which both sides treat as optional), flattened, with
  * `true | false` as `boolean`. */
-function members(n: Norm): Norm[] {
+function members(n: Norm, written = false): Norm[] {
   const flat: Norm[] = []
   const push = (m: Norm) => {
     if (m.k === 'union') m.members.forEach(push)
@@ -95,10 +95,22 @@ function members(n: Norm): Norm[] {
     else if (!isUndefined(m) && !(m.k === 'intersection' && m.members.some(isUndefined))) flat.push(m)
   }
   push(n)
-  if (flat.some((m) => isLit(m, 'true')) && flat.some((m) => isLit(m, 'false'))) {
-    return [...flat.filter((m) => !isLit(m, 'true') && !isLit(m, 'false')), prim('boolean')]
+  // `'default' | 'large' | string` is `string` to the checker: a literal that a primitive of its kind in the same
+  // union already covers adds nothing, so a union Caliper wrote with it reads the same as one without. Only Caliper's
+  // (`written`): the checker's `"blue" | … | (string & {})` keeps its literals, which are what a reader sees. A
+  // `true`/`false` literal is boolean's, not string's.
+  const has = (name: string) => flat.some((m) => m.k === 'prim' && m.name === name)
+  const covered = (m: Norm) =>
+    written &&
+    m.k === 'lit' &&
+    m.value !== 'true' &&
+    m.value !== 'false' &&
+    (/^-?\d+(\.\d+)?$/.test(m.value) ? has('number') : has('string'))
+  const kept = flat.filter((m) => !covered(m))
+  if (kept.some((m) => isLit(m, 'true')) && kept.some((m) => isLit(m, 'false'))) {
+    return [...kept.filter((m) => !isLit(m, 'true') && !isLit(m, 'false')), prim('boolean')]
   }
-  return flat
+  return kept
 }
 
 /** Two unions: each checker member covered by one of Caliper's (a missing member makes Caliper's type too narrow),
@@ -171,6 +183,9 @@ function compareOne(c: Norm, k: Norm, depth: number): Verdict {
       // `c` may be one member of a union Caliper wrote out (`string` of `string | number`), so it must fit one member of
       // an instance, not all of them.
       const instances = [k.fallback, k.constraint].filter((i): i is Norm => i !== undefined).flatMap((i) => members(i))
+      // A parameter with neither (a generic component cast over `forwardRef`, whose props interface declares the
+      // default) leaves the checker no instance to hold Caliper's to: any one it picked is one value of the parameter.
+      if (instances.length === 0) return 'less precise'
       return instances.some((i) => compare(c, i, depth + 1) !== 'wrong') ? 'less precise' : 'wrong'
     }
     default: {
@@ -210,7 +225,7 @@ export function compare(c: Norm, k: Norm, depth = 0): Verdict {
   }
   // An intersection Caliper left as written, which the checker reduced (`Mode & …` to a literal union).
   if (c.k === 'intersection' && !km.some((m) => m.k === 'intersection')) return 'less precise'
-  const cm = members(c)
+  const cm = members(c, true)
   if (cm.length !== 1 || km.length !== 1) return compareUnions(cm, km, depth)
   const [cOne] = cm
   const [kOne] = km
