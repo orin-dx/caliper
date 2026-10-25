@@ -412,6 +412,9 @@ impl Revision {
         .with_react_types(react_types.clone());
         lib_diagnostics.extend(ctx.tsconfig_diagnostic.clone());
         let resolved = resolve_all(&component_ids(&global, options), &ctx);
+        // Every component is resolved, so the memos are garbage: free them beside output assembly. A failed spawn
+        // drops the context on this thread instead.
+        drop(std::thread::Builder::new().name("caliper-drop".into()).spawn(move || drop(ctx)));
         let files = Arc::new(src_files.into_iter().collect());
 
         let (dts_files_parsed, dts_cache_hits) = cache.counts();
