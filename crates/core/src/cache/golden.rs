@@ -14,6 +14,7 @@ import type { Base } from "./base";
 
 /** A size scale. */
 export const SIZES = ["sm", "md", "lg"] as const;
+export const ALL_SIZES = ["xs", ...SIZES] as const;
 
 export enum Tone {
   Quiet = "quiet",

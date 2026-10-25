@@ -59,7 +59,9 @@ pub(super) fn resolve_to_canonical(
     let namespace_ref = ctx.import_map.find_import(consuming_file, namespace)?;
     // A named import of a namespace (`import { Menu as MenuPrimitive } from "./ui"`, then `MenuPrimitive.Root`):
     // the member's name in that module is `Menu.Root`, which a namespace re-export or declaration answers.
-    let member = if namespace_ref.exported_name == "*" {
+    // A default import is the module's namespace for an `export =` module (`import React from "react"` under
+    // `esModuleInterop`, antd's spelling), so `React.CSSProperties` names the same member `import * as React` does.
+    let member = if namespace_ref.exported_name == "*" || namespace_ref.exported_name == "default" {
         member.to_owned()
     } else {
         format!("{}.{member}", namespace_ref.exported_name)
