@@ -41,6 +41,63 @@ fn merge_cached_dts_file_does_not_drop_parse_diagnostics() {
     );
 }
 
+#[test]
+fn parsing_a_dts_file_apart_from_merging_it_gives_what_merging_it_in_one_step_gives() {
+    // A cold run parses the lib files while it parses the project's, then merges them in order: the split must lose
+    // nothing the one-step merge keeps, diagnostics included.
+    let tmp = TempDir::new().unwrap();
+    let nested = "(".repeat(2500) + &")".repeat(2500);
+    let cache_dir = Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap();
+    let cache = DtsCache::load_from_disk(Some(&cache_dir));
+
+    for (name, source, interfaces, nesting_reported) in [
+        ("clean.d.ts", "export interface Declared { a: string }".to_owned(), 1, false),
+        ("nested.d.ts", format!("const x = {nested};"), 0, true),
+    ] {
+        let path = write_file(&tmp, name, &source);
+
+        let mut one_step = GlobalSourceData::default();
+        let mut one_step_diagnostics = Vec::new();
+        merge_cached_dts_file(&path, &cache, &mut one_step, &mut one_step_diagnostics);
+
+        let mut split = GlobalSourceData::default();
+        let mut split_diagnostics = Vec::new();
+        merge_parsed_dts_file(&path, parse_cached_dts_file(&path, &cache), &mut split, &mut split_diagnostics);
+
+        assert_eq!(
+            split.interfaces.keys().collect::<Vec<_>>(),
+            one_step.interfaces.keys().collect::<Vec<_>>(),
+            "{name}"
+        );
+        assert_eq!(split.interfaces.len(), interfaces, "{name}");
+        assert_eq!(split_diagnostics, one_step_diagnostics, "{name}");
+        assert_eq!(
+            split_diagnostics.iter().any(|d| d.code == DiagnosticCode::ExcessiveNesting),
+            nesting_reported,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn an_unreadable_dts_file_is_reported_once_and_merges_nothing() {
+    let tmp = TempDir::new().unwrap();
+    let missing = Utf8PathBuf::from_path_buf(tmp.path().join("absent.d.ts")).unwrap();
+    let cache_dir = Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap();
+    let cache = DtsCache::load_from_disk(Some(&cache_dir));
+
+    let parsed = parse_cached_dts_file(&missing, &cache);
+    assert!(parsed.is_err(), "an unreadable file is not parsed as empty and cached");
+
+    let mut global = GlobalSourceData::default();
+    let mut diagnostics = Vec::new();
+    merge_parsed_dts_file(&missing, parsed, &mut global, &mut diagnostics);
+
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, DiagnosticCode::IoError);
+    assert!(global.interfaces.is_empty());
+}
+
 /// Write a file into a temp dir and return its Utf8PathBuf.
 fn write_file(dir: &TempDir, name: &str, content: &str) -> Utf8PathBuf {
     let path = dir.path().join(name);

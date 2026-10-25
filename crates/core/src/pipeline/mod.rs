@@ -293,26 +293,43 @@ pub fn extract(options: &PipelineOptions) -> ExtractionOutput {
 /// directly with no diagnostics drain at all: an excessive-nesting trip or a
 /// parse error while parsing either file would have been silently discarded,
 /// since `GlobalSourceData` itself has no diagnostics field to catch it later.
+#[cfg(test)]
 pub(super) fn merge_cached_dts_file(
     path: &Utf8Path,
     cache: &DtsCache,
     global: &mut GlobalSourceData,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // An unreadable file is reported and skipped; parsing "" instead would cache an empty result under this path.
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) => {
-            diagnostics.push(Diagnostic::io_read_error(path, &error));
-            return;
-        }
-    };
-    let mut data = match cache.get(path, &source) {
+    merge_parsed_dts_file(path, parse_cached_dts_file(path, cache), global, diagnostics);
+}
+
+/// Read and parse one declaration file through the cache. An unreadable file is an error and is not parsed: parsing ""
+/// instead would cache an empty result under this path.
+pub(super) fn parse_cached_dts_file(path: &Utf8Path, cache: &DtsCache) -> Result<SourceData, Diagnostic> {
+    let source = std::fs::read_to_string(path).map_err(|error| Diagnostic::io_read_error(path, &error))?;
+    Ok(match cache.get(path, &source) {
         Some(cached) => cached,
         None => {
             let data = crate::extractor::parse_file(path, &source);
             cache.insert(path, &source, data.clone());
             data
+        }
+    })
+}
+
+/// [`parse_cached_dts_file`]'s result merged into `global`, with the parse's diagnostics (or the read error) added to
+/// `diagnostics`. Split from the parse so a run can parse these files while it parses the project's.
+pub(super) fn merge_parsed_dts_file(
+    path: &Utf8Path,
+    parsed: Result<SourceData, Diagnostic>,
+    global: &mut GlobalSourceData,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut data = match parsed {
+        Ok(data) => data,
+        Err(diagnostic) => {
+            diagnostics.push(diagnostic);
+            return;
         }
     };
     diagnostics.append(&mut data.diagnostics);
