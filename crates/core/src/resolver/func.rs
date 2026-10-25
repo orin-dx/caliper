@@ -106,7 +106,12 @@ pub(super) fn resolve_typeof(
         file: Some(consuming_file.to_string()),
         line: None,
         column: None,
-        help: None,
+        help: Some(
+            "Only components, cva variants and `as const` arrays have a type here. The type of a value built by a \
+             call (a zod schema behind `z.infer`, a store, a hook's result) comes from the checker: declare the type \
+             where it is used, or run with `--experimental-semantic-types`."
+                .into(),
+        ),
         code: DiagnosticCode::OpaqueType,
         affects: Vec::new(),
     });
