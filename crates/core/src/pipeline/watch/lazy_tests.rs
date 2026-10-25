@@ -245,16 +245,13 @@ fn two_packages() -> (tempfile::TempDir, Utf8PathBuf) {
         ("node_modules/pkg-a/index.d.ts", "export interface AProps { a?: string }\n"),
         ("node_modules/pkg-b/package.json", r#"{ "name": "pkg-b", "version": "1.0.0", "types": "index.d.ts" }"#),
         ("node_modules/pkg-b/index.d.ts", "export interface BProps { b?: number }\n"),
-        // No project file imports pkg-c until a test edits one to.
-        ("node_modules/pkg-c/package.json", r#"{ "name": "pkg-c", "version": "1.0.0", "types": "index.d.ts" }"#),
-        ("node_modules/pkg-c/index.d.ts", "export interface CProps { c?: boolean }\n"),
         ("src/A.tsx", "import type { AProps } from 'pkg-a';\nexport function A(props: AProps) { return null; }\n"),
         ("src/B.tsx", "import type { BProps } from 'pkg-b';\nexport function B(props: BProps) { return null; }\n"),
     ])
 }
 
 #[test]
-fn the_first_request_loads_its_names_and_the_rest_of_the_project_follows() {
+fn a_request_loads_only_the_dependency_names_its_component_reaches() {
     let (_tmp, root) = two_packages();
     let options = options(&root, true);
     let session = WatchSession::lazy(options.clone());
@@ -262,8 +259,7 @@ fn the_first_request_loads_its_names_and_the_rest_of_the_project_follows() {
     assert_eq!(session.lazy_stats().unwrap().dependency_files, 0, "nothing loaded at the start");
 
     assert_eq!(prop_names(&session.component("A")), ["a"]);
-    session.wait_for_dependency_load();
-    assert_eq!(session.lazy_stats().unwrap().dependency_files, 2, "B's names are loaded after the first answer");
+    assert_eq!(session.lazy_stats().unwrap().dependency_files, 1, "pkg-b is not read for A");
 
     assert_eq!(prop_names(&session.component("B")), ["b"]);
     assert_eq!(session.lazy_stats().unwrap().dependency_files, 2);
@@ -277,29 +273,26 @@ fn a_new_import_in_an_edited_file_loads_its_names_on_the_next_request() {
     let session = WatchSession::lazy(options.clone());
     drop(session.initialize());
     session.component("A");
-    session.wait_for_dependency_load();
-    assert_eq!(session.lazy_stats().unwrap().dependency_files, 2);
 
     write(
         &root,
         &[(
             "src/A.tsx",
-            "import type { AProps } from 'pkg-a';\nimport type { CProps } from 'pkg-c';\n\
-             export function A(props: AProps & CProps) { return null; }\n",
+            "import type { AProps } from 'pkg-a';\nimport type { BProps } from 'pkg-b';\n\
+             export function A(props: AProps & BProps) { return null; }\n",
         )],
     );
     let update = session.update_file(&root.join("src/A.tsx"));
 
     assert_eq!(update.updated_keys, ["A"]);
-    assert_eq!(session.lazy_stats().unwrap().dependency_files, 2, "an edit loads nothing by itself");
-    assert_eq!(prop_names(&session.component("A")), ["a", "c"]);
-    session.wait_for_dependency_load();
-    assert_eq!(session.lazy_stats().unwrap().dependency_files, 3);
+    assert_eq!(session.lazy_stats().unwrap().dependency_files, 1, "an edit loads nothing by itself");
+    assert_eq!(prop_names(&session.component("A")), ["a", "b"]);
+    assert_eq!(session.lazy_stats().unwrap().dependency_files, 2);
     assert_matches_batch(&session, &options);
 }
 
-/// `count` components, each importing its own package, so every request would grow the layer if the layer grew
-/// per request.
+/// `count` components, each importing its own package, so every request grows the layer until the whole project's
+/// names are loaded.
 fn many_packages(count: usize) -> (tempfile::TempDir, Utf8PathBuf) {
     let mut files: Vec<(String, String)> = Vec::new();
     for n in 0..count {
@@ -319,20 +312,40 @@ fn many_packages(count: usize) -> (tempfile::TempDir, Utf8PathBuf) {
 }
 
 #[test]
-fn reading_a_project_end_to_end_grows_the_dependency_layer_twice_not_once_per_component() {
+fn a_few_requests_load_only_the_names_they_reach() {
     let (_tmp, root) = many_packages(8);
     let options = options(&root, true);
     let session = WatchSession::lazy(options.clone());
     drop(session.initialize());
 
-    assert_eq!(prop_names(&session.component("C0")), ["p0"]);
+    for n in 0..2 {
+        assert_eq!(prop_names(&session.component(&format!("C{n}"))), [format!("p{n}")]);
+    }
     session.wait_for_dependency_load();
-    for n in 1..8 {
+
+    assert_eq!(session.lazy_stats().unwrap().dependency_files, 2, "pkg-2 to pkg-7 are not read for C0 and C1");
+    assert_matches_batch(&session, &options);
+}
+
+#[test]
+fn reading_a_project_end_to_end_stops_growing_the_layer_once_the_rest_of_it_loads() {
+    let (_tmp, root) = many_packages(8);
+    let options = options(&root, true);
+    let session = WatchSession::lazy(options.clone());
+    drop(session.initialize());
+
+    // Three requests grow the layer one at a time; the third answer starts loading the rest of the project's names.
+    for n in 0..3 {
+        assert_eq!(prop_names(&session.component(&format!("C{n}"))), [format!("p{n}")]);
+    }
+    session.wait_for_dependency_load();
+    for n in 3..8 {
         assert_eq!(prop_names(&session.component(&format!("C{n}"))), [format!("p{n}")]);
     }
 
     let growths = session.current.load_full().unwrap().layer_growths();
-    assert_eq!(growths, 2, "the first answer's names, then the rest of the project's; none per later component");
+    assert_eq!(growths, 4, "one per request for three, then one for everything else; none per later component");
+    assert_eq!(session.lazy_stats().unwrap().dependency_files, 8);
     assert_matches_batch(&session, &options);
 }
 
@@ -343,14 +356,14 @@ fn requests_that_race_the_background_load_answer_as_a_batch_run_does() {
     for _ in 0..10 {
         let session = WatchSession::lazy(options.clone());
         drop(session.initialize());
-        // The first answer starts the load; the rest ask while it runs, one at a time and all at once.
-        session.component("C3");
-        for n in [7, 0, 5] {
+        // The third answer starts the load; the rest ask while it runs, one at a time and all at once.
+        for n in [3, 7, 0, 5, 1] {
             session.component(&format!("C{n}"));
         }
         let keys: Vec<String> = (0..8).map(|n| format!("C{n}")).collect();
         let answers = session.components(&keys);
         assert!(answers.iter().all(Option::is_some));
         assert_matches_batch(&session, &options);
+        session.wait_for_dependency_load();
     }
 }

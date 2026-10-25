@@ -129,6 +129,11 @@ impl Engine {
     }
 }
 
+/// How many times the layer grows for requests before the rest of the project's names load in the background. Three
+/// keeps a session that looks at a few components at the layer they reach (shadcn holds 181 declaration files after 50
+/// requests that way, 450 once every name is loaded) and moves one that reads on within three requests.
+const WHOLE_DEMAND_AFTER_GROWTHS: usize = 3;
+
 pub(super) struct Lazy {
     /// Each project file's dependency demands; files that demand nothing are absent.
     demands: FxHashMap<PathKey, Arc<[Demand]>>,
@@ -421,17 +426,21 @@ impl Revision {
         }
     }
 
-    /// After the first answer, load every name the project's files take from a package on a thread of its own, once.
+    /// Once the layer has grown [`WHOLE_DEMAND_AFTER_GROWTHS`] times, load every name the project's files take from a
+    /// package on a thread of its own, once.
     ///
     /// Each growth of the layer rebuilds the resolution context, so a session that grows one request at a time pays
     /// that rebuild for every new component (Spectrum: 33 rebuilds, about 140 of the 300 ms a project read end to end
-    /// took). The first answer stays quick because it loads only what it reaches; the rest of the project's names are
-    /// loaded while the caller looks at it, and the later requests find them there. A request that needs a name before
-    /// the thread has loaded it waits for the same lock and loads it, as it would have anyway.
+    /// took). A session that asks about a few components never gets here, and holds only the names they reach; one
+    /// that reads across the project does, and the later requests find every name loaded. A request that needs a name
+    /// before the thread has loaded it waits for the same lock and loads it, as it would have anyway.
     pub(crate) fn load_whole_demand_in_background(self: &Arc<Self>, options: &PipelineOptions) {
         use std::sync::atomic::Ordering::Relaxed;
         let Some(lazy) = &self.lazy else { return };
-        if !options.load_dependencies || lazy.whole_demand_started.swap(true, Relaxed) {
+        if !options.load_dependencies
+            || lazy.growths.load(Relaxed) < WHOLE_DEMAND_AFTER_GROWTHS
+            || lazy.whole_demand_started.swap(true, Relaxed)
+        {
             return;
         }
         let (revision, options) = (self.clone(), options.clone());
