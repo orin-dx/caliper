@@ -77,6 +77,12 @@ Checker types are normalized once per type id and verdicts made once per pair, s
 
 The checker finds more components than Caliper on antd and Spectrum because, like RDT, it counts every exported function with one parameter. "Less precise" on Spectrum is mostly `Responsive<DimensionValue>` printed without its object form. The beta needs two workarounds, both in `oracle.ts`: compiler options must come from `parseConfigFile` (its server panics on string-valued enum options passed to `createProgram`), and `true`/`false` literal types carry no `value`, so they are read with `typeToString`.
 
+## Setting up the corpora
+
+`parity.py setup` fetches each repo at its pinned commit and installs it with its own package manager (corepack shims at the versions each `packageManager` field pins). A corpus that fails to fetch or install is named on stderr with the tail of its install log (`.parity/logs/install-<name>.log`), as a GitHub annotation and in the job summary; the other corpora still install, and the command exits non-zero naming the failed ones.
+
+`--install-node-dir DIR` runs only the corpora's installs with the `node` in `DIR`. The weekly workflow uses it to install under Node 24, because Yarn 4.18, which Mantine and React Spectrum pin, crashes under the repository's Node 26 with `Dynamic require of "util" is not supported`. Everything else in the job keeps the toolchain's Node.
+
 ## Running it
 
 ```bash

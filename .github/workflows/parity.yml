@@ -38,6 +38,15 @@ jobs:
       - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
         with:
           toolchain: ${{ steps.rust.outputs.version }}
+      # The corpora's own package managers run under Node 24: Yarn 4.18, which Mantine and React Spectrum pin, crashes
+      # under the repository's Node 26 ("Dynamic require of "util" is not supported"). This step comes before the
+      # toolchain's so that the toolchain's Node stays first on PATH for everything else; only the installs use this one.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - id: corpus-node
+        run: echo "dir=$(dirname "$(command -v node)")" >> "$GITHUB_OUTPUT"
       # RDT runs from apps/validate's react-docgen-typescript.
       - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
         with:
@@ -68,8 +77,12 @@ jobs:
             .parity/caches
             .parity/rdt
           key: parity-${{ hashFiles('scripts/parity.py', 'scripts/parity-rdt.mjs', 'pnpm-lock.yaml') }}
+      # A corpus that fails to install is named in the log, an annotation and the job summary with the tail of its install
+      # log; the others still install. The install logs are in the parity artifact.
       - name: Fetch and install the corpora
-        run: python3 scripts/parity.py setup
+        env:
+          INSTALL_NODE_DIR: ${{ steps.corpus-node.outputs.dir }}
+        run: python3 scripts/parity.py setup --install-node-dir "$INSTALL_NODE_DIR"
       - name: Measure and gate
         run: >-
           python3 scripts/parity.py run --bin "$RUNNER_TEMP/caliper-head" --base-bin "$RUNNER_TEMP/caliper-base"
