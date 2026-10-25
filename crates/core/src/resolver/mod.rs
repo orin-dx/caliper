@@ -271,6 +271,10 @@ pub struct ResolutionContext {
     /// Member reads of a named type (`CssProperties["marker"]`) by `(file, name, key)`, with the files each depended
     /// on: Chakra's style props read the same csstype members once per component (`evaluate::member`).
     pub(crate) member_reads: dashmap::DashMap<evaluate::MemberReadKey, evaluate::MemberRead, rustc_hash::FxBuildHasher>,
+    /// Properties read from a named type's props chain (`ComponentProps<typeof Button>["variant"]`) by `(file, type,
+    /// key)`, with the files each depended on (`primitives::read_from_props_chain`).
+    pub(crate) props_reads:
+        dashmap::DashMap<primitives::PropsReadKey, primitives::PropsRead, rustc_hash::FxBuildHasher>,
     pub extra_builtins: FxHashSet<CompactString>,
     /// Bare name → full scoped key ("file:name") index over `global.enums`,
     /// built once per resolution pass so `resolve_typeof` and
@@ -382,6 +386,7 @@ impl ResolutionContext {
             react_types_files: Default::default(),
             shared_props: Default::default(),
             member_reads: Default::default(),
+            props_reads: Default::default(),
             interface_chains: Default::default(),
             named_results: memo::NamedResults::with_max_reads(NAMED_RESULT_MAX_READS),
             attribute_reads: memo::Memo::with_max_reads(NAMED_RESULT_MAX_READS),
@@ -400,6 +405,9 @@ impl ResolutionContext {
         for entry in from.member_reads.iter().filter(|entry| keep(entry.value().deps(), &entry.key().0)) {
             self.member_reads.insert(entry.key().clone(), entry.value().clone());
         }
+        for entry in from.props_reads.iter().filter(|entry| keep(entry.value().deps(), &entry.key().0)) {
+            self.props_reads.insert(entry.key().clone(), entry.value().clone());
+        }
         for entry in from.shared_props.iter() {
             self.shared_props.insert(*entry.key(), entry.value().clone());
         }
@@ -409,6 +417,24 @@ impl ResolutionContext {
         for entry in from.react_types_files.iter() {
             self.react_types_files.insert(entry.key().clone(), entry.value().clone());
         }
+    }
+
+    /// The key in `global.enums` of the variants (`cva`, `tv`, recipes) `name` stands for as `consuming_file` writes
+    /// it: its own declaration, else the one it imports, else the first file by path that declares the bare name. Two
+    /// files can each declare an `itemVariants` (shadcn keeps a copy of every component per registry), and the bare
+    /// name alone would give both the same one.
+    pub(crate) fn enum_key_for(&self, name: &str, consuming_file: &Utf8Path) -> Option<String> {
+        let own = format!("{consuming_file}:{name}");
+        if self.global.enums.contains_key(&own) {
+            return Some(own);
+        }
+        if let Some((file, canonical)) = import::resolve_to_canonical(name, consuming_file, self, &mut Vec::new()) {
+            let imported = format!("{file}:{canonical}");
+            if self.global.enums.contains_key(&imported) {
+                return Some(imported);
+            }
+        }
+        self.enum_bare_index.get(name).map(|key| key.to_string())
     }
 
     /// `prop` as the run's one shared allocation of it: an equal prop built earlier, or `prop` itself.

@@ -92,7 +92,7 @@ pub(super) fn resolve_typeof(
     // precomputed bare-name index (O(1) instead of a linear scan over every
     // enum/cva/tv/recipe entry in the project with a per-candidate allocation).
     super::deps::record_bare_name(name);
-    let found_enum = ctx.enum_bare_index.get(name.as_str()).and_then(|key| ctx.global.enums.get(key.as_str()));
+    let found_enum = ctx.enum_key_for(name.as_str(), consuming_file).and_then(|key| ctx.global.enums.get(key.as_str()));
 
     if found_enum.is_some() {
         // Has cva-like enum entries — the VariantProps<typeof X> pattern handles this.
@@ -106,7 +106,12 @@ pub(super) fn resolve_typeof(
         file: Some(consuming_file.to_string()),
         line: None,
         column: None,
-        help: None,
+        help: Some(
+            "Only components, cva variants and `as const` arrays have a type here. The type of a value built by a \
+             call (a zod schema behind `z.infer`, a store, a hook's result) comes from the checker: declare the type \
+             where it is used, or run with `--experimental-semantic-types`."
+                .into(),
+        ),
         code: DiagnosticCode::OpaqueType,
         affects: Vec::new(),
     });

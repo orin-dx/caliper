@@ -502,19 +502,30 @@ impl PropType {
     /// Whether a conditional, mapped or indexed access type the static resolver can't evaluate appears anywhere in this
     /// type, so its text would include that type's source.
     pub(crate) fn holds_unevaluated_type(&self) -> bool {
-        match self {
-            PropType::Opaque(detail) => matches!(
+        self.holds_opaque_where(&|detail| {
+            matches!(
                 detail.reason(),
                 OpaqueReason::ConditionalType | OpaqueReason::MappedType | OpaqueReason::IndexedAccess { .. }
-            ),
+            )
+        })
+    }
+
+    /// Whether any opaque type, whatever the reason, appears anywhere in this type.
+    pub(crate) fn holds_opaque(&self) -> bool {
+        self.holds_opaque_where(&|_| true)
+    }
+
+    fn holds_opaque_where(&self, test: &dyn Fn(&OpaqueDetail) -> bool) -> bool {
+        match self {
+            PropType::Opaque(detail) => test(detail),
             PropType::Union(members) | PropType::Intersection(members) | PropType::Tuple(members) => {
-                members.iter().any(PropType::holds_unevaluated_type)
+                members.iter().any(|member| member.holds_opaque_where(test))
             }
-            PropType::Array(inner) => inner.holds_unevaluated_type(),
-            PropType::Object(fields) => fields.iter().any(|f| f.prop_type.holds_unevaluated_type()),
-            PropType::Named { args, .. } => args.iter().any(PropType::holds_unevaluated_type),
+            PropType::Array(inner) => inner.holds_opaque_where(test),
+            PropType::Object(fields) => fields.iter().any(|f| f.prop_type.holds_opaque_where(test)),
+            PropType::Named { args, .. } => args.iter().any(|arg| arg.holds_opaque_where(test)),
             PropType::Function { params, return_type, .. } => {
-                params.iter().any(|p| p.param_type.holds_unevaluated_type()) || return_type.holds_unevaluated_type()
+                params.iter().any(|p| p.param_type.holds_opaque_where(test)) || return_type.holds_opaque_where(test)
             }
             PropType::String
             | PropType::Number

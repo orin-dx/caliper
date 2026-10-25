@@ -479,11 +479,42 @@ pub(super) fn resolve_union_alias(
         .collect();
 
     if named_members.len() < 2 {
-        // Not a discriminated union — just merge all.
+        // Not a discriminated union. The chain is every branch's chain merged as before, but a prop the branches type
+        // differently is the union of those types, and one that some branch lacks or marks optional is optional.
         let mut chain = ResolvedChain::empty();
+        let mut merged_props: BTreeMap<String, ParsedProp> = BTreeMap::new();
+        let mut prop_types: BTreeMap<String, Vec<PropType>> = BTreeMap::new();
+        let mut seen_count: BTreeMap<String, usize> = BTreeMap::new();
+        let mut required_in_all: BTreeMap<String, bool> = BTreeMap::new();
+        // A branch with no props (`undefined`, `never`) says nothing about presence.
+        let mut variants: usize = 0;
         for member in members {
             let sub = resolve_base_as_chain(member, file_path, mapping, ctx, state, depth);
+            if !sub.props.is_empty() {
+                variants += 1;
+                record_variant_props(
+                    &sub.props,
+                    &mut merged_props,
+                    &mut prop_types,
+                    &mut seen_count,
+                    &mut required_in_all,
+                );
+            }
             chain.merge_parent(sub);
+        }
+        if variants > 1 {
+            for prop in &mut chain.props {
+                let Some(types) = prop_types.get(&prop.name) else { continue };
+                let everywhere = seen_count.get(&prop.name).copied().unwrap_or(0) == variants;
+                let required = everywhere && required_in_all.get(&prop.name).copied().unwrap_or(false);
+                let prop_type = if types.len() > 1 { union_of(types.clone()) } else { prop.prop_type.clone() };
+                if prop_type != prop.prop_type || required != prop.required {
+                    let mut widened = ParsedProp::clone(prop);
+                    widened.prop_type = prop_type;
+                    widened.required = required;
+                    *prop = Arc::new(widened);
+                }
+            }
         }
         return chain;
     }
