@@ -55,6 +55,13 @@ def hyperfine(command, prepare=None, warmup=0):
     subprocess.run([*args, command], check=True, stdout=subprocess.DEVNULL)
     result = json.load(open(out))['results'][0]
     os.remove(out)
+    if 'measurements' in result:
+        # hyperfine 2: one record per run.
+        runs = result['measurements']
+        walls = sorted(run['time_wall_clock']['value'] for run in runs)
+        user = sum(run['time_user']['value'] for run in runs) / len(runs)
+        system = sum(run['time_system']['value'] for run in runs) / len(runs)
+        result = {'min': walls[0], 'median': walls[len(walls) // 2], 'user': user, 'system': system}
     return {key: round(result[key] * 1000, 1) for key in ('min', 'median', 'user', 'system')}
 
 
