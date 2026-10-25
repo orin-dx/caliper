@@ -35,6 +35,7 @@ Before answering, the provider compares every source file's mtime and size with 
 | `tsconfigPath` |  | tsconfig for path aliases. |
 | `skipHtmlProps` | `false` | Leave out the HTML attributes a component inherits from its element. |
 | `htmlAttributes` | `curated` | `curated` lists the notable HTML attributes, `full` all of them, `none` none. Wins over `skipHtmlProps`. |
+| `cache` | `true` | Read and write the on-disk caches under `node_modules/.cache`. `false` reads and writes nothing there and parses everything every run; the output is the same. |
 | `loadDependencies` | `true` | Read the type declarations your props reference from installed packages, so library-typed props resolve instead of degrading. `false` skips the work. |
 | `collapseInheritedProps` | `none` | `none` lists every inherited prop. `dependencies` or `all` list inherited sources of more than 30 props as one layer. |
 | `fallback` | `degraded` | `degraded`: a component whose extraction reported a warning or error goes to React's docgen. `never`: always answer. |

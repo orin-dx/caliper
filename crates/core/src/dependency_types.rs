@@ -605,7 +605,8 @@ pub(crate) fn load(
         packages: DashMap::default(),
         learned: AtomicBool::new(false),
     };
-    let index_path = index_path(options);
+    // With the cache off the index is neither read nor written, and the run learns everything again.
+    let index_path = options.use_cache.then(|| index_path(options));
     match previous {
         Some(previous) => {
             for (key, value) in &previous.resolutions {
@@ -630,7 +631,11 @@ pub(crate) fn load(
                 loader.react_files.insert(file.clone());
             }
         }
-        None => read_index(&index_path, &loader),
+        None => {
+            if let Some(path) = &index_path {
+                read_index(path, &loader);
+            }
+        }
     }
     rayon::scope(|scope| {
         for demand in demands {
@@ -641,8 +646,10 @@ pub(crate) fn load(
             });
         }
     });
-    if previous.is_none() && loader.learned.load(Ordering::Relaxed) {
-        write_index(&index_path, &loader);
+    if let (None, Some(path)) = (previous, &index_path) {
+        if loader.learned.load(Ordering::Relaxed) {
+            write_index(path, &loader);
+        }
     }
 
     let mut files: Vec<PathKey> = loader.declaring.iter().map(|f| f.clone()).collect();

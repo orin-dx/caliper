@@ -15,6 +15,7 @@ describe('preset', () => {
       tsconfigPath: undefined,
       skipHtmlProps: undefined,
       htmlAttributes: undefined,
+      cache: undefined,
       loadDependencies: undefined,
       collapseInheritedProps: undefined,
       lazy: undefined,
