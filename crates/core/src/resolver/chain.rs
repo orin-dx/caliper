@@ -127,6 +127,10 @@ pub(super) fn resolve_props_chain(
         return ResolvedChain::give_up(type_name.to_owned(), Some(diag), state);
     }
 
+    if state.in_scope_type_params.iter().any(|param| param == type_name) && type_args.is_empty() {
+        return ResolvedChain::empty_with_compose(type_name.to_owned());
+    }
+
     // Cycle detection — scoped by file so same type name in different files is OK.
     // Must include type_args: distinct instantiations of the same generic alias
     // (e.g. `Partial<RowHeights>` vs `Partial<ColumnWidths>` in the same interface's
