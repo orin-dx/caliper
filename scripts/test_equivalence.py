@@ -69,11 +69,26 @@ class AllowList(unittest.TestCase):
     def test_a_malformed_entry_is_named(self):
         self.assertEqual(len(equivalence.allow_problems(['prop-added Button.x', 7])), 2)
 
-    def test_the_checked_in_list_is_valid(self):
-        import json
+    def test_the_checked_in_entries_are_valid(self):
+        patterns = [pattern for _, pattern in equivalence.load_allow(equivalence.DEFAULT_ALLOW)]
+        self.assertEqual(equivalence.allow_problems(patterns), [])
 
-        with open(equivalence.DEFAULT_ALLOW) as f:
-            self.assertEqual(equivalence.allow_problems(json.load(f)['allow']), [])
+    def test_every_file_in_the_directory_counts_in_name_order_and_nothing_else_does(self):
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            files = {'b-feature.json': ['b/* prop-added B.x'], 'a-fix.json': ['a/* prop-added A.y', 'a/* prop-added A.z']}
+            for name, allow in files.items():
+                with open(os.path.join(tmp, name), 'w') as f:
+                    json.dump({'allow': allow}, f)
+            with open(os.path.join(tmp, 'notes.txt'), 'w') as f:
+                f.write('not an allow-list')
+            expected = [(name, pattern) for name in sorted(files) for pattern in files[name]]
+            self.assertEqual(equivalence.load_allow(tmp), expected)
+
+    def test_a_missing_directory_has_no_entries(self):
+        self.assertEqual(equivalence.load_allow('/no/such/allow-list-directory'), [])
 
 
 class ResolveBase(unittest.TestCase):

@@ -8,9 +8,10 @@ cache counters dropped), and reports per corpus and configuration either `identi
 components added or removed, props added, removed or changed (type, or required/default/description/tags), other
 component fields changed, diagnostics added or removed, enums and stats that differ.
 
-Any diff fails the run unless scripts/equivalence-allow.json lists it. The file holds `allow`, a list of fnmatch
-patterns matched against `<corpus>/<config> <kind> <item>` as printed in the report; it is empty unless a change is
-meant to alter output, and then the patterns say exactly which differences are meant.
+Any diff fails the run unless a file in scripts/equivalence-allow.d/ lists it. Each file holds `allow`, a list of
+fnmatch patterns matched against `<corpus>/<config> <kind> <item>` as printed in the report. A pull request that means
+to alter output adds its own file there, named for it, so two pull requests never edit the same lines; main has no
+files, and then the patterns say exactly which differences are meant.
 
 The `none` configurations compare every field exactly. The curated and full ones leave out the props, notable props and
 layers that `@types/react` gives an element, which ADR 0024 changes on purpose.
@@ -26,7 +27,7 @@ stage that runs over is killed with its whole process group and reported by name
 run fails: a hung build, child process or deadlocked test can never stall CI silently.
 
 Usage: scripts/equivalence.py [BASE] [--bin BIN] [--corpora DIR] [--corpus NAME]... [--config NAME]... [--lazy MODE]
-                              [--oracle] [--examples N] [--allow FILE] [--require-empty-allow] [--work DIR] [--out FILE]
+                              [--oracle] [--examples N] [--allow DIR] [--require-empty-allow] [--work DIR] [--out FILE]
                               [--markdown FILE]
                               [--timeout-build S] [--timeout-extract S] [--timeout-lazy S] [--timeout-oracle S]
   BASE   a git ref (default origin/main; built once per commit in a scratch worktree) or an executable.
@@ -61,7 +62,7 @@ CONFIGS = {
 COMMON = ['--json', '--quiet', '--include-unexported']
 # Counters that depend on the parse cache or the clock, not on what was resolved.
 VOLATILE_STATS = {'durationMs', 'dtsFilesParsed', 'dtsCacheHits'}
-DEFAULT_ALLOW = os.path.join(ROOT, 'scripts', 'equivalence-allow.json')
+DEFAULT_ALLOW = os.path.join(ROOT, 'scripts', 'equivalence-allow.d')
 
 
 # ─── Builds ───────────────────────────────────────────────────────────────────
@@ -269,6 +270,17 @@ def index_allow(patterns):
     return names, rest, {}
 
 
+def load_allow(directory):
+    """The entries of every `*.json` file in the allow-list directory as (file name, pattern), in name order. A missing
+    directory has none: main has no files, and a pull request adds one named for it."""
+    entries = []
+    for name in sorted(os.listdir(directory)) if os.path.isdir(directory) else []:
+        if name.endswith('.json'):
+            with open(os.path.join(directory, name)) as f:
+                entries.extend((name, pattern) for pattern in json.load(f)['allow'])
+    return entries
+
+
 def allowed(label, kind, item, patterns):
     names, rest, covering = index_allow(tuple(patterns))
     if (label, kind) not in covering:
@@ -408,15 +420,16 @@ def main():
     args.work = os.path.abspath(args.work)
     os.makedirs(args.work, exist_ok=True)
 
-    with open(args.allow) as f:
-        patterns = json.load(f)['allow']
-    problems = allow_problems(patterns)
+    entries = load_allow(args.allow)
+    patterns = [pattern for _, pattern in entries]
+    problems = [f'{name}: {problem}' for name, pattern in entries for problem in allow_problems([pattern])]
     if problems:
         sys.exit('the allow-list has entries that hide too much:\n  ' + '\n  '.join(problems))
     if args.require_empty_allow:
-        # main's list is empty: a pull request lists the differences it means to make, and they stop being differences
+        # main has no files: a pull request lists the differences it means to make, and they stop being differences
         # when it merges.
-        sys.exit(f'{args.allow} has {len(patterns)} entries; it must be empty on main' if patterns else 0)
+        files = sorted({name for name, _ in entries})
+        sys.exit(f'{args.allow} has entries in {", ".join(files)}; it must have none on main' if entries else 0)
     try:
         head_bin = os.path.abspath(args.bin) if args.bin else build_head(args.timeout_build)
         base_bin = resolve_base(args.base, args.work, args.timeout_build)
