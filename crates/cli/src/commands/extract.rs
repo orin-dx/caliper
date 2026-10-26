@@ -25,6 +25,7 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
         config_path,
         extra_builtins: &args.extra_builtins,
         load_dependencies: args.load_dependencies,
+        no_load_dependencies: args.no_load_dependencies,
         collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
     let mut options = options;

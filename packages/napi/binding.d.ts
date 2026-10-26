@@ -72,7 +72,7 @@ export interface JsExtractOptions {
    * output is the same.
    */
   cache?: boolean
-  /** Load the dependency type declarations project types reference (off by default). */
+  /** Load the dependency type declarations project types reference (default `true`). */
   loadDependencies?: boolean
   /** Which inherited sources of more than 30 props to list as one layer (default `'dependencies'`). */
   collapseInheritedProps?: 'dependencies' | 'all' | 'none'

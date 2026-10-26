@@ -135,15 +135,19 @@ pub(super) fn component_props_of(
         // A dependency's component, from the loaded layer's value index; never emitted itself (ADR 0010).
         .or_else(|| ctx.dependencies.as_ref()?.component(&canonical_file, &canonical_name));
     match target {
-        Some(target) => resolve_props_chain(
-            target.props_type_name.as_str(),
-            &target.props_type_args,
-            &target.file_path,
-            mapping,
-            ctx,
-            state,
-            depth + 1,
-        ),
+        Some(target) => {
+            // TypeScript instantiates an unbound generic callable with `unknown` in `ComponentProps<typeof X>`.
+            let props_type_args = instantiated_props_args(target);
+            resolve_props_chain(
+                target.props_type_name.as_str(),
+                &props_type_args,
+                &target.file_path,
+                mapping,
+                ctx,
+                state,
+                depth + 1,
+            )
+        }
         // `typeof Primitive.div`: a member of a value whose declared type is a mapped type over its keys.
         None if let Some((props, props_file)) = name
             .rsplit_once('.')
@@ -164,6 +168,13 @@ pub(super) fn component_props_of(
             ResolvedChain::empty_with_compose(format!("ComponentProps<typeof {name}>"))
         }
     }
+}
+
+/// TypeScript instantiates a generic component value referenced through `typeof` with `unknown` type arguments.
+pub(super) fn instantiated_props_args(target: &ComponentMapping) -> Vec<CollectedType> {
+    let substitution: super::substitute::Substitution<'_> =
+        target.type_params.iter().map(|param| (param.as_str(), CollectedType::Unknown)).collect();
+    target.props_type_args.iter().map(|arg| super::substitute::substitute_type(arg, &substitution)).collect()
 }
 
 /// Full mode only: look up `name` (e.g. "ButtonHTMLAttributes") directly in

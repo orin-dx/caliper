@@ -72,6 +72,59 @@ fn prop_types(output: &crate::types::ExtractionOutput, component: &str) -> Vec<(
     output.components[component].props.values().map(|p| (p.name.clone(), p.prop_type.raw_string())).collect()
 }
 
+#[test]
+fn extract_selects_an_imported_discriminated_member_through_an_optional_array() {
+    let (_tmp, root) = project(&[
+        ("node_modules/menu-kit/package.json", r#"{ "name": "menu-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        (
+            "node_modules/menu-kit/index.d.ts",
+            "export interface SubMenuType { type?: 'submenu'; disabled?: boolean; title?: string; children: ItemType[] }\n\
+             export interface MenuItemType { type?: 'item'; extra?: number }\n\
+             export type ItemType = SubMenuType | MenuItemType | null;\n\
+             export interface MenuProps { items?: ItemType[] }\n",
+        ),
+        (
+            "src/SubMenu.tsx",
+            "import type { MenuProps } from 'menu-kit';\n\
+             type Item = NonNullable<NonNullable<MenuProps['items']>[number]>;\n\
+             type RcSubMenu = Extract<Item, { type?: 'submenu' }>;\n\
+             interface SubMenuProps extends Omit<RcSubMenu, 'children' | 'title'> { title?: string; icon?: string }\n\
+             export function SubMenu(props: SubMenuProps) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+    assert_eq!(
+        prop_types(&output, "SubMenu"),
+        [
+            ("disabled".into(), "boolean".into()),
+            ("icon".into(), "string".into()),
+            ("title".into(), "string".into()),
+            ("type".into(), "\"submenu\"".into()),
+        ]
+    );
+    assert!(output.diagnostics.iter().all(|diag| !diag.message.contains("Cannot determine the object members")));
+}
+
+#[test]
+fn undecidable_extract_filter_emits_a_diagnostic() {
+    let (_tmp, root) = project(&[(
+        "src/Items.tsx",
+        "interface Known { type?: 'submenu'; known?: string }\n\
+         interface Unknown { type?: any; unknown?: string }\n\
+         type Selected = Extract<Known | Unknown, { type?: 'submenu' }>;\n\
+         interface Props extends Selected { own?: boolean }\n\
+         export function Items(props: Props) { return null; }\n",
+    )]);
+
+    let output = extract(&options(&root, false));
+    assert_eq!(prop_types(&output, "Items"), [("own".into(), "boolean".into())]);
+    assert!(output.diagnostics.iter().any(|diag| {
+        diag.code == crate::types::DiagnosticCode::OpaqueType
+            && diag.message.contains("Cannot determine the object members selected by 'Extract'")
+    }));
+}
+
 fn demand(root: &Utf8Path, specifier: &str, name: &str) -> Demand {
     Demand { from: root.join("src/Badge.tsx"), specifier: specifier.into(), name: name.into() }
 }
@@ -80,6 +133,250 @@ const BADGE: &str = "import type { ButtonProps, B, Tokens, Tone } from 'ui-kit';
     import * as React from 'react';\n\
     export function Badge(props: ButtonProps & { b?: B; gap?: Tokens.Gap; tone?: Tone }) { return null; }\n\
     export function Wrapped(props: React.ComponentProps<typeof Button>) { return null; }\n";
+
+#[test]
+fn component_props_reads_an_imported_callable_declaration() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/callable-kit/package.json",
+            r#"{ "name": "callable-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/callable-kit/index.d.ts",
+            "import * as React from 'react';\n\
+             export interface TabProps { id: string; disabled?: boolean }\n\
+             export declare const Tab: (props: TabProps & React.RefAttributes<HTMLDivElement>) => React.ReactElement | null;\n",
+        ),
+        (
+            "src/Tabs.tsx",
+            "import * as React from 'react';\nimport { Tab as TabPrimitive } from 'callable-kit';\n\
+             export function TabsTrigger(props: React.ComponentProps<typeof TabPrimitive>) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+
+    assert_eq!(
+        prop_types(&output, "TabsTrigger"),
+        [("disabled".into(), "boolean".into()), ("id".into(), "string".into())]
+    );
+}
+
+#[test]
+fn component_props_reads_a_declared_component_member_of_an_imported_value() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/combo-kit/package.json",
+            r#"{ "name": "combo-kit", "version": "1.0.0", "types": "es/index.d.ts" }"#,
+        ),
+        ("node_modules/combo-kit/es/index.d.ts", "import Combo from './Combo';\nexport default Combo;\n"),
+        (
+            "node_modules/combo-kit/es/Combo.d.ts",
+            "import * as React from 'react';\nimport Group from './Group';\n\
+             interface Compounded<P> extends React.FC<P> { Group: typeof Group }\n\
+             declare const Combo: Compounded<{ id?: string }>;\n\
+             export default Combo;\n",
+        ),
+        (
+            "node_modules/combo-kit/es/Group.d.ts",
+            "import * as React from 'react';\n\
+             export interface GroupProps { items?: string[]; disabled?: boolean }\n\
+             declare const Group: React.FC<GroupProps>;\n\
+             export default Group;\n",
+        ),
+        (
+            "src/Group.tsx",
+            "import * as React from 'react';\nimport Combo from 'combo-kit';\n\
+             export function Group(props: React.ComponentProps<typeof Combo.Group>) { return null; }\n\
+             type GetProps<T extends React.ComponentType<any> | object> =\n\
+               T extends React.Context<infer CP> ? CP :\n\
+               T extends React.ComponentType<infer P> ? P :\n\
+               T extends object ? T : never;\n\
+             interface WrappedProps extends Omit<GetProps<typeof Combo.Group>, 'disabled'> { own?: boolean }\n\
+             export function Wrapped(props: WrappedProps) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+    assert_eq!(
+        prop_types(&output, "Group"),
+        [("disabled".into(), "boolean".into()), ("items".into(), "string[]".into())]
+    );
+    assert_eq!(prop_types(&output, "Wrapped"), [("items".into(), "string[]".into()), ("own".into(), "boolean".into())]);
+}
+
+#[test]
+fn component_props_reads_a_call_signature_in_an_imported_namespace() {
+    let (_tmp, root) = project(&[
+        ("node_modules/call-kit/package.json", r#"{ "name": "call-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/call-kit/index.d.ts", "import * as Menu from './menu';\nexport { Menu as Menubar };\n"),
+        (
+            "node_modules/call-kit/menu.d.ts",
+            "import * as react_jsx_runtime from 'react/jsx-runtime';\n\
+             type ScopedProps<P> = P & { __scopeMenubar?: string };\n\
+             interface MenuProps { value?: string; children?: string }\n\
+             declare const Menu: { (props: ScopedProps<MenuProps>): react_jsx_runtime.JSX.Element; displayName: string };\n\
+             export { Menu };\n",
+        ),
+        (
+            "src/Menubar.tsx",
+            "import * as React from 'react';\nimport { Menubar as Primitive } from 'call-kit';\n\
+             export function MenubarMenu(props: React.ComponentProps<typeof Primitive.Menu>) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+    assert_eq!(
+        prop_types(&output, "MenubarMenu"),
+        [
+            ("__scopeMenubar".into(), "string".into()),
+            ("children".into(), "string".into()),
+            ("value".into(), "string".into()),
+        ]
+    );
+}
+
+#[test]
+fn component_props_reads_a_generic_callable_with_imported_react_element() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/callable-kit/package.json",
+            r#"{ "name": "callable-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/callable-kit/index.d.ts",
+            "import * as React from 'react';\nimport { ReactElement } from 'react';\n\
+             export interface MenuProps<T> { id: string; value?: T }\n\
+             export declare const Menu: <T>(props: MenuProps<T> & React.RefAttributes<HTMLDivElement>) => ReactElement | null;\n",
+        ),
+        (
+            "src/Menu.tsx",
+            "import * as React from 'react';\nimport { Menu as MenuPrimitive } from 'callable-kit';\n\
+             export function Menu(props: React.ComponentProps<typeof MenuPrimitive>) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+
+    assert_eq!(prop_types(&output, "Menu"), [("id".into(), "string".into()), ("value".into(), "unknown".into())]);
+    assert!(output.diagnostics.iter().all(|d| !d.message.contains("Cannot resolve type 'T'")));
+}
+
+#[test]
+fn component_props_reads_a_lowercase_dependency_value_exported_as_a_component() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/callable-kit/package.json",
+            r#"{ "name": "callable-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/callable-kit/index.d.ts",
+            "import * as React from 'react';\n\
+             interface CommandProps { asChild?: boolean; label?: string }\n\
+             declare const pkg: React.ForwardRefExoticComponent<CommandProps & { loop?: boolean } & React.RefAttributes<HTMLDivElement>> & { Item: React.ForwardRefExoticComponent<{ value: string }> };\n\
+             declare const Command: React.ForwardRefExoticComponent<{ rootOnly?: number }>;\n\
+             export { pkg as Command, Command as CommandRoot };\n",
+        ),
+        (
+            "src/Command.tsx",
+            "import * as React from 'react';\nimport { Command as CommandPrimitive } from 'callable-kit';\n\
+             export function Command(props: React.ComponentProps<typeof CommandPrimitive>) { return null; }\n\
+             export function CommandItem(props: React.ComponentProps<typeof CommandPrimitive.Item>) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+
+    assert_eq!(
+        prop_types(&output, "Command"),
+        [("asChild".into(), "boolean".into()), ("label".into(), "string".into()), ("loop".into(), "boolean".into())]
+    );
+    assert_eq!(prop_types(&output, "CommandItem"), [("value".into(), "string".into())]);
+}
+
+#[test]
+fn component_props_reads_members_of_a_declared_component_namespace() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/drawer-kit/package.json",
+            r#"{ "name": "drawer-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/drawer-kit/index.d.ts",
+            "import * as React from 'react';\n\
+             interface RootProps<T> { open?: boolean; title: string; value?: T }\n\
+             declare function Root<T>(props: RootProps<T>): React.JSX.Element;\n\
+             export declare const Drawer: { Root: typeof Root; Trigger: React.ForwardRefExoticComponent<{ disabled?: boolean }> };\n",
+        ),
+        (
+            "src/Drawer.tsx",
+            "import * as React from 'react';\nimport { Drawer as Primitive } from 'drawer-kit';\n\
+             export function DrawerRoot(props: React.ComponentProps<typeof Primitive.Root>) { return null; }\n\
+             export function DrawerTrigger(props: React.ComponentProps<typeof Primitive.Trigger>) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+
+    assert_eq!(
+        prop_types(&output, "DrawerRoot"),
+        [("open".into(), "boolean".into()), ("title".into(), "string".into()), ("value".into(), "unknown".into())]
+    );
+    assert_eq!(prop_types(&output, "DrawerTrigger"), [("disabled".into(), "boolean".into())]);
+    assert!(output.diagnostics.iter().all(|d| !d.message.contains("Cannot resolve type 'T'")));
+}
+
+#[test]
+fn component_props_reads_forward_ref_with_renamed_react_namespace() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/otp-kit/package.json",
+            r#"{ "name": "otp-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/otp-kit/index.d.ts",
+            "import * as React$1 from 'react';\n\
+             interface OTPProps { maxLength: number; value?: string }\n\
+             export declare const OTPInput: React$1.ForwardRefExoticComponent<OTPProps & React$1.RefAttributes<HTMLInputElement>>;\n",
+        ),
+        (
+            "src/OTP.tsx",
+            "import * as React from 'react';\nimport { OTPInput } from 'otp-kit';\n\
+             export function InputOTP(props: React.ComponentProps<typeof OTPInput>) { return null; }\n",
+        ),
+    ]);
+    let output = extract(&options(&root, true));
+    assert_eq!(
+        prop_types(&output, "InputOTP"),
+        [("maxLength".into(), "number".into()), ("value".into(), "string".into())]
+    );
+}
+
+#[test]
+fn component_props_reads_memoized_callable_dependency() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/markdown-kit/package.json",
+            r#"{ "name": "markdown-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/markdown-kit/index.d.ts",
+            "import * as react from 'react';\n\
+             interface MarkdownProps { children: string; streaming?: boolean }\n\
+             export declare const Markdown: react.MemoExoticComponent<(props: MarkdownProps) => react.JSX.Element>;\n",
+        ),
+        (
+            "src/Markdown.tsx",
+            "import * as React from 'react';\nimport { Markdown as Primitive } from 'markdown-kit';\n\
+             export function Markdown(props: React.ComponentProps<typeof Primitive>) { return null; }\n",
+        ),
+    ]);
+    let output = extract(&options(&root, true));
+    assert_eq!(
+        prop_types(&output, "Markdown"),
+        [("children".into(), "string".into()), ("streaming".into(), "boolean".into())]
+    );
+}
 
 #[test]
 fn package_types_resolve_through_star_exports_cycles_and_namespaces_and_the_value_index() {

@@ -30,6 +30,7 @@ Usage: scripts/parity.py setup [--corpora DIR] [--corpus NAME]... [--install-nod
                                 [--markdown FILE] [--baseline FILE] [--check]
 """
 import argparse
+import functools
 import json
 import os
 import re
@@ -340,11 +341,23 @@ def load_json(text):
     return json.loads(text[text.index('{'):])
 
 
+@functools.lru_cache(maxsize=None)
+def knows_no_load_dependencies(binary):
+    """Whether this build has `--no-load-dependencies` (ADR 0019); an older build has dependency loading off."""
+    help_text = subprocess.run([binary, 'extract', '--help'], capture_output=True, text=True).stdout
+    return '--no-load-dependencies' in help_text
+
+
+def deps_flags(binary, deps):
+    """The flag that pins dependency loading on or off whatever the build's default is, so a mode means one thing."""
+    if deps:
+        return ['--load-dependencies']
+    return ['--no-load-dependencies'] if knows_no_load_dependencies(binary) else []
+
+
 def caliper_rdt(binary, src, deps):
     args = [binary, 'extract', '--src', src, '--format', 'rdt', '--html-attributes', 'full', '--include-unexported',
-            '--quiet']
-    if deps:
-        args.append('--load-dependencies')
+            '--quiet'] + deps_flags(binary, deps)
     out = subprocess.run(args, capture_output=True, text=True, check=True).stdout
     return load_json(out)
 
@@ -413,11 +426,11 @@ def timings(binaries, src, runs):
         mode = 'on' if deps else 'off'
         best = {label: (float('inf'), 0.0) for label in binaries}
         for label, binary in binaries.items():
-            subprocess.run([binary, 'extract', '--src', src, '--json'] + (['--load-dependencies'] if deps else []),
+            subprocess.run([binary, 'extract', '--src', src, '--json'] + deps_flags(binary, deps),
                            capture_output=True, check=True)
         for _ in range(runs):
             for label, binary in binaries.items():
-                args = [binary, 'extract', '--src', src, '--json'] + (['--load-dependencies'] if deps else [])
+                args = [binary, 'extract', '--src', src, '--json'] + deps_flags(binary, deps)
                 elapsed, rss = run_once(args)
                 ms, peak = best[label]
                 best[label] = (min(ms, elapsed * 1000), max(peak, rss))
@@ -505,11 +518,13 @@ def oracle(args):
         list_file, tsconfig = program_inputs(name, src, work)
         verdicts = os.path.join(work, f'{name}.oracle.json')
         dump = os.path.join(work, f'{name}.oracle-props.json')
+        rows = os.path.join(work, f'{name}.oracle-rows.json')
+        missing = os.path.join(work, f'{name}.oracle-missing.json')
         print(f'{name}: asking the checker', file=sys.stderr, flush=True)
         start = time.time()
         subprocess.run(['pnpm', '--dir', validate, 'exec', 'tsx', 'src/oracle.ts', '--root', root, '--src', src,
                         '--tsconfig', tsconfig, '--caliper', caliper_json, '--out', verdicts, '--files', list_file,
-                        '--dump', dump],
+                        '--dump', dump, '--rows', rows, '--missing', missing],
                        check=True, **limits)
         with open(verdicts) as f:
             entry = json.load(f)

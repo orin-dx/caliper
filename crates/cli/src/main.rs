@@ -108,9 +108,13 @@ pub struct ExtractArgs {
     /// paths below), and suppresses the human-readable summary/diagnostics.
     #[arg(long, short = 'j')]
     pub json: bool,
-    /// Load the type declarations props reference from installed packages (off by default)
+    /// Load the type declarations props reference from installed packages (on by default; this flag turns it back on
+    /// over a config that sets `loadDependencies: false`)
     #[arg(long)]
     pub load_dependencies: bool,
+    /// Do not load the type declarations props reference from installed packages
+    #[arg(long, conflicts_with = "load_dependencies")]
+    pub no_load_dependencies: bool,
 
     /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
     #[arg(long, value_enum)]
@@ -174,9 +178,13 @@ pub struct InspectArgs {
     /// Source directories to scan [default: ./src]
     #[arg(long, short, value_delimiter = ',')]
     pub src: Vec<String>,
-    /// Load the type declarations props reference from installed packages (off by default)
+    /// Load the type declarations props reference from installed packages (on by default; this flag turns it back on
+    /// over a config that sets `loadDependencies: false`)
     #[arg(long)]
     pub load_dependencies: bool,
+    /// Do not load the type declarations props reference from installed packages
+    #[arg(long, conflicts_with = "load_dependencies")]
+    pub no_load_dependencies: bool,
 
     /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
     #[arg(long, value_enum)]
@@ -192,9 +200,13 @@ pub struct WatchArgs {
     /// Output file to write on each change
     #[arg(long, short)]
     pub out: Option<String>,
-    /// Load the type declarations props reference from installed packages (off by default)
+    /// Load the type declarations props reference from installed packages (on by default; this flag turns it back on
+    /// over a config that sets `loadDependencies: false`)
     #[arg(long)]
     pub load_dependencies: bool,
+    /// Do not load the type declarations props reference from installed packages
+    #[arg(long, conflicts_with = "load_dependencies")]
+    pub no_load_dependencies: bool,
 
     /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
     #[arg(long, value_enum)]
@@ -214,9 +226,13 @@ pub struct CheckArgs {
     /// Machine-readable JSON diagnostics instead of the human-readable table
     #[arg(long, short = 'j')]
     pub json: bool,
-    /// Load the type declarations props reference from installed packages (off by default)
+    /// Load the type declarations props reference from installed packages (on by default; this flag turns it back on
+    /// over a config that sets `loadDependencies: false`)
     #[arg(long)]
     pub load_dependencies: bool,
+    /// Do not load the type declarations props reference from installed packages
+    #[arg(long, conflicts_with = "load_dependencies")]
+    pub no_load_dependencies: bool,
 
     /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
     #[arg(long, value_enum)]

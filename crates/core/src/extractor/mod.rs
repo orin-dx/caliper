@@ -218,6 +218,10 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) aliased_away: FxHashSet<CompactString>,
     /// Wrapper-call candidates, promoted to mappings in `finish()` once the whole file has been seen.
     pub(super) pending_wrappers: Vec<wrapper::PendingWrapper>,
+    /// Simple local aliases of generic functions, resolved after all declarations have been visited.
+    pub(super) pending_function_aliases: Vec<(String, String)>,
+    /// Local cast names and the base component and asserted props type they export.
+    pub(super) cast_component_aliases: rustc_hash::FxHashMap<CompactString, (String, CompactString)>,
     /// `export { local as exported }` without a source: the index into `data.exports` and the `local` name, so
     /// `finish()` can recognize a re-exported import once every import has been seen.
     pub(super) pending_local_exports: Vec<(usize, String)>,
@@ -261,6 +265,8 @@ impl<'src> SourceDataCollector<'src> {
             pending_display_name_renames: Vec::new(),
             aliased_away: FxHashSet::default(),
             pending_wrappers: Vec::new(),
+            pending_function_aliases: Vec::new(),
+            cast_component_aliases: Default::default(),
             pending_local_exports: Vec::new(),
             decline_reason: None,
             name_uses: Default::default(),
@@ -308,15 +314,31 @@ impl<'src> SourceDataCollector<'src> {
 
     /// `declare const Primitive: Primitives`: the type of a value declared without an initializer, as the alias
     /// `typeof Primitive` (a name no source can write), so `typeof Primitive.div` and `(typeof NODES)[number]` can be
-    /// read from it.
+    /// read from it. A declared object or intersection with static component members is indexed as well.
     pub(super) fn record_declared_value_type(&mut self, declarator: &VariableDeclarator<'_>) {
         let (BindingPattern::BindingIdentifier(id), Some(annotation)) = (&declarator.id, &declarator.type_annotation)
         else {
             return;
         };
         let target = self.ts_type_to_collected(&annotation.type_annotation);
-        // Object types stay out: `lib.dom.d.ts` and every package's typings would add their whole shape here.
-        if !matches!(target, crate::types::CollectedType::Named { .. } | crate::types::CollectedType::Tuple(_)) {
+        // Keep static component members on a callable value without indexing arbitrary object declarations.
+        let has_component_member = |fields: &[crate::types::CollectedObjectField]| {
+            fields.iter().any(|field| {
+                matches!(&field.collected_type, crate::types::CollectedType::Named { name, .. }
+                    if name.ends_with("Component"))
+            })
+        };
+        let static_components = match &target {
+            crate::types::CollectedType::Intersection(members) => members.iter().any(|member| match member {
+                crate::types::CollectedType::Object(fields) => has_component_member(fields),
+                _ => false,
+            }),
+            crate::types::CollectedType::Object(fields) => has_component_member(fields),
+            _ => false,
+        };
+        if !matches!(target, crate::types::CollectedType::Named { .. } | crate::types::CollectedType::Tuple(_))
+            && !static_components
+        {
             return;
         }
         let key = self.scoped_key(&format!("typeof {}", id.name));
@@ -429,6 +451,7 @@ impl<'src> SourceDataCollector<'src> {
                 self.data.interface_type_params.insert(key, params);
             }
         }
+        self.promote_function_aliases();
         self.promote_wrapper_calls();
         self.promote_reexported_imports();
         // Filtered by original identifier first, before any displayName rename

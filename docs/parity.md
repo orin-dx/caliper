@@ -18,7 +18,7 @@ A lockfile the pinned package manager rejects falls back to a fresh resolve; the
 
 ## What is measured
 
-Caliper runs in RDT's format with `--html-attributes full --include-unexported`, without and with `--load-dependencies`. On components both tools report (same file, same name):
+Caliper runs in RDT's format with `--html-attributes full --include-unexported`, without (`--no-load-dependencies`, since dependency loading is on by default, ADR 0019) and with `--load-dependencies`; `scripts/parity.py` pins the flag for builds that know it. On components both tools report (same file, same name):
 
 | Measure | Meaning |
 | --- | --- |
