@@ -128,10 +128,7 @@ pub(super) fn component_props_of(
     let (canonical_file, canonical_name) = resolve_to_canonical(name, file, ctx, &mut state.diagnostics)
         .unwrap_or_else(|| (file.to_owned(), name.to_owned()));
     let target = ctx
-        .global
-        .component_mappings
-        .iter()
-        .find(|m| m.file_path == canonical_file && m.component_name == canonical_name)
+        .component_mapping(&canonical_file, &canonical_name)
         // A dependency's component, from the loaded layer's value index; never emitted itself (ADR 0010).
         .or_else(|| ctx.dependencies.as_ref()?.component(&canonical_file, &canonical_name));
     match target {

@@ -43,6 +43,10 @@ const SESSION_VARIANTS = ['caliper', 'caliper-nodeps', 'caliper-curated']
 
 /** The lazy session is the default; the eager ones resolve every component at start, as the addon did before it. */
 Object.assign(VARIANTS, {
+  // What the element attributes cost the session: each mode, otherwise the defaults.
+  'caliper-html-none': { loadDependencies: true, collapseInheritedProps: 'none', htmlAttributes: 'none' },
+  'caliper-html-curated': { loadDependencies: true, collapseInheritedProps: 'none', htmlAttributes: 'curated' },
+  'caliper-html-full': { loadDependencies: true, collapseInheritedProps: 'none', htmlAttributes: 'full' },
   'caliper-eager': { loadDependencies: true, collapseInheritedProps: 'none', lazy: false },
   'caliper-nodeps-eager': { loadDependencies: false, collapseInheritedProps: 'none', lazy: false },
   // Lazy that resolves the rest in one background pass after 16 components were asked for.

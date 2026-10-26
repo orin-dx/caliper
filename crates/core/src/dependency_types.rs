@@ -245,6 +245,9 @@ pub(crate) struct DependencyLayer {
     totals: Totals,
     /// Declaring files' component mappings: the value index. Nothing here is emitted.
     component_mappings: Vec<ComponentMapping>,
+    /// Positions in `component_mappings` by component name, ascending: `ComponentProps<typeof X>` asks `component` for a
+    /// name that is usually not here, and comparing every mapping's path to find that out dominated a design system's run.
+    component_positions: FxHashMap<CompactString, Vec<usize>>,
     /// Falls back to the parent's.
     pub(crate) named_types: Arc<NamedTypeIndex>,
     /// Falls back to the parent's.
@@ -310,8 +313,14 @@ impl DependencyLayer {
 
     /// A dependency component by its declaring `(file, name)`.
     pub(crate) fn component(&self, file: &Utf8Path, name: &str) -> Option<&ComponentMapping> {
-        self.chain()
-            .find_map(|layer| layer.component_mappings.iter().find(|m| m.file_path == file && m.component_name == name))
+        self.chain().find_map(|layer| {
+            layer
+                .component_positions
+                .get(name)?
+                .iter()
+                .filter_map(|&position| layer.component_mappings.get(position))
+                .find(|mapping| mapping.file_path == file)
+        })
     }
 
     /// Why the loader found no declaration for `name` imported from `specifier` by a file in `dir`, if it didn't.
@@ -778,6 +787,10 @@ pub(crate) fn load(
         }
     }
     component_mappings.sort_by(|a, b| (&a.file_path, a.span_start).cmp(&(&b.file_path, b.span_start)));
+    let mut component_positions: FxHashMap<CompactString, Vec<usize>> = FxHashMap::default();
+    for (position, mapping) in component_mappings.iter().enumerate() {
+        component_positions.entry(CompactString::from(mapping.component_name.as_str())).or_default().push(position);
+    }
     let named_types = Arc::new(named);
     // React's declarations reference what React imports (`CSS.Properties`), so those imports must resolve too; its
     // declarations stay out of `named_types`.
@@ -809,6 +822,7 @@ pub(crate) fn load(
         parent: parent.clone(),
         totals,
         component_mappings,
+        component_positions,
         named_types,
         import_map,
         exports,
