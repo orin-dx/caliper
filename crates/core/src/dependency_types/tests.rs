@@ -462,7 +462,7 @@ fn the_loader_is_deterministic_across_demand_order_and_threads() {
             exports,
             files,
             unresolved,
-            layer.global.component_mappings.iter().map(|m| m.component_name.clone()).collect::<Vec<_>>(),
+            layer.component_mappings.iter().map(|m| m.component_name.clone()).collect::<Vec<_>>(),
         )
     };
 

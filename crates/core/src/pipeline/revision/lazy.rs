@@ -110,11 +110,7 @@ impl Engine {
         react_types: &Option<Arc<NamedTypeIndex>>,
     ) -> Engine {
         let named_types = match &layer {
-            Some(layer) => {
-                let mut with_fallback = (**named_types).clone();
-                with_fallback.fallback = Some(layer.named_types.clone());
-                Arc::new(with_fallback)
-            }
+            Some(layer) => Arc::new(named_types.with_fallback(layer.named_types.clone())),
             None => named_types.clone(),
         };
         let ctx = ResolutionContext::new_with_cached_ambient_global_files(
@@ -129,9 +125,14 @@ impl Engine {
     }
 }
 
-/// How many times the layer grows for requests before the rest of the project's names load in the background. Three
-/// keeps a session that looks at a few components at the layer they reach (shadcn holds 181 declaration files after 50
-/// requests that way, 450 once every name is loaded) and moves one that reads on within three requests.
+/// How many times the layer grows for requests before the rest of the project's names load in the background. A
+/// growth is cheap (it shares the project's indexes with the context it replaces), so a session that looks at a few
+/// dozen components holds only the names they reach (shadcn: 181 declaration files after 50 requests, 450 once every
+/// name is loaded, 30 MB more); one that reads across the project, as a static build does, reaches this and loads the
+/// rest once instead of growing for every new component. Tests use a small project, so a small count.
+#[cfg(not(test))]
+const WHOLE_DEMAND_AFTER_GROWTHS: usize = 48;
+#[cfg(test)]
 const WHOLE_DEMAND_AFTER_GROWTHS: usize = 3;
 
 pub(super) struct Lazy {
@@ -467,6 +468,14 @@ impl Revision {
         }
     }
 
+    /// Whether the session's current context holds this revision's own project index, not a copy of it: growing the
+    /// layer must not clone the project's declarations.
+    #[cfg(test)]
+    pub(crate) fn context_shares_project_index(&self) -> Option<bool> {
+        let lazy = self.lazy.as_ref()?;
+        Some(lazy.engine.load().ctx.named_types.shares_declarations_with(&self.named_types))
+    }
+
     /// How many times the dependency layer grew since this revision was built.
     #[cfg(test)]
     pub(crate) fn layer_growths(&self) -> usize {
@@ -490,14 +499,11 @@ impl Revision {
             lazy.engine.store(Arc::new(Engine { layer: Some(extended), ctx: engine.ctx.clone() }));
             return;
         }
-        let next = Engine::new(
-            &self.global,
-            options,
-            &self.ambient_global_files,
-            &self.named_types,
-            Some(extended),
-            &self.react_types,
-        );
+        // The new context shares the project's index, import map, resolvers and bare-name tables with the old one;
+        // rebuilding them for every growth was most of what a session reading across a project spent.
+        let named_types = Arc::new(self.named_types.with_fallback(extended.named_types.clone()));
+        let ctx = Arc::new(engine.ctx.over_layer(named_types, Some(extended.clone())));
+        let next = Engine { layer: Some(extended), ctx };
         // A memo that reached a project file whose names the old layer lacked was computed without them, and stays
         // behind; the rest hold for the larger layer, so the next component does not rebuild them.
         let covered = |file: &str| lazy.demands.get(file).is_none_or(|demands| layer.covers(demands));

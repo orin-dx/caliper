@@ -220,8 +220,8 @@ pub(crate) fn project_demands(file: &Utf8Path, data: &SourceData) -> Vec<Demand>
 /// The dependency declarations a run loaded. Immutable once built; a watch revision that needs more builds a new one
 /// from it.
 pub(crate) struct DependencyLayer {
-    /// Declaring files' data. Their component mappings are the value index; nothing here is emitted.
-    pub(crate) global: GlobalSourceData,
+    /// Declaring files' component mappings: the value index. Nothing here is emitted.
+    pub(crate) component_mappings: Vec<ComponentMapping>,
     pub(crate) named_types: Arc<NamedTypeIndex>,
     pub(crate) import_map: Arc<ImportResolutionMap>,
     /// `(module, name)` → the declaring `(file, name)`, or `None` when the module's types do not export it.
@@ -254,7 +254,7 @@ impl DependencyLayer {
 
     /// A dependency component by its declaring `(file, name)`.
     pub(crate) fn component(&self, file: &Utf8Path, name: &str) -> Option<&ComponentMapping> {
-        self.global.component_mappings.iter().find(|m| m.file_path == file && m.component_name == name)
+        self.component_mappings.iter().find(|m| m.file_path == file && m.component_name == name)
     }
 
     /// Why the loader found no declaration for `name` imported from `specifier` by a file in `dir`, if it didn't.
@@ -664,27 +664,36 @@ pub(crate) fn load(
 
     let mut files: Vec<PathKey> = loader.declaring.iter().map(|f| f.clone()).collect();
     files.sort();
-    let mut global = GlobalSourceData::default();
+    // Each file's declarations go straight into the index, and only what the import map reads (imports and
+    // re-exports) and the value index (component mappings) is kept apart; a merged copy of every file's data would
+    // hold the same declarations twice.
+    let mut named = NamedTypeIndex::default();
+    let mut component_mappings: Vec<ComponentMapping> = Vec::new();
+    let mut imports = GlobalSourceData::default();
     for file in &files {
         let path = Utf8Path::new(std::borrow::Borrow::<str>::borrow(file));
         if let Some(Some(data)) = loader.parsed.get(file).and_then(|cell| cell.get().cloned()) {
-            global.merge(path, (*data).clone());
+            named.merge_file(&data);
+            component_mappings.extend(data.component_mappings.iter().cloned());
+            imports.import_map.insert(path.to_owned(), data.imports.clone());
+            imports.re_export_map.insert(path.to_owned(), data.exports.clone());
         }
     }
-    global.component_mappings.sort_by(|a, b| (&a.file_path, a.span_start).cmp(&(&b.file_path, b.span_start)));
-    let named_types = Arc::new(NamedTypeIndex::build(&global));
+    component_mappings.sort_by(|a, b| (&a.file_path, a.span_start).cmp(&(&b.file_path, b.span_start)));
+    let named_types = Arc::new(named);
     // React's declarations reference what React imports (`CSS.Properties`), so those imports must resolve too; its
     // declarations stay out of `named_types`.
     let react_files: FxHashSet<PathKey> = loader.react_files.into_iter().collect();
     for file in &react_files {
         let path = Utf8Path::new(std::borrow::Borrow::<str>::borrow(file));
         if let Some(Some(data)) = loader.parsed.get(file).and_then(|cell| cell.get().cloned()) {
-            global.merge(path, SourceData { imports: data.imports.clone(), ..SourceData::default() });
+            imports.import_map.insert(path.to_owned(), data.imports.clone());
+            imports.re_export_map.insert(path.to_owned(), Vec::new());
         }
     }
-    let import_map = Arc::new(ImportResolutionMap::build(&global));
+    let import_map = Arc::new(ImportResolutionMap::build(&imports));
     DependencyLayer {
-        global,
+        component_mappings,
         named_types,
         import_map,
         exports: loader.exports.into_iter().collect(),
