@@ -31,10 +31,17 @@ export interface CaliperStorybookOptions {
    */
   lazy?: boolean
   /**
-   * With a lazy session, resolve a few components in the background after it starts, so the first story does not
-   * load the dependencies stories share. Default: `true`.
+   * With a lazy session, resolve a few components in the background after it starts. Default: `false`: it did not
+   * make the first story faster in measurement.
    */
   warmUp?: boolean
+  /**
+   * With a lazy session, once this many distinct components have been asked for, resolve all the rest in the
+   * background in one parallel pass. It lowers the median story latency of a project read end to end (Spectrum's
+   * 50 stories: 19 ms to 5 ms) but not the total time, and raises peak memory by 170 to 420 MB, so it is off by
+   * default: `0`.
+   */
+  fillAfter?: number
   /**
    * When a component's resolution reported a warning or an error, its props may be incomplete. `'degraded'` (the
    * default) hands such a component to the next docgen provider, React's own; `'never'` always answers.

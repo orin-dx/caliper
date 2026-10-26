@@ -110,11 +110,7 @@ impl Engine {
         react_types: &Option<Arc<NamedTypeIndex>>,
     ) -> Engine {
         let named_types = match &layer {
-            Some(layer) => {
-                let mut with_fallback = (**named_types).clone();
-                with_fallback.fallback = Some(layer.named_types.clone());
-                Arc::new(with_fallback)
-            }
+            Some(layer) => Arc::new(named_types.with_fallback(layer.named_types.clone())),
             None => named_types.clone(),
         };
         let ctx = ResolutionContext::new_with_cached_ambient_global_files(
@@ -129,6 +125,13 @@ impl Engine {
     }
 }
 
+/// How many times the layer grows for requests before the rest of the project's names load in the background. A
+/// growth is cheap (it shares the project's indexes with the context it replaces), so a session that looks at a few
+/// dozen components holds only the names they reach (shadcn: 181 declaration files after 50 requests, 450 once every
+/// name is loaded, 30 MB more); one that reads across the project, as a static build does, reaches this and loads the
+/// rest once instead of growing for every new component. Tests use a small project, so a small count.
+const WHOLE_DEMAND_AFTER_GROWTHS: usize = 3;
+
 pub(super) struct Lazy {
     /// Each project file's dependency demands; files that demand nothing are absent.
     demands: FxHashMap<PathKey, Arc<[Demand]>>,
@@ -138,6 +141,12 @@ pub(super) struct Lazy {
     engine: ArcSwap<Engine>,
     /// Serializes layer growth, so concurrent requests load a name once.
     growing: Mutex<()>,
+    /// Whether the background load of every name the project takes from a package has started.
+    whole_demand_started: std::sync::atomic::AtomicBool,
+    /// The thread loading them, until [`Revision::wait_for_dependency_load`] joins it.
+    whole_demand_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// How many times the layer grew (and the context was rebuilt or kept), for tests and stats.
+    growths: std::sync::atomic::AtomicUsize,
 }
 
 /// The components of `global` by name, each name's components in output order.
@@ -198,6 +207,9 @@ impl Revision {
             memo: DashMap::default(),
             engine: ArcSwap::from_pointee(engine),
             growing: Mutex::new(()),
+            whole_demand_started: std::sync::atomic::AtomicBool::new(false),
+            whole_demand_thread: Mutex::new(None),
+            growths: std::sync::atomic::AtomicUsize::new(0),
         };
         Revision {
             id,
@@ -321,6 +333,9 @@ impl Revision {
                 memo,
                 engine: ArcSwap::from_pointee(engine),
                 growing: Mutex::new(()),
+                whole_demand_started: std::sync::atomic::AtomicBool::new(false),
+                whole_demand_thread: Mutex::new(None),
+                growths: std::sync::atomic::AtomicUsize::new(0),
             }),
         };
         let update = self.lazy_delta(&next, options, &touched, affected_files, start);
@@ -409,6 +424,61 @@ impl Revision {
         }
     }
 
+    /// Once the layer has grown [`WHOLE_DEMAND_AFTER_GROWTHS`] times, load every name the project's files take from a
+    /// package on a thread of its own, once.
+    ///
+    /// Each growth of the layer rebuilds the resolution context, so a session that grows one request at a time pays
+    /// that rebuild for every new component (Spectrum: 33 rebuilds, about 140 of the 300 ms a project read end to end
+    /// took). A session that asks about a few components never gets here, and holds only the names they reach; one
+    /// that reads across the project does, and the later requests find every name loaded. A request that needs a name
+    /// before the thread has loaded it waits for the same lock and loads it, as it would have anyway.
+    pub(crate) fn load_whole_demand_in_background(self: &Arc<Self>, options: &PipelineOptions) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let Some(lazy) = &self.lazy else { return };
+        if !options.load_dependencies
+            || lazy.growths.load(Relaxed) < WHOLE_DEMAND_AFTER_GROWTHS
+            || lazy.whole_demand_started.swap(true, Relaxed)
+        {
+            return;
+        }
+        let (revision, options) = (self.clone(), options.clone());
+        let spawned = std::thread::Builder::new().name("caliper-whole-demand".into()).spawn(move || {
+            drop(crate::panic_guard::contain_panic("load_whole_demand", || {
+                let Some(lazy) = &revision.lazy else { return };
+                let all: Vec<Demand> = lazy.demands.values().flat_map(|demands| demands.iter().cloned()).collect();
+                revision.grow(&options, lazy, &all);
+            }));
+        });
+        // A thread that cannot start costs the speed-up, never an answer.
+        if let Ok(handle) = spawned {
+            *lazy.whole_demand_thread.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(handle);
+        }
+    }
+
+    /// Wait until the background load [`Self::load_whole_demand_in_background`] started has finished. Without one,
+    /// returns at once.
+    pub(crate) fn wait_for_dependency_load(&self) {
+        let Some(lazy) = &self.lazy else { return };
+        let handle = lazy.whole_demand_thread.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+        if let Some(handle) = handle {
+            drop(handle.join());
+        }
+    }
+
+    /// Whether the session's current context holds this revision's own project index, not a copy of it: growing the
+    /// layer must not clone the project's declarations.
+    #[cfg(test)]
+    pub(crate) fn context_shares_project_index(&self) -> Option<bool> {
+        let lazy = self.lazy.as_ref()?;
+        Some(lazy.engine.load().ctx.named_types.shares_declarations_with(&self.named_types))
+    }
+
+    /// How many times the dependency layer grew since this revision was built.
+    #[cfg(test)]
+    pub(crate) fn layer_growths(&self) -> usize {
+        self.lazy.as_ref().map_or(0, |lazy| lazy.growths.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
     /// Load `demands` into the dependency layer unless a concurrent request already did.
     fn grow(&self, options: &PipelineOptions, lazy: &Lazy, demands: &[Demand]) {
         let _growing = lazy.growing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -419,20 +489,18 @@ impl Revision {
             return;
         }
         let extended = Arc::new(off_pool(|| dependency_types::load(missing, options, Some(layer))));
+        lazy.growths.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // Names that were already loaded, or that no package declares, add nothing the resolver reads, so the
         // context and its memos stay; only the record of what was asked for moves on.
         if extended.resolves_like(layer) {
             lazy.engine.store(Arc::new(Engine { layer: Some(extended), ctx: engine.ctx.clone() }));
             return;
         }
-        let next = Engine::new(
-            &self.global,
-            options,
-            &self.ambient_global_files,
-            &self.named_types,
-            Some(extended),
-            &self.react_types,
-        );
+        // The new context shares the project's index, import map, resolvers and bare-name tables with the old one;
+        // rebuilding them for every growth was most of what a session reading across a project spent.
+        let named_types = Arc::new(self.named_types.with_fallback(extended.named_types.clone()));
+        let ctx = Arc::new(engine.ctx.over_layer(named_types, Some(extended.clone())));
+        let next = Engine { layer: Some(extended), ctx };
         // A memo that reached a project file whose names the old layer lacked was computed without them, and stays
         // behind; the rest hold for the larger layer, so the next component does not rebuild them.
         let covered = |file: &str| lazy.demands.get(file).is_none_or(|demands| layer.covers(demands));

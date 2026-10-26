@@ -685,7 +685,7 @@ fn the_loader_is_deterministic_across_demand_order_and_threads() {
             exports,
             files,
             unresolved,
-            layer.global.component_mappings.iter().map(|m| m.component_name.clone()).collect::<Vec<_>>(),
+            layer.component_mappings.iter().map(|m| m.component_name.clone()).collect::<Vec<_>>(),
         )
     };
 
@@ -693,6 +693,74 @@ fn the_loader_is_deterministic_across_demand_order_and_threads() {
     for (reverse, threads) in [(true, 1), (false, 4), (true, 18)] {
         assert_eq!(snapshot(reverse, threads), first, "reverse {reverse}, {threads} threads");
     }
+}
+
+#[test]
+fn chained_layer_and_flatten_resolve_like_one_cold_load() {
+    let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
+    let options = PipelineOptions { use_cache: false, ..options(&root, true) };
+    let names = [
+        "B",
+        "ButtonProps",
+        "Tone",
+        "Tokens.Gap",
+        "Button",
+        "Missing0",
+        "Missing1",
+        "Missing2",
+        "Missing3",
+        "Missing4",
+        "Missing5",
+        "Missing6",
+    ];
+    let demands: Vec<_> = names.iter().map(|name| demand(&root, "ui-kit", name)).collect();
+    let cold = load(demands.clone(), &options, None);
+    let mut chained = Arc::new(load(vec![demands[0].clone()], &options, None));
+    for next in demands.iter().skip(1) {
+        chained = Arc::new(load(vec![next.clone()], &options, Some(&chained)));
+    }
+
+    assert_eq!(chained.depth, 2, "the ninth extension flattened the chain");
+    assert_eq!(chained.file_count(), cold.file_count());
+    assert!(chained.resolves_like(&cold));
+    assert!(chained.covers(&demands));
+    assert_eq!(chained.missing(&demands), Vec::<Demand>::new());
+    let dist = root.join("node_modules/ui-kit/dist");
+    for name in names {
+        assert_eq!(chained.export_of(&dist.join("index.d.ts"), name), cold.export_of(&dist.join("index.d.ts"), name));
+    }
+    for name in names.iter().filter(|name| name.starts_with("Missing")) {
+        assert_eq!(chained.unresolved_reason(&root.join("src"), "ui-kit", name), Some(Unresolved::NotExported));
+    }
+    let prop_names = |layer: &DependencyLayer| {
+        layer
+            .named_types
+            .lookup_interface(&dist.join("button.d.ts"), "ButtonProps")
+            .map(|iface| iface.props.iter().map(|prop| prop.name.clone()).collect::<Vec<_>>())
+    };
+    assert_eq!(prop_names(&chained), prop_names(&cold));
+    assert_eq!(
+        chained.component(&dist.join("button.d.ts"), "Button").map(|m| m.props_type_name.as_str()),
+        cold.component(&dist.join("button.d.ts"), "Button").map(|m| m.props_type_name.as_str())
+    );
+}
+
+#[test]
+fn a_file_parsed_as_a_reexport_stub_is_indexed_when_a_later_demand_claims_it() {
+    let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
+    let options = PipelineOptions { use_cache: false, ..options(&root, true) };
+    let button = root.join("node_modules/ui-kit/dist/button.d.ts");
+    let first = Arc::new(load(vec![demand(&root, "ui-kit", "Missing")], &options, None));
+    assert!(first.parsed_data(button.as_str()).is_some());
+    assert!(!first.is_dependency_file(&button));
+
+    let extended = load(vec![demand(&root, "ui-kit", "ButtonProps")], &options, Some(&first));
+    let props = extended
+        .named_types
+        .lookup_interface(&button, "ButtonProps")
+        .map(|iface| iface.props.iter().map(|prop| prop.name.as_str()).collect::<Vec<_>>());
+    assert_eq!(props, Some(vec!["size", "label"]));
+    assert_eq!(extended.file_count(), 2, "ButtonProps also reaches Size in tokens.d.ts");
 }
 
 #[test]

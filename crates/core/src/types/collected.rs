@@ -1079,6 +1079,8 @@ pub enum DetectionRule {
     /// `const HiddenInput = ArkCheckbox.HiddenInput`: a PascalCase member of an imported module, re-exported under a
     /// name of the project's own. Its props are the imported component's.
     ImportedMemberAlias,
+    /// Detects a declared component typed as `MemoExoticComponent<(props: Props) => ReactElement>`.
+    MemoExoticDecl,
 }
 
 /// A component → prop type mapping.
