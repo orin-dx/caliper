@@ -110,6 +110,31 @@ fn component_props_reads_an_imported_callable_declaration() {
 }
 
 #[test]
+fn component_props_reads_a_generic_callable_with_imported_react_element() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/callable-kit/package.json",
+            r#"{ "name": "callable-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/callable-kit/index.d.ts",
+            "import { ReactElement } from 'react';\n\
+             export interface MenuProps<T> { id: string }\n\
+             export declare const Menu: <T>(props: MenuProps<T>) => ReactElement | null;\n",
+        ),
+        (
+            "src/Menu.tsx",
+            "import * as React from 'react';\nimport { Menu as MenuPrimitive } from 'callable-kit';\n\
+             export function Menu(props: React.ComponentProps<typeof MenuPrimitive>) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+
+    assert_eq!(prop_types(&output, "Menu"), [("id".into(), "string".into())]);
+}
+
+#[test]
 fn package_types_resolve_through_star_exports_cycles_and_namespaces_and_the_value_index() {
     let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
 
