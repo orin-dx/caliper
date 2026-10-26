@@ -153,7 +153,8 @@ fn component_props_reads_a_lowercase_dependency_value_exported_as_a_component() 
         (
             "src/Command.tsx",
             "import * as React from 'react';\nimport { Command as CommandPrimitive } from 'callable-kit';\n\
-             export function Command(props: React.ComponentProps<typeof CommandPrimitive>) { return null; }\n",
+             export function Command(props: React.ComponentProps<typeof CommandPrimitive>) { return null; }\n\
+             export function CommandItem(props: React.ComponentProps<typeof CommandPrimitive.Item>) { return null; }\n",
         ),
     ]);
 
@@ -163,6 +164,7 @@ fn component_props_reads_a_lowercase_dependency_value_exported_as_a_component() 
         prop_types(&output, "Command"),
         [("asChild".into(), "boolean".into()), ("label".into(), "string".into()), ("loop".into(), "boolean".into())]
     );
+    assert_eq!(prop_types(&output, "CommandItem"), [("value".into(), "string".into())]);
 }
 
 #[test]

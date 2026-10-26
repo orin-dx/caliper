@@ -73,8 +73,18 @@ pub(super) fn value_member_props(
     let (base_file, base_name) =
         resolve_to_canonical(base, file, ctx, &mut ignored).unwrap_or_else(|| (file.to_owned(), base.to_owned()));
     let (_, declared) = lookup_type_alias(ctx, base_file.as_str(), &format!("typeof {base_name}"))?;
-    let CollectedTypeAlias::Passthrough { target: CollectedType::Named { name, .. }, .. } = declared else {
-        return None;
+    let name = match declared {
+        CollectedTypeAlias::Passthrough { target: CollectedType::Named { name, .. }, .. } => name,
+        CollectedTypeAlias::Passthrough { target: CollectedType::Intersection(members), .. } => {
+            return members.iter().find_map(|part| match part {
+                CollectedType::Object(fields) => fields
+                    .iter()
+                    .find(|field| field.name == member)
+                    .and_then(|field| component_props_type(&field.collected_type, &base_file, ctx, 0)),
+                _ => None,
+            });
+        }
+        _ => return None,
     };
     let (mapped_file, mapped_name) = resolve_to_canonical(name, &base_file, ctx, &mut ignored)
         .unwrap_or_else(|| (base_file.clone(), name.to_string()));
