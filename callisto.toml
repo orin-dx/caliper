@@ -18,6 +18,16 @@ publish-to = ["crates-io"]
 release-trigger = "changeset"
 
 [[package]]
+match = "cargo/caliper-docgen-tsc-client"
+publish-to = ["crates-io"]
+release-trigger = "changeset"
+
+[[package]]
+match = "cargo/caliper-docgen-semantic"
+publish-to = ["crates-io"]
+release-trigger = "changeset"
+
+[[package]]
 match = "cargo/caliper-docgen"
 publish-to = ["crates-io"]
 release-trigger = "changeset"

@@ -27,6 +27,7 @@ One line per ADR, with what it guards. Add a line when you add an ADR.
 - [18. Write prop sets and name lists once in the canonical output](0018-canonical-output-interns-prop-sets-and-name-lists.md) — do not write a component's props, an inheritance layer's `omitted` or a diagnostic's `affects` inline in canonical JSON. Extends 0009's per-prop table to the lists that repeat across components; `SCHEMA_VERSION` 2.
 - [19. Load dependency declarations by default](0019-load-dependencies-by-default.md) — do not make a surface default `loadDependencies` to off, or compare a baseline recorded without a flag against a build with the other default. Supersedes 0010's "off by default".
 - [20. Chain dependency layers and load the remaining names after three growths](0020-chain-dependency-layers.md) — keep dependency growth incremental and bound lookup depth. Supersedes 0016's 48-growth threshold.
+- [21. Publish the semantic backend crates with the CLI](0021-publish-the-semantic-backend-crates.md) — keep the runtime opt-in backend available in the published CLI by releasing its versioned crate dependencies first.
 
 Changing any of these needs a new ADR.
 

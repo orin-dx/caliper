@@ -11,6 +11,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 struct SourceFile {
     /// Path relative to `crates/core/src`, with `/` separators.
@@ -197,6 +198,42 @@ fn no_manifest_sets_panic_abort() {
         }
     }
     assert_eq!(panic_abort_manifests(&manifests), Vec::<String>::new());
+}
+
+#[test]
+fn publishable_crates_have_publishable_versioned_path_dependencies() {
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let output = Command::new("cargo")
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .current_dir(workspace)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let packages = metadata["packages"].as_array().unwrap();
+    let workspace_members = metadata["workspace_members"].as_array().unwrap();
+    let mut violations = Vec::new();
+    for package in packages {
+        if !workspace_members.contains(&package["id"]) || package["publish"] == serde_json::json!([]) {
+            continue;
+        }
+        for dependency in package["dependencies"].as_array().unwrap() {
+            if dependency["path"].is_null() {
+                continue;
+            }
+            let name = dependency["name"].as_str().unwrap();
+            if dependency["req"] == "*" {
+                violations.push(format!("{} depends on {name} without a version", package["name"]));
+            }
+            if packages
+                .iter()
+                .any(|candidate| candidate["name"] == *name && candidate["publish"] == serde_json::json!([]))
+            {
+                violations.push(format!("{} depends on unpublished {name}", package["name"]));
+            }
+        }
+    }
+    assert_eq!(violations, Vec::<String>::new());
 }
 
 #[test]
