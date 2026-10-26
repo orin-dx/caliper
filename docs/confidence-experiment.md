@@ -15,7 +15,7 @@ The soft label includes many type spellings that may be useful to preserve in RD
 
 ## Missing props
 
-The checker reports 1,182 props absent from matched shadcn components after excluding props attributed to intentionally summarized inheritance layers. Of these, 1,154 originate in Next's ambient augmentation, 22 in the TypeScript DOM library, and 6 in Radix Menubar. The other corpora have 27 antd, 12 Chakra, 67 Mantine, 52 Spectrum, and 13 fixture missing props by the same heuristic. The matching procedure does not evaluate components the checker finds but Caliper does not match.
+The checker reports 1,182 props absent from matched shadcn components after excluding props attributed to intentionally summarized inheritance layers. Of these, 1,154 originate in Next's ambient augmentation, 22 in the TypeScript DOM library, and 6 in Radix Menubar. The 22 DOM props belong to an exported `GET(request: Request)` route handler that Caliper mistakenly classified as a component because its `ImageResponse` constructor receives JSX; they are a false component match, addressed after this measurement in #209. The other corpora have 27 antd, 12 Chakra, 67 Mantine, 52 Spectrum, and 13 fixture missing props by the same heuristic. The matching procedure does not evaluate components the checker finds but Caliper does not match.
 
 These are separate coverage labels, not `wrong` type labels. The layer exclusion matches declaration paths, so it can misclassify a prop when different types share one file. A routing policy trained on these labels would mostly learn package augmentation and corpus composition rather than structural extraction risk.
 
