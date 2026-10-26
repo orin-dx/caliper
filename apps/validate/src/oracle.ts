@@ -71,8 +71,7 @@ const normComponent = (name: string) =>
   )
     .split('.')
     .at(-1)!
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]/g, '')
+    .replaceAll(/[^A-Za-z0-9]/g, '')
 const rel = (path: string) => relative(root, realpathSync(path))
 const pathKey = (path: string) =>
   process.platform === 'darwin' || process.platform === 'win32' ? path.toLowerCase() : path
