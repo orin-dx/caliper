@@ -1,6 +1,21 @@
 use super::*;
 use crate::types::{DefaultSource, EnumValue};
 
+#[test]
+fn jsx_passed_to_a_response_constructor_does_not_make_a_route_handler_a_component() {
+    let path = Utf8Path::new("/fixtures/app/og/route.tsx");
+    let data = parse_file(
+        path,
+        "export async function GET(request: Request) { return new ImageResponse(<div>{request.url}</div>); }\n\
+         export function Card(props: { title: string }) { return <div>{props.title}</div>; }",
+    );
+
+    assert_eq!(
+        data.component_mappings.iter().map(|mapping| mapping.component_name.as_str()).collect::<Vec<_>>(),
+        ["Card"]
+    );
+}
+
 fn fixture_path(rel: &str) -> std::path::PathBuf {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest_dir.join("../../fixtures").join(rel)
@@ -1050,6 +1065,7 @@ fn typed_functions_that_never_render_are_declined_with_the_reason() {
         export function Label(u: User) { const unused = <b>{u.first}</b>; return u.first; }
         export function Columns(u: User) { return { title: <b>{u.first}</b> }; }
         export function OnLater(u: User) { setTimeout(() => <i />); return u.last; }
+        export function ResponseOfJSX(u: User) { return makeResponse(<b>{u.first}</b>); }
         import type { ReactNode } from "./my-types";
         export function Typed(u: User): ReactNode { return u.first; }
     "#;
@@ -1073,6 +1089,7 @@ fn typed_functions_that_never_render_are_declined_with_the_reason() {
             "'FullName' takes a typed props parameter but declares a return type that is not React's element type",
             "'Label' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call",
             "'OnLater' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call",
+            "'ResponseOfJSX' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call",
             "'Saga' takes a typed props parameter but is a generator",
             "'Search' wraps a typed function that never returns an element: no returned JSX, element, null, children or component call, and no hook call",
             "'Selector' wraps a typed function that never returns an element: no returned JSX, element, null, children or component call, and no hook call",
@@ -1089,6 +1106,7 @@ fn components_whose_returned_value_holds_an_element_are_detected() {
         interface P { items: string[]; open?: boolean }
         export function Held({ items }: P) { const content = <ul>{items}</ul>; return content; }
         export function Mapped({ items }: P) { return items.map((i) => <li key={i}>{i}</li>); }
+        export function Reduced({ items }: P) { return items.reduce((acc, i) => <>{acc}{i}</>, <></>); }
         export function Branch({ open }: P) { if (!open) { return null; } return open ? <div /> : <span />; }
         export function Guarded({ open }: P) { return open && <div />; }
         export function Annotated(p: P): ReactNode { return p.items[0]; }
@@ -1097,7 +1115,7 @@ fn components_whose_returned_value_holds_an_element_are_detected() {
     let data = parse_file(Utf8Path::new("/test/shapes.tsx"), source);
     let mut names: Vec<&str> = data.component_mappings.iter().map(|m| m.component_name.as_str()).collect();
     names.sort_unstable();
-    assert_eq!(names, vec!["Annotated", "Branch", "Guarded", "Held", "Mapped", "Qualified"]);
+    assert_eq!(names, vec!["Annotated", "Branch", "Guarded", "Held", "Mapped", "Qualified", "Reduced"]);
 }
 
 #[test]
