@@ -50,7 +50,8 @@ The structural result is complete on its own and returns first. The semantic pas
 | --- | --- | --- |
 | `children` without a description | RDT projection only. Canonical keeps it | Done |
 | Ambient `.d.ts` components such as `PureComponent` | Merge step | Done |
-| `ref`, `key` | Not emitted, matching the structural path | Open |
+| `key` | Not emitted, matching the structural path | Closed |
+| `ref` | Emitted in `curated` and `full` for `ComponentProps<"div">`-style props and `forwardRef` components, matching the structural path | Closed |
 | HTML and DOM attributes in curated and none mode | Semantic adapter, by declaring interface rather than by name | Open |
 
 ### Delivery (proposed)
