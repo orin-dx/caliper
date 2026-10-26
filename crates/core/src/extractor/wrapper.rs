@@ -168,7 +168,11 @@ impl<'src> SourceDataCollector<'src> {
     /// Record `const Center = chakra("div", { ... })` as a candidate: a call given an intrinsic tag name and a config
     /// object, whose props type is the `CenterProps` declared in this file. Nothing here names a library; calls that
     /// build elements rather than components (`createElement("div", { ... })`) are excluded by name, as React's own API.
-    pub(super) fn try_record_tagged_factory<'a>(&mut self, decl: &super::component::Binding<'_, 'a>, name: &str) -> bool {
+    pub(super) fn try_record_tagged_factory<'a>(
+        &mut self,
+        decl: &super::component::Binding<'_, 'a>,
+        name: &str,
+    ) -> bool {
         let Some(init) = decl.init else { return false };
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
         if call.type_arguments.is_some() {
@@ -180,7 +184,8 @@ impl<'src> SourceDataCollector<'src> {
         };
         let is_tag = tag.value.starts_with(|c: char| c.is_ascii_lowercase())
             && tag.value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
-        let has_config = matches!(config.as_expression().map(super::component::peel_expr), Some(Expression::ObjectExpression(_)));
+        let has_config =
+            matches!(config.as_expression().map(super::component::peel_expr), Some(Expression::ObjectExpression(_)));
         let Some(callee) = self.extract_callee_name(call) else { return false };
         let element_builder = matches!(
             callee.rsplit('.').next(),

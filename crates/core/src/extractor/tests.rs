@@ -1293,8 +1293,11 @@ fn a_call_given_a_tag_and_a_config_object_is_a_component_when_its_props_type_is_
         export const NoConfig = chakra("div");
     "#;
     let data = parse_file(Utf8Path::new("/test/tagged.tsx"), source);
-    let mut found: Vec<(&str, &str, crate::types::DetectionRule)> =
-        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule)).collect();
+    let mut found: Vec<(&str, &str, crate::types::DetectionRule)> = data
+        .component_mappings
+        .iter()
+        .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule))
+        .collect();
     found.sort_by_key(|(name, _, _)| *name);
     assert_eq!(found, vec![("Center", "CenterProps", TaggedFactory), ("Pill", "PillProps", TaggedFactory)]);
 }
