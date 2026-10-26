@@ -4,18 +4,18 @@ The score uses only Caliper's emitted prop shapes, component metadata, and diagn
 
 ## Result on the pinned corpora
 
-Measured on 2026-10-25 with the structural binary at `3f20f965` and its PR stack, `typescript@7.1.0-beta`, and the five corpora in `scripts/parity.py` plus fixtures. The checker and Caliper share 518,297 labelled props. The oracle marks one prop `wrong`: `RouterProvider.navigate` in Spectrum. Its source preserves `Href` and `RouterOptions` aliases; the checker instantiates the unaugmented `RouterConfig` to `string` and `undefined`. This is a spelling and environment difference, not evidence of a consumer-visible incorrect function signature. One hard label cannot validate an automatic fallback rule.
+Measured on 2026-10-25 with the structural binary at `3f20f965` and its PR stack, `typescript@7.1.0-beta`, and the five corpora in `scripts/parity.py` plus fixtures. The checker and Caliper share 518,278 labelled props after skipping ambiguous component matches. The oracle marks one prop `wrong`: `RouterProvider.navigate` in Spectrum. Its source preserves `Href` and `RouterOptions` aliases; the checker instantiates the unaugmented `RouterConfig` to `string` and `undefined`. This is a spelling and environment difference, not evidence of a consumer-visible incorrect function signature. One hard label cannot validate an automatic fallback rule.
 
 | Target at 10% of matched components routed | Existing warning rule | Smoothed table | Logistic model |
 | --- | --: | --: | --: |
 | Shared `wrong` or `less precise` props, five-corpus mean | 10% | 27% | 25% |
-| Checker-only props outside summarized layers, five-corpus mean | 23% | 3% | 6% |
+| Checker-only props outside summarized layers, five-corpus mean | 23% | 2% | 6% |
 
 The soft label includes many type spellings that may be useful to preserve in RDT-compatible output. The table and model catch no hard `wrong` labels at a 20% component budget. Routing individual props has the same missing-prop blind spot: a prop that Caliper never emitted has no prop-level score.
 
 ## Missing props
 
-The checker reports 1,182 props absent from matched shadcn components after excluding props attributed to intentionally summarized inheritance layers. Of these, 1,154 originate in Next's ambient augmentation, 22 in the TypeScript DOM library, and 6 in Radix Menubar. The 22 DOM props belong to an exported `GET(request: Request)` route handler that Caliper mistakenly classified as a component because its `ImageResponse` constructor receives JSX; they are a false component match, addressed after this measurement in #209. The other corpora have 22 antd, 12 Chakra, 67 Mantine, 20 Spectrum, and 11 fixture missing props by the same heuristic. This excludes 39 `ref` props across those corpora, which Caliper deliberately omits along with `key`. The matching procedure does not evaluate components the checker finds but Caliper does not match.
+The checker reports 1,182 props absent from matched shadcn components after excluding props attributed to intentionally summarized inheritance layers. Of these, 1,154 originate in Next's ambient augmentation, 22 in the TypeScript DOM library, and 6 in Radix Menubar. The 22 DOM props belong to an exported `GET(request: Request)` route handler that Caliper mistakenly classified as a component because its `ImageResponse` constructor receives JSX; they are a false component match, addressed after this measurement in #209. The other corpora have 22 antd, 12 Chakra, 66 Mantine, 20 Spectrum, and 11 fixture missing props by the same heuristic. This excludes 39 `ref` props across those corpora, which Caliper deliberately omits along with `key`. The oracle also skips three ambiguous export matches caused by duplicate display names; that removes a false `ScrollAreaThumb.forceMount` missing label. The matching procedure does not evaluate components the checker finds but Caliper does not match.
 
 These are separate coverage labels, not `wrong` type labels. The layer exclusion matches declaration paths, so it can misclassify a prop when different types share one file. A routing policy trained on these labels would mostly learn package augmentation and corpus composition rather than structural extraction risk.
 

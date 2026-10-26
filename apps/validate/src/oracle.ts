@@ -148,6 +148,7 @@ const totals = {
   propsMissing: 0,
   propsCollapsed: 0,
   failedExports: 0,
+  ambiguousExports: 0,
 }
 
 /** The verdict for one prop, made once per (Caliper prop, checker type). */
@@ -204,7 +205,12 @@ function visitExport(exported: any, candidates: { name: string; key: string; com
       !p.declarations?.some((d: any) => String(d.path).includes('/@types/react/')),
   )
   totals.propsChecker += own.length
-  const match = candidates.find((c) => c.name === normComponent(name))
+  const matches = candidates.filter((c) => c.name === normComponent(name))
+  if (matches.length > 1) {
+    totals.ambiguousExports++
+    return
+  }
+  const [match] = matches
   if (!match) return
   totals.componentsMatched++
   const shared = own.filter((p: any) => p.name in match.component.props)
@@ -281,6 +287,7 @@ const report = {
   verdicts: counts,
   distinct_comparisons: verdictCache.size,
   failed_exports: totals.failedExports,
+  ambiguous_exports: totals.ambiguousExports,
   program_ms: Math.round(programMs),
   compare_ms: Math.round(compareMs),
   examples,
