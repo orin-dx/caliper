@@ -101,9 +101,16 @@ PRUNED_FILE = re.compile(r'\.(test|spec|stories|story)\.|\.d\.ts$')
 
 def package_manager_env(base):
     caches = os.path.join(base, 'caches')
+    # The package managers corepack downloads (yarn 4's `yarn.js`) are CommonJS bundles. The corepack home lives under
+    # this repository, whose root package.json says `"type": "module"`, so Node would load them as ES modules, where
+    # `require` does not exist: `Dynamic require of "util" is not supported`. A package.json of their own wins.
+    corepack_home = os.path.join(caches, 'corepack')
+    os.makedirs(corepack_home, exist_ok=True)
+    with open(os.path.join(corepack_home, 'package.json'), 'w') as manifest:
+        manifest.write('{"type": "commonjs"}\n')
     env = dict(os.environ)
     env.update({
-        'COREPACK_HOME': os.path.join(caches, 'corepack'),
+        'COREPACK_HOME': corepack_home,
         'COREPACK_ENABLE_DOWNLOAD_PROMPT': '0',
         'COREPACK_ENABLE_AUTO_PIN': '0',
         'YARN_CACHE_FOLDER': os.path.join(caches, 'yarn'),

@@ -21,6 +21,7 @@ pub(super) fn peel_expr<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> 
     let mut expr = expr;
     loop {
         expr = match expr {
+            Expression::ParenthesizedExpression(parenthesized) => &parenthesized.expression,
             Expression::TSAsExpression(as_expr) => &as_expr.expression,
             Expression::TSSatisfiesExpression(sat_expr) => &sat_expr.expression,
             Expression::TSNonNullExpression(non_null) => &non_null.expression,

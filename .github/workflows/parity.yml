@@ -33,6 +33,11 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # main's list must be empty. A run dispatched on a branch carries that branch's own entries on purpose, so there
+      # the step only reports: failing it would skip the install, the build and every measurement after it.
+      - name: Allow-list is empty
+        continue-on-error: ${{ github.event_name != 'schedule' && github.ref != 'refs/heads/main' }}
+        run: python3 scripts/equivalence.py --require-empty-allow
       - id: rust
         run: echo "version=$(sed -n 's/^rust = "\(.*\)"/\1/p' .prototools)" >> "$GITHUB_OUTPUT"
       - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
