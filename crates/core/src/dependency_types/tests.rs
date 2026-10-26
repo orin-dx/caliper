@@ -163,6 +163,49 @@ fn component_props_reads_an_imported_callable_declaration() {
 }
 
 #[test]
+fn component_props_reads_a_declared_component_member_of_an_imported_value() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/combo-kit/package.json",
+            r#"{ "name": "combo-kit", "version": "1.0.0", "types": "es/index.d.ts" }"#,
+        ),
+        ("node_modules/combo-kit/es/index.d.ts", "import Combo from './Combo';\nexport default Combo;\n"),
+        (
+            "node_modules/combo-kit/es/Combo.d.ts",
+            "import * as React from 'react';\nimport Group from './Group';\n\
+             interface Compounded<P> extends React.FC<P> { Group: typeof Group }\n\
+             declare const Combo: Compounded<{ id?: string }>;\n\
+             export default Combo;\n",
+        ),
+        (
+            "node_modules/combo-kit/es/Group.d.ts",
+            "import * as React from 'react';\n\
+             export interface GroupProps { items?: string[]; disabled?: boolean }\n\
+             declare const Group: React.FC<GroupProps>;\n\
+             export default Group;\n",
+        ),
+        (
+            "src/Group.tsx",
+            "import * as React from 'react';\nimport Combo from 'combo-kit';\n\
+             export function Group(props: React.ComponentProps<typeof Combo.Group>) { return null; }\n\
+             type GetProps<T extends React.ComponentType<any> | object> =\n\
+               T extends React.Context<infer CP> ? CP :\n\
+               T extends React.ComponentType<infer P> ? P :\n\
+               T extends object ? T : never;\n\
+             interface WrappedProps extends Omit<GetProps<typeof Combo.Group>, 'disabled'> { own?: boolean }\n\
+             export function Wrapped(props: WrappedProps) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+    assert_eq!(
+        prop_types(&output, "Group"),
+        [("disabled".into(), "boolean".into()), ("items".into(), "string[]".into())]
+    );
+    assert_eq!(prop_types(&output, "Wrapped"), [("items".into(), "string[]".into()), ("own".into(), "boolean".into())]);
+}
+
+#[test]
 fn component_props_reads_a_generic_callable_with_imported_react_element() {
     let (_tmp, root) = project(&[
         (

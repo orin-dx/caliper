@@ -34,6 +34,14 @@ const COMPONENT_TYPES: &[&str] = &[
 /// Aliases followed from the result type to the component type; the bound only guards against a cycle.
 const MAX_DEPTH: u8 = 8;
 
+pub(super) fn component_props_of_typeof(
+    name: &str,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+) -> Option<(CollectedType, Utf8PathBuf)> {
+    component_props_type(&CollectedType::TypeOf(name.into()), file, ctx, 0).map(|(props, file, _)| (props, file))
+}
+
 /// The props chain of the component a generic call builds, from its callee's result type. `None` when the callee is
 /// not a project function with a known result, the result has no React component type, or its props evaluate to
 /// nothing (a conditional over an unbound generic, as in Mantine's `polymorphicFactory`): the extractor's selection
@@ -117,17 +125,51 @@ pub(super) fn value_member_props(
     file: &Utf8Path,
     ctx: &ResolutionContext,
 ) -> Option<(CollectedType, Utf8PathBuf)> {
+    value_member_props_at_depth(base, member, file, ctx, 0)
+}
+
+fn value_member_props_at_depth(
+    base: &str,
+    member: &str,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+    depth: u8,
+) -> Option<(CollectedType, Utf8PathBuf)> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
     let mut ignored = Vec::new();
     let (base_file, base_name) =
         resolve_to_canonical(base, file, ctx, &mut ignored).unwrap_or_else(|| (file.to_owned(), base.to_owned()));
+    let (base_file, base_name, member) =
+        if lookup_type_alias(ctx, base_file.as_str(), &format!("typeof {base_name}")).is_some() {
+            (base_file, base_name, member.to_owned())
+        } else if let Some(Some((declaring_file, qualified))) =
+            ctx.dependencies.as_ref().and_then(|layer| layer.export_of(&base_file, &format!("{base_name}.{member}")))
+        {
+            let (declaring_name, declared_member) = qualified.split_once('.')?;
+            (declaring_file.clone(), declaring_name.to_owned(), declared_member.to_owned())
+        } else {
+            let local = ctx.import_map.local_export(&base_file, &base_name)?;
+            let (file, name) = resolve_to_canonical(&local, &base_file, ctx, &mut ignored)?;
+            (file, name, member.to_owned())
+        };
     let (_, declared) = lookup_type_alias(ctx, base_file.as_str(), &format!("typeof {base_name}"))?;
     let name = match declared {
-        CollectedTypeAlias::Passthrough { target: CollectedType::Named { name, .. }, .. } => name,
+        CollectedTypeAlias::Passthrough { target: named @ CollectedType::Named { .. }, .. } => {
+            if let Some((member_type, member_file)) = super::evaluate::member(named, &member, &base_file, ctx, 0) {
+                if let Some((props, file, _)) = component_props_type(&member_type, &member_file, ctx, depth + 1) {
+                    return Some((props, file));
+                }
+            }
+            let CollectedType::Named { name, .. } = named else { return None };
+            name
+        }
         CollectedTypeAlias::Passthrough { target: CollectedType::Object(fields), .. } => {
             return fields
                 .iter()
                 .find(|field| field.name == member)
-                .and_then(|field| component_props_type(&field.collected_type, &base_file, ctx, 0))
+                .and_then(|field| component_props_type(&field.collected_type, &base_file, ctx, depth + 1))
                 .map(|(props, file, _)| (props, file));
         }
         CollectedTypeAlias::Passthrough { target: CollectedType::Intersection(members), .. } => {
@@ -135,7 +177,7 @@ pub(super) fn value_member_props(
                 CollectedType::Object(fields) => fields
                     .iter()
                     .find(|field| field.name == member)
-                    .and_then(|field| component_props_type(&field.collected_type, &base_file, ctx, 0))
+                    .and_then(|field| component_props_type(&field.collected_type, &base_file, ctx, depth + 1))
                     .map(|(props, file, _)| (props, file)),
                 _ => None,
             });
@@ -157,7 +199,7 @@ pub(super) fn value_member_props(
     let mut bindings = super::substitute::Substitution::default();
     bindings.insert(param.as_str(), CollectedType::StringLiteral(member.into()));
     let value = substitute_type(value_type, &bindings);
-    component_props_type(&value, &mapped_file, ctx, 0).map(|(props, file, _)| (props, file))
+    component_props_type(&value, &mapped_file, ctx, depth + 1).map(|(props, file, _)| (props, file))
 }
 
 /// The props parameter of the React component type `ty` describes, its file, and any callable type parameters in scope.
@@ -181,7 +223,12 @@ fn component_props_type(
                 .component_mappings
                 .iter()
                 .find(|mapping| mapping.file_path == canonical_file && mapping.component_name == canonical_name)
-                .or_else(|| ctx.dependencies.as_ref()?.component(&canonical_file, &canonical_name))?;
+                .or_else(|| ctx.dependencies.as_ref()?.component(&canonical_file, &canonical_name));
+            let Some(mapping) = mapping else {
+                let (base, member) = name.rsplit_once('.')?;
+                let (props, props_file) = value_member_props_at_depth(base, member, file, ctx, depth + 1)?;
+                return Some((props, props_file, Vec::new()));
+            };
             Some((
                 CollectedType::Named {
                     name: mapping.props_type_name.clone(),

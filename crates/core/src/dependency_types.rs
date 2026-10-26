@@ -431,9 +431,18 @@ impl Loader<'_> {
                 _ => {}
             }
         }
-        // An import exported under its own name is recorded as an import plus a local export.
-        if let Some(demand) = imported_demand(module, &data.imports, name) {
-            if data.exports.iter().any(|e| matches!(e, LexedExport::LocalDeclaration { name: n, .. } if n == head)) {
+        // A local export can name an imported binding (`import Image from './Image'; export default Image`).
+        if let Some(local) = data.exports.iter().find_map(|export| match export {
+            LexedExport::LocalDeclaration { name: exported, declared_as, .. } if exported == head => {
+                Some(declared_as.as_deref().unwrap_or(head))
+            }
+            LexedExport::LocalDeclaration { .. }
+            | LexedExport::ReExportNamed { .. }
+            | LexedExport::ReExportAll { .. }
+            | LexedExport::ReExportNamespace { .. } => None,
+        }) {
+            let reference = rest.map_or_else(|| local.to_owned(), |rest| format!("{local}.{rest}"));
+            if let Some(demand) = imported_demand(module, &data.imports, &reference) {
                 let target = self.resolve(module, &demand.specifier).ok()?;
                 return self.find_export_in(&target, &demand.name, visited, cut);
             }
