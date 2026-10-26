@@ -9,13 +9,13 @@ Measured on 2026-10-25 with the structural binary at `3f20f965` and its PR stack
 | Target at 10% of matched components routed | Existing warning rule | Smoothed table | Logistic model |
 | --- | --: | --: | --: |
 | Shared `wrong` or `less precise` props, five-corpus mean | 10% | 27% | 25% |
-| Checker-only props outside summarized layers, five-corpus mean | 24% | 3% | 8% |
+| Checker-only props outside summarized layers, five-corpus mean | 23% | 3% | 6% |
 
 The soft label includes many type spellings that may be useful to preserve in RDT-compatible output. The table and model catch no hard `wrong` labels at a 20% component budget. Routing individual props has the same missing-prop blind spot: a prop that Caliper never emitted has no prop-level score.
 
 ## Missing props
 
-The checker reports 1,182 props absent from matched shadcn components after excluding props attributed to intentionally summarized inheritance layers. Of these, 1,154 originate in Next's ambient augmentation, 22 in the TypeScript DOM library, and 6 in Radix Menubar. The 22 DOM props belong to an exported `GET(request: Request)` route handler that Caliper mistakenly classified as a component because its `ImageResponse` constructor receives JSX; they are a false component match, addressed after this measurement in #209. The other corpora have 27 antd, 12 Chakra, 67 Mantine, 52 Spectrum, and 13 fixture missing props by the same heuristic. The matching procedure does not evaluate components the checker finds but Caliper does not match.
+The checker reports 1,182 props absent from matched shadcn components after excluding props attributed to intentionally summarized inheritance layers. Of these, 1,154 originate in Next's ambient augmentation, 22 in the TypeScript DOM library, and 6 in Radix Menubar. The 22 DOM props belong to an exported `GET(request: Request)` route handler that Caliper mistakenly classified as a component because its `ImageResponse` constructor receives JSX; they are a false component match, addressed after this measurement in #209. The other corpora have 22 antd, 12 Chakra, 67 Mantine, 20 Spectrum, and 11 fixture missing props by the same heuristic. This excludes 39 `ref` props across those corpora, which Caliper deliberately omits along with `key`. The matching procedure does not evaluate components the checker finds but Caliper does not match.
 
 These are separate coverage labels, not `wrong` type labels. The layer exclusion matches declaration paths, so it can misclassify a prop when different types share one file. A routing policy trained on these labels would mostly learn package augmentation and corpus composition rather than structural extraction risk.
 

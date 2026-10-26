@@ -196,8 +196,13 @@ function visitExport(exported: any, candidates: { name: string; key: string; com
   if (props.length === 0) return
   totals.componentsChecker++
   const name = exportName(exported)
-  // Only props a component declares itself count: React's DOM attributes are one inherited layer in Caliper.
-  const own = props.filter((p: any) => !p.declarations?.some((d: any) => String(d.path).includes('/@types/react/')))
+  // React's DOM attributes are one inherited layer; ref and key are deliberately absent from Caliper's output.
+  const own = props.filter(
+    (p: any) =>
+      p.name !== 'ref' &&
+      p.name !== 'key' &&
+      !p.declarations?.some((d: any) => String(d.path).includes('/@types/react/')),
+  )
   totals.propsChecker += own.length
   const match = candidates.find((c) => c.name === normComponent(name))
   if (!match) return
