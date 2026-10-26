@@ -761,13 +761,14 @@ pub struct SourceData {
     pub type_param_defaults: FxHashMap<std::string::String, Vec<Option<CollectedType>>>,
 }
 
-/// What a generic function returns, declared or asserted by its one top-level `return … as T`: the shape of the
-/// component a wrapper call such as `factory<Payload>(render)` builds, with the call's type arguments bound to
-/// `type_params`.
+/// What a generic function returns: its declared or asserted type, or a generic call stored in a returned local const.
+/// The wrapper call's type arguments bind to `type_params` before its result is resolved.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionResult {
     pub type_params: Vec<TypeName>,
     pub result: CollectedType,
+    /// A generic call assigned to a local const and returned by name, when there is no explicit result type.
+    pub returned_call: Option<WrapperCallee>,
 }
 
 /// The generic function a wrapper call invokes, as the call names it, and the type arguments it passes.

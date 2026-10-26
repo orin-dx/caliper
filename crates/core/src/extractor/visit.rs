@@ -252,6 +252,13 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 let name = id.name.as_str().to_owned();
                 self.try_collect_cva_call(declarator, &name);
                 self.record_object_assign_declarator(&name, declarator.init.as_ref());
+                if self.function_depth == 0 && node.kind.is_const() {
+                    if let Some(Expression::Identifier(target)) =
+                        declarator.init.as_ref().map(super::component::peel_expr)
+                    {
+                        self.pending_function_aliases.push((name, target.name.as_str().to_owned()));
+                    }
+                }
             }
             if self.is_tsx && self.function_depth > 0 {
                 if let Some(name) = self.extract_pascal_name(declarator) {
