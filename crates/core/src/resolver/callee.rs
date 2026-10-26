@@ -7,6 +7,8 @@
 //! choice among the type arguments (`extractor/wrapper.rs`) is the fallback for a callee with no known result. Nothing
 //! here names a library; the React component types are React's own.
 
+use std::sync::Arc;
+
 use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::types::*;
@@ -49,9 +51,32 @@ pub(super) fn result_chain(
     let function = ctx.global.function_results.get(&format!("{file}:{name}"))?;
     let bindings = build_substitution(&function.type_params, &callee.type_args, &mapping.file_path, &mut ignored);
     let result = substitute_type(&function.result, &bindings);
-    let (props, props_file) = component_props_type(&result, &file, ctx, 0)?;
+    let (props, props_file, type_params) = component_props_type(&result, &file, ctx, 0)?;
     let mut attempt = state.branch();
-    let chain = resolve_base_as_chain(&props, &props_file, mapping, ctx, &mut attempt, 0);
+    attempt.add_type_params(type_params.iter());
+    let mut chain = resolve_base_as_chain(&props, &props_file, mapping, ctx, &mut attempt, 0);
+    if chain.composes.iter().any(|name| {
+        function.type_params.iter().any(|param| name == param.as_str() || name.starts_with(&format!("{param}[")))
+    }) {
+        let fallback = super::chain::resolve_props_chain(
+            mapping.props_type_name.as_str(),
+            &mapping.props_type_args,
+            &mapping.file_path,
+            mapping,
+            ctx,
+            &mut attempt,
+            0,
+        );
+        // An explicit `any` from the selected payload absorbs the conditional's tentative type in an intersection.
+        for prop in &fallback.props {
+            if matches!(prop.prop_type, PropType::Any) {
+                if let Some(existing) = chain.props.iter_mut().find(|existing| existing.name == prop.name) {
+                    *existing = Arc::clone(prop);
+                }
+            }
+        }
+        chain.merge_parent(fallback);
+    }
     if chain.props.is_empty() && chain.inheritance.is_empty() {
         return None;
     }
@@ -79,14 +104,16 @@ pub(super) fn value_member_props(
             return fields
                 .iter()
                 .find(|field| field.name == member)
-                .and_then(|field| component_props_type(&field.collected_type, &base_file, ctx, 0));
+                .and_then(|field| component_props_type(&field.collected_type, &base_file, ctx, 0))
+                .map(|(props, file, _)| (props, file));
         }
         CollectedTypeAlias::Passthrough { target: CollectedType::Intersection(members), .. } => {
             return members.iter().find_map(|part| match part {
                 CollectedType::Object(fields) => fields
                     .iter()
                     .find(|field| field.name == member)
-                    .and_then(|field| component_props_type(&field.collected_type, &base_file, ctx, 0)),
+                    .and_then(|field| component_props_type(&field.collected_type, &base_file, ctx, 0))
+                    .map(|(props, file, _)| (props, file)),
                 _ => None,
             });
         }
@@ -107,16 +134,16 @@ pub(super) fn value_member_props(
     let mut bindings = super::substitute::Substitution::default();
     bindings.insert(param.as_str(), CollectedType::StringLiteral(member.into()));
     let value = substitute_type(value_type, &bindings);
-    component_props_type(&value, &mapped_file, ctx, 0)
+    component_props_type(&value, &mapped_file, ctx, 0).map(|(props, file, _)| (props, file))
 }
 
-/// The props parameter of the React component type `ty` describes, and the file its names resolve in.
+/// The props parameter of the React component type `ty` describes, its file, and any callable type parameters in scope.
 fn component_props_type(
     ty: &CollectedType,
     file: &Utf8Path,
     ctx: &ResolutionContext,
     depth: u8,
-) -> Option<(CollectedType, Utf8PathBuf)> {
+) -> Option<(CollectedType, Utf8PathBuf, Vec<TypeName>)> {
     if depth > MAX_DEPTH {
         return None;
     }
@@ -138,15 +165,18 @@ fn component_props_type(
                     args: super::extends::instantiated_props_args(mapping),
                 },
                 mapping.file_path.clone(),
+                mapping.type_params.clone(),
             ))
         }
         CollectedType::Intersection(members) => {
             members.iter().find_map(|member| component_props_type(member, file, ctx, depth + 1))
         }
-        CollectedType::Function { params, .. } => Some((params.first()?.clone(), file.to_owned())),
+        CollectedType::Function { type_params, params, .. } => {
+            Some((params.first()?.clone(), file.to_owned(), type_params.clone()))
+        }
         CollectedType::Named { name, args } => {
             if COMPONENT_TYPES.contains(&name.strip_prefix("React.").unwrap_or(name)) {
-                return Some((args.first()?.clone(), file.to_owned()));
+                return Some((args.first()?.clone(), file.to_owned(), Vec::new()));
             }
             let mut ignored = Vec::new();
             let (alias_file, alias_name) = resolve_to_canonical(name, file, ctx, &mut ignored)
@@ -166,7 +196,7 @@ fn component_props_type(
                     }
                     let props = type_args.first()?;
                     let props = bindings.as_ref().map_or_else(|| props.clone(), |b| substitute_type(props, b));
-                    Some((props, alias_file.clone()))
+                    Some((props, alias_file.clone(), Vec::new()))
                 });
             }
             let (matched, alias) = lookup_type_alias(ctx, alias_file.as_str(), &alias_name)?;

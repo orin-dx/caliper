@@ -561,7 +561,7 @@ fn interface_prop(
 }
 
 /// A type alias's definition with `args` bound to its parameters, as one type.
-fn alias_body(
+pub(super) fn alias_body(
     name: &CompactString,
     args: &[CollectedType],
     file: &Utf8Path,

@@ -3146,6 +3146,56 @@ export const Typed = factory<ButtonFactory>((props: ButtonProps) => <button>{pro
     assert_eq!(warnings, Vec::<&str>::new());
 }
 
+#[test]
+fn a_polymorphic_factory_result_through_local_aliases_adds_its_props() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "factory.tsx",
+        r#"
+import * as React from "react";
+type PolymorphicComponentProps<C, Props> = C extends React.ElementType
+  ? Props & { component?: C; renderRoot?: (props: Record<string, any>) => React.ReactNode }
+  : Props & { component: React.ElementType; renderRoot?: (props: Record<string, any>) => React.ReactNode };
+export interface Payload { props: Record<string, any>; defaultComponent: React.ElementType }
+export type PolymorphicFactory<P extends Payload> = P;
+export function polymorphicFactory<P extends Payload>(ui: (props: P['props']) => React.ReactNode) {
+  type ComponentProps<C> = PolymorphicComponentProps<C, P['props']>;
+  type Callable = <C = P['defaultComponent']>(props: ComponentProps<C>) => React.ReactElement;
+  type ComponentProperties = Omit<React.FunctionComponent<ComponentProps<any>>, never>;
+  type PolymorphicComponent = Callable & ComponentProperties;
+  const Component = ui as unknown as PolymorphicComponent;
+  return Component as PolymorphicComponent;
+}
+"#,
+    );
+    write_file(
+        &tmp,
+        "Button.tsx",
+        r#"
+import { polymorphicFactory, PolymorphicFactory } from './factory';
+interface ButtonProps { label: string }
+type ButtonPayload = PolymorphicFactory<{ props: ButtonProps; defaultComponent: 'button' }>;
+export const Button = polymorphicFactory<ButtonPayload>((props) => <button>{props.label}</button>);
+interface LinkProps { label: string; component: any }
+type LinkPayload = PolymorphicFactory<{ props: LinkProps; defaultComponent: 'a' }>;
+export const Link = polymorphicFactory<LinkPayload>((props) => <a>{props.label}</a>);
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+    assert_eq!(prop_names(&output, "Button"), ["component", "label", "renderRoot"], "{:#?}", output.diagnostics);
+    assert_eq!(prop_names(&output, "Link"), ["component", "label", "renderRoot"], "{:#?}", output.diagnostics);
+    assert_eq!(output.components["Button"].props["label"].prop_type.raw_string(), "string");
+    assert!(!output.components["Button"].props["component"].required);
+    assert!(!output.components["Button"].props["renderRoot"].required);
+    assert_eq!(output.components["Link"].props["component"].prop_type.raw_string(), "any");
+}
+
 /// An `export *` barrel reaches any exported value, not only types: `ComponentProps<typeof Button>` finds a component
 /// declared as a const two barrels away, renamed exports included.
 #[test]
