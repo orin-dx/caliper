@@ -183,6 +183,42 @@ fn react_picked_props(
     props
 }
 
+/// Inline fields guaranteed by both branches of an undecidable conditional; names hidden behind a reference are
+/// deliberately excluded because their presence depends on resolving that reference.
+fn shared_inline_keys(
+    left: &CollectedType,
+    right: &CollectedType,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+) -> FxHashSet<String> {
+    fn collect(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8, keys: &mut FxHashSet<String>) {
+        if depth > 8 {
+            return;
+        }
+        match ty {
+            CollectedType::Object(fields) => keys.extend(fields.iter().map(|field| field.name.clone())),
+            CollectedType::Intersection(members) => {
+                for member in members {
+                    collect(member, file, ctx, depth + 1, keys);
+                }
+            }
+            CollectedType::AtFile { file, inner } => collect(inner, file, ctx, depth + 1, keys),
+            CollectedType::Named { name, args } => {
+                if let Some((body, body_file)) = super::evaluate::alias_body(name, args, file, ctx) {
+                    collect(&body, &body_file, ctx, depth + 1, keys);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut left_keys = FxHashSet::default();
+    let mut right_keys = FxHashSet::default();
+    collect(left, file, ctx, 0, &mut left_keys);
+    collect(right, file, ctx, 0, &mut right_keys);
+    left_keys.retain(|key| right_keys.contains(key));
+    left_keys
+}
+
 /// Resolve a `CollectedType` as a props chain (for base types in aliases).
 pub(super) fn resolve_base_as_chain(
     base: &CollectedType,
@@ -292,6 +328,31 @@ pub(super) fn resolve_base_as_chain(
                 return ResolvedChain::empty();
             };
             resolve_base_as_chain(&reduced, &reduced_file, mapping, ctx, state, depth + 1)
+        }
+        CollectedType::Conditional { true_type, false_type, .. }
+            if !shared_inline_keys(true_type, false_type, file_path, ctx).is_empty() =>
+        {
+            let shared = shared_inline_keys(true_type, false_type, file_path, ctx);
+            let branches = [true_type.as_ref().clone(), false_type.as_ref().clone()];
+            let mut chain = resolve_union_alias(&branches, file_path, mapping, ctx, state, depth + 1);
+            chain.props.retain(|prop| shared.contains(&prop.name));
+            chain.notable.retain(|prop| shared.contains(&prop.name));
+            chain.inherited_by_name.retain(|name, _| shared.contains(name));
+            chain.inheritance.clear();
+            state.diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Info,
+                message: format!(
+                    "Cannot decide conditional '{}' — listing only props present in both branches",
+                    base.to_raw_string()
+                ),
+                file: Some(file_path.to_string()),
+                line: None,
+                column: None,
+                help: None,
+                code: DiagnosticCode::OpaqueType,
+                affects: Vec::new(),
+            });
+            chain
         }
         CollectedType::Mapped { param, key_type, value_type, optional }
             if super::evaluate::mapped_keys(key_type, file_path, ctx, 0).is_some() =>
