@@ -41,11 +41,42 @@ pub(super) fn reduce(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContex
     match ty {
         CollectedType::AtFile { file, inner } => reduce(inner, file, ctx, depth + 1),
         CollectedType::Conditional { check, extends_type, true_type, false_type } => {
+            if let Some(branch) = inferred_component_branch(check, extends_type, true_type, false_type, file, ctx) {
+                return Some((branch, file.to_owned()));
+            }
             let branch = if extends(check, extends_type, file, ctx, depth)? { true_type } else { false_type };
             Some((branch.as_ref().clone(), file.to_owned()))
         }
         // Same depth: `member` counts its own steps, and at 0 it answers from the run's cache.
         CollectedType::IndexedAccess { obj, key } => member(obj, &literal(key)?, file, ctx, depth),
+        _ => None,
+    }
+}
+
+fn inferred_component_branch(
+    check: &CollectedType,
+    extends_type: &CollectedType,
+    true_type: &CollectedType,
+    false_type: &CollectedType,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+) -> Option<CollectedType> {
+    let (CollectedType::TypeOf(component), check_file) = unwrap_at_file(check) else { return None };
+    let check_file = check_file.unwrap_or(file);
+    let (props, props_file) = super::callee::component_props_of_typeof(component, check_file, ctx)?;
+    let (CollectedType::Named { name, args }, _) = unwrap_at_file(extends_type) else { return None };
+    if !super::may_be_react_builtin(name, file, ctx) {
+        return None;
+    }
+    let [CollectedType::Raw(infer)] = args.as_slice() else { return None };
+    let param = infer.trim().strip_prefix("infer ")?.trim();
+    match name.strip_prefix("React.").unwrap_or(name) {
+        "Context" => Some(false_type.clone()),
+        "ComponentType" if !param.is_empty() => {
+            let mut subst = super::substitute::Substitution::default();
+            subst.insert(param, CollectedType::AtFile { file: props_file, inner: Box::new(props) });
+            Some(substitute_type(true_type, &subst))
+        }
         _ => None,
     }
 }
