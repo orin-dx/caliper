@@ -265,10 +265,10 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         for declarator in &node.declarations {
             self.try_collect_const_enum(declarator);
             self.try_collect_const_array(declarator);
-            // Collect cva() / tv() variant definitions for all file types (.ts and .tsx)
+            // Collect variant bags (a call with a `variants` map of maps: cva, tv, recipes) for all file types
             if let BindingPattern::BindingIdentifier(id) = &declarator.id {
                 let name = id.name.as_str().to_owned();
-                self.try_collect_cva_call(declarator, &name);
+                self.try_collect_variant_bag(declarator, &name);
                 self.record_object_assign_declarator(&name, declarator.init.as_ref());
                 if self.function_depth == 0 {
                     self.try_record_cast_component_alias(declarator, &name);
@@ -306,6 +306,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     if declarator.init.is_some()
                         && !self.try_rename_identifier_wrapped_component(&binding, &name)
                         && !self.try_record_wrapper_call(&binding, &name)
+                        && !self.try_record_tagged_factory(&binding, &name)
                         && !self.try_record_imported_member_alias(&binding, &name)
                     {
                         let message = self.decline_reason.take().unwrap_or_else(|| {

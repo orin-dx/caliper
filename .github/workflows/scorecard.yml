@@ -1,10 +1,21 @@
 name: Scorecard
 
 # The performance gates in docs/performance.md, on five pinned public corpora. Weekly, the week's main is compared
-# with main as of a week before; run it by hand on a branch to compare it with main.
+# with main as of a week before; run it by hand on a branch to compare it with main. A pull request that touches the
+# resolver, extractor, types or pipeline is compared with its own base on Mantine and Chakra, non-blocking until it has
+# run green on ten pull requests (docs/performance.md): a speed regression of 38% and 47% on those two merged unseen.
 on:
   schedule:
     - cron: "0 5 * * 1"
+  pull_request:
+    paths:
+      - "crates/core/src/resolver/**"
+      - "crates/core/src/extractor/**"
+      - "crates/core/src/types/**"
+      - "crates/core/src/pipeline/**"
+      - "crates/core/src/dependency_types/**"
+      - "scripts/scorecard*"
+      - ".github/workflows/scorecard.yml"
   workflow_dispatch:
     inputs:
       base:
@@ -27,6 +38,8 @@ jobs:
     name: Scorecard
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # A pull request's result is in the job summary; it does not fail the pull request yet.
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,8 +59,11 @@ jobs:
       - id: base
         env:
           BASE: ${{ inputs.base }}
+          PR_BASE: ${{ github.base_ref }}
         run: |
-          if [ -n "$BASE" ]; then
+          if [ -n "$PR_BASE" ]; then
+            ref="origin/$PR_BASE"
+          elif [ -n "$BASE" ]; then
             ref="origin/$BASE"
             git rev-parse --verify --quiet "$ref^{commit}" >/dev/null || ref="$BASE"
           elif [ "$GITHUB_EVENT_NAME" = schedule ]; then
@@ -70,9 +86,14 @@ jobs:
           path: .scorecard/corpora
           key: scorecard-corpora-${{ hashFiles('scripts/scorecard.py') }}
       - name: Score and gate
-        run: >-
-          python3 scripts/scorecard.py --bin "$RUNNER_TEMP/caliper-head" --base-bin "$RUNNER_TEMP/caliper-base" --rdt
-          --out scorecard.json --check
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          # A pull request scores the two corpora where the last regression showed; the scaling gate needs mantine.
+          only=()
+          if [ "$EVENT" = pull_request ]; then only=(--corpus mantine --corpus chakra); fi
+          python3 scripts/scorecard.py --bin "$RUNNER_TEMP/caliper-head" --base-bin "$RUNNER_TEMP/caliper-base" --rdt \
+            "${only[@]}" --out scorecard.json --check
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -1,4 +1,4 @@
-# 0022. Function parameters carry `optional` and `rest`, and the canonical JSON moves to version 3
+# 0023. Function parameters carry `optional` and `rest`, and the canonical JSON moves to version 3
 
 **Status:** Accepted **Date:** 2026-10-26
 

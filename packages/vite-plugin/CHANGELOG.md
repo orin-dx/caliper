@@ -1,5 +1,9 @@
 # caliper-docgen-vite-plugin
 
+## 0.7.0
+
+- Installed package types now load by default, revealing more props and reducing unresolved warnings. Use `--no-load-dependencies` or `loadDependencies: false` to keep the previous behavior. On Chakra, extraction rises from about 50 to 220 ms and from 100 to 330 MiB.
+
 ## 0.6.0
 
 - - **The Storybook addon documents more by default:** it reads dependency types (`loadDependencies`, default `true`) and lists every inherited prop (`collapseInheritedProps`, default `'none'`), so library-typed props resolve and fewer components fall back to Storybook's own docgen. New options: `htmlAttributes` (`'curated'` | `'full'` | `'none'`), `loadDependencies`, `collapseInheritedProps`.
