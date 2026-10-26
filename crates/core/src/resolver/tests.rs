@@ -1771,6 +1771,7 @@ fn function_type(params: Vec<(&str, CollectedType)>, return_type: CollectedType)
     CollectedType::Function {
         type_params: vec![],
         param_names: params.iter().map(|(name, _)| Some((*name).into())).collect(),
+        param_kinds: vec![],
         params: params.into_iter().map(|(_, t)| t).collect(),
         return_type: Box::new(return_type),
     }
@@ -1806,6 +1807,7 @@ fn a_generic_function_types_own_parameters_are_placeholders_not_types_to_look_up
         type_params: vec!["T".into()],
         params: vec![item.clone()],
         param_names: vec![Some("item".into())],
+        param_kinds: vec![],
         return_type: Box::new(item),
     };
     let result = super::collected::resolve_collected_type(&ct, Utf8Path::new("/test/b.tsx"), &ctx, &mut state, 0);

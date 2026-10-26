@@ -14,6 +14,62 @@ use super::diagnostic::Diagnostic;
 /// Compact string used for names, type strings — avoids heap alloc under 24 bytes.
 pub type TypeName = CompactString;
 
+// ─── ParamKind ────────────────────────────────────────────────────────────────
+
+/// How a function parameter is declared: `a`, `a?` or `...a`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ParamKind {
+    #[default]
+    Required,
+    Optional,
+    Rest,
+}
+
+impl ParamKind {
+    /// The kind of a parameter that is `optional` (`a?`) or the `rest` parameter (`...a`).
+    pub fn new(optional: bool, rest: bool) -> Self {
+        match (rest, optional) {
+            (true, _) => Self::Rest,
+            (false, true) => Self::Optional,
+            (false, false) => Self::Required,
+        }
+    }
+
+    /// Source text before the name: `...` for a rest parameter.
+    pub(crate) fn prefix(self) -> &'static str {
+        if self == Self::Rest {
+            "..."
+        } else {
+            ""
+        }
+    }
+
+    /// Source text after the name: `?` for an optional parameter.
+    pub(crate) fn marker(self) -> &'static str {
+        if self == Self::Optional {
+            "?"
+        } else {
+            ""
+        }
+    }
+
+    pub(crate) fn code(self) -> u8 {
+        match self {
+            Self::Required => 0,
+            Self::Optional => 1,
+            Self::Rest => 2,
+        }
+    }
+
+    pub(crate) fn from_code(code: u64) -> Self {
+        match code {
+            1 => Self::Optional,
+            2 => Self::Rest,
+            _ => Self::Required,
+        }
+    }
+}
+
 // ─── CollectedType ────────────────────────────────────────────────────────────
 
 /// A structured representation of a TypeScript type as collected from the AST.
@@ -94,6 +150,9 @@ pub enum CollectedType {
         /// a given index when that parameter has no simple identifier binding
         /// (e.g. destructured) or the caller didn't capture one.
         param_names: Vec<Option<CompactString>>,
+        /// Whether each parameter is required, optional (`a?`) or the rest parameter (`...a`), parallel to `params`.
+        /// Shorter than `params` (or empty, as an old cache entry or a hand-built type is) means required.
+        param_kinds: Vec<ParamKind>,
         return_type: Box<CollectedType>,
     },
 
@@ -169,10 +228,11 @@ impl CollectedType {
                 obj.structural_hash(hasher);
                 key.structural_hash(hasher);
             }
-            CollectedType::Function { type_params, params, param_names, return_type } => {
+            CollectedType::Function { type_params, params, param_names, param_kinds, return_type } => {
                 type_params.hash(hasher);
                 all(hasher, params);
                 param_names.hash(hasher);
+                param_kinds.hash(hasher);
                 return_type.structural_hash(hasher);
             }
             CollectedType::Conditional { check, extends_type, true_type, false_type } => {
@@ -251,15 +311,18 @@ impl CollectedType {
                     .collect::<Vec<_>>()
                     .join("")
             ),
-            CollectedType::Function { type_params, params, param_names, return_type } => format!(
+            CollectedType::Function { type_params, params, param_names, param_kinds, return_type } => format!(
                 "{}({}) => {}",
                 if type_params.is_empty() { String::new() } else { format!("<{}>", type_params.join(", ")) },
                 params
                     .iter()
                     .enumerate()
-                    .map(|(i, p)| match param_names.get(i).and_then(|n| n.as_ref()) {
-                        Some(name) => format!("{name}: {}", p.to_raw_string()),
-                        None => p.to_raw_string(),
+                    .map(|(i, p)| {
+                        let kind = param_kinds.get(i).copied().unwrap_or_default();
+                        match param_names.get(i).and_then(|n| n.as_ref()) {
+                            Some(name) => format!("{}{name}{}: {}", kind.prefix(), kind.marker(), p.to_raw_string()),
+                            None => p.to_raw_string(),
+                        }
                     })
                     .collect::<Vec<_>>()
                     .join(", "),
@@ -368,14 +431,17 @@ impl CollectedType {
                 "tl": parts.iter().map(|p| p.to_json_value()).collect::<Vec<_>>()
             }),
             // Function: {"fn": {tp: [type_params], p: [params], names: [param_names], r: return_type}}
-            CollectedType::Function { type_params, params, param_names, return_type } => serde_json::json!({
-                "fn": {
-                    "tp": type_params.iter().map(CompactString::as_str).collect::<Vec<_>>(),
-                    "p": params.iter().map(|p| p.to_json_value()).collect::<Vec<_>>(),
-                    "names": param_names.iter().map(|n| n.as_ref().map(|s| s.as_str())).collect::<Vec<_>>(),
-                    "r": return_type.to_json_value()
-                }
-            }),
+            CollectedType::Function { type_params, params, param_names, param_kinds, return_type } => {
+                serde_json::json!({
+                    "fn": {
+                        "tp": type_params.iter().map(CompactString::as_str).collect::<Vec<_>>(),
+                        "p": params.iter().map(|p| p.to_json_value()).collect::<Vec<_>>(),
+                        "names": param_names.iter().map(|n| n.as_ref().map(|s| s.as_str())).collect::<Vec<_>>(),
+                        "kinds": param_kinds.iter().map(|k| k.code()).collect::<Vec<_>>(),
+                        "r": return_type.to_json_value()
+                    }
+                })
+            }
             // Conditional: {"cond": {c, e, t, f}}
             CollectedType::Conditional { check, extends_type, true_type, false_type } => {
                 serde_json::json!({
@@ -519,13 +585,24 @@ impl CollectedType {
                         .and_then(|v| v.as_array())
                         .map(|arr| arr.iter().map(|v| v.as_str().map(CompactString::from)).collect::<Vec<_>>())
                         .unwrap_or_default();
+                    let param_kinds = inner
+                        .get("kinds")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| arr.iter().map(|v| ParamKind::from_code(v.as_u64().unwrap_or(0))).collect())
+                        .unwrap_or_default();
                     let type_params = inner
                         .get("tp")
                         .and_then(|v| v.as_array())
                         .map(|arr| arr.iter().filter_map(|v| v.as_str().map(CompactString::from)).collect())
                         .unwrap_or_default();
                     let rt = Self::from_json_value(inner.get("r").unwrap_or(&serde_json::Value::Null))?;
-                    return Ok(CollectedType::Function { type_params, params, param_names, return_type: Box::new(rt) });
+                    return Ok(CollectedType::Function {
+                        type_params,
+                        params,
+                        param_names,
+                        param_kinds,
+                        return_type: Box::new(rt),
+                    });
                 }
                 if let Some(inner) = map.get("cond") {
                     let check = Self::from_json_value(inner.get("c").unwrap_or(&serde_json::Value::Null))?;
@@ -861,12 +938,13 @@ impl CollectedType {
                 obj: Box::new(obj.rename_named(rename)),
                 key: Box::new(key.rename_named(rename)),
             },
-            CollectedType::Function { type_params, params, param_names, return_type } => {
+            CollectedType::Function { type_params, params, param_names, param_kinds, return_type } => {
                 let scoped = |name: &str| if type_params.iter().any(|p| p == name) { None } else { rename(name) };
                 CollectedType::Function {
                     type_params: type_params.clone(),
                     params: params.iter().map(|p| p.rename_named(&scoped)).collect(),
                     param_names: param_names.clone(),
+                    param_kinds: param_kinds.clone(),
                     return_type: Box::new(return_type.rename_named(&scoped)),
                 }
             }
@@ -1265,6 +1343,34 @@ mod tests {
         let json = original.to_json_value();
         let restored = CollectedType::from_json_value(&json).expect("deserialize");
         assert_eq!(restored.to_json_value(), json, "round-tripped value must re-serialize identically");
+    }
+
+    #[test]
+    fn a_function_type_round_trips_its_parameter_kinds_and_prints_them() {
+        let original = CollectedType::Function {
+            type_params: vec![],
+            params: vec![
+                CollectedType::String,
+                CollectedType::Number,
+                CollectedType::Array(Box::new(CollectedType::Boolean)),
+            ],
+            param_names: vec![Some("a".into()), Some("b".into()), Some("rest".into())],
+            param_kinds: vec![ParamKind::Required, ParamKind::Optional, ParamKind::Rest],
+            return_type: Box::new(CollectedType::Void),
+        };
+        let json = original.to_json_value();
+        assert_eq!(json["fn"]["kinds"], serde_json::json!([0, 1, 2]));
+        let restored = CollectedType::from_json_value(&json).expect("deserialize");
+        assert_eq!(restored.to_json_value(), json);
+        assert_eq!(restored.to_raw_string(), "(a: string, b?: number, ...rest: boolean[]) => void");
+    }
+
+    #[test]
+    fn a_function_type_written_before_the_kinds_existed_reads_as_all_required() {
+        let json = serde_json::json!({ "fn": { "tp": [], "p": [{ "str": null }], "names": ["a"], "r": "void" } });
+        let restored = CollectedType::from_json_value(&json).expect("deserialize");
+        let CollectedType::Function { param_kinds, .. } = restored else { panic!("expected a function") };
+        assert!(param_kinds.is_empty());
     }
 
     // ── SPEC-TYPES-001 AC-004D: from_json_value on a number/bool/null, and on

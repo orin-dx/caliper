@@ -15,14 +15,20 @@ pub(super) fn resolve_function_type(
     type_params: &[CompactString],
     params: &[CollectedType],
     param_names: &[Option<CompactString>],
+    param_kinds: &[ParamKind],
     return_type: &CollectedType,
 ) -> PropType {
     let params = params
         .iter()
         .enumerate()
-        .map(|(i, param)| FunctionParam {
-            name: param_names.get(i).cloned().flatten().map(|n| n.to_string()),
-            param_type: as_written(param),
+        .map(|(i, param)| {
+            let kind = param_kinds.get(i).copied().unwrap_or_default();
+            FunctionParam {
+                name: param_names.get(i).cloned().flatten().map(|n| n.to_string()),
+                param_type: as_written(param),
+                optional: kind == ParamKind::Optional,
+                rest: kind == ParamKind::Rest,
+            }
         })
         .collect();
     PropType::Function {
@@ -66,8 +72,8 @@ pub(super) fn as_written(ct: &CollectedType) -> PropType {
         CollectedType::Named { name, args } => {
             PropType::Named { name: name.clone(), args: args.iter().map(as_written).collect() }
         }
-        CollectedType::Function { type_params, params, param_names, return_type } => {
-            resolve_function_type(type_params, params, param_names, return_type)
+        CollectedType::Function { type_params, params, param_names, param_kinds, return_type } => {
+            resolve_function_type(type_params, params, param_names, param_kinds, return_type)
         }
         CollectedType::AtFile { inner, .. } => as_written(inner),
         CollectedType::BigInt
