@@ -40,7 +40,7 @@ pub enum PropType {
     Tuple(Vec<PropType>), Object(Vec<ObjectField>),
     Named { name: TypeName, args: Vec<PropType> },
     ReactNode, CssProperties,
-    Function { type_params: Vec<String>, params: Vec<FunctionParam>, return_type: Box<PropType> },
+    Function { type_params: Vec<String>, params: Vec<FunctionParam>, return_type: Box<PropType> }, // FunctionParam: name, type, optional, rest (ADR 0022)
     Ref { element: Option<String> },
     ElementType,
     HtmlAttributes { element: String, omitted: Vec<String> },

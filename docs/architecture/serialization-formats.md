@@ -6,7 +6,7 @@ This tool's canonical, lossless representation is `ExtractionOutput` — the str
 
 ## Schema version
 
-The canonical JSON (`ExtractionOutput`, `IncrementalUpdate`, the session index) carries `schemaVersion` (ADR 0017); `SCHEMA_VERSION` in `crates/core/src/types/output.rs` is the one definition, and `schema.rs` requires it. Version 1 is the shape ADR 0009 describes. Version 2 (ADR 0018) writes a component's `props` as prop set ids, and an inheritance layer's `omitted` and a diagnostic's `affects` as name list ids, with `propSets` and `nameLists` tables beside `props`.
+The canonical JSON (`ExtractionOutput`, `IncrementalUpdate`, the session index) carries `schemaVersion` (ADR 0017); `SCHEMA_VERSION` in `crates/core/src/types/output.rs` is the one definition, and `schema.rs` requires it. Version 1 is the shape ADR 0009 describes. Version 2 (ADR 0018) writes a component's `props` as prop set ids, and an inheritance layer's `omitted` and a diagnostic's `affects` as name list ids, with `propSets` and `nameLists` tables beside `props`. Version 3 (ADR 0022) adds `optional` and `rest` to a function type's parameters, written only when true, and lists a rest parameter as the last parameter.
 
 - **Bump** when a reader of the previous version would misread or lose data: a field removed, renamed or retyped, its meaning changed, or references and tables restructured. A new field, a new `detectedBy` value or a new diagnostic code is not a bump; readers must tolerate them.
 - **A bump ships** in a changeset marked breaking for the core crate and every package that reads the JSON.
