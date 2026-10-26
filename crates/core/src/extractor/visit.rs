@@ -306,6 +306,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     if declarator.init.is_some()
                         && !self.try_rename_identifier_wrapped_component(&binding, &name)
                         && !self.try_record_wrapper_call(&binding, &name)
+                        && !self.try_record_tagged_factory(&binding, &name)
                         && !self.try_record_imported_member_alias(&binding, &name)
                     {
                         let message = self.decline_reason.take().unwrap_or_else(|| {
