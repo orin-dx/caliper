@@ -90,7 +90,11 @@ fn a_project_without_typescript_answers_every_request_with_a_warning_and_no_comp
         assert!(outcome.components.is_empty());
         assert_eq!(outcome.diagnostics.len(), 1);
         assert_eq!(outcome.diagnostics[0].severity, DiagnosticSeverity::Warning);
-        assert!(outcome.diagnostics[0].message.contains("no node_modules/typescript/bin/tsc"), "{:?}", outcome.diagnostics);
+        assert!(
+            outcome.diagnostics[0].message.contains("no node_modules/typescript/bin/tsc"),
+            "{:?}",
+            outcome.diagnostics
+        );
     }
 }
 

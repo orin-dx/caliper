@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout)]
-//! What asking `tsc` for one component at a time costs, against asking for the whole project once (ADR 0020).
+//! What asking `tsc` for one component at a time costs, against asking for the whole project once (ADR 0022).
 //!
 //!   ondemand_bench --src DIR --tsc PATH [--tsconfig FILE] [--mode on-demand|project] [--count N] [--seed S] [--batch K]
 //!

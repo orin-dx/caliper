@@ -237,7 +237,7 @@ impl WatchSession {
         }
     }
 
-    /// Attach a TypeScript checker that is asked for each component a request names (ADR 0020). [`Self::component`]
+    /// Attach a TypeScript checker that is asked for each component a request names (ADR 0022). [`Self::component`]
     /// then returns the checker's props when it answers within `wait`, the structural ones otherwise, and the checker's
     /// late answer on the next request of the same, unedited component. Without a checker nothing changes.
     #[must_use]

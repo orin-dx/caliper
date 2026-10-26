@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-//! A session with a checker attached asks it for the component a request names (ADR 0020): the checker's props when it
+//! A session with a checker attached asks it for the component a request names (ADR 0022): the checker's props when it
 //! answers in time, the structural ones when it does not, its late answer on the next request, and one warning when it
 //! is unavailable. The checker here is a fake, so the contract is tested without `tsc`.
 
@@ -58,7 +58,10 @@ fn finds_size(target: &SemanticTarget) -> SemanticOutcome {
             display_name: target.display_name.clone(),
             props: vec![
                 prop("label", PropType::String),
-                prop("size", PropType::Union(vec![PropType::StringLiteral("sm".into()), PropType::StringLiteral("lg".into())])),
+                prop(
+                    "size",
+                    PropType::Union(vec![PropType::StringLiteral("sm".into()), PropType::StringLiteral("lg".into())]),
+                ),
             ],
         }],
         ..SemanticOutcome::default()
@@ -121,7 +124,11 @@ fn the_checker_is_asked_once_per_version_of_the_file() {
     assert_eq!(first, second);
     assert_eq!(checker.requests(), 1);
 
-    std::fs::write(project.root.join("Button.tsx"), "export function Button(props: { label: string; tone?: string }) { return null; }").unwrap();
+    std::fs::write(
+        project.root.join("Button.tsx"),
+        "export function Button(props: { label: string; tone?: string }) { return null; }",
+    )
+    .unwrap();
     session.update_file(&project.root.join("Button.tsx"));
     let edited = session.component("Button").unwrap();
 

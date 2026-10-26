@@ -57,7 +57,10 @@ impl OnDemandConfig {
 enum Job {
     /// Start the checker now instead of at the first request.
     Warm,
-    Answer { targets: Vec<SemanticTarget>, reply: mpsc::SyncSender<SemanticOutcome> },
+    Answer {
+        targets: Vec<SemanticTarget>,
+        reply: mpsc::SyncSender<SemanticOutcome>,
+    },
 }
 
 /// A warm `tsc` that answers for the components it is asked about. Dropping it stops the process.
@@ -70,10 +73,8 @@ impl OnDemand {
     /// Starts the worker thread. The `tsc` process itself starts on the first request, or on [`OnDemand::warm_up`].
     pub fn new(config: OnDemandConfig) -> Self {
         let (jobs, queue) = unbounded_channel();
-        let thread = std::thread::Builder::new()
-            .name("caliper-tsc".to_string())
-            .spawn(move || worker(config, queue))
-            .ok();
+        let thread =
+            std::thread::Builder::new().name("caliper-tsc".to_string()).spawn(move || worker(config, queue)).ok();
         Self { jobs: thread.as_ref().map(|_| jobs), thread }
     }
 

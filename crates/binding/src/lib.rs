@@ -112,7 +112,7 @@ pub struct JsExtractOptions {
     /// returns an output with no components.
     pub lazy: Option<bool>,
     /// Session only: `'on-demand'` asks TypeScript's 7.1 checker for each component a request names, and answers
-    /// with the structural props when the checker is slower than `semanticWaitMs` (experimental; ADR 0020). Needs
+    /// with the structural props when the checker is slower than `semanticWaitMs` (experimental; ADR 0022). Needs
     /// `typescript@beta` installed or `tscPath`. `'off'` (the default) never starts it.
     #[napi(ts_type = "'off' | 'on-demand'")]
     pub semantic_types: Option<String>,

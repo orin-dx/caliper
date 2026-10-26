@@ -126,7 +126,11 @@ impl Rpc {
     /// Initializes the `tsc` session and reads the compiler options, once per process. The beta panics on
     /// string-valued enum options such as `target: "es2022"`, so options come from `parseConfigFile`, which yields
     /// numeric ones.
-    pub(crate) async fn prepare(client: &Client, deadline: Duration, tsconfig: Option<&str>) -> Result<Value, CallError> {
+    pub(crate) async fn prepare(
+        client: &Client,
+        deadline: Duration,
+        tsconfig: Option<&str>,
+    ) -> Result<Value, CallError> {
         let rpc = Rpc {
             client: client.clone(),
             deadline,

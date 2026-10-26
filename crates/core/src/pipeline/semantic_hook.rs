@@ -1,4 +1,4 @@
-//! Asking a checker for the component a session was just asked about (ADR 0020).
+//! Asking a checker for the component a session was just asked about (ADR 0022).
 //!
 //! The structural answer is always computed first and is a complete answer on its own. With a [`SemanticProvider`]
 //! attached, [`SemanticHook::refine`] asks the checker for exactly that component, waits a bounded time, and merges

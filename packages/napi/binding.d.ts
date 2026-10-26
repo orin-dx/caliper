@@ -84,7 +84,7 @@ export interface JsExtractOptions {
   lazy?: boolean
   /**
    * Session only: `'on-demand'` asks TypeScript's 7.1 checker for each component a request names, and answers
-   * with the structural props when the checker is slower than `semanticWaitMs` (experimental; ADR 0020). Needs
+   * with the structural props when the checker is slower than `semanticWaitMs` (experimental; ADR 0022). Needs
    * `typescript@beta` installed or `tscPath`. `'off'` (the default) never starts it.
    */
   semanticTypes?: 'off' | 'on-demand'
