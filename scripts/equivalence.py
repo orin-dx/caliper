@@ -23,7 +23,8 @@ stage that runs over is killed with its whole process group and reported by name
 run fails: a hung build, child process or deadlocked test can never stall CI silently.
 
 Usage: scripts/equivalence.py [BASE] [--bin BIN] [--corpora DIR] [--corpus NAME]... [--config NAME]... [--lazy MODE]
-                              [--oracle] [--examples N] [--allow FILE] [--work DIR] [--out FILE] [--markdown FILE]
+                              [--oracle] [--examples N] [--allow FILE] [--require-empty-allow] [--work DIR] [--out FILE]
+                              [--markdown FILE]
                               [--timeout-build S] [--timeout-extract S] [--timeout-lazy S] [--timeout-oracle S]
   BASE   a git ref (default origin/main; built once per commit in a scratch worktree) or an executable.
   --bin  this build (default: `cargo build --release -p caliper-docgen` in this checkout).
@@ -31,8 +32,10 @@ Usage: scripts/equivalence.py [BASE] [--bin BIN] [--corpora DIR] [--corpus NAME]
 import argparse
 import collections
 import fnmatch
+import functools
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -99,7 +102,10 @@ def resolve_base(base, work, timeout):
     """An executable as given; a git ref built once per commit in a scratch worktree, then cached by commit."""
     if os.path.isfile(base) and os.access(base, os.X_OK):
         return os.path.abspath(base)
-    sha = run('git', 'rev-parse', '--verify', f'{base}^{{commit}}', capture_output=True, text=True).stdout.strip()
+    try:
+        sha = run('git', 'rev-parse', '--verify', f'{base}^{{commit}}', capture_output=True, text=True).stdout.strip()
+    except subprocess.CalledProcessError:
+        sys.exit(f'{base}: not an executable and not a commit; if it is a path, the step that builds it did not run')
     cached = os.path.join(work, 'bin', sha)
     if os.path.exists(cached):
         return cached
@@ -230,8 +236,53 @@ def diagnostic_item(text):
     return f'{head} | {text[:100]}'
 
 
+PROP_TAIL = re.compile(r'^(\S+) (\S+) \*\.([^*?\[\]]+)$')
+
+
+@functools.lru_cache(maxsize=4)
+def index_allow(patterns):
+    """The entries shaped `<label> <kind> *.<name>` (one per prop a change adds) by label and kind, their names in a
+    set; the others stay a list. A change to what every component lists can need thousands of such entries, and
+    matching each difference against each one in turn would take longer than the extraction."""
+    names, rest = {}, []
+    for pattern in patterns:
+        m = PROP_TAIL.match(pattern)
+        if m:
+            names.setdefault((m[1], m[2]), set()).add(m[3])
+        else:
+            rest.append(pattern)
+    return names, rest, {}
+
+
 def allowed(label, kind, item, patterns):
-    return any(fnmatch.fnmatchcase(f'{label} {kind} {item}', p) for p in patterns)
+    names, rest, covering = index_allow(tuple(patterns))
+    if (label, kind) not in covering:
+        covering[label, kind] = [
+            tails for (l, k), tails in names.items() if fnmatch.fnmatchcase(label, l) and fnmatch.fnmatchcase(kind, k)
+        ]
+    # `*.name` matches an item that ends in `.name`: any suffix after one of its dots.
+    if any(item[i + 1:] in tails for tails in covering[label, kind] for i, c in enumerate(item) if c == '.'):
+        return True
+    return any(fnmatch.fnmatchcase(f'{label} {kind} {item}', p) for p in rest)
+
+
+def allow_problems(patterns):
+    """What is wrong with allow-list entries. An entry is `<corpus>/<config> <kind> <item>`, and each part must name
+    something: `antd/* prop-added *` would hide every prop any change adds to antd, for every pull request after it."""
+    problems = []
+    for pattern in patterns:
+        parts = pattern.split(' ', 2) if isinstance(pattern, str) else []
+        if len(parts) != 3:
+            problems.append(f'{pattern!r}: expected "<corpus>/<config> <kind> <item>"')
+            continue
+        label, kind, item = parts
+        if not label.strip('*/'):
+            problems.append(f'{pattern!r}: names no corpus')
+        elif not kind.strip('*'):
+            problems.append(f'{pattern!r}: names no kind of difference')
+        elif not item.strip('*. '):
+            problems.append(f'{pattern!r}: names no component, prop or diagnostic; list the differences one by one')
+    return problems
 
 
 # ─── Stages ───────────────────────────────────────────────────────────────────
@@ -329,6 +380,8 @@ def main():
     parser.add_argument('--oracle-baseline', default=os.path.join(ROOT, 'scripts', 'oracle-baseline.json'))
     parser.add_argument('--examples', type=int, default=5, help='differences shown per kind')
     parser.add_argument('--allow', default=DEFAULT_ALLOW)
+    parser.add_argument('--require-empty-allow', action='store_true',
+                        help='exit 1 when the allow-list has entries, and do nothing else (main must have none)')
     parser.add_argument('--work', default=os.path.join(ROOT, '.parity', 'equivalence'))
     parser.add_argument('--out')
     parser.add_argument('--markdown')
@@ -342,6 +395,13 @@ def main():
 
     with open(args.allow) as f:
         patterns = json.load(f)['allow']
+    problems = allow_problems(patterns)
+    if problems:
+        sys.exit('the allow-list has entries that hide too much:\n  ' + '\n  '.join(problems))
+    if args.require_empty_allow:
+        # main's list is empty: a pull request lists the differences it means to make, and they stop being differences
+        # when it merges.
+        sys.exit(f'{args.allow} has {len(patterns)} entries; it must be empty on main' if patterns else 0)
     try:
         head_bin = os.path.abspath(args.bin) if args.bin else build_head(args.timeout_build)
         base_bin = resolve_base(args.base, args.work, args.timeout_build)

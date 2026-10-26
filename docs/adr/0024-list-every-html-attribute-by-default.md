@@ -1,4 +1,4 @@
-# 0023. List every HTML attribute React declares by default
+# 0024. List every HTML attribute React declares by default
 
 **Status:** Accepted **Date:** 2026-10-26 **Supersedes:** the "curated by default" clause of [0013](0013-curated-mode-reads-react-attributes-apart.md) and the `htmlAttributes` default recorded in `docs/rdt-coverage.md`
 

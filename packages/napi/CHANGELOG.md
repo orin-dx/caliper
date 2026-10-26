@@ -1,5 +1,9 @@
 # npm/caliper-docgen-napi
 
+## 0.7.0
+
+- Released together with the `napi-and-binding` fixed group.
+
 ## 0.6.0
 
 - Released together with the `napi-and-binding` fixed group.
