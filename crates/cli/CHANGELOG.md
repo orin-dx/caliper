@@ -1,5 +1,25 @@
 # cargo/caliper-docgen
 
+## 0.7.0
+
+- Radix `MenubarMenu` now shows its props in both shadcn variants.
+- Wrappers around React Aria components now show props from installed package declarations.
+- Chakra group components now show recipe props such as `orientation`, `attached`, `grow`, and `stacking`.
+- Vaul `Drawer` wrappers now show props from the package's component members.
+- Route handlers that return an `ImageResponse` no longer appear as React components.
+- Spectrum `Card` now includes its collection and link props when exported through a cast alias.
+- antd `SubMenu` now includes its inherited props.
+- Generic component members now expose the same props as direct component references.
+- Mantine `Box` and table components now include `component` and `renderRoot` props when created through aliased factories.
+- antd `InternalPreviewGroup` now shows five previously missing props.
+- Installed package types now load by default, revealing more props and reducing unresolved warnings. Use `--no-load-dependencies` or `loadDependencies: false` to keep the previous behavior. On Chakra, extraction rises from about 50 to 220 ms and from 100 to 330 MiB.
+- Components from generic factories now retain props shared by every result variant.
+- Publish the TypeScript transport and semantic backend crates before the CLI. The CLI's runtime opt-in backend remains available in its crates.io distribution, and every local crate dependency now has a version requirement that Cargo can publish.
+- Wrappers around memoized React components, including `InputOTP` and Streamdown, now show their props.
+- The `lsp` subcommand has been removed. Use your editor's TypeScript language server for hover and completion, or the lazy session API for component docs.
+- Wrappers around cmdk's `Command` components now show their props.
+- Props from `Record`, `Pick`, and `PropsWithChildren` now appear, including antd breakpoint props, picked React attributes, and Spectrum's `children` prop.
+
 ## 0.6.0
 
 - - **A union a dependency declares as a tuple is expanded:** `type Align = (typeof ALIGN_OPTIONS)[number]` over `declare const ALIGN_OPTIONS: readonly ["start", "center", "end"]` is `"start" | "center" | "end"`, read from the file that wrote it, as TypeScript reads `typeof X`. Radix declares `Align` and `Side` this way, so shadcn's Radix-based popover, tooltip, hover card, dropdown menu and select now show their `align` and `side` literals instead of the bare names.
