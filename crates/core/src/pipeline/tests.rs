@@ -2732,6 +2732,44 @@ fn a_mapped_type_keeps_the_default_tag_of_the_member_it_maps() {
     assert_eq!(props["tone"].default_value, None);
 }
 
+#[test]
+fn a_chakra_factory_config_supplies_inferred_recipe_props() {
+    let output = extract_one(&[(
+        "Group.tsx",
+        r#"
+declare function chakra(element: string, config: unknown): unknown;
+const StyledGroup = chakra("div", {
+  variants: {
+    orientation: { horizontal: {}, vertical: {} },
+    attached: { true: {} },
+    grow: { true: {} },
+    stacking: { "first-on-top": {}, "last-on-top": {} },
+  },
+});
+type InferRecipeProps<T> = T extends unknown ? T : {};
+type VariantProps = InferRecipeProps<typeof StyledGroup>;
+interface GroupProps extends VariantProps { label?: string }
+export function Group(props: GroupProps) { return <div>{props.label}</div>; }
+"#,
+    )]);
+    assert_eq!(prop_names(&output, "Group"), ["attached", "grow", "label", "orientation", "stacking"]);
+    assert_eq!(
+        output.components["Group"].props["attached"].prop_type.raw_string(),
+        "ConditionalValue<boolean | undefined>"
+    );
+    assert_eq!(
+        output.components["Group"].props["orientation"].prop_type.raw_string(),
+        "ConditionalValue<\"horizontal\" | \"vertical\" | undefined>"
+    );
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| {
+            diagnostic.code != crate::types::DiagnosticCode::OpaqueType || !diagnostic.message.contains("StyledGroup")
+        }),
+        "{:#?}",
+        output.diagnostics
+    );
+}
+
 /// A generic component's own type parameters are placeholders, the way an interface's are, and an ES2015 global
 /// (`Iterable`) is TypeScript's.
 #[test]
