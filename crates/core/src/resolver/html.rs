@@ -158,8 +158,26 @@ pub(super) fn layer_attributes(
     // `ref` is a prop of `ComponentProps<"div">` (`ClassAttributes`) but not of `HTMLAttributes<HTMLDivElement>`.
     let bare = layer.type_name.strip_prefix("React.").unwrap_or(&layer.type_name);
     let takes_ref = matches!(bare, "ComponentProps" | "ComponentPropsWithRef");
-    let declared = react_attribute_names(element, file, ctx);
-    let loaded = !declared.is_empty();
+    let key = format!("{}\0{element}\0{full}", layer.file_name);
+    let cached = ctx.attribute_names.get(&key).map(|names| names.clone());
+    let names: Arc<[String]> = match cached {
+        Some(names) => names,
+        None => {
+            let declared = react_attribute_names(element, file, ctx);
+            let names: Vec<String> = match (full, declared.is_empty()) {
+                (true, false) => declared.into_iter().filter(|name| name != "key").collect(),
+                (false, false) => declared
+                    .into_iter()
+                    .filter(|name| crate::react_types::is_curated_html_attr(element, name))
+                    .collect(),
+                (_, true) => Vec::new(),
+            };
+            let names: Arc<[String]> = names.into();
+            ctx.attribute_names.insert(key, names.clone());
+            names
+        }
+    };
+    let loaded = !names.is_empty();
     if full && !loaded {
         state.diagnostics.push(
             Diagnostic::new(
@@ -171,16 +189,14 @@ pub(super) fn layer_attributes(
         );
         return Vec::new();
     }
-    let names: Vec<String> = match (full, loaded) {
-        (true, true) => declared.into_iter().filter(|name| name != "key").collect(),
-        (false, true) => {
-            declared.into_iter().filter(|name| crate::react_types::is_curated_html_attr(element, name)).collect()
-        }
-        (_, false) => crate::react_types::notable_html_attrs(element)
+    let names: Vec<String> = if loaded {
+        names.to_vec()
+    } else {
+        crate::react_types::notable_html_attrs(element)
             .iter()
             .chain(["ref"].iter())
             .map(|name| (*name).to_owned())
-            .collect(),
+            .collect()
     };
     let parent = PropParent {
         name: format!("{}HTMLAttributes", capitalize_element(element)),

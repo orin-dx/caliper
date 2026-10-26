@@ -310,6 +310,8 @@ pub struct ResolutionContext {
     pub(crate) named_results: memo::NamedResults,
     /// An HTML element's attribute declarations (`html::react_attribute`), read once per element and name.
     pub(crate) attribute_reads: memo::Memo<Option<ParsedProp>>,
+    /// The attribute names an HTML layer lists for an element and mode (`html::layer_attributes`), computed once.
+    pub(crate) attribute_names: dashmap::DashMap<String, Arc<[String]>, rustc_hash::FxBuildHasher>,
     /// Loaded dependency declarations (`PipelineOptions::load_dependencies`, ADR 0010).
     pub(crate) dependencies: Option<Arc<crate::dependency_types::DependencyLayer>>,
     /// React's own declarations in curated mode, which only HTML-attribute lookups read (`react_index`).
@@ -396,6 +398,7 @@ impl ResolutionContext {
             interface_chains: Default::default(),
             named_results: memo::NamedResults::with_max_reads(NAMED_RESULT_MAX_READS),
             attribute_reads: memo::Memo::with_max_reads(NAMED_RESULT_MAX_READS),
+            attribute_names: Default::default(),
             dependencies: None,
             react_types: None,
             collapse_inherited_props: options.collapse_inherited_props,
@@ -523,6 +526,7 @@ impl ResolutionContext {
             interface_chains: Default::default(),
             named_results: memo::NamedResults::with_max_reads(NAMED_RESULT_MAX_READS),
             attribute_reads: memo::Memo::with_max_reads(NAMED_RESULT_MAX_READS),
+            attribute_names: Default::default(),
             dependencies: layer,
             react_types: self.react_types.clone(),
             collapse_inherited_props: self.collapse_inherited_props,
