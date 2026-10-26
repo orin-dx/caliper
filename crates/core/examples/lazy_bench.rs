@@ -72,7 +72,12 @@ fn main() {
         seed ^= seed << 17;
         picked.swap(i, (seed % (i as u64 + 1)) as usize);
     }
-    picked.truncate(count);
+    // `--all`: every component, in file order, as a static build asks.
+    if flag("--all") {
+        picked = keys.clone();
+    } else {
+        picked.truncate(count);
+    }
     if let Some(names) = arg(&args, "--pick") {
         picked = names.split(',').map(str::to_owned).collect();
     }

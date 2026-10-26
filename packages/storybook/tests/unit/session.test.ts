@@ -257,9 +257,56 @@ describe('DocgenSession, lazy', () => {
       await new DocgenSession({ srcDirs: [src], ...options }, binding).fresh()
       return binding.warmUps
     }
-    expect(await warmed({})).toEqual([8])
-    expect(await warmed({ warmUp: false })).toEqual([])
-    expect(await warmed({ lazy: false })).toEqual([])
+    expect(await warmed({ warmUp: true })).toEqual([8])
+    expect(await warmed({})).toEqual([])
+    expect(await warmed({ warmUp: true, lazy: false })).toEqual([])
+  })
+
+  it('resolves the rest in one pass once enough distinct components were asked for, and only once', async () => {
+    const names = ['A', 'B', 'C', 'D', 'E']
+    const binding = new FakeBinding({
+      components: Object.fromEntries(names.map((name) => [name, entry(name, join(src, `${name}.tsx`))])),
+    })
+    binding.docs = Object.fromEntries(names.map((name) => [name, rdtDoc(name)]))
+    const session = new DocgenSession({ srcDirs: [src], fillAfter: 3 }, binding)
+    await session.fresh()
+    for (const name of ['A', 'A', 'B']) await session.documentation(name)
+    expect(binding.warmUps).toEqual([])
+    await session.documentation('C')
+    await session.documentation('D')
+    expect(binding.warmUps).toEqual([2 ** 32 - 1])
+
+    const never = new DocgenSession({ srcDirs: [src], fillAfter: 0 }, binding)
+    await never.fresh()
+    for (const name of names) await never.documentation(name)
+    expect(binding.warmUps).toEqual([2 ** 32 - 1])
+  })
+
+  it('never resolves the rest in one pass by default, however many components were asked for', async () => {
+    const names = Array.from({ length: 40 }, (_, i) => `C${i}`)
+    const binding = new FakeBinding({
+      components: Object.fromEntries(names.map((name) => [name, entry(name, join(src, `${name}.tsx`))])),
+    })
+    binding.docs = Object.fromEntries(names.map((name) => [name, rdtDoc(name)]))
+    const session = new DocgenSession({ srcDirs: [src] }, binding)
+    await session.fresh()
+    for (const name of names) await session.documentation(name)
+    expect(binding.warmUps).toEqual([])
+  })
+
+  it('forgets a listed key that has no component, so a lookup names what the file really has', async () => {
+    const binding = new FakeBinding({
+      components: {
+        Card: entry('Card', join(src, 'Card.tsx')),
+        CardContext: entry('CardContext', join(src, 'Card.tsx')),
+      },
+    })
+    binding.docs = { Card: rdtDoc('Card') }
+    const session = new DocgenSession({ srcDirs: [src] }, binding)
+    await session.fresh()
+    expect(session.namesIn(join(src, 'Card.tsx'))).toEqual(['Card', 'CardContext'])
+    expect((await session.documentation('CardContext')).doc).toBeUndefined()
+    expect(session.namesIn(join(src, 'Card.tsx'))).toEqual(['Card'])
   })
 
   it('looks again at where components are after an update that changes keys, and only then', async () => {
