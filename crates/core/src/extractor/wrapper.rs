@@ -85,7 +85,7 @@ fn component_argument_evidence(
     if callee.rsplit('.').next() == Some("createContext") {
         return Err("creates a context");
     }
-    let Some(first) = call.arguments.first().and_then(Argument::as_expression) else {
+    let Some(first) = call.arguments.first().and_then(Argument::as_expression).map(super::component::peel_expr) else {
         return Err("has no argument that could be a component");
     };
     let element_type_arg = || call.type_arguments.as_ref().is_some_and(|a| a.params.iter().any(is_element_type_arg));
