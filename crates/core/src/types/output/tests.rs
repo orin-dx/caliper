@@ -72,10 +72,16 @@ fn to_tagged_value(pt: &PropType) -> serde_json::Value {
         PropType::Function { type_params, params, return_type } => serde_json::json!({
             "kind": "function",
             "typeParams": type_params,
-            "params": params.iter().map(|p| serde_json::json!({
-                "name": p.name,
-                "type": to_tagged_value(&p.param_type),
-            })).collect::<Vec<_>>(),
+            "params": params.iter().map(|p| {
+                let mut param = serde_json::json!({ "name": p.name, "type": to_tagged_value(&p.param_type) });
+                // The flags are written only when set, so a signature without them is the shape it always had.
+                for (key, set) in [("optional", p.optional), ("rest", p.rest)] {
+                    if set {
+                        param[key] = serde_json::Value::Bool(true);
+                    }
+                }
+                param
+            }).collect::<Vec<_>>(),
             "returnType": to_tagged_value(return_type)
         }),
         PropType::Ref { element } => serde_json::json!({
@@ -128,10 +134,7 @@ fn to_tagged_value(pt: &PropType) -> serde_json::Value {
 fn an_operand_is_parenthesized_where_typescript_needs_it() {
     let callback = PropType::Function {
         type_params: vec![],
-        params: vec![FunctionParam {
-            name: Some("theme".into()),
-            param_type: PropType::Named { name: "Theme".into(), args: vec![] },
-        }],
+        params: vec![FunctionParam::new(Some("theme".into()), PropType::Named { name: "Theme".into(), args: vec![] })],
         return_type: Box::new(PropType::CssProperties),
     };
     let either = PropType::Union(vec![PropType::String, PropType::Number]);
@@ -752,15 +755,16 @@ mod streaming_serialize_tests {
             PropType::Function {
                 type_params: vec!["T".into()],
                 params: vec![
-                    FunctionParam {
-                        name: Some("event".into()),
-                        param_type: PropType::Named { name: "MouseEvent".into(), args: vec![] },
-                    },
-                    FunctionParam { name: None, param_type: PropType::String },
+                    FunctionParam::new(
+                        Some("event".into()),
+                        PropType::Named { name: "MouseEvent".into(), args: vec![] },
+                    ),
+                    FunctionParam::new(None, PropType::String),
                 ],
                 return_type: Box::new(PropType::ReactNode),
             },
             PropType::Function { type_params: vec![], params: vec![], return_type: Box::new(PropType::Void) },
+            signature_with_optional_and_rest(),
             PropType::Ref { element: Some("HTMLDivElement".into()) },
             PropType::Ref { element: None },
             PropType::HtmlAttributes { element: "button".into(), omitted: vec!["type".into()] },
@@ -768,6 +772,70 @@ mod streaming_serialize_tests {
         ];
         shapes.extend(reasons.into_iter().map(|reason| OpaqueDetail::new("Raw<T>", reason)));
         shapes
+    }
+
+    /// `(a: string, b?: number, ...rest: boolean[]) => void`
+    fn signature_with_optional_and_rest() -> PropType {
+        PropType::Function {
+            type_params: vec![],
+            params: vec![
+                FunctionParam::new(Some("a".into()), PropType::String),
+                FunctionParam { optional: true, ..FunctionParam::new(Some("b".into()), PropType::Number) },
+                FunctionParam {
+                    rest: true,
+                    ..FunctionParam::new(Some("rest".into()), PropType::Array(Box::new(PropType::Boolean)))
+                },
+            ],
+            return_type: Box::new(PropType::Void),
+        }
+    }
+
+    #[test]
+    fn a_signature_prints_its_optional_and_rest_parameters() {
+        assert_eq!(
+            signature_with_optional_and_rest().raw_string(),
+            "(a: string, b?: number, ...rest: boolean[]) => void"
+        );
+        let unnamed = PropType::Function {
+            type_params: vec![],
+            params: vec![FunctionParam { optional: true, ..FunctionParam::new(None, PropType::String) }],
+            return_type: Box::new(PropType::Void),
+        };
+        assert_eq!(unnamed.raw_string(), "(__0?: string) => void");
+    }
+
+    #[test]
+    fn the_flags_are_written_only_when_set_and_read_back() {
+        let json = serde_json::to_value(signature_with_optional_and_rest()).expect("serialize");
+        assert_eq!(
+            json["params"],
+            serde_json::json!([
+                { "name": "a", "type": { "kind": "string" } },
+                { "name": "b", "type": { "kind": "number" }, "optional": true },
+                { "name": "rest", "type": { "kind": "array", "element": { "kind": "boolean" } }, "rest": true },
+            ])
+        );
+        assert_eq!(
+            PropType::from_tagged_value(&json).map(|p| p.raw_string()),
+            Ok("(a: string, b?: number, ...rest: boolean[]) => void".to_owned())
+        );
+    }
+
+    #[test]
+    fn signatures_that_differ_only_by_a_flag_do_not_share_a_hash() {
+        use std::hash::{DefaultHasher, Hasher};
+        let hash = |ty: &PropType| {
+            let mut hasher = DefaultHasher::new();
+            ty.structural_hash(&mut hasher);
+            hasher.finish()
+        };
+        let required = |optional, rest| PropType::Function {
+            type_params: vec![],
+            params: vec![FunctionParam { optional, rest, ..FunctionParam::new(Some("a".into()), PropType::String) }],
+            return_type: Box::new(PropType::Void),
+        };
+        let hashes = [hash(&required(false, false)), hash(&required(true, false)), hash(&required(false, true))];
+        assert!(hashes[0] != hashes[1] && hashes[0] != hashes[2] && hashes[1] != hashes[2], "{hashes:?}");
     }
 
     #[test]

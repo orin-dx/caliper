@@ -125,9 +125,20 @@ fn format_type_compact(prop_type: &PropType) -> String {
         PropType::NumberLiteral(n) => n.to_string(),
         PropType::BoolLiteral(b) => b.to_string(),
         PropType::LiteralUnion { members, .. } => truncate_with_indicator(members, 6, "|"),
-        // Parameter types only: the names cost tokens and say little an agent needs.
+        // Parameter types only: the names cost tokens and say little an agent needs. An agent does need to know which
+        // arguments it may leave out (`T?`) and which repeat (`...T[]`).
         PropType::Function { params, return_type, .. } => {
-            let params: Vec<String> = params.iter().map(|p| format_type_compact(&p.param_type)).collect();
+            let params: Vec<String> = params
+                .iter()
+                .map(|p| {
+                    let ty = format_type_compact(&p.param_type);
+                    match (p.rest, p.optional) {
+                        (true, _) => format!("...{ty}"),
+                        (false, true) => format!("{ty}?"),
+                        (false, false) => ty,
+                    }
+                })
+                .collect();
             format!("({}) => {}", params.join(", "), format_type_compact(return_type))
         }
         PropType::ReactNode => "ReactNode".into(),
@@ -254,13 +265,32 @@ mod tests {
         );
         let on_select = PropType::Function {
             type_params: vec![],
-            params: vec![crate::types::FunctionParam {
-                name: Some("event".into()),
-                param_type: PropType::Named { name: "MouseEvent".into(), args: vec![] },
-            }],
+            params: vec![crate::types::FunctionParam::new(
+                Some("event".into()),
+                PropType::Named { name: "MouseEvent".into(), args: vec![] },
+            )],
             return_type: Box::new(PropType::Boolean),
         };
         assert_eq!(format_type_compact(&on_select), "(MouseEvent) => boolean");
+        let with_flags = PropType::Function {
+            type_params: vec![],
+            params: vec![
+                crate::types::FunctionParam::new(Some("a".into()), PropType::String),
+                crate::types::FunctionParam {
+                    optional: true,
+                    ..crate::types::FunctionParam::new(Some("b".into()), PropType::Number)
+                },
+                crate::types::FunctionParam {
+                    rest: true,
+                    ..crate::types::FunctionParam::new(
+                        Some("rest".into()),
+                        PropType::Array(Box::new(PropType::Boolean)),
+                    )
+                },
+            ],
+            return_type: Box::new(PropType::Void),
+        };
+        assert_eq!(format_type_compact(&with_flags), "(string, number?, ...Array<boolean>) => void");
         assert_eq!(
             format_type_compact(&PropType::HtmlAttributes { element: "button".into(), omitted: vec![] }),
             "HTMLAttributes<button>"

@@ -1,7 +1,7 @@
 import type { Diagnostic, WireDiagnostic } from 'caliper-docgen-napi'
 
 /** The output schema version this package reads (ADR 0017). A different major is a different shape. */
-export const SUPPORTED_SCHEMA_VERSION = 2
+export const SUPPORTED_SCHEMA_VERSION = 3
 
 /**
  * Returns `output` once its `schemaVersion` is one this package reads, and throws otherwise. Output without a version

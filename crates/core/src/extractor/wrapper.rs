@@ -32,7 +32,8 @@ pub(crate) struct PendingWrapper {
     /// The only evidence was a tag name, so the props must come from a factory payload.
     needs_payload: bool,
     type_args: Vec<WrapperTypeArg>,
-    callee: WrapperCallee,
+    callee: Option<WrapperCallee>,
+    rule: DetectionRule,
     description: String,
     tags: BTreeMap<String, String>,
     span: Span,
@@ -155,7 +156,51 @@ impl<'src> SourceDataCollector<'src> {
             name: name.to_owned(),
             needs_payload,
             type_args,
-            callee,
+            callee: Some(callee),
+            rule: DetectionRule::WrapperTypeArgument,
+            description,
+            tags,
+            span: decl.span,
+        });
+        true
+    }
+
+    /// Record `const Center = chakra("div", { ... })` as a candidate: a call given an intrinsic tag name and a config
+    /// object, whose props type is the `CenterProps` declared in this file. Nothing here names a library; calls that
+    /// build elements rather than components (`createElement("div", { ... })`) are excluded by name, as React's own API.
+    pub(super) fn try_record_tagged_factory<'a>(
+        &mut self,
+        decl: &super::component::Binding<'_, 'a>,
+        name: &str,
+    ) -> bool {
+        let Some(init) = decl.init else { return false };
+        let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
+        if call.type_arguments.is_some() {
+            return false;
+        }
+        let [tag, config] = call.arguments.as_slice() else { return false };
+        let Some(Expression::StringLiteral(tag)) = tag.as_expression().map(super::component::peel_expr) else {
+            return false;
+        };
+        let is_tag = tag.value.starts_with(|c: char| c.is_ascii_lowercase())
+            && tag.value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+        let has_config =
+            matches!(config.as_expression().map(super::component::peel_expr), Some(Expression::ObjectExpression(_)));
+        let Some(callee) = self.extract_callee_name(call) else { return false };
+        let element_builder = matches!(
+            callee.rsplit('.').next(),
+            Some("createElement" | "cloneElement" | "jsx" | "jsxs" | "jsxDEV" | "h")
+        );
+        if !is_tag || !has_config || element_builder {
+            return false;
+        }
+        let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
+        self.pending_wrappers.push(PendingWrapper {
+            name: name.to_owned(),
+            needs_payload: false,
+            type_args: vec![WrapperTypeArg { reference: Some((TypeName::from(format!("{name}Props")), Vec::new())) }],
+            callee: None,
+            rule: DetectionRule::TaggedFactory,
             description,
             tags,
             span: decl.span,
@@ -215,19 +260,28 @@ impl<'src> SourceDataCollector<'src> {
                 );
                 continue;
             };
-            self.data.component_mappings.push(
-                ComponentMapping::new(
-                    pending.name,
-                    props_name,
-                    self.file_path.clone(),
-                    pending.span.start,
-                    pending.span.end,
-                    DetectionRule::WrapperTypeArgument,
-                )
-                .with_props_type_args(props_args)
-                .with_doc(pending.description, pending.tags)
-                .with_wrapper_callee(pending.callee),
-            );
+            // A tag and a config object also describe a call that is not a component, so the props type must be
+            // seen in this file: the naming convention alone does not vouch for it.
+            if pending.rule == DetectionRule::TaggedFactory
+                && !self.data.interfaces.contains_key(&self.scoped_key(&props_name))
+                && !self.data.type_aliases.contains_key(&self.scoped_key(&props_name))
+            {
+                continue;
+            }
+            let mut mapping = ComponentMapping::new(
+                pending.name,
+                props_name,
+                self.file_path.clone(),
+                pending.span.start,
+                pending.span.end,
+                pending.rule,
+            )
+            .with_props_type_args(props_args)
+            .with_doc(pending.description, pending.tags);
+            if let Some(callee) = pending.callee {
+                mapping = mapping.with_wrapper_callee(callee);
+            }
+            self.data.component_mappings.push(mapping);
         }
     }
 

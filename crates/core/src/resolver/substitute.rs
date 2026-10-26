@@ -216,7 +216,7 @@ pub(super) fn substitute_type(ct: &CollectedType, subst: &Substitution) -> Colle
         CollectedType::TemplateLiteral(parts) => {
             CollectedType::TemplateLiteral(parts.iter().map(|p| substitute_type(p, subst)).collect())
         }
-        CollectedType::Function { type_params, params, param_names, return_type } => {
+        CollectedType::Function { type_params, params, param_names, param_kinds, return_type } => {
             // The function's own type parameters shadow the outer ones of the same name.
             let shadowed;
             let subst = if type_params.iter().any(|p| subst.contains_key(p.as_str())) {
@@ -233,6 +233,7 @@ pub(super) fn substitute_type(ct: &CollectedType, subst: &Substitution) -> Colle
                 type_params: type_params.clone(),
                 params: params.iter().map(|p| substitute_type(p, subst)).collect(),
                 param_names: param_names.clone(),
+                param_kinds: param_kinds.clone(),
                 return_type: Box::new(substitute_type(return_type, subst)),
             }
         }

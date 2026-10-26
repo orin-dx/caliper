@@ -193,10 +193,7 @@ impl Converter {
         let types = if references.is_empty() { Vec::new() } else { self.rpc.types_of_symbols(&references).await? };
         let mut params = Vec::new();
         for (parameter, ty) in parameters.iter().zip(&types) {
-            params.push(FunctionParam {
-                name: Some(parameter.name.clone()),
-                param_type: self.convert(ty, depth + 1).await?,
-            });
+            params.push(FunctionParam::new(Some(parameter.name.clone()), self.convert(ty, depth + 1).await?));
         }
         let return_type = self.rpc.return_type(signature.id).await?;
         Ok(PropType::Function {
