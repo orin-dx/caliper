@@ -2770,6 +2770,107 @@ export function Group(props: GroupProps) { return <div>{props.label}</div>; }
     );
 }
 
+/// A component whose props extend what `typeof recipe` infers (the config's `variants`), after `setup` declares `recipe`.
+fn variant_bag_output(setup: &str) -> ExtractionOutput {
+    let source = format!(
+        "{setup}\n\
+         type InferRecipeProps<T> = T extends unknown ? T : {{}};\n\
+         type VariantProps = InferRecipeProps<typeof recipe>;\n\
+         interface BoxProps extends VariantProps {{ label?: string }}\n\
+         export function Box(props: BoxProps) {{ return <div>{{props.label}}</div>; }}\n"
+    );
+    extract_one(&[("Box.tsx", source.as_str())])
+}
+
+/// The variant bag is found by its shape, not by the name the call is imported under: `cva` as `c` still declares `size`
+/// and `tone`, with the config at argument 1.
+#[test]
+fn a_variant_bag_is_found_under_an_aliased_cva_import() {
+    let output = variant_bag_output(
+        "import { cva as c } from \"class-variance-authority\";\n\
+         const recipe = c(\"base\", { variants: { size: { sm: \"text-sm\", lg: [\"text-lg\"] }, tone: { a: `x`, b: \"y\" } } });",
+    );
+    assert_eq!(prop_names(&output, "Box"), ["label", "size", "tone"]);
+    assert_eq!(
+        output.components["Box"].props["size"].prop_type.raw_string(),
+        "ConditionalValue<\"sm\" | \"lg\" | undefined>"
+    );
+    assert_eq!(
+        output.components["Box"].props["tone"].prop_type.raw_string(),
+        "ConditionalValue<\"a\" | \"b\" | undefined>"
+    );
+}
+
+/// `tv({ variants })` keeps the config at argument 0, under an alias too.
+#[test]
+fn a_variant_bag_is_found_under_an_aliased_tv_import_with_the_config_first() {
+    let output = variant_bag_output(
+        "import { tv as t } from \"tailwind-variants\";\n\
+         const recipe = t({ base: \"b\", variants: { size: { sm: \"s\", md: \"m\" } }, defaultVariants: { size: \"md\" } });",
+    );
+    assert_eq!(prop_names(&output, "Box"), ["label", "size"]);
+    assert_eq!(
+        output.components["Box"].props["size"].prop_type.raw_string(),
+        "ConditionalValue<\"sm\" | \"md\" | undefined>"
+    );
+}
+
+/// A library nobody listed, with the same config shape, in any argument position.
+#[test]
+fn a_variant_bag_is_found_for_a_library_the_extractor_has_never_heard_of() {
+    let output = variant_bag_output(
+        "declare function makeVariants(first: string, second: number, config: unknown): unknown;\n\
+         const recipe = makeVariants(\"x\", 1, { variants: { density: { \"tight\": {}, \"loose\": { gap: 4 } } } });",
+    );
+    assert_eq!(prop_names(&output, "Box"), ["density", "label"]);
+    assert_eq!(
+        output.components["Box"].props["density"].prop_type.raw_string(),
+        "ConditionalValue<\"tight\" | \"loose\" | undefined>"
+    );
+}
+
+/// Real recipes mix literal groups with groups taken from another recipe or built by a call (Chakra's input addon:
+/// `size: inputRecipe.variants!.size`, `variant: { … }`). The literal groups still declare their props.
+#[test]
+fn a_variant_bag_keeps_its_literal_groups_when_other_groups_are_references() {
+    let output = variant_bag_output(
+        "declare const inputRecipe: { variants: { size: Record<string, unknown> } };\n\
+         declare function mapEntries(value: unknown, map: unknown): unknown;\n\
+         declare function defineRecipe(config: unknown): unknown;\n\
+         const recipe = defineRecipe({\n\
+           variants: {\n\
+             size: inputRecipe.variants!.size,\n\
+             variant: { outline: { bg: \"a\" }, subtle: { bg: \"b\" } },\n\
+             tone: mapEntries(inputRecipe, (key: string) => key),\n\
+           },\n\
+         });",
+    );
+    assert_eq!(prop_names(&output, "Box"), ["label", "variant"]);
+    assert_eq!(
+        output.components["Box"].props["variant"].prop_type.raw_string(),
+        "ConditionalValue<\"outline\" | \"subtle\" | undefined>"
+    );
+}
+
+/// An object with a `variants` property that is not a map of maps of styling is not a variant bag, and nothing is
+/// invented from it: a plain string, a list, a group that is not an object, or a leaf that is a number.
+#[test]
+fn an_object_with_a_variants_property_that_is_not_a_variant_bag_declares_no_props() {
+    for config in [
+        "{ variants: \"size\" }",
+        "{ variants: [\"a\", \"b\"] }",
+        "{ variants: { size: \"sm\" } }",
+        "{ variants: { size: { sm: 1, lg: 2 } } }",
+        "{ variants: { size: { sm: true } } }",
+        "{ variants: {} }",
+    ] {
+        let output = variant_bag_output(&format!(
+            "declare function use(config: unknown): unknown;\nconst recipe = use({config});"
+        ));
+        assert_eq!(prop_names(&output, "Box"), ["label"], "{config}");
+    }
+}
+
 /// A generic component's own type parameters are placeholders, the way an interface's are, and an ES2015 global
 /// (`Iterable`) is TypeScript's.
 #[test]

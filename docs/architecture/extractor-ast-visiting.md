@@ -61,6 +61,10 @@ Two fields are deliberately _not_ part of the "real" output surface: `const_arra
 
 - **`try_rename_identifier_wrapped_component` matches two distinct real-world shapes with one function**, not two: a call-wrapped rename (`export let X = someLibraryWrapper(InnerFn) as Y` — Headless UI's `forwardRefWithAs`) and a bare passthrough (`const Button = InternalButton;` — antd's pattern). Both reduce to "an identifier reference to an already-collected mapping, optionally wrapped in a recognized-but-uninterpreted call." Splitting these into separate functions was considered unnecessary since the resolution logic (clone-and-rename, track `aliased_away`) is identical either way.
 
+- **Variant bags are found by shape, not by the callee's name.** `try_collect_variant_bag` (`interface.rs`) reads any object-literal argument, at any position, that has a `variants` property which is a map of maps (`{ size: { sm: …, lg: … } }`) whose leaves are styling: strings, templates, arrays, objects, or references. That covers `cva`, `tv`, Chakra's `defineRecipe`, `defineSlotRecipe`, `recipe` and `chakra(element, config)`, and Panda's, under any import alias and for a library nobody listed. A group written as a reference or a call (`size: other.variants!.size`) is skipped and the literal groups still count; a group that is a plain literal, or a leaf that is a number, boolean or function, means the object is not a variant bag and nothing is recorded. No callee name decides this.
+
+- **The callee names that still decide behavior are React's API, not a library's:** `forwardRef`, `React.forwardRef` and `memo` in `component.rs`, and `createContext` in `wrapper.rs`. They are matched by identifier today, not by the import's source package, so an aliased `forwardRef` import is not recognized. The one other place a library name appears is `known.rs`, where the `VariantProps` shortcut and its `RuntimeDependent { function_name: "cva" }` diagnostic label are a measured, documented shortcut table (ADR 0014), not detection.
+
 ## Component detection: the pattern chain, explicitly enumerated
 
 | Pattern | Recognizes | File |
