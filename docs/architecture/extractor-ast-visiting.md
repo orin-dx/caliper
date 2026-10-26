@@ -76,7 +76,7 @@ Two fields are deliberately _not_ part of the "real" output surface: `const_arra
 | 5. `ForwardRefExoticComponent` decl | `declare const X: React.ForwardRefExoticComponent<Props & RefAttributes<E>>` (no initializer — `.d.ts` shape) | `component.rs:230-280` |
 | — | Identifier-alias rename (not a distinct detector — a fallback when 1-3 all miss) | `component.rs:303-326` |
 
-**Deliberately not recognized** (per `docs/edge-cases.md` Priority 2, "Extractor"): anonymous default-exported function components (`export default function(props: Props) {}` — `visit_function` requires `func.id`); class components (`class Button extends React.Component<Props>`); class-expression components (`const Button = class extends React.Component<Props> {}`); `Object.assign(Component, { Sub: ... })` compound-component pattern (only `X.Y = ...` static-member assignment is handled — see `interface.rs`'s `static_member_assignment`); `satisfies`-wrapped expressions (no `TSSatisfiesExpression` handling anywhere). All of these are silent misses today, not diagnosed — cross-reference `edge-cases.md` rather than treating this list as exhaustive, since new gaps may have been found since.
+**Also recognized, outside the table:** anonymous default-exported function components (`export default function(props: Props) {}`, named after the PascalCased file stem); class components and class expressions extending `Component` or `PureComponent` (the first type argument is the props type; a class with no type arguments is silently omitted, like a function with no params); `satisfies`-wrapped expressions (`unwrap_as_expression` peels them like `as`); and a sub-component that exists only inside an `Object.assign(Component, { Sub: function … })` object literal (a bare identifier value is left to its own detection). Compound components attached by `X.Y = ...` assignment are handled by `interface.rs`'s `static_member_assignment`. Don't treat these lists as exhaustive; `edge-cases.md` has the open gaps.
 
 ## `SkippedCandidate` diagnostic: where it is and isn't wired
 
@@ -93,7 +93,7 @@ Explicitly _not_ wired (by design, per Invariant 4):
 - A lowercase-first-letter binding (never PascalCase, never entered the candidate chain).
 - A `.tsx` PascalCase binding with **no initializer at all** — deferred to Pattern 5 (ambient `.d.ts`-style declarations) or legitimately not a component.
 
-Per `edge-cases.md` Priority 2, several _other_ extractor silent-drop paths still have no `record_skip` call at all despite being structurally identical to the ones that do: `Object.assign` compound components, computed/numeric/symbol interface property keys, and any `TSType` shape unhandled by `extract_props_arg`/`extract_type_name_from_type`. Do not assume `SkippedCandidate` coverage is complete just because some paths have it.
+Other extractor drop paths may have no `record_skip` call despite being structurally identical to the ones that do (computed, symbol and numeric interface property keys are excluded silently, for one). Do not assume `SkippedCandidate` coverage is complete just because some paths have it.
 
 ## JSDoc proximity heuristic: known false-positive risk
 
@@ -101,8 +101,8 @@ Per `edge-cases.md` Priority 2, several _other_ extractor silent-drop paths stil
 
 ## Known gaps not otherwise covered above
 
-See `docs/edge-cases.md` for the full audit; the extractor-relevant subset beyond component-detection gaps:
+See `docs/edge-cases.md` for the open gaps; the extractor-relevant subset beyond component-detection gaps:
 
 - `classify_type_alias`'s `Omit`/`Pick`/`Partial`/`Required`/`Readonly` arms drop the _entire_ alias on malformed arguments rather than degrading partially (alias.rs) — now diagnosed via `record_skip`, but the alias is still fully absent from `data.type_aliases`.
 - Any `TSType` variant unhandled by `extract_props_arg`/`extract_type_name_from_type` silently produces no `ComponentMapping` at all, with no `SkippedCandidate` trace (unlike the visit.rs call sites).
-- Deep conditional-type chains are covered by the depth guard (Invariant 8) but P1-8 in `edge-cases.md` flags this as previously under-tested — now covered by `deeply_chained_conditional_types_hit_the_depth_guard_not_the_bracket_heuristic`.
+- Deep conditional-type chains are covered by the depth guard (Invariant 8) and tested by `deeply_chained_conditional_types_hit_the_depth_guard_not_the_bracket_heuristic`.

@@ -9,7 +9,7 @@ One line per ADR, with what it guards. Add a line when you add an ADR.
 - [1. Parse with OXC instead of the TypeScript compiler](0001-oxc-over-typescript-compiler.md) — do not add a type-checking pass to the default path. The opt-in backend is 0006.
 - [2. Hand-write Serialize/Deserialize for PropType instead of deriving it](0002-manual-serialize-for-prop-type.md) — do not derive them on `PropType` or `CollectedType`.
 - [3. Cache the DTS parse cache with positional (not named) MessagePack](0003-positional-msgpack-cache-encoding.md) — do not reorder, insert or remove `SourceData` fields without bumping `CACHE_SCHEMA_VERSION`.
-- [4. Defer full type-checker integration](0004-defer-type-checker-integration.md) — superseded by 0006.
+- 4. Defer full type-checker integration — removed: superseded by 0006. The gap list and gates are in `docs/type-checker-integration.md`.
 - [5. Contain panics at a single, per-item boundary](0005-panic-containment-boundary.md) — route anything reachable from a rayon `.map()`, a `DocgenPlugin` hook or a NAPI entry point through `contain_panic`.
 - [6. Run the TypeScript backend as a second resolver](0006-semantic-backend-as-second-resolver.md) — do not patch `Opaque` leaves, give `crates/core` a compiler process or I/O, or route the backend through NAPI.
 
@@ -21,15 +21,15 @@ One line per ADR, with what it guards. Add a line when you add an ADR.
 - [12. Collapse large inherited dependency sources, as Storybook does](0012-collapse-large-dependency-sources.md) — do not resolve a collapsed source's props, or collapse a component's own props.
 - [13. Read React's attribute declarations in curated mode, in an index of their own](0013-curated-mode-reads-react-attributes-apart.md) — do not merge React into the project index outside Full mode, or make the React index a lookup fallback.
 - [14. A loaded declaration wins over a known shortcut; shortcuts are fallbacks](0014-declarations-before-shortcuts.md) — do not check a shortcut before a declaration, or add one without measuring it against the declaration on consumer code.
-- [15. A member read through React's types reads React's declaration and what it imports](0015-member-reads-of-react-types-read-their-declarations.md) — do not answer an indexed access from a table before its declaration, or add React's own files to the dependency layer. Narrows 0013's "only HTML-attribute lookups read the React index" and 0010's "the loader doesn't read React".
+- 15. A member read through React's types reads React's declaration and what it imports — removed: a resolver behavior, not a structure. It lives in `docs/architecture/resolver-type-resolution.md` ("Member reads through React's types").
 - [16. Resolve components on request, and load dependencies for the names their resolution reaches](0016-resolve-components-on-request.md) — do not make a lazy answer differ from batch extraction's for the same key, memoize a resolution that found a dependency name missing, or expose a parser type from the session API. Extends 0010's loading from "before resolution" to "before the resolution that answers".
 - [17. Version the canonical JSON, and make readers reject a version they don't read](0017-version-the-canonical-json.md) — do not change the canonical JSON's shape without bumping `SCHEMA_VERSION`, or let a reader accept a version it was not written for.
 - [18. Write prop sets and name lists once in the canonical output](0018-canonical-output-interns-prop-sets-and-name-lists.md) — do not write a component's props, an inheritance layer's `omitted` or a diagnostic's `affects` inline in canonical JSON. Extends 0009's per-prop table to the lists that repeat across components; `SCHEMA_VERSION` 2.
 - [19. Load dependency declarations by default](0019-load-dependencies-by-default.md) — do not make a surface default `loadDependencies` to off, or compare a baseline recorded without a flag against a build with the other default. Supersedes 0010's "off by default".
-- [20. Chain dependency layers and load the remaining names after three growths](0020-chain-dependency-layers.md) — keep dependency growth incremental and bound lookup depth. Supersedes 0016's 48-growth threshold.
+- 20. Chain dependency layers and load the remaining names after three growths — removed: a tuning of 0016's design with measurements, not a new decision. It lives in `docs/architecture/pipeline-orchestration.md` ("Demand-driven dependencies") and `docs/performance.md`. It replaced 0016's 48-growth threshold.
 - [21. Publish the semantic backend crates with the CLI](0021-publish-the-semantic-backend-crates.md) — keep the runtime opt-in backend available in the published CLI by releasing its versioned crate dependencies first.
 
-Changing any of these needs a new ADR.
+Changing any of these needs a new ADR. A removed entry keeps its number; its rationale moved to the doc named on its line.
 
 ## When to write one
 
@@ -48,6 +48,9 @@ Good candidates:
 
 Not ADR material:
 
+- A default, threshold or resolution order that one module reads (a collapse limit, a growth count, which lookup goes first) — that's a code comment plus the subsystem's `docs/architecture/` page. Measurements belong in `docs/performance.md`.
+- A release or CI procedure (what to publish first, which gate blocks) — that's the workflow file.
+- A superseded or tuned earlier decision whose design still holds — update the architecture page, don't stack a new ADR on it. Write one only if the contract itself changes.
 - A single function's algorithm choice, confined to that function — that's a code comment
 - A bug fix — commit message, and if it's the kind of thing that could recur, a line in `rdt-coverage.md`
 - A behavior-preserving refactor — commit message is enough
