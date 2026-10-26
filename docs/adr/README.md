@@ -26,6 +26,7 @@ One line per ADR, with what it guards. Add a line when you add an ADR.
 - [17. Version the canonical JSON, and make readers reject a version they don't read](0017-version-the-canonical-json.md) — do not change the canonical JSON's shape without bumping `SCHEMA_VERSION`, or let a reader accept a version it was not written for.
 - [18. Write prop sets and name lists once in the canonical output](0018-canonical-output-interns-prop-sets-and-name-lists.md) — do not write a component's props, an inheritance layer's `omitted` or a diagnostic's `affects` inline in canonical JSON. Extends 0009's per-prop table to the lists that repeat across components; `SCHEMA_VERSION` 2.
 - [20. Chain dependency layers and load the remaining names after three growths](0020-chain-dependency-layers.md) — keep dependency growth incremental and bound lookup depth. Supersedes 0016's 48-growth threshold.
+- [21. Publish the semantic backend crates with the CLI](0021-publish-the-semantic-backend-crates.md) — keep the runtime opt-in backend available in the published CLI by releasing its versioned crate dependencies first.
 
 Changing any of these needs a new ADR.
 

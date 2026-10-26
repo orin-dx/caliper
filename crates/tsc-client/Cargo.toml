@@ -4,7 +4,9 @@ description = "Process supervisor and JSON-RPC transport client for TypeScript 7
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-publish = false
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [lints]
 workspace = true

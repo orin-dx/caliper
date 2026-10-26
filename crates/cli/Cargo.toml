@@ -21,7 +21,7 @@ path = "src/main.rs"
 
 [dependencies]
 caliper-docgen-core = { path = "../core", version = "0.6.0" }
-caliper-docgen-semantic = { path = "../semantic" }
+caliper-docgen-semantic = { path = "../semantic", version = "0.1.0" }
 clap.workspace            = true
 clap_complete.workspace   = true
 miette                    = { workspace = true, features = ["fancy"] }
