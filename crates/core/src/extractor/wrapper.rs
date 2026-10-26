@@ -110,6 +110,26 @@ fn component_argument_evidence(
 }
 
 impl<'src> SourceDataCollector<'src> {
+    pub(super) fn promote_function_aliases(&mut self) {
+        let aliases = std::mem::take(&mut self.pending_function_aliases);
+        for _ in 0..aliases.len() {
+            let mut changed = false;
+            for (name, target) in &aliases {
+                let key = self.scoped_key(name);
+                if self.data.function_results.contains_key(&key) {
+                    continue;
+                }
+                if let Some(result) = self.data.function_results.get(&self.scoped_key(target)).cloned() {
+                    self.data.function_results.insert(key, result);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
     /// Record `const Name = callee<...>(first, ...)` as a candidate. Returns whether it was recorded.
     pub(super) fn try_record_wrapper_call<'a>(&mut self, decl: &super::component::Binding<'_, 'a>, name: &str) -> bool {
         let Some(init) = decl.init else { return false };
@@ -222,21 +242,23 @@ impl<'src> SourceDataCollector<'src> {
         })
     }
 
-    /// Record what a generic function declaration returns: its return annotation, or the type its one top-level
-    /// `return … as T` asserts (`return Component as MantineComponent<Payload>`). A wrapper call to it then gets the
-    /// props that type adds (`resolver::callee`).
+    /// Record a generic function's annotated, asserted, or single returned local factory result. A wrapper call to
+    /// it then gets the props that result adds (`resolver::callee`).
     pub(super) fn record_function_result<'a>(&mut self, func: &Function<'a>) {
         let (Some(id), Some(type_parameters)) = (&func.id, func.type_parameters.as_deref()) else { return };
-        let result = match &func.return_type {
-            Some(annotation) => self.ts_type_to_collected(&annotation.type_annotation),
-            None => {
-                let Some(ty) = asserted_return_type(func) else { return };
-                self.ts_type_to_collected(ty)
-            }
+        let (result, returned_call) = match &func.return_type {
+            Some(annotation) => (self.ts_type_to_collected(&annotation.type_annotation), None),
+            None => match asserted_return_type(func) {
+                Some(ty) => (self.ts_type_to_collected(ty), None),
+                None => (CollectedType::Unknown, returned_local_call(self, func)),
+            },
         };
+        if matches!(result, CollectedType::Unknown) && returned_call.is_none() {
+            return;
+        }
         let type_params = super::type_param_names(Some(type_parameters));
         let key = self.scoped_key(id.name.as_str());
-        self.data.function_results.insert(key, FunctionResult { type_params, result });
+        self.data.function_results.insert(key, FunctionResult { type_params, result, returned_call });
     }
 
     /// Pick the props type from a wrapper call's type arguments, last first (the props usually follow the element).
@@ -282,6 +304,37 @@ impl<'src> SourceDataCollector<'src> {
             _ => None,
         })
     }
+}
+
+/// A single top-level `return Local` where `Local` is a const initialized by a generic call.
+fn returned_local_call<'a>(collector: &mut SourceDataCollector<'_>, func: &Function<'a>) -> Option<WrapperCallee> {
+    let body = func.body.as_ref()?;
+    let mut returns = body.statements.iter().filter_map(|statement| match statement {
+        Statement::ReturnStatement(ret) => ret.argument.as_ref(),
+        _ => None,
+    });
+    let Expression::Identifier(returned) = returns.next()?.without_parentheses() else { return None };
+    if returns.next().is_some() {
+        return None;
+    }
+    for statement in &body.statements {
+        let Statement::VariableDeclaration(declaration) = statement else { continue };
+        if !declaration.kind.is_const() {
+            continue;
+        }
+        for declarator in &declaration.declarations {
+            let BindingPattern::BindingIdentifier(name) = &declarator.id else { continue };
+            if name.name != returned.name {
+                continue;
+            }
+            let Some(Expression::CallExpression(call)) = declarator.init.as_ref().map(super::component::peel_expr)
+            else {
+                return None;
+            };
+            return collector.wrapper_callee(call);
+        }
+    }
+    None
 }
 
 /// Where a wrapper call's props come from.

@@ -44,20 +44,16 @@ pub(super) fn result_chain(
     state: &mut ResolveState,
 ) -> Option<super::ResolvedChain> {
     let callee = mapping.wrapper_callee.as_ref()?;
-    let mut ignored = Vec::new();
-    let (file, name) = resolve_to_canonical(&callee.name, &mapping.file_path, ctx, &mut ignored)
-        .unwrap_or_else(|| (mapping.file_path.clone(), callee.name.to_string()));
-    super::deps::record(&file);
-    let function = ctx.global.function_results.get(&format!("{file}:{name}"))?;
-    let bindings = build_substitution(&function.type_params, &callee.type_args, &mapping.file_path, &mut ignored);
-    let result = substitute_type(&function.result, &bindings);
-    let (props, props_file, type_params) = component_props_type(&result, &file, ctx, 0)?;
+    let (props, props_file, type_params, factory_params) = result_props(callee, &mapping.file_path, ctx, 0)?;
     let mut attempt = state.branch();
     attempt.add_type_params(type_params.iter());
+    attempt.add_type_params(factory_params.iter());
     let mut chain = resolve_base_as_chain(&props, &props_file, mapping, ctx, &mut attempt, 0);
-    if chain.composes.iter().any(|name| {
-        function.type_params.iter().any(|param| name == param.as_str() || name.starts_with(&format!("{param}[")))
-    }) {
+    if chain
+        .composes
+        .iter()
+        .any(|name| factory_params.iter().any(|param| name == param.as_str() || name.starts_with(&format!("{param}["))))
+    {
         let fallback = super::chain::resolve_props_chain(
             mapping.props_type_name.as_str(),
             &mapping.props_type_args,
@@ -82,6 +78,33 @@ pub(super) fn result_chain(
     }
     state.absorb(attempt);
     Some(chain)
+}
+
+fn result_props(
+    callee: &WrapperCallee,
+    caller_file: &Utf8Path,
+    ctx: &ResolutionContext,
+    depth: u8,
+) -> Option<(CollectedType, Utf8PathBuf, Vec<TypeName>, Vec<TypeName>)> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    let mut ignored = Vec::new();
+    let (file, name) = resolve_to_canonical(&callee.name, caller_file, ctx, &mut ignored)
+        .unwrap_or_else(|| (caller_file.to_owned(), callee.name.to_string()));
+    super::deps::record(&file);
+    let function = ctx.global.function_results.get(&format!("{file}:{name}"))?;
+    let bindings = build_substitution(&function.type_params, &callee.type_args, caller_file, &mut ignored);
+    if let Some(inner) = &function.returned_call {
+        let inner = WrapperCallee {
+            name: inner.name.clone(),
+            type_args: inner.type_args.iter().map(|arg| substitute_type(arg, &bindings)).collect(),
+        };
+        return result_props(&inner, &file, ctx, depth + 1);
+    }
+    let result = substitute_type(&function.result, &bindings);
+    let (props, props_file, type_params) = component_props_type(&result, &file, ctx, 0)?;
+    Some((props, props_file, type_params, function.type_params.clone()))
 }
 
 /// The props of a member of a value declared with a mapped type: `Primitive.div` for `declare const Primitive:

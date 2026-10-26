@@ -218,6 +218,8 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) aliased_away: FxHashSet<CompactString>,
     /// Wrapper-call candidates, promoted to mappings in `finish()` once the whole file has been seen.
     pub(super) pending_wrappers: Vec<wrapper::PendingWrapper>,
+    /// Simple local aliases of generic functions, resolved after all declarations have been visited.
+    pub(super) pending_function_aliases: Vec<(String, String)>,
     /// `export { local as exported }` without a source: the index into `data.exports` and the `local` name, so
     /// `finish()` can recognize a re-exported import once every import has been seen.
     pub(super) pending_local_exports: Vec<(usize, String)>,
@@ -261,6 +263,7 @@ impl<'src> SourceDataCollector<'src> {
             pending_display_name_renames: Vec::new(),
             aliased_away: FxHashSet::default(),
             pending_wrappers: Vec::new(),
+            pending_function_aliases: Vec::new(),
             pending_local_exports: Vec::new(),
             decline_reason: None,
             name_uses: Default::default(),
@@ -445,6 +448,7 @@ impl<'src> SourceDataCollector<'src> {
                 self.data.interface_type_params.insert(key, params);
             }
         }
+        self.promote_function_aliases();
         self.promote_wrapper_calls();
         self.promote_reexported_imports();
         // Filtered by original identifier first, before any displayName rename
