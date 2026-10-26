@@ -309,7 +309,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 });
                 if let Some(name) = name {
                     if let Some(mapping) = self
-                        .try_forward_ref_exotic_decl(declarator, &name)
+                        .try_exotic_component_decl(declarator, &name)
                         .or_else(|| self.try_declared_callable_component(declarator, &name))
                     {
                         self.data.component_mappings.push(mapping);
