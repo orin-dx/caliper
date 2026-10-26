@@ -145,7 +145,16 @@ impl SemanticHook {
 
     fn apply(&self, answer: &mut ComponentAnswer, component: Option<&Arc<SemanticComponent>>) {
         let Some(component) = component else { return };
+        let inherited: Vec<_> = (answer.entry.props.iter())
+            .filter(|(_, prop)| prop.parent.is_some())
+            .map(|(name, prop)| (name.clone(), prop.clone()))
+            .collect();
         apply_semantic_props(&mut answer.entry, component, &mut FxHashMap::default());
+        // The checker leaves out what `@types/react` declares (`children`, `aria-*`, DOM handlers); a story still
+        // lists them, so the structural ones stay unless the checker answered for the name.
+        for (name, prop) in inherited {
+            answer.entry.props.entry(name).or_insert(prop);
+        }
         // A structural diagnostic about a prop the checker now answers for would be stale.
         answer.diagnostics.retain(|diagnostic| {
             !matches!(

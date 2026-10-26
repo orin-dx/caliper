@@ -174,6 +174,21 @@ fn an_unavailable_checker_warns_once_per_session_and_never_fails_a_request() {
 }
 
 #[test]
+fn props_the_checker_leaves_out_but_the_component_inherits_stay_structural() {
+    let project = project(&[(
+        "Button.tsx",
+        "interface Base { id?: string }\nexport function Button(props: Base & { label: string }) { return null; }",
+    )]);
+    let checker = Fake::new(Duration::ZERO, finds_size);
+    let session = session(&project, checker, Duration::from_secs(5));
+
+    let answer = session.component("Button").unwrap();
+
+    assert_eq!(answer.entry.props.keys().cloned().collect::<Vec<_>>(), ["id", "label", "size"]);
+    assert_eq!(answer.entry.props["id"].parent.as_ref().map(|parent| parent.name.as_str()), Some("Base"));
+}
+
+#[test]
 fn a_session_without_a_checker_answers_as_before() {
     let project = project(&[("Button.tsx", BUTTON)]);
     let plain = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() });
