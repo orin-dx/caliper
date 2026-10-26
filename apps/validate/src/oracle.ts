@@ -15,12 +15,6 @@
 // Checker types are normalized once per type id and verdicts made once per (Caliper prop, checker type), so Chakra's
 // ~470,000 props cost a few thousand distinct comparisons.
 //
-// Usage: tsx src/oracle.ts --root DIR --src DIR --tsconfig FILE --caliper caliper.json --out verdicts.json
-//                          [--files list.txt] [--dump props.json] [--rows rows.json] [--missing missing.json]
-//
-// `--dump` writes every prop judged `wrong` or `less precise` (the examples in `--out` stop at 20 per verdict), so two
-// builds' verdicts can be diffed prop by prop. `--rows` writes one `[component key, prop, verdict]` row for every shared
-// prop, which `scripts/confidence.py` joins with the canonical JSON to ask which signals predict a disagreement.
 import { readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { API, SignatureKind, SymbolFlags } from 'typescript-beta/sync'
