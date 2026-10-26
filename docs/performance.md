@@ -4,7 +4,7 @@
 
 ## Corpora
 
-Each corpus is a shallow, sparse fetch of one directory at a pinned commit, plus the files above it (root `tsconfig.json`, `package.json`). No dependencies are installed, so imports from other packages stay unresolved; that is the "Unresolved" column.
+Each corpus is a shallow, sparse fetch of one directory at a pinned commit, plus the files above it (root `tsconfig.json`, `package.json`). No dependencies are installed, so imports from other packages stay unresolved; that is the "Unresolved" column. The scorecard therefore runs with `--no-load-dependencies`, whatever a build's default (loading is on by default, ADR 0019), so a base build with a different default compares like for like; the "With dependencies loading" column times the default mode over the same files.
 
 | Corpus   | Repository              | Commit     | Source directory             |
 | -------- | ----------------------- | ---------- | ---------------------------- |
@@ -37,6 +37,7 @@ Per corpus:
 | Gate | Fails when | Why |
 | --- | --- | --- |
 | Regression | Wall ms is more than 1.1× the base build's, on any corpus | The base (main) is built and timed in the same job, runs interleaved, so the runner's speed cancels out |
+| Dependency loading | The default mode takes more than 1.7× the time of `--no-load-dependencies`, on any corpus | With nothing installed every import fails after a directory walk, and the dependency index keeps only answers found inside a package, so each run repeats them: 1.15× to 1.2× on a laptop, up to about 1.5× on a CI runner (Mantine 61 → 71 ms, Chakra 58 → 67 ms). The limit catches a real jump, not that cost |
 | RDT ratio | Caliper is less than 10× faster than RDT, on any corpus | The point of the tool. Caliper's time includes process startup and RDT's does not, so the ratio is a lower bound |
 | Scaling | Two copies of mantine take more than 2.2× as long to extract as one | Doubling files, components and props must not more than double the work; name collisions between the copies exercise disambiguation |
 

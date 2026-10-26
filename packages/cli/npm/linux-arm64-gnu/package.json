@@ -1,6 +1,6 @@
 {
   "name": "caliper-docgen-linux-arm64-gnu",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "caliper-docgen CLI binary for Linux ARM64 (glibc) — not meant to be installed directly, pulled in as an optionalDependency of caliper-docgen",
   "keywords": [
     "react",
