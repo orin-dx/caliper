@@ -171,6 +171,36 @@ pub(super) fn resolve_props_chain(
     // A project's own `Partial` or `Required`, or one imported from a package, is that declaration (step 2), not
     // TypeScript's global.
     let ts_lib = super::may_be_ts_lib_type(type_name, consuming_file, ctx);
+    if ts_lib && type_name_bare == "Extract" && type_args.len() == 2 {
+        if let Some(selected) =
+            super::evaluate::extracted_object_members(&type_args[0], &type_args[1], consuming_file, ctx)
+        {
+            let members = selected
+                .into_iter()
+                .map(|(inner, file)| CollectedType::AtFile { file, inner: Box::new(inner) })
+                .collect();
+            return resolve_type_alias_chain(
+                &CollectedTypeAlias::Union { members, file_path: consuming_file.to_owned() },
+                consuming_file,
+                mapping,
+                ctx,
+                state,
+                depth,
+            );
+        }
+        if matches!(&type_args[1], CollectedType::Object(_)) {
+            state.diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Info,
+                message: format!("Cannot determine the object members selected by '{type_name}' in '{consuming_file}'"),
+                file: Some(consuming_file.to_string()),
+                line: None,
+                column: None,
+                help: None,
+                code: DiagnosticCode::OpaqueType,
+                affects: Vec::new(),
+            });
+        }
+    }
     if super::may_be_utility(type_name, consuming_file, ctx) {
         if let Some(alias) = super::substitute::synthesize_utility_alias(type_name_bare, type_args, consuming_file) {
             return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);

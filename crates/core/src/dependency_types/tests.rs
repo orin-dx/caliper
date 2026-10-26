@@ -72,6 +72,59 @@ fn prop_types(output: &crate::types::ExtractionOutput, component: &str) -> Vec<(
     output.components[component].props.values().map(|p| (p.name.clone(), p.prop_type.raw_string())).collect()
 }
 
+#[test]
+fn extract_selects_an_imported_discriminated_member_through_an_optional_array() {
+    let (_tmp, root) = project(&[
+        ("node_modules/menu-kit/package.json", r#"{ "name": "menu-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        (
+            "node_modules/menu-kit/index.d.ts",
+            "export interface SubMenuType { type?: 'submenu'; disabled?: boolean; title?: string; children: ItemType[] }\n\
+             export interface MenuItemType { type?: 'item'; extra?: number }\n\
+             export type ItemType = SubMenuType | MenuItemType | null;\n\
+             export interface MenuProps { items?: ItemType[] }\n",
+        ),
+        (
+            "src/SubMenu.tsx",
+            "import type { MenuProps } from 'menu-kit';\n\
+             type Item = NonNullable<NonNullable<MenuProps['items']>[number]>;\n\
+             type RcSubMenu = Extract<Item, { type?: 'submenu' }>;\n\
+             interface SubMenuProps extends Omit<RcSubMenu, 'children' | 'title'> { title?: string; icon?: string }\n\
+             export function SubMenu(props: SubMenuProps) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+    assert_eq!(
+        prop_types(&output, "SubMenu"),
+        [
+            ("disabled".into(), "boolean".into()),
+            ("icon".into(), "string".into()),
+            ("title".into(), "string".into()),
+            ("type".into(), "\"submenu\"".into()),
+        ]
+    );
+    assert!(output.diagnostics.iter().all(|diag| !diag.message.contains("Cannot determine the object members")));
+}
+
+#[test]
+fn undecidable_extract_filter_emits_a_diagnostic() {
+    let (_tmp, root) = project(&[(
+        "src/Items.tsx",
+        "interface Known { type?: 'submenu'; known?: string }\n\
+         interface Unknown { type?: any; unknown?: string }\n\
+         type Selected = Extract<Known | Unknown, { type?: 'submenu' }>;\n\
+         interface Props extends Selected { own?: boolean }\n\
+         export function Items(props: Props) { return null; }\n",
+    )]);
+
+    let output = extract(&options(&root, false));
+    assert_eq!(prop_types(&output, "Items"), [("own".into(), "boolean".into())]);
+    assert!(output.diagnostics.iter().any(|diag| {
+        diag.code == crate::types::DiagnosticCode::OpaqueType
+            && diag.message.contains("Cannot determine the object members selected by 'Extract'")
+    }));
+}
+
 fn demand(root: &Utf8Path, specifier: &str, name: &str) -> Demand {
     Demand { from: root.join("src/Badge.tsx"), specifier: specifier.into(), name: name.into() }
 }
