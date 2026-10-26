@@ -33,6 +33,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Allow-list is empty
+        run: python3 scripts/equivalence.py --require-empty-allow
       - id: rust
         run: echo "version=$(sed -n 's/^rust = "\(.*\)"/\1/p' .prototools)" >> "$GITHUB_OUTPUT"
       - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
