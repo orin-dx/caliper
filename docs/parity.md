@@ -83,7 +83,7 @@ The checker finds more components than Caliper on antd and Spectrum because, lik
 
 `parity.py setup` fetches each repo at its pinned commit and installs it with its own package manager (corepack shims at the versions each `packageManager` field pins). A corpus that fails to fetch or install is named on stderr with the tail of its install log (`.parity/logs/install-<name>.log`), as a GitHub annotation and in the job summary; the other corpora still install, and the command exits non-zero naming the failed ones.
 
-`--install-node-dir DIR` runs only the corpora's installs with the `node` in `DIR`. The weekly workflow uses it to install under Node 24, because Yarn 4.18, which Mantine and React Spectrum pin, crashes under the repository's Node 26 with `Dynamic require of "util" is not supported`. Everything else in the job keeps the toolchain's Node.
+`--install-node-dir DIR` runs only the corpora's installs with the `node` in `DIR`. The weekly workflow uses it to install under Node 24. That was not the fix for the `Dynamic require of "util" is not supported` that Mantine's and React Spectrum's installs hit under Yarn 4.18: the Node version is not the cause. Corepack keeps the package managers it downloads in `.parity/caches/corepack`, inside this repository, whose root `package.json` says `"type": "module"`. Node therefore loaded Yarn's CommonJS bundle `yarn.js` as an ES module, where `require` does not exist, on Node 24 and 26 alike. `parity.py setup` now writes a `{"type": "commonjs"}` `package.json` into the corepack home, so the nearest manifest above `yarn.js` is its own. Everything else in the job keeps the toolchain's Node.
 
 ## Equivalence with a base build
 
@@ -91,7 +91,7 @@ A change to how the resolver works (memos, interning, scheduling) should change 
 
 For each corpus and configuration it prints `identical`, or the differences by kind: `component-added`/`removed`, `prop-added`/`removed`, `prop-type-changed`, `prop-field-changed` (required, default, description, tags, parent, declarations), `notable-added`/`removed`/`changed` (the inherited attributes a component lists), `component-field-changed`, `diagnostic-added`/`removed`, `enum-changed`, `stat-changed`, with the first `--examples` of each. Any difference exits non-zero.
 
-A change that is meant to alter output lists exactly what it alters in `scripts/equivalence-allow.json`, as fnmatch patterns over the printed `<corpus>/<config> <kind> <item>`, for example `shadcn/* prop-added Button*.size`. The file is empty on `main`; an entry belongs to the pull request that changes the output and goes with it.
+A change that is meant to alter output lists exactly what it alters in `scripts/equivalence-allow.json`, as fnmatch patterns over the printed `<corpus>/<config> <kind> <item>`, for example `shadcn/* prop-added Button*.size`. The file is empty on `main`; an entry belongs to the pull request that changes the output and goes with it. Two checks hold that: `equivalence.py` refuses an entry that names no component, prop or diagnostic (`antd/* prop-added *` would hide every prop added to antd, for every pull request after it), and the `Allow-list empty` workflow, with the same step in the weekly parity workflow, fails when `main` has any entry (`equivalence.py --require-empty-allow`). A stacked pull request compares with its own base, so it lists only what it changes beyond its parent.
 
 Two further stages:
 
@@ -106,7 +106,7 @@ just equivalence origin/main --corpus mantine --corpus shadcn --lazy fixtures   
 just equivalence ./caliper-before --bin target/release/caliper-docgen --oracle   # or an executable
 ```
 
-`.github/workflows/equivalence.yml` runs it on pull requests that touch `crates/core/src/{resolver,extractor,types,pipeline}`: chakra and shadcn with dependencies loaded, against `main` (the two pnpm corpora: yarn 4.18, which mantine and spectrum pin, crashes under Node 26 with `Dynamic require of "util" is not supported`). It is non-blocking (`continue-on-error`) until it has run long enough to trust, and its time is not yet measured in CI; the corpus installs are the cost. The weekly parity workflow runs all five corpora and the lazy parity over their sources.
+`.github/workflows/equivalence.yml` runs it on pull requests that touch `crates/core/src/{resolver,extractor,types,pipeline}`: chakra and shadcn with dependencies loaded, against the pull request's own base (the two pnpm corpora; mantine and spectrum, which use yarn, can join now that their install works, see `--install-node-dir` above). It is non-blocking (`continue-on-error`) until it has run long enough to trust, and its time is not yet measured in CI; the corpus installs are the cost. The weekly parity workflow runs all five corpora and the lazy parity over their sources.
 
 ## Running it
 
