@@ -3,7 +3,9 @@
 
 Fetches each corpus at its pinned commit (shallow, sparse: the source directory plus the files above it, no
 dependencies installed), then for each one records lines of code, components, props, unresolved-type diagnostics, and
-the median wall time and peak RSS of `caliper-docgen extract --json` with a warm parse cache.
+the median wall time and peak RSS of `caliper-docgen extract --json` with a warm parse cache. Every figure is with
+dependency loading off (`--no-load-dependencies`, whatever the build's default), since nothing is installed; a build
+that has the flag is also timed in its default mode, as the "With dependencies loading" column.
 
 Optional comparisons:
   --base-bin BIN    a second build (main) timed interleaved with BIN on the same machine
@@ -11,12 +13,14 @@ Optional comparisons:
   --rdt-baseline F  read RDT times from a committed scorecard JSON instead
 
 --check exits 1 when a gate fails: BIN slower than 1.1x BASE on any corpus, BIN less than 10x faster than RDT on any
-corpus, or two copies of Mantine taking more than 2.2x as long as one (the scaling test).
+corpus, BIN with dependency loading more than 1.7x its time without it, or two copies of Mantine taking more than 2.2x
+as long as one (the scaling test).
 
 Usage: scripts/scorecard.py --bin BIN [--base-bin BIN] [--rdt | --rdt-baseline FILE] [--runs N] [--corpora DIR]
                             [--out FILE] [--check]
 """
 import argparse
+import functools
 import json
 import os
 import shutil
@@ -73,6 +77,10 @@ UNRESOLVED_CODES = {
 # (docs/performance.md).
 FIXED_MS, PER_KLOC_MS, PER_KPROP_MS = 6.4, 0.13, 3.8
 REGRESSION_LIMIT = 1.1
+# Dependency loading with nothing installed: every import fails after a directory walk and the index keeps only answers
+# found inside a package, so each run repeats them. Measured 1.15x to 1.2x on a laptop and up to about 1.5x on a CI
+# runner; the limit catches a real jump, not that cost.
+DEPS_LIMIT = 1.7
 RDT_MIN_SPEEDUP = 10.0
 SCALING_CORPUS = 'mantine'
 SCALING_LIMIT = 2.2
@@ -151,9 +159,25 @@ def measure(cmd, stdout=subprocess.DEVNULL):
     return elapsed, rss
 
 
+@functools.lru_cache(maxsize=None)
+def has_deps_flag(binary):
+    """Whether `binary` knows `--no-load-dependencies` (builds from before dependency loading became the default don't)."""
+    help_text = subprocess.run([binary, 'extract', '--help'], capture_output=True, text=True).stdout
+    return '--no-load-dependencies' in help_text
+
+
+def extract_command(binary, src, cache, deps=False):
+    """`extract --json` over `src`. The corpora are fetched without their dependencies, so the scorecard measures with
+    dependency loading off, whatever the binary's default; a build from before the flag existed is already off."""
+    command = [binary, 'extract', '--json', '-s', src, '--cache-dir', cache]
+    if not deps and has_deps_flag(binary):
+        command.append('--no-load-dependencies')
+    return command
+
+
 def counts(binary, src, cache):
     with tempfile.TemporaryFile() as out:
-        measure([binary, 'extract', '--json', '-s', src, '--cache-dir', cache], stdout=out)
+        measure(extract_command(binary, src, cache), stdout=out)
         out.seek(0)
         output = json.load(out)
     components = output['components'].values()
@@ -168,20 +192,25 @@ def counts(binary, src, cache):
     }
 
 
-def timed_run(binary, src, cache):
+def timed_run(binary, src, cache, deps=False):
     """Wall ms, peak RSS MB, and the extraction's own `durationMs` of one run."""
     with tempfile.TemporaryFile() as out:
-        wall, rss = measure([binary, 'extract', '--json', '-s', src, '--cache-dir', cache], stdout=out)
+        wall, rss = measure(extract_command(binary, src, cache, deps), stdout=out)
         out.seek(0)
         return wall, rss, json.load(out)['stats']['durationMs']
 
 
-def time_binaries(binaries, src, caches, runs):
-    """Medians and max peak RSS per binary, runs interleaved so machine drift hits each one alike."""
-    samples = {name: [] for name in binaries}
+def time_binaries(binaries, src, caches, runs, deps=()):
+    """Medians and max peak RSS per binary, runs interleaved so machine drift hits each one alike. Each name in `deps`
+    is timed again as `<name>-deps`, with dependency loading on."""
+    variants = {name: (binary, False) for name, binary in binaries.items()}
+    variants.update({f'{name}-deps': (binaries[name], True) for name in deps})
+    for name in deps:
+        caches[f'{name}-deps'] = caches[name] + '-deps'
+    samples = {name: [] for name in variants}
     for _ in range(runs):
-        for name, binary in binaries.items():
-            samples[name].append(timed_run(binary, src, caches[name]))
+        for name, (binary, with_deps) in variants.items():
+            samples[name].append(timed_run(binary, src, caches[name], with_deps))
     return {
         name: {
             'ms': round(statistics.median(wall for wall, _, _ in runs_), 1),
@@ -232,6 +261,11 @@ def gates(rows, scaled):
             failures.append(
                 f"{row['name']}: {row['ms']} ms is more than {REGRESSION_LIMIT}x main's {row['base']['ms']} ms"
             )
+        if 'deps' in row and row['deps']['ms'] > DEPS_LIMIT * row['ms']:
+            failures.append(
+                f"{row['name']}: dependency loading takes {row['deps']['ms']} ms, more than {DEPS_LIMIT}x the "
+                f"{row['ms']} ms without it"
+            )
         if 'rdt' in row and row['rdt']['ms'] < RDT_MIN_SPEEDUP * row['ms']:
             failures.append(
                 f"{row['name']}: {row['rdt']['ms'] / row['ms']:.1f}x faster than RDT, below {RDT_MIN_SPEEDUP:.0f}x"
@@ -242,16 +276,17 @@ def gates(rows, scaled):
 def table(rows):
     header = (
         '| Corpus | kLOC | Components | Props | Unresolved | Wall ms | Peak RSS MB | Extract ms | Model ms | vs main '
-        '| vs RDT |'
+        '| With dependencies loading | vs RDT |'
     )
-    lines = [header, '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
+    lines = [header, '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
     for row in rows:
         base = f"{row['ms'] / row['base']['ms']:.2f}x" if 'base' in row else ''
+        deps = f"{row['deps']['ms']} ms ({row['deps']['ms'] / row['ms']:.2f}x)" if 'deps' in row else ''
         rdt = f"{row['rdt']['ms'] / row['ms']:.0f}x faster" if 'rdt' in row else ''
         lines.append(
             f"| {row['name']} | {row['loc'] / 1000:.1f} | {row['components']:,} | {row['props']:,} | "
             f"{row['unresolved']:,} | {row['ms']} | {row['rss_mb']} | {row['extract_ms']} | {predicted_ms(row):.0f} | "
-            f'{base} | {rdt} |'
+            f'{base} | {deps} | {rdt} |'
         )
     return '\n'.join(lines)
 
@@ -297,8 +332,11 @@ def main():
             }
             if 'base' in binaries:
                 row['base_counts'] = counts(binaries['base'], src, caches['base'])
-            timed = time_binaries(binaries, src, caches, args.runs)
+            deps = ('head',) if has_deps_flag(binaries['head']) else ()
+            timed = time_binaries(binaries, src, caches, args.runs, deps)
             row.update(timed.pop('head'))
+            if 'head-deps' in timed:
+                row['deps'] = timed['head-deps']
             if 'base' in timed:
                 row['base'] = timed['base']
             if args.rdt:
