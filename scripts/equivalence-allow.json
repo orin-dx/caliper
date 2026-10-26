@@ -1,3 +1,12 @@
 {
-  "allow": []
+  "allow": [
+    "antd/* component-field-changed *.composes",
+    "antd/* diagnostic-removed info INDEXED_ACCESS_OPAQUE*",
+    "antd/* prop-added *",
+    "antd/* prop-type-changed *.aria-label",
+    "mantine/* diagnostic-removed info INDEXED_ACCESS_OPAQUE*",
+    "mantine/* prop-type-changed TextareaAutosize.style",
+    "spectrum/* component-field-changed *.composes",
+    "spectrum/* prop-added *.children"
+  ]
 }

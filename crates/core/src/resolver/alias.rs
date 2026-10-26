@@ -63,6 +63,10 @@ pub(super) fn resolve_type_alias_chain(
                 chain.props.clear();
                 return chain;
             };
+            // React's declarations are merged only for `full` attributes; the base was then a `composes` entry with no props.
+            if chain.props.is_empty() {
+                chain.props = react_picked_props(base, &picked, file_path, mapping, ctx, state, depth);
+            }
             let picked_set: FxHashSet<&str> = picked.iter().map(String::as_str).collect();
             chain.props.retain(|p| picked_set.contains(p.name.as_str()));
             chain
@@ -117,6 +121,66 @@ pub(super) fn resolve_type_alias_chain(
             ResolvedChain::give_up(display, Some(diag), state)
         }
     }
+}
+
+/// `Pick<React.AriaAttributes, 'aria-label'>`: each picked key read from React's interface, as `Pick<T, K>` reads
+/// `T[K]`, with the optionality and documentation the declaration gives it. Empty when the base is not one of React's
+/// interfaces. A key React's declaration does not have is reported.
+#[allow(clippy::too_many_arguments)]
+fn react_picked_props(
+    base: &CollectedType,
+    picked: &[String],
+    file_path: &Utf8Path,
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> Vec<Arc<ParsedProp>> {
+    let (mut base, mut file) = (base, file_path);
+    while let CollectedType::AtFile { file: inner_file, inner } = base {
+        (base, file) = (inner, inner_file.as_path());
+    }
+    let CollectedType::Named { name, args } = base else { return Vec::new() };
+    // An alias of React's (`ComponentProps<typeof X>`) resolves as a chain of its own, not as an interface to read.
+    if !super::may_be_react_builtin(name, file, ctx) || !super::evaluate::is_react_interface(name, file, ctx) {
+        return Vec::new();
+    }
+    let mut props = Vec::new();
+    for key in picked {
+        let Some(declared) = super::evaluate::react_declared_prop(name, args, key, file, ctx) else {
+            state.diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Info,
+                message: format!("'{key}' is picked from '{name}' but React's declaration of it was not found"),
+                file: Some(file.to_string()),
+                line: None,
+                column: None,
+                help: None,
+                code: DiagnosticCode::OpaqueType,
+                affects: Vec::new(),
+            });
+            continue;
+        };
+        let prop_type = if state.keys_only {
+            PropType::Unknown
+        } else {
+            resolve_collected_type(&declared.ty, &declared.file, ctx, state, depth + 1)
+        };
+        let default_value = state
+            .param_default(mapping, key)
+            .map(|code| DefaultValue { value: code.value.clone(), computed: code.computed });
+        let parent = PropParent { name: declared.declared_by, file_name: declared.file.to_string() };
+        props.push(ctx.share(ParsedProp::new(
+            key.clone(),
+            prop_type,
+            declared.required,
+            default_value,
+            declared.description,
+            Default::default(),
+            Some(parent.clone()),
+            vec![parent],
+        )));
+    }
+    props
 }
 
 /// Resolve a `CollectedType` as a props chain (for base types in aliases).
