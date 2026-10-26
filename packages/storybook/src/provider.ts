@@ -45,6 +45,13 @@ function tagLists(tags: Record<string, string>): Record<string, string[]> | unde
   return entries.length > 0 ? Object.fromEntries(entries.map(([tag, value]) => [tag, [value]])) : undefined
 }
 
+/** Says there is no component `name` in `path`, and which ones the file does have. */
+function noComponent(session: DocgenSession, name: string, path: string): string {
+  const names = session.namesIn(path)
+  const choice = names.length > 0 ? `; its components are ${names.join(', ')}` : ''
+  return `caliper-docgen found no component ${name} in ${path}${choice}`
+}
+
 export function createDocgenProvider(
   options: CaliperStorybookOptions = {},
   binding?: SessionBinding,
@@ -62,6 +69,7 @@ export function createDocgenProvider(
     collapseInheritedProps: options.collapseInheritedProps ?? 'none',
     lazy: options.lazy,
     warmUp: options.warmUp,
+    fillAfter: options.fillAfter,
   }
   // The native binding loads on the first story request, not when Storybook starts the worker.
   let sessionPromise: Promise<DocgenSession> | undefined
@@ -92,9 +100,7 @@ export function createDocgenProvider(
       if (!path) throw new Error(`no file for the import of ${exportName}`)
       const key = await session.resolveExport(path, exportName, localName)
       if (key) return { key, path }
-      const names = session.namesIn(path)
-      const choice = names.length > 0 ? `; its components are ${names.join(', ')}` : ''
-      throw new Error(`caliper-docgen found no component ${exportName} in ${path}${choice}`)
+      throw new Error(noComponent(session, exportName, path))
     }
     // Storybook reads `Namespace.Member` only for `import * as Namespace`; `Select.Option` of a named import is common.
     const member = memberComponent(session, target, storyPath)
@@ -148,7 +154,7 @@ export function createDocgenProvider(
       reportFallback(key, reason)
       throw new Error(`${key}'s props may be incomplete: ${reason}`)
     }
-    if (!doc) throw new Error(`${key} left the session`)
+    if (!doc) throw new Error(noComponent(session, key, path))
     return { key, path, doc }
   }
 

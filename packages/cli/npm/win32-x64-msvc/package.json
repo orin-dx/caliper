@@ -1,6 +1,6 @@
 {
   "name": "caliper-docgen-win32-x64-msvc",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "caliper-docgen CLI binary for Windows x64 — not meant to be installed directly, pulled in as an optionalDependency of caliper-docgen",
   "keywords": [
     "react",

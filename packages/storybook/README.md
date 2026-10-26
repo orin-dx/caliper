@@ -38,6 +38,9 @@ Before answering, the provider compares every source file's mtime and size with 
 | `cache` | `true` | Read and write the on-disk caches under `node_modules/.cache`. `false` reads and writes nothing there and parses everything every run; the output is the same. |
 | `loadDependencies` | `true` | Read the type declarations your props reference from installed packages, so library-typed props resolve instead of degrading. `false` skips the work. |
 | `collapseInheritedProps` | `none` | `none` lists every inherited prop. `dependencies` or `all` list inherited sources of more than 30 props as one layer. |
+| `lazy` | `true` | Resolve a component when a story asks for it. `false` resolves every component at start; the answers are the same. |
+| `fillAfter` | `0` | With `lazy`, once this many distinct components were asked for, resolve the rest in the background in one parallel pass. It lowers the median story latency of a project read end to end (Spectrum's 50 stories: 19 ms to 5 ms) but not the total time, and raises peak memory by 170 to 420 MB, so it is off. `16` is a reasonable value to try. |
+| `warmUp` | `false` | With `lazy`, resolve a few components in the background after start. Off: it did not make the first story faster in measurement. |
 | `fallback` | `degraded` | `degraded`: a component whose extraction reported a warning or error goes to React's docgen. `never`: always answer. |
 
 A story whose component caliper-docgen can't find goes to React's docgen, which stays registered underneath. Each component handed on is logged once as a warning with the reason (the extraction diagnostics that affect it).

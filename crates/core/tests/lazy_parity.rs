@@ -106,6 +106,17 @@ fn assert_parity(options: &PipelineOptions, label: &str) {
         };
         assert_same(&format!("{label}: {key}, asked one at a time in reverse"), sequential.component(key), expected);
     }
+
+    let forward = WatchSession::lazy(options.clone());
+    drop(forward.initialize());
+    for key in &keys {
+        let expected = ComponentAnswer {
+            key: key.clone(),
+            entry: batch.components[key].clone(),
+            diagnostics: batch_diagnostics(&batch, key),
+        };
+        assert_same(&format!("{label}: {key}, asked one at a time in order"), forward.component(key), expected);
+    }
 }
 
 fn fixture_options(dir: &Utf8PathBuf, cache: &tempfile::TempDir) -> PipelineOptions {

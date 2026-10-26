@@ -45,8 +45,10 @@ const SESSION_VARIANTS = ['caliper', 'caliper-nodeps', 'caliper-curated']
 Object.assign(VARIANTS, {
   'caliper-eager': { loadDependencies: true, collapseInheritedProps: 'none', lazy: false },
   'caliper-nodeps-eager': { loadDependencies: false, collapseInheritedProps: 'none', lazy: false },
-  // Lazy without the background warm-up of the dependencies every story reaches.
-  'caliper-cold': { loadDependencies: true, collapseInheritedProps: 'none', warmUp: false },
+  // Lazy that resolves the rest in one background pass after 16 components were asked for.
+  'caliper-fill': { loadDependencies: true, collapseInheritedProps: 'none', fillAfter: 16 },
+  // The lazy session as it shipped in #172: warm-up on, no fill.
+  'caliper-shipped': { loadDependencies: true, collapseInheritedProps: 'none', warmUp: true, fillAfter: 0 },
 })
 
 function walk(dir, found = []) {
@@ -292,8 +294,11 @@ function sameAnswers(runs) {
   if (!eager) return undefined
   const differing = {}
   for (const run of runs.filter((r) => r.variant !== 'caliper-eager' && r.variant.startsWith('caliper') && !r.failed)) {
+    // A hand-off is the same hand-off whatever words say why, so only the reason's kind is compared.
+    const kind = (story) =>
+      story && story.status === 'fallback' ? { ...story, reason: reasonBucket(story.reason) } : story
     differing[run.variant] = Object.keys(eager.stories).filter(
-      (file) => JSON.stringify(run.stories[file]) !== JSON.stringify(eager.stories[file]),
+      (file) => JSON.stringify(kind(run.stories[file])) !== JSON.stringify(kind(eager.stories[file])),
     )
   }
   return differing
@@ -357,7 +362,14 @@ function compareProps(ours, theirs, into, story) {
     const where = basename(story)
     if (a.kind !== b.kind) {
       into.kindDiffers++
-      into.details.kind.push({ story: where, prop: name, ours: a.kind, theirs: b.kind, oursType: a.type, theirsType: b.type })
+      into.details.kind.push({
+        story: where,
+        prop: name,
+        ours: a.kind,
+        theirs: b.kind,
+        oursType: a.type,
+        theirsType: b.type,
+      })
     }
     if (a.options && !b.options) into.optionsOnlyOurs++
     else if (!a.options && b.options) into.optionsOnlyTheirs++
@@ -368,8 +380,7 @@ function compareProps(ours, theirs, into, story) {
     else if (!a.default && b.default) {
       into.defaultOnlyTheirs++
       into.details.defaults.push({ story: where, prop: name, theirs: b.default })
-    }
-    else if (a.default && b.default && a.default.replaceAll(/['"]/g, '') !== b.default.replaceAll(/['"]/g, ''))
+    } else if (a.default && b.default && a.default.replaceAll(/['"]/g, '') !== b.default.replaceAll(/['"]/g, ''))
       into.defaultDiffers++
     if (a.described && !b.described) into.describedOnlyOurs++
     else if (!a.described && b.described) into.describedOnlyTheirs++
