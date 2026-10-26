@@ -381,17 +381,26 @@ impl<'src> SourceDataCollector<'src> {
     ) -> Option<ComponentMapping> {
         let TSType::TSFunctionType(function) = &decl.type_annotation.as_ref()?.type_annotation else { return None };
         let [parameter] = function.params.items.as_slice() else { return None };
+        let return_type = self.ts_type_to_collected(&function.return_type.type_annotation);
+        let is_element = |name: &str| {
+            matches!(name, "React.ReactElement" | "React.JSX.Element" | "JSX.Element")
+                || self.data.imports.iter().any(|binding| {
+                    binding.local_name == name
+                        && binding.exported_name == "ReactElement"
+                        && binding.specifier == "react"
+                })
+        };
         let returns_element = |ty: &crate::types::CollectedType| match ty {
-            crate::types::CollectedType::Named { name, .. } => {
-                matches!(name.as_str(), "React.ReactElement" | "React.JSX.Element" | "JSX.Element")
-            }
+            crate::types::CollectedType::Named { name, .. } => is_element(name),
             crate::types::CollectedType::Union(members) => members.iter().any(|member| {
-                matches!(member, crate::types::CollectedType::Named { name, .. }
-                    if matches!(name.as_str(), "React.ReactElement" | "React.JSX.Element" | "JSX.Element"))
+                if let crate::types::CollectedType::Named { name, .. } = member {
+                    is_element(name)
+                } else {
+                    false
+                }
             }),
             _ => false,
         };
-        let return_type = self.ts_type_to_collected(&function.return_type.type_annotation);
         if !returns_element(&return_type) {
             return None;
         }
