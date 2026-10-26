@@ -12,7 +12,10 @@
 mod component;
 mod convert;
 mod locate;
+mod on_demand;
 mod rpc;
+
+pub use on_demand::{OnDemand, OnDemandConfig};
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,7 +24,7 @@ use caliper_docgen_core::types::semantic::{PropInterner, SemanticComponent, Sema
 use caliper_docgen_core::types::ExtractionOutput;
 use caliper_docgen_tsc_client::{Supervisor, SupervisorConfig};
 use camino::{Utf8Path, Utf8PathBuf};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
@@ -38,15 +41,7 @@ pub const PINNED_VERSIONS: &[&str] = &["7.1.0-beta"];
 const FILES_IN_FLIGHT: usize = 16;
 
 /// A component the structural pass found.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Target {
-    pub file_path: Utf8PathBuf,
-    pub display_name: String,
-    pub exported: bool,
-    /// Props the structural pass already has a description for. The checker is not asked for those: it is 65% of
-    /// the requests on Mantine, and the merge keeps the structural description when the checker's is empty.
-    pub described: FxHashSet<String>,
-}
+pub use caliper_docgen_core::types::semantic::SemanticTarget as Target;
 
 /// The components of `output`, in output order.
 pub fn targets_of(output: &ExtractionOutput) -> Vec<Target> {
@@ -82,6 +77,9 @@ pub struct SemanticRequest {
     pub record_to: Option<Utf8PathBuf>,
     /// Environment for the `tsc` process; the tests use it to pick a replay scenario.
     pub extra_env: Vec<(String, String)>,
+    /// Compiler options of a `tsc` session that is already initialized. A warm checker sets this once so a request
+    /// only builds its program.
+    pub(crate) prepared_options: Option<serde_json::Value>,
 }
 
 impl SemanticRequest {
@@ -95,6 +93,7 @@ impl SemanticRequest {
             expected_versions: PINNED_VERSIONS,
             record_to: None,
             extra_env: Vec::new(),
+            prepared_options: None,
         }
     }
 }
@@ -109,7 +108,9 @@ pub fn resolve(request: SemanticRequest) -> SemanticOutcome {
     runtime.block_on(run(request))
 }
 
-async fn run(request: SemanticRequest) -> SemanticOutcome {
+/// The exported targets by file, in first-seen order, and an outcome that already holds a fallback for each target
+/// the checker cannot be asked about.
+fn group_by_file(request: &SemanticRequest) -> (SemanticOutcome, FxHashMap<&Utf8Path, Vec<&Target>>, Vec<&Utf8Path>) {
     let mut outcome = SemanticOutcome::default();
     let mut by_file: FxHashMap<&Utf8Path, Vec<&Target>> = FxHashMap::default();
     let mut order: Vec<&Utf8Path> = Vec::new();
@@ -124,27 +125,42 @@ async fn run(request: SemanticRequest) -> SemanticOutcome {
         }
         group.push(target);
     }
-    if order.is_empty() {
-        return outcome;
-    }
+    (outcome, by_file, order)
+}
 
-    let tsc_path = match locate::find_tsc(&request.project_root, request.tsc_path.as_deref()) {
-        Ok(path) => path,
-        Err(reason) => return SemanticOutcome::unavailable(reason),
-    };
+fn supervisor_config(request: &SemanticRequest) -> Result<SupervisorConfig, String> {
+    let tsc_path = locate::find_tsc(&request.project_root, request.tsc_path.as_deref())?;
     let mut config = SupervisorConfig::new(tsc_path, request.project_root.clone(), request.expected_versions);
     config.handshake_timeout = request.request_timeout;
     config.extra_env.clone_from(&request.extra_env);
+    Ok(config)
+}
+
+async fn run(request: SemanticRequest) -> SemanticOutcome {
+    if !request.targets.iter().any(|target| target.exported) {
+        return group_by_file(&request).0;
+    }
+    let config = match supervisor_config(&request) {
+        Ok(config) => config,
+        Err(reason) => return SemanticOutcome::unavailable(reason),
+    };
     let supervisor = match Supervisor::spawn(config).await {
         Ok(supervisor) => supervisor,
         Err(error) => return SemanticOutcome::unavailable(error.to_string()),
     };
-
-    let files: Vec<String> = order.iter().map(|file| file.to_string()).collect();
-    let session = session(&supervisor, &request, &files, &by_file, &order).await;
+    let outcome = answer_with(&supervisor, &request).await;
     supervisor.shutdown().await.ok();
+    outcome
+}
 
-    match session {
+/// Answers the request's targets with a checker that is already running: one program rooted at their files.
+async fn answer_with(supervisor: &Supervisor, request: &SemanticRequest) -> SemanticOutcome {
+    let (mut outcome, by_file, order) = group_by_file(request);
+    if order.is_empty() {
+        return outcome;
+    }
+    let files: Vec<String> = order.iter().map(|file| file.to_string()).collect();
+    match session(supervisor, request, &files, &by_file, &order).await {
         Ok(mut answered) => {
             outcome.components.append(&mut answered.components);
             outcome.fallbacks.append(&mut answered.fallbacks);
@@ -162,16 +178,23 @@ async fn session(
     order: &[&Utf8Path],
 ) -> Result<SemanticOutcome, CallError> {
     let started = std::time::Instant::now();
-    let rpc = Arc::new(
-        Rpc::open(
-            supervisor.client(),
-            request.request_timeout,
-            request.tsconfig.as_ref().map(|path| path.as_str()),
-            files,
-            request.record_to.is_some(),
-        )
-        .await?,
-    );
+    let opened = match &request.prepared_options {
+        Some(options) => {
+            Rpc::open_with(supervisor.client(), request.request_timeout, options, files, request.record_to.is_some())
+                .await
+        }
+        None => {
+            Rpc::open(
+                supervisor.client(),
+                request.request_timeout,
+                request.tsconfig.as_ref().map(|path| path.as_str()),
+                files,
+                request.record_to.is_some(),
+            )
+            .await
+        }
+    };
+    let rpc = Arc::new(opened?);
     let opened = started.elapsed();
     let converter = Converter::new(rpc.clone());
     let limit = Arc::new(Semaphore::new(FILES_IN_FLIGHT));

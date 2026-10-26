@@ -119,6 +119,40 @@ impl Rpc {
         root_files: &[String],
         record: bool,
     ) -> Result<Rpc, CallError> {
+        let options = Rpc::prepare(&client, deadline, tsconfig).await?;
+        Rpc::open_with(client, deadline, &options, root_files, record).await
+    }
+
+    /// Initializes the `tsc` session and reads the compiler options, once per process. The beta panics on
+    /// string-valued enum options such as `target: "es2022"`, so options come from `parseConfigFile`, which yields
+    /// numeric ones.
+    pub(crate) async fn prepare(client: &Client, deadline: Duration, tsconfig: Option<&str>) -> Result<Value, CallError> {
+        let rpc = Rpc {
+            client: client.clone(),
+            deadline,
+            snapshot: 0,
+            project: String::new(),
+            recording: None,
+            calls: Mutex::new(BTreeMap::new()),
+        };
+        rpc.call("initialize", Value::Null).await?;
+        Ok(match tsconfig {
+            Some(file) => {
+                let parsed = rpc.call("parseConfigFile", json!({ "file": file })).await?;
+                parsed.get("options").cloned().unwrap_or_else(default_options)
+            }
+            None => default_options(),
+        })
+    }
+
+    /// A snapshot over `root_files` in a session [`Rpc::prepare`] already initialized.
+    pub(crate) async fn open_with(
+        client: Client,
+        deadline: Duration,
+        options: &Value,
+        root_files: &[String],
+        record: bool,
+    ) -> Result<Rpc, CallError> {
         let mut rpc = Rpc {
             client,
             deadline,
@@ -126,16 +160,6 @@ impl Rpc {
             project: String::new(),
             recording: record.then(|| Mutex::new(Vec::new())),
             calls: Mutex::new(BTreeMap::new()),
-        };
-        rpc.call("initialize", Value::Null).await?;
-        // The beta panics on string-valued enum options such as `target: "es2022"`, so options come from
-        // `parseConfigFile`, which yields numeric ones.
-        let options = match tsconfig {
-            Some(file) => {
-                let parsed = rpc.call("parseConfigFile", json!({ "file": file })).await?;
-                parsed.get("options").cloned().unwrap_or_else(default_options)
-            }
-            None => default_options(),
         };
         let created = rpc
             .call(

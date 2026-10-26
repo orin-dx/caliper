@@ -18,7 +18,7 @@ path = "tests/bin/replay_tsc.rs"
 [dependencies]
 caliper-docgen-core       = { path = "../core", version = "0.6.0" }
 caliper-docgen-tsc-client = { path = "../tsc-client", version = "0.1.0" }
-tokio                     = { workspace = true, features = ["time", "rt"] }
+tokio                     = { workspace = true, features = ["time", "rt", "sync"] }
 serde.workspace           = true
 serde_json.workspace      = true
 camino.workspace          = true
