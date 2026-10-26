@@ -42,6 +42,12 @@ Per corpus:
 
 RDT takes 1 to 2 s per corpus here, so CI times it live instead of reading a committed baseline. `--rdt-baseline FILE` reads RDT times from an earlier scorecard JSON for machines without Node.
 
+### On pull requests
+
+The scorecard also runs on a pull request that touches `crates/core/src/{resolver,extractor,types,pipeline,dependency_types}` or the scorecard itself (`.github/workflows/scorecard.yml`). It builds the pull request and its base, passed through `github.base_ref` so a stacked pull request compares with its parent, and scores mantine and chakra only (`scorecard.py --corpus`), which keeps the job short; the scaling gate runs because mantine is one of them. It is `continue-on-error` and the result is in the job summary. It exists because a batch of 20 resolver pull requests merged on 2026-10-26 with Mantine 38% (109.9 ms against 79.9) and Chakra 47% (75.0 against 51.1) slower, found only by the run after the merge, and unattributable to one of them.
+
+Promotion: the job becomes blocking after ten consecutive green runs on pull requests that target `main`. A run that fails for the runner's noise rather than a regression resets nothing but must be named in the pull request that promotes it.
+
 ## Size model
 
 Extraction time fits t ≈ 6.4 ms + 0.13 ms/kLOC + 3.8 ms/kprop (props as counted above). It is a sizing guide, reported as "Model ms", not a gate: a fixed cost that varies by machine dominates small corpora, so per-corpus residuals vary too much to gate on. On the run below the model is within 2× of the measured extract time on every corpus (0.45× for mantine to 1.6× for chakra).
