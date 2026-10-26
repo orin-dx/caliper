@@ -297,7 +297,17 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 if node.kind.is_const() {
                     self.record_declared_value_type(declarator);
                 }
-                if let Some(name) = self.extract_pascal_name(declarator) {
+                let name = self.extract_pascal_name(declarator).or_else(|| {
+                    let path = self.file_path.as_str();
+                    if ![".d.ts", ".d.mts", ".d.cts"].iter().any(|suffix| path.ends_with(suffix)) {
+                        return None;
+                    }
+                    match &declarator.id {
+                        BindingPattern::BindingIdentifier(id) => Some(id.name.as_str().to_owned()),
+                        _ => None,
+                    }
+                });
+                if let Some(name) = name {
                     if let Some(mapping) = self
                         .try_forward_ref_exotic_decl(declarator, &name)
                         .or_else(|| self.try_declared_callable_component(declarator, &name))
