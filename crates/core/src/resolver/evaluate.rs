@@ -250,6 +250,163 @@ pub(super) fn union_members(arg: &CollectedType, file: &Utf8Path, ctx: &Resoluti
     }
 }
 
+/// Expand the object union read by `Extract<Items[number], { type?: "submenu" }>` only when every step is known.
+/// This is separate from `union_members`: a failed indexed read must not become a plausible union member.
+fn object_union_members(
+    arg: &CollectedType,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+    depth: u8,
+) -> Option<Vec<Located>> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    match arg {
+        CollectedType::AtFile { file, inner } => object_union_members(inner, file, ctx, depth + 1),
+        CollectedType::Named { name, args }
+            if name == "NonNullable" && args.len() == 1 && super::may_be_ts_lib_type(name, file, ctx) =>
+        {
+            object_union_members(&args[0], file, ctx, depth + 1).map(|members| {
+                members
+                    .into_iter()
+                    .filter(|(ty, _)| !matches!(ty, CollectedType::Null | CollectedType::Undefined))
+                    .collect()
+            })
+        }
+        CollectedType::Named { name, args } => {
+            let (canonical_file, canonical_name) = canonical(name, file, ctx);
+            if lookup_interface_including_ambient(ctx, canonical_file.as_str(), &canonical_name).is_some() {
+                return Some(vec![(arg.clone(), file.to_owned())]);
+            }
+            let (body, body_file) = alias_body(name, args, file, ctx)?;
+            object_union_members(&body, &body_file, ctx, depth + 1)
+        }
+        CollectedType::Union(members) => {
+            let mut expanded = Vec::new();
+            for member in members {
+                expanded.extend(object_union_members(member, file, ctx, depth + 1)?);
+            }
+            Some(expanded)
+        }
+        CollectedType::IndexedAccess { obj, key } if matches!(key.as_ref(), CollectedType::Number) => {
+            let array = array_element(obj, file, ctx, depth + 1)?;
+            object_union_members(&array.0, &array.1, ctx, depth + 1)
+        }
+        CollectedType::IndexedAccess { .. } => {
+            let (member, member_file) = reduce(arg, file, ctx, depth + 1)?;
+            object_union_members(&member, &member_file, ctx, depth + 1)
+        }
+        CollectedType::Null | CollectedType::Undefined | CollectedType::Object(_) => {
+            Some(vec![(arg.clone(), file.to_owned())])
+        }
+        CollectedType::Intersection(_)
+        | CollectedType::Array(_)
+        | CollectedType::Tuple(_)
+        | CollectedType::TypeOf(_)
+        | CollectedType::Conditional { .. }
+        | CollectedType::Mapped { .. }
+        | CollectedType::KeyOf(_)
+        | CollectedType::Raw(_)
+        | CollectedType::String
+        | CollectedType::Number
+        | CollectedType::Boolean
+        | CollectedType::Any
+        | CollectedType::Never
+        | CollectedType::Unknown
+        | CollectedType::Void
+        | CollectedType::BigInt
+        | CollectedType::Symbol
+        | CollectedType::StringLiteral(_)
+        | CollectedType::NumberLiteral(_)
+        | CollectedType::BoolLiteral(_)
+        | CollectedType::TemplateLiteral(_)
+        | CollectedType::Function { .. } => Some(vec![(arg.clone(), file.to_owned())]),
+    }
+}
+
+fn array_element(arg: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> Option<Located> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    match arg {
+        CollectedType::AtFile { file, inner } => array_element(inner, file, ctx, depth + 1),
+        CollectedType::Named { name, args }
+            if name == "NonNullable" && args.len() == 1 && super::may_be_ts_lib_type(name, file, ctx) =>
+        {
+            array_element(&args[0], file, ctx, depth + 1)
+        }
+        CollectedType::Named { name, args } => {
+            let (body, body_file) = alias_body(name, args, file, ctx)?;
+            array_element(&body, &body_file, ctx, depth + 1)
+        }
+        CollectedType::IndexedAccess { .. } => {
+            let (member, member_file) = reduce(arg, file, ctx, depth + 1)?;
+            array_element(&member, &member_file, ctx, depth + 1)
+        }
+        CollectedType::Union(members) => {
+            let mut arrays =
+                members.iter().filter(|member| !matches!(member, CollectedType::Null | CollectedType::Undefined));
+            let one = arrays.next()?;
+            if arrays.next().is_some() {
+                return None;
+            }
+            array_element(one, file, ctx, depth + 1)
+        }
+        CollectedType::Array(inner) => Some((inner.as_ref().clone(), file.to_owned())),
+        CollectedType::Object(_)
+        | CollectedType::Intersection(_)
+        | CollectedType::Tuple(_)
+        | CollectedType::TypeOf(_)
+        | CollectedType::Conditional { .. }
+        | CollectedType::Mapped { .. }
+        | CollectedType::KeyOf(_)
+        | CollectedType::Raw(_)
+        | CollectedType::String
+        | CollectedType::Number
+        | CollectedType::Boolean
+        | CollectedType::Null
+        | CollectedType::Undefined
+        | CollectedType::Any
+        | CollectedType::Never
+        | CollectedType::Unknown
+        | CollectedType::Void
+        | CollectedType::BigInt
+        | CollectedType::Symbol
+        | CollectedType::StringLiteral(_)
+        | CollectedType::NumberLiteral(_)
+        | CollectedType::BoolLiteral(_)
+        | CollectedType::TemplateLiteral(_)
+        | CollectedType::Function { .. } => None,
+    }
+}
+
+/// The selected members of a discriminated object union, or `None` if the filter cannot be decided.
+pub(super) fn extracted_object_members(
+    source: &CollectedType,
+    filter: &CollectedType,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+) -> Option<Vec<Located>> {
+    let CollectedType::Object(fields) = filter else { return None };
+    let [field] = fields.as_slice() else { return None };
+    if field.required {
+        return None;
+    }
+    let CollectedType::StringLiteral(wanted) = &field.collected_type else { return None };
+    let mut selected = Vec::new();
+    for (member_type, member_file) in object_union_members(source, file, ctx, 0)? {
+        if matches!(member_type, CollectedType::Null | CollectedType::Undefined) {
+            continue;
+        }
+        let (actual, actual_file) = member(&member_type, &field.name, &member_file, ctx, 0)?;
+        let values = atoms(&actual, &actual_file, ctx, 0)?;
+        if !values.is_empty() && values.iter().all(|value| value == &Atom::Str(wanted.to_string())) {
+            selected.push((member_type, member_file));
+        }
+    }
+    Some(selected)
+}
+
 /// Whether `obj` is an object type, through aliases, whose fields are all known and none is `key`.
 fn lacks_member(obj: &CollectedType, key: &str, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> bool {
     if depth > MAX_DEPTH {
