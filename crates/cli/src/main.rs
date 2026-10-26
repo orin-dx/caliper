@@ -13,7 +13,6 @@ use commands::check::cmd_check;
 use commands::completions::cmd_completions;
 use commands::extract::cmd_extract;
 use commands::inspect::cmd_inspect;
-use commands::lsp::cmd_lsp;
 use commands::schema::cmd_schema;
 use commands::watch::cmd_watch;
 
@@ -61,9 +60,6 @@ enum Command {
 
     /// Export JSON Schema for docgen output format
     Schema,
-
-    /// Start LSP language server for IDE component prop hovers
-    Lsp,
 
     /// Generate shell completions
     Completions(CompletionsArgs),
@@ -264,10 +260,6 @@ fn main() -> Result<()> {
             cmd_schema()?;
             0
         }
-        Command::Lsp => {
-            cmd_lsp()?;
-            0
-        }
         Command::Completions(args) => {
             cmd_completions(args)?;
             0
@@ -293,11 +285,7 @@ fn log_filter(verbose: u8) -> Option<&'static str> {
 fn init_tracing(verbose: u8) {
     let Some(filter) = log_filter(verbose) else { return };
     use tracing_subscriber::{fmt, EnvFilter};
-    // stderr, never stdout: `lsp` reserves stdout exclusively for
-    // Content-Length-framed protocol messages — any other byte written there
-    // (a tracing::error!/warn! call firing mid-session) corrupts the
-    // transport and desyncs a real editor's LSP client. stderr is safe for
-    // every command, so this isn't LSP-specific special-casing.
+    // stderr, never stdout: command payloads (JSON, TOON) own stdout, and a tracing line there corrupts them.
     fmt().with_env_filter(EnvFilter::new(filter)).with_writer(std::io::stderr).init();
 }
 

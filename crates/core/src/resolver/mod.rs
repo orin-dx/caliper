@@ -291,10 +291,10 @@ pub struct ResolutionContext {
     /// files) resolve to whichever key `global.enums` yields first during
     /// this build pass — the same tie-break the old linear scan produced,
     /// since both iterate the same underlying map.
-    pub enum_bare_index: FxHashMap<CompactString, CompactString>,
+    pub enum_bare_index: Arc<FxHashMap<CompactString, CompactString>>,
     /// Same as `enum_bare_index`, but over `global.const_arrays` — for
     /// `(typeof X)[number]` on a flat `const X = [...] as const` array.
-    pub const_array_bare_index: FxHashMap<CompactString, CompactString>,
+    pub const_array_bare_index: Arc<FxHashMap<CompactString, CompactString>>,
     /// How much of an inherited HTML element's attributes to expose.
     pub html_attributes: crate::pipeline::HtmlAttributeMode,
     /// Paths to TypeScript's own `lib.es5.d.ts`/`lib.dom.d.ts`, if resolvable
@@ -385,8 +385,8 @@ impl ResolutionContext {
             types_first_resolver: Arc::new(resolvers.types_first),
             tsconfig_diagnostic,
             extra_builtins: options.extra_builtins.clone(),
-            enum_bare_index,
-            const_array_bare_index,
+            enum_bare_index: Arc::new(enum_bare_index),
+            const_array_bare_index: Arc::new(const_array_bare_index),
             html_attributes: options.html_attributes,
             ambient_global_files,
             module_resolutions: Default::default(),
@@ -492,6 +492,42 @@ impl ResolutionContext {
         }
         self.dependencies = layer;
         self
+    }
+
+    /// A context for the same project over a larger dependency `layer`, with empty memos. Everything about the project
+    /// that a layer cannot change is shared with this one rather than built again: the merged source data, the import
+    /// map and `named_types` declarations, the module resolvers (and their file-system caches), the tsconfig check, and
+    /// the bare-name indexes. `named_types` is the project's index with `layer` as its fallback.
+    pub(crate) fn over_layer(
+        &self,
+        named_types: Arc<crate::named_type_index::NamedTypeIndex>,
+        layer: Option<Arc<crate::dependency_types::DependencyLayer>>,
+    ) -> Self {
+        let import_map = self.import_map.with_fallback(layer.as_ref().map(|layer| layer.import_map.clone()));
+        Self {
+            global: self.global.clone(),
+            import_map: Arc::new(import_map),
+            named_types,
+            oxc_resolver: self.oxc_resolver.clone(),
+            types_first_resolver: self.types_first_resolver.clone(),
+            module_resolutions: Default::default(),
+            react_types_files: Default::default(),
+            shared_props: Default::default(),
+            member_reads: Default::default(),
+            props_reads: Default::default(),
+            extra_builtins: self.extra_builtins.clone(),
+            enum_bare_index: self.enum_bare_index.clone(),
+            const_array_bare_index: self.const_array_bare_index.clone(),
+            html_attributes: self.html_attributes,
+            ambient_global_files: self.ambient_global_files.clone(),
+            tsconfig_diagnostic: self.tsconfig_diagnostic.clone(),
+            interface_chains: Default::default(),
+            named_results: memo::NamedResults::with_max_reads(NAMED_RESULT_MAX_READS),
+            attribute_reads: memo::Memo::with_max_reads(NAMED_RESULT_MAX_READS),
+            dependencies: layer,
+            react_types: self.react_types.clone(),
+            collapse_inherited_props: self.collapse_inherited_props,
+        }
     }
 
     /// Whether `file` is a loaded dependency file.

@@ -2,7 +2,7 @@
 
 **Updated:** 2026-10-22
 
-Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are fully tested. Config file loading, watch mode (including rebuilds on config changes and polling with `ensure_fresh`), plugin architecture, TOON token-optimized output format, JSON schema export, LSP server scaffold, and bounded atomic DTS caching are implemented and verified.
+Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are fully tested. Config file loading, watch mode (including rebuilds on config changes and polling with `ensure_fresh`), plugin architecture, TOON token-optimized output format, JSON schema export, and bounded atomic DTS caching are implemented and verified.
 
 **Types from other packages.** Imports resolve to any file under a source directory, `.d.ts` included, so a monorepo whose packages are all source directories resolves across them. By default the declarations those names point to are loaded (ADR 0010, on by default since ADR 0019): a prop typed by an installed package resolves. `--no-load-dependencies` (config, NAPI and Vite `loadDependencies: false`) reads only `@types/react` and TypeScript's own lib files from `node_modules`, and then a prop whose type comes from any other installed package stays a named reference with an `UNRESOLVABLE_IMPORT` warning. Checked against RDT on five installed repos, loading reports far more of RDT's props and changes 11 matching types in 59,000. Chakra, the worst case, costs about 220 ms and 330 MiB against 50 ms and 100 MiB without (`docs/performance.md`).
 
@@ -22,7 +22,6 @@ Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are f
 - **TOON output format** (`--format toon` / `toon.rs`) — Token-optimized format for LLM agents, cutting context window token usage by ~65-75%.
 - **JSON schema export** (`caliper-docgen schema`) — Machine-readable Draft-07 JSON Schema export for component metadata validation.
 - **Atomic & Bounded DTS cache** (`cache.rs`) — Atomic temp-file swap writes, dirty flag tracking, and 5,000 entry eviction cap.
-- **LSP server scaffold** (`caliper-docgen lsp`) — bounded framing plus initialize/shutdown/exit lifecycle. It currently advertises `hoverProvider: false` and does not serve component prop hovers yet.
 - **Strict Safe Rust** — `unsafe_code = "deny"` via `[workspace.lints]`, active across all three crates (`core`, `cli`, `binding`) — none currently use `unsafe`, including the NAPI FFI boundary (napi-rs's `#[napi]` macros generate the glue without user-visible `unsafe`).
 
 ## Known gaps that won't get fixed without a type checker

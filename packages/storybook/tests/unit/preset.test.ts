@@ -20,6 +20,7 @@ describe('preset', () => {
       collapseInheritedProps: undefined,
       lazy: undefined,
       warmUp: undefined,
+      fillAfter: undefined,
       fallback: 'never',
     })
     expect(ours?.moduleSpecifier).toMatch(/provider\.(js|ts)$/)
