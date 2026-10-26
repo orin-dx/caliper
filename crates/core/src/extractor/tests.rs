@@ -1285,8 +1285,11 @@ fn a_wrapped_render_function_may_be_parenthesized_or_asserted() {
         export const Counter = genericFactory<GroupFactory>(((props: GroupProps) => 42) as any);
     "#;
     let data = parse_file(Utf8Path::new("/test/parenthesized.tsx"), source);
-    let mut found: Vec<(&str, &str, crate::types::DetectionRule)> =
-        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule)).collect();
+    let mut found: Vec<(&str, &str, crate::types::DetectionRule)> = data
+        .component_mappings
+        .iter()
+        .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule))
+        .collect();
     found.sort_by_key(|(name, _, _)| *name);
     assert_eq!(found, vec![("Group", "GroupProps", WrapperTypeArgument), ("Plain", "GroupProps", HocWrapper)]);
 }
