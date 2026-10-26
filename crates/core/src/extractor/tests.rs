@@ -1285,8 +1285,11 @@ fn a_function_component_annotation_inside_an_intersection_carries_the_props() {
         export const Plain: { size: number } & { depth: number } = { size: 1, depth: 2 };
     "#;
     let data = parse_file(Utf8Path::new("/test/drawer.tsx"), source);
-    let found: Vec<(&str, &str, crate::types::DetectionRule)> =
-        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule)).collect();
+    let found: Vec<(&str, &str, crate::types::DetectionRule)> = data
+        .component_mappings
+        .iter()
+        .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule))
+        .collect();
     assert_eq!(found, vec![("Drawer", "DrawerProps", FcAnnotation), ("Sheet", "DrawerProps", FcAnnotation)]);
 }
 
