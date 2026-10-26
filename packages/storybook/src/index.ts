@@ -43,6 +43,17 @@ export interface CaliperStorybookOptions {
    */
   fillAfter?: number
   /**
+   * Ask TypeScript's 7.1 checker for each component a story names (experimental). `'off'` (the default) never starts
+   * it. `'on-demand'` keeps one `tsc` warm in the background, asks it for exactly the requested component, and uses
+   * the structural props when it is slower than `semanticWaitMs`; its answer is kept for the next request. Needs
+   * `typescript@beta` (7.1) installed, or `tscPath`.
+   */
+  semanticTypes?: 'off' | 'on-demand'
+  /** The `tsc` binary to run, instead of the nearest `node_modules/typescript/bin/tsc`. */
+  tscPath?: string
+  /** How many milliseconds a story waits for the checker before it takes the structural props. Default: `150`. */
+  semanticWaitMs?: number
+  /**
    * When a component's resolution reported a warning or an error, its props may be incomplete. `'degraded'` (the
    * default) hands such a component to the next docgen provider, React's own; `'never'` always answers.
    */
