@@ -328,35 +328,56 @@ impl<'src> SourceDataCollector<'src> {
         let type_ann = decl.type_annotation.as_ref()?;
         let ct = self.ts_type_to_collected(&type_ann.type_annotation);
 
-        let (type_name, args) = match &ct {
-            crate::types::CollectedType::Named { name, args } => (name.as_str(), args.as_slice()),
-            _ => return None,
-        };
-
-        if !matches!(type_name, "ForwardRefExoticComponent" | "React.ForwardRefExoticComponent") {
-            return None;
+        fn forward_ref_args(ty: &crate::types::CollectedType) -> Option<&[crate::types::CollectedType]> {
+            match ty {
+                crate::types::CollectedType::Named { name, args }
+                    if matches!(name.as_str(), "ForwardRefExoticComponent" | "React.ForwardRefExoticComponent") =>
+                {
+                    Some(args.as_slice())
+                }
+                _ => None,
+            }
         }
+        let args = match &ct {
+            crate::types::CollectedType::Intersection(members) => members.iter().find_map(forward_ref_args),
+            other => forward_ref_args(other),
+        }?;
 
         let first_arg = args.first()?;
 
-        // Extract P from P & RefAttributes<E>
+        // RefAttributes is metadata on the value, not a prop base. Keep every other member: declaration generators
+        // often write several props objects into one ForwardRefExoticComponent argument.
         let props_type = match first_arg {
-            crate::types::CollectedType::Intersection(members) => members
-                .iter()
-                .find(|m| {
-                    !matches!(m, crate::types::CollectedType::Named { name, .. }
+            crate::types::CollectedType::Intersection(members) => {
+                let mut props: Vec<_> = members
+                    .iter()
+                    .filter(|member| {
+                        !matches!(member, crate::types::CollectedType::Named { name, .. }
                             if matches!(name.as_str(), "RefAttributes" | "React.RefAttributes"))
-                })
-                .unwrap_or(first_arg),
-            other => other,
+                    })
+                    .cloned()
+                    .collect();
+                match props.len() {
+                    0 => return None,
+                    1 => props.remove(0),
+                    _ => crate::types::CollectedType::Intersection(props),
+                }
+            }
+            other => other.clone(),
         };
 
         let (props_name, props_args) = match props_type {
-            crate::types::CollectedType::Named { name, args } => (name.clone(), args.clone()),
-            _ => return None,
+            crate::types::CollectedType::Named { name, args } => (name, args),
+            props => {
+                let name = format!("__anon_{}", self.data.type_aliases.len());
+                let key = self.scoped_key(&name);
+                self.data.type_aliases.insert(
+                    key,
+                    crate::types::CollectedTypeAlias::Passthrough { target: props, file_path: self.file_path.clone() },
+                );
+                (name.into(), vec![])
+            }
         };
-
-        let props_type_args = props_args;
 
         Some(
             ComponentMapping::new(
@@ -367,7 +388,7 @@ impl<'src> SourceDataCollector<'src> {
                 decl.span.end,
                 DetectionRule::ForwardRefExoticDecl,
             )
-            .with_props_type_args(props_type_args)
+            .with_props_type_args(props_args)
             .with_doc(self.find_jsdoc(decl.span.start), BTreeMap::new())
             .with_param_defaults(rustc_hash::FxHashMap::default()),
         )
