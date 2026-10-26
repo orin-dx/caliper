@@ -1,5 +1,5 @@
-//! Content-Length framing, ported from `crates/cli/src/commands/lsp.rs`'s tested
-//! sync/server-role design to `tokio_util::codec`'s incremental, client-role shape.
+//! Content-Length framing, in `tokio_util::codec`'s incremental, client-role shape (it began as a port of the CLI's
+//! since-removed, tested sync/server-role LSP framing).
 //! Same parsing rules, same EOF-vs-malformed-header distinction; the size cap is
 //! still checked before the body is buffered.
 //!
@@ -16,9 +16,8 @@ use tokio_util::codec::Decoder;
 
 use crate::error::{MalformedFrameReason, TscClientError};
 
-/// Default cap on a single frame's declared `Content-Length`, matching
-/// `crates/cli/src/commands/lsp.rs`'s `MAX_LSP_MESSAGE_BYTES`. `tsc`'s own frames are
-/// server-controlled input with no upper bound of their own.
+/// Default cap on a single frame's declared `Content-Length`. `tsc`'s own frames are server-controlled input with no
+/// upper bound of their own.
 pub const DEFAULT_MAX_FRAME_BYTES: usize = 16 * 1024 * 1024; // 16 MiB
 
 /// Reject an oversized frame before its receive buffer is grown to hold it.
