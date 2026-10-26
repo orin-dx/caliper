@@ -137,13 +137,7 @@ pub(super) fn component_props_of(
     match target {
         Some(target) => {
             // TypeScript instantiates an unbound generic callable with `unknown` in `ComponentProps<typeof X>`.
-            let substitution: super::substitute::Substitution<'_> =
-                target.type_params.iter().map(|param| (param.as_str(), crate::types::CollectedType::Unknown)).collect();
-            let props_type_args = target
-                .props_type_args
-                .iter()
-                .map(|arg| super::substitute::substitute_type(arg, &substitution))
-                .collect::<Vec<_>>();
+            let props_type_args = instantiated_props_args(target);
             resolve_props_chain(
                 target.props_type_name.as_str(),
                 &props_type_args,
@@ -174,6 +168,13 @@ pub(super) fn component_props_of(
             ResolvedChain::empty_with_compose(format!("ComponentProps<typeof {name}>"))
         }
     }
+}
+
+/// TypeScript instantiates a generic component value referenced through `typeof` with `unknown` type arguments.
+pub(super) fn instantiated_props_args(target: &ComponentMapping) -> Vec<CollectedType> {
+    let substitution: super::substitute::Substitution<'_> =
+        target.type_params.iter().map(|param| (param.as_str(), CollectedType::Unknown)).collect();
+    target.props_type_args.iter().map(|arg| super::substitute::substitute_type(arg, &substitution)).collect()
 }
 
 /// Full mode only: look up `name` (e.g. "ButtonHTMLAttributes") directly in

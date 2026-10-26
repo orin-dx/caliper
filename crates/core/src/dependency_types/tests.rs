@@ -177,8 +177,8 @@ fn component_props_reads_members_of_a_declared_component_namespace() {
         (
             "node_modules/drawer-kit/index.d.ts",
             "import * as React from 'react';\n\
-             interface RootProps { open?: boolean; title: string }\n\
-             declare function Root(props: RootProps): React.JSX.Element;\n\
+             interface RootProps<T> { open?: boolean; title: string; value?: T }\n\
+             declare function Root<T>(props: RootProps<T>): React.JSX.Element;\n\
              export declare const Drawer: { Root: typeof Root; Trigger: React.ForwardRefExoticComponent<{ disabled?: boolean }> };\n",
         ),
         (
@@ -193,9 +193,10 @@ fn component_props_reads_members_of_a_declared_component_namespace() {
 
     assert_eq!(
         prop_types(&output, "DrawerRoot"),
-        [("open".into(), "boolean".into()), ("title".into(), "string".into())]
+        [("open".into(), "boolean".into()), ("title".into(), "string".into()), ("value".into(), "unknown".into())]
     );
     assert_eq!(prop_types(&output, "DrawerTrigger"), [("disabled".into(), "boolean".into())]);
+    assert!(output.diagnostics.iter().all(|d| !d.message.contains("Cannot resolve type 'T'")));
 }
 
 #[test]
