@@ -315,8 +315,20 @@ impl<'src> SourceDataCollector<'src> {
             return;
         };
         let target = self.ts_type_to_collected(&annotation.type_annotation);
-        // Object types stay out: `lib.dom.d.ts` and every package's typings would add their whole shape here.
-        if !matches!(target, crate::types::CollectedType::Named { .. } | crate::types::CollectedType::Tuple(_)) {
+        // Keep static component members on a callable value without indexing arbitrary object declarations.
+        let static_components = match &target {
+            crate::types::CollectedType::Intersection(members) => members.iter().any(|member| match member {
+                crate::types::CollectedType::Object(fields) => fields.iter().any(|field| {
+                    matches!(&field.collected_type, crate::types::CollectedType::Named { name, .. }
+                        if name.ends_with("Component"))
+                }),
+                _ => false,
+            }),
+            _ => false,
+        };
+        if !matches!(target, crate::types::CollectedType::Named { .. } | crate::types::CollectedType::Tuple(_))
+            && !static_components
+        {
             return;
         }
         let key = self.scoped_key(&format!("typeof {}", id.name));
