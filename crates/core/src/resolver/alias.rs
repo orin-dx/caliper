@@ -230,6 +230,13 @@ pub(super) fn resolve_base_as_chain(
 ) -> ResolvedChain {
     match base {
         CollectedType::Named { name, args } => {
+            if name.strip_prefix("React.").unwrap_or(name) == "PropsWithoutRef"
+                && super::may_be_react_builtin(name, file_path, ctx)
+            {
+                if let Some(alias) = react_props_without_ref_alias(args, file_path) {
+                    return resolve_type_alias_chain(&alias, file_path, mapping, ctx, state, depth);
+                }
+            }
             // Omit/Pick/Partial/Readonly applied to a *structured* reference — e.g. a
             // member of `Omit<T, keyof U> & U` after `T`/`U` were substituted with real
             // types (see resolver/substitute.rs). Handled directly here, rather than via
@@ -431,6 +438,14 @@ pub(super) fn resolve_base_as_chain(
             ResolvedChain::empty_with_compose(base.to_raw_string())
         }
     }
+}
+
+pub(super) fn react_props_without_ref_alias(args: &[CollectedType], file: &Utf8Path) -> Option<CollectedTypeAlias> {
+    Some(CollectedTypeAlias::Omit {
+        base: args.first()?.clone(),
+        keys: CollectedType::StringLiteral("ref".into()),
+        file_path: file.to_owned(),
+    })
 }
 
 /// One prop per key of a mapped type: `{ [K in keyof Variant]?: ConditionalValue<Variant[K]> }` gives each of

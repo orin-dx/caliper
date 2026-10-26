@@ -220,6 +220,8 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) pending_wrappers: Vec<wrapper::PendingWrapper>,
     /// Simple local aliases of generic functions, resolved after all declarations have been visited.
     pub(super) pending_function_aliases: Vec<(String, String)>,
+    /// Local cast names and the base component and asserted props type they export.
+    pub(super) cast_component_aliases: rustc_hash::FxHashMap<CompactString, (String, CompactString)>,
     /// `export { local as exported }` without a source: the index into `data.exports` and the `local` name, so
     /// `finish()` can recognize a re-exported import once every import has been seen.
     pub(super) pending_local_exports: Vec<(usize, String)>,
@@ -264,6 +266,7 @@ impl<'src> SourceDataCollector<'src> {
             aliased_away: FxHashSet::default(),
             pending_wrappers: Vec::new(),
             pending_function_aliases: Vec::new(),
+            cast_component_aliases: Default::default(),
             pending_local_exports: Vec::new(),
             decline_reason: None,
             name_uses: Default::default(),
