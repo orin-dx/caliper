@@ -49,6 +49,14 @@ Object.assign(VARIANTS, {
   'caliper-fill': { loadDependencies: true, collapseInheritedProps: 'none', fillAfter: 16 },
   // The lazy session as it shipped in #172: warm-up on, no fill.
   'caliper-shipped': { loadDependencies: true, collapseInheritedProps: 'none', warmUp: true, fillAfter: 0 },
+  // The structural answer plus the warm TypeScript 7.1 checker for the requested component (ADR 0022); `CALIPER_TSC` names
+  // the `tsc` binary when the corpus does not install typescript@beta itself.
+  'caliper-ondemand': {
+    loadDependencies: true,
+    collapseInheritedProps: 'none',
+    semanticTypes: 'on-demand',
+    ...(process.env.CALIPER_TSC ? { tscPath: process.env.CALIPER_TSC } : {}),
+  },
 })
 
 function walk(dir, found = []) {

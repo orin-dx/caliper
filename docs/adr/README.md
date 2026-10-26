@@ -28,6 +28,7 @@ One line per ADR, with what it guards. Add a line when you add an ADR.
 - [19. Load dependency declarations by default](0019-load-dependencies-by-default.md) — do not make a surface default `loadDependencies` to off, or compare a baseline recorded without a flag against a build with the other default. Supersedes 0010's "off by default".
 - [20. Chain dependency layers and load the remaining names after three growths](0020-chain-dependency-layers.md) — keep dependency growth incremental and bound lookup depth. Supersedes 0016's 48-growth threshold.
 - [21. Publish the semantic backend crates with the CLI](0021-publish-the-semantic-backend-crates.md) — keep the runtime opt-in backend available in the published CLI by releasing its versioned crate dependencies first.
+- [22. Ask a warm checker for the requested component](0022-ask-a-warm-checker-for-the-requested-component.md) — do not route by predicted risk or check the whole project to answer one story: ask the TypeScript checker for the component a request names, wait a bounded time, and take the structural answer when it is slower. Extends 0007's runtime opt-in from a project run to a session.
 - [23. Function parameters carry `optional` and `rest`](0023-function-parameters-carry-optional-and-rest.md) — do not print a function type without its `?` and `...` parameters, or add a parameter flag without a `SCHEMA_VERSION` bump and a reader update. `SCHEMA_VERSION` 3.
 
 Changing any of these needs a new ADR.

@@ -82,6 +82,22 @@ export interface JsExtractOptions {
    * returns an output with no components.
    */
   lazy?: boolean
+  /**
+   * Session only: `'on-demand'` asks TypeScript's 7.1 checker for each component a request names, and answers
+   * with the structural props when the checker is slower than `semanticWaitMs` (experimental; ADR 0022). Needs
+   * `typescript@beta` installed or `tscPath`. `'off'` (the default) never starts it.
+   */
+  semanticTypes?: 'off' | 'on-demand'
+  /**
+   * Session only, with `semanticTypes: 'on-demand'`: the `tsc` binary to run, instead of the nearest
+   * `node_modules/typescript/bin/tsc`.
+   */
+  tscPath?: string
+  /**
+   * Session only, with `semanticTypes: 'on-demand'`: how many milliseconds a request waits for the checker before
+   * it takes the structural answer (default 150).
+   */
+  semanticWaitMs?: number
 }
 
 /** What a lazy session has indexed and resolved so far. `None` for an eager, unknown or uninitialized session. */

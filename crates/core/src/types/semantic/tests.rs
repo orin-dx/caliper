@@ -55,6 +55,7 @@ fn semantic_prop(name: &str, description: &str, required: bool) -> Arc<SemanticP
         prop_type: PropType::String,
         required,
         description: description.to_string(),
+        react_declared: false,
     })
 }
 
@@ -173,18 +174,21 @@ fn identical_props_are_shared_between_components_and_a_different_one_is_not() {
         prop_type: PropType::String,
         required: true,
         description: String::new(),
+        react_declared: false,
     });
     let b = interner.share(SemanticProp {
         name: "x".into(),
         prop_type: PropType::String,
         required: true,
         description: String::new(),
+        react_declared: false,
     });
     let c = interner.share(SemanticProp {
         name: "x".into(),
         prop_type: PropType::Number,
         required: true,
         description: String::new(),
+        react_declared: false,
     });
 
     assert!(Arc::ptr_eq(&a, &b));

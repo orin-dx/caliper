@@ -111,16 +111,73 @@ pub struct JsExtractOptions {
     /// resolve a component when `sessionDocgenInfo` asks for it (off by default; ADR 0016). `initializeSession` then
     /// returns an output with no components.
     pub lazy: Option<bool>,
+    /// Session only: `'on-demand'` asks TypeScript's 7.1 checker for each component a request names, and answers
+    /// with the structural props when the checker is slower than `semanticWaitMs` (experimental; ADR 0022). Needs
+    /// `typescript@beta` installed or `tscPath`. `'off'` (the default) never starts it.
+    #[napi(ts_type = "'off' | 'on-demand'")]
+    pub semantic_types: Option<String>,
+    /// Session only, with `semanticTypes: 'on-demand'`: the `tsc` binary to run, instead of the nearest
+    /// `node_modules/typescript/bin/tsc`.
+    pub tsc_path: Option<String>,
+    /// Session only, with `semanticTypes: 'on-demand'`: how many milliseconds a request waits for the checker before
+    /// it takes the structural answer (default 150).
+    pub semantic_wait_ms: Option<u32>,
 }
 
-/// An empty session for `options`: lazy when they say so.
+/// How long a request waits for the checker when `semanticWaitMs` is not set: about the first-story budget.
+const DEFAULT_SEMANTIC_WAIT_MS: u32 = 150;
+
+/// An empty session for `options`: lazy when they say so, with a checker attached when they ask for one.
 fn new_session(options: JsExtractOptions) -> napi::Result<Arc<WatchSession>> {
     let lazy = options.lazy.unwrap_or(false);
+    let semantic = match options.semantic_types.as_deref() {
+        None | Some("off") => None,
+        Some("on-demand") => Some((
+            options.tsc_path.clone(),
+            options.tsconfig_path.clone(),
+            options.src_dirs.first().cloned(),
+            options.semantic_wait_ms.unwrap_or(DEFAULT_SEMANTIC_WAIT_MS),
+        )),
+        Some(other) => {
+            return Err(napi::Error::from_reason(format!("semanticTypes must be 'off' or 'on-demand', got '{other}'")))
+        }
+    };
     let pipeline_options = PipelineOptions::try_from(options).map_err(napi::Error::from_reason)?;
-    Ok(Arc::new(match lazy {
+    let session = match lazy {
         true => WatchSession::lazy(pipeline_options),
         false => WatchSession::new(pipeline_options),
-    }))
+    };
+    let session = match semantic {
+        Some((tsc_path, tsconfig, first_src, wait_ms)) => {
+            let checker = on_demand_checker(tsc_path, tsconfig, first_src);
+            session.with_semantic(checker, std::time::Duration::from_millis(u64::from(wait_ms)))
+        }
+        None => session,
+    };
+    Ok(Arc::new(session))
+}
+
+/// A warm `tsc` for the project that holds `first_src`. It starts in the background, so a request that arrives before
+/// it is up takes the structural answer rather than waiting for the process.
+fn on_demand_checker(
+    tsc_path: Option<String>,
+    tsconfig: Option<String>,
+    first_src: Option<String>,
+) -> Arc<caliper_docgen_semantic::OnDemand> {
+    let root = first_src
+        .as_deref()
+        .and_then(|dir| std::fs::canonicalize(dir).ok())
+        .and_then(|dir| camino::Utf8PathBuf::from_path_buf(dir).ok())
+        .or_else(|| std::env::current_dir().ok().and_then(|dir| camino::Utf8PathBuf::from_path_buf(dir).ok()))
+        .unwrap_or_default();
+    let mut config = caliper_docgen_semantic::OnDemandConfig::new(root.clone());
+    config.tsconfig = tsconfig
+        .map(camino::Utf8PathBuf::from)
+        .or_else(|| root.ancestors().map(|dir| dir.join("tsconfig.json")).find(|file| file.is_file()));
+    config.tsc_path = tsc_path.map(camino::Utf8PathBuf::from);
+    let checker = caliper_docgen_semantic::OnDemand::new(config);
+    checker.warm_up();
+    Arc::new(checker)
 }
 
 // ─── TryFrom<JsExtractOptions> for PipelineOptions ────────────────────────────
@@ -536,6 +593,9 @@ mod tests {
             load_dependencies: None,
             collapse_inherited_props: None,
             lazy: None,
+            semantic_types: None,
+            tsc_path: None,
+            semantic_wait_ms: None,
         }
     }
 
@@ -881,6 +941,9 @@ mod tests {
             src_dirs: vec![dir.to_string_lossy().into_owned()],
             cache_dir: Some(dir.join("cache").to_string_lossy().into_owned()),
             lazy,
+            semantic_types: None,
+            tsc_path: None,
+            semantic_wait_ms: None,
             ..base_options()
         };
 
@@ -922,6 +985,9 @@ mod tests {
             src_dirs: vec![dir.to_string_lossy().into_owned()],
             cache_dir: Some(dir.join("cache").to_string_lossy().into_owned()),
             lazy,
+            semantic_types: None,
+            tsc_path: None,
+            semantic_wait_ms: None,
             ..base_options()
         };
 
@@ -968,6 +1034,9 @@ mod tests {
             src_dirs: vec![dir.to_string_lossy().into_owned()],
             cache_dir: Some(dir.join("cache").to_string_lossy().into_owned()),
             lazy,
+            semantic_types: None,
+            tsc_path: None,
+            semantic_wait_ms: None,
             ..base_options()
         };
         let eager = create_session(options(None)).expect("eager session");

@@ -15,6 +15,7 @@ use crate::types::*;
 mod discover;
 pub mod rdt;
 mod revision;
+mod semantic_hook;
 pub mod watch;
 
 pub use revision::{ComponentAnswer, ComponentLocation};

@@ -254,6 +254,7 @@ name = "caliper-docgen-napi"
 version = "0.7.0"
 dependencies = [
  "caliper-docgen-core",
+ "caliper-docgen-semantic",
  "camino",
  "compact_str",
  "dashmap",

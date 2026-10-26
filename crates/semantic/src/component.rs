@@ -20,8 +20,8 @@ fn declared_in(declaration: &str) -> &str {
     declaration.splitn(3, '.').nth(2).unwrap_or("")
 }
 
-/// What `@types/react` declares (`key`, `ref`, `children` on `PropsWithChildren`, HTML attributes) is not the
-/// component's own prop; the structural result reports those through inheritance layers.
+/// What `@types/react` declares (`key`, `ref`, `children` on `PropsWithChildren`, HTML attributes). Reported with the
+/// flag set when the request asks for the name; what to do with them is the session's policy, not ours.
 fn is_react_declared(property: &SymbolInfo) -> bool {
     property.declarations.iter().any(|declaration| declared_in(declaration).contains("/@types/react/"))
 }
@@ -80,19 +80,29 @@ pub(crate) async fn props_of(
         return fallback("props type is any, unknown, generic or a union");
     }
 
-    let own: Vec<SymbolInfo> =
-        rpc.properties(props_type.id).await?.into_iter().filter(|property| !is_react_declared(property)).collect();
+    let own: Vec<SymbolInfo> = rpc
+        .properties(props_type.id)
+        .await?
+        .into_iter()
+        .filter(|property| {
+            !is_react_declared(property)
+                || target.react_wanted.as_ref().is_none_or(|wanted| wanted.contains(&property.name))
+        })
+        .collect();
     let references: Vec<_> = own.iter().map(|property| &property.reference).collect();
     let types = if references.is_empty() { Vec::new() } else { rpc.types_of_symbols(&references).await? };
 
     let mut props = Vec::with_capacity(own.len());
     for (property, ty) in own.iter().zip(&types) {
         let required = property.flags & flag::SYMBOL_OPTIONAL == 0;
+        let react_declared = is_react_declared(property);
         props.push(interner.share(SemanticProp {
             name: property.name.clone(),
             prop_type: without_undefined(converter.convert(ty, 0).await?, !required),
             required,
-            description: if target.described.contains(&property.name) {
+            react_declared,
+            // React's own descriptions are the structural pass's to give, and fetching one per attribute is a call each.
+            description: if react_declared || target.described.contains(&property.name) {
                 String::new()
             } else {
                 rpc.documentation(&property.reference).await?
