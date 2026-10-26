@@ -45,7 +45,7 @@ def main():
     ap.add_argument('--runs', type=int, default=15)
     ap.add_argument('--only')
     ap.add_argument('--srcs', help='JSON file mapping corpus name to its absolute source directory')
-    ap.add_argument('--extra', nargs='*', default=[], help='extra extract arguments')
+    ap.add_argument('--no-deps', action='store_true')
     args = ap.parse_args()
 
     tmp = tempfile.mkdtemp(prefix='aa-')
@@ -57,7 +57,7 @@ def main():
         if args.only and name != args.only:
             continue
         src = json.load(open(args.srcs))[name] if args.srcs else os.path.join(args.corpora, rel)
-        cmd = lambda binary: [binary, 'extract', '--json', '-s', src, '--no-cache', *args.extra]
+        cmd = lambda binary: [binary, 'extract', '--json', '-s', src, '--no-cache', *(['--no-load-dependencies'] if args.no_deps else [])]
         for binary in (a, b):  # warm the page cache and the binary
             measure(cmd(binary))
         trials = []

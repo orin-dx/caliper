@@ -44,7 +44,7 @@ jobs:
           print(dirs)
           EOF
       - name: A/A, 20 trials of 15 interleaved runs per side
-        run: python3 scripts/aa.py target/release/caliper-docgen . aa-ci.json --srcs srcs.json --extra --no-load-dependencies
+        run: python3 scripts/aa.py target/release/caliper-docgen . aa-ci.json --srcs srcs.json --no-deps
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
