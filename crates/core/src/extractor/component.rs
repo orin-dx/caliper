@@ -237,7 +237,7 @@ impl<'src> SourceDataCollector<'src> {
             _ => return None,
         };
         let type_ann = params.items.first()?.type_annotation.as_ref()?;
-        if let Err(reason) = renders(&shape, &|n| self.may_be_react(n)) {
+        if let Err(reason) = renders(&shape, &*self) {
             self.decline_reason = Some(format!("'{name}' takes a typed props parameter but {reason}"));
             return None;
         }
@@ -314,7 +314,7 @@ impl<'src> SourceDataCollector<'src> {
         let first_param = params.items.first()?;
         let type_ann = first_param.type_annotation.as_ref()?;
         // `debounce((q: Row) => …)` and `createSelector((s: State) => …)` have the same shape as `memo(…)`.
-        if let Err(reason) = renders(&shape, &|n| self.may_be_react(n)) {
+        if let Err(reason) = renders(&shape, &*self) {
             self.decline_reason = Some(format!("'{name}' wraps a typed function that {reason}"));
             return None;
         }

@@ -16,6 +16,59 @@ fn jsx_passed_to_a_response_constructor_does_not_make_a_route_handler_a_componen
     );
 }
 
+fn components_in(source: &str) -> Vec<String> {
+    let data = parse_file(Utf8Path::new("/fixtures/helper.tsx"), source);
+    data.component_mappings.iter().map(|mapping| mapping.component_name.clone()).collect()
+}
+
+#[test]
+fn a_call_to_a_same_file_function_declared_to_return_an_element_is_element_evidence() {
+    let source = "import type * as React from 'react';\n\
+        function renderByProp(render: unknown, props: object, fallback: React.ReactElement): React.ReactElement { return fallback; }\n\
+        export function MenuTrigger(props: { render?: unknown }) { return renderByProp(props.render, props, <button />); }\n\
+        export const Arrow = (props: { render?: unknown }) => renderByProp(props.render, props, <button />);";
+    assert_eq!(components_in(source), ["MenuTrigger", "Arrow"]);
+}
+
+#[test]
+fn an_aliased_element_return_type_makes_the_helper_element_evidence() {
+    let source = "import type { ReactElement } from 'react';\n\
+        type Rendered = ReactElement;\n\
+        type Output = Rendered | null;\n\
+        const wrap = (child: unknown): Output => null;\n\
+        export function Slot(props: { child?: unknown }) { return wrap(props.child); }";
+    assert_eq!(components_in(source), ["Slot"]);
+}
+
+#[test]
+fn a_call_to_a_helper_that_does_not_return_an_element_is_not_element_evidence() {
+    let source = "import type { ReactElement } from 'react';\n\
+        function label(props: object): string { return 'x'; }\n\
+        async function later(): Promise<ReactElement> { throw new Error(); }\n\
+        function untyped(props: object) { return props; }\n\
+        export function Name(props: { id: string }) { return label(props); }\n\
+        export function Later(props: { id: string }) { return later(); }\n\
+        export function Untyped(props: { id: string }) { return untyped(props); }";
+    assert_eq!(components_in(source), Vec::<String>::new());
+}
+
+#[test]
+fn an_element_type_imported_from_elsewhere_does_not_make_a_helper_element_evidence() {
+    let source = "import type { ReactElement } from './mine';\n\
+        function build(): ReactElement { throw new Error(); }\n\
+        export function Name(props: { id: string }) { return build(); }";
+    assert_eq!(components_in(source), Vec::<String>::new());
+}
+
+#[test]
+fn jsx_passed_to_a_constructor_stays_non_evidence_beside_an_element_helper() {
+    let source = "import type { ReactElement } from 'react';\n\
+        function wrap(child: ReactElement): ReactElement { return child; }\n\
+        export async function GET(request: Request) { return new ImageResponse(wrap(<div />)); }\n\
+        export function Card(props: { title: string }) { return wrap(<div>{props.title}</div>); }";
+    assert_eq!(components_in(source), ["Card"]);
+}
+
 fn fixture_path(rel: &str) -> std::path::PathBuf {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest_dir.join("../../fixtures").join(rel)
