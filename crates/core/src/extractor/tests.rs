@@ -2061,7 +2061,7 @@ fn no_init_fc_family_with_an_exotic_type_argument_is_flagged_not_silently_droppe
 #[test]
 fn no_init_forward_ref_exotic_decl_success_does_not_also_emit_a_skip_diagnostic() {
     // Regression guard for the fix above: the new guard must not fire when
-    // Pattern 5's own detector (try_forward_ref_exotic_decl) already
+    // Pattern 5's own detector (try_exotic_component_decl) already
     // succeeded — only when every no-init detector failed.
     let source = r#"
         interface ButtonProps { label: string; }

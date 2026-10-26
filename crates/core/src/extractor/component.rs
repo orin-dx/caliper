@@ -317,10 +317,10 @@ impl<'src> SourceDataCollector<'src> {
         })
     }
 
-    /// Try to detect: `declare const Button: React.ForwardRefExoticComponent<ButtonProps & RefAttributes<E>>`
+    /// Try to detect declared `ForwardRefExoticComponent<Props>` and `MemoExoticComponent<(props: Props) => JSX>` values.
     ///
     /// Common in .d.ts files — no initializer, just a type annotation.
-    pub(super) fn try_forward_ref_exotic_decl<'a>(
+    pub(super) fn try_exotic_component_decl<'a>(
         &mut self,
         decl: &VariableDeclarator<'a>,
         name: &str,
@@ -328,19 +328,30 @@ impl<'src> SourceDataCollector<'src> {
         let type_ann = decl.type_annotation.as_ref()?;
         let ct = self.ts_type_to_collected(&type_ann.type_annotation);
 
-        fn forward_ref_args(ty: &crate::types::CollectedType) -> Option<&[crate::types::CollectedType]> {
-            match ty {
-                crate::types::CollectedType::Named { name, args }
-                    if matches!(name.as_str(), "ForwardRefExoticComponent" | "React.ForwardRefExoticComponent") =>
-                {
-                    Some(args.as_slice())
-                }
-                _ => None,
+        let is_react_type = |name: &str, expected: &str| {
+            name == expected
+                || name.rsplit_once('.').is_some_and(|(prefix, suffix)| {
+                    suffix == expected
+                        && (prefix == "React"
+                            || self.data.imports.iter().any(|binding| {
+                                binding.local_name == prefix
+                                    && binding.exported_name == "*"
+                                    && binding.specifier == "react"
+                            }))
+                })
+        };
+        let exotic_args = |ty: &crate::types::CollectedType| match ty {
+            crate::types::CollectedType::Named { name, args } if is_react_type(name, "ForwardRefExoticComponent") => {
+                Some((args.clone(), false))
             }
-        }
-        let args = match &ct {
-            crate::types::CollectedType::Intersection(members) => members.iter().find_map(forward_ref_args),
-            other => forward_ref_args(other),
+            crate::types::CollectedType::Named { name, args } if is_react_type(name, "MemoExoticComponent") => {
+                Some((args.clone(), true))
+            }
+            _ => None,
+        };
+        let (args, memoized) = match &ct {
+            crate::types::CollectedType::Intersection(members) => members.iter().find_map(exotic_args),
+            other => exotic_args(other),
         }?;
 
         let first_arg = args.first()?;
@@ -348,12 +359,14 @@ impl<'src> SourceDataCollector<'src> {
         // RefAttributes is metadata on the value, not a prop base. Keep every other member: declaration generators
         // often write several props objects into one ForwardRefExoticComponent argument.
         let props_type = match first_arg {
+            crate::types::CollectedType::Function { params, .. } if memoized => params.first()?.clone(),
+            _ if memoized => return None,
             crate::types::CollectedType::Intersection(members) => {
                 let mut props: Vec<_> = members
                     .iter()
                     .filter(|member| {
                         !matches!(member, crate::types::CollectedType::Named { name, .. }
-                            if matches!(name.as_str(), "RefAttributes" | "React.RefAttributes"))
+                            if is_react_type(name, "RefAttributes"))
                     })
                     .cloned()
                     .collect();
@@ -386,7 +399,7 @@ impl<'src> SourceDataCollector<'src> {
                 self.file_path.clone(),
                 decl.span.start,
                 decl.span.end,
-                DetectionRule::ForwardRefExoticDecl,
+                if memoized { DetectionRule::MemoExoticDecl } else { DetectionRule::ForwardRefExoticDecl },
             )
             .with_props_type_args(props_args)
             .with_doc(self.find_jsdoc(decl.span.start), BTreeMap::new())

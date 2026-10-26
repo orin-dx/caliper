@@ -199,6 +199,58 @@ fn component_props_reads_members_of_a_declared_component_namespace() {
 }
 
 #[test]
+fn component_props_reads_forward_ref_with_renamed_react_namespace() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/otp-kit/package.json",
+            r#"{ "name": "otp-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/otp-kit/index.d.ts",
+            "import * as React$1 from 'react';\n\
+             interface OTPProps { maxLength: number; value?: string }\n\
+             export declare const OTPInput: React$1.ForwardRefExoticComponent<OTPProps & React$1.RefAttributes<HTMLInputElement>>;\n",
+        ),
+        (
+            "src/OTP.tsx",
+            "import * as React from 'react';\nimport { OTPInput } from 'otp-kit';\n\
+             export function InputOTP(props: React.ComponentProps<typeof OTPInput>) { return null; }\n",
+        ),
+    ]);
+    let output = extract(&options(&root, true));
+    assert_eq!(
+        prop_types(&output, "InputOTP"),
+        [("maxLength".into(), "number".into()), ("value".into(), "string".into())]
+    );
+}
+
+#[test]
+fn component_props_reads_memoized_callable_dependency() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/markdown-kit/package.json",
+            r#"{ "name": "markdown-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/markdown-kit/index.d.ts",
+            "import * as react from 'react';\n\
+             interface MarkdownProps { children: string; streaming?: boolean }\n\
+             export declare const Markdown: react.MemoExoticComponent<(props: MarkdownProps) => react.JSX.Element>;\n",
+        ),
+        (
+            "src/Markdown.tsx",
+            "import * as React from 'react';\nimport { Markdown as Primitive } from 'markdown-kit';\n\
+             export function Markdown(props: React.ComponentProps<typeof Primitive>) { return null; }\n",
+        ),
+    ]);
+    let output = extract(&options(&root, true));
+    assert_eq!(
+        prop_types(&output, "Markdown"),
+        [("children".into(), "string".into()), ("streaming".into(), "boolean".into())]
+    );
+}
+
+#[test]
 fn package_types_resolve_through_star_exports_cycles_and_namespaces_and_the_value_index() {
     let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
 
