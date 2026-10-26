@@ -23,17 +23,18 @@ Through the Storybook harness (`storybook-parity.mjs --variants caliper,caliper-
 | Corpus | Variant    | First story | Median story |     Total |    Peak RSS | Props Storybook lists that we lack |
 | ------ | ---------- | ----------: | -----------: | --------: | ----------: | ---------------------------------: |
 | shadcn | structural |   75-144 ms |      2-10 ms | 0.4-1.9 s | 314-324 MiB |                                  0 |
-| shadcn | on-demand  |  101-335 ms |     29-66 ms | 3.0-7.1 s | 318-328 MiB |                                  3 |
+| shadcn | on-demand  |  101-335 ms |     29-66 ms | 3.0-7.1 s | 318-328 MiB |                                  0 |
 | antd   | structural |   59-102 ms |       2-4 ms | 0.2-0.5 s | 222-226 MiB |                                 37 |
-| antd   | on-demand  |   96-147 ms |     39-53 ms | 3.3-4.6 s | 229-230 MiB |                                  5 |
+| antd   | on-demand  |   96-147 ms |     39-53 ms | 3.3-4.6 s | 229-230 MiB |                                  2 |
 
-Memory is the addon's; the checker's process is not in the harness figure. The checker's props replace the structural ones, and the props it leaves out that the component inherits (`children`, `aria-*`, DOM handlers) stay structural. Without that rule shadcn lost 6 props and antd gained only 28.
+Memory is the addon's; the checker's process is not in the harness figure. With the merge below, shadcn lists every prop Storybook does and antd lacks 2 (`ref`, which the policy omits, and the `capture` attribute, which the curated set does not carry). Default structural mode lacks 37 on antd: `ref`, `capture`, and PurePanel's own and DOM props.
 
 ## Decision
 
 A session can have a checker attached (`WatchSession::with_semantic`, a `SemanticProvider` the semantic crate implements). Core owns the trait and the merge; the checker's process, protocol and threads stay in `caliper-docgen-semantic`, so core does no I/O.
 
-- `component(key)` computes the structural answer, asks the checker for that component, and waits up to `semanticWaitMs` (default 150). An answer in time replaces the props, keeping defaults, tags, `parent` and `declarations` from the structural pass, and adds one `Info` provenance diagnostic. A slower checker leaves the structural answer and one `Info` diagnostic saying so; its late answer is kept for the next request.
+- `component(key)` computes the structural answer, asks the checker for that component, and waits up to `semanticWaitMs` (default 150). An answer in time is merged by name: where both have a prop the checker's type, optionality and description win, defaults, tags, `parent` and `declarations` stay structural, and every structural prop the checker did not return stays as the structural pass resolved it. One `Info` provenance diagnostic says so and counts the props kept. A slower checker leaves the structural answer and one `Info` diagnostic saying so; its late answer is kept for the next request.
+- `htmlAttributes` means the same in both engines, because the checker reports what `@types/react` declares (`children`, `aria-*`, handlers, `className`) flagged `reactDeclared`, never filtered on its side, and the session applies the policy once after the merge (`react_types::checker_prop_used`). `full` takes all of them. `curated` and `none` take only those the structural pass already lists among the component's props (`children` through `PropsWithChildren`, or declared by the component), so the curated attributes and the absence in `none` stay the structural pass's. The request asks only for those names (`SemanticTarget::react_wanted`), so a component does not convert hundreds of DOM attributes it would drop. `key` and `ref` are omitted in every mode; the one constant that says so is `REACT_SPECIAL_PROPS` in `react_types.rs`, and showing `ref` for function components (React 19) is a one-line change there.
 - Answers are cached in memory by component key and the content hash of its file. An edit is a new question.
 - The checker runs on its own thread with its own runtime, so a caller on any thread can bound its wait. `tsc` starts in the background when the session is created. It is replaced after 64 programs (antd reached 612 MiB after 50) and after a crash; three crashes keep it down for the session.
 - A missing or unpinned `tsc`, a crash or a timeout yields the structural answer and one `Warning` per session. A request never fails because of the checker.
