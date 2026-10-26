@@ -81,6 +81,7 @@ pub fn resolve_known(
         // The real declarations infer from the function's parameters (`Parameters<T>[0]`), which needs a checker, so
         // this also stands in when they are loaded (ADR 0014).
         "VariantProps" | "RecipeVariantProps" | "RecipeVariants" => resolve_cva_variant_props(args, global, enum_key),
+        "InferRecipeProps" => resolve_inferred_recipe_props(args, global, enum_key),
 
         // ── React Aria ───────────────────────────────────────────────────────
         // RenderProps<ButtonRenderProps> → className, style and children, each a value or a function of the state
@@ -180,6 +181,48 @@ fn resolve_cva_variant_props(
             OpaqueReason::RuntimeDependent { function_name: "cva".into() },
         ))),
     }
+}
+
+fn resolve_inferred_recipe_props(
+    args: &[PropType],
+    global: &GlobalSourceData,
+    enum_key: &dyn Fn(&str) -> Option<String>,
+) -> Option<KnownPatternResult> {
+    let Some(PropType::Named { name, .. }) = args.first() else { return None };
+    let entries = enum_key(name).and_then(|key| global.enums.get(&key))?;
+    let mut variants = std::collections::BTreeMap::<String, Vec<String>>::new();
+    for entry in entries {
+        variants.entry(entry.name.clone()).or_default().push(entry.value.to_display_string());
+    }
+    let props = variants
+        .into_iter()
+        .map(|(key, values)| {
+            let mut literals = Vec::new();
+            let mut boolean = false;
+            for value in values {
+                if matches!(value.as_str(), "true" | "false") {
+                    boolean = true;
+                } else if !literals.contains(&value) {
+                    literals.push(value);
+                }
+            }
+            let mut members = Vec::new();
+            if !literals.is_empty() {
+                members.push(PropType::LiteralUnion { members: literals, has_default: false });
+            }
+            if boolean {
+                members.push(PropType::Boolean);
+            }
+            members.push(PropType::Undefined);
+            simple_prop(
+                &key,
+                PropType::Named { name: "ConditionalValue".into(), args: vec![PropType::Union(members)] },
+                false,
+                "",
+            )
+        })
+        .collect();
+    Some(KnownPatternResult::Props(props))
 }
 
 /// React Aria's `RenderProps<T>`: `className`, `style` and `children` each take a value or a function of the render

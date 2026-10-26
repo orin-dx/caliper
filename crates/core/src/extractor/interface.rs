@@ -130,7 +130,7 @@ impl<'src> SourceDataCollector<'src> {
         self.data.const_arrays.insert(key, values);
     }
 
-    /// Detect: `const X = cva(base, { variants: { key: { val: "...", ... } } })`
+    /// Detect a call with a literal `variants` config, such as `cva(base, { variants })` or `chakra("div", { variants })`.
     /// Store each variant key's values in self.data.enums under the scoped key.
     pub(super) fn try_collect_cva_call<'a>(&mut self, decl: &VariableDeclarator<'a>, name: &str) {
         let Some(init) = decl.init.as_ref() else { return };
@@ -145,12 +145,12 @@ impl<'src> SourceDataCollector<'src> {
             _ => return,
         };
 
-        if !matches!(callee_name, "cva" | "tv" | "defineRecipe" | "recipe" | "defineSlotRecipe") {
+        if !matches!(callee_name, "cva" | "tv" | "defineRecipe" | "recipe" | "defineSlotRecipe" | "chakra") {
             return;
         }
 
-        // cva(baseClasses, { variants }) takes config at index 1; all other callees take it at index 0
-        let arg_index = usize::from(callee_name == "cva");
+        // cva(baseClasses, { variants }) and chakra(element, { variants }) take config at index 1.
+        let arg_index = usize::from(matches!(callee_name, "cva" | "chakra"));
         let Some(second_arg) = call.arguments.get(arg_index) else { return };
         let second_expr = match second_arg {
             Argument::SpreadElement(_) => return,
