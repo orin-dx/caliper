@@ -168,8 +168,9 @@ def has_deps_flag(binary):
 
 def extract_command(binary, src, cache, deps=False):
     """`extract --json` over `src`. The corpora are fetched without their dependencies, so the scorecard measures with
-    dependency loading off, whatever the binary's default; a build from before the flag existed is already off."""
-    command = [binary, 'extract', '--json', '-s', src, '--cache-dir', cache]
+    dependency loading off, whatever the binary's default; a build from before the flag existed is already off. The HTML
+    attributes are `curated`, the default these baselines were recorded with (ADR 0024 made `full` the default)."""
+    command = [binary, 'extract', '--json', '-s', src, '--cache-dir', cache, '--html-attributes', 'curated']
     if not deps and has_deps_flag(binary):
         command.append('--no-load-dependencies')
     return command
