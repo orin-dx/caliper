@@ -314,8 +314,13 @@ def control(t):
     return 'object'
 
 
+STRING_LITERAL = re.compile(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|`(?:[^`\\]|\\.)*`')
+
+
 def type_params(t):
-    return set(re.findall(r'\b(?:[A-Z]|T[A-Z][a-zA-Z]*|Target|Props)\b', t))
+    """The names in a type's text that look like type parameters, outside string literals: `"S" | "M"` is a literal
+    union (Spectrum's breakpoints), not two unbound parameters."""
+    return set(re.findall(r'\b(?:[A-Z]|T[A-Z][a-zA-Z]*|Target|Props)\b', STRING_LITERAL.sub('""', t)))
 
 
 UTILITY = re.compile(r'\b(Omit|Pick|Exclude|Extract|NonNullable|GetProp|Parameters|ReturnType)<')
