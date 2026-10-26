@@ -11990,7 +11990,7 @@ expression: value
       ]
     },
     {
-      "severity": "warning",
+      "severity": "info",
       "message": "Cannot resolve type 'TrustedHTML' in '[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts' — it will appear as an unexpanded named reference",
       "file": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts",
       "line": null,

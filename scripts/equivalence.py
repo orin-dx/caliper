@@ -12,6 +12,9 @@ Any diff fails the run unless scripts/equivalence-allow.json lists it. The file 
 patterns matched against `<corpus>/<config> <kind> <item>` as printed in the report; it is empty unless a change is
 meant to alter output, and then the patterns say exactly which differences are meant.
 
+The `none` configurations compare every field exactly. The curated and full ones leave out the props, notable props and
+layers that `@types/react` gives an element, which ADR 0023 changes on purpose.
+
 Two optional stages:
   --lazy {off,fixtures,all}  lazy-vs-batch parity (crates/core/tests/lazy_parity.rs): the fixtures, and with `all`
                              also the selected corpora's sources. Default: all.
@@ -45,6 +48,8 @@ import parity  # noqa: E402  (corpus list and setup, the oracle and its gate)
 
 ROOT = parity.ROOT
 CONFIGS = {
+    'none': ['--html-attributes', 'none'],
+    'deps+none': ['--load-dependencies', '--html-attributes', 'none'],
     'default': ['--html-attributes', 'curated'],
     'deps': ['--load-dependencies', '--html-attributes', 'curated'],
     'html-full': ['--html-attributes', 'full'],
@@ -131,7 +136,13 @@ def extract(binary, src, flags, cache_dir, timeout):
     return json.loads(out[out.index('{'):])
 
 
-def canonical(output):
+def is_react_attribute(prop):
+    """Whether `@types/react` is the interface that gives the prop its name, which the HTML-attribute modes change on
+    purpose (ADR 0023); `none` configurations compare everything else exactly."""
+    return '/@types/react/' in ((prop.get('parent') or {}).get('fileName') or '')
+
+
+def canonical(output, html=False):
     """The output with its interned tables expanded where they are used, and nothing that varies run to run.
 
     A component's `props` (prop set ids) becomes one map of name to prop; an inheritance layer's `omitted` and a
@@ -151,6 +162,10 @@ def canonical(output):
                 expanded[name] = props[prop_id]
         layers = [{**layer, 'omitted': names(layer.get('omitted'))} for layer in c.get('inheritance', [])]
         notable = {name: props.get(prop_id, prop_id) for name, prop_id in c.get('notableInherited', {}).items()}
+        if html:
+            expanded = {name: prop for name, prop in expanded.items() if not is_react_attribute(prop)}
+            layers = [layer for layer in layers if not layer.get('htmlElement')]
+            notable = {name: prop for name, prop in notable.items() if not is_react_attribute(prop)}
         components[key] = {**c, 'props': expanded, 'inheritance': layers, 'notableInherited': notable}
     diagnostics = [{**d, 'affects': names(d['affects'])} if 'affects' in d else d for d in output['diagnostics']]
     return {
@@ -275,7 +290,7 @@ def compare(args, base_bin, head_bin, patterns):
             for tag, binary in (('base', base_bin), ('head', head_bin)):
                 cache = os.path.join(args.work, 'cache', tag)
                 os.makedirs(cache, exist_ok=True)
-                outputs.append(canonical(extract(binary, src, CONFIGS[name], cache, args.timeout_extract)))
+                outputs.append(canonical(extract(binary, src, CONFIGS[name], cache, args.timeout_extract), html='none' not in name))
             found = diff(*outputs)
             unexpected = [d for d in found if not allowed(label, d[0], d[1], patterns)]
             n_components = len(outputs[1]['components'])

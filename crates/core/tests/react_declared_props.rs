@@ -18,6 +18,7 @@ export const CompProps = (props: React.ComponentProps<'div'>) => <div />;
 export const NoRef = (props: React.PropsWithoutRef<React.ComponentProps<'button'>>) => <button />;
 export interface InheritedProps extends React.HTMLAttributes<HTMLDivElement> { own?: boolean }
 export const Inherited = (props: InheritedProps) => <div />;
+export const Beside = (props: React.ComponentProps<'div'> & { children?: React.ReactNode; id?: string | number }) => <div />;
 export const Fwd = React.forwardRef<HTMLDivElement, { label?: string }>(function Fwd(props, ref) {
     return <div ref={ref}>{props.label}</div>;
 });
@@ -115,4 +116,23 @@ fn a_forward_ref_component_lists_ref() {
         assert_eq!(listed(mode, "Fwd"), set(&["label", "ref"]), "{mode:?}");
     }
     assert_eq!(listed(HtmlAttributeMode::None, "Fwd"), set(&["label"]));
+}
+
+#[test]
+fn a_prop_declared_beside_an_element_has_one_type_when_the_declarations_agree() {
+    let tmp = TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let root = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
+    std::fs::write(root.join("Components.tsx"), SOURCE).unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![root.clone()],
+        cache_dir: Some(root.join(".cache")),
+        html_attributes: HtmlAttributeMode::Full,
+        ..Default::default()
+    };
+    let output = extract(&options);
+    let beside = &output.components["Beside"];
+    let type_of = |name: &str| serde_json::to_value(&beside.props[name].prop_type).unwrap();
+    // `ReactNode` written twice is one type, and `string` narrows the `string | number` the component declares.
+    assert_eq!(type_of("children"), serde_json::json!({ "kind": "named", "name": "ReactNode", "args": [] }));
+    assert_eq!(type_of("id"), serde_json::json!({ "kind": "string" }));
 }

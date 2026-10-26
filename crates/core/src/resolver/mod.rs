@@ -1096,12 +1096,22 @@ fn intersect_declarations(first: &ParsedProp, second: &ParsedProp) -> ParsedProp
         PropType::Intersection(members) => members.clone(),
         other => vec![other.clone()],
     };
+    // The same type written twice (`ReactNode` as the builtin and as a named reference) is one member.
+    let same = |a: &PropType, b: &PropType| a == b || a.raw_string() == b.raw_string();
     let mut types = members(&first.prop_type);
     for member in members(&second.prop_type) {
-        if !types.contains(&member) {
+        if !types.iter().any(|known| same(known, &member)) {
             types.push(member);
         }
     }
+    // `A & (A | B)` is `A`: a union that has another member as one of its own adds nothing.
+    let snapshot = types.clone();
+    types.retain(|member| match member {
+        PropType::Union(alternatives) => {
+            !snapshot.iter().any(|other| other != member && alternatives.iter().any(|alt| same(alt, other)))
+        }
+        _ => true,
+    });
     // `any` absorbs an intersection, as in TypeScript.
     let prop_type = if types.contains(&PropType::Any) {
         PropType::Any
