@@ -41,11 +41,42 @@ pub(super) fn reduce(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContex
     match ty {
         CollectedType::AtFile { file, inner } => reduce(inner, file, ctx, depth + 1),
         CollectedType::Conditional { check, extends_type, true_type, false_type } => {
+            if let Some(branch) = inferred_component_branch(check, extends_type, true_type, false_type, file, ctx) {
+                return Some((branch, file.to_owned()));
+            }
             let branch = if extends(check, extends_type, file, ctx, depth)? { true_type } else { false_type };
             Some((branch.as_ref().clone(), file.to_owned()))
         }
         // Same depth: `member` counts its own steps, and at 0 it answers from the run's cache.
         CollectedType::IndexedAccess { obj, key } => member(obj, &literal(key)?, file, ctx, depth),
+        _ => None,
+    }
+}
+
+fn inferred_component_branch(
+    check: &CollectedType,
+    extends_type: &CollectedType,
+    true_type: &CollectedType,
+    false_type: &CollectedType,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+) -> Option<CollectedType> {
+    let (CollectedType::TypeOf(component), check_file) = unwrap_at_file(check) else { return None };
+    let check_file = check_file.unwrap_or(file);
+    let (props, props_file) = super::callee::component_props_of_typeof(component, check_file, ctx)?;
+    let (CollectedType::Named { name, args }, _) = unwrap_at_file(extends_type) else { return None };
+    if !super::may_be_react_builtin(name, file, ctx) {
+        return None;
+    }
+    let [CollectedType::Raw(infer)] = args.as_slice() else { return None };
+    let param = infer.trim().strip_prefix("infer ")?.trim();
+    match name.strip_prefix("React.").unwrap_or(name) {
+        "Context" => Some(false_type.clone()),
+        "ComponentType" if !param.is_empty() => {
+            let mut subst = super::substitute::Substitution::default();
+            subst.insert(param, CollectedType::AtFile { file: props_file, inner: Box::new(props) });
+            Some(substitute_type(true_type, &subst))
+        }
         _ => None,
     }
 }
@@ -57,13 +88,36 @@ pub(super) fn mapped_keys(
     ctx: &ResolutionContext,
     depth: u8,
 ) -> Option<Vec<Key>> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
     match constraint {
         CollectedType::AtFile { file, inner } => mapped_keys(inner, file, ctx, depth + 1),
+        // `Record<Breakpoint, V>`: an alias for a union of literals, here or in another file.
+        CollectedType::Named { name, args } => {
+            let (body, body_file) = alias_body(name, args, file, ctx)?;
+            mapped_keys(&body, &body_file, ctx, depth + 1)
+        }
         CollectedType::KeyOf(target) => keys_of(target, file, ctx, depth + 1),
         // `(typeof NODES)[number]` over `declare const NODES: readonly ["a", "b"]`: the tuple's elements.
         CollectedType::IndexedAccess { obj, key } if matches!(key.as_ref(), CollectedType::Number) => {
             let (CollectedType::TypeOf(array), array_file) = unwrap_at_file(obj) else { return None };
             let array_file = array_file.unwrap_or(file);
+            // `export const responsiveArray = ['xxxl', 'xxl'] as const`: its string values, when it holds nothing else.
+            if let Some(values) = ctx.named_types.lookup_const_array(array_file, array) {
+                return values
+                    .iter()
+                    .map(|value| match value {
+                        EnumValue::String(name) => Some(Key {
+                            name: name.clone(),
+                            required: true,
+                            description: String::new(),
+                            tags: Default::default(),
+                        }),
+                        _ => None,
+                    })
+                    .collect();
+            }
             let (_, alias) = lookup_type_alias(ctx, array_file.as_str(), &format!("typeof {array}"))?;
             let CollectedTypeAlias::Passthrough { target: CollectedType::Tuple(elements), .. } = alias else {
                 return None;
@@ -225,6 +279,163 @@ pub(super) fn union_members(arg: &CollectedType, file: &Utf8Path, ctx: &Resoluti
         },
         other => vec![(other.clone(), file.to_owned())],
     }
+}
+
+/// Expand the object union read by `Extract<Items[number], { type?: "submenu" }>` only when every step is known.
+/// This is separate from `union_members`: a failed indexed read must not become a plausible union member.
+fn object_union_members(
+    arg: &CollectedType,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+    depth: u8,
+) -> Option<Vec<Located>> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    match arg {
+        CollectedType::AtFile { file, inner } => object_union_members(inner, file, ctx, depth + 1),
+        CollectedType::Named { name, args }
+            if name == "NonNullable" && args.len() == 1 && super::may_be_ts_lib_type(name, file, ctx) =>
+        {
+            object_union_members(&args[0], file, ctx, depth + 1).map(|members| {
+                members
+                    .into_iter()
+                    .filter(|(ty, _)| !matches!(ty, CollectedType::Null | CollectedType::Undefined))
+                    .collect()
+            })
+        }
+        CollectedType::Named { name, args } => {
+            let (canonical_file, canonical_name) = canonical(name, file, ctx);
+            if lookup_interface_including_ambient(ctx, canonical_file.as_str(), &canonical_name).is_some() {
+                return Some(vec![(arg.clone(), file.to_owned())]);
+            }
+            let (body, body_file) = alias_body(name, args, file, ctx)?;
+            object_union_members(&body, &body_file, ctx, depth + 1)
+        }
+        CollectedType::Union(members) => {
+            let mut expanded = Vec::new();
+            for member in members {
+                expanded.extend(object_union_members(member, file, ctx, depth + 1)?);
+            }
+            Some(expanded)
+        }
+        CollectedType::IndexedAccess { obj, key } if matches!(key.as_ref(), CollectedType::Number) => {
+            let array = array_element(obj, file, ctx, depth + 1)?;
+            object_union_members(&array.0, &array.1, ctx, depth + 1)
+        }
+        CollectedType::IndexedAccess { .. } => {
+            let (member, member_file) = reduce(arg, file, ctx, depth + 1)?;
+            object_union_members(&member, &member_file, ctx, depth + 1)
+        }
+        CollectedType::Null | CollectedType::Undefined | CollectedType::Object(_) => {
+            Some(vec![(arg.clone(), file.to_owned())])
+        }
+        CollectedType::Intersection(_)
+        | CollectedType::Array(_)
+        | CollectedType::Tuple(_)
+        | CollectedType::TypeOf(_)
+        | CollectedType::Conditional { .. }
+        | CollectedType::Mapped { .. }
+        | CollectedType::KeyOf(_)
+        | CollectedType::Raw(_)
+        | CollectedType::String
+        | CollectedType::Number
+        | CollectedType::Boolean
+        | CollectedType::Any
+        | CollectedType::Never
+        | CollectedType::Unknown
+        | CollectedType::Void
+        | CollectedType::BigInt
+        | CollectedType::Symbol
+        | CollectedType::StringLiteral(_)
+        | CollectedType::NumberLiteral(_)
+        | CollectedType::BoolLiteral(_)
+        | CollectedType::TemplateLiteral(_)
+        | CollectedType::Function { .. } => Some(vec![(arg.clone(), file.to_owned())]),
+    }
+}
+
+fn array_element(arg: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> Option<Located> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    match arg {
+        CollectedType::AtFile { file, inner } => array_element(inner, file, ctx, depth + 1),
+        CollectedType::Named { name, args }
+            if name == "NonNullable" && args.len() == 1 && super::may_be_ts_lib_type(name, file, ctx) =>
+        {
+            array_element(&args[0], file, ctx, depth + 1)
+        }
+        CollectedType::Named { name, args } => {
+            let (body, body_file) = alias_body(name, args, file, ctx)?;
+            array_element(&body, &body_file, ctx, depth + 1)
+        }
+        CollectedType::IndexedAccess { .. } => {
+            let (member, member_file) = reduce(arg, file, ctx, depth + 1)?;
+            array_element(&member, &member_file, ctx, depth + 1)
+        }
+        CollectedType::Union(members) => {
+            let mut arrays =
+                members.iter().filter(|member| !matches!(member, CollectedType::Null | CollectedType::Undefined));
+            let one = arrays.next()?;
+            if arrays.next().is_some() {
+                return None;
+            }
+            array_element(one, file, ctx, depth + 1)
+        }
+        CollectedType::Array(inner) => Some((inner.as_ref().clone(), file.to_owned())),
+        CollectedType::Object(_)
+        | CollectedType::Intersection(_)
+        | CollectedType::Tuple(_)
+        | CollectedType::TypeOf(_)
+        | CollectedType::Conditional { .. }
+        | CollectedType::Mapped { .. }
+        | CollectedType::KeyOf(_)
+        | CollectedType::Raw(_)
+        | CollectedType::String
+        | CollectedType::Number
+        | CollectedType::Boolean
+        | CollectedType::Null
+        | CollectedType::Undefined
+        | CollectedType::Any
+        | CollectedType::Never
+        | CollectedType::Unknown
+        | CollectedType::Void
+        | CollectedType::BigInt
+        | CollectedType::Symbol
+        | CollectedType::StringLiteral(_)
+        | CollectedType::NumberLiteral(_)
+        | CollectedType::BoolLiteral(_)
+        | CollectedType::TemplateLiteral(_)
+        | CollectedType::Function { .. } => None,
+    }
+}
+
+/// The selected members of a discriminated object union, or `None` if the filter cannot be decided.
+pub(super) fn extracted_object_members(
+    source: &CollectedType,
+    filter: &CollectedType,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+) -> Option<Vec<Located>> {
+    let CollectedType::Object(fields) = filter else { return None };
+    let [field] = fields.as_slice() else { return None };
+    if field.required {
+        return None;
+    }
+    let CollectedType::StringLiteral(wanted) = &field.collected_type else { return None };
+    let mut selected = Vec::new();
+    for (member_type, member_file) in object_union_members(source, file, ctx, 0)? {
+        if matches!(member_type, CollectedType::Null | CollectedType::Undefined) {
+            continue;
+        }
+        let (actual, actual_file) = member(&member_type, &field.name, &member_file, ctx, 0)?;
+        let values = atoms(&actual, &actual_file, ctx, 0)?;
+        if !values.is_empty() && values.iter().all(|value| value == &Atom::Str(wanted.to_string())) {
+            selected.push((member_type, member_file));
+        }
+    }
+    Some(selected)
 }
 
 /// Whether `obj` is an object type, through aliases, whose fields are all known and none is `key`.
@@ -435,6 +646,48 @@ fn interface_member(
     ctx: &ResolutionContext,
     depth: u8,
 ) -> Option<Located> {
+    interface_prop(iface, args, key, args_file, ctx, depth).map(|prop| (prop.ty, prop.file))
+}
+
+/// A member as its interface declares it: the type with the interface's parameters bound, whether it is required, and
+/// its documentation.
+pub(super) struct DeclaredProp {
+    pub(super) ty: CollectedType,
+    pub(super) required: bool,
+    pub(super) description: String,
+    pub(super) file: Utf8PathBuf,
+    /// The interface that declares it, which may be an ancestor of the one read.
+    pub(super) declared_by: String,
+}
+
+/// Whether `name` (as written in `file`) is one of React's interfaces, which `react_declared_prop` can read.
+pub(super) fn is_react_interface(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> bool {
+    let (canonical_file, canonical_name) = canonical(name, file, ctx);
+    react_interface(ctx, &canonical_file, &canonical_name).is_some()
+}
+
+/// React's own interface `name` (as written in `file`, `React.AriaAttributes` or `AriaAttributes`), read from its
+/// declaration whether or not React's declarations were merged into the run (`html_attributes` other than `full`).
+pub(super) fn react_declared_prop(
+    name: &str,
+    args: &[CollectedType],
+    key: &str,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+) -> Option<DeclaredProp> {
+    let (canonical_file, canonical_name) = canonical(name, file, ctx);
+    let iface = react_interface(ctx, &canonical_file, &canonical_name)?;
+    interface_prop(iface, args, key, file, ctx, 0)
+}
+
+fn interface_prop(
+    iface: &CollectedInterface,
+    args: &[CollectedType],
+    key: &str,
+    args_file: &Utf8Path,
+    ctx: &ResolutionContext,
+    depth: u8,
+) -> Option<DeclaredProp> {
     let params = ctx
         .named_types
         .lookup_interface_type_params_for(iface)
@@ -455,7 +708,13 @@ fn interface_member(
         None => ty.clone(),
     };
     if let Some(prop) = iface.props.iter().find(|p| p.name == key) {
-        return Some((bind(&prop.collected_type), iface.file_path.clone()));
+        return Some(DeclaredProp {
+            ty: bind(&prop.collected_type),
+            required: prop.required,
+            description: prop.description.clone(),
+            file: iface.file_path.clone(),
+            declared_by: iface.name.to_string(),
+        });
     }
     if depth > MAX_DEPTH {
         return None;
@@ -464,25 +723,33 @@ fn interface_member(
         let (name, type_args) = match parent {
             ExtendsRef::SameFile { name, type_args } => (name, type_args),
             ExtendsRef::Imported { local_name, type_args, .. } => (local_name, type_args),
-            ExtendsRef::Builtin { .. } => return None,
+            // React's own interfaces name their parents by the spelling the extractor recognizes as React's
+            // (`HTMLAttributes<T> extends AriaAttributes, DOMAttributes<T>`).
+            ExtendsRef::Builtin { name, type_args, .. } => (name, type_args),
         };
         let (parent_file, parent_name) = canonical(name, &iface.file_path, ctx);
         let type_args: Vec<CollectedType> = type_args.iter().map(&bind).collect();
         match lookup_interface(ctx, parent_file.as_str(), &parent_name)
             .or_else(|| react_interface(ctx, &parent_file, &parent_name))
         {
-            Some(parent) => interface_member(parent, &type_args, key, &iface.file_path, ctx, depth + 1),
+            Some(parent) => interface_prop(parent, &type_args, key, &iface.file_path, ctx, depth + 1),
             // An interface may extend an alias (csstype's `StandardLonghandPropertiesFallback = Fallback<…>`).
             None => {
                 let parent = CollectedType::Named { name: name.clone(), args: type_args };
-                member(&parent, key, &iface.file_path, ctx, depth + 1)
+                member(&parent, key, &iface.file_path, ctx, depth + 1).map(|(ty, file)| DeclaredProp {
+                    ty,
+                    required: false,
+                    description: String::new(),
+                    file,
+                    declared_by: name.to_string(),
+                })
             }
         }
     })
 }
 
 /// A type alias's definition with `args` bound to its parameters, as one type.
-fn alias_body(
+pub(super) fn alias_body(
     name: &CompactString,
     args: &[CollectedType],
     file: &Utf8Path,

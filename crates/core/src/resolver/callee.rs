@@ -7,6 +7,8 @@
 //! choice among the type arguments (`extractor/wrapper.rs`) is the fallback for a callee with no known result. Nothing
 //! here names a library; the React component types are React's own.
 
+use std::sync::Arc;
+
 use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::types::*;
@@ -32,6 +34,14 @@ const COMPONENT_TYPES: &[&str] = &[
 /// Aliases followed from the result type to the component type; the bound only guards against a cycle.
 const MAX_DEPTH: u8 = 8;
 
+pub(super) fn component_props_of_typeof(
+    name: &str,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+) -> Option<(CollectedType, Utf8PathBuf)> {
+    component_props_type(&CollectedType::TypeOf(name.into()), file, ctx, 0).map(|(props, file, _)| (props, file))
+}
+
 /// The props chain of the component a generic call builds, from its callee's result type. `None` when the callee is
 /// not a project function with a known result, the result has no React component type, or its props evaluate to
 /// nothing (a conditional over an unbound generic, as in Mantine's `polymorphicFactory`): the extractor's selection
@@ -42,21 +52,67 @@ pub(super) fn result_chain(
     state: &mut ResolveState,
 ) -> Option<super::ResolvedChain> {
     let callee = mapping.wrapper_callee.as_ref()?;
-    let mut ignored = Vec::new();
-    let (file, name) = resolve_to_canonical(&callee.name, &mapping.file_path, ctx, &mut ignored)
-        .unwrap_or_else(|| (mapping.file_path.clone(), callee.name.to_string()));
-    super::deps::record(&file);
-    let function = ctx.global.function_results.get(&format!("{file}:{name}"))?;
-    let bindings = build_substitution(&function.type_params, &callee.type_args, &mapping.file_path, &mut ignored);
-    let result = substitute_type(&function.result, &bindings);
-    let (props, props_file) = component_props_type(&result, &file, ctx, 0)?;
+    let (props, props_file, type_params, factory_params) = result_props(callee, &mapping.file_path, ctx, 0)?;
     let mut attempt = state.branch();
-    let chain = resolve_base_as_chain(&props, &props_file, mapping, ctx, &mut attempt, 0);
+    attempt.add_type_params(type_params.iter());
+    attempt.add_type_params(factory_params.iter());
+    let mut chain = resolve_base_as_chain(&props, &props_file, mapping, ctx, &mut attempt, 0);
+    if chain
+        .composes
+        .iter()
+        .any(|name| factory_params.iter().any(|param| name == param.as_str() || name.starts_with(&format!("{param}["))))
+    {
+        let fallback = super::chain::resolve_props_chain(
+            mapping.props_type_name.as_str(),
+            &mapping.props_type_args,
+            &mapping.file_path,
+            mapping,
+            ctx,
+            &mut attempt,
+            0,
+        );
+        // An explicit `any` from the selected payload absorbs the conditional's tentative type in an intersection.
+        for prop in &fallback.props {
+            if matches!(prop.prop_type, PropType::Any) {
+                if let Some(existing) = chain.props.iter_mut().find(|existing| existing.name == prop.name) {
+                    *existing = Arc::clone(prop);
+                }
+            }
+        }
+        chain.merge_parent(fallback);
+    }
     if chain.props.is_empty() && chain.inheritance.is_empty() {
         return None;
     }
     state.absorb(attempt);
     Some(chain)
+}
+
+fn result_props(
+    callee: &WrapperCallee,
+    caller_file: &Utf8Path,
+    ctx: &ResolutionContext,
+    depth: u8,
+) -> Option<(CollectedType, Utf8PathBuf, Vec<TypeName>, Vec<TypeName>)> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    let mut ignored = Vec::new();
+    let (file, name) = resolve_to_canonical(&callee.name, caller_file, ctx, &mut ignored)
+        .unwrap_or_else(|| (caller_file.to_owned(), callee.name.to_string()));
+    super::deps::record(&file);
+    let function = ctx.global.function_results.get(&format!("{file}:{name}"))?;
+    let bindings = build_substitution(&function.type_params, &callee.type_args, caller_file, &mut ignored);
+    if let Some(inner) = &function.returned_call {
+        let inner = WrapperCallee {
+            name: inner.name.clone(),
+            type_args: inner.type_args.iter().map(|arg| substitute_type(arg, &bindings)).collect(),
+        };
+        return result_props(&inner, &file, ctx, depth + 1);
+    }
+    let result = substitute_type(&function.result, &bindings);
+    let (props, props_file, type_params) = component_props_type(&result, &file, ctx, 0)?;
+    Some((props, props_file, type_params, function.type_params.clone()))
 }
 
 /// The props of a member of a value declared with a mapped type: `Primitive.div` for `declare const Primitive:
@@ -69,12 +125,64 @@ pub(super) fn value_member_props(
     file: &Utf8Path,
     ctx: &ResolutionContext,
 ) -> Option<(CollectedType, Utf8PathBuf)> {
+    value_member_props_at_depth(base, member, file, ctx, 0)
+}
+
+fn value_member_props_at_depth(
+    base: &str,
+    member: &str,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+    depth: u8,
+) -> Option<(CollectedType, Utf8PathBuf)> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
     let mut ignored = Vec::new();
     let (base_file, base_name) =
         resolve_to_canonical(base, file, ctx, &mut ignored).unwrap_or_else(|| (file.to_owned(), base.to_owned()));
+    let (base_file, base_name, member) =
+        if lookup_type_alias(ctx, base_file.as_str(), &format!("typeof {base_name}")).is_some() {
+            (base_file, base_name, member.to_owned())
+        } else if let Some(Some((declaring_file, qualified))) =
+            ctx.dependencies.as_ref().and_then(|layer| layer.export_of(&base_file, &format!("{base_name}.{member}")))
+        {
+            let (declaring_name, declared_member) = qualified.split_once('.')?;
+            (declaring_file.clone(), declaring_name.to_owned(), declared_member.to_owned())
+        } else {
+            let local = ctx.import_map.local_export(&base_file, &base_name)?;
+            let (file, name) = resolve_to_canonical(&local, &base_file, ctx, &mut ignored)?;
+            (file, name, member.to_owned())
+        };
     let (_, declared) = lookup_type_alias(ctx, base_file.as_str(), &format!("typeof {base_name}"))?;
-    let CollectedTypeAlias::Passthrough { target: CollectedType::Named { name, .. }, .. } = declared else {
-        return None;
+    let name = match declared {
+        CollectedTypeAlias::Passthrough { target: named @ CollectedType::Named { .. }, .. } => {
+            if let Some((member_type, member_file)) = super::evaluate::member(named, &member, &base_file, ctx, 0) {
+                if let Some((props, file, _)) = component_props_type(&member_type, &member_file, ctx, depth + 1) {
+                    return Some((props, file));
+                }
+            }
+            let CollectedType::Named { name, .. } = named else { return None };
+            name
+        }
+        CollectedTypeAlias::Passthrough { target: CollectedType::Object(fields), .. } => {
+            return fields
+                .iter()
+                .find(|field| field.name == member)
+                .and_then(|field| component_props_type(&field.collected_type, &base_file, ctx, depth + 1))
+                .map(|(props, file, _)| (props, file));
+        }
+        CollectedTypeAlias::Passthrough { target: CollectedType::Intersection(members), .. } => {
+            return members.iter().find_map(|part| match part {
+                CollectedType::Object(fields) => fields
+                    .iter()
+                    .find(|field| field.name == member)
+                    .and_then(|field| component_props_type(&field.collected_type, &base_file, ctx, depth + 1))
+                    .map(|(props, file, _)| (props, file)),
+                _ => None,
+            });
+        }
+        _ => return None,
     };
     let (mapped_file, mapped_name) = resolve_to_canonical(name, &base_file, ctx, &mut ignored)
         .unwrap_or_else(|| (base_file.clone(), name.to_string()));
@@ -91,28 +199,54 @@ pub(super) fn value_member_props(
     let mut bindings = super::substitute::Substitution::default();
     bindings.insert(param.as_str(), CollectedType::StringLiteral(member.into()));
     let value = substitute_type(value_type, &bindings);
-    component_props_type(&value, &mapped_file, ctx, 0)
+    component_props_type(&value, &mapped_file, ctx, depth + 1).map(|(props, file, _)| (props, file))
 }
 
-/// The props parameter of the React component type `ty` describes, and the file its names resolve in.
+/// The props parameter of the React component type `ty` describes, its file, and any callable type parameters in scope.
 fn component_props_type(
     ty: &CollectedType,
     file: &Utf8Path,
     ctx: &ResolutionContext,
     depth: u8,
-) -> Option<(CollectedType, Utf8PathBuf)> {
+) -> Option<(CollectedType, Utf8PathBuf, Vec<TypeName>)> {
     if depth > MAX_DEPTH {
         return None;
     }
     match ty {
         CollectedType::AtFile { file, inner } => component_props_type(inner, file, ctx, depth + 1),
+        CollectedType::TypeOf(name) => {
+            let mut ignored = Vec::new();
+            let (canonical_file, canonical_name) = resolve_to_canonical(name, file, ctx, &mut ignored)
+                .unwrap_or_else(|| (file.to_owned(), name.to_string()));
+            let mapping = ctx
+                .global
+                .component_mappings
+                .iter()
+                .find(|mapping| mapping.file_path == canonical_file && mapping.component_name == canonical_name)
+                .or_else(|| ctx.dependencies.as_ref()?.component(&canonical_file, &canonical_name));
+            let Some(mapping) = mapping else {
+                let (base, member) = name.rsplit_once('.')?;
+                let (props, props_file) = value_member_props_at_depth(base, member, file, ctx, depth + 1)?;
+                return Some((props, props_file, Vec::new()));
+            };
+            Some((
+                CollectedType::Named {
+                    name: mapping.props_type_name.clone(),
+                    args: super::extends::instantiated_props_args(mapping),
+                },
+                mapping.file_path.clone(),
+                mapping.type_params.clone(),
+            ))
+        }
         CollectedType::Intersection(members) => {
             members.iter().find_map(|member| component_props_type(member, file, ctx, depth + 1))
         }
-        CollectedType::Function { params, .. } => Some((params.first()?.clone(), file.to_owned())),
+        CollectedType::Function { type_params, params, .. } => {
+            Some((params.first()?.clone(), file.to_owned(), type_params.clone()))
+        }
         CollectedType::Named { name, args } => {
             if COMPONENT_TYPES.contains(&name.strip_prefix("React.").unwrap_or(name)) {
-                return Some((args.first()?.clone(), file.to_owned()));
+                return Some((args.first()?.clone(), file.to_owned(), Vec::new()));
             }
             let mut ignored = Vec::new();
             let (alias_file, alias_name) = resolve_to_canonical(name, file, ctx, &mut ignored)
@@ -132,7 +266,7 @@ fn component_props_type(
                     }
                     let props = type_args.first()?;
                     let props = bindings.as_ref().map_or_else(|| props.clone(), |b| substitute_type(props, b));
-                    Some((props, alias_file.clone()))
+                    Some((props, alias_file.clone(), Vec::new()))
                 });
             }
             let (matched, alias) = lookup_type_alias(ctx, alias_file.as_str(), &alias_name)?;

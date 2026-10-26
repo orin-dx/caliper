@@ -15,18 +15,13 @@
 // Checker types are normalized once per type id and verdicts made once per (Caliper prop, checker type), so Chakra's
 // ~470,000 props cost a few thousand distinct comparisons.
 //
-// Usage: tsx src/oracle.ts --root DIR --src DIR --tsconfig FILE --caliper caliper.json --out verdicts.json
-//                          [--files list.txt] [--dump props.json]
-//
-// `--dump` writes every prop judged `wrong` or `less precise` (the examples in `--out` stop at 20 per verdict), so two
-// builds' verdicts can be diffed prop by prop.
 import { readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { API, SignatureKind, SymbolFlags } from 'typescript-beta/sync'
 import { checkerNormalizer } from './oracle-checker.ts'
 import { caliperNorm, compare, VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'
 
-const KEYS = ['root', 'src', 'tsconfig', 'caliper', 'out', 'files', 'dump'] as const
+const KEYS = ['root', 'src', 'tsconfig', 'caliper', 'out', 'files', 'dump', 'rows', 'missing'] as const
 const args: Partial<Record<(typeof KEYS)[number], string>> = {}
 for (let i = 2; i < process.argv.length; i += 2) {
   args[process.argv[i].replace(/^--/, '') as (typeof KEYS)[number]] = process.argv[i + 1]
@@ -76,20 +71,21 @@ const normComponent = (name: string) =>
   )
     .split('.')
     .at(-1)!
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]/g, '')
+    .replaceAll(/[^A-Za-z0-9]/g, '')
 const rel = (path: string) => relative(root, realpathSync(path))
+const pathKey = (path: string) =>
+  process.platform === 'darwin' || process.platform === 'win32' ? path.toLowerCase() : path
 
 const caliper = JSON.parse(readFileSync(args.caliper, 'utf8'))
-const caliperByFile = new Map<string, { name: string; component: any }[]>()
-for (const component of Object.values<any>(caliper.components)) {
+const caliperByFile = new Map<string, { name: string; key: string; component: any }[]>()
+for (const [componentKey, component] of Object.entries<any>(caliper.components)) {
   // Schema 2 lists a component's prop set ids, each a map of prop name to prop id; this reads one map of both.
   if (Array.isArray(component.props)) {
     component.props = Object.assign({}, ...component.props.map((id: string) => caliper.propSets[id]))
   }
   const key = rel(component.filePath)
   const list = caliperByFile.get(key) ?? []
-  list.push({ name: normComponent(component.displayName), component })
+  list.push({ name: normComponent(component.displayName), key: componentKey, component })
   caliperByFile.set(key, list)
 }
 
@@ -126,9 +122,27 @@ interface Example {
 const counts = Object.fromEntries(VERDICTS.map((v) => [v, 0])) as Record<Verdict, number>
 const examples = Object.fromEntries(VERDICTS.map((v) => [v, [] as Example[]])) as Record<Verdict, Example[]>
 const verdictCache = new Map<string, Verdict>()
-const dumped: { file: string; component: string; prop: string; verdict: Verdict; caliper: unknown; checker: string }[] =
-  []
-const totals = { componentsChecker: 0, componentsMatched: 0, propsChecker: 0, propsShared: 0, failedExports: 0 }
+const rows: [string, string, Verdict | 'missing' | 'collapsed'][] = []
+const missingDetails: { key: string; prop: string; verdict: 'missing' | 'collapsed'; declarations: string[] }[] = []
+const dumped: {
+  key: string
+  file: string
+  component: string
+  prop: string
+  verdict: Verdict
+  caliper: unknown
+  checker: string
+}[] = []
+const totals = {
+  componentsChecker: 0,
+  componentsMatched: 0,
+  propsChecker: 0,
+  propsShared: 0,
+  propsMissing: 0,
+  propsCollapsed: 0,
+  failedExports: 0,
+  ambiguousExports: 0,
+}
 
 /** The verdict for one prop, made once per (Caliper prop, checker type). */
 function judge({
@@ -163,7 +177,7 @@ function judge({
 }
 
 /** Every prop of one exported component the checker finds, against Caliper's component of the same name. */
-function visitExport(exported: any, candidates: { name: string; component: any }[], file: string): void {
+function visitExport(exported: any, candidates: { name: string; key: string; component: any }[], file: string): void {
   let propsType
   try {
     propsType = propsTypeOf(exported)
@@ -176,13 +190,55 @@ function visitExport(exported: any, candidates: { name: string; component: any }
   if (props.length === 0) return
   totals.componentsChecker++
   const name = exportName(exported)
-  // Only props a component declares itself count: React's DOM attributes are one inherited layer in Caliper.
-  const own = props.filter((p: any) => !p.declarations?.some((d: any) => String(d.path).includes('/@types/react/')))
+  // React's DOM attributes are one inherited layer; ref and key are deliberately absent from Caliper's output.
+  const own = props.filter(
+    (p: any) =>
+      p.name !== 'ref' &&
+      p.name !== 'key' &&
+      !p.declarations?.some((d: any) => String(d.path).includes('/@types/react/')),
+  )
   totals.propsChecker += own.length
-  const match = candidates.find((c) => c.name === normComponent(name))
+  const matches = candidates.filter((c) => c.name === normComponent(name))
+  if (matches.length > 1) {
+    totals.ambiguousExports++
+    return
+  }
+  const [match] = matches
   if (!match) return
   totals.componentsMatched++
   const shared = own.filter((p: any) => p.name in match.component.props)
+  const layerFiles = new Set(
+    (match.component.inheritance ?? [])
+      .filter((layer: any) => layer.totalProps > 30)
+      .map((layer: any) => pathKey(String(layer.fileName))),
+  )
+  const absent = own.filter((p: any) => !(p.name in match.component.props))
+  const collapsed: any[] = []
+  const missing: any[] = []
+  for (const p of absent) {
+    if (p.declarations?.some((d: any) => layerFiles.has(pathKey(String(d.path))))) collapsed.push(p)
+    else missing.push(p)
+  }
+  totals.propsMissing += missing.length
+  totals.propsCollapsed += collapsed.length
+  if (args.rows) rows.push(...missing.map((p: any) => [match.key, p.name, 'missing'] as [string, string, 'missing']))
+  if (args.rows)
+    rows.push(...collapsed.map((p: any) => [match.key, p.name, 'collapsed'] as [string, string, 'collapsed']))
+  if (args.missing) {
+    for (const [verdict, absentProps] of [
+      ['missing', missing],
+      ['collapsed', collapsed],
+    ] as const) {
+      for (const p of absentProps) {
+        missingDetails.push({
+          key: match.key,
+          prop: p.name,
+          verdict,
+          declarations: p.declarations?.map((d: any) => String(d.path)) ?? [],
+        })
+      }
+    }
+  }
   if (shared.length === 0) return
   const types = checker.getTypeOfSymbol(shared)
   for (const [i, p] of shared.entries()) {
@@ -190,8 +246,10 @@ function visitExport(exported: any, candidates: { name: string; component: any }
     const caliperId = match.component.props[p.name]
     const verdict = judge({ component: name, prop: p.name, caliperId, type: types[i] })
     counts[verdict]++
+    if (args.rows) rows.push([match.key, p.name, verdict])
     if (args.dump && (verdict === 'wrong' || verdict === 'less precise')) {
       dumped.push({
+        key: match.key,
         file: rel(file),
         component: name,
         prop: p.name,
@@ -217,15 +275,20 @@ const report = {
   components_matched: totals.componentsMatched,
   props_checker: totals.propsChecker,
   props_shared: totals.propsShared,
+  props_missing: totals.propsMissing,
+  props_collapsed: totals.propsCollapsed,
   verdicts: counts,
   distinct_comparisons: verdictCache.size,
   failed_exports: totals.failedExports,
+  ambiguous_exports: totals.ambiguousExports,
   program_ms: Math.round(programMs),
   compare_ms: Math.round(compareMs),
   examples,
 }
 writeFileSync(args.out, JSON.stringify(report, null, 2))
 if (args.dump) writeFileSync(args.dump, JSON.stringify(dumped))
+if (args.rows) writeFileSync(args.rows, JSON.stringify(rows))
+if (args.missing) writeFileSync(args.missing, JSON.stringify(missingDetails))
 program.dispose()
 api.close()
 console.error(

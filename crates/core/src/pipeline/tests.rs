@@ -2732,6 +2732,44 @@ fn a_mapped_type_keeps_the_default_tag_of_the_member_it_maps() {
     assert_eq!(props["tone"].default_value, None);
 }
 
+#[test]
+fn a_chakra_factory_config_supplies_inferred_recipe_props() {
+    let output = extract_one(&[(
+        "Group.tsx",
+        r#"
+declare function chakra(element: string, config: unknown): unknown;
+const StyledGroup = chakra("div", {
+  variants: {
+    orientation: { horizontal: {}, vertical: {} },
+    attached: { true: {} },
+    grow: { true: {} },
+    stacking: { "first-on-top": {}, "last-on-top": {} },
+  },
+});
+type InferRecipeProps<T> = T extends unknown ? T : {};
+type VariantProps = InferRecipeProps<typeof StyledGroup>;
+interface GroupProps extends VariantProps { label?: string }
+export function Group(props: GroupProps) { return <div>{props.label}</div>; }
+"#,
+    )]);
+    assert_eq!(prop_names(&output, "Group"), ["attached", "grow", "label", "orientation", "stacking"]);
+    assert_eq!(
+        output.components["Group"].props["attached"].prop_type.raw_string(),
+        "ConditionalValue<boolean | undefined>"
+    );
+    assert_eq!(
+        output.components["Group"].props["orientation"].prop_type.raw_string(),
+        "ConditionalValue<\"horizontal\" | \"vertical\" | undefined>"
+    );
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| {
+            diagnostic.code != crate::types::DiagnosticCode::OpaqueType || !diagnostic.message.contains("StyledGroup")
+        }),
+        "{:#?}",
+        output.diagnostics
+    );
+}
+
 /// A generic component's own type parameters are placeholders, the way an interface's are, and an ES2015 global
 /// (`Iterable`) is TypeScript's.
 #[test]
@@ -3144,6 +3182,132 @@ export const Typed = factory<ButtonFactory>((props: ButtonProps) => <button>{pro
         .map(|d| d.message.as_str())
         .collect();
     assert_eq!(warnings, Vec::<&str>::new());
+}
+
+#[test]
+fn a_polymorphic_factory_result_through_local_aliases_adds_its_props() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "factory.tsx",
+        r#"
+import * as React from "react";
+type PolymorphicComponentProps<C, Props> = C extends React.ElementType
+  ? Props & { component?: C; renderRoot?: (props: Record<string, any>) => React.ReactNode }
+  : Props & { component: React.ElementType; renderRoot?: (props: Record<string, any>) => React.ReactNode };
+export interface Payload { props: Record<string, any>; defaultComponent: React.ElementType }
+export type PolymorphicFactory<P extends Payload> = P;
+export function polymorphicFactory<P extends Payload>(ui: (props: P['props']) => React.ReactNode) {
+  type ComponentProps<C> = PolymorphicComponentProps<C, P['props']>;
+  type Callable = <C = P['defaultComponent']>(props: ComponentProps<C>) => React.ReactElement;
+  type ComponentProperties = Omit<React.FunctionComponent<ComponentProps<any>>, never>;
+  type PolymorphicComponent = Callable & ComponentProperties;
+  const Component = ui as unknown as PolymorphicComponent;
+  return Component as PolymorphicComponent;
+}
+
+"#,
+    );
+    write_file(
+        &tmp,
+        "Button.tsx",
+        r#"
+import { polymorphicFactory, PolymorphicFactory } from './factory';
+interface ButtonProps { label: string }
+type ButtonPayload = PolymorphicFactory<{ props: ButtonProps; defaultComponent: 'button' }>;
+export const Button = polymorphicFactory<ButtonPayload>((props) => <button>{props.label}</button>);
+interface LinkProps { label: string; component: any }
+type LinkPayload = PolymorphicFactory<{ props: LinkProps; defaultComponent: 'a' }>;
+export const Link = polymorphicFactory<LinkPayload>((props) => <a>{props.label}</a>);
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+    assert_eq!(prop_names(&output, "Button"), ["component", "label", "renderRoot"], "{:#?}", output.diagnostics);
+    assert_eq!(prop_names(&output, "Link"), ["component", "label", "renderRoot"], "{:#?}", output.diagnostics);
+    assert_eq!(output.components["Button"].props["label"].prop_type.raw_string(), "string");
+    assert!(!output.components["Button"].props["component"].required);
+    assert!(!output.components["Button"].props["renderRoot"].required);
+    assert_eq!(output.components["Link"].props["component"].prop_type.raw_string(), "any");
+}
+
+#[test]
+fn a_local_alias_of_a_generic_component_factory_keeps_its_result() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "factory.tsx",
+        r#"
+import * as React from "react";
+type ComponentProps<C, Props> = C extends React.ElementType
+  ? Props & { component?: C; renderRoot?: (props: any) => any }
+  : Props & { component: React.ElementType; renderRoot?: (props: any) => any };
+export function createPolymorphicComponent<Default, Props>(component: any) {
+  type Callable = <C = Default>(props: ComponentProps<C, Props>) => React.ReactElement;
+  return component as Callable;
+}
+
+export const polymorphic = createPolymorphicComponent;
+"#,
+    );
+    write_file(
+        &tmp,
+        "Box.tsx",
+        r#"
+import { polymorphic } from './factory';
+interface BoxProps { label: string }
+const _Box = (props: BoxProps) => <div>{props.label}</div>;
+export const Box = polymorphic<'div', BoxProps>(_Box);
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+    assert_eq!(prop_names(&output, "Box"), ["component", "label", "renderRoot"], "{:#?}", output.diagnostics);
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| !diagnostic.message.contains("Cannot resolve type 'Props'")),
+        "{:#?}",
+        output.diagnostics
+    );
+}
+
+#[test]
+fn a_factory_returned_through_a_local_const_keeps_its_result_props() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "Table.tsx",
+        r#"
+import * as React from 'react';
+interface FactoryPayload { props: Record<string, any> }
+type Factory<P extends FactoryPayload> = P;
+function factory<P extends FactoryPayload>(render: (props: P['props']) => React.ReactNode): React.FC<P['props'] & { component?: React.ElementType; renderRoot?: (props: any) => any }> {
+  return render as any;
+}
+function tableElement<F extends FactoryPayload>(element: 'th') {
+  const Component = factory<F>((props) => <th>{props.label}</th>);
+  Component.displayName = 'TableTh';
+  return Component;
+}
+interface TableThProps { label: string }
+type TableThFactory = Factory<{ props: TableThProps }>;
+export const TableTh = tableElement<TableThFactory>('th');
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+    assert_eq!(prop_names(&output, "TableTh"), ["component", "label", "renderRoot"], "{:#?}", output.diagnostics);
 }
 
 /// An `export *` barrel reaches any exported value, not only types: `ComponentProps<typeof Button>` finds a component
@@ -3595,4 +3759,46 @@ export function List(props: {
             return_type: Box::new(PropType::Void),
         }
     );
+}
+
+#[test]
+fn an_exported_component_cast_uses_the_asserted_props() {
+    let output = extract_one(&[(
+        "Card.tsx",
+        r#"
+import { forwardRef, ForwardRefExoticComponent } from 'react';
+type PropsWithoutRef<P> = P;
+interface CardProps { label: string }
+interface ItemProps<P> { title?: string; textValue?: string; href?: string }
+let Card = forwardRef<HTMLDivElement, CardProps>((props, ref) => <div ref={ref}>{props.label}</div>);
+let _Card = Card as ForwardRefExoticComponent<ItemProps<CardProps> & PropsWithoutRef<CardProps>>;
+export { _Card as Card };
+"#,
+    )]);
+    assert_eq!(
+        prop_names(&output, "Card"),
+        ["href", "label", "textValue", "title"],
+        "components: {:#?}; diagnostics: {:#?}",
+        output.components.keys().collect::<Vec<_>>(),
+        output.diagnostics
+    );
+    assert_eq!(output.components["Card"].props["label"].prop_type.raw_string(), "string");
+    assert_eq!(output.components["Card"].props["title"].prop_type.raw_string(), "string");
+}
+
+#[test]
+fn react_props_without_ref_keeps_the_base_props_in_alias_and_extends_positions() {
+    let output = extract_one(&[(
+        "Cards.tsx",
+        r#"
+import type { PropsWithoutRef } from 'react';
+interface Base { label: string; ref?: string }
+type Alias = PropsWithoutRef<Base>;
+interface Extended extends PropsWithoutRef<Base> {}
+export function AliasCard(props: Alias) { return <div>{props.label}</div>; }
+export function ExtendedCard(props: Extended) { return <div>{props.label}</div>; }
+"#,
+    )]);
+    assert_eq!(prop_names(&output, "AliasCard"), ["label"]);
+    assert_eq!(prop_names(&output, "ExtendedCard"), ["label"]);
 }

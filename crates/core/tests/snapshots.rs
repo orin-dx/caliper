@@ -43,6 +43,10 @@ fn run_fixture(library: &str) -> serde_json::Value {
         src_dirs: vec![dir],
         tsconfig_path: Some(tsconfig),
         cache_dir: Some(Utf8PathBuf::from_path_buf(cache.path().to_owned()).expect("UTF-8 temp path")),
+        // The fixtures are baselines of the extractor on single files. Loading dependencies would also read whatever
+        // packages the checkout has installed (csstype turns Mantine's `string` props into its literal unions), so
+        // the snapshots would vary with `node_modules`.
+        load_dependencies: false,
         ..Default::default()
     };
 

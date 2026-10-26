@@ -22,7 +22,7 @@ export interface CaliperDocgenOptions {
    * there and parses everything every run. The output is the same.
    */
   cache?: boolean
-  /** Load the type declarations your props reference from installed packages. Off by default. */
+  /** Load the type declarations your props reference from installed packages. On by default; `false` skips it. */
   loadDependencies?: boolean
   /**
    * Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop: those from
