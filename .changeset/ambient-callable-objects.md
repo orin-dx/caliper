@@ -6,4 +6,4 @@ npm/caliper-docgen: patch
 npm/caliper-docgen-storybook: patch
 ---
 
-Read a single JSX-returning call signature from a declared component value's object type. This restores the Radix `MenubarMenu` props in both shadcn variants.
+Radix `MenubarMenu` now shows its props in both shadcn variants.

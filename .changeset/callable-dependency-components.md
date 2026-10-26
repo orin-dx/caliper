@@ -6,4 +6,4 @@ npm/caliper-docgen: patch
 npm/caliper-docgen-storybook: patch
 ---
 
-Resolve `ComponentProps<typeof X>` when an installed package declares `X` as a callable React component. Wrappers around React Aria components now list or summarize the props from those declarations.
+Wrappers around React Aria components now show props from installed package declarations.

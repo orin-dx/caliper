@@ -6,4 +6,4 @@ npm/caliper-docgen: patch
 npm/caliper-docgen-storybook: patch
 ---
 
-Recognize declared React components that use a renamed React namespace or `MemoExoticComponent` around a callable type. `InputOTP` and Streamdown wrappers now expose their props through `ComponentProps`.
+Wrappers around memoized React components, including `InputOTP` and Streamdown, now show their props.

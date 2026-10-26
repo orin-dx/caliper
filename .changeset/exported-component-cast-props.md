@@ -6,4 +6,4 @@ npm/caliper-docgen: patch
 npm/caliper-docgen-storybook: patch
 ---
 
-Use the asserted props of a component exported through a local cast alias, and resolve React's `PropsWithoutRef<P>` without dropping `P`'s other fields. This restores collection and link props on Spectrum's `Card`.
+Spectrum `Card` now includes its collection and link props when exported through a cast alias.
