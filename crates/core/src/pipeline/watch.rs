@@ -367,7 +367,7 @@ impl WatchSession {
     /// `answer` with the attached checker's props, when there is a checker and it answers in time.
     fn refined(&self, answer: Option<ComponentAnswer>) -> Option<ComponentAnswer> {
         match (&self.semantic, answer) {
-            (Some(hook), Some(answer)) => Some(hook.refine(answer)),
+            (Some(hook), Some(answer)) => Some(hook.refine(answer, self.options.html_attributes)),
             (_, answer) => answer,
         }
     }

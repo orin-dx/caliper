@@ -58,6 +58,8 @@ pub fn targets_of(output: &ExtractionOutput) -> Vec<Target> {
                 .filter(|prop| !prop.description.is_empty())
                 .map(|prop| prop.name.clone())
                 .collect(),
+            // The whole-project merge leaves `@types/react`'s props to the inheritance layers.
+            react_wanted: Some(Default::default()),
         })
         .collect()
 }

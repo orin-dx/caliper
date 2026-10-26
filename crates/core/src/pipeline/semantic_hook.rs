@@ -14,9 +14,11 @@ use std::time::Duration;
 use rustc_hash::{FxHashMap, FxHasher};
 
 use super::ComponentAnswer;
+use crate::pipeline::HtmlAttributeMode;
+use crate::react_types::{checker_prop_used, react_props_wanted};
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use crate::types::semantic::{
-    apply_semantic_props, SemanticComponent, SemanticOutcome, SemanticProvider, SemanticTarget,
+    merge_semantic_props, SemanticComponent, SemanticOutcome, SemanticProvider, SemanticTarget,
 };
 
 /// What the checker said about one component at one version of its file.
@@ -37,7 +39,7 @@ impl SemanticHook {
     }
 
     /// `answer` with the checker's props, when it has them.
-    pub(crate) fn refine(&self, mut answer: ComponentAnswer) -> ComponentAnswer {
+    pub(crate) fn refine(&self, mut answer: ComponentAnswer, mode: HtmlAttributeMode) -> ComponentAnswer {
         let stamp = std::fs::read(&answer.entry.file_path).map(|bytes| {
             let mut hasher = FxHasher::default();
             bytes.hash(&mut hasher);
@@ -46,7 +48,7 @@ impl SemanticHook {
         let cache_key = stamp.ok().map(|stamp| (answer.key.clone(), stamp));
 
         if let Some(cached) = cache_key.as_ref().and_then(|key| self.cached(key)) {
-            self.apply(&mut answer, cached.as_ref());
+            self.apply(&mut answer, cached.as_ref(), mode);
             return answer;
         }
 
@@ -61,6 +63,7 @@ impl SemanticHook {
                 .filter(|prop| !prop.description.is_empty())
                 .map(|prop| prop.name.clone())
                 .collect(),
+            react_wanted: react_props_wanted(mode, &answer.entry.props),
         };
         let receiver = self.provider.request(vec![target]);
         match receiver.recv_timeout(self.wait) {
@@ -71,7 +74,7 @@ impl SemanticHook {
                 if let Some(key) = cache_key {
                     self.store(key, component.clone());
                 }
-                self.apply(&mut answer, component.as_ref());
+                self.apply(&mut answer, component.as_ref(), mode);
             }
             Err(RecvTimeoutError::Timeout) => {
                 self.keep_late_answer(receiver, cache_key);
@@ -143,18 +146,12 @@ impl SemanticHook {
             .map(Arc::new)
     }
 
-    fn apply(&self, answer: &mut ComponentAnswer, component: Option<&Arc<SemanticComponent>>) {
+    fn apply(&self, answer: &mut ComponentAnswer, component: Option<&Arc<SemanticComponent>>, mode: HtmlAttributeMode) {
         let Some(component) = component else { return };
-        let inherited: Vec<_> = (answer.entry.props.iter())
-            .filter(|(_, prop)| prop.parent.is_some())
-            .map(|(name, prop)| (name.clone(), prop.clone()))
-            .collect();
-        apply_semantic_props(&mut answer.entry, component, &mut FxHashMap::default());
-        // The checker leaves out what `@types/react` declares (`children`, `aria-*`, DOM handlers); a story still
-        // lists them, so the structural ones stay unless the checker answered for the name.
-        for (name, prop) in inherited {
-            answer.entry.props.entry(name).or_insert(prop);
-        }
+        let structural = answer.entry.props.clone();
+        let used =
+            component.props.iter().filter(|prop| checker_prop_used(mode, &prop.name, prop.react_declared, &structural));
+        let kept = merge_semantic_props(&mut answer.entry, used, &mut FxHashMap::default());
         // A structural diagnostic about a prop the checker now answers for would be stale.
         answer.diagnostics.retain(|diagnostic| {
             !matches!(
@@ -165,7 +162,13 @@ impl SemanticHook {
         let mut provenance = Diagnostic::new(
             DiagnosticSeverity::Info,
             DiagnosticCode::SemanticBackend,
-            "1 component(s) resolved by the TypeScript checker",
+            match kept {
+                0 => "1 component(s) resolved by the TypeScript checker".to_string(),
+                kept => format!(
+                    "1 component(s) resolved by the TypeScript checker; {kept} prop(s) it did not report keep their \
+                     structural type"
+                ),
+            },
         );
         provenance.affects = vec![answer.key.clone()];
         answer.diagnostics.push(provenance);

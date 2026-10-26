@@ -157,6 +157,48 @@ pub fn is_react_builtin(name: &str, extra: &rustc_hash::FxHashSet<compact_str::C
         )
 }
 
+/// Props React itself adds to every element, which are not part of a component's API. The one place that decides what
+/// to do with them when the checker reports them (ADR 0022); they are omitted today. Making `ref` visible for function
+/// components, as React 19 does, is a one-line change here.
+const REACT_SPECIAL_PROPS: &[&str] = &["key", "ref"];
+
+/// Whether the checker's answer for a prop is used, under `mode`. The structural pass keeps the props the checker does
+/// not return either way, so this decides only what the checker adds: its own props always, and the props
+/// `@types/react` declares (`children`, `aria-*`, handlers, `className`) as `mode` defines them. `Full` takes all of
+/// them; `Curated` and `None` take those the structural pass lists among the component's props (`children` through
+/// `PropsWithChildren`), because the curated attributes and the none-mode absence are the structural pass's to give.
+pub fn checker_prop_used(
+    mode: crate::pipeline::HtmlAttributeMode,
+    name: &str,
+    react_declared: bool,
+    structural_props: &std::collections::BTreeMap<String, std::sync::Arc<crate::types::ParsedProp>>,
+) -> bool {
+    use crate::pipeline::HtmlAttributeMode;
+    if !react_declared {
+        return true;
+    }
+    if REACT_SPECIAL_PROPS.contains(&name) {
+        return false;
+    }
+    match mode {
+        HtmlAttributeMode::Full => true,
+        HtmlAttributeMode::Curated | HtmlAttributeMode::None => structural_props.contains_key(name),
+    }
+}
+
+/// The `@types/react` props the checker is asked to report under `mode`: `None` for all of them, else only these
+/// names. Asking for fewer is the same answer as [`checker_prop_used`] gives, without converting the types of
+/// hundreds of DOM attributes per component.
+pub fn react_props_wanted(
+    mode: crate::pipeline::HtmlAttributeMode,
+    structural_props: &std::collections::BTreeMap<String, std::sync::Arc<crate::types::ParsedProp>>,
+) -> Option<rustc_hash::FxHashSet<String>> {
+    match mode {
+        crate::pipeline::HtmlAttributeMode::Full => None,
+        _ => Some(structural_props.keys().cloned().collect()),
+    }
+}
+
 /// Returns the curated list of notable HTML attribute prop names for a given element.
 ///
 /// Used to populate `ComponentEntry.notable_inherited` — the subset of inherited

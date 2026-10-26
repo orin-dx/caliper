@@ -20,6 +20,8 @@ pub struct SemanticProp {
     pub prop_type: PropType,
     pub required: bool,
     pub description: String,
+    /// Declared by `@types/react` (`children`, `aria-*`, handlers, `className`): not the component's own prop.
+    pub react_declared: bool,
 }
 
 impl SemanticProp {
@@ -27,6 +29,7 @@ impl SemanticProp {
         let mut hasher = FxHasher::default();
         self.name.hash(&mut hasher);
         self.required.hash(&mut hasher);
+        self.react_declared.hash(&mut hasher);
         self.description.hash(&mut hasher);
         self.prop_type.structural_hash(&mut hasher);
         hasher.finish()
@@ -59,7 +62,7 @@ impl PropInterner {
 pub struct SemanticComponent {
     pub file_path: Utf8PathBuf,
     pub display_name: String,
-    /// Declared props in declaration order, without anything `@types/react` declares.
+    /// Declared props in declaration order, with the `@types/react` ones the request asked for.
     pub props: Vec<Arc<SemanticProp>>,
 }
 
@@ -89,6 +92,9 @@ pub struct SemanticTarget {
     /// Props the structural pass already has a description for. The checker is not asked for those: it is 65% of
     /// the requests on Mantine, and the merge keeps the structural description when the checker's is empty.
     pub described: rustc_hash::FxHashSet<String>,
+    /// Which props `@types/react` declares the checker reports: `None` for all of them, else only these names. The
+    /// session decides from `htmlAttributes` (`react_types::react_props_wanted`); the checker never filters by itself.
+    pub react_wanted: Option<rustc_hash::FxHashSet<String>>,
 }
 
 /// A checker that answers for components as they are asked about, for a long-lived session.
@@ -120,8 +126,29 @@ pub fn apply_semantic_props(
     semantic: &SemanticComponent,
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
 ) {
+    // The whole-project merge replaces the props and leaves `@types/react`'s to the inheritance layers.
+    replace_props(entry, semantic.props.iter().filter(|prop| !prop.react_declared), false, shared);
+}
+
+/// Merges the checker's `props` into `entry` by name: the checker's type, optionality and description win where both
+/// have a prop, and every structural prop the checker did not return stays as the structural pass resolved it. Returns
+/// how many were kept.
+pub fn merge_semantic_props<'a>(
+    entry: &mut ComponentEntry,
+    props: impl Iterator<Item = &'a Arc<SemanticProp>>,
+    shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
+) -> usize {
+    replace_props(entry, props, true, shared)
+}
+
+fn replace_props<'a>(
+    entry: &mut ComponentEntry,
+    props_in: impl Iterator<Item = &'a Arc<SemanticProp>>,
+    keep_unanswered: bool,
+    shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
+) -> usize {
     let mut props: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
-    for prop in &semantic.props {
+    for prop in props_in {
         let structural = entry.props.get(&prop.name);
         let description = if prop.description.is_empty() {
             structural.map(|s| s.description.clone()).unwrap_or_default()
@@ -151,7 +178,17 @@ pub fn apply_semantic_props(
         };
         props.insert(prop.name.clone(), merged);
     }
+    let mut kept = 0;
+    if keep_unanswered {
+        for (name, structural) in &entry.props {
+            if !props.contains_key(name) {
+                props.insert(name.clone(), structural.clone());
+                kept += 1;
+            }
+        }
+    }
     entry.props = props;
+    kept
 }
 
 /// Merge the checker's props over `output`, component by component.

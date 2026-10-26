@@ -8,7 +8,7 @@ use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 use std::time::Duration;
 
-use caliper_docgen_core::pipeline::{PipelineOptions, WatchSession};
+use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, WatchSession};
 use caliper_docgen_core::types::semantic::{
     SemanticComponent, SemanticOutcome, SemanticProp, SemanticProvider, SemanticTarget,
 };
@@ -50,7 +50,13 @@ impl SemanticProvider for Fake {
 /// The checker finds a prop the structural pass cannot see: `size`, typed as a union of two literals.
 fn finds_size(target: &SemanticTarget) -> SemanticOutcome {
     let prop = |name: &str, prop_type: PropType| {
-        Arc::new(SemanticProp { name: name.to_string(), prop_type, required: false, description: String::new() })
+        Arc::new(SemanticProp {
+            name: name.to_string(),
+            prop_type,
+            required: false,
+            description: String::new(),
+            react_declared: false,
+        })
     };
     SemanticOutcome {
         components: vec![SemanticComponent {
@@ -62,6 +68,35 @@ fn finds_size(target: &SemanticTarget) -> SemanticOutcome {
                     "size",
                     PropType::Union(vec![PropType::StringLiteral("sm".into()), PropType::StringLiteral("lg".into())]),
                 ),
+            ],
+        }],
+        ..SemanticOutcome::default()
+    }
+}
+
+/// The checker reports the component's `label` and, as `tsc` does without a filter, everything `@types/react` declares:
+/// `children` as a string (so the checker's type is visible), `className`, `id`, and the `key` and `ref` React adds.
+fn reports_react_props(target: &SemanticTarget) -> SemanticOutcome {
+    let prop = |name: &str, prop_type: PropType, react_declared: bool| {
+        Arc::new(SemanticProp {
+            name: name.to_string(),
+            prop_type,
+            required: false,
+            description: String::new(),
+            react_declared,
+        })
+    };
+    SemanticOutcome {
+        components: vec![SemanticComponent {
+            file_path: target.file_path.clone(),
+            display_name: target.display_name.clone(),
+            props: vec![
+                prop("label", PropType::String, false),
+                prop("children", PropType::String, true),
+                prop("className", PropType::String, true),
+                prop("id", PropType::String, true),
+                prop("key", PropType::String, true),
+                prop("ref", PropType::String, true),
             ],
         }],
         ..SemanticOutcome::default()
@@ -89,6 +124,24 @@ fn project(files: &[(&str, &str)]) -> Project {
 fn session(project: &Project, checker: Arc<Fake>, wait: Duration) -> WatchSession {
     let session = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() })
         .with_semantic(checker, wait);
+    let _ = session.initialize();
+    session
+}
+
+fn session_in(
+    project: &Project,
+    mode: HtmlAttributeMode,
+    reply: fn(&SemanticTarget) -> SemanticOutcome,
+) -> WatchSession {
+    let options = PipelineOptions { src_dirs: vec![project.root.clone()], html_attributes: mode, ..Default::default() };
+    let session = WatchSession::lazy(options).with_semantic(Fake::new(Duration::ZERO, reply), Duration::from_secs(5));
+    let _ = session.initialize();
+    session
+}
+
+fn structural_session(project: &Project, mode: HtmlAttributeMode) -> WatchSession {
+    let options = PipelineOptions { src_dirs: vec![project.root.clone()], html_attributes: mode, ..Default::default() };
+    let session = WatchSession::lazy(options);
     let _ = session.initialize();
     session
 }
@@ -133,7 +186,8 @@ fn the_checker_is_asked_once_per_version_of_the_file() {
     let edited = session.component("Button").unwrap();
 
     assert_eq!(checker.requests(), 2, "an edited file is a new question");
-    assert_eq!(edited.entry.props.keys().cloned().collect::<Vec<_>>(), ["label", "size"]);
+    // The checker's fake reply does not know `tone`; the structural pass does, and a prop the checker does not return stays.
+    assert_eq!(edited.entry.props.keys().cloned().collect::<Vec<_>>(), ["label", "size", "tone"]);
 }
 
 #[test]
@@ -174,7 +228,7 @@ fn an_unavailable_checker_warns_once_per_session_and_never_fails_a_request() {
 }
 
 #[test]
-fn props_the_checker_leaves_out_but_the_component_inherits_stay_structural() {
+fn a_structural_prop_the_checker_does_not_return_stays_with_its_structural_type() {
     let project = project(&[(
         "Button.tsx",
         "interface Base { id?: string }\nexport function Button(props: Base & { label: string }) { return null; }",
@@ -198,4 +252,86 @@ fn a_session_without_a_checker_answers_as_before() {
 
     assert_eq!(answer.entry.props.keys().cloned().collect::<Vec<_>>(), ["label"]);
     assert!(answer.diagnostics.iter().all(|d| d.code != DiagnosticCode::SemanticBackend));
+}
+
+const REACT_PROP_COMPONENTS: [(&str, &str); 3] = [
+    (
+        "WithChildren.tsx",
+        "import type { PropsWithChildren } from \"react\";\n\
+         export function WithChildren(props: PropsWithChildren<{ label: string }>) { return null; }",
+    ),
+    (
+        "OwnChildren.tsx",
+        "import type { ReactNode } from \"react\";\n\
+         export function OwnChildren(props: { label: string; children?: ReactNode }) { return null; }",
+    ),
+    (
+        "Div.tsx",
+        "import type { HTMLAttributes } from \"react\";\n\
+         export interface DivProps extends HTMLAttributes<HTMLDivElement> { label: string }\n\
+         export function Div(props: DivProps) { return null; }",
+    ),
+];
+
+fn names(session: &WatchSession, key: &str) -> Vec<String> {
+    prop_names(session, key)
+}
+
+#[test]
+fn curated_and_none_take_the_checkers_react_props_only_where_the_structural_pass_lists_them() {
+    let project = project(&REACT_PROP_COMPONENTS);
+    for mode in [HtmlAttributeMode::Curated, HtmlAttributeMode::None] {
+        let structural = structural_session(&project, mode);
+        let checked = session_in(&project, mode, reports_react_props);
+        for key in ["WithChildren", "OwnChildren", "Div"] {
+            let before = names(&structural, key);
+            let after = names(&checked, key);
+            assert_eq!(after, before, "{key} under {mode:?}: the checker adds no name of its own here");
+        }
+        // Where `children` is a prop of the component, the checker's type wins.
+        for key in ["WithChildren", "OwnChildren"] {
+            let children = &checked.component(key).unwrap().entry.props["children"];
+            assert_eq!(children.prop_type, PropType::String, "{key} under {mode:?}");
+        }
+    }
+}
+
+#[test]
+fn full_takes_everything_the_checker_reports_except_key_and_ref() {
+    let project = project(&REACT_PROP_COMPONENTS);
+    let checked = session_in(&project, HtmlAttributeMode::Full, reports_react_props);
+    for key in ["WithChildren", "OwnChildren", "Div"] {
+        let got = names(&checked, key);
+        for wanted in ["label", "children", "className", "id"] {
+            assert!(got.iter().any(|name| name == wanted), "{key} lacks {wanted}: {got:?}");
+        }
+        assert!(!got.iter().any(|name| name == "key" || name == "ref"), "{key} lists key or ref: {got:?}");
+    }
+}
+
+#[test]
+fn the_request_asks_only_for_the_react_props_the_mode_can_use() {
+    let wanted = |mode| {
+        let seen = Arc::new(std::sync::Mutex::new(None));
+        struct Spy(Arc<std::sync::Mutex<Option<SemanticTarget>>>);
+        impl SemanticProvider for Spy {
+            fn request(&self, mut targets: Vec<SemanticTarget>) -> Receiver<SemanticOutcome> {
+                *self.0.lock().unwrap() = targets.pop();
+                channel().1
+            }
+        }
+        let project = project(&REACT_PROP_COMPONENTS);
+        let options =
+            PipelineOptions { src_dirs: vec![project.root.clone()], html_attributes: mode, ..Default::default() };
+        let session = WatchSession::lazy(options).with_semantic(Arc::new(Spy(seen.clone())), Duration::from_millis(1));
+        let _ = session.initialize();
+        let _ = session.component("WithChildren");
+        let target = seen.lock().unwrap().take().unwrap();
+        target.react_wanted
+    };
+
+    assert_eq!(wanted(HtmlAttributeMode::Full), None);
+    let curated = wanted(HtmlAttributeMode::Curated).unwrap();
+    assert!(curated.contains("children") && curated.contains("label"), "{curated:?}");
+    assert!(!curated.contains("className"));
 }

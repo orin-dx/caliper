@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use caliper_docgen_core::pipeline::{extract, PipelineOptions};
+use caliper_docgen_core::pipeline::{extract, HtmlAttributeMode, PipelineOptions, WatchSession};
 use caliper_docgen_core::types::semantic::{SemanticOutcome, SemanticProvider, SemanticTarget};
 use caliper_docgen_core::types::{DiagnosticSeverity, ExtractionOutput};
 use caliper_docgen_semantic::{targets_of, OnDemand, OnDemandConfig};
@@ -131,4 +131,73 @@ fn the_real_checker_answers_the_requested_component() {
     let names: Vec<_> = first.components[0].props.iter().map(|prop| prop.name.as_str()).collect();
     assert_eq!(names, ["label", "size", "disabled", "onClick", "tags", "pair", "box"]);
     assert_eq!(second.components[0].props.len(), 7, "the same warm process answers again");
+}
+
+/// With the real checker and the real `@types/react` (the repository's own, via `node_modules/@types/react`), a
+/// component's prop names are the same with the checker as without it, in every `htmlAttributes` mode: the checker
+/// improves types and optionality, and `htmlAttributes` means one thing in both engines.
+#[test]
+fn the_real_checker_lists_the_same_prop_names_as_the_structural_pass_in_every_html_attributes_mode() {
+    let Some(tsc) = std::env::var_os("CALIPER_TEST_TSC") else {
+        eprintln!("skipped: CALIPER_TEST_TSC does not name a typescript@7.1 beta `tsc`");
+        return;
+    };
+    let react = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../node_modules/@types/react");
+    if !react.exists() {
+        eprintln!("skipped: {react} is not installed");
+        return;
+    }
+    let react = Utf8PathBuf::from_path_buf(std::fs::canonicalize(&react).unwrap()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+    std::fs::create_dir_all(root.join("node_modules/@types")).unwrap();
+    std::os::unix::fs::symlink(&react, root.join("node_modules/@types/react")).unwrap();
+    std::fs::copy(
+        Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/project/tsconfig.json"),
+        root.join("tsconfig.json"),
+    )
+    .unwrap();
+    let sources = [
+        ("WithChildren.tsx", "import type { PropsWithChildren } from \"react\";\nexport function WithChildren(props: PropsWithChildren<{ label: string }>) { return null; }\n"),
+        ("OwnChildren.tsx", "import type { ReactNode } from \"react\";\nexport function OwnChildren(props: { label: string; children?: ReactNode }) { return null; }\n"),
+        ("Div.tsx", "import type { HTMLAttributes } from \"react\";\nexport interface DivProps extends HTMLAttributes<HTMLDivElement> { label: string }\nexport function Div(props: DivProps) { return null; }\n"),
+    ];
+    for (name, source) in sources {
+        std::fs::write(root.join(name), source).unwrap();
+    }
+
+    for mode in [HtmlAttributeMode::Full, HtmlAttributeMode::Curated, HtmlAttributeMode::None] {
+        let options =
+            || PipelineOptions { src_dirs: vec![root.clone()], html_attributes: mode, ..PipelineOptions::default() };
+        let structural = WatchSession::lazy(options());
+        let _ = structural.initialize();
+        let mut config = OnDemandConfig::new(root.clone());
+        config.tsc_path = Some(Utf8PathBuf::from(tsc.to_str().unwrap()));
+        config.request_timeout = Duration::from_secs(60);
+        let checked = WatchSession::lazy(options())
+            .with_semantic(std::sync::Arc::new(OnDemand::new(config)), Duration::from_secs(60));
+        let _ = checked.initialize();
+
+        for key in ["WithChildren", "OwnChildren", "Div"] {
+            let before = structural.component(key).unwrap();
+            let after = checked.component(key).unwrap();
+            assert!(
+                after.diagnostics.iter().any(|d| d.message.contains("resolved by the TypeScript checker")),
+                "{key} under {mode:?} was not answered by the checker: {:?}",
+                after.diagnostics
+            );
+            let names = |answer: &caliper_docgen_core::pipeline::ComponentAnswer| -> Vec<String> {
+                answer.entry.props.keys().cloned().collect()
+            };
+            assert_eq!(names(&after), names(&before), "{key} under {mode:?}");
+            assert_eq!(
+                after.entry.notable_inherited.keys().collect::<Vec<_>>(),
+                before.entry.notable_inherited.keys().collect::<Vec<_>>(),
+                "{key} under {mode:?}: the curated attributes are the structural pass's"
+            );
+            if mode == HtmlAttributeMode::Full && key == "Div" {
+                assert!(names(&before).iter().any(|name| name == "className"), "Full lists the real attributes");
+            }
+        }
+    }
 }
