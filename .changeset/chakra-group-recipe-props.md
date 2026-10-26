@@ -6,4 +6,4 @@ npm/caliper-docgen: patch
 npm/caliper-docgen-storybook: patch
 ---
 
-Recover recipe props inferred from `chakra(element, { variants })`, including `orientation`, `attached`, `grow`, and `stacking` on Chakra's group components.
+Chakra group components now show recipe props such as `orientation`, `attached`, `grow`, and `stacking`.

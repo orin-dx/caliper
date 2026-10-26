@@ -437,11 +437,36 @@ impl<'src> SourceDataCollector<'src> {
         decl: &VariableDeclarator<'a>,
         name: &str,
     ) -> Option<ComponentMapping> {
-        let TSType::TSFunctionType(function) = &decl.type_annotation.as_ref()?.type_annotation else { return None };
-        let [parameter] = function.params.items.as_slice() else { return None };
-        let return_type = self.ts_type_to_collected(&function.return_type.type_annotation);
+        let annotation = &decl.type_annotation.as_ref()?.type_annotation;
+        let (params, return_type, type_parameters) = if let TSType::TSFunctionType(function) = annotation {
+            (function.params.as_ref(), function.return_type.as_ref(), function.type_parameters.as_deref())
+        } else if let TSType::TSTypeLiteral(literal) = annotation {
+            let mut calls = literal.members.iter().filter_map(|member| match member {
+                TSSignature::TSCallSignatureDeclaration(call) => Some(call.as_ref()),
+                TSSignature::TSIndexSignature(_)
+                | TSSignature::TSPropertySignature(_)
+                | TSSignature::TSConstructSignatureDeclaration(_)
+                | TSSignature::TSMethodSignature(_) => None,
+            });
+            let call = calls.next()?;
+            if calls.next().is_some() {
+                return None;
+            }
+            (call.params.as_ref(), call.return_type.as_deref()?, call.type_parameters.as_deref())
+        } else {
+            return None;
+        };
+        let [parameter] = params.items.as_slice() else { return None };
+        let return_type = self.ts_type_to_collected(&return_type.type_annotation);
         let is_element = |name: &str| {
             matches!(name, "React.ReactElement" | "React.JSX.Element" | "JSX.Element")
+                || name.strip_suffix(".JSX.Element").is_some_and(|namespace| {
+                    self.data.imports.iter().any(|binding| {
+                        binding.local_name == namespace
+                            && binding.exported_name == "*"
+                            && matches!(binding.specifier.as_str(), "react/jsx-runtime" | "react/jsx-dev-runtime")
+                    })
+                })
                 || self.data.imports.iter().any(|binding| {
                     binding.local_name == name
                         && binding.exported_name == "ReactElement"
@@ -464,9 +489,7 @@ impl<'src> SourceDataCollector<'src> {
         }
         let (props_name, mut props_args) =
             self.extract_type_name_from_type(&parameter.type_annotation.as_ref()?.type_annotation)?;
-        let type_params: Vec<crate::types::TypeName> = function
-            .type_parameters
-            .as_ref()
+        let type_params: Vec<crate::types::TypeName> = type_parameters
             .map(|declaration| declaration.params.iter().map(|param| param.name.name.as_str().into()).collect())
             .unwrap_or_default();
         if props_name.starts_with("__anon_") && !type_params.is_empty() {

@@ -6,4 +6,4 @@ npm/caliper-docgen: patch
 npm/caliper-docgen-storybook: patch
 ---
 
-Exclude route handlers that return a constructed response containing JSX from React component extraction. A `GET` handler returning `new ImageResponse(<div />)` no longer appears as a component with `Request` props.
+Route handlers that return an `ImageResponse` no longer appear as React components.

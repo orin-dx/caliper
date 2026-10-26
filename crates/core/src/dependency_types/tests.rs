@@ -206,6 +206,37 @@ fn component_props_reads_a_declared_component_member_of_an_imported_value() {
 }
 
 #[test]
+fn component_props_reads_a_call_signature_in_an_imported_namespace() {
+    let (_tmp, root) = project(&[
+        ("node_modules/call-kit/package.json", r#"{ "name": "call-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/call-kit/index.d.ts", "import * as Menu from './menu';\nexport { Menu as Menubar };\n"),
+        (
+            "node_modules/call-kit/menu.d.ts",
+            "import * as react_jsx_runtime from 'react/jsx-runtime';\n\
+             type ScopedProps<P> = P & { __scopeMenubar?: string };\n\
+             interface MenuProps { value?: string; children?: string }\n\
+             declare const Menu: { (props: ScopedProps<MenuProps>): react_jsx_runtime.JSX.Element; displayName: string };\n\
+             export { Menu };\n",
+        ),
+        (
+            "src/Menubar.tsx",
+            "import * as React from 'react';\nimport { Menubar as Primitive } from 'call-kit';\n\
+             export function MenubarMenu(props: React.ComponentProps<typeof Primitive.Menu>) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+    assert_eq!(
+        prop_types(&output, "MenubarMenu"),
+        [
+            ("__scopeMenubar".into(), "string".into()),
+            ("children".into(), "string".into()),
+            ("value".into(), "string".into()),
+        ]
+    );
+}
+
+#[test]
 fn component_props_reads_a_generic_callable_with_imported_react_element() {
     let (_tmp, root) = project(&[
         (

@@ -1845,6 +1845,23 @@ fn unrelated_no_init_type_annotation_is_silently_omitted() {
     assert!(data.diagnostics.is_empty(), "expected no diagnostics, got {:?}", data.diagnostics);
 }
 
+#[test]
+fn declared_callable_object_needs_one_element_returning_signature() {
+    let source = r#"
+        interface Props { value?: string }
+        declare const Menu: { (props: Props): React.JSX.Element; displayName: string };
+        declare const Formatter: { (props: Props): string; displayName: string };
+        declare const Overloaded: { (props: Props): React.JSX.Element; (props: string): React.JSX.Element };
+    "#;
+    let data = parse_file(Utf8Path::new("/test/callable.d.mts"), source);
+    let mappings: Vec<_> = data
+        .component_mappings
+        .iter()
+        .map(|mapping| (mapping.component_name.as_str(), mapping.props_type_name.as_str()))
+        .collect();
+    assert_eq!(mappings, [("Menu", "Props")]);
+}
+
 // ── SPEC-EXTRACTOR-001 AC-018: computed/symbol keys are silently omitted;
 // a numeric-literal key extracts as its decimal string form.
 
