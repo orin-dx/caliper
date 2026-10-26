@@ -71,6 +71,24 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 is_type_only: node.export_kind.is_type() || spec.export_kind.is_type(),
                 declared_as: (local != exported).then(|| local.to_owned()),
             });
+            if let Some((base_name, props_name)) = self.cast_component_aliases.get(local).cloned() {
+                if let Some(index) =
+                    self.data.component_mappings.iter().position(|mapping| mapping.component_name == base_name)
+                {
+                    let mut public = self.data.component_mappings[index].clone();
+                    public.component_name = exported.to_owned();
+                    public.props_type_name = props_name;
+                    public.props_type_args.clear();
+                    public.wrapper_callee = None;
+                    public.rule = crate::types::DetectionRule::FcAnnotation;
+                    if base_name == exported {
+                        self.data.component_mappings[index] = public;
+                    } else {
+                        self.data.component_mappings.push(public);
+                    }
+                    self.record_exported_local(exported);
+                }
+            }
         }
 
         walk::walk_export_named_declaration(self, node);
@@ -252,6 +270,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 let name = id.name.as_str().to_owned();
                 self.try_collect_cva_call(declarator, &name);
                 self.record_object_assign_declarator(&name, declarator.init.as_ref());
+                if self.function_depth == 0 {
+                    self.try_record_cast_component_alias(declarator, &name);
+                }
                 if self.function_depth == 0 && node.kind.is_const() {
                     if let Some(Expression::Identifier(target)) =
                         declarator.init.as_ref().map(super::component::peel_expr)
