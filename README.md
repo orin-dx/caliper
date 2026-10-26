@@ -56,7 +56,7 @@ caliper-docgen extract --src src --format rdt
 | `variant` | `"default" \| "destructive" \| "outline"` | no       | `"default"` | Visual style. |
 | `loading` | `boolean`                                 | no       |             |               |
 
-By default only a curated subset of inherited HTML attributes is exposed; `--html-attributes full` exposes all of them (what `react-docgen-typescript` does). `--format canonical` is the tool's own shape, `rdt` matches `react-docgen-typescript`, and `toon` is a compact format for LLM agents.
+By default all of an element's inherited HTML attributes are exposed (what `react-docgen-typescript` does); `--html-attributes curated` keeps a compact subset, `none` none. `--format canonical` is the tool's own shape, `rdt` matches `react-docgen-typescript`, and `toon` is a compact format for LLM agents.
 
 ```mermaid
 %%{init: {'theme': 'base', 'flowchart': {'curve': 'basis', 'nodeSpacing': 40, 'rankSpacing': 56}, 'themeVariables': {'fontFamily': 'Inter, ui-sans-serif, system-ui, sans-serif', 'fontSize': '14px', 'lineColor': '#94a3b8', 'edgeLabelBackground': '#ffffff'}}}%%

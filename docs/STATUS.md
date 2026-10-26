@@ -17,6 +17,7 @@ Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are f
 
 ## Features and improvements
 
+- **`htmlAttributes` defaults to `full`** (ADR 0023) — every attribute `@types/react` declares is listed, `ref` for `forwardRef` and `ComponentProps<"div">` props; `curated` is an opt-in compact mode. Costs against the old default: wall time +9 to +31%, peak RSS +12 to +37%, canonical JSON +42 to +105%.
 - **Testing Stack** — `cargo-nextest` process runner, `rstest` parameterized spec tables, `insta` snapshots, and `trycmd` executable Markdown CLI specs.
 - **Plugin system** (`DocgenPlugin` / `PluginRegistry`) — Extensible AST and component resolution hooks in `crates/core/src/plugin.rs`.
 - **TOON output format** (`--format toon` / `toon.rs`) — Token-optimized format for LLM agents, cutting context window token usage by ~65-75%.

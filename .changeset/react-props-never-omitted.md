@@ -2,4 +2,4 @@
 npm/caliper-docgen-storybook: minor
 ---
 
-Event handlers like onClick and onFocus, aria-* attributes, and ref now always appear in your props table, however a component inherits them. No action needed.
+Event handlers such as onClick and onFocus, and ref, now always appear in your props table; use htmlAttributes: curated to keep a compact list instead. No action needed.
