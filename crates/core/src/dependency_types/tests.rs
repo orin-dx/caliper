@@ -118,9 +118,9 @@ fn component_props_reads_a_generic_callable_with_imported_react_element() {
         ),
         (
             "node_modules/callable-kit/index.d.ts",
-            "import { ReactElement } from 'react';\n\
-             export interface MenuProps<T> { id: string }\n\
-             export declare const Menu: <T>(props: MenuProps<T>) => ReactElement | null;\n",
+            "import * as React from 'react';\nimport { ReactElement } from 'react';\n\
+             export interface MenuProps<T> { id: string; value?: T }\n\
+             export declare const Menu: <T>(props: MenuProps<T> & React.RefAttributes<HTMLDivElement>) => ReactElement | null;\n",
         ),
         (
             "src/Menu.tsx",
@@ -131,7 +131,8 @@ fn component_props_reads_a_generic_callable_with_imported_react_element() {
 
     let output = extract(&options(&root, true));
 
-    assert_eq!(prop_types(&output, "Menu"), [("id".into(), "string".into())]);
+    assert_eq!(prop_types(&output, "Menu"), [("id".into(), "string".into()), ("value".into(), "unknown".into())]);
+    assert!(output.diagnostics.iter().all(|d| !d.message.contains("Cannot resolve type 'T'")));
 }
 
 #[test]
