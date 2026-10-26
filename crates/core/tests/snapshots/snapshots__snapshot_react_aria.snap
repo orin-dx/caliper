@@ -1045,7 +1045,31 @@ expression: value
         }
       },
       "inheritance": [],
-      "notableInherited": {},
+      "notableInherited": {
+        "ref": {
+          "name": "ref",
+          "type": {
+            "kind": "named",
+            "name": "Ref",
+            "args": [
+              {
+                "kind": "named",
+                "name": "unknown",
+                "args": []
+              }
+            ]
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "",
+          "tags": {},
+          "parent": {
+            "name": "RefAttributes",
+            "fileName": "node_modules/@types/react/index.d.ts"
+          },
+          "declarations": []
+        }
+      },
       "discriminantProp": null,
       "composes": [],
       "tags": {},

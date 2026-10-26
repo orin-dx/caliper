@@ -20,7 +20,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::import_map::ImportResolutionMap;
 use crate::pipeline::PipelineOptions;
-use crate::react_types;
 use crate::types::*;
 
 mod alias;
@@ -869,44 +868,71 @@ pub(crate) fn resolve_component_shared(
     }
     apply_param_defaults(mapping, &mut props, ctx);
 
-    // Populate notable_inherited from HTML element layers and non-HTML inherited layers.
+    // Populate notable_inherited from HTML element layers and non-HTML inherited layers. Curated mode lists the
+    // curated attributes there; Full mode lists all of them in `props`, except for a layer whose attributes the
+    // interface chain already merged (`total_props`); None mode lists none.
     let mut notable_inherited: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
     for layer in &chain.inheritance {
-        if let Some(ref element) = layer.html_element {
-            // Curated-mode synthesis only: Full mode already merged the real
-            // attributes directly into `props` (see resolver/extends.rs); None
-            // mode wants no HTML attrs synthesized at all.
-            if ctx.html_attributes != crate::pipeline::HtmlAttributeMode::Curated {
-                continue;
+        if layer.html_element.is_none() {
+            continue;
+        }
+        match ctx.html_attributes {
+            crate::pipeline::HtmlAttributeMode::None => {}
+            crate::pipeline::HtmlAttributeMode::Full => {
+                if layer.total_props == 0 {
+                    let added =
+                        html::layer_attributes(layer, true, |name| props.contains_key(name), ctx, &mut state, 0);
+                    for prop in added {
+                        props.entry(prop.name.clone()).or_insert(prop);
+                    }
+                }
             }
-            let notable_attrs = react_types::notable_html_attrs(element);
-            for attr_name in notable_attrs {
-                if props.contains_key(*attr_name) {
-                    continue;
-                } // own prop wins
-                if notable_inherited.contains_key(*attr_name) {
-                    continue;
-                } // already added
-
-                // Synthesize a minimal prop for display purposes
-                let prop_type = html::infer_html_attr_prop_type(attr_name);
-                notable_inherited.insert(
-                    attr_name.to_string(),
-                    ctx.share(ParsedProp::new(
-                        attr_name.to_string(),
-                        prop_type,
-                        false,
-                        None,
-                        String::new(),
-                        Default::default(),
-                        Some(PropParent {
-                            name: format!("{}HTMLAttributes", html::capitalize_element(element)),
-                            file_name: "node_modules/@types/react/index.d.ts".to_string(),
-                        }),
-                        vec![],
-                    )),
+            crate::pipeline::HtmlAttributeMode::Curated => {
+                let added = html::layer_attributes(
+                    layer,
+                    false,
+                    |name| props.contains_key(name) || notable_inherited.contains_key(name),
+                    ctx,
+                    &mut state,
+                    0,
                 );
+                for prop in added {
+                    notable_inherited.entry(prop.name.clone()).or_insert(prop);
+                }
             }
+        }
+    }
+    // A `forwardRef` component takes `ref` whatever its props type declares. The element type isn't recorded, so it is
+    // `Ref<unknown>` unless the props or an HTML layer gave the real declaration.
+    let takes_ref = matches!(mapping.rule, DetectionRule::ForwardRef | DetectionRule::ForwardRefExoticDecl);
+    if takes_ref && ctx.html_attributes != crate::pipeline::HtmlAttributeMode::None {
+        let target = if ctx.html_attributes == crate::pipeline::HtmlAttributeMode::Full {
+            &mut props
+        } else {
+            &mut notable_inherited
+        };
+        if !target.contains_key("ref") {
+            let ref_type = PropType::Named {
+                name: "Ref".into(),
+                args: vec![PropType::Named { name: "unknown".into(), args: vec![] }],
+            };
+            let parent = PropParent {
+                name: "RefAttributes".to_owned(),
+                file_name: "node_modules/@types/react/index.d.ts".to_owned(),
+            };
+            target.insert(
+                "ref".to_owned(),
+                ctx.share(ParsedProp::new(
+                    "ref".to_owned(),
+                    ref_type,
+                    false,
+                    None,
+                    String::new(),
+                    Default::default(),
+                    Some(parent),
+                    vec![],
+                )),
+            );
         }
     }
     // A collapsed source's notable props (ADR 0012); the only non-HTML layers.

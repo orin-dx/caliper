@@ -35,10 +35,14 @@ pub fn docgen_info(entry: &ComponentEntry) -> serde_json::Value {
     component_doc(entry, |_| true)
 }
 
+/// The props a props table lists: the component's own and inherited ones, then the curated attributes inherited from an
+/// HTML element, which `curated` mode keeps apart so the canonical output can collapse them. A prop named in both is
+/// listed once, as the component declares it.
 fn component_doc(entry: &ComponentEntry, keep: impl Fn(&ParsedProp) -> bool) -> serde_json::Value {
     let props: serde_json::Map<String, serde_json::Value> = entry
         .props
         .iter()
+        .chain(entry.notable_inherited.iter().filter(|(name, _)| !entry.props.contains_key(*name)))
         .filter(|(_, prop)| keep(prop))
         .map(|(k, prop)| {
             let obj = serde_json::json!({
