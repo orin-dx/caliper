@@ -268,6 +268,8 @@ def main():
     parser.add_argument('--corpora', default=os.path.join(ROOT, '.scorecard', 'corpora'))
     parser.add_argument('--out', help='write the scorecard as JSON here')
     parser.add_argument('--check', action='store_true', help='exit 1 when a gate fails')
+    parser.add_argument('--corpus', action='append', metavar='NAME',
+                        help='score only this corpus (repeatable); the scaling gate runs only with mantine')
     args = parser.parse_args()
 
     binaries = {'head': os.path.abspath(args.bin)}
@@ -279,8 +281,9 @@ def main():
             rdt_baseline = {row['name']: row['rdt'] for row in json.load(f)['corpora'] if 'rdt' in row}
 
     rows = []
+    scaled = None
     with tempfile.TemporaryDirectory() as caches_dir:
-        for corpus in CORPORA:
+        for corpus in [c for c in CORPORA if not args.corpus or c['name'] in args.corpus]:
             src = fetch(corpus, args.corpora)
             caches = {name: os.path.join(caches_dir, corpus['name'], name) for name in binaries}
             row = {
@@ -308,8 +311,9 @@ def main():
                 scaled = scaling(binaries['head'], src, args.runs, os.path.join(caches_dir, 'scaling'))
 
     report = table(rows)
-    report += f"\n\nScaling: {SCALING_CORPUS} extracts in {scaled['one']} ms, two copies in {scaled['two']} ms "
-    report += f"({scaled['two'] / scaled['one']:.2f}x, limit {SCALING_LIMIT}x)."
+    if scaled:
+        report += f"\n\nScaling: {SCALING_CORPUS} extracts in {scaled['one']} ms, two copies in {scaled['two']} ms "
+        report += f"({scaled['two'] / scaled['one']:.2f}x, limit {SCALING_LIMIT}x)."
     failures = gates(rows, scaled)
     summary = report + '\n\n' + ('\n'.join(f'- FAIL {f}' for f in failures) if failures else 'All gates pass.') + '\n'
     print(summary)
@@ -321,7 +325,7 @@ def main():
             'platform': sys.platform,
             'runs': args.runs,
             'model': {'fixed_ms': FIXED_MS, 'per_kloc_ms': PER_KLOC_MS, 'per_kprop_ms': PER_KPROP_MS},
-            'scaling': {'corpus': SCALING_CORPUS, 'one_ms': scaled['one'], 'two_ms': scaled['two']},
+            'scaling': {'corpus': SCALING_CORPUS, 'one_ms': scaled['one'], 'two_ms': scaled['two']} if scaled else None,
             'corpora': rows,
         }
         with open(args.out, 'w') as f:
