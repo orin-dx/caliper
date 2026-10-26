@@ -75,6 +75,12 @@ pub(super) fn value_member_props(
     let (_, declared) = lookup_type_alias(ctx, base_file.as_str(), &format!("typeof {base_name}"))?;
     let name = match declared {
         CollectedTypeAlias::Passthrough { target: CollectedType::Named { name, .. }, .. } => name,
+        CollectedTypeAlias::Passthrough { target: CollectedType::Object(fields), .. } => {
+            return fields
+                .iter()
+                .find(|field| field.name == member)
+                .and_then(|field| component_props_type(&field.collected_type, &base_file, ctx, 0));
+        }
         CollectedTypeAlias::Passthrough { target: CollectedType::Intersection(members), .. } => {
             return members.iter().find_map(|part| match part {
                 CollectedType::Object(fields) => fields
@@ -116,6 +122,21 @@ fn component_props_type(
     }
     match ty {
         CollectedType::AtFile { file, inner } => component_props_type(inner, file, ctx, depth + 1),
+        CollectedType::TypeOf(name) => {
+            let mut ignored = Vec::new();
+            let (canonical_file, canonical_name) = resolve_to_canonical(name, file, ctx, &mut ignored)
+                .unwrap_or_else(|| (file.to_owned(), name.to_string()));
+            let mapping = ctx
+                .global
+                .component_mappings
+                .iter()
+                .find(|mapping| mapping.file_path == canonical_file && mapping.component_name == canonical_name)
+                .or_else(|| ctx.dependencies.as_ref()?.component(&canonical_file, &canonical_name))?;
+            Some((
+                CollectedType::Named { name: mapping.props_type_name.clone(), args: mapping.props_type_args.clone() },
+                mapping.file_path.clone(),
+            ))
+        }
         CollectedType::Intersection(members) => {
             members.iter().find_map(|member| component_props_type(member, file, ctx, depth + 1))
         }

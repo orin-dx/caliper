@@ -168,6 +168,37 @@ fn component_props_reads_a_lowercase_dependency_value_exported_as_a_component() 
 }
 
 #[test]
+fn component_props_reads_members_of_a_declared_component_namespace() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/drawer-kit/package.json",
+            r#"{ "name": "drawer-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/drawer-kit/index.d.ts",
+            "import * as React from 'react';\n\
+             interface RootProps { open?: boolean; title: string }\n\
+             declare function Root(props: RootProps): React.JSX.Element;\n\
+             export declare const Drawer: { Root: typeof Root; Trigger: React.ForwardRefExoticComponent<{ disabled?: boolean }> };\n",
+        ),
+        (
+            "src/Drawer.tsx",
+            "import * as React from 'react';\nimport { Drawer as Primitive } from 'drawer-kit';\n\
+             export function DrawerRoot(props: React.ComponentProps<typeof Primitive.Root>) { return null; }\n\
+             export function DrawerTrigger(props: React.ComponentProps<typeof Primitive.Trigger>) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+
+    assert_eq!(
+        prop_types(&output, "DrawerRoot"),
+        [("open".into(), "boolean".into()), ("title".into(), "string".into())]
+    );
+    assert_eq!(prop_types(&output, "DrawerTrigger"), [("disabled".into(), "boolean".into())]);
+}
+
+#[test]
 fn package_types_resolve_through_star_exports_cycles_and_namespaces_and_the_value_index() {
     let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
 
