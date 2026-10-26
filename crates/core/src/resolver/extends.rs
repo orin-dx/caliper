@@ -135,15 +135,25 @@ pub(super) fn component_props_of(
         // A dependency's component, from the loaded layer's value index; never emitted itself (ADR 0010).
         .or_else(|| ctx.dependencies.as_ref()?.component(&canonical_file, &canonical_name));
     match target {
-        Some(target) => resolve_props_chain(
-            target.props_type_name.as_str(),
-            &target.props_type_args,
-            &target.file_path,
-            mapping,
-            ctx,
-            state,
-            depth + 1,
-        ),
+        Some(target) => {
+            // TypeScript instantiates an unbound generic callable with `unknown` in `ComponentProps<typeof X>`.
+            let substitution: super::substitute::Substitution<'_> =
+                target.type_params.iter().map(|param| (param.as_str(), crate::types::CollectedType::Unknown)).collect();
+            let props_type_args = target
+                .props_type_args
+                .iter()
+                .map(|arg| super::substitute::substitute_type(arg, &substitution))
+                .collect::<Vec<_>>();
+            resolve_props_chain(
+                target.props_type_name.as_str(),
+                &props_type_args,
+                &target.file_path,
+                mapping,
+                ctx,
+                state,
+                depth + 1,
+            )
+        }
         // `typeof Primitive.div`: a member of a value whose declared type is a mapped type over its keys.
         None if let Some((props, props_file)) = name
             .rsplit_once('.')

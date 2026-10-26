@@ -425,20 +425,32 @@ impl<'src> SourceDataCollector<'src> {
         if !returns_element(&return_type) {
             return None;
         }
-        let (props_name, props_args) =
+        let (props_name, mut props_args) =
             self.extract_type_name_from_type(&parameter.type_annotation.as_ref()?.type_annotation)?;
-        Some(
-            ComponentMapping::new(
-                name.to_owned(),
-                props_name,
-                self.file_path.clone(),
-                decl.span.start,
-                decl.span.end,
-                DetectionRule::FunctionDeclaration,
-            )
-            .with_props_type_args(props_args)
-            .with_doc(self.find_jsdoc(decl.span.start), BTreeMap::new()),
+        let type_params: Vec<crate::types::TypeName> = function
+            .type_parameters
+            .as_ref()
+            .map(|declaration| declaration.params.iter().map(|param| param.name.name.as_str().into()).collect())
+            .unwrap_or_default();
+        if props_name.starts_with("__anon_") && !type_params.is_empty() {
+            self.data.type_alias_params.insert(self.scoped_key(&props_name), type_params.clone());
+            props_args = type_params
+                .iter()
+                .map(|name| crate::types::CollectedType::Named { name: name.clone(), args: Vec::new() })
+                .collect();
+        }
+        let mut mapping = ComponentMapping::new(
+            name.to_owned(),
+            props_name,
+            self.file_path.clone(),
+            decl.span.start,
+            decl.span.end,
+            DetectionRule::FunctionDeclaration,
         )
+        .with_props_type_args(props_args)
+        .with_doc(self.find_jsdoc(decl.span.start), BTreeMap::new());
+        mapping.type_params = type_params;
+        Some(mapping)
     }
 
     /// Try to detect: `export default function(props: Props) { ... }` — an
