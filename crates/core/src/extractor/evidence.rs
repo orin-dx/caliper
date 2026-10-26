@@ -100,10 +100,17 @@ impl<'a> Visit<'a> for ElementInValue {
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        if callee_name(&it.callee).is_some_and(|c| ELEMENT_FACTORIES.contains(&c)) {
+        let name = callee_name(&it.callee);
+        if name.is_some_and(|c| ELEMENT_FACTORIES.contains(&c)) {
             self.found = true;
+        // These calls preserve the JSX value; an arbitrary call may turn it into a Response or other data.
+        } else if name.is_some_and(|name| matches!(name, "map" | "flatMap" | "reduce"))
+            || matches!(&it.callee, Expression::StaticMemberExpression(member)
+                if matches!(&member.object, Expression::Identifier(id) if id.name == "Promise")
+                    && matches!(member.property.name.as_str(), "resolve" | "all"))
+        {
+            walk::walk_call_expression(self, it);
         }
-        walk::walk_call_expression(self, it);
     }
 
     // JSX passed to a constructor, such as `new ImageResponse(<div />)`, is not the function's return value.
