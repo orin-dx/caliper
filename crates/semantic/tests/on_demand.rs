@@ -109,3 +109,26 @@ fn dropping_the_checker_stops_its_process_and_thread() {
     // Drop joins the worker, which shuts `tsc` down first; a hang here is the failure.
     drop(checker);
 }
+
+/// Against the real `tsc` (`7.1.0-beta`): set `CALIPER_TEST_TSC` to its `bin/tsc`. Skipped, loudly, when it is not set.
+#[test]
+fn the_real_checker_answers_the_requested_component() {
+    let Some(tsc) = std::env::var_os("CALIPER_TEST_TSC") else {
+        eprintln!("skipped: CALIPER_TEST_TSC does not name a typescript@7.1 beta `tsc`");
+        return;
+    };
+    let project = project(false);
+    let output = structural(&project);
+    let mut config = OnDemandConfig::new(project.root.clone());
+    config.tsc_path = Some(Utf8PathBuf::from(tsc.to_str().unwrap()));
+    config.request_timeout = Duration::from_secs(60);
+    let checker = OnDemand::new(config);
+
+    let first = ask(&checker, target(&output, "Button"));
+    let second = ask(&checker, target(&output, "Button"));
+
+    assert_eq!(first.diagnostics, []);
+    let names: Vec<_> = first.components[0].props.iter().map(|prop| prop.name.as_str()).collect();
+    assert_eq!(names, ["label", "size", "disabled", "onClick", "tags", "pair", "box"]);
+    assert_eq!(second.components[0].props.len(), 7, "the same warm process answers again");
+}

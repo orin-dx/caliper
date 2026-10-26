@@ -18,6 +18,17 @@ The TypeScript 7.1 backend (ADR 0006, 0007) checks the whole project in one run:
 
 Of a 30 to 40 ms request, 20 to 33 ms builds the program and 2 to 11 ms answers the queries. Initializing the session and parsing the tsconfig once per process, instead of per request, took 10 ms off. For the same components the checker reports 893 props where the structural pass reports 387 on shadcn, 828 against 732 on antd, and the same count on Mantine, Chakra and Spectrum.
 
+Through the Storybook harness (`storybook-parity.mjs --variants caliper,caliper-ondemand`, shadcn 95 and antd 83 sampled stories, two runs each, shared machine):
+
+| Corpus | Variant    | First story | Median story |     Total |    Peak RSS | Props Storybook lists that we lack |
+| ------ | ---------- | ----------: | -----------: | --------: | ----------: | ---------------------------------: |
+| shadcn | structural |   75-144 ms |      2-10 ms | 0.4-1.9 s | 314-324 MiB |                                  0 |
+| shadcn | on-demand  |  101-335 ms |     29-66 ms | 3.0-7.1 s | 318-328 MiB |                                  3 |
+| antd   | structural |   59-102 ms |       2-4 ms | 0.2-0.5 s | 222-226 MiB |                                 37 |
+| antd   | on-demand  |   96-147 ms |     39-53 ms | 3.3-4.6 s | 229-230 MiB |                                  5 |
+
+Memory is the addon's; the checker's process is not in the harness figure. The checker's props replace the structural ones, and the props it leaves out that the component inherits (`children`, `aria-*`, DOM handlers) stay structural. Without that rule shadcn lost 6 props and antd gained only 28.
+
 ## Decision
 
 A session can have a checker attached (`WatchSession::with_semantic`, a `SemanticProvider` the semantic crate implements). Core owns the trait and the merge; the checker's process, protocol and threads stay in `caliper-docgen-semantic`, so core does no I/O.
