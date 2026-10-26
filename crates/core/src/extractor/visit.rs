@@ -298,7 +298,10 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     self.record_declared_value_type(declarator);
                 }
                 if let Some(name) = self.extract_pascal_name(declarator) {
-                    if let Some(mapping) = self.try_forward_ref_exotic_decl(declarator, &name) {
+                    if let Some(mapping) = self
+                        .try_forward_ref_exotic_decl(declarator, &name)
+                        .or_else(|| self.try_declared_callable_component(declarator, &name))
+                    {
                         self.data.component_mappings.push(mapping);
                     } else if self.type_annotation_is_fc_family(declarator) {
                         // try_fc_annotation already ran unconditionally above and found

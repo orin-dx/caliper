@@ -373,6 +373,44 @@ impl<'src> SourceDataCollector<'src> {
         )
     }
 
+    /// A dependency can publish a component as `declare const Tab: (props: TabProps) => ReactElement | null`.
+    pub(super) fn try_declared_callable_component<'a>(
+        &mut self,
+        decl: &VariableDeclarator<'a>,
+        name: &str,
+    ) -> Option<ComponentMapping> {
+        let TSType::TSFunctionType(function) = &decl.type_annotation.as_ref()?.type_annotation else { return None };
+        let [parameter] = function.params.items.as_slice() else { return None };
+        let returns_element = |ty: &crate::types::CollectedType| match ty {
+            crate::types::CollectedType::Named { name, .. } => {
+                matches!(name.as_str(), "React.ReactElement" | "React.JSX.Element" | "JSX.Element")
+            }
+            crate::types::CollectedType::Union(members) => members.iter().any(|member| {
+                matches!(member, crate::types::CollectedType::Named { name, .. }
+                    if matches!(name.as_str(), "React.ReactElement" | "React.JSX.Element" | "JSX.Element"))
+            }),
+            _ => false,
+        };
+        let return_type = self.ts_type_to_collected(&function.return_type.type_annotation);
+        if !returns_element(&return_type) {
+            return None;
+        }
+        let (props_name, props_args) =
+            self.extract_type_name_from_type(&parameter.type_annotation.as_ref()?.type_annotation)?;
+        Some(
+            ComponentMapping::new(
+                name.to_owned(),
+                props_name,
+                self.file_path.clone(),
+                decl.span.start,
+                decl.span.end,
+                DetectionRule::FunctionDeclaration,
+            )
+            .with_props_type_args(props_args)
+            .with_doc(self.find_jsdoc(decl.span.start), BTreeMap::new()),
+        )
+    }
+
     /// Try to detect: `export default function(props: Props) { ... }` — an
     /// anonymous default-exported function component, common in Next.js page
     /// files. There's no identifier to name it after, so the PascalCased

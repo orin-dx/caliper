@@ -82,6 +82,34 @@ const BADGE: &str = "import type { ButtonProps, B, Tokens, Tone } from 'ui-kit';
     export function Wrapped(props: React.ComponentProps<typeof Button>) { return null; }\n";
 
 #[test]
+fn component_props_reads_an_imported_callable_declaration() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/callable-kit/package.json",
+            r#"{ "name": "callable-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/callable-kit/index.d.ts",
+            "import * as React from 'react';\n\
+             export interface TabProps { id: string; disabled?: boolean }\n\
+             export declare const Tab: (props: TabProps & React.RefAttributes<HTMLDivElement>) => React.ReactElement | null;\n",
+        ),
+        (
+            "src/Tabs.tsx",
+            "import * as React from 'react';\nimport { Tab as TabPrimitive } from 'callable-kit';\n\
+             export function TabsTrigger(props: React.ComponentProps<typeof TabPrimitive>) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+
+    assert_eq!(
+        prop_types(&output, "TabsTrigger"),
+        [("disabled".into(), "boolean".into()), ("id".into(), "string".into())]
+    );
+}
+
+#[test]
 fn package_types_resolve_through_star_exports_cycles_and_namespaces_and_the_value_index() {
     let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
 
