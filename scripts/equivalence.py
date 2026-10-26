@@ -100,7 +100,10 @@ def resolve_base(base, work, timeout):
     """An executable as given; a git ref built once per commit in a scratch worktree, then cached by commit."""
     if os.path.isfile(base) and os.access(base, os.X_OK):
         return os.path.abspath(base)
-    sha = run('git', 'rev-parse', '--verify', f'{base}^{{commit}}', capture_output=True, text=True).stdout.strip()
+    try:
+        sha = run('git', 'rev-parse', '--verify', f'{base}^{{commit}}', capture_output=True, text=True).stdout.strip()
+    except subprocess.CalledProcessError:
+        sys.exit(f'{base}: not an executable and not a commit; if it is a path, the step that builds it did not run')
     cached = os.path.join(work, 'bin', sha)
     if os.path.exists(cached):
         return cached

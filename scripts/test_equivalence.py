@@ -74,3 +74,25 @@ class AllowList(unittest.TestCase):
 
         with open(equivalence.DEFAULT_ALLOW) as f:
             self.assertEqual(equivalence.allow_problems(json.load(f)['allow']), [])
+
+
+class ResolveBase(unittest.TestCase):
+
+    def test_an_executable_path_is_taken_as_given(self):
+        import stat
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = os.path.join(tmp, 'caliper-base')
+            with open(binary, 'w') as f:
+                f.write('#!/bin/sh\n')
+            os.chmod(binary, os.stat(binary).st_mode | stat.S_IXUSR)
+            self.assertEqual(equivalence.resolve_base(binary, tmp, 5), binary)
+
+    def test_a_missing_path_is_named_rather_than_handed_on(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(SystemExit) as raised:
+                equivalence.resolve_base(os.path.join(tmp, 'no-such-binary'), tmp, 5)
+            self.assertIn('not an executable and not a commit', str(raised.exception))
