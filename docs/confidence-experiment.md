@@ -7,7 +7,7 @@ The score uses only Caliper's emitted prop shapes, component metadata, and diagn
 Measured on 2026-10-25 with the structural binary at `3f20f965` and its PR stack, `typescript@7.1.0-beta`, and the five corpora in `scripts/parity.py` plus fixtures. The checker and Caliper share 518,297 labelled props. The oracle marks one prop `wrong`: `RouterProvider.navigate` in Spectrum. Its source preserves `Href` and `RouterOptions` aliases; the checker instantiates the unaugmented `RouterConfig` to `string` and `undefined`. This is a spelling and environment difference, not evidence of a consumer-visible incorrect function signature. One hard label cannot validate an automatic fallback rule.
 
 | Target at 10% of matched components routed | Existing warning rule | Smoothed table | Logistic model |
-| --- | ---: | ---: | ---: |
+| --- | --: | --: | --: |
 | Shared `wrong` or `less precise` props, five-corpus mean | 10% | 27% | 25% |
 | Checker-only props outside summarized layers, five-corpus mean | 24% | 3% | 8% |
 
