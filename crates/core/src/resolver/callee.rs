@@ -133,7 +133,10 @@ fn component_props_type(
                 .find(|mapping| mapping.file_path == canonical_file && mapping.component_name == canonical_name)
                 .or_else(|| ctx.dependencies.as_ref()?.component(&canonical_file, &canonical_name))?;
             Some((
-                CollectedType::Named { name: mapping.props_type_name.clone(), args: mapping.props_type_args.clone() },
+                CollectedType::Named {
+                    name: mapping.props_type_name.clone(),
+                    args: super::extends::instantiated_props_args(mapping),
+                },
                 mapping.file_path.clone(),
             ))
         }
