@@ -106,6 +106,9 @@ impl<'a> Visit<'a> for ElementInValue {
         walk::walk_call_expression(self, it);
     }
 
+    // JSX passed to a constructor, such as `new ImageResponse(<div />)`, is not the function's return value.
+    fn visit_new_expression(&mut self, _it: &NewExpression<'a>) {}
+
     fn visit_object_expression(&mut self, _it: &ObjectExpression<'a>) {}
 }
 
