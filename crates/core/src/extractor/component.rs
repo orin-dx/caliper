@@ -328,35 +328,56 @@ impl<'src> SourceDataCollector<'src> {
         let type_ann = decl.type_annotation.as_ref()?;
         let ct = self.ts_type_to_collected(&type_ann.type_annotation);
 
-        let (type_name, args) = match &ct {
-            crate::types::CollectedType::Named { name, args } => (name.as_str(), args.as_slice()),
-            _ => return None,
-        };
-
-        if !matches!(type_name, "ForwardRefExoticComponent" | "React.ForwardRefExoticComponent") {
-            return None;
+        fn forward_ref_args(ty: &crate::types::CollectedType) -> Option<&[crate::types::CollectedType]> {
+            match ty {
+                crate::types::CollectedType::Named { name, args }
+                    if matches!(name.as_str(), "ForwardRefExoticComponent" | "React.ForwardRefExoticComponent") =>
+                {
+                    Some(args.as_slice())
+                }
+                _ => None,
+            }
         }
+        let args = match &ct {
+            crate::types::CollectedType::Intersection(members) => members.iter().find_map(forward_ref_args),
+            other => forward_ref_args(other),
+        }?;
 
         let first_arg = args.first()?;
 
-        // Extract P from P & RefAttributes<E>
+        // RefAttributes is metadata on the value, not a prop base. Keep every other member: declaration generators
+        // often write several props objects into one ForwardRefExoticComponent argument.
         let props_type = match first_arg {
-            crate::types::CollectedType::Intersection(members) => members
-                .iter()
-                .find(|m| {
-                    !matches!(m, crate::types::CollectedType::Named { name, .. }
+            crate::types::CollectedType::Intersection(members) => {
+                let mut props: Vec<_> = members
+                    .iter()
+                    .filter(|member| {
+                        !matches!(member, crate::types::CollectedType::Named { name, .. }
                             if matches!(name.as_str(), "RefAttributes" | "React.RefAttributes"))
-                })
-                .unwrap_or(first_arg),
-            other => other,
+                    })
+                    .cloned()
+                    .collect();
+                match props.len() {
+                    0 => return None,
+                    1 => props.remove(0),
+                    _ => crate::types::CollectedType::Intersection(props),
+                }
+            }
+            other => other.clone(),
         };
 
         let (props_name, props_args) = match props_type {
-            crate::types::CollectedType::Named { name, args } => (name.clone(), args.clone()),
-            _ => return None,
+            crate::types::CollectedType::Named { name, args } => (name, args),
+            props => {
+                let name = format!("__anon_{}", self.data.type_aliases.len());
+                let key = self.scoped_key(&name);
+                self.data.type_aliases.insert(
+                    key,
+                    crate::types::CollectedTypeAlias::Passthrough { target: props, file_path: self.file_path.clone() },
+                );
+                (name.into(), vec![])
+            }
         };
-
-        let props_type_args = props_args;
 
         Some(
             ComponentMapping::new(
@@ -367,10 +388,69 @@ impl<'src> SourceDataCollector<'src> {
                 decl.span.end,
                 DetectionRule::ForwardRefExoticDecl,
             )
-            .with_props_type_args(props_type_args)
+            .with_props_type_args(props_args)
             .with_doc(self.find_jsdoc(decl.span.start), BTreeMap::new())
             .with_param_defaults(rustc_hash::FxHashMap::default()),
         )
+    }
+
+    /// A dependency can publish a component as `declare const Tab: (props: TabProps) => ReactElement | null`.
+    pub(super) fn try_declared_callable_component<'a>(
+        &mut self,
+        decl: &VariableDeclarator<'a>,
+        name: &str,
+    ) -> Option<ComponentMapping> {
+        let TSType::TSFunctionType(function) = &decl.type_annotation.as_ref()?.type_annotation else { return None };
+        let [parameter] = function.params.items.as_slice() else { return None };
+        let return_type = self.ts_type_to_collected(&function.return_type.type_annotation);
+        let is_element = |name: &str| {
+            matches!(name, "React.ReactElement" | "React.JSX.Element" | "JSX.Element")
+                || self.data.imports.iter().any(|binding| {
+                    binding.local_name == name
+                        && binding.exported_name == "ReactElement"
+                        && binding.specifier == "react"
+                })
+        };
+        let returns_element = |ty: &crate::types::CollectedType| match ty {
+            crate::types::CollectedType::Named { name, .. } => is_element(name),
+            crate::types::CollectedType::Union(members) => members.iter().any(|member| {
+                if let crate::types::CollectedType::Named { name, .. } = member {
+                    is_element(name)
+                } else {
+                    false
+                }
+            }),
+            _ => false,
+        };
+        if !returns_element(&return_type) {
+            return None;
+        }
+        let (props_name, mut props_args) =
+            self.extract_type_name_from_type(&parameter.type_annotation.as_ref()?.type_annotation)?;
+        let type_params: Vec<crate::types::TypeName> = function
+            .type_parameters
+            .as_ref()
+            .map(|declaration| declaration.params.iter().map(|param| param.name.name.as_str().into()).collect())
+            .unwrap_or_default();
+        if props_name.starts_with("__anon_") && !type_params.is_empty() {
+            self.data.type_alias_params.insert(self.scoped_key(&props_name), type_params.clone());
+            props_args = type_params
+                .iter()
+                .map(|name| crate::types::CollectedType::Named { name: name.clone(), args: Vec::new() })
+                .collect();
+        }
+        let mut mapping = ComponentMapping::new(
+            name.to_owned(),
+            props_name,
+            self.file_path.clone(),
+            decl.span.start,
+            decl.span.end,
+            DetectionRule::FunctionDeclaration,
+        )
+        .with_props_type_args(props_args)
+        .with_doc(self.find_jsdoc(decl.span.start), BTreeMap::new());
+        mapping.type_params = type_params;
+        Some(mapping)
     }
 
     /// Try to detect: `export default function(props: Props) { ... }` — an

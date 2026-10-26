@@ -82,6 +82,90 @@ const BADGE: &str = "import type { ButtonProps, B, Tokens, Tone } from 'ui-kit';
     export function Wrapped(props: React.ComponentProps<typeof Button>) { return null; }\n";
 
 #[test]
+fn component_props_reads_an_imported_callable_declaration() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/callable-kit/package.json",
+            r#"{ "name": "callable-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/callable-kit/index.d.ts",
+            "import * as React from 'react';\n\
+             export interface TabProps { id: string; disabled?: boolean }\n\
+             export declare const Tab: (props: TabProps & React.RefAttributes<HTMLDivElement>) => React.ReactElement | null;\n",
+        ),
+        (
+            "src/Tabs.tsx",
+            "import * as React from 'react';\nimport { Tab as TabPrimitive } from 'callable-kit';\n\
+             export function TabsTrigger(props: React.ComponentProps<typeof TabPrimitive>) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+
+    assert_eq!(
+        prop_types(&output, "TabsTrigger"),
+        [("disabled".into(), "boolean".into()), ("id".into(), "string".into())]
+    );
+}
+
+#[test]
+fn component_props_reads_a_generic_callable_with_imported_react_element() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/callable-kit/package.json",
+            r#"{ "name": "callable-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/callable-kit/index.d.ts",
+            "import * as React from 'react';\nimport { ReactElement } from 'react';\n\
+             export interface MenuProps<T> { id: string; value?: T }\n\
+             export declare const Menu: <T>(props: MenuProps<T> & React.RefAttributes<HTMLDivElement>) => ReactElement | null;\n",
+        ),
+        (
+            "src/Menu.tsx",
+            "import * as React from 'react';\nimport { Menu as MenuPrimitive } from 'callable-kit';\n\
+             export function Menu(props: React.ComponentProps<typeof MenuPrimitive>) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+
+    assert_eq!(prop_types(&output, "Menu"), [("id".into(), "string".into()), ("value".into(), "unknown".into())]);
+    assert!(output.diagnostics.iter().all(|d| !d.message.contains("Cannot resolve type 'T'")));
+}
+
+#[test]
+fn component_props_reads_a_lowercase_dependency_value_exported_as_a_component() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/callable-kit/package.json",
+            r#"{ "name": "callable-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/callable-kit/index.d.ts",
+            "import * as React from 'react';\n\
+             interface CommandProps { asChild?: boolean; label?: string }\n\
+             declare const pkg: React.ForwardRefExoticComponent<CommandProps & { loop?: boolean } & React.RefAttributes<HTMLDivElement>> & { Item: React.ForwardRefExoticComponent<{ value: string }> };\n\
+             declare const Command: React.ForwardRefExoticComponent<{ rootOnly?: number }>;\n\
+             export { pkg as Command, Command as CommandRoot };\n",
+        ),
+        (
+            "src/Command.tsx",
+            "import * as React from 'react';\nimport { Command as CommandPrimitive } from 'callable-kit';\n\
+             export function Command(props: React.ComponentProps<typeof CommandPrimitive>) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+
+    assert_eq!(
+        prop_types(&output, "Command"),
+        [("asChild".into(), "boolean".into()), ("label".into(), "string".into()), ("loop".into(), "boolean".into())]
+    );
+}
+
+#[test]
 fn package_types_resolve_through_star_exports_cycles_and_namespaces_and_the_value_index() {
     let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
 
