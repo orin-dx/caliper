@@ -80,7 +80,8 @@ const normComponent = (name: string) =>
     .toLowerCase()
     .replaceAll(/[^a-z0-9]/g, '')
 const rel = (path: string) => relative(root, realpathSync(path))
-const pathKey = (path: string) => (process.platform === 'darwin' || process.platform === 'win32' ? path.toLowerCase() : path)
+const pathKey = (path: string) =>
+  process.platform === 'darwin' || process.platform === 'win32' ? path.toLowerCase() : path
 
 const caliper = JSON.parse(readFileSync(args.caliper, 'utf8'))
 const caliperByFile = new Map<string, { name: string; key: string; component: any }[]>()
@@ -130,8 +131,24 @@ const examples = Object.fromEntries(VERDICTS.map((v) => [v, [] as Example[]])) a
 const verdictCache = new Map<string, Verdict>()
 const rows: [string, string, Verdict | 'missing' | 'collapsed'][] = []
 const missingDetails: { key: string; prop: string; verdict: 'missing' | 'collapsed'; declarations: string[] }[] = []
-const dumped: { key: string; file: string; component: string; prop: string; verdict: Verdict; caliper: unknown; checker: string }[] = []
-const totals = { componentsChecker: 0, componentsMatched: 0, propsChecker: 0, propsShared: 0, propsMissing: 0, propsCollapsed: 0, failedExports: 0 }
+const dumped: {
+  key: string
+  file: string
+  component: string
+  prop: string
+  verdict: Verdict
+  caliper: unknown
+  checker: string
+}[] = []
+const totals = {
+  componentsChecker: 0,
+  componentsMatched: 0,
+  propsChecker: 0,
+  propsShared: 0,
+  propsMissing: 0,
+  propsCollapsed: 0,
+  failedExports: 0,
+}
 
 /** The verdict for one prop, made once per (Caliper prop, checker type). */
 function judge({
@@ -201,11 +218,20 @@ function visitExport(exported: any, candidates: { name: string; key: string; com
   totals.propsMissing += missing.length
   totals.propsCollapsed += collapsed.length
   if (args.rows) rows.push(...missing.map((p: any) => [match.key, p.name, 'missing'] as [string, string, 'missing']))
-  if (args.rows) rows.push(...collapsed.map((p: any) => [match.key, p.name, 'collapsed'] as [string, string, 'collapsed']))
+  if (args.rows)
+    rows.push(...collapsed.map((p: any) => [match.key, p.name, 'collapsed'] as [string, string, 'collapsed']))
   if (args.missing) {
-    for (const [verdict, absentProps] of [['missing', missing], ['collapsed', collapsed]] as const) {
+    for (const [verdict, absentProps] of [
+      ['missing', missing],
+      ['collapsed', collapsed],
+    ] as const) {
       for (const p of absentProps) {
-        missingDetails.push({ key: match.key, prop: p.name, verdict, declarations: p.declarations?.map((d: any) => String(d.path)) ?? [] })
+        missingDetails.push({
+          key: match.key,
+          prop: p.name,
+          verdict,
+          declarations: p.declarations?.map((d: any) => String(d.path)) ?? [],
+        })
       }
     }
   }
