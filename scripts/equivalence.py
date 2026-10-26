@@ -13,7 +13,7 @@ patterns matched against `<corpus>/<config> <kind> <item>` as printed in the rep
 meant to alter output, and then the patterns say exactly which differences are meant.
 
 The `none` configurations compare every field exactly. The curated and full ones leave out the props, notable props and
-layers that `@types/react` gives an element, which ADR 0023 changes on purpose.
+layers that `@types/react` gives an element, which ADR 0024 changes on purpose.
 
 Two optional stages:
   --lazy {off,fixtures,all}  lazy-vs-batch parity (crates/core/tests/lazy_parity.rs): the fixtures, and with `all`
@@ -35,8 +35,10 @@ Usage: scripts/equivalence.py [BASE] [--bin BIN] [--corpora DIR] [--corpus NAME]
 import argparse
 import collections
 import fnmatch
+import functools
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -138,7 +140,7 @@ def extract(binary, src, flags, cache_dir, timeout):
 
 def is_react_attribute(prop):
     """Whether `@types/react` is the interface that gives the prop its name, which the HTML-attribute modes change on
-    purpose (ADR 0023); `none` configurations compare everything else exactly."""
+    purpose (ADR 0024); `none` configurations compare everything else exactly."""
     return '/@types/react/' in ((prop.get('parent') or {}).get('fileName') or '')
 
 
@@ -249,8 +251,34 @@ def diagnostic_item(text):
     return f'{head} | {text[:100]}'
 
 
+PROP_TAIL = re.compile(r'^(\S+) (\S+) \*\.([^*?\[\]]+)$')
+
+
+@functools.lru_cache(maxsize=4)
+def index_allow(patterns):
+    """The entries shaped `<label> <kind> *.<name>` (one per prop a change adds) by label and kind, their names in a
+    set; the others stay a list. A change to what every component lists can need thousands of such entries, and
+    matching each difference against each one in turn would take longer than the extraction."""
+    names, rest = {}, []
+    for pattern in patterns:
+        m = PROP_TAIL.match(pattern)
+        if m:
+            names.setdefault((m[1], m[2]), set()).add(m[3])
+        else:
+            rest.append(pattern)
+    return names, rest, {}
+
+
 def allowed(label, kind, item, patterns):
-    return any(fnmatch.fnmatchcase(f'{label} {kind} {item}', p) for p in patterns)
+    names, rest, covering = index_allow(tuple(patterns))
+    if (label, kind) not in covering:
+        covering[label, kind] = [
+            tails for (l, k), tails in names.items() if fnmatch.fnmatchcase(label, l) and fnmatch.fnmatchcase(kind, k)
+        ]
+    # `*.name` matches an item that ends in `.name`: any suffix after one of its dots.
+    if any(item[i + 1:] in tails for tails in covering[label, kind] for i, c in enumerate(item) if c == '.'):
+        return True
+    return any(fnmatch.fnmatchcase(f'{label} {kind} {item}', p) for p in rest)
 
 
 def allow_problems(patterns):
