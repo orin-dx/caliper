@@ -44,8 +44,8 @@ import parity  # noqa: E402  (corpus list and setup, the oracle and its gate)
 
 ROOT = parity.ROOT
 CONFIGS = {
-    'default': [],
-    'deps': ['--load-dependencies'],
+    'default': ['--html-attributes', 'curated'],
+    'deps': ['--load-dependencies', '--html-attributes', 'curated'],
     'html-full': ['--html-attributes', 'full'],
     'deps+html-full': ['--load-dependencies', '--html-attributes', 'full'],
 }

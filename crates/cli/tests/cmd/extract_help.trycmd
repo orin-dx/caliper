@@ -33,10 +33,10 @@ Options:
           How much of an inherited HTML element's attributes to expose
 
           Possible values:
-          - curated: ~15-20 curated, commonly-documented attributes per element
-            (default)
+          - curated: A compact subset per element: handlers, aria-*, ref and the
+            common attributes
           - full:    All of `@types/react`'s real attributes for the element
-            (matches RDT)
+            (matches RDT) (default)
           - none:    No inherited HTML attributes at all — own props only
 
       --extra-builtins <EXTRA_BUILTINS>

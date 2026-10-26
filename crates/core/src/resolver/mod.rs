@@ -916,10 +916,9 @@ pub(crate) fn resolve_component_shared(
                 name: "Ref".into(),
                 args: vec![PropType::Named { name: "unknown".into(), args: vec![] }],
             };
-            let parent = PropParent {
-                name: "RefAttributes".to_owned(),
-                file_name: "node_modules/@types/react/index.d.ts".to_owned(),
-            };
+            // The component takes it, so no interface is its parent, and a consumer that hides React's inherited props
+            // (the addon's `collapseInheritedProps`) still shows it.
+            let parent = None;
             target.insert(
                 "ref".to_owned(),
                 ctx.share(ParsedProp::new(
@@ -929,7 +928,7 @@ pub(crate) fn resolve_component_shared(
                     None,
                     String::new(),
                     Default::default(),
-                    Some(parent),
+                    parent,
                     vec![],
                 )),
             );

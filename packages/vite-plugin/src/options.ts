@@ -6,7 +6,7 @@ export interface CaliperDocgenOptions {
   exclude?: string[]
   /** Leave out the HTML attributes a component inherits from its element. Same as `htmlAttributes: 'none'`. */
   skipHtmlProps?: boolean
-  /** Which HTML attributes to list: the notable ones (`'curated'`, the default), all of them or none. Wins over `skipHtmlProps`. */
+  /** Which HTML attributes to list: all of them (`'full'`, the default), a compact subset (`'curated'`: handlers, `aria-*`, `ref`, common attributes) or none. Wins over `skipHtmlProps`. */
   htmlAttributes?: 'curated' | 'full' | 'none'
   /**
    * The least severe extraction diagnostic to log, once each: `'error'`, `'warn'` (the default), `'info'`, or

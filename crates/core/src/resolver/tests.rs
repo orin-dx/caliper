@@ -943,7 +943,9 @@ fn test_html_attribute_mode_curated_does_not_expand_real_button_attrs() {
         },
     );
 
-    let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
+    let options =
+        PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Curated, ..Default::default() };
+    let ctx = ResolutionContext::new(Arc::new(global), &options);
     let mapping = ComponentMapping::new(
         "Button".into(),
         "ButtonProps".into(),

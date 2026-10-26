@@ -307,14 +307,6 @@ impl Indexed {
                 let (path, parsed) = *found;
                 react_types = Some(curated_react_types(&path, parsed, &mut lib_diagnostics));
             }
-            (ReactDts::Missing, HtmlAttributeMode::Full) => lib_diagnostics.push(
-                Diagnostic::new(
-                    DiagnosticSeverity::Warning,
-                    DiagnosticCode::MissingTypeLibrary,
-                    "HtmlAttributeMode::Full requested but @types/react could not be resolved",
-                )
-                .with_help("Check that @types/react is installed. Falling back to curated attributes."),
-            ),
             (ReactDts::Missing | ReactDts::NotWanted, _) => {}
         }
         // Ambient globals (Date, Element, ...) live in TS's lib files and are never imported, so merge them in every

@@ -160,6 +160,17 @@ pub(super) fn layer_attributes(
     let takes_ref = matches!(bare, "ComponentProps" | "ComponentPropsWithRef");
     let declared = react_attribute_names(element, file, ctx);
     let loaded = !declared.is_empty();
+    if full && !loaded {
+        state.diagnostics.push(
+            Diagnostic::new(
+                DiagnosticSeverity::Info,
+                DiagnosticCode::MissingTypeLibrary,
+                format!("@types/react could not be resolved, so the attributes of <{element}> are left out"),
+            )
+            .with_help("Check that @types/react is installed."),
+        );
+        return Vec::new();
+    }
     let names: Vec<String> = match (full, loaded) {
         (true, true) => declared.into_iter().filter(|name| name != "key").collect(),
         (false, true) => {

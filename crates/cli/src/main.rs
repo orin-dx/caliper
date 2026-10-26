@@ -142,9 +142,9 @@ pub enum OutputFormat {
 
 #[derive(clap::ValueEnum, Clone, Copy)]
 pub enum HtmlAttributeModeArg {
-    /// ~15-20 curated, commonly-documented attributes per element (default)
+    /// A compact subset per element: handlers, aria-*, ref and the common attributes
     Curated,
-    /// All of `@types/react`'s real attributes for the element (matches RDT)
+    /// All of `@types/react`'s real attributes for the element (matches RDT) (default)
     Full,
     /// No inherited HTML attributes at all — own props only
     None,

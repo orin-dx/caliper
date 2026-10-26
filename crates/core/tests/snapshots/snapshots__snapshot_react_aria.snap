@@ -856,12 +856,42 @@ expression: value
             }
           ]
         },
+        "ref": {
+          "name": "ref",
+          "type": {
+            "kind": "named",
+            "name": "Ref",
+            "args": [
+              {
+                "kind": "named",
+                "name": "unknown",
+                "args": []
+              }
+            ]
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "",
+          "tags": {},
+          "parent": null,
+          "declarations": []
+        },
         "referrerPolicy": {
           "name": "referrerPolicy",
           "type": {
-            "kind": "named",
-            "name": "React.HTMLAttributeReferrerPolicy",
-            "args": []
+            "kind": "literalUnion",
+            "members": [
+              "",
+              "no-referrer",
+              "no-referrer-when-downgrade",
+              "origin",
+              "origin-when-cross-origin",
+              "same-origin",
+              "strict-origin",
+              "strict-origin-when-cross-origin",
+              "unsafe-url"
+            ],
+            "hasDefault": false
           },
           "required": false,
           "defaultValue": null,
@@ -1045,31 +1075,7 @@ expression: value
         }
       },
       "inheritance": [],
-      "notableInherited": {
-        "ref": {
-          "name": "ref",
-          "type": {
-            "kind": "named",
-            "name": "Ref",
-            "args": [
-              {
-                "kind": "named",
-                "name": "unknown",
-                "args": []
-              }
-            ]
-          },
-          "required": false,
-          "defaultValue": null,
-          "description": "",
-          "tags": {},
-          "parent": {
-            "name": "RefAttributes",
-            "fileName": "node_modules/@types/react/index.d.ts"
-          },
-          "declarations": []
-        }
-      },
+      "notableInherited": {},
       "discriminantProp": null,
       "composes": [],
       "tags": {},

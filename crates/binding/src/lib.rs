@@ -94,6 +94,7 @@ fn next_session_id() -> u32 {
 pub struct JsExtractOptions {
     pub src_dirs: Vec<String>,
     pub exclude: Option<Vec<String>>,
+    /// `'full'` (the default) lists all of an element's attributes, `'curated'` a compact subset, `'none'` none.
     #[napi(ts_type = "'curated' | 'full' | 'none'")]
     pub html_attributes: Option<String>,
     pub tsconfig_path: Option<String>,

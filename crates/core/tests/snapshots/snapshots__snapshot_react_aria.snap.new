@@ -1,0 +1,1104 @@
+---
+source: crates/core/tests/snapshots.rs
+assertion_line: 176
+expression: value
+---
+{
+  "components": {
+    "Button": {
+      "displayName": "Button",
+      "filePath": "[ROOT]/fixtures/react-aria/Button.d.ts",
+      "description": "A button allows a user to perform an action, with mouse, touch, and keyboard interactions.",
+      "props": {
+        "allowFocusWhenDisabled": {
+          "name": "allowFocusWhenDisabled",
+          "type": {
+            "kind": "boolean"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Whether keyboard presses should trigger press events.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "aria-controls": {
+          "name": "aria-controls",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Identifies the element (or elements) whose contents or presence are controlled by the current element.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "aria-describedby": {
+          "name": "aria-describedby",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Identifies the element (or elements) that describes the object.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "aria-details": {
+          "name": "aria-details",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Identifies the element (or elements) that provide a detailed, extended description for the object.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "aria-expanded": {
+          "name": "aria-expanded",
+          "type": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "boolean"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "true"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "false"
+              }
+            ]
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Indicates to assistive technology that an element is expanded or collapsed.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "aria-haspopup": {
+          "name": "aria-haspopup",
+          "type": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "boolean"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "menu"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "listbox"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "tree"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "grid"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "dialog"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "true"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "false"
+              }
+            ]
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Indicates the availability and type of interactive popup element that can be triggered by an element.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "aria-label": {
+          "name": "aria-label",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "An accessibility label for this element.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "aria-labelledby": {
+          "name": "aria-labelledby",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Identifies the element (or elements) that labels the current element.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "aria-pressed": {
+          "name": "aria-pressed",
+          "type": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "boolean"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "true"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "false"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "mixed"
+              }
+            ]
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Indicates whether the element, or another grouping element it controls, is currently selected or checked.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "children": {
+          "name": "children",
+          "type": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "reactNode"
+              },
+              {
+                "kind": "function",
+                "typeParams": [],
+                "params": [
+                  {
+                    "name": "renderProps",
+                    "type": {
+                      "kind": "named",
+                      "name": "ButtonRenderProps",
+                      "args": []
+                    }
+                  }
+                ],
+                "returnType": {
+                  "kind": "named",
+                  "name": "React.ReactNode",
+                  "args": []
+                }
+              }
+            ]
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "The content to display in the button.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "className": {
+          "name": "className",
+          "type": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "function",
+                "typeParams": [],
+                "params": [
+                  {
+                    "name": "renderProps",
+                    "type": {
+                      "kind": "named",
+                      "name": "ButtonRenderProps",
+                      "args": []
+                    }
+                  }
+                ],
+                "returnType": {
+                  "kind": "string"
+                }
+              }
+            ]
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Additional CSS class names to apply.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "download": {
+          "name": "download",
+          "type": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "boolean"
+              }
+            ]
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Download a URL instead of navigating to it.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "excludeFromTabOrder": {
+          "name": "excludeFromTabOrder",
+          "type": {
+            "kind": "boolean"
+          },
+          "required": false,
+          "defaultValue": {
+            "value": "false",
+            "computed": false
+          },
+          "description": "Whether the element should not be included in the tab order.\nUse when the button is rendered inside a group that manages focus.",
+          "tags": {
+            "default": "false"
+          },
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "href": {
+          "name": "href",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "The URL that the hyperlink points to. If provided, the button is rendered as an anchor.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "hrefLang": {
+          "name": "hrefLang",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Hints at the linked URL's format; used when `href` is specified.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "id": {
+          "name": "id",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Defines a string value that labels the current element.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "isDisabled": {
+          "name": "isDisabled",
+          "type": {
+            "kind": "boolean"
+          },
+          "required": false,
+          "defaultValue": {
+            "value": "false",
+            "computed": false
+          },
+          "description": "Whether the button is disabled.",
+          "tags": {
+            "default": "false"
+          },
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "onBlur": {
+          "name": "onBlur",
+          "type": {
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "React.FocusEvent",
+                  "args": [
+                    {
+                      "kind": "named",
+                      "name": "HTMLButtonElement",
+                      "args": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Handler that is called when the element loses focus.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "onFocus": {
+          "name": "onFocus",
+          "type": {
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "React.FocusEvent",
+                  "args": [
+                    {
+                      "kind": "named",
+                      "name": "HTMLButtonElement",
+                      "args": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Handler that is called when the element receives focus.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "onFocusChange": {
+          "name": "onFocusChange",
+          "type": {
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "isFocused",
+                "type": {
+                  "kind": "boolean"
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Handler that is called when the element's focus status changes.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "onKeyDown": {
+          "name": "onKeyDown",
+          "type": {
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "React.KeyboardEvent",
+                  "args": [
+                    {
+                      "kind": "named",
+                      "name": "HTMLButtonElement",
+                      "args": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Handler that is called when a key is pressed.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "onKeyUp": {
+          "name": "onKeyUp",
+          "type": {
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "React.KeyboardEvent",
+                  "args": [
+                    {
+                      "kind": "named",
+                      "name": "HTMLButtonElement",
+                      "args": []
+                    }
+                  ]
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Handler that is called when a key is released.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "onPress": {
+          "name": "onPress",
+          "type": {
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "PressEvent",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Handler that is called when the press is released over the target.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "onPressChange": {
+          "name": "onPressChange",
+          "type": {
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "isPressed",
+                "type": {
+                  "kind": "boolean"
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Handler that is called when the press state changes.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "onPressEnd": {
+          "name": "onPressEnd",
+          "type": {
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "PressEvent",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Handler that is called when a press interaction ends, either over the target or when the pointer leaves the target.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "onPressStart": {
+          "name": "onPressStart",
+          "type": {
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "PressEvent",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Handler that is called when a press interaction starts.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "onPressUp": {
+          "name": "onPressUp",
+          "type": {
+            "kind": "function",
+            "typeParams": [],
+            "params": [
+              {
+                "name": "e",
+                "type": {
+                  "kind": "named",
+                  "name": "PressEvent",
+                  "args": []
+                }
+              }
+            ],
+            "returnType": {
+              "kind": "void"
+            }
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Handler that is called when a press is released over the target regardless of whether it started on the target or not.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "ping": {
+          "name": "ping",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Specifies the MIME type of the linked URL.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "ref": {
+          "name": "ref",
+          "type": {
+            "kind": "named",
+            "name": "Ref",
+            "args": [
+              {
+                "kind": "named",
+                "name": "unknown",
+                "args": []
+              }
+            ]
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "",
+          "tags": {},
+          "parent": {
+            "name": "RefAttributes",
+            "fileName": "node_modules/@types/react/index.d.ts"
+          },
+          "declarations": []
+        },
+        "referrerPolicy": {
+          "name": "referrerPolicy",
+          "type": {
+            "kind": "literalUnion",
+            "members": [
+              "",
+              "no-referrer",
+              "no-referrer-when-downgrade",
+              "origin",
+              "origin-when-cross-origin",
+              "same-origin",
+              "strict-origin",
+              "strict-origin-when-cross-origin",
+              "unsafe-url"
+            ],
+            "hasDefault": false
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "How much of the referrer to send when following the link.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "rel": {
+          "name": "rel",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "The relationship of the linked URL as space-separated link types.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "role": {
+          "name": "role",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Allows an author to specify, on a per-element basis, which accessibility features the element exposes to the accessibility tree.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "routerOptions": {
+          "name": "routerOptions",
+          "type": {
+            "kind": "named",
+            "name": "object",
+            "args": []
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "A router options object. Only applies when `href` is specified and a router is configured.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "style": {
+          "name": "style",
+          "type": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "cssProperties"
+              },
+              {
+                "kind": "function",
+                "typeParams": [],
+                "params": [
+                  {
+                    "name": "renderProps",
+                    "type": {
+                      "kind": "named",
+                      "name": "ButtonRenderProps",
+                      "args": []
+                    }
+                  }
+                ],
+                "returnType": {
+                  "kind": "named",
+                  "name": "React.CSSProperties",
+                  "args": []
+                }
+              }
+            ]
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Additional inline styles.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "target": {
+          "name": "target",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "Where to display the linked URL; used when `href` is specified.",
+          "tags": {},
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        },
+        "type": {
+          "name": "type",
+          "type": {
+            "kind": "union",
+            "members": [
+              {
+                "kind": "stringLiteral",
+                "value": "button"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "submit"
+              },
+              {
+                "kind": "stringLiteral",
+                "value": "reset"
+              }
+            ]
+          },
+          "required": false,
+          "defaultValue": {
+            "value": "'button'",
+            "computed": false
+          },
+          "description": "The behavior of the button when used in an HTML form.",
+          "tags": {
+            "default": "'button'"
+          },
+          "parent": {
+            "name": "ButtonProps",
+            "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ButtonProps",
+              "fileName": "[ROOT]/fixtures/react-aria/Button.d.ts"
+            }
+          ]
+        }
+      },
+      "inheritance": [],
+      "notableInherited": {},
+      "discriminantProp": null,
+      "composes": [],
+      "tags": {},
+      "methods": [],
+      "detectedBy": "forwardRefExoticDecl",
+      "exported": true
+    }
+  },
+  "enums": {},
+  "diagnostics": [],
+  "stats": {
+    "componentsExtracted": 1,
+    "componentsSkipped": 0,
+    "filesParsed": 1,
+    "dtsFilesParsed": 7,
+    "dtsCacheHits": 0,
+    "durationMs": 0,
+    "tier1Count": 0,
+    "tier3Count": 0,
+    "opaqueCount": 0
+  }
+}
