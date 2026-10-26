@@ -1,6 +1,21 @@
 use super::*;
 use crate::types::{DefaultSource, EnumValue};
 
+#[test]
+fn jsx_passed_to_a_response_constructor_does_not_make_a_route_handler_a_component() {
+    let path = Utf8Path::new("/fixtures/app/og/route.tsx");
+    let data = parse_file(
+        path,
+        "export async function GET(request: Request) { return new ImageResponse(<div>{request.url}</div>); }\n\
+         export function Card(props: { title: string }) { return <div>{props.title}</div>; }",
+    );
+
+    assert_eq!(
+        data.component_mappings.iter().map(|mapping| mapping.component_name.as_str()).collect::<Vec<_>>(),
+        ["Card"]
+    );
+}
+
 fn fixture_path(rel: &str) -> std::path::PathBuf {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest_dir.join("../../fixtures").join(rel)

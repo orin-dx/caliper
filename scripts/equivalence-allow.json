@@ -11,11 +11,13 @@
     "shadcn/deps* component-field-changed *.composes",
     "shadcn/deps* component-field-changed *.inheritance",
     "shadcn/deps* component-field-changed *.discriminantProp",
+    "shadcn/deps* component-removed GET",
     "shadcn/deps* diagnostic-added info CIRCULAR_REFERENCE *",
     "shadcn/deps* diagnostic-added info DISCRIMINATED_UNION *",
     "shadcn/deps* diagnostic-added info INDEXED_ACCESS_OPAQUE *",
     "shadcn/deps* diagnostic-added info JS_DOC_DEFAULT_MISMATCH *",
     "shadcn/deps* diagnostic-added info OPAQUE_TYPE *",
+    "shadcn/deps* diagnostic-added info SKIPPED_CANDIDATE 'GET' takes a typed props parameter *",
     "shadcn/deps* diagnostic-added info TEMPLATE_LITERAL_OPAQUE *",
     "shadcn/deps* diagnostic-added warning UNRESOLVABLE_IMPORT Cannot resolve type 'TrustedHTML' *",
     "shadcn/deps* diagnostic-removed info CIRCULAR_REFERENCE *",
@@ -29,6 +31,7 @@
     "shadcn/deps* prop-field-changed *ToggleGroup*orientation.declarations",
     "shadcn/deps* prop-field-changed *ToggleGroup*orientation.parent",
     "shadcn/deps* prop-type-changed Combobox*",
-    "shadcn/deps* prop-type-changed Select*"
+    "shadcn/deps* prop-type-changed Select*",
+    "shadcn/deps* stat-changed componentsExtracted"
   ]
 }
