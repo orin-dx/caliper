@@ -26,5 +26,18 @@ class UnboundTypeParameter(unittest.TestCase):
         self.assertEqual(parity.type_params('"a" | T'), {'T'})
 
 
+class RestParameterLost(unittest.TestCase):
+    pattern = staticmethod(parity.LOSS_PATTERNS['rest parameter lost'])
+
+    def test_a_dropped_rest_parameter_is_a_loss(self):
+        self.assertTrue(self.pattern('(args: any[]) => void', '(...args: any[]) => void'))
+
+    def test_a_kept_rest_parameter_is_not(self):
+        self.assertFalse(self.pattern('(...args: any[]) => void', '(...args: any[]) => void'))
+
+    def test_typescripts_own_elision_is_not_a_rest_parameter(self):
+        self.assertFalse(self.pattern('"a" | "b" | "c"', '"a" | "b" | ... 40 more ... | "c"'))
+
+
 if __name__ == '__main__':
     unittest.main()
