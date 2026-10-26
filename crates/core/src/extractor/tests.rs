@@ -1274,6 +1274,48 @@ fn wrapper_calls_carrying_props_in_a_type_argument_are_detected_by_shape() {
 }
 
 #[test]
+fn a_call_given_a_tag_and_a_config_object_is_a_component_when_its_props_type_is_declared_beside_it() {
+    use crate::types::DetectionRule::TaggedFactory;
+    let source = r#"
+        import { chakra, styled } from "../styled-system";
+        import { createElement, h } from "react";
+        import type { RemoteProps } from "./remote";
+        export interface CenterProps extends HTMLChakraProps<"div"> {}
+        export const Center = chakra("div", { base: { display: "flex" }, variants: { inline: { true: {} } } });
+        type PillProps = { tone: string };
+        export const Pill = styled("span", { base: {} });
+        export const Remote = chakra("div", { base: {} });
+        export const Undeclared = chakra("div", { base: {} });
+        export const Element = createElement("div", { className: "x" });
+        export const Hyper = h("div", { className: "x" });
+        export const Tagless = chakra(Center, { base: {} });
+        export const Generic = chakra<CenterProps>("div", { base: {} });
+        export const NoConfig = chakra("div");
+    "#;
+    let data = parse_file(Utf8Path::new("/test/tagged.tsx"), source);
+    let mut found: Vec<(&str, &str, crate::types::DetectionRule)> = data
+fn a_function_component_annotation_inside_an_intersection_carries_the_props() {
+    use crate::types::DetectionRule::FcAnnotation;
+    let source = r#"
+        import * as React from "react";
+        interface DrawerProps { open: boolean }
+        interface PanelProps { title: string }
+        export const Drawer: React.FC<DrawerProps> & { _Panel: React.FC<PanelProps> } = (props) => <div />;
+        export const Sheet: { size: number } & React.FC<DrawerProps> = (props) => <div />;
+        export const Plain: { size: number } & { depth: number } = { size: 1, depth: 2 };
+    "#;
+    let data = parse_file(Utf8Path::new("/test/drawer.tsx"), source);
+    let found: Vec<(&str, &str, crate::types::DetectionRule)> = data
+        .component_mappings
+        .iter()
+        .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule))
+        .collect();
+    found.sort_by_key(|(name, _, _)| *name);
+    assert_eq!(found, vec![("Center", "CenterProps", TaggedFactory), ("Pill", "PillProps", TaggedFactory)]);
+    assert_eq!(found, vec![("Drawer", "DrawerProps", FcAnnotation), ("Sheet", "DrawerProps", FcAnnotation)]);
+}
+
+#[test]
 fn a_wrapped_render_function_may_be_parenthesized_or_asserted() {
     use crate::types::DetectionRule::{HocWrapper, WrapperTypeArgument};
     let source = r#"

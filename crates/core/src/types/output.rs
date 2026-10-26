@@ -15,7 +15,7 @@ pub(crate) mod interned;
 /// [`IncrementalUpdate`](crate::pipeline::IncrementalUpdate) and a session index. Bumped whenever a reader of the
 /// previous shape would misread or lose data from the new one; never by an addition it can ignore. Version 2 writes a
 /// component's props as prop set ids and an inheritance layer's `omitted` as a name list id (ADR 0018).
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 // ─── Top-level output ─────────────────────────────────────────────────────────
 
@@ -478,6 +478,8 @@ impl PropType {
                 params.len().hash(hasher);
                 for param in params {
                     param.name.hash(hasher);
+                    param.optional.hash(hasher);
+                    param.rest.hash(hasher);
                     param.param_type.structural_hash(hasher);
                 }
                 return_type.structural_hash(hasher);
@@ -620,16 +622,7 @@ impl PropType {
                 } else {
                     format!("<{}>", type_params.join(", "))
                 };
-                // A destructured parameter has no name; TypeScript prints it as `__0`, `__1`, ...
-                let params = params
-                    .iter()
-                    .enumerate()
-                    .map(|(i, p)| match &p.name {
-                        Some(name) => format!("{name}: {}", p.param_type.raw_string()),
-                        None => format!("__{i}: {}", p.param_type.raw_string()),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let params = params.iter().enumerate().map(|(i, p)| p.signature(i)).collect::<Vec<_>>().join(", ");
                 format!("{type_params}({params}) => {}", return_type.raw_string())
             }
             PropType::Ref { element: Some(e) } => format!("Ref<{}>", e),
@@ -954,6 +947,8 @@ impl PropType {
                                 Ok(FunctionParam {
                                     name: p["name"].as_str().map(str::to_owned),
                                     param_type: Self::from_tagged_value(&p["type"])?,
+                                    optional: p["optional"].as_bool().unwrap_or(false),
+                                    rest: p["rest"].as_bool().unwrap_or(false),
                                 })
                             })
                             .collect::<Result<Vec<_>, std::string::String>>()
@@ -1071,6 +1066,29 @@ pub struct FunctionParam {
     pub name: Option<std::string::String>,
     #[serde(rename = "type")]
     pub param_type: PropType,
+    /// The parameter is written `name?: T`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub optional: bool,
+    /// The parameter is the rest parameter `...name: T[]`; its `type` is the array type as written.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rest: bool,
+}
+
+impl FunctionParam {
+    /// A required parameter.
+    pub fn new(name: Option<std::string::String>, param_type: PropType) -> Self {
+        Self { name, param_type, optional: false, rest: false }
+    }
+
+    /// The parameter as TypeScript prints it, with its `...` and `?`: `...rest: number[]`, `a?: string`.
+    fn signature(&self, index: usize) -> std::string::String {
+        let (prefix, marker) = (if self.rest { "..." } else { "" }, if self.optional { "?" } else { "" });
+        match &self.name {
+            Some(name) => format!("{prefix}{name}{marker}: {}", self.param_type.raw_string()),
+            // A destructured parameter has no name; TypeScript prints it as `__0`, `__1`, ...
+            None => format!("{prefix}__{index}{marker}: {}", self.param_type.raw_string()),
+        }
+    }
 }
 
 /// A field in an object type.
