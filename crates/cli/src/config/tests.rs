@@ -192,6 +192,7 @@ fn build_options_maps_extra_builtins_cli_flag() {
         config_path: None,
         extra_builtins: &extra_builtins,
         load_dependencies: false,
+        no_load_dependencies: false,
         collapse_inherited_props: None,
     })
     .expect("build_options should succeed with no config file");
@@ -228,6 +229,7 @@ export default {
         config_path: Some(config_path.to_str().unwrap()),
         extra_builtins: &extra_builtins,
         load_dependencies: false,
+        no_load_dependencies: false,
         collapse_inherited_props: None,
     })
     .expect("build_options should succeed");
@@ -252,6 +254,7 @@ fn build_options_propagates_a_config_load_failure_as_err() {
         config_path: Some("/nonexistent-parent-dir-xyz/docgen.config.ts"),
         extra_builtins: &[],
         load_dependencies: false,
+        no_load_dependencies: false,
         collapse_inherited_props: None,
     });
     assert!(result.is_err(), "expected build_options to return Err for a failing --config path");
@@ -313,6 +316,7 @@ fn no_flags<'a>() -> BuildOptionsArgs<'a> {
         config_path: None,
         extra_builtins: &[],
         load_dependencies: false,
+        no_load_dependencies: false,
         collapse_inherited_props: None,
     }
 }
@@ -352,13 +356,16 @@ fn build_options_rejects_an_unrecognized_html_attributes_flag_naming_the_value()
 }
 
 #[test]
-fn load_dependencies_comes_from_the_config_and_the_flag_turns_it_on() {
-    for (json, expected) in [("{}", false), (r#"{ "loadDependencies": true }"#, true)] {
+fn load_dependencies_is_on_by_default_and_the_config_and_the_flags_set_it() {
+    for (json, expected) in
+        [("{}", true), (r#"{ "loadDependencies": true }"#, true), (r#"{ "loadDependencies": false }"#, false)]
+    {
         let schema: DocgenConfigSchema = serde_json::from_str(json).expect("valid config JSON");
         assert_eq!(schema.into_pipeline_options().unwrap().load_dependencies, expected, "{json}");
     }
-    assert!(!build_options(no_flags()).unwrap().load_dependencies);
+    assert!(build_options(no_flags()).unwrap().load_dependencies);
     assert!(build_options(BuildOptionsArgs { load_dependencies: true, ..no_flags() }).unwrap().load_dependencies);
+    assert!(!build_options(BuildOptionsArgs { no_load_dependencies: true, ..no_flags() }).unwrap().load_dependencies);
 }
 
 #[test]

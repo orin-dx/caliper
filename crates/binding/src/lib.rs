@@ -102,7 +102,7 @@ pub struct JsExtractOptions {
     /// Read and write the on-disk caches (default `true`). `false` reads and writes nothing under `cacheDir`; the
     /// output is the same.
     pub cache: Option<bool>,
-    /// Load the dependency type declarations project types reference (off by default).
+    /// Load the dependency type declarations project types reference (default `true`).
     pub load_dependencies: Option<bool>,
     /// Which inherited sources of more than 30 props to list as one layer (default `'dependencies'`).
     #[napi(ts_type = "'dependencies' | 'all' | 'none'")]

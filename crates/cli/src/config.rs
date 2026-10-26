@@ -193,6 +193,8 @@ pub struct BuildOptionsArgs<'a> {
     pub extra_builtins: &'a [String],
     /// `--load-dependencies`: turns loading on over the config; absent leaves the config's choice.
     pub load_dependencies: bool,
+    /// `--no-load-dependencies`: turns loading off over the config; absent leaves the config's choice.
+    pub no_load_dependencies: bool,
     /// `--collapse-inherited-props`; absent leaves the config's choice.
     pub collapse_inherited_props: Option<CollapseInheritedProps>,
 }
@@ -229,6 +231,9 @@ pub fn build_options(args: BuildOptionsArgs) -> Result<PipelineOptions> {
     }
     if args.load_dependencies {
         opts.load_dependencies = true;
+    }
+    if args.no_load_dependencies {
+        opts.load_dependencies = false;
     }
     if let Some(mode) = args.collapse_inherited_props {
         opts.collapse_inherited_props = mode;

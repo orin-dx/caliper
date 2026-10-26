@@ -117,8 +117,9 @@ pub struct PipelineOptions {
     pub use_cache: bool,
     /// Custom docgen extension plugins.
     pub plugins: crate::plugin::PluginRegistry,
-    /// Load the dependency declarations project types reference, by name, before resolving (ADR 0010). Off by default:
-    /// without it a type imported from a package resolves only when it is a builtin or a known shortcut.
+    /// Load the dependency declarations project types reference, by name, before resolving (ADR 0010). On by default
+    /// (ADR 0019); off, a type imported from a package resolves only when it is a builtin or a known shortcut. A
+    /// project with no installed packages loads nothing either way.
     pub load_dependencies: bool,
     /// Which large inherited sources to record as a layer instead of expanding.
     pub collapse_inherited_props: CollapseInheritedProps,
@@ -144,7 +145,7 @@ impl Default for PipelineOptions {
             cache_dir: None,
             use_cache: true,
             plugins: crate::plugin::PluginRegistry::default(),
-            load_dependencies: false,
+            load_dependencies: true,
             collapse_inherited_props: CollapseInheritedProps::default(),
             experimental_semantic_types: false,
             semantic_tsc_path: None,

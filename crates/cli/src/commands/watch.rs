@@ -37,6 +37,7 @@ fn start_session(
         config_path,
         extra_builtins: &[],
         load_dependencies: args.load_dependencies,
+        no_load_dependencies: args.no_load_dependencies,
         collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
 
@@ -591,6 +592,7 @@ mod tests {
                 src: vec![dir.clone()],
                 out: Some(out.to_str().unwrap().to_owned()),
                 load_dependencies: false,
+                no_load_dependencies: false,
                 collapse_inherited_props: None,
             };
 
