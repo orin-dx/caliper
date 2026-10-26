@@ -1,5 +1,26 @@
 # npm/caliper-docgen
 
+## 0.7.0
+
+- Radix `MenubarMenu` now shows its props in both shadcn variants.
+- Wrappers around React Aria components now show props from installed package declarations.
+- Chakra group components now show recipe props such as `orientation`, `attached`, `grow`, and `stacking`.
+- Vaul `Drawer` wrappers now show props from the package's component members.
+- Route handlers that return an `ImageResponse` no longer appear as React components.
+- Spectrum `Card` now includes its collection and link props when exported through a cast alias.
+- antd `SubMenu` now includes its inherited props.
+- Generic component members now expose the same props as direct component references.
+- Mantine `Box` and table components now include `component` and `renderRoot` props when created through aliased factories.
+- antd `InternalPreviewGroup` now shows five previously missing props.
+- Long lazy sessions now load remaining dependency types once in the background, making repeated component requests faster. A session that reads the full project may use more memory.
+- Installed package types now load by default, revealing more props and reducing unresolved warnings. Use `--no-load-dependencies` or `loadDependencies: false` to keep the previous behavior. On Chakra, extraction rises from about 50 to 220 ms and from 100 to 330 MiB.
+- Components from generic factories now retain props shared by every result variant.
+- Wrappers around memoized React components, including `InputOTP` and Streamdown, now show their props.
+- The `lsp` subcommand has been removed. Use your editor's TypeScript language server for hover and completion, or the lazy session API for component docs.
+- Lazy sessions now reuse the project index as dependencies load, making repeated requests faster and reducing memory use. Small sessions no longer load every remaining dependency name.
+- Wrappers around cmdk's `Command` components now show their props.
+- Props from `Record`, `Pick`, and `PropsWithChildren` now appear, including antd breakpoint props, picked React attributes, and Spectrum's `children` prop.
+
 ## 0.6.0
 
 - - **The Storybook addon resolves a component when a story asks for it:** the session indexes where components live from parsing alone and resolves one on request (`lazy`, default `true`; `lazy: false` restores resolving every component at start). Chakra with dependencies answers its first story in 55–121 ms where the eager session took 357–425 ms, and peaks at 419 MB where the eager one peaked at 658 MB. Answers are identical to the eager session's.
