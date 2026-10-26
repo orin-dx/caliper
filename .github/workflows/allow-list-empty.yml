@@ -1,8 +1,8 @@
 name: Allow-list empty
 
-# scripts/equivalence-allow.json lists the differences one pull request means to make, so the Equivalence job can pass
-# it. Once the pull request merges they are no longer differences, and an entry left on main hides the same kind of
-# difference from every pull request after it (docs/parity.md). main's list must be empty.
+# A file in scripts/equivalence-allow.d/ lists the differences one pull request means to make, so the Equivalence job
+# can pass it. Once the pull request merges they are no longer differences, and an entry left on main hides the same
+# kind of difference from every pull request after it (docs/parity.md). main must have no entries.
 on:
   push:
     branches: [main]
