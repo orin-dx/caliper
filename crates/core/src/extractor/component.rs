@@ -291,7 +291,7 @@ impl<'src> SourceDataCollector<'src> {
                                 self.file_path.clone(),
                                 decl.span.start,
                                 decl.span.end,
-                                DetectionRule::HocWrapper,
+                                DetectionRule::ForwardRef,
                             )
                             .with_props_type_args(type_args)
                             .with_doc(description, tags),
@@ -335,7 +335,7 @@ impl<'src> SourceDataCollector<'src> {
             self.file_path.clone(),
             decl.span.start,
             decl.span.end,
-            DetectionRule::HocWrapper,
+            if is_forward_ref_call(call) { DetectionRule::ForwardRef } else { DetectionRule::HocWrapper },
         )
         .with_props_type_args(type_args)
         .with_doc(description, tags)
@@ -702,6 +702,10 @@ impl<'src> SourceDataCollector<'src> {
             }
         }
         let mut alias = base.clone();
+        // `forwardRef(Inner)` makes a component that takes a `ref` even when `Inner` is a plain typed function.
+        if call.is_some_and(is_forward_ref_call) {
+            alias.rule = DetectionRule::ForwardRef;
+        }
         alias.component_name = name.to_owned();
         self.data.component_mappings.push(alias);
         self.aliased_away.insert(inner_name.into());
@@ -745,6 +749,16 @@ impl<'src> SourceDataCollector<'src> {
             }
             _ => None,
         }
+    }
+}
+
+/// Whether `call` is React's `forwardRef(…)` however it is spelled: bare, `React.forwardRef`, or React Aria's
+/// `(forwardRef as forwardRefType)(…)`. Such a component takes a `ref` whatever its props type declares.
+fn is_forward_ref_call(call: &CallExpression<'_>) -> bool {
+    match peel_expr(&call.callee) {
+        Expression::Identifier(id) => id.name == "forwardRef",
+        Expression::StaticMemberExpression(m) => m.property.name == "forwardRef",
+        _ => false,
     }
 }
 
