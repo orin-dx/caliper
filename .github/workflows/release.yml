@@ -319,6 +319,27 @@ jobs:
             --orchestration-revision "$GITHUB_SHA"
           )
           callisto release execute "${args[@]}"
+      # Callisto tags the release commit; the tap follows the CLI's npm tag.
+      - name: Find the CLI release tag
+        id: cli-tag
+        working-directory: release-source
+        run: |
+          set -euo pipefail
+          git fetch --tags --quiet origin
+          tag=$(git tag --points-at HEAD --list 'npm/caliper-docgen@*' | head -n 1)
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          [[ -n "$tag" ]] || echo 'This run released no CLI version; the Homebrew tap is not notified.'
+      # The tap also checks daily, so a failed notification never fails the release.
+      - name: Notify the Homebrew tap
+        if: steps.cli-tag.outputs.tag != ''
+        continue-on-error: true
+        uses: orin-dx/actions/notify-homebrew-tap@687b60169775ae9e9270af098a4cabb5e1c2a08e # main
+        with:
+          client-id: ${{ vars.TAP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
+          tap-repository: orin-dx/homebrew-tap
+          tool: caliper
+          release-tag: ${{ steps.cli-tag.outputs.tag }}
       - name: Summarize receipt
         if: always()
         run: |
