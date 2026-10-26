@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use camino::Utf8Path;
 use oxc_ast::ast::*;
 
-use crate::types::{ComponentMapping, DetectionRule, DiagnosticCode};
+use crate::types::{CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode};
 
 use super::evidence::{renders, FunctionShape};
 use super::{is_pascal_case, SourceDataCollector};
@@ -72,6 +72,30 @@ pub(super) fn pascal_case_from_file_stem(file_path: &Utf8Path) -> Option<String>
 }
 
 impl<'src> SourceDataCollector<'src> {
+    /// An asserted React component alias can replace the inner component's props before the alias is exported.
+    pub(super) fn try_record_cast_component_alias<'a>(&mut self, decl: &VariableDeclarator<'a>, name: &str) {
+        let Some(Expression::TSAsExpression(assertion)) = decl.init.as_ref() else { return };
+        let Expression::Identifier(inner) = assertion.expression.without_parentheses() else { return };
+        let has_base = self.data.component_mappings.iter().any(|mapping| mapping.component_name == inner.name.as_str());
+        if !has_base {
+            return;
+        }
+        let TSType::TSTypeReference(reference) = &assertion.type_annotation else { return };
+        let type_name = self.extract_type_ref_name(reference);
+        let bare = type_name.strip_prefix("React.").unwrap_or(&type_name);
+        if !matches!(bare, "ForwardRefExoticComponent" | "FunctionComponent" | "FC" | "ComponentType") {
+            return;
+        }
+        let Some(props) = reference.type_arguments.as_ref().and_then(|args| args.params.first()) else { return };
+        let alias_name = format!("__{name}CastProps{}", decl.span.start);
+        let alias_key = self.scoped_key(&alias_name);
+        let target = self.ts_type_to_collected(props);
+        self.data
+            .type_aliases
+            .insert(alias_key, CollectedTypeAlias::Passthrough { target, file_path: self.file_path.clone() });
+        self.cast_component_aliases.insert(name.into(), (inner.name.as_str().to_owned(), alias_name.into()));
+    }
+
     // ─── Component detection helpers ──────────────────────────────────────────
 
     /// Try to extract a PascalCase name from a VariableDeclarator's binding.

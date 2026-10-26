@@ -159,6 +159,11 @@ pub(super) fn resolve_props_chain(
 
     // Strip "React." namespace prefix before all builtin/utility checks.
     let type_name_bare = type_name.strip_prefix("React.").unwrap_or(type_name);
+    if type_name_bare == "PropsWithoutRef" && super::may_be_react_builtin(type_name, consuming_file, ctx) {
+        if let Some(alias) = super::alias::react_props_without_ref_alias(type_args, consuming_file) {
+            return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
+        }
+    }
 
     // ── Step 0.5: Inline utility type in extends position ─────────────────────
     // `extends Pick<T, K>` (and Omit, Partial, Required, Readonly) resolves through the same alias logic as

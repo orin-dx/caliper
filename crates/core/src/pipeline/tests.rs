@@ -3760,3 +3760,45 @@ export function List(props: {
         }
     );
 }
+
+#[test]
+fn an_exported_component_cast_uses_the_asserted_props() {
+    let output = extract_one(&[(
+        "Card.tsx",
+        r#"
+import { forwardRef, ForwardRefExoticComponent } from 'react';
+type PropsWithoutRef<P> = P;
+interface CardProps { label: string }
+interface ItemProps<P> { title?: string; textValue?: string; href?: string }
+let Card = forwardRef<HTMLDivElement, CardProps>((props, ref) => <div ref={ref}>{props.label}</div>);
+let _Card = Card as ForwardRefExoticComponent<ItemProps<CardProps> & PropsWithoutRef<CardProps>>;
+export { _Card as Card };
+"#,
+    )]);
+    assert_eq!(
+        prop_names(&output, "Card"),
+        ["href", "label", "textValue", "title"],
+        "components: {:#?}; diagnostics: {:#?}",
+        output.components.keys().collect::<Vec<_>>(),
+        output.diagnostics
+    );
+    assert_eq!(output.components["Card"].props["label"].prop_type.raw_string(), "string");
+    assert_eq!(output.components["Card"].props["title"].prop_type.raw_string(), "string");
+}
+
+#[test]
+fn react_props_without_ref_keeps_the_base_props_in_alias_and_extends_positions() {
+    let output = extract_one(&[(
+        "Cards.tsx",
+        r#"
+import type { PropsWithoutRef } from 'react';
+interface Base { label: string; ref?: string }
+type Alias = PropsWithoutRef<Base>;
+interface Extended extends PropsWithoutRef<Base> {}
+export function AliasCard(props: Alias) { return <div>{props.label}</div>; }
+export function ExtendedCard(props: Extended) { return <div>{props.label}</div>; }
+"#,
+    )]);
+    assert_eq!(prop_names(&output, "AliasCard"), ["label"]);
+    assert_eq!(prop_names(&output, "ExtendedCard"), ["label"]);
+}
