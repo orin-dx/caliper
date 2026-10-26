@@ -1058,8 +1058,6 @@ pub enum DetectionRule {
     ForwardRef,
     /// `declare const Button: ForwardRefExoticComponent<Props & RefAttributes<El>>`
     ForwardRefExoticDecl,
-    /// Detects a declared component typed as `MemoExoticComponent<(props: Props) => ReactElement>`.
-    MemoExoticDecl,
     /// `memo(...)`, `observer(...)` or any call whose first argument is a function with a typed props parameter.
     HocWrapper,
     /// `class Button extends Component<Props>`
@@ -1079,6 +1077,8 @@ pub enum DetectionRule {
     /// `const HiddenInput = ArkCheckbox.HiddenInput`: a PascalCase member of an imported module, re-exported under a
     /// name of the project's own. Its props are the imported component's.
     ImportedMemberAlias,
+    /// Detects a declared component typed as `MemoExoticComponent<(props: Props) => ReactElement>`.
+    MemoExoticDecl,
 }
 
 /// A component → prop type mapping.
