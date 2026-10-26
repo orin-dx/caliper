@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path'
 import type * as Napi from 'caliper-docgen-napi'
 import type { Diagnostic, IncrementalUpdate, RdtComponentDoc, SessionIndex } from 'caliper-docgen-napi'
 import { localNameOf } from './exports.js'
+import { Fill } from './fill.js'
 import { buildLookups, diagnosticId, incompleteMessages, type ComponentRef, type Lookups } from './lookups.js'
 import { assertSchemaVersion, expandDiagnostics } from './schema.js'
 
@@ -36,13 +37,22 @@ export interface SessionOptions {
   lazy?: boolean
   /**
    * After a lazy session starts, resolve a few components in the background so the dependency declarations and memos
-   * the stories share are loaded before the first one asks. Default: `true`.
+   * the stories share are loaded before the first one asks. Default: `false`: measured against the same stories, it
+   * did not make the first story faster, because the warm-up and the story compete for the same threads.
    */
   warmUp?: boolean
+  /**
+   * Once this many distinct components were asked for, resolve the rest in one background pass. Default: `0`, never:
+   * it lowers the median story latency but raises peak memory by 170 to 420 MB.
+   */
+  fillAfter?: number
 }
 
 /** How many components the background warm-up resolves, spread over the project. */
 const WARM_UP_COMPONENTS = 8
+const FILL_AFTER = 0
+/** The most components `sessionWarmUp` takes: all of them. */
+const ALL_COMPONENTS = 2 ** 32 - 1
 
 /** What the session says about one component: its documentation and why its props may be incomplete. */
 export interface Documentation {
@@ -68,12 +78,14 @@ export class DocgenSession {
   private checking: Promise<void> | undefined
   private queued: Promise<void> | undefined
   private latestRevision = 0
+  private readonly fill: Fill
   private readonly options: SessionOptions
   private readonly napi: SessionBinding
 
   constructor(options: SessionOptions, napi: SessionBinding) {
     this.options = options
     this.napi = napi
+    this.fill = new Fill(options.fillAfter ?? FILL_AFTER)
   }
 
   private napiOptions(): Napi.JsExtractOptions {
@@ -97,13 +109,13 @@ export class DocgenSession {
     this.sessionId = this.napi.createSession(this.napiOptions())
     await this.reindex()
     // Not awaited: the first story answers as soon as it can, and shares what the warm-up has loaded by then.
-    if (this.lazy && this.options.warmUp !== false) void this.warmUp(this.sessionId)
+    if (this.lazy && this.options.warmUp === true) void this.warmUp(this.sessionId, WARM_UP_COMPONENTS)
   }
 
-  /** Best effort: a warm-up that fails costs the first story the time it would have saved. */
-  private async warmUp(sessionId: number): Promise<void> {
+  /** Best effort: a background resolution that fails costs the stories the time it would have saved. */
+  private async warmUp(sessionId: number, count: number): Promise<void> {
     try {
-      await this.napi.sessionWarmUp(sessionId, WARM_UP_COMPONENTS)
+      await this.napi.sessionWarmUp(sessionId, count)
     } catch {
       // The stories resolve what they need themselves.
     }
@@ -267,7 +279,13 @@ export class DocgenSession {
       { docgenInfo: RdtComponentDoc; diagnostics: Diagnostic[] }
     >
     const answer = answers[key]
-    return { doc: answer?.docgenInfo, degradedBy: answer ? incompleteMessages(answer.diagnostics) : [] }
+    if (!answer) {
+      // The listing includes a re-export of a package component that has nothing to show; it is no component.
+      if (this.components.delete(key)) this.index = undefined
+      return { doc: undefined, degradedBy: [] }
+    }
+    if (this.fill.asked(key)) void this.warmUp(this.sessionId, ALL_COMPONENTS)
+    return { doc: answer.docgenInfo, degradedBy: incompleteMessages(answer.diagnostics) }
   }
 
   docgenInfo(key: string): RdtComponentDoc | undefined {

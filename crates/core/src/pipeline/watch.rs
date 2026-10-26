@@ -342,8 +342,22 @@ impl WatchSession {
     pub fn component(&self, key: &str) -> Option<ComponentAnswer> {
         let revision = self.current.load_full()?;
         match revision.is_lazy() {
-            true => revision.lazy_component(&self.options, key),
+            true => {
+                let answer = revision.lazy_component(&self.options, key);
+                revision.load_whole_demand_in_background(&self.options);
+                answer
+            }
             false => revision.published_component(key),
+        }
+    }
+
+    /// Wait for the dependency declarations a lazy session loads in the background after its first answer (the names
+    /// every project file takes from a package, so later requests grow the dependency layer no further). A request
+    /// never needs this; a benchmark or a test that wants a settled session does. Returns at once for an eager
+    /// session, one without `load_dependencies`, and before the first answer.
+    pub fn wait_for_dependency_load(&self) {
+        if let Some(revision) = self.current.load_full() {
+            revision.wait_for_dependency_load();
         }
     }
 
@@ -376,7 +390,11 @@ impl WatchSession {
         use rayon::prelude::*;
         let Some(revision) = self.current.load_full() else { return vec![None; keys.len()] };
         match revision.is_lazy() {
-            true => revision.lazy_components(&self.options, keys),
+            true => {
+                let answers = revision.lazy_components(&self.options, keys);
+                revision.load_whole_demand_in_background(&self.options);
+                answers
+            }
             false => keys.par_iter().map(|key| revision.published_component(key)).collect(),
         }
     }

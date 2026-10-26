@@ -217,12 +217,37 @@ pub(crate) fn project_demands(file: &Utf8Path, data: &SourceData) -> Vec<Demand>
 
 // ─── The layer ────────────────────────────────────────────────────────────────
 
-/// The dependency declarations a run loaded. Immutable once built; a watch revision that needs more builds a new one
-/// from it.
+/// How many layers a chain holds before the next extension flattens it into one.
+///
+/// An extension adds only the files it loaded, as a layer over the one it extends, so a growth costs what it loads and
+/// not what the session already holds. Lookups walk the chain, so it is kept short: a flatten copies everything once
+/// and the chain starts again.
+const MAX_CHAIN_DEPTH: usize = 8;
+
+/// The sizes of a layer and its parents together, for [`DependencyLayer::resolves_like`] and `file_count`.
+#[derive(Clone, Copy, Default)]
+struct Totals {
+    files: usize,
+    react_files: usize,
+    exports: usize,
+    resolutions: usize,
+    unresolved: usize,
+}
+
+/// The dependency declarations a run loaded. Immutable once built; a watch revision or a lazy session that needs more
+/// builds a new one over it, holding only what the extension added.
 pub(crate) struct DependencyLayer {
-    /// Declaring files' data. Their component mappings are the value index; nothing here is emitted.
-    pub(crate) global: GlobalSourceData,
+    /// The layer this one extends. Everything below is this layer's own additions; the parent's are consulted through
+    /// the accessors, `named_types` and `import_map`.
+    parent: Option<Arc<DependencyLayer>>,
+    /// Layers below this one.
+    depth: usize,
+    totals: Totals,
+    /// Declaring files' component mappings: the value index. Nothing here is emitted.
+    component_mappings: Vec<ComponentMapping>,
+    /// Falls back to the parent's.
     pub(crate) named_types: Arc<NamedTypeIndex>,
+    /// Falls back to the parent's.
     pub(crate) import_map: Arc<ImportResolutionMap>,
     /// `(module, name)` → the declaring `(file, name)`, or `None` when the module's types do not export it.
     exports: FxHashMap<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>>,
@@ -233,53 +258,87 @@ pub(crate) struct DependencyLayer {
     react_files: FxHashSet<PathKey>,
     demands: FxHashSet<DemandKey>,
     unresolved: FxHashMap<DemandKey, Unresolved>,
-    /// Every parsed file's data (stubs included), so a watch revision's extension reuses them.
+    /// The `(file, name)` declarations whose references were followed.
+    claimed: FxHashSet<(PathKey, CompactString)>,
+    /// Every parsed file's data (stubs included), so an extension reuses them.
     parsed: FxHashMap<PathKey, Option<Arc<SourceData>>>,
 }
 
 impl DependencyLayer {
-    /// How many declaration files this layer holds.
+    /// This layer and then each one it extends.
+    fn chain(&self) -> impl Iterator<Item = &DependencyLayer> {
+        std::iter::successors(Some(self), |layer| layer.parent.as_deref())
+    }
+
+    /// How many declaration files this layer holds, with its parents'.
     pub(crate) fn file_count(&self) -> usize {
-        self.files.len()
+        self.totals.files
     }
 
     pub(crate) fn is_dependency_file(&self, file: &Utf8Path) -> bool {
-        self.files.contains(file.as_str())
+        self.chain().any(|layer| layer.files.contains(file.as_str()))
     }
 
     /// The declaring `(file, name)` of `name` exported from `module`, when the loader answered it.
     pub(crate) fn export_of(&self, module: &Utf8Path, name: &str) -> Option<&Option<(Utf8PathBuf, CompactString)>> {
-        self.exports.get(&(PathKey::from(module), CompactString::from(name)))
+        self.export_entry(&(PathKey::from(module), CompactString::from(name)))
+    }
+
+    fn export_entry(&self, key: &(PathKey, CompactString)) -> Option<&Option<(Utf8PathBuf, CompactString)>> {
+        self.chain().find_map(|layer| layer.exports.get(key))
+    }
+
+    fn resolution(&self, key: &(Box<str>, Box<str>)) -> Option<&Result<Utf8PathBuf, Unresolved>> {
+        self.chain().find_map(|layer| layer.resolutions.get(key))
+    }
+
+    fn parsed_data(&self, file: &str) -> Option<&Option<Arc<SourceData>>> {
+        self.chain().find_map(|layer| layer.parsed.get(file))
+    }
+
+    fn has_react_file(&self, file: &str) -> bool {
+        self.chain().any(|layer| layer.react_files.contains(file))
+    }
+
+    fn has_demand(&self, key: &DemandKey) -> bool {
+        self.chain().any(|layer| layer.demands.contains(key))
+    }
+
+    fn has_claimed(&self, key: &(PathKey, CompactString)) -> bool {
+        self.chain().any(|layer| layer.claimed.contains(key))
     }
 
     /// A dependency component by its declaring `(file, name)`.
     pub(crate) fn component(&self, file: &Utf8Path, name: &str) -> Option<&ComponentMapping> {
-        self.global.component_mappings.iter().find(|m| m.file_path == file && m.component_name == name)
+        self.chain()
+            .find_map(|layer| layer.component_mappings.iter().find(|m| m.file_path == file && m.component_name == name))
     }
 
     /// Why the loader found no declaration for `name` imported from `specifier` by a file in `dir`, if it didn't.
     pub(crate) fn unresolved_reason(&self, dir: &Utf8Path, specifier: &str, name: &str) -> Option<Unresolved> {
-        self.unresolved.get(&(Box::from(dir.as_str()), Box::from(specifier), CompactString::from(name))).copied()
+        let key = (Box::from(dir.as_str()), Box::from(specifier), CompactString::from(name));
+        self.chain().find_map(|layer| layer.unresolved.get(&key)).copied()
     }
 
     /// Whether `other`, a layer this one was extended from, resolves every name the way this one does: extending only
     /// adds, so equal counts mean nothing was added.
     pub(crate) fn resolves_like(&self, other: &DependencyLayer) -> bool {
-        self.files.len() == other.files.len()
-            && self.react_files.len() == other.react_files.len()
-            && self.exports.len() == other.exports.len()
-            && self.resolutions.len() == other.resolutions.len()
-            && self.unresolved.len() == other.unresolved.len()
+        let (a, b) = (self.totals, other.totals);
+        a.files == b.files
+            && a.react_files == b.react_files
+            && a.exports == b.exports
+            && a.resolutions == b.resolutions
+            && a.unresolved == b.unresolved
     }
 
     /// Whether this layer has followed every one of `demands`.
     pub(crate) fn covers(&self, demands: &[Demand]) -> bool {
-        demands.iter().all(|d| self.demands.contains(&d.key()))
+        demands.iter().all(|d| self.has_demand(&d.key()))
     }
 
     /// The demands of `demands` this layer has not followed.
     pub(crate) fn missing(&self, demands: &[Demand]) -> Vec<Demand> {
-        demands.iter().filter(|d| !self.demands.contains(&d.key())).cloned().collect()
+        demands.iter().filter(|d| !self.has_demand(&d.key())).cloned().collect()
     }
 }
 
@@ -288,6 +347,8 @@ impl DependencyLayer {
 struct Loader<'a> {
     resolvers: &'a ModuleResolvers,
     project_dirs: &'a [Utf8PathBuf],
+    /// The layer being extended, consulted before the maps below so an extension holds only its own additions.
+    parent: Option<&'a DependencyLayer>,
     parsed: FxDashMap<PathKey, Arc<OnceLock<Option<Arc<SourceData>>>>>,
     resolutions: FxDashMap<(Box<str>, Box<str>), Result<Utf8PathBuf, Unresolved>>,
     exports: FxDashMap<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>>,
@@ -304,6 +365,9 @@ struct Loader<'a> {
 
 impl Loader<'_> {
     fn parse(&self, file: &Utf8Path) -> Option<Arc<SourceData>> {
+        if let Some(found) = self.parent.and_then(|parent| parent.parsed_data(file.as_str())) {
+            return found.clone();
+        }
         let cell = self.parsed.entry(PathKey::from(file)).or_default().clone();
         cell.get_or_init(|| {
             let source = std::fs::read_to_string(file).ok()?;
@@ -320,6 +384,9 @@ impl Loader<'_> {
         let dir = from_file.parent().map_or("", Utf8Path::as_str);
         let key = (Box::from(dir), Box::from(specifier));
         if let Some(found) = self.resolutions.get(&key) {
+            return found.clone();
+        }
+        if let Some(found) = self.parent.and_then(|parent| parent.resolution(&key)) {
             return found.clone();
         }
         let result = match crate::resolver::resolve_module_with(
@@ -365,6 +432,9 @@ impl Loader<'_> {
     ) -> Option<(Utf8PathBuf, CompactString)> {
         let key = (PathKey::from(module), CompactString::from(name));
         if let Some(found) = self.exports.get(&key) {
+            return found.clone();
+        }
+        if let Some(found) = self.parent.and_then(|parent| parent.export_entry(&key)) {
             return found.clone();
         }
         if !visited.insert(key.clone()) {
@@ -463,7 +533,7 @@ impl Loader<'_> {
 
     fn demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand) {
         let key = demand.key();
-        if !self.demands.insert(key.clone()) {
+        if self.parent.is_some_and(|parent| parent.has_demand(&key)) || !self.demands.insert(key.clone()) {
             return;
         }
         let module = match self.resolve(&demand.from, &demand.specifier) {
@@ -507,12 +577,15 @@ impl Loader<'_> {
             name.split_once('.').map(|(head, _)| CompactString::from(head)).into_iter().collect();
         stack.push(name);
         while let Some(name) = stack.pop() {
-            if !self.claimed.insert((PathKey::from(file.as_path()), name.clone())) {
+            let claim = (PathKey::from(file.as_path()), name.clone());
+            if self.parent.is_some_and(|parent| parent.has_claimed(&claim)) || !self.claimed.insert(claim) {
                 continue;
             }
             if react {
-                self.react_files.insert(PathKey::from(file.as_path()));
-            } else {
+                if !self.parent.is_some_and(|parent| parent.has_react_file(file.as_str())) {
+                    self.react_files.insert(PathKey::from(file.as_path()));
+                }
+            } else if !self.parent.is_some_and(|parent| parent.is_dependency_file(&file)) {
                 self.declaring.insert(PathKey::from(file.as_path()));
             }
             // The type a value is declared with (`declare const Primitive: Primitives`) goes with the value.
@@ -596,12 +669,15 @@ fn declaration_refs(data: &SourceData, file: &Utf8Path, name: &str, out: &mut Fx
     }
 }
 
-/// Load what `demands` reference: from scratch for a cold run, or on top of `previous` when a watch revision found
-/// names the session hasn't loaded.
+/// Load what `demands` reference: from scratch for a cold run, or on top of `previous` when a watch revision or a lazy
+/// session found names it hasn't loaded.
+///
+/// An extension is a layer over `previous` holding only what it added, until the chain reaches [`MAX_CHAIN_DEPTH`]; then
+/// it takes everything the chain holds into one layer, and the chain starts again.
 pub(crate) fn load(
     demands: Vec<Demand>,
     options: &PipelineOptions,
-    previous: Option<&DependencyLayer>,
+    previous: Option<&Arc<DependencyLayer>>,
 ) -> DependencyLayer {
     let resolvers = ModuleResolvers::new(options);
     let project_dirs: Vec<Utf8PathBuf> = options
@@ -610,9 +686,12 @@ pub(crate) fn load(
         .filter_map(|dir| std::fs::canonicalize(dir).ok())
         .filter_map(|dir| Utf8PathBuf::from_path_buf(dir).ok())
         .collect();
+    let parent: Option<Arc<DependencyLayer>> = previous.filter(|layer| layer.depth < MAX_CHAIN_DEPTH).cloned();
+    let flatten = previous.filter(|_| parent.is_none());
     let loader = Loader {
         resolvers: &resolvers,
         project_dirs: &project_dirs,
+        parent: parent.as_deref(),
         parsed: DashMap::default(),
         resolutions: DashMap::default(),
         exports: DashMap::default(),
@@ -626,35 +705,44 @@ pub(crate) fn load(
     };
     // With the cache off the index is neither read nor written, and the run learns everything again.
     let index_path = options.use_cache.then(|| index_path(options));
-    match previous {
-        Some(previous) => {
-            for (key, value) in &previous.resolutions {
-                loader.resolutions.insert(key.clone(), value.clone());
-            }
-            for (key, value) in &previous.exports {
-                loader.exports.insert(key.clone(), value.clone());
-            }
-            for (key, data) in &previous.parsed {
-                loader.parsed.insert(key.clone(), Arc::new(OnceLock::from(data.clone())));
-            }
-            for key in &previous.demands {
-                loader.demands.insert(key.clone());
-            }
-            for (key, reason) in &previous.unresolved {
-                loader.unresolved.insert(key.clone(), *reason);
-            }
-            for file in &previous.files {
-                loader.declaring.insert(file.clone());
-            }
-            for file in &previous.react_files {
-                loader.react_files.insert(file.clone());
-            }
-        }
-        None => {
+    match (previous, flatten) {
+        (None, _) => {
             if let Some(path) = &index_path {
                 read_index(path, &loader);
             }
         }
+        // A chain at its depth limit: take everything it holds, so this layer stands alone.
+        (Some(_), Some(full)) => {
+            let mut chain: Vec<_> = full.chain().collect();
+            chain.reverse();
+            for layer in chain {
+                for (key, value) in &layer.resolutions {
+                    loader.resolutions.insert(key.clone(), value.clone());
+                }
+                for (key, value) in &layer.exports {
+                    loader.exports.insert(key.clone(), value.clone());
+                }
+                for (key, data) in &layer.parsed {
+                    loader.parsed.insert(key.clone(), Arc::new(OnceLock::from(data.clone())));
+                }
+                for key in &layer.demands {
+                    loader.demands.insert(key.clone());
+                }
+                for key in &layer.claimed {
+                    loader.claimed.insert(key.clone());
+                }
+                for (key, reason) in &layer.unresolved {
+                    loader.unresolved.insert(key.clone(), *reason);
+                }
+                for file in &layer.files {
+                    loader.declaring.insert(file.clone());
+                }
+                for file in &layer.react_files {
+                    loader.react_files.insert(file.clone());
+                }
+            }
+        }
+        (Some(_), None) => {}
     }
     rayon::scope(|scope| {
         for demand in demands {
@@ -673,35 +761,63 @@ pub(crate) fn load(
 
     let mut files: Vec<PathKey> = loader.declaring.iter().map(|f| f.clone()).collect();
     files.sort();
-    let mut global = GlobalSourceData::default();
+    // Each file's declarations go straight into the index, and only what the import map reads (imports and
+    // re-exports) and the value index (component mappings) is kept apart; a merged copy of every file's data would
+    // hold the same declarations twice. An extension indexes only its own files; the parent's answer for the rest.
+    let mut named = NamedTypeIndex::default();
+    named.fallback = parent.as_ref().map(|layer| layer.named_types.clone());
+    let mut component_mappings: Vec<ComponentMapping> = Vec::new();
+    let mut imports = GlobalSourceData::default();
     for file in &files {
         let path = Utf8Path::new(std::borrow::Borrow::<str>::borrow(file));
-        if let Some(Some(data)) = loader.parsed.get(file).and_then(|cell| cell.get().cloned()) {
-            global.merge(path, (*data).clone());
+        if let Some(data) = loader.parse(path) {
+            named.merge_file(&data);
+            component_mappings.extend(data.component_mappings.iter().cloned());
+            imports.import_map.insert(path.to_owned(), data.imports.clone());
+            imports.re_export_map.insert(path.to_owned(), data.exports.clone());
         }
     }
-    global.component_mappings.sort_by(|a, b| (&a.file_path, a.span_start).cmp(&(&b.file_path, b.span_start)));
-    let named_types = Arc::new(NamedTypeIndex::build(&global));
+    component_mappings.sort_by(|a, b| (&a.file_path, a.span_start).cmp(&(&b.file_path, b.span_start)));
+    let named_types = Arc::new(named);
     // React's declarations reference what React imports (`CSS.Properties`), so those imports must resolve too; its
     // declarations stay out of `named_types`.
-    let react_files: FxHashSet<PathKey> = loader.react_files.into_iter().collect();
+    let react_files: FxHashSet<PathKey> = loader.react_files.iter().map(|file| file.clone()).collect();
     for file in &react_files {
         let path = Utf8Path::new(std::borrow::Borrow::<str>::borrow(file));
-        if let Some(Some(data)) = loader.parsed.get(file).and_then(|cell| cell.get().cloned()) {
-            global.merge(path, SourceData { imports: data.imports.clone(), ..SourceData::default() });
+        if let Some(data) = loader.parse(path) {
+            imports.import_map.insert(path.to_owned(), data.imports.clone());
+            imports.re_export_map.insert(path.to_owned(), Vec::new());
         }
     }
-    let import_map = Arc::new(ImportResolutionMap::build(&global));
+    let import_map = Arc::new(
+        ImportResolutionMap::build(&imports).with_fallback(parent.as_ref().map(|layer| layer.import_map.clone())),
+    );
+    let exports: FxHashMap<_, _> = loader.exports.into_iter().collect();
+    let resolutions: FxHashMap<_, _> = loader.resolutions.into_iter().collect();
+    let unresolved: FxHashMap<_, _> = loader.unresolved.into_iter().collect();
+    let files: FxHashSet<PathKey> = files.into_iter().collect();
+    let below = parent.as_ref().map(|layer| layer.totals).unwrap_or_default();
+    let totals = Totals {
+        files: below.files + files.len(),
+        react_files: below.react_files + react_files.len(),
+        exports: below.exports + exports.len(),
+        resolutions: below.resolutions + resolutions.len(),
+        unresolved: below.unresolved + unresolved.len(),
+    };
     DependencyLayer {
-        global,
+        depth: parent.as_ref().map_or(0, |layer| layer.depth + 1),
+        parent: parent.clone(),
+        totals,
+        component_mappings,
         named_types,
         import_map,
-        exports: loader.exports.into_iter().collect(),
-        resolutions: loader.resolutions.into_iter().collect(),
-        files: files.into_iter().collect(),
+        exports,
+        resolutions,
+        files,
         react_files,
         demands: loader.demands.into_iter().collect(),
-        unresolved: loader.unresolved.into_iter().collect(),
+        unresolved,
+        claimed: loader.claimed.into_iter().collect(),
         parsed: loader.parsed.into_iter().map(|(key, cell)| (key, cell.get().cloned().flatten())).collect(),
     }
 }

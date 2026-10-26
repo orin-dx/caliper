@@ -1,5 +1,9 @@
 # npm/caliper-docgen-napi
 
+## 0.6.0
+
+- Released together with the `napi-and-binding` fixed group.
+
 ## 0.5.0
 
 - **Curated mode also gives a prop beside `ComponentProps<"div">` the element attribute's type:** recharts' `onTimeUpdate` next to a div's attributes is now `ReactEventHandler<HTMLDivElement>` intersected with recharts' handler in the default curated mode too, not only in Full mode. Curated mode reads React's declarations for this lookup only (ADR 0013), so nothing else in its output changes.
