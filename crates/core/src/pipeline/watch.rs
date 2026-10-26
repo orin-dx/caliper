@@ -7,6 +7,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
+use crate::types::semantic::SemanticProvider;
 use crate::types::*;
 
 use super::discover::{discover_dirs, discover_files};
@@ -208,6 +209,7 @@ pub struct WatchSession {
     current: ArcSwapOption<Revision>,
     writer: Mutex<Freshness>,
     lazy: bool,
+    semantic: Option<super::semantic_hook::SemanticHook>,
 }
 
 /// What a lazy session has indexed and answered so far.
@@ -231,7 +233,17 @@ impl WatchSession {
             current: ArcSwapOption::empty(),
             writer: Mutex::new(Freshness::cold(SystemTime::UNIX_EPOCH)),
             lazy: false,
+            semantic: None,
         }
+    }
+
+    /// Attach a TypeScript checker that is asked for each component a request names (ADR 0020). [`Self::component`]
+    /// then returns the checker's props when it answers within `wait`, the structural ones otherwise, and the checker's
+    /// late answer on the next request of the same, unedited component. Without a checker nothing changes.
+    #[must_use]
+    pub fn with_semantic(mut self, provider: Arc<dyn SemanticProvider>, wait: Duration) -> Self {
+        self.semantic = Some(super::semantic_hook::SemanticHook::new(provider, wait));
+        self
     }
 
     /// Create an empty lazy session (call `initialize()` before first use). Its `initialize` parses and indexes every
@@ -341,13 +353,22 @@ impl WatchSession {
     /// that key. `None` for a key with no component, and before `initialize`.
     pub fn component(&self, key: &str) -> Option<ComponentAnswer> {
         let revision = self.current.load_full()?;
-        match revision.is_lazy() {
+        let answer = match revision.is_lazy() {
             true => {
                 let answer = revision.lazy_component(&self.options, key);
                 revision.load_whole_demand_in_background(&self.options);
                 answer
             }
             false => revision.published_component(key),
+        };
+        self.refined(answer)
+    }
+
+    /// `answer` with the attached checker's props, when there is a checker and it answers in time.
+    fn refined(&self, answer: Option<ComponentAnswer>) -> Option<ComponentAnswer> {
+        match (&self.semantic, answer) {
+            (Some(hook), Some(answer)) => Some(hook.refine(answer)),
+            (_, answer) => answer,
         }
     }
 
@@ -393,9 +414,9 @@ impl WatchSession {
             true => {
                 let answers = revision.lazy_components(&self.options, keys);
                 revision.load_whole_demand_in_background(&self.options);
-                answers
+                answers.into_iter().map(|answer| self.refined(answer)).collect()
             }
-            false => keys.par_iter().map(|key| revision.published_component(key)).collect(),
+            false => keys.par_iter().map(|key| self.refined(revision.published_component(key))).collect(),
         }
     }
 

@@ -11,7 +11,7 @@ use camino::Utf8PathBuf;
 use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
-use crate::types::output::{ExtractionOutput, ParsedProp, PropType};
+use crate::types::output::{ComponentEntry, ExtractionOutput, ParsedProp, PropType};
 
 /// One prop as the checker reports it.
 #[derive(Debug, Clone, PartialEq)]
@@ -80,6 +80,25 @@ pub struct SemanticOutcome {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// A component the checker may be asked about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemanticTarget {
+    pub file_path: Utf8PathBuf,
+    pub display_name: String,
+    pub exported: bool,
+    /// Props the structural pass already has a description for. The checker is not asked for those: it is 65% of
+    /// the requests on Mantine, and the merge keeps the structural description when the checker's is empty.
+    pub described: rustc_hash::FxHashSet<String>,
+}
+
+/// A checker that answers for components as they are asked about, for a long-lived session.
+///
+/// `request` never blocks: it queues the targets and returns the receiver that yields the outcome once the checker
+/// has it, so a caller can wait a bounded time and take the structural answer when the checker is slower.
+pub trait SemanticProvider: Send + Sync {
+    fn request(&self, targets: Vec<SemanticTarget>) -> std::sync::mpsc::Receiver<SemanticOutcome>;
+}
+
 impl SemanticOutcome {
     /// An outcome for a backend that did nothing: the structural result stands, for this reason.
     pub fn unavailable(reason: impl Into<String>) -> Self {
@@ -91,6 +110,48 @@ impl SemanticOutcome {
         .with_help("The structural result is used instead. Install `typescript@beta` (7.1) or pass `--tsc-path`.");
         Self { diagnostics: vec![diagnostic], ..Self::default() }
     }
+}
+
+/// Replaces `entry`'s props with the checker's, keeping what only the structural pass has (a default value, tags,
+/// `parent`, `declarations`, and a description when the checker has none). `shared` interns identical props across
+/// the components of one merge.
+pub fn apply_semantic_props(
+    entry: &mut ComponentEntry,
+    semantic: &SemanticComponent,
+    shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
+) {
+    let mut props: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
+    for prop in &semantic.props {
+        let structural = entry.props.get(&prop.name);
+        let description = if prop.description.is_empty() {
+            structural.map(|s| s.description.clone()).unwrap_or_default()
+        } else {
+            prop.description.clone()
+        };
+        let merged = ParsedProp::new(
+            prop.name.clone(),
+            prop.prop_type.clone(),
+            prop.required,
+            structural.and_then(|s| s.default_value.clone()),
+            description,
+            structural.map(|s| s.tags.clone()).unwrap_or_default(),
+            structural.and_then(|s| s.parent.clone()),
+            structural.map(|s| s.declarations.clone()).unwrap_or_default(),
+        );
+        let mut hasher = FxHasher::default();
+        merged.structural_hash(&mut hasher);
+        let bucket = shared.entry(hasher.finish()).or_default();
+        let merged = match bucket.iter().find(|existing| ***existing == merged) {
+            Some(existing) => existing.clone(),
+            None => {
+                let merged = Arc::new(merged);
+                bucket.push(merged.clone());
+                merged
+            }
+        };
+        props.insert(prop.name.clone(), merged);
+    }
+    entry.props = props;
 }
 
 /// Merge the checker's props over `output`, component by component.
@@ -115,38 +176,7 @@ pub fn merge_semantic(output: &mut ExtractionOutput, outcome: SemanticOutcome) {
         else {
             continue;
         };
-        let mut props: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
-        for prop in &semantic.props {
-            let structural = entry.props.get(&prop.name);
-            let description = if prop.description.is_empty() {
-                structural.map(|s| s.description.clone()).unwrap_or_default()
-            } else {
-                prop.description.clone()
-            };
-            let merged = ParsedProp::new(
-                prop.name.clone(),
-                prop.prop_type.clone(),
-                prop.required,
-                structural.and_then(|s| s.default_value.clone()),
-                description,
-                structural.map(|s| s.tags.clone()).unwrap_or_default(),
-                structural.and_then(|s| s.parent.clone()),
-                structural.map(|s| s.declarations.clone()).unwrap_or_default(),
-            );
-            let mut hasher = FxHasher::default();
-            merged.structural_hash(&mut hasher);
-            let bucket = shared.entry(hasher.finish()).or_default();
-            let merged = match bucket.iter().find(|existing| ***existing == merged) {
-                Some(existing) => existing.clone(),
-                None => {
-                    let merged = Arc::new(merged);
-                    bucket.push(merged.clone());
-                    merged
-                }
-            };
-            props.insert(prop.name.clone(), merged);
-        }
-        entry.props = props;
+        apply_semantic_props(entry, &semantic, &mut shared);
         merged_keys.push(key.clone());
     }
     output.diagnostics.extend(diagnostics);
