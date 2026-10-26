@@ -505,11 +505,13 @@ def oracle(args):
         list_file, tsconfig = program_inputs(name, src, work)
         verdicts = os.path.join(work, f'{name}.oracle.json')
         dump = os.path.join(work, f'{name}.oracle-props.json')
+        rows = os.path.join(work, f'{name}.oracle-rows.json')
+        missing = os.path.join(work, f'{name}.oracle-missing.json')
         print(f'{name}: asking the checker', file=sys.stderr, flush=True)
         start = time.time()
         subprocess.run(['pnpm', '--dir', validate, 'exec', 'tsx', 'src/oracle.ts', '--root', root, '--src', src,
                         '--tsconfig', tsconfig, '--caliper', caliper_json, '--out', verdicts, '--files', list_file,
-                        '--dump', dump],
+                        '--dump', dump, '--rows', rows, '--missing', missing],
                        check=True, **limits)
         with open(verdicts) as f:
             entry = json.load(f)
