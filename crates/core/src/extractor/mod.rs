@@ -308,7 +308,7 @@ impl<'src> SourceDataCollector<'src> {
 
     /// `declare const Primitive: Primitives`: the type of a value declared without an initializer, as the alias
     /// `typeof Primitive` (a name no source can write), so `typeof Primitive.div` and `(typeof NODES)[number]` can be
-    /// read from it.
+    /// read from it. A declared object or intersection with static component members is indexed as well.
     pub(super) fn record_declared_value_type(&mut self, declarator: &VariableDeclarator<'_>) {
         let (BindingPattern::BindingIdentifier(id), Some(annotation)) = (&declarator.id, &declarator.type_annotation)
         else {
@@ -316,14 +316,18 @@ impl<'src> SourceDataCollector<'src> {
         };
         let target = self.ts_type_to_collected(&annotation.type_annotation);
         // Keep static component members on a callable value without indexing arbitrary object declarations.
+        let has_component_member = |fields: &[crate::types::CollectedObjectField]| {
+            fields.iter().any(|field| {
+                matches!(&field.collected_type, crate::types::CollectedType::Named { name, .. }
+                    if name.ends_with("Component"))
+            })
+        };
         let static_components = match &target {
             crate::types::CollectedType::Intersection(members) => members.iter().any(|member| match member {
-                crate::types::CollectedType::Object(fields) => fields.iter().any(|field| {
-                    matches!(&field.collected_type, crate::types::CollectedType::Named { name, .. }
-                        if name.ends_with("Component"))
-                }),
+                crate::types::CollectedType::Object(fields) => has_component_member(fields),
                 _ => false,
             }),
+            crate::types::CollectedType::Object(fields) => has_component_member(fields),
             _ => false,
         };
         if !matches!(target, crate::types::CollectedType::Named { .. } | crate::types::CollectedType::Tuple(_))
