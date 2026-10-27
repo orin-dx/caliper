@@ -20,6 +20,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURES_ROOT = path.join(__dirname, 'fixtures')
 const BUTTON_FIXTURE = path.join(FIXTURES_ROOT, 'src/Button.tsx')
 
+/** A component's props as prop name to prop id, merged from the prop sets it lists. */
+function propIds(
+  tables: { propSets: Record<string, Record<string, string>> },
+  component: { props: string[] },
+): Record<string, string> {
+  return Object.assign({}, ...component.props.map((set) => tables.propSets[set]))
+}
+
 let napiAvailable = false
 try {
   await import('caliper-docgen-napi')
@@ -93,13 +101,14 @@ describe.skipIf(!shouldRun)('caliperDocgen (integration, real native binding)', 
 
     expect(data.components).toHaveProperty('Button')
     const button = data.components.Button
-    expect(Object.keys(button.props).toSorted()).toEqual(['label', 'onClick', 'variant'])
-    const prop = (name: string) => data.props[button.props[name]]
+    const ids = propIds(data, button)
+    expect(Object.keys(ids).toSorted()).toEqual(['label', 'onClick', 'variant'])
+    const prop = (name: string) => data.props[ids[name]]
     expect(prop('label').required).toBe(true)
     expect(prop('variant').required).toBe(false)
     // The NAPI boundary's ParsedProp.defaultValue.value carries the prop's
     // source-text literal verbatim, quotes included — not a bare JS string.
-    expect(prop('variant').defaultValue?.value).toBe('"primary"')
+    expect(prop('variant').defaultValue?.value).toBe("'primary'")
   })
 
   it('re-extracts real prop changes via a direct hotUpdate call against the real binding', async () => {
@@ -147,11 +156,12 @@ export function Button({ label, disabled = false }: ButtonProps) {
     const payload = updateEvent!.data as any
     const updated = payload.updatedComponents[0]
     expect(updated.displayName).toBe('Button')
-    expect(Object.keys(updated.props).toSorted()).toEqual(['disabled', 'label'])
-    expect(payload.props[updated.props.disabled].defaultValue?.value).toBe('false')
+    const updatedIds = propIds(payload, updated)
+    expect(Object.keys(updatedIds).toSorted()).toEqual(['disabled', 'label'])
+    expect(payload.props[updatedIds.disabled].defaultValue?.value).toBe('false')
 
     const data = await loadVirtualModule(server)
-    expect(Object.keys(data.components.Button.props).toSorted()).toEqual(['disabled', 'label'])
+    expect(Object.keys(propIds(data, data.components.Button)).toSorted()).toEqual(['disabled', 'label'])
   })
 
   it('serves dependency edits and deletions through the virtual module and the update event', async () => {
@@ -187,7 +197,7 @@ export function Button({ label, disabled = false }: ButtonProps) {
     ])
     const data = await loadVirtualModule(server)
     expect(Object.keys(data.components)).toEqual(['Button'])
-    expect(Object.keys(data.components.Button.props).toSorted()).toEqual(['label', 'size'])
+    expect(Object.keys(propIds(data, data.components.Button)).toSorted()).toEqual(['label', 'size'])
   })
 
   it('bundles the extracted output into a production build', async () => {

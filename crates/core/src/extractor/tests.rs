@@ -1,6 +1,21 @@
 use super::*;
 use crate::types::{DefaultSource, EnumValue};
 
+#[test]
+fn jsx_passed_to_a_response_constructor_does_not_make_a_route_handler_a_component() {
+    let path = Utf8Path::new("/fixtures/app/og/route.tsx");
+    let data = parse_file(
+        path,
+        "export async function GET(request: Request) { return new ImageResponse(<div>{request.url}</div>); }\n\
+         export function Card(props: { title: string }) { return <div>{props.title}</div>; }",
+    );
+
+    assert_eq!(
+        data.component_mappings.iter().map(|mapping| mapping.component_name.as_str()).collect::<Vec<_>>(),
+        ["Card"]
+    );
+}
+
 fn fixture_path(rel: &str) -> std::path::PathBuf {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest_dir.join("../../fixtures").join(rel)
@@ -378,6 +393,51 @@ fn test_display_name_update() {
 }
 
 #[test]
+fn a_generic_functions_result_is_its_return_annotation_or_its_one_asserted_return() {
+    let source = r#"
+        export function annotated<P>(render: unknown): React.FC<P> { return render as any; }
+        export function asserted<P, R>(render: unknown) {
+            const component = render;
+            return component as unknown as Box<P, R>;
+        }
+        export function unasserted<P>(render: P) { return render; }
+        export function twice<P>(flag: boolean) { return 1 as Box<P>; return 2 as Box<P>; }
+        export function plain(render: unknown) { return render as Box<string>; }
+    "#;
+    let data = parse_file(Utf8Path::new("/test/factory.ts"), source);
+
+    let mut results: Vec<(&str, Vec<&str>, String)> = data
+        .function_results
+        .iter()
+        .map(|(key, result)| {
+            let name = key.rsplit_once(':').unwrap().1;
+            (name, result.type_params.iter().map(|p| p.as_str()).collect(), result.result.to_raw_string())
+        })
+        .collect();
+    results.sort();
+    assert_eq!(
+        results,
+        [("annotated", vec!["P"], "React.FC<P>".to_owned()), ("asserted", vec!["P", "R"], "Box<P, R>".to_owned())]
+    );
+}
+
+#[test]
+fn string_defaults_keep_their_source_quotes() {
+    let source = r#"
+        export function Button({ size = 'md', tone = "neutral", label = `Go` }: { size?: string; tone?: string; label?: string }) {
+            return null;
+        }
+    "#;
+    let data = parse_file(Utf8Path::new("/test/button.tsx"), source);
+    let button = data.component_mappings.iter().find(|m| m.component_name == "Button").unwrap();
+
+    let mut defaults: Vec<(&str, &str, bool)> =
+        button.param_defaults.iter().map(|(name, d)| (name.as_str(), d.value.as_str(), d.computed)).collect();
+    defaults.sort();
+    assert_eq!(defaults, [("label", "`Go`", true), ("size", "'md'", false), ("tone", "\"neutral\"", false)]);
+}
+
+#[test]
 fn test_default_props_assignment_merged_into_component_mapping() {
     // MUI-style: `Component.defaultProps = { size: 'md' }` (deprecated in
     // React 19 but still shipped in real .d.ts/.tsx). Distinct from
@@ -401,7 +461,7 @@ fn test_default_props_assignment_merged_into_component_mapping() {
     let size_default = button.param_defaults.get("size");
     assert!(size_default.is_some(), "expected 'size' default from defaultProps, got {:?}", button.param_defaults);
     let size_default = size_default.unwrap();
-    assert_eq!(size_default.value, "\"md\"");
+    assert_eq!(size_default.value, "'md'");
     assert!(!size_default.computed);
     assert!(matches!(size_default.source, DefaultSource::DefaultProps));
 
@@ -775,6 +835,105 @@ fn only_an_identifier_named_namespace_qualifies_the_types_declared_inside_it() {
     assert_eq!(keys, expected.iter().map(String::as_str).collect::<Vec<_>>());
 }
 
+/// csstype's shape: `namespace DataType { type ColorBase = ...; type Color = ColorBase | ... }`. A sibling is written bare
+/// and stored qualified, so its reference is qualified too, unless a type parameter of the declaration shadows it.
+#[test]
+fn a_namespace_sibling_is_referenced_by_its_qualified_name() {
+    let source = r#"
+        namespace DataType {
+            type Base = "red" | "blue";
+            type Color<T = string> = Base | "green" | T;
+            type Shadowed<Base> = Base | Color;
+            interface Shape extends Frame<Base> { color: Color; shades: Array<Base> }
+            interface Frame<T> { inner: T }
+        }
+        type Outside = Base;
+    "#;
+    let path = Utf8Path::new("/test/ns-siblings.ts");
+    let data = parse_file(path, source);
+
+    let alias = |name: &str| match &data.type_aliases[&format!("{path}:{name}")] {
+        CollectedTypeAlias::Union { members, .. } => {
+            members.iter().map(CollectedType::to_raw_string).collect::<Vec<_>>()
+        }
+        CollectedTypeAlias::Passthrough { target, .. } => vec![target.to_raw_string()],
+        other => panic!("unexpected alias {other:?}"),
+    };
+    assert_eq!(alias("DataType.Color"), ["DataType.Base", "\"green\"", "T"]);
+    assert_eq!(alias("DataType.Shadowed"), ["Base", "DataType.Color"]);
+    assert_eq!(alias("Outside"), ["Base"]);
+
+    let shape = &data.interfaces[&format!("{path}:DataType.Shape")];
+    let props: Vec<_> = shape.props.iter().map(|p| (p.name.as_str(), p.collected_type.to_raw_string())).collect();
+    assert_eq!(props, [("color", "DataType.Color".to_owned()), ("shades", "Array<DataType.Base>".to_owned())]);
+    let extends: Vec<_> = shape
+        .extends
+        .iter()
+        .map(|e| match e {
+            ExtendsRef::SameFile { name, type_args } => {
+                (name.to_string(), type_args.iter().map(CollectedType::to_raw_string).collect::<Vec<_>>())
+            }
+            other => panic!("unexpected extends {other:?}"),
+        })
+        .collect();
+    assert_eq!(extends, [("DataType.Frame".to_owned(), vec!["DataType.Base".to_owned()])]);
+}
+
+/// antd's `Badge`: the defaults are declared in the body, `const { dot = false, overflowCount = 99 } = props`, and a
+/// renamed one (`tone: t = 'a'`) is the prop `tone`, not the local `t`.
+#[test]
+fn defaults_destructured_from_the_props_parameter_in_the_body_are_the_components() {
+    let source = r#"
+        import * as React from "react";
+        interface BadgeProps { dot?: boolean; overflowCount?: number; tone?: string; other?: number }
+        export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>((props, ref) => {
+            const { dot = false, overflowCount = 99, tone: t = 'a', other } = props;
+            const { shadow = 1 } = somethingElse;
+            return <span ref={ref} />;
+        });
+        export function Plain(props: BadgeProps) {
+            const { dot = true } = props;
+            function inner(props: { dot?: boolean }) { const { dot = 'nested' } = props; return dot; }
+            return null;
+        }
+    "#;
+    let data = parse_file(Utf8Path::new("/test/badge.tsx"), source);
+
+    let defaults = |component: &str| {
+        let mapping = data.component_mappings.iter().find(|m| m.component_name == component).unwrap();
+        let mut found: Vec<_> = mapping.param_defaults.iter().map(|(k, v)| (k.clone(), v.value.clone())).collect();
+        found.sort();
+        found
+    };
+    let owned =
+        |pairs: &[(&str, &str)]| pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect::<Vec<_>>();
+    assert_eq!(defaults("Badge"), owned(&[("dot", "false"), ("overflowCount", "99"), ("tone", "'a'")]));
+    assert_eq!(defaults("Plain"), owned(&[("dot", "true")]));
+}
+
+/// `declare const Primitive: Primitives` has no initializer to read; its declared type is kept as the alias
+/// `typeof Primitive`, and a tuple-typed constant (`NODES`) the same, so a member or an element type can be read.
+#[test]
+fn a_declared_constants_type_is_recorded_as_a_typeof_alias() {
+    let source = r#"
+        declare const NODES: readonly ["a", "div"];
+        declare const Primitive: Primitives;
+        declare let mutable: Primitives;
+        declare const shape: { a: string };
+    "#;
+    let path = Utf8Path::new("/test/prim.d.ts");
+    let data = parse_file(path, source);
+
+    let mut keys: Vec<&str> = data.type_aliases.keys().map(String::as_str).collect();
+    keys.sort();
+    let expected = [format!("{path}:typeof NODES"), format!("{path}:typeof Primitive")];
+    assert_eq!(keys, expected.iter().map(String::as_str).collect::<Vec<_>>());
+    let CollectedTypeAlias::Passthrough { target, .. } = &data.type_aliases[&format!("{path}:typeof NODES")] else {
+        panic!("expected a passthrough alias");
+    };
+    assert_eq!(target.to_raw_string(), "[\"a\", \"div\"]");
+}
+
 #[test]
 fn test_forward_ref_component_annotation_with_as_cast() {
     // Fluent UI's real pattern: no explicit forwardRef<Ref, Props> type args, and
@@ -906,6 +1065,7 @@ fn typed_functions_that_never_render_are_declined_with_the_reason() {
         export function Label(u: User) { const unused = <b>{u.first}</b>; return u.first; }
         export function Columns(u: User) { return { title: <b>{u.first}</b> }; }
         export function OnLater(u: User) { setTimeout(() => <i />); return u.last; }
+        export function ResponseOfJSX(u: User) { return makeResponse(<b>{u.first}</b>); }
         import type { ReactNode } from "./my-types";
         export function Typed(u: User): ReactNode { return u.first; }
     "#;
@@ -929,6 +1089,7 @@ fn typed_functions_that_never_render_are_declined_with_the_reason() {
             "'FullName' takes a typed props parameter but declares a return type that is not React's element type",
             "'Label' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call",
             "'OnLater' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call",
+            "'ResponseOfJSX' takes a typed props parameter but never returns an element: no returned JSX, element, null, children or component call, and no hook call",
             "'Saga' takes a typed props parameter but is a generator",
             "'Search' wraps a typed function that never returns an element: no returned JSX, element, null, children or component call, and no hook call",
             "'Selector' wraps a typed function that never returns an element: no returned JSX, element, null, children or component call, and no hook call",
@@ -945,6 +1106,7 @@ fn components_whose_returned_value_holds_an_element_are_detected() {
         interface P { items: string[]; open?: boolean }
         export function Held({ items }: P) { const content = <ul>{items}</ul>; return content; }
         export function Mapped({ items }: P) { return items.map((i) => <li key={i}>{i}</li>); }
+        export function Reduced({ items }: P) { return items.reduce((acc, i) => <>{acc}{i}</>, <></>); }
         export function Branch({ open }: P) { if (!open) { return null; } return open ? <div /> : <span />; }
         export function Guarded({ open }: P) { return open && <div />; }
         export function Annotated(p: P): ReactNode { return p.items[0]; }
@@ -953,7 +1115,7 @@ fn components_whose_returned_value_holds_an_element_are_detected() {
     let data = parse_file(Utf8Path::new("/test/shapes.tsx"), source);
     let mut names: Vec<&str> = data.component_mappings.iter().map(|m| m.component_name.as_str()).collect();
     names.sort_unstable();
-    assert_eq!(names, vec!["Annotated", "Branch", "Guarded", "Held", "Mapped", "Qualified"]);
+    assert_eq!(names, vec!["Annotated", "Branch", "Guarded", "Held", "Mapped", "Qualified", "Reduced"]);
 }
 
 #[test]
@@ -991,6 +1153,35 @@ fn a_component_passed_to_a_non_wrapper_call_keeps_its_name_and_the_call_is_not_a
     assert!(data.diagnostics.iter().any(
         |d| d.message == "'CardName' passes component 'Card' to a call that does not look like a component wrapper"
     ));
+}
+
+#[test]
+fn a_wrapper_call_naming_its_props_type_does_not_take_the_props_of_the_component_it_receives() {
+    use crate::types::DetectionRule::{ForwardRef, WrapperTypeArgument};
+    let source = r#"
+        import { forwardRef, memo } from "react";
+        interface BaseProps { asChild?: boolean }
+        interface OverlayProps { tone?: string }
+        const BaseOverlay = forwardRef<HTMLDivElement, BaseProps>((props, ref) => <div ref={ref} />);
+        export const Overlay = withContext<HTMLDivElement, OverlayProps>(BaseOverlay, "overlay");
+        export const Memoized = memo(BaseOverlay);
+        export const Themed = withTheme<HTMLDivElement>(BaseOverlay);
+    "#;
+    let data = parse_file(Utf8Path::new("/test/overlay.tsx"), source);
+    let mut found: Vec<(&str, &str, crate::types::DetectionRule)> = data
+        .component_mappings
+        .iter()
+        .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule))
+        .collect();
+    found.sort_by_key(|(name, _, _)| *name);
+    assert_eq!(
+        found,
+        vec![
+            ("Memoized", "BaseProps", ForwardRef),
+            ("Overlay", "OverlayProps", WrapperTypeArgument),
+            ("Themed", "BaseProps", ForwardRef),
+        ]
+    );
 }
 
 #[test]
@@ -1080,6 +1271,47 @@ fn wrapper_calls_carrying_props_in_a_type_argument_are_detected_by_shape() {
             ("Remote", "RemoteProps", WrapperTypeArgument),
         ]
     );
+}
+
+#[test]
+fn a_function_component_annotation_inside_an_intersection_carries_the_props() {
+    use crate::types::DetectionRule::FcAnnotation;
+    let source = r#"
+        import * as React from "react";
+        interface DrawerProps { open: boolean }
+        interface PanelProps { title: string }
+        export const Drawer: React.FC<DrawerProps> & { _Panel: React.FC<PanelProps> } = (props) => <div />;
+        export const Sheet: { size: number } & React.FC<DrawerProps> = (props) => <div />;
+        export const Plain: { size: number } & { depth: number } = { size: 1, depth: 2 };
+    "#;
+    let data = parse_file(Utf8Path::new("/test/drawer.tsx"), source);
+    let found: Vec<(&str, &str, crate::types::DetectionRule)> = data
+        .component_mappings
+        .iter()
+        .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule))
+        .collect();
+    assert_eq!(found, vec![("Drawer", "DrawerProps", FcAnnotation), ("Sheet", "DrawerProps", FcAnnotation)]);
+}
+
+#[test]
+fn a_wrapped_render_function_may_be_parenthesized_or_asserted() {
+    use crate::types::DetectionRule::{HocWrapper, WrapperTypeArgument};
+    let source = r#"
+        import { genericFactory } from "./lib";
+        interface GroupProps { value: string }
+        type GroupFactory = Factory<{ props: GroupProps; ref: HTMLDivElement }>;
+        export const Group = genericFactory<GroupFactory>(((props: GroupProps) => <div />) as any);
+        export const Plain = genericFactory<GroupFactory>(((props: GroupProps) => <div />));
+        export const Counter = genericFactory<GroupFactory>(((props: GroupProps) => 42) as any);
+    "#;
+    let data = parse_file(Utf8Path::new("/test/parenthesized.tsx"), source);
+    let mut found: Vec<(&str, &str, crate::types::DetectionRule)> = data
+        .component_mappings
+        .iter()
+        .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule))
+        .collect();
+    found.sort_by_key(|(name, _, _)| *name);
+    assert_eq!(found, vec![("Group", "GroupProps", WrapperTypeArgument), ("Plain", "GroupProps", HocWrapper)]);
 }
 
 #[test]
@@ -1654,6 +1886,23 @@ fn unrelated_no_init_type_annotation_is_silently_omitted() {
     assert!(data.diagnostics.is_empty(), "expected no diagnostics, got {:?}", data.diagnostics);
 }
 
+#[test]
+fn declared_callable_object_needs_one_element_returning_signature() {
+    let source = r#"
+        interface Props { value?: string }
+        declare const Menu: { (props: Props): React.JSX.Element; displayName: string };
+        declare const Formatter: { (props: Props): string; displayName: string };
+        declare const Overloaded: { (props: Props): React.JSX.Element; (props: string): React.JSX.Element };
+    "#;
+    let data = parse_file(Utf8Path::new("/test/callable.d.mts"), source);
+    let mappings: Vec<_> = data
+        .component_mappings
+        .iter()
+        .map(|mapping| (mapping.component_name.as_str(), mapping.props_type_name.as_str()))
+        .collect();
+    assert_eq!(mappings, [("Menu", "Props")]);
+}
+
 // ── SPEC-EXTRACTOR-001 AC-018: computed/symbol keys are silently omitted;
 // a numeric-literal key extracts as its decimal string form.
 
@@ -1888,7 +2137,7 @@ fn no_init_fc_family_with_an_exotic_type_argument_is_flagged_not_silently_droppe
 #[test]
 fn no_init_forward_ref_exotic_decl_success_does_not_also_emit_a_skip_diagnostic() {
     // Regression guard for the fix above: the new guard must not fire when
-    // Pattern 5's own detector (try_forward_ref_exotic_decl) already
+    // Pattern 5's own detector (try_exotic_component_decl) already
     // succeeded — only when every no-init detector failed.
     let source = r#"
         interface ButtonProps { label: string; }
@@ -2196,6 +2445,45 @@ fn object_assign_sub_component_with_untyped_first_param_is_flagged() {
         skips[0].message.contains("Icon") && skips[0].message.contains("untyped first param"),
         "expected the diagnostic to name Icon and the untyped param, got {:?}",
         skips[0].message
+    );
+}
+
+#[test]
+fn a_component_declared_inside_a_function_body_is_reported_not_mapped() {
+    let source = r#"
+        import { forwardRef, Component } from "react";
+        interface CardProps { title: string }
+        export function Card(props: CardProps) { return <div />; }
+        export function createLeaf<P>(render: (props: P) => any) {
+            const Result = forwardRef((props: P, ref) => <div>{render(props)}</div>);
+            function Inner(props: P) { return <div />; }
+            class Legacy extends Component<P> { render() { return null; } }
+            const Tag = "div";
+            return Result;
+        }
+        export const Story = (props: CardProps) => {
+            const Local: React.FC<CardProps> = (props) => <div />;
+            return <Local title="x" />;
+        };
+    "#;
+    let data = parse_file(Utf8Path::new("/test/factory.tsx"), source);
+
+    let names: Vec<&str> = data.component_mappings.iter().map(|m| m.component_name.as_str()).collect();
+    assert_eq!(names, ["Card", "Story"]);
+    let skips: Vec<&str> = data
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::SkippedCandidate)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(
+        skips,
+        [
+            "'Result' is declared inside a function body, so no module can import it",
+            "'Inner' is declared inside a function body, so no module can import it",
+            "'Legacy' is declared inside a function body, so no module can import it",
+            "'Local' is declared inside a function body, so no module can import it",
+        ]
     );
 }
 

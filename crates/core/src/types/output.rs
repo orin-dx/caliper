@@ -11,6 +11,12 @@ use super::global::ResolveState;
 
 pub(crate) mod interned;
 
+/// The version of the canonical JSON shape (ADR 0017): `schemaVersion` in an [`ExtractionOutput`], an
+/// [`IncrementalUpdate`](crate::pipeline::IncrementalUpdate) and a session index. Bumped whenever a reader of the
+/// previous shape would misread or lose data from the new one; never by an addition it can ignore. Version 2 writes a
+/// component's props as prop set ids and an inheritance layer's `omitted` as a name list id (ADR 0018).
+pub const SCHEMA_VERSION: u32 = 2;
+
 // ─── Top-level output ─────────────────────────────────────────────────────────
 
 /// The complete extraction output — top-level return type of the pipeline. Its JSON writes each distinct prop once
@@ -186,6 +192,38 @@ pub struct ParsedProp {
 struct Seal;
 
 impl ParsedProp {
+    /// Feed `hasher` everything `==` compares, so equal props hash equal (`ResolutionContext::share`).
+    pub(crate) fn structural_hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
+        use std::hash::Hash;
+        self.name.hash(hasher);
+        self.prop_type.structural_hash(hasher);
+        self.required.hash(hasher);
+        if let Some(default) = &self.default_value {
+            default.value.hash(hasher);
+            default.computed.hash(hasher);
+        }
+        self.description.hash(hasher);
+        self.tags.hash(hasher);
+        for parent in self.parent.iter().chain(&self.declarations) {
+            parent.name.hash(hasher);
+            parent.file_name.hash(hasher);
+        }
+    }
+
+    /// This prop with `default_value` as its default, and so not required.
+    pub(crate) fn with_default_value(&self, default_value: DefaultValue) -> ParsedProp {
+        ParsedProp::new(
+            self.name.clone(),
+            self.prop_type.clone(),
+            self.required,
+            Some(default_value),
+            self.description.clone(),
+            self.tags.clone(),
+            self.parent.clone(),
+            self.declarations.clone(),
+        )
+    }
+
     /// Constructs a `ParsedProp`, normalizing the `required`/`default_value`
     /// relationship: RDT convention is that a supplied default value makes a
     /// prop effectively optional regardless of what `required` was computed
@@ -392,22 +430,102 @@ impl OpaqueDetail {
 }
 
 impl PropType {
+    /// Feed `hasher` everything that tells two types apart, so equal types hash equal. The resolver shares identical
+    /// props by this hash (`ResolutionContext::share`).
+    pub(crate) fn structural_hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
+        use std::hash::Hash;
+        std::mem::discriminant(self).hash(hasher);
+        let all = |hasher: &mut H, members: &[PropType]| {
+            members.len().hash(hasher);
+            members.iter().for_each(|member| member.structural_hash(hasher));
+        };
+        match self {
+            PropType::String
+            | PropType::Number
+            | PropType::Boolean
+            | PropType::Null
+            | PropType::Undefined
+            | PropType::Any
+            | PropType::Never
+            | PropType::Unknown
+            | PropType::Void
+            | PropType::ReactNode
+            | PropType::CssProperties
+            | PropType::ElementType
+            | PropType::SxProps => {}
+            PropType::StringLiteral(s) => s.hash(hasher),
+            PropType::NumberLiteral(n) => n.to_bits().hash(hasher),
+            PropType::BoolLiteral(b) => b.hash(hasher),
+            PropType::Union(members) | PropType::Intersection(members) | PropType::Tuple(members) => {
+                all(hasher, members)
+            }
+            PropType::Array(inner) => inner.structural_hash(hasher),
+            PropType::Object(fields) => {
+                fields.len().hash(hasher);
+                for field in fields {
+                    field.name.hash(hasher);
+                    field.required.hash(hasher);
+                    field.description.hash(hasher);
+                    field.prop_type.structural_hash(hasher);
+                }
+            }
+            PropType::Named { name, args } => {
+                name.hash(hasher);
+                all(hasher, args);
+            }
+            PropType::Function { type_params, params, return_type } => {
+                type_params.hash(hasher);
+                params.len().hash(hasher);
+                for param in params {
+                    param.name.hash(hasher);
+                    param.param_type.structural_hash(hasher);
+                }
+                return_type.structural_hash(hasher);
+            }
+            PropType::Ref { element } => element.hash(hasher),
+            PropType::HtmlAttributes { element, omitted } => {
+                element.hash(hasher);
+                omitted.hash(hasher);
+            }
+            PropType::LiteralUnion { members, has_default } => {
+                members.hash(hasher);
+                has_default.hash(hasher);
+            }
+            // Rare, and its reason has no cheap hash of its own.
+            PropType::Opaque(detail) => {
+                detail.raw.hash(hasher);
+                format!("{:?}", detail.reason).hash(hasher);
+            }
+        }
+    }
+
     /// Whether a conditional, mapped or indexed access type the static resolver can't evaluate appears anywhere in this
     /// type, so its text would include that type's source.
     pub(crate) fn holds_unevaluated_type(&self) -> bool {
-        match self {
-            PropType::Opaque(detail) => matches!(
+        self.holds_opaque_where(&|detail| {
+            matches!(
                 detail.reason(),
                 OpaqueReason::ConditionalType | OpaqueReason::MappedType | OpaqueReason::IndexedAccess { .. }
-            ),
+            )
+        })
+    }
+
+    /// Whether any opaque type, whatever the reason, appears anywhere in this type.
+    pub(crate) fn holds_opaque(&self) -> bool {
+        self.holds_opaque_where(&|_| true)
+    }
+
+    fn holds_opaque_where(&self, test: &dyn Fn(&OpaqueDetail) -> bool) -> bool {
+        match self {
+            PropType::Opaque(detail) => test(detail),
             PropType::Union(members) | PropType::Intersection(members) | PropType::Tuple(members) => {
-                members.iter().any(PropType::holds_unevaluated_type)
+                members.iter().any(|member| member.holds_opaque_where(test))
             }
-            PropType::Array(inner) => inner.holds_unevaluated_type(),
-            PropType::Object(fields) => fields.iter().any(|f| f.prop_type.holds_unevaluated_type()),
-            PropType::Named { args, .. } => args.iter().any(PropType::holds_unevaluated_type),
+            PropType::Array(inner) => inner.holds_opaque_where(test),
+            PropType::Object(fields) => fields.iter().any(|f| f.prop_type.holds_opaque_where(test)),
+            PropType::Named { args, .. } => args.iter().any(|arg| arg.holds_opaque_where(test)),
             PropType::Function { params, return_type, .. } => {
-                params.iter().any(|p| p.param_type.holds_unevaluated_type()) || return_type.holds_unevaluated_type()
+                params.iter().any(|p| p.param_type.holds_opaque_where(test)) || return_type.holds_opaque_where(test)
             }
             PropType::String
             | PropType::Number

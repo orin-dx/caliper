@@ -51,6 +51,7 @@ Two habits that repeatedly caught real bugs during the 2026-08-12 spec-validatio
 ## Writing and commits
 
 - Succinct: short sentences, bullets, tables. No backstory, hedging or filler. Banned words are in `docs/adr/README.md`.
+- Changesets become bullets under generated changelog headings. Write one short, consumer-facing paragraph per changeset; start with the outcome, and include an upgrade action or cost when needed. Do not start the body with a heading or list marker.
 - Never hard-wrap Markdown, commit messages or PR descriptions: one line per paragraph.
 - Comments: only the non-obvious why, no history (the commit records it). Fill to 120 columns (`.rustfmt.toml`). Rewriting a comment block counts as writing it: re-fill and cut it, don't inherit the old wrapping.
 - Commits: imperative subject, at most one or two sentences of why, no list of what changed, no "This commit...". Skip the body when the subject says it all.

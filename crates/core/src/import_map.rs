@@ -38,15 +38,17 @@ pub enum ReExportStep {
 
 /// Maps `(consuming_file, local_name)` → import reference.
 /// Built once from `GlobalSourceData`, then used read-only during parallel resolution.
+#[derive(Clone)]
 pub struct ImportResolutionMap {
     /// `file_path` → (`local_name` → specifier + original exported name).
     /// Nested (rather than a flat `(Utf8PathBuf, CompactString)` key) so lookups can
     /// borrow `&Utf8Path` directly instead of cloning the whole path per call.
     /// Note: we store the specifier string, not the resolved file path.
     /// The resolver calls `oxc_resolver` to turn specifiers into absolute paths.
-    bindings: FxHashMap<PathKey, FxHashMap<CompactString, ImportRef>>,
+    /// Behind an `Arc` so the same project's map with another dependency layer (`with_fallback`) shares it.
+    bindings: std::sync::Arc<FxHashMap<PathKey, FxHashMap<CompactString, ImportRef>>>,
     /// `global.re_export_map`, keyed for string-hashed lookups during barrel walks.
-    re_exports: FxHashMap<PathKey, Vec<LexedExport>>,
+    re_exports: std::sync::Arc<FxHashMap<PathKey, Vec<LexedExport>>>,
     /// Loaded dependency files' imports and re-exports (ADR 0010), consulted for a file this map holds nothing for.
     pub(crate) fallback: Option<std::sync::Arc<ImportResolutionMap>>,
 }
@@ -73,12 +75,17 @@ impl ImportResolutionMap {
             }
         }
 
-        let re_exports = global
+        let re_exports: FxHashMap<PathKey, Vec<LexedExport>> = global
             .re_export_map
             .iter()
             .map(|(file_path, exports)| (PathKey::from(file_path.as_path()), exports.clone()))
             .collect();
-        Self { bindings, re_exports, fallback: None }
+        Self { bindings: std::sync::Arc::new(bindings), re_exports: std::sync::Arc::new(re_exports), fallback: None }
+    }
+
+    /// This map with `fallback` as its dependency layer. The project's bindings and re-exports are shared, not copied.
+    pub(crate) fn with_fallback(&self, fallback: Option<std::sync::Arc<ImportResolutionMap>>) -> Self {
+        Self { fallback, ..self.clone() }
     }
 
     /// Given a file and a local name used in that file, return where it was imported from.
@@ -89,6 +96,20 @@ impl ImportResolutionMap {
             Some(per_file) => per_file.get(local_name),
             None => self.fallback.as_ref()?.find_import(file, local_name),
         }
+    }
+
+    /// The local name of the declaration `file` itself exports as `name` (`export function f`, `export { g as f }`),
+    /// whatever kind of declaration it is.
+    pub fn local_export(&self, file: &Utf8Path, name: &str) -> Option<String> {
+        let Some(exports) = self.re_exports.get(file.as_str()) else {
+            return self.fallback.as_ref()?.local_export(file, name);
+        };
+        exports.iter().find_map(|export| match export {
+            LexedExport::LocalDeclaration { name: exported, declared_as, .. } if exported == name => {
+                Some(declared_as.clone().unwrap_or_else(|| exported.clone()))
+            }
+            _ => None,
+        })
     }
 
     /// Walk one step of the re-export chain for `barrel_file`.

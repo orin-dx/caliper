@@ -4,12 +4,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use camino::Utf8Path;
-use rustc_hash::FxHashSet;
+use compact_str::CompactString;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::types::*;
 
 use super::chain::resolve_props_chain;
 use super::collected::resolve_collected_type;
+use super::primitives::union_of;
 use super::{ResolutionContext, ResolvedChain};
 
 /// Resolve a `CollectedTypeAlias` as a props chain.
@@ -61,6 +63,10 @@ pub(super) fn resolve_type_alias_chain(
                 chain.props.clear();
                 return chain;
             };
+            // React's declarations are merged only for `full` attributes; the base was then a `composes` entry with no props.
+            if chain.props.is_empty() {
+                chain.props = react_picked_props(base, &picked, file_path, mapping, ctx, state, depth);
+            }
             let picked_set: FxHashSet<&str> = picked.iter().map(String::as_str).collect();
             chain.props.retain(|p| picked_set.contains(p.name.as_str()));
             chain
@@ -117,6 +123,102 @@ pub(super) fn resolve_type_alias_chain(
     }
 }
 
+/// `Pick<React.AriaAttributes, 'aria-label'>`: each picked key read from React's interface, as `Pick<T, K>` reads
+/// `T[K]`, with the optionality and documentation the declaration gives it. Empty when the base is not one of React's
+/// interfaces. A key React's declaration does not have is reported.
+#[allow(clippy::too_many_arguments)]
+fn react_picked_props(
+    base: &CollectedType,
+    picked: &[String],
+    file_path: &Utf8Path,
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> Vec<Arc<ParsedProp>> {
+    let (mut base, mut file) = (base, file_path);
+    while let CollectedType::AtFile { file: inner_file, inner } = base {
+        (base, file) = (inner, inner_file.as_path());
+    }
+    let CollectedType::Named { name, args } = base else { return Vec::new() };
+    // An alias of React's (`ComponentProps<typeof X>`) resolves as a chain of its own, not as an interface to read.
+    if !super::may_be_react_builtin(name, file, ctx) || !super::evaluate::is_react_interface(name, file, ctx) {
+        return Vec::new();
+    }
+    let mut props = Vec::new();
+    for key in picked {
+        let Some(declared) = super::evaluate::react_declared_prop(name, args, key, file, ctx) else {
+            state.diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Info,
+                message: format!("'{key}' is picked from '{name}' but React's declaration of it was not found"),
+                file: Some(file.to_string()),
+                line: None,
+                column: None,
+                help: None,
+                code: DiagnosticCode::OpaqueType,
+                affects: Vec::new(),
+            });
+            continue;
+        };
+        let prop_type = if state.keys_only {
+            PropType::Unknown
+        } else {
+            resolve_collected_type(&declared.ty, &declared.file, ctx, state, depth + 1)
+        };
+        let default_value = state
+            .param_default(mapping, key)
+            .map(|code| DefaultValue { value: code.value.clone(), computed: code.computed });
+        let parent = PropParent { name: declared.declared_by, file_name: declared.file.to_string() };
+        props.push(ctx.share(ParsedProp::new(
+            key.clone(),
+            prop_type,
+            declared.required,
+            default_value,
+            declared.description,
+            Default::default(),
+            Some(parent.clone()),
+            vec![parent],
+        )));
+    }
+    props
+}
+
+/// Inline fields guaranteed by both branches of an undecidable conditional; names hidden behind a reference are
+/// deliberately excluded because their presence depends on resolving that reference.
+fn shared_inline_keys(
+    left: &CollectedType,
+    right: &CollectedType,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+) -> FxHashSet<String> {
+    fn collect(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8, keys: &mut FxHashSet<String>) {
+        if depth > 8 {
+            return;
+        }
+        match ty {
+            CollectedType::Object(fields) => keys.extend(fields.iter().map(|field| field.name.clone())),
+            CollectedType::Intersection(members) => {
+                for member in members {
+                    collect(member, file, ctx, depth + 1, keys);
+                }
+            }
+            CollectedType::AtFile { file, inner } => collect(inner, file, ctx, depth + 1, keys),
+            CollectedType::Named { name, args } => {
+                if let Some((body, body_file)) = super::evaluate::alias_body(name, args, file, ctx) {
+                    collect(&body, &body_file, ctx, depth + 1, keys);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut left_keys = FxHashSet::default();
+    let mut right_keys = FxHashSet::default();
+    collect(left, file, ctx, 0, &mut left_keys);
+    collect(right, file, ctx, 0, &mut right_keys);
+    left_keys.retain(|key| right_keys.contains(key));
+    left_keys
+}
+
 /// Resolve a `CollectedType` as a props chain (for base types in aliases).
 pub(super) fn resolve_base_as_chain(
     base: &CollectedType,
@@ -128,6 +230,13 @@ pub(super) fn resolve_base_as_chain(
 ) -> ResolvedChain {
     match base {
         CollectedType::Named { name, args } => {
+            if name.strip_prefix("React.").unwrap_or(name) == "PropsWithoutRef"
+                && super::may_be_react_builtin(name, file_path, ctx)
+            {
+                if let Some(alias) = react_props_without_ref_alias(args, file_path) {
+                    return resolve_type_alias_chain(&alias, file_path, mapping, ctx, state, depth);
+                }
+            }
             // Omit/Pick/Partial/Readonly applied to a *structured* reference — e.g. a
             // member of `Omit<T, keyof U> & U` after `T`/`U` were substituted with real
             // types (see resolver/substitute.rs). Handled directly here, rather than via
@@ -153,7 +262,19 @@ pub(super) fn resolve_base_as_chain(
                 ctx,
                 &mut state.diagnostics,
             ) {
-                return resolve_type_alias_chain(&alias, file_path, mapping, ctx, state, depth + 1);
+                let mut attempt = state.branch();
+                let chain = resolve_type_alias_chain(&alias, file_path, mapping, ctx, &mut attempt, depth + 1);
+                return super::chain::known_fallback_for_alias(
+                    chain,
+                    attempt,
+                    name.as_str(),
+                    args,
+                    file_path,
+                    mapping,
+                    ctx,
+                    state,
+                    depth + 1,
+                );
             }
 
             resolve_props_chain(name.as_str(), args, file_path, mapping, ctx, state, depth + 1)
@@ -172,12 +293,21 @@ pub(super) fn resolve_base_as_chain(
             // Expand the object fields directly as own props.
             let mut chain = ResolvedChain::empty();
             for field in fields {
-                let prop_type = resolve_collected_type(&field.collected_type, file_path, ctx, state, depth);
-                chain.props.push(Arc::new(ParsedProp::new(
+                let prop_type = if state.keys_only {
+                    PropType::Unknown
+                } else {
+                    resolve_collected_type(&field.collected_type, file_path, ctx, state, depth)
+                };
+                // The component's own defaults apply to an inline field as to a declared one (`props: IconProps &
+                // { size?: 'S' | 'M' }` with `let { size = 'M' } = props`).
+                let default_value = state
+                    .param_default(mapping, &field.name)
+                    .map(|code| DefaultValue { value: code.value.clone(), computed: code.computed });
+                chain.props.push(ctx.share(ParsedProp::new(
                     field.name.clone(),
                     prop_type,
                     field.required,
-                    None,
+                    default_value,
                     field.description.clone(),
                     Default::default(),
                     None,
@@ -196,6 +326,66 @@ pub(super) fn resolve_base_as_chain(
             // collapsed each prop's type to whichever branch happened to be seen
             // last instead of a proper union across all branches.
             resolve_union_alias(members, file_path, mapping, ctx, state, depth)
+        }
+        // `SlotRecipeProps<"avatar">`'s branch, `Recipes["avatar"]["__type"]`: evaluated when the operands are known.
+        CollectedType::Conditional { .. } | CollectedType::IndexedAccess { .. }
+            if super::evaluate::reduce(base, file_path, ctx, 0).is_some() =>
+        {
+            let Some((reduced, reduced_file)) = super::evaluate::reduce(base, file_path, ctx, 0) else {
+                return ResolvedChain::empty();
+            };
+            resolve_base_as_chain(&reduced, &reduced_file, mapping, ctx, state, depth + 1)
+        }
+        CollectedType::Conditional { true_type, false_type, .. }
+            if !shared_inline_keys(true_type, false_type, file_path, ctx).is_empty() =>
+        {
+            let shared = shared_inline_keys(true_type, false_type, file_path, ctx);
+            let branches = [true_type.as_ref().clone(), false_type.as_ref().clone()];
+            let mut chain = resolve_union_alias(&branches, file_path, mapping, ctx, state, depth + 1);
+            chain.props.retain(|prop| shared.contains(&prop.name));
+            chain.notable.retain(|prop| shared.contains(&prop.name));
+            chain.inherited_by_name.retain(|name, _| shared.contains(name));
+            chain.inheritance.clear();
+            state.diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Info,
+                message: format!(
+                    "Cannot decide conditional '{}' — listing only props present in both branches",
+                    base.to_raw_string()
+                ),
+                file: Some(file_path.to_string()),
+                line: None,
+                column: None,
+                help: None,
+                code: DiagnosticCode::OpaqueType,
+                affects: Vec::new(),
+            });
+            chain
+        }
+        CollectedType::Mapped { param, key_type, value_type, optional }
+            if super::evaluate::mapped_keys(key_type, file_path, ctx, 0).is_some() =>
+        {
+            let keys = super::evaluate::mapped_keys(key_type, file_path, ctx, 0).unwrap_or_default();
+            resolve_mapped_chain(param, &keys, value_type, *optional, file_path, ctx, state, depth)
+        }
+        // `{ [K in keyof ComponentPropsWithRef<"div">]: Wrap<ComponentPropsWithRef<"div">[K]> }` (Base UI): the
+        // element's attributes, each in a wrapper this does not apply, so it is listed as the element's own.
+        CollectedType::Mapped { key_type, .. } if element_props_of(key_type).is_some() => {
+            let Some(element_props) = element_props_of(key_type) else { return ResolvedChain::empty() };
+            state.diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Info,
+                message: format!(
+                    "'{}' is a mapped type over an element's attributes: they are listed as the element's, without \
+                     the wrapper its values apply",
+                    base.to_raw_string()
+                ),
+                file: Some(file_path.to_string()),
+                line: None,
+                column: None,
+                help: None,
+                code: DiagnosticCode::OpaqueType,
+                affects: Vec::new(),
+            });
+            resolve_base_as_chain(&element_props, file_path, mapping, ctx, state, depth + 1)
         }
         // None of these can ever provide a props chain (a props type must be
         // object-like — an interface, intersection, union, or inline object).
@@ -250,6 +440,64 @@ pub(super) fn resolve_base_as_chain(
     }
 }
 
+pub(super) fn react_props_without_ref_alias(args: &[CollectedType], file: &Utf8Path) -> Option<CollectedTypeAlias> {
+    Some(CollectedTypeAlias::Omit {
+        base: args.first()?.clone(),
+        keys: CollectedType::StringLiteral("ref".into()),
+        file_path: file.to_owned(),
+    })
+}
+
+/// One prop per key of a mapped type: `{ [K in keyof Variant]?: ConditionalValue<Variant[K]> }` gives each of
+/// `Variant`'s members the value type with `K` bound to its name. Without a `?`/`-?` modifier a key keeps its source
+/// member's optionality, as TypeScript's homomorphic mapped types do, and its description.
+#[allow(clippy::too_many_arguments)]
+fn resolve_mapped_chain(
+    param: &CompactString,
+    keys: &[super::evaluate::Key],
+    value_type: &CollectedType,
+    optional: Option<bool>,
+    file_path: &Utf8Path,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> ResolvedChain {
+    let mut chain = ResolvedChain::empty();
+    for key in keys {
+        // A `keyof` operand needs only the names (`ResolveState::keys_only`).
+        let prop_type = if state.keys_only {
+            PropType::Unknown
+        } else {
+            let bound =
+                FxHashMap::from_iter([(param.as_str(), CollectedType::StringLiteral(key.name.as_str().into()))]);
+            resolve_collected_type(
+                &super::substitute::substitute_type(value_type, &bound),
+                file_path,
+                ctx,
+                state,
+                depth + 1,
+            )
+        };
+        // A tag on the source member (`/** @default "md" */ size: …` in a recipe's variants) carries over.
+        let default_value = key
+            .tags
+            .get("default")
+            .or_else(|| key.tags.get("defaultValue"))
+            .map(|value| DefaultValue { value: value.trim().to_owned(), computed: false });
+        chain.props.push(ctx.share(ParsedProp::new(
+            key.name.clone(),
+            prop_type,
+            optional.map_or(key.required, |optional| !optional),
+            default_value,
+            key.description.clone(),
+            key.tags.clone(),
+            None,
+            vec![],
+        )));
+    }
+    chain
+}
+
 /// Resolve an intersection's members and merge them as TypeScript does (`ResolvedChain::intersect_member`). An HTML layer
 /// lists none of its element's attributes but declares them all the same, so a prop another member declares also has the
 /// attribute's type when React's own declarations are loaded.
@@ -265,13 +513,17 @@ fn resolve_intersection_chain(
     // HTML layers merged so far whose element's declarations this run has.
     let mut layers: Vec<InheritedLayer> = Vec::new();
     for member in members {
-        let mut member = resolve_base_as_chain(member, file_path, mapping, ctx, state, depth);
-        if !layers.is_empty() {
+        // Each member is its own branch: a type two members both reach (`Pick<P, K> & Omit<P, K>`, which is Ark's
+        // `Optional`) is not circular, and the cycle set must hold only the members' ancestors, as for an extends entry.
+        let mut branch = state.branch();
+        let mut member = resolve_base_as_chain(member, file_path, mapping, ctx, &mut branch, depth);
+        state.absorb(branch);
+        if !layers.is_empty() && !state.keys_only {
             let listed: FxHashSet<&str> = chain.props.iter().map(|prop| prop.name.as_str()).collect();
             for prop in member.props.iter_mut().filter(|prop| !listed.contains(prop.name.as_str())) {
                 for layer in &layers {
                     if let Some(attribute) = layer_attribute(layer, &prop.name, ctx, state, depth) {
-                        *prop = Arc::new(super::intersect_declarations(&attribute, prop));
+                        *prop = ctx.share(super::intersect_declarations(&attribute, prop));
                     }
                 }
             }
@@ -282,12 +534,12 @@ fn resolve_intersection_chain(
             .filter(|layer| layer.html_element.as_deref().is_some_and(|element| has_element(layer, element, ctx)))
             .cloned()
             .collect();
-        if !new_layers.is_empty() {
+        if !new_layers.is_empty() && !state.keys_only {
             let own: FxHashSet<&str> = member.props.iter().map(|prop| prop.name.as_str()).collect();
             for prop in chain.props.iter_mut().filter(|prop| !own.contains(prop.name.as_str())) {
                 for layer in &new_layers {
                     if let Some(attribute) = layer_attribute(layer, &prop.name, ctx, state, depth) {
-                        *prop = Arc::new(super::intersect_declarations(prop, &attribute));
+                        *prop = ctx.share(super::intersect_declarations(prop, &attribute));
                     }
                 }
             }
@@ -296,6 +548,24 @@ fn resolve_intersection_chain(
         chain.intersect_member(member);
     }
     chain
+}
+
+/// `ComponentProps<"div">`, when `key_type` is `keyof` it: the type the mapped type ranges over.
+fn element_props_of(key_type: &CollectedType) -> Option<CollectedType> {
+    match key_type {
+        CollectedType::AtFile { inner, .. } => element_props_of(inner),
+        CollectedType::KeyOf(target) => match target.as_ref() {
+            CollectedType::AtFile { inner, .. } => element_props_of(&CollectedType::KeyOf(inner.clone())),
+            CollectedType::Named { name, args } => {
+                let bare = name.strip_prefix("React.").unwrap_or(name);
+                let component_props =
+                    matches!(bare, "ComponentProps" | "ComponentPropsWithRef" | "ComponentPropsWithoutRef");
+                (component_props && args.len() == 1).then(|| target.as_ref().clone())
+            }
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn has_element(layer: &InheritedLayer, element: &str, ctx: &ResolutionContext) -> bool {
@@ -314,7 +584,10 @@ fn layer_attribute(
         return None;
     }
     let element = layer.html_element.as_deref()?;
-    super::html::react_attribute(element, name, Utf8Path::new(&layer.file_name), ctx, state, depth)
+    let key = format!("{}\0{element}\0{name}", layer.file_name);
+    ctx.attribute_reads.get_or_resolve(&key, depth, state, None, |state| {
+        super::html::react_attribute(element, name, Utf8Path::new(&layer.file_name), ctx, state, depth)
+    })
 }
 
 /// Resolve a `CollectedTypeAlias::Union` — detect discriminated union if possible.
@@ -346,11 +619,42 @@ pub(super) fn resolve_union_alias(
         .collect();
 
     if named_members.len() < 2 {
-        // Not a discriminated union — just merge all.
+        // Not a discriminated union. The chain is every branch's chain merged as before, but a prop the branches type
+        // differently is the union of those types, and one that some branch lacks or marks optional is optional.
         let mut chain = ResolvedChain::empty();
+        let mut merged_props: BTreeMap<String, ParsedProp> = BTreeMap::new();
+        let mut prop_types: BTreeMap<String, Vec<PropType>> = BTreeMap::new();
+        let mut seen_count: BTreeMap<String, usize> = BTreeMap::new();
+        let mut required_in_all: BTreeMap<String, bool> = BTreeMap::new();
+        // A branch with no props (`undefined`, `never`) says nothing about presence.
+        let mut variants: usize = 0;
         for member in members {
             let sub = resolve_base_as_chain(member, file_path, mapping, ctx, state, depth);
+            if !sub.props.is_empty() {
+                variants += 1;
+                record_variant_props(
+                    &sub.props,
+                    &mut merged_props,
+                    &mut prop_types,
+                    &mut seen_count,
+                    &mut required_in_all,
+                );
+            }
             chain.merge_parent(sub);
+        }
+        if variants > 1 {
+            for prop in &mut chain.props {
+                let Some(types) = prop_types.get(&prop.name) else { continue };
+                let everywhere = seen_count.get(&prop.name).copied().unwrap_or(0) == variants;
+                let required = everywhere && required_in_all.get(&prop.name).copied().unwrap_or(false);
+                let prop_type = if types.len() > 1 { union_of(types.clone()) } else { prop.prop_type.clone() };
+                if prop_type != prop.prop_type || required != prop.required {
+                    let mut widened = ParsedProp::clone(prop);
+                    widened.prop_type = prop_type;
+                    widened.required = required;
+                    *prop = Arc::new(widened);
+                }
+            }
         }
         return chain;
     }
@@ -397,7 +701,7 @@ pub(super) fn resolve_union_alias(
                 Some(t) => t,
                 None => continue,
             },
-            _ => PropType::Union(types),
+            _ => union_of(types),
         };
 
         if let Some(entry) = merged_props.get_mut(&name) {
@@ -416,7 +720,7 @@ pub(super) fn resolve_union_alias(
             .collect();
 
         if let Some(disc_prop) = merged_props.get_mut(disc_name) {
-            disc_prop.prop_type = PropType::Union(disc_literals);
+            disc_prop.prop_type = union_of(disc_literals);
         }
     }
 
@@ -493,14 +797,10 @@ pub(super) fn resolve_type_alias_type(
             resolve_collected_type(target, file_path, ctx, state, depth + 1)
         }
         CollectedTypeAlias::Union { members, .. } => {
-            let resolved: Vec<PropType> =
-                members.iter().map(|m| resolve_collected_type(m, file_path, ctx, state, depth + 1)).collect();
-            PropType::Union(resolved)
+            union_of(members.iter().map(|m| resolve_collected_type(m, file_path, ctx, state, depth + 1)))
         }
         CollectedTypeAlias::Intersection { members, .. } => {
-            let resolved: Vec<PropType> =
-                members.iter().map(|m| resolve_collected_type(m, file_path, ctx, state, depth + 1)).collect();
-            PropType::Intersection(resolved)
+            super::primitives::resolve_intersection(members, file_path, ctx, state, depth)
         }
         CollectedTypeAlias::Partial { base, .. } | CollectedTypeAlias::Required { base, .. } => {
             resolve_collected_type(base, file_path, ctx, state, depth + 1)
@@ -548,7 +848,7 @@ fn resolve_key_set(
     state: &mut ResolveState,
     depth: u8,
 ) -> Option<Vec<String>> {
-    if depth > super::MAX_DEPTH {
+    if super::past_max_depth(state, depth) {
         return None;
     }
     match keys {
@@ -566,9 +866,13 @@ fn resolve_key_set(
         CollectedType::KeyOf(target) => {
             // A fresh cycle set: reading a type's keys is a separate question from the props walk that called it, which
             // has usually just visited the same type (`Omit<Base, keyof Base>` resolves `Base` first). Sharing the set
-            // made `keyof Base` look circular and come back empty. Depth still bounds the recursion.
-            let mut branch_state =
-                ResolveState { expand_all: state.expand_all || ctx.can_collapse(), ..state.detached() };
+            // made `keyof Base` look circular and come back empty. Depth still bounds the recursion. Only the names are
+            // read, so members' types are not resolved (`keys_only`).
+            let mut branch_state = ResolveState {
+                expand_all: state.expand_all || ctx.can_collapse(),
+                keys_only: true,
+                ..state.detached()
+            };
             let chain = resolve_base_as_chain(target, file, mapping, ctx, &mut branch_state, depth + 1);
             state.absorb_detached(branch_state);
             Some(chain.props.iter().map(|p| p.name.clone()).collect())

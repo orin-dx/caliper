@@ -23,6 +23,98 @@ fn as_const_literal<'a, 'b>(decl: &'b VariableDeclarator<'a>) -> Option<(std::st
     Some((id.name.as_str().to_owned(), inner))
 }
 
+/// The value a literal type stands for: `"a"`, `1`, `-1`, `true`.
+fn literal_member(ty: &TSType<'_>) -> Option<EnumValue> {
+    let TSType::TSLiteralType(lit) = ty else { return None };
+    match &lit.literal {
+        TSLiteral::StringLiteral(s) => Some(EnumValue::String(s.value.as_str().to_owned())),
+        TSLiteral::NumericLiteral(n) => Some(EnumValue::Number(n.value)),
+        TSLiteral::BooleanLiteral(b) => Some(EnumValue::Bool(b.value)),
+        TSLiteral::UnaryExpression(u) if u.operator == UnaryOperator::UnaryNegation => match &u.argument {
+            Expression::NumericLiteral(n) => Some(EnumValue::Number(-n.value)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The name a property key spells without evaluating anything: `size`, `"size"`.
+fn static_key<'a>(key: &'a PropertyKey<'_>) -> Option<&'a str> {
+    match key {
+        PropertyKey::StaticIdentifier(id) => Some(id.name.as_str()),
+        PropertyKey::StringLiteral(s) => Some(s.value.as_str()),
+        _ => None,
+    }
+}
+
+/// Whether an expression can be a variant's styling: class strings, class lists, style objects, or a reference to one.
+/// A number, a boolean, `null` or a function is not, so `{ variants: { a: { b: 1 } } }` is not a variant bag.
+fn is_class_value(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::ParenthesizedExpression(inner) => is_class_value(&inner.expression),
+        Expression::TSAsExpression(inner) => is_class_value(&inner.expression),
+        Expression::TSSatisfiesExpression(inner) => is_class_value(&inner.expression),
+        Expression::StringLiteral(_)
+        | Expression::TemplateLiteral(_)
+        | Expression::TaggedTemplateExpression(_)
+        | Expression::ArrayExpression(_)
+        | Expression::ObjectExpression(_)
+        | Expression::Identifier(_)
+        | Expression::StaticMemberExpression(_)
+        | Expression::CallExpression(_)
+        | Expression::ConditionalExpression(_)
+        | Expression::BinaryExpression(_) => true,
+        _ => false,
+    }
+}
+
+/// The variant values a config object declares, one entry per `(group, value)`, when the object has the shape of a
+/// variant bag: a `variants` property that is a map of maps (`{ size: { sm: …, lg: … }, tone: { … } }`) whose leaves
+/// are styling (see [`is_class_value`]). `cva`, `tv`, Chakra's recipes and Panda's all declare variants this way, and
+/// nothing else is asked of the call, so an aliased import or an unknown library with the same config is read alike.
+/// A group written as a reference or a call is skipped (real recipes mix those with literal groups). `None` when there
+/// is no `variants`, a group is a plain literal, a leaf is not styling, or no value is named.
+fn variant_entries(object: &ObjectExpression<'_>) -> Option<Vec<EnumEntry>> {
+    let variants = object.properties.iter().find_map(|property| match property {
+        ObjectPropertyKind::ObjectProperty(p) if static_key(&p.key) == Some("variants") => Some(&p.value),
+        _ => None,
+    })?;
+    let Expression::ObjectExpression(groups) = variants else { return None };
+
+    let mut entries = Vec::new();
+    for group in &groups.properties {
+        // A spread of another bag contributes nothing here, as before.
+        let ObjectPropertyKind::ObjectProperty(group) = group else { continue };
+        let Some(group_name) = static_key(&group.key) else { continue };
+        let values = match &group.value {
+            Expression::ObjectExpression(values) => values,
+            // A group that is a plain literal is not a variant: `variants: { size: "sm" }`, `{ tones: ["a", "b"] }`.
+            Expression::StringLiteral(_)
+            | Expression::TemplateLiteral(_)
+            | Expression::NumericLiteral(_)
+            | Expression::BooleanLiteral(_)
+            | Expression::NullLiteral(_)
+            | Expression::ArrayExpression(_) => return None,
+            // A group written as a reference or a call (`size: inputRecipe.variants!.size`, `variant: mapEntries(…)`)
+            // names no values here and the rest of the bag still does, as before.
+            _ => continue,
+        };
+        for value in &values.properties {
+            let ObjectPropertyKind::ObjectProperty(value) = value else { continue };
+            if !is_class_value(&value.value) {
+                return None;
+            }
+            let Some(value_name) = static_key(&value.key) else { continue };
+            entries.push(EnumEntry {
+                name: group_name.to_owned(),
+                value: EnumValue::String(value_name.to_owned()),
+                description: String::new(),
+            });
+        }
+    }
+    (!entries.is_empty()).then_some(entries)
+}
+
 impl<'src> SourceDataCollector<'src> {
     // ─── `const` enum (as-const objects) collection ──────────────────────────
 
@@ -63,18 +155,27 @@ impl<'src> SourceDataCollector<'src> {
     /// separately in `SourceData::const_arrays` — see that field's doc comment
     /// for why it isn't folded into `enums`.
     pub(super) fn try_collect_const_array<'a>(&mut self, decl: &VariableDeclarator<'a>) {
-        let Some((name, arr_expr)) = as_const_literal(decl) else { return };
+        let Some((name, arr_expr)) = as_const_literal(decl) else {
+            self.try_collect_annotated_tuple(decl);
+            return;
+        };
 
         let arr = match arr_expr {
             Expression::ArrayExpression(a) => a,
             _ => return,
         };
 
+        // A spread of a named array (`...PresetColors`) is kept by name; the resolver finds the array it names.
         let values: Vec<EnumValue> = arr
             .elements
             .iter()
-            .filter_map(|el| el.as_expression())
-            .filter_map(|e| self.expression_to_enum_value(e))
+            .filter_map(|el| match el {
+                ArrayExpressionElement::SpreadElement(spread) => match &spread.argument {
+                    Expression::Identifier(id) => Some(EnumValue::Spread { spread: id.name.as_str().to_owned() }),
+                    _ => None,
+                },
+                other => other.as_expression().and_then(|e| self.expression_to_enum_value(e)),
+            })
             .collect();
 
         if !values.is_empty() {
@@ -83,91 +184,45 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
-    /// Detect: `const X = cva(base, { variants: { key: { val: "...", ... } } })`
-    /// Store each variant key's values in self.data.enums under the scoped key.
-    pub(super) fn try_collect_cva_call<'a>(&mut self, decl: &VariableDeclarator<'a>, name: &str) {
-        let Some(init) = decl.init.as_ref() else { return };
-        let call = match init {
-            Expression::CallExpression(ce) => ce,
-            _ => return,
-        };
-
-        let callee_name = match &call.callee {
-            Expression::Identifier(id) => id.name.as_str(),
-            Expression::StaticMemberExpression(m) => m.property.name.as_str(),
-            _ => return,
-        };
-
-        if !matches!(callee_name, "cva" | "tv" | "defineRecipe" | "recipe" | "defineSlotRecipe") {
-            return;
-        }
-
-        // cva(baseClasses, { variants }) takes config at index 1; all other callees take it at index 0
-        let arg_index = usize::from(callee_name == "cva");
-        let Some(second_arg) = call.arguments.get(arg_index) else { return };
-        let second_expr = match second_arg {
-            Argument::SpreadElement(_) => return,
-            other => match other.as_expression() {
-                Some(e) => e,
-                None => return,
-            },
-        };
-        let obj = match second_expr {
-            Expression::ObjectExpression(o) => o,
-            _ => return,
-        };
-
-        let variants_value = obj.properties.iter().find_map(|prop| {
-            if let ObjectPropertyKind::ObjectProperty(p) = prop {
-                if let PropertyKey::StaticIdentifier(key) = &p.key {
-                    if key.name.as_str() == "variants" {
-                        return match &p.value {
-                            Expression::ObjectExpression(o) => Some(o),
-                            _ => None,
-                        };
-                    }
-                }
+    /// Detect: `declare const X: readonly ["a", "b"]` — the same array as `const X = ["a", "b"] as const`, declared by its
+    /// type instead of its value (what a `.d.ts` says, e.g. Radix's `ALIGN_OPTIONS`). TypeScript reads `typeof X` as the
+    /// declared type of the symbol and `[number]` as the union of the tuple's elements, so the members go where an
+    /// initializer's would. Only a tuple of literals is kept: any other element leaves the const out, as an array
+    /// literal with a computed element would.
+    fn try_collect_annotated_tuple<'a>(&mut self, decl: &VariableDeclarator<'a>) {
+        let BindingPattern::BindingIdentifier(id) = &decl.id else { return };
+        let Some(annotation) = decl.type_annotation.as_ref() else { return };
+        let mut ty = &annotation.type_annotation;
+        while let TSType::TSTypeOperatorType(op) = ty {
+            if op.operator != TSTypeOperatorOperator::Readonly {
+                return;
             }
-            None
-        });
-        let Some(variants_value) = variants_value else { return };
-
-        let scoped_key = self.scoped_key(name);
-        let mut entries: Vec<EnumEntry> = Vec::new();
-
-        for prop in &variants_value.properties {
-            if let ObjectPropertyKind::ObjectProperty(variant_prop) = prop {
-                let variant_key = match &variant_prop.key {
-                    PropertyKey::StaticIdentifier(id) => id.name.as_str().to_owned(),
-                    PropertyKey::StringLiteral(s) => s.value.as_str().to_owned(),
-                    _ => continue,
-                };
-
-                // The value is another object: { default: "...", sm: "...", ... }
-                let values_obj = match &variant_prop.value {
-                    Expression::ObjectExpression(o) => o,
-                    _ => continue,
-                };
-
-                for value_prop in &values_obj.properties {
-                    if let ObjectPropertyKind::ObjectProperty(vp) = value_prop {
-                        let value_name = match &vp.key {
-                            PropertyKey::StaticIdentifier(id) => id.name.as_str().to_owned(),
-                            PropertyKey::StringLiteral(s) => s.value.as_str().to_owned(),
-                            _ => continue,
-                        };
-
-                        entries.push(EnumEntry {
-                            name: variant_key.clone(),
-                            value: EnumValue::String(value_name),
-                            description: String::new(),
-                        });
-                    }
-                }
-            }
+            ty = &op.type_annotation;
         }
+        let TSType::TSTupleType(tuple) = ty else { return };
+        let values: Option<Vec<EnumValue>> =
+            tuple.element_types.iter().map(|element| element.as_ts_type().and_then(literal_member)).collect();
+        let Some(values) = values.filter(|values| !values.is_empty()) else { return };
+        let key = self.scoped_key(id.name.as_str());
+        self.data.const_arrays.insert(key, values);
+    }
 
-        if !entries.is_empty() {
+    /// Detect a call with a variant bag in one of its object-literal arguments, such as `cva(base, { variants })`,
+    /// `tv({ variants })`, `defineRecipe({ variants })` or `chakra("div", { variants })`, and store each variant key's
+    /// values in self.data.enums under the scoped key. The shape decides, not the callee: a `variants` property whose
+    /// value is a map of maps (see [`variant_entries`]), at any argument position, under any import alias.
+    pub(super) fn try_collect_variant_bag<'a>(&mut self, decl: &VariableDeclarator<'a>, name: &str) {
+        let Some(Expression::CallExpression(call)) = decl.init.as_ref() else { return };
+        let entries = call
+            .arguments
+            .iter()
+            .filter_map(|argument| match argument.as_expression() {
+                Some(Expression::ObjectExpression(object)) => variant_entries(object),
+                _ => None,
+            })
+            .next();
+        if let Some(entries) = entries {
+            let scoped_key = self.scoped_key(name);
             self.data.enums.insert(scoped_key, entries);
         }
     }

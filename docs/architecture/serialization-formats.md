@@ -4,13 +4,22 @@
 
 This tool's canonical, lossless representation is `ExtractionOutput` — the struct tree in `crates/core/src/types/`, whose JSON writes each distinct prop once and refers to it by id (ADR 0009; see `types-and-output-contract.md`). Everything in this document is a _consumer-facing projection_ of that canonical form: two formats reshape it for specific downstream tools (`--format rdt`, `--format toon`), and one (`schema.rs`) describes its shape for external validators. None of the three is the source of truth; `ExtractionOutput` is.
 
+## Schema version
+
+The canonical JSON (`ExtractionOutput`, `IncrementalUpdate`, the session index) carries `schemaVersion` (ADR 0017); `SCHEMA_VERSION` in `crates/core/src/types/output.rs` is the one definition, and `schema.rs` requires it. Version 1 is the shape ADR 0009 describes. Version 2 (ADR 0018) writes a component's `props` as prop set ids, and an inheritance layer's `omitted` and a diagnostic's `affects` as name list ids, with `propSets` and `nameLists` tables beside `props`.
+
+- **Bump** when a reader of the previous version would misread or lose data: a field removed, renamed or retyped, its meaning changed, or references and tables restructured. A new field, a new `detectedBy` value or a new diagnostic code is not a bump; readers must tolerate them.
+- **A bump ships** in a changeset marked breaking for the core crate and every package that reads the JSON.
+- **Readers** (`ExtractionOutput`'s `Deserialize`, `packages/vite-plugin/src/schema.ts`, `packages/storybook/src/schema.ts`) accept their own version, reject any other with an error naming both, and read output with no `schemaVersion` as version 1.
+- `--format rdt`, `--format storybook` and `--format toon` carry no version; they have other tools' shapes. The parse cache has its own `CACHE_SCHEMA_VERSION`.
+
 ## Where this code lives, and why that's not a AGENTS.md violation
 
 `crates/core/AGENTS.md` says "no terminal/display code in `crates/core`." The RDT projection (`pipeline/rdt.rs`) and `toon.rs` (`render_output_toon`, `render_component_toon`, `format_type_compact`) live in **`crates/core`**, and both are serialization formats, not extraction logic.
 
 The line the project actually draws, reverse-engineered from where each format lives: "terminal/display code" means code whose job is to _render for a human looking at a terminal_ (colors, tables, spinners — `crates/cli/src/output.rs`'s comfy-table helpers, `indicatif` progress bars). A _serialization format_ — even a human-readable, LLM-optimized one like TOON — is a consumer-facing data contract, judged by "does another program or prompt consume this," not "is it pretty-printed." TOON is core-side because it's plumbed through `PipelineOptions`/pipeline output the same way canonical JSON is (`caliper_docgen_core::toon::render_output_toon(&output)` at `extract.rs:57`), and because a NAPI/plugin consumer could plausibly want TOON output too, not just the CLI. The RDT shape is core-side for the same reason: the NAPI binding's `sessionDocgenInfo` returns it per component for the Storybook provider (`packages/storybook`), and `--format rdt` (`serialize_rdt`) delegates to the same module.
 
-**Invariant 1:** A new serialization format belongs in `crates/core` only if a non-CLI consumer (NAPI binding, a plugin, a future LSP response) could plausibly want to produce it directly from a `PipelineOptions`/`ExtractionOutput` value. If a format exists solely to match another CLI tool's file-format contract, it belongs in `crates/cli/src/commands/`, not `crates/core`.
+**Invariant 1:** A new serialization format belongs in `crates/core` only if a non-CLI consumer (NAPI binding, a plugin, a future query server) could plausibly want to produce it directly from a `PipelineOptions`/`ExtractionOutput` value. If a format exists solely to match another CLI tool's file-format contract, it belongs in `crates/cli/src/commands/`, not `crates/core`.
 
 ## RDT format (`pipeline::rdt`)
 

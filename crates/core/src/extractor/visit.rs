@@ -71,6 +71,24 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 is_type_only: node.export_kind.is_type() || spec.export_kind.is_type(),
                 declared_as: (local != exported).then(|| local.to_owned()),
             });
+            if let Some((base_name, props_name)) = self.cast_component_aliases.get(local).cloned() {
+                if let Some(index) =
+                    self.data.component_mappings.iter().position(|mapping| mapping.component_name == base_name)
+                {
+                    let mut public = self.data.component_mappings[index].clone();
+                    public.component_name = exported.to_owned();
+                    public.props_type_name = props_name;
+                    public.props_type_args.clear();
+                    public.wrapper_callee = None;
+                    public.rule = crate::types::DetectionRule::FcAnnotation;
+                    if base_name == exported {
+                        self.data.component_mappings[index] = public;
+                    } else {
+                        self.data.component_mappings.push(public);
+                    }
+                    self.record_exported_local(exported);
+                }
+            }
         }
 
         walk::walk_export_named_declaration(self, node);
@@ -172,6 +190,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         if let Some(type_parameters) = &node.type_parameters {
             let params: Vec<TypeName> = type_parameters.params.iter().map(|p| p.name.name.as_str().into()).collect();
             if !params.is_empty() {
+                self.record_type_param_defaults(&key, &type_parameters.params);
                 self.data.interface_type_params.insert(key, params);
             }
         }
@@ -194,6 +213,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         if let Some(type_parameters) = &node.type_parameters {
             let params: Vec<TypeName> = type_parameters.params.iter().map(|p| p.name.name.as_str().into()).collect();
             if !params.is_empty() {
+                self.record_type_param_defaults(&key, &type_parameters.params);
                 self.data.type_alias_params.insert(key, params);
             }
         }
@@ -204,6 +224,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     fn visit_ts_namespace_declaration(&mut self, node: &TSNamespaceDeclaration<'a>) {
         self.namespace_stack.push(node.id.name.as_str().into());
         walk::walk_ts_namespace_declaration(self, node);
+        self.qualify_namespace_references();
         self.namespace_stack.pop();
     }
 
@@ -244,13 +265,29 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         for declarator in &node.declarations {
             self.try_collect_const_enum(declarator);
             self.try_collect_const_array(declarator);
-            // Collect cva() / tv() variant definitions for all file types (.ts and .tsx)
+            // Collect variant bags (a call with a `variants` map of maps: cva, tv, recipes) for all file types
             if let BindingPattern::BindingIdentifier(id) = &declarator.id {
                 let name = id.name.as_str().to_owned();
-                self.try_collect_cva_call(declarator, &name);
+                self.try_collect_variant_bag(declarator, &name);
                 self.record_object_assign_declarator(&name, declarator.init.as_ref());
+                if self.function_depth == 0 {
+                    self.try_record_cast_component_alias(declarator, &name);
+                }
+                if self.function_depth == 0 && node.kind.is_const() {
+                    if let Some(Expression::Identifier(target)) =
+                        declarator.init.as_ref().map(super::component::peel_expr)
+                    {
+                        self.pending_function_aliases.push((name, target.name.as_str().to_owned()));
+                    }
+                }
             }
-            if self.is_tsx {
+            if self.is_tsx && self.function_depth > 0 {
+                if let Some(name) = self.extract_pascal_name(declarator) {
+                    if self.detect_component(&Binding::of(declarator), &name).is_some() {
+                        self.skip_local_component(&name, declarator.span);
+                    }
+                }
+            } else if self.is_tsx {
                 if let Some(name) = self.extract_pascal_name(declarator) {
                     self.decline_reason = None;
                     let binding = Binding::of(declarator);
@@ -269,6 +306,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     if declarator.init.is_some()
                         && !self.try_rename_identifier_wrapped_component(&binding, &name)
                         && !self.try_record_wrapper_call(&binding, &name)
+                        && !self.try_record_imported_member_alias(&binding, &name)
                     {
                         let message = self.decline_reason.take().unwrap_or_else(|| {
                             format!(
@@ -280,11 +318,28 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     }
                 }
             }
+            self.record_body_defaults(declarator);
             // Pattern 5: declare const Button: React.ForwardRefExoticComponent<ButtonProps & RefAttributes<E>>
             // Common in .d.ts files — no initializer, just a type annotation
             if declarator.init.is_none() {
-                if let Some(name) = self.extract_pascal_name(declarator) {
-                    if let Some(mapping) = self.try_forward_ref_exotic_decl(declarator, &name) {
+                if node.kind.is_const() {
+                    self.record_declared_value_type(declarator);
+                }
+                let name = self.extract_pascal_name(declarator).or_else(|| {
+                    let path = self.file_path.as_str();
+                    if ![".d.ts", ".d.mts", ".d.cts"].iter().any(|suffix| path.ends_with(suffix)) {
+                        return None;
+                    }
+                    match &declarator.id {
+                        BindingPattern::BindingIdentifier(id) => Some(id.name.as_str().to_owned()),
+                        _ => None,
+                    }
+                });
+                if let Some(name) = name {
+                    if let Some(mapping) = self
+                        .try_exotic_component_decl(declarator, &name)
+                        .or_else(|| self.try_declared_callable_component(declarator, &name))
+                    {
                         self.data.component_mappings.push(mapping);
                     } else if self.type_annotation_is_fc_family(declarator) {
                         // try_fc_annotation already ran unconditionally above and found
@@ -305,14 +360,30 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         walk::walk_variable_declaration(self, node);
     }
 
+    fn visit_arrow_function_expression(&mut self, arrow: &ArrowFunctionExpression<'a>) {
+        self.record_function_type_params(arrow.span, arrow.type_parameters.as_deref());
+        self.props_params.push((first_param_name(&arrow.params), arrow.span.start, arrow.span.end));
+        walk::walk_arrow_function_expression(self, arrow);
+        self.props_params.pop();
+    }
+
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
+        self.record_function_result(func);
+        self.record_function_type_params(func.span, func.type_parameters.as_deref());
+        self.props_params.push((first_param_name(&func.params), func.span.start, func.span.end));
         // Pattern 4: `function Button(props: ButtonProps) { ... }`
         if self.is_tsx {
             if let Some(id) = &func.id {
                 let name = id.name.as_str();
                 let declaration =
                     matches!(func.r#type, FunctionType::FunctionDeclaration | FunctionType::TSDeclareFunction);
-                if is_pascal_case(name) && declaration {
+                if is_pascal_case(name) && declaration && self.function_depth > 0 {
+                    let typed = func.params.items.first().is_some_and(|p| p.type_annotation.is_some());
+                    let shape = super::evidence::FunctionShape::of_function(func);
+                    if typed && super::evidence::renders(&shape, &|n| self.may_be_react(n)).is_ok() {
+                        self.skip_local_component(name, func.span);
+                    }
+                } else if is_pascal_case(name) && declaration {
                     if let Some(first_param) = func.params.items.first() {
                         if let Some(type_ann) = &first_param.type_annotation {
                             if let Err(reason) =
@@ -372,6 +443,13 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             }
         }
         walk::walk_function(self, func, flags);
+        self.props_params.pop();
+    }
+
+    fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
+        self.function_depth += 1;
+        walk::walk_function_body(self, body);
+        self.function_depth -= 1;
     }
 
     fn visit_class(&mut self, class: &Class<'a>) {
@@ -380,7 +458,22 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         // an anonymous ClassExpression (no `class.id`) is instead picked up by
         // `try_class_expression_wrapped` in `visit_variable_declaration`'s
         // detector chain, from the outer binding's name.
-        if self.is_tsx {
+        if let Some(id) = &class.id {
+            let params = class
+                .type_parameters
+                .as_ref()
+                .map(|declaration| declaration.params.iter().map(|p| p.name.name.as_str().into()).collect())
+                .unwrap_or_default();
+            self.pending_classes.push((self.scoped_key(id.name.as_str()), id.name.as_str().into(), params));
+        }
+        if self.is_tsx && self.function_depth > 0 {
+            if let Some(id) = &class.id {
+                let name = id.name.as_str();
+                if is_pascal_case(name) && self.super_class_is_component_family(class).is_some() {
+                    self.skip_local_component(name, class.span);
+                }
+            }
+        } else if self.is_tsx {
             if let Some(id) = &class.id {
                 let name = id.name.as_str();
                 if is_pascal_case(name) {
@@ -435,7 +528,17 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             },
         };
         match local {
-            Some(name) => self.record_exported_local(name),
+            Some(name) => {
+                self.record_exported_local(name);
+                // `export default Tooltip`: the module's default is `Tooltip`, which `finish` turns into a re-export
+                // when it is an import, as `export { Tooltip as default }` is.
+                self.pending_local_exports.push((self.data.exports.len(), name.to_owned()));
+                self.data.exports.push(LexedExport::LocalDeclaration {
+                    name: "default".to_owned(),
+                    is_type_only: false,
+                    declared_as: Some(name.to_owned()),
+                });
+            }
             None => {
                 if let Some(name) = super::component::pascal_case_from_file_stem(&self.file_path) {
                     self.record_exported_local(&name);
@@ -484,5 +587,13 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             self.try_scan_object_assign_sub_components(node);
         }
         walk::walk_expression_statement(self, node);
+    }
+}
+
+/// The name of a function's first parameter, when it is a plain identifier (`props`).
+fn first_param_name(params: &FormalParameters<'_>) -> Option<compact_str::CompactString> {
+    match &params.items.first()?.pattern {
+        BindingPattern::BindingIdentifier(id) => Some(id.name.as_str().into()),
+        _ => None,
     }
 }

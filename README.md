@@ -106,7 +106,9 @@ caliper-docgen check --src src
 
 Settings can also live in a `docgen.config.ts` (`srcDirs`, `htmlAttributes`, `cacheDir`, and more). `caliper-docgen --help` lists the rest, including `schema` for the JSON Schema of the output.
 
-Types your props import from installed packages stay named references by default. `--load-dependencies` (config, NAPI and Vite option `loadDependencies`) loads the declarations those names point to. A package source contributing more than 30 props is then listed as one inherited layer with its notable props, as Storybook does; `--collapse-inherited-props all` does the same for the project's own sources and `none` lists every prop.
+Parsed declarations and the dependency index are cached under `node_modules/.cache/caliper-docgen`. `--no-cache` (config, NAPI, Vite and Storybook option `cache: false`) reads and writes nothing there; the output is the same.
+
+Types your props import from installed packages are resolved by default: the declarations those names point to are loaded (ADR 0019). `--no-load-dependencies` (config, NAPI and Vite option `loadDependencies: false`) leaves them as named references with an `UNRESOLVABLE_IMPORT` warning, and a project with no packages installed loads nothing either way. A package source contributing more than 30 props is then listed as one inherited layer with its notable props, as Storybook does; `--collapse-inherited-props all` does the same for the project's own sources and `none` lists every prop.
 
 ## Vite plugin
 

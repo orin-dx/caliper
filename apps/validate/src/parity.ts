@@ -2,9 +2,9 @@ import { readFileSync, existsSync } from 'node:fs'
 import chalk from 'chalk'
 import type { ToolResult } from './types.ts'
 
-// Parity check: does run-semantic.ts's tsc-api algorithm reproduce real RDT's output?
-// See docs/type-checker-integration.md, "Evidence". Not a quality comparison — that's
-// compare.ts/analyze.ts, which weigh caliper-docgen against RDT.
+// Parity check: does a baseline reproduce real RDT's output? By default run-semantic.ts's tsc-api algorithm (see
+// docs/type-checker-integration.md, "Evidence"); `parity.ts <baseline>` checks another, such as `caliper-docgen`.
+// Not a quality comparison — that's compare.ts/analyze.ts, which weigh caliper-docgen against RDT.
 
 function loadBaseline(name: string): Map<string, ToolResult> {
   const p = `./baselines/${name}.json`
@@ -34,7 +34,8 @@ function typesMatch(oursRawType: string, rdtType: string): boolean {
 }
 
 const rdt = loadBaseline('react-docgen-typescript')
-const semantic = loadBaseline('semantic')
+const candidateName = process.argv[2] ?? 'semantic'
+const candidate = loadBaseline(candidateName)
 
 let componentsCompared = 0
 let propsUnion = 0
@@ -49,42 +50,42 @@ let descriptionTotal = 0
 const mismatches: string[] = []
 
 for (const [key, rdtResult] of rdt) {
-  const semanticResult = semantic.get(key)
-  if (!semanticResult || rdtResult.error || semanticResult.error) continue
+  const candidateResult = candidate.get(key)
+  if (!candidateResult || rdtResult.error || candidateResult.error) continue
 
   const [rdtComp] = Object.values(rdtResult.output)
-  const [semanticComp] = Object.values(semanticResult.output)
-  if (!rdtComp || !semanticComp) continue
+  const [candidateComp] = Object.values(candidateResult.output)
+  if (!rdtComp || !candidateComp) continue
 
   componentsCompared++
   descriptionTotal++
-  if (rdtComp.description.trim() === semanticComp.description.trim()) descriptionMatched++
+  if (rdtComp.description.trim() === candidateComp.description.trim()) descriptionMatched++
   else mismatches.push(`${key}: description differs`)
 
-  const allPropNames = new Set([...Object.keys(rdtComp.props), ...Object.keys(semanticComp.props)])
+  const allPropNames = new Set([...Object.keys(rdtComp.props), ...Object.keys(candidateComp.props)])
   for (const propName of allPropNames) {
     const rp = rdtComp.props[propName]
-    const sp = semanticComp.props[propName]
+    const sp = candidateComp.props[propName]
     propsUnion++
 
     if (!sp) {
       missing++
-      mismatches.push(`${key}.${propName}: missing (rdt has it, semantic doesn't)`)
+      mismatches.push(`${key}.${propName}: missing (rdt has it, ${candidateName} doesn't)`)
       continue
     }
     if (!rp) {
       extra++
-      mismatches.push(`${key}.${propName}: extra (semantic has it, rdt doesn't)`)
+      mismatches.push(`${key}.${propName}: extra (${candidateName} has it, rdt doesn't)`)
       continue
     }
 
     requiredTotal++
     if (rp.required === sp.required) requiredMatched++
-    else mismatches.push(`${key}.${propName}: required rdt=${rp.required} semantic=${sp.required}`)
+    else mismatches.push(`${key}.${propName}: required rdt=${rp.required} ${candidateName}=${sp.required}`)
 
     typeTotal++
     if (typesMatch(sp.type, rp.type)) typeMatched++
-    else mismatches.push(`${key}.${propName}: type rdt="${rp.type}" semantic="${sp.type}"`)
+    else mismatches.push(`${key}.${propName}: type rdt="${rp.type}" ${candidateName}="${sp.type}"`)
   }
 }
 
@@ -99,7 +100,7 @@ function ratio(label: string, ok: number, total: number): string {
   return colorForRatio(pct, `  ${label}: ${ok}/${total} (${pct.toFixed(1)}%)`)
 }
 
-console.log(chalk.bold('Semantic vs RDT parity'))
+console.log(chalk.bold(`${candidateName} vs RDT parity`))
 console.log(`  components compared: ${componentsCompared}`)
 console.log(`  props in union: ${propsUnion}`)
 console.log(missing === 0 ? chalk.green(`  missing: ${missing}`) : chalk.red(`  missing: ${missing}`))
@@ -109,7 +110,9 @@ console.log(ratio('type strings', typeMatched, typeTotal))
 console.log(ratio('descriptions', descriptionMatched, descriptionTotal))
 
 if (mismatches.length > 0) {
-  console.log(chalk.dim(`\n${mismatches.length} mismatches (first 50):`))
-  for (const m of mismatches.slice(0, 50)) console.log(chalk.dim(`  ${m}`))
-  if (mismatches.length > 50) console.log(chalk.dim(`  ... and ${mismatches.length - 50} more`))
+  // PARITY_SHOW=all lists every mismatch.
+  const shown = process.env.PARITY_SHOW === 'all' ? mismatches.length : 50
+  console.log(chalk.dim(`\n${mismatches.length} mismatches (first ${Math.min(shown, mismatches.length)}):`))
+  for (const m of mismatches.slice(0, shown)) console.log(chalk.dim(`  ${m}`))
+  if (mismatches.length > shown) console.log(chalk.dim(`  ... and ${mismatches.length - shown} more`))
 }

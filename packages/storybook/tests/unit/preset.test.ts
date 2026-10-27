@@ -14,6 +14,13 @@ describe('preset', () => {
       exclude: undefined,
       tsconfigPath: undefined,
       skipHtmlProps: undefined,
+      htmlAttributes: undefined,
+      cache: undefined,
+      loadDependencies: undefined,
+      collapseInheritedProps: undefined,
+      lazy: undefined,
+      warmUp: undefined,
+      fillAfter: undefined,
       fallback: 'never',
     })
     expect(ours?.moduleSpecifier).toMatch(/provider\.(js|ts)$/)

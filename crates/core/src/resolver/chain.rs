@@ -14,7 +14,101 @@ use super::alias::resolve_type_alias_chain;
 use super::collected::resolve_collected_type;
 use super::extends::resolve_extends_ref;
 use super::react::resolve_react_types_file;
-use super::{ResolutionContext, ResolvedChain, MAX_DEPTH};
+use super::{ResolutionContext, ResolvedChain};
+
+/// A declaration's props chain, unless it evaluated to nothing (no props, no inherited layer, and something left
+/// unevaluated: cva's `VariantProps` is `Omit<OmitUndefined<Parameters<…>[0]>, …>`) and a known shortcut covers the
+/// name, which then stands in (ADR 0014). An `attempt` that is kept is merged into `state`; a replaced one is dropped
+/// with its diagnostics.
+#[allow(clippy::too_many_arguments)]
+fn known_fallback(
+    chain: ResolvedChain,
+    attempt: ResolveState,
+    type_name: &str,
+    resolved_args: &[PropType],
+    consuming_file: &Utf8Path,
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> ResolvedChain {
+    if evaluated_to_nothing(&chain, &attempt) {
+        let bare = type_name.strip_prefix("React.").unwrap_or(type_name);
+        let enum_key = |name: &str| ctx.enum_key_for(name, consuming_file);
+        if let Some(result) = crate::known::resolve_known(bare, resolved_args, &ctx.global, &enum_key) {
+            return known_chain(result, type_name, consuming_file, mapping, ctx, state, depth);
+        }
+    }
+    state.absorb(attempt);
+    chain
+}
+
+fn evaluated_to_nothing(chain: &ResolvedChain, attempt: &ResolveState) -> bool {
+    chain.props.is_empty()
+        && chain.inheritance.is_empty()
+        && (!chain.composes.is_empty() || !attempt.diagnostics.is_empty() || !attempt.shared_diagnostics.is_empty())
+}
+
+/// [`known_fallback`] for a generic alias expanded where it is written (`VariantProps<typeof buttonVariants>` inside
+/// an intersection), whose arguments are resolved only when the expansion came to nothing.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn known_fallback_for_alias(
+    chain: ResolvedChain,
+    attempt: ResolveState,
+    type_name: &str,
+    type_args: &[CollectedType],
+    consuming_file: &Utf8Path,
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> ResolvedChain {
+    if !evaluated_to_nothing(&chain, &attempt) {
+        state.absorb(attempt);
+        return chain;
+    }
+    let resolved_args: Vec<PropType> =
+        type_args.iter().map(|a| resolve_collected_type(a, consuming_file, ctx, state, depth + 1)).collect();
+    known_fallback(chain, attempt, type_name, &resolved_args, consuming_file, mapping, ctx, state, depth)
+}
+
+/// The props chain a known shortcut gives `type_name`.
+#[allow(clippy::too_many_arguments)]
+fn known_chain(
+    result: KnownPatternResult,
+    type_name: &str,
+    consuming_file: &Utf8Path,
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> ResolvedChain {
+    match result {
+        KnownPatternResult::Props(props) => {
+            ResolvedChain { props: props.into_iter().map(Arc::new).collect(), ..ResolvedChain::empty() }
+        }
+        KnownPatternResult::Type(PropType::HtmlAttributes { element, omitted }) => {
+            let layer = InheritedLayer {
+                type_name: type_name.to_owned(),
+                file_name: resolve_react_types_file(consuming_file, ctx),
+                omitted,
+                html_element: Some(element),
+                total_props: 0,
+            };
+            ResolvedChain { inheritance: vec![layer], ..ResolvedChain::empty() }
+        }
+        KnownPatternResult::Type(pt) => {
+            if let PropType::Opaque(detail) = &pt {
+                let bare = type_name.strip_prefix("React.").unwrap_or(type_name);
+                push_known_opaque_diagnostic(&mut state.diagnostics, detail.reason(), bare, consuming_file);
+            }
+            ResolvedChain::empty_with_compose(pt.raw_string())
+        }
+        KnownPatternResult::Alias { name } => {
+            resolve_props_chain(&name, &[], consuming_file, mapping, ctx, state, depth + 1)
+        }
+    }
+}
 
 /// Resolve a named type to a chain of props.
 /// This is the recursive core — handles interfaces, aliases, known patterns, etc.
@@ -28,9 +122,13 @@ pub(super) fn resolve_props_chain(
     state: &mut ResolveState,
     depth: u8,
 ) -> ResolvedChain {
-    if depth > MAX_DEPTH {
+    if super::past_max_depth(state, depth) {
         let diag = super::max_depth_diagnostic(&format!("type '{}'", type_name), consuming_file);
         return ResolvedChain::give_up(type_name.to_owned(), Some(diag), state);
+    }
+
+    if state.in_scope_type_params.iter().any(|param| param == type_name) && type_args.is_empty() {
+        return ResolvedChain::empty_with_compose(type_name.to_owned());
     }
 
     // Cycle detection — scoped by file so same type name in different files is OK.
@@ -61,6 +159,11 @@ pub(super) fn resolve_props_chain(
 
     // Strip "React." namespace prefix before all builtin/utility checks.
     let type_name_bare = type_name.strip_prefix("React.").unwrap_or(type_name);
+    if type_name_bare == "PropsWithoutRef" && super::may_be_react_builtin(type_name, consuming_file, ctx) {
+        if let Some(alias) = super::alias::react_props_without_ref_alias(type_args, consuming_file) {
+            return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
+        }
+    }
 
     // ── Step 0.5: Inline utility type in extends position ─────────────────────
     // `extends Pick<T, K>` (and Omit, Partial, Required, Readonly) resolves through the same alias logic as
@@ -68,6 +171,36 @@ pub(super) fn resolve_props_chain(
     // A project's own `Partial` or `Required`, or one imported from a package, is that declaration (step 2), not
     // TypeScript's global.
     let ts_lib = super::may_be_ts_lib_type(type_name, consuming_file, ctx);
+    if ts_lib && type_name_bare == "Extract" && type_args.len() == 2 {
+        if let Some(selected) =
+            super::evaluate::extracted_object_members(&type_args[0], &type_args[1], consuming_file, ctx)
+        {
+            let members = selected
+                .into_iter()
+                .map(|(inner, file)| CollectedType::AtFile { file, inner: Box::new(inner) })
+                .collect();
+            return resolve_type_alias_chain(
+                &CollectedTypeAlias::Union { members, file_path: consuming_file.to_owned() },
+                consuming_file,
+                mapping,
+                ctx,
+                state,
+                depth,
+            );
+        }
+        if matches!(&type_args[1], CollectedType::Object(_)) {
+            state.diagnostics.push(Diagnostic {
+                severity: DiagnosticSeverity::Info,
+                message: format!("Cannot determine the object members selected by '{type_name}' in '{consuming_file}'"),
+                file: Some(consuming_file.to_string()),
+                line: None,
+                column: None,
+                help: None,
+                code: DiagnosticCode::OpaqueType,
+                affects: Vec::new(),
+            });
+        }
+    }
     if super::may_be_utility(type_name, consuming_file, ctx) {
         if let Some(alias) = super::substitute::synthesize_utility_alias(type_name_bare, type_args, consuming_file) {
             return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
@@ -135,41 +268,37 @@ pub(super) fn resolve_props_chain(
                     );
                 }
             }
-            return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
+            let mut attempt = state.branch();
+            let chain = resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, &mut attempt, depth);
+            return known_fallback(
+                chain,
+                attempt,
+                type_name,
+                &resolved_args,
+                consuming_file,
+                mapping,
+                ctx,
+                state,
+                depth,
+            );
         }
         Some(super::precedence::SourceOrKnownMatch::Interface(iface)) => {
-            return resolve_interface_chain(iface, type_args, consuming_file, mapping, ctx, state, depth);
+            let mut attempt = state.branch();
+            let chain = resolve_interface_chain(iface, type_args, consuming_file, mapping, ctx, &mut attempt, depth);
+            return known_fallback(
+                chain,
+                attempt,
+                type_name,
+                &resolved_args,
+                consuming_file,
+                mapping,
+                ctx,
+                state,
+                depth,
+            );
         }
         Some(super::precedence::SourceOrKnownMatch::Known(result)) => {
-            return match result {
-                KnownPatternResult::Props(props) => {
-                    ResolvedChain { props: props.into_iter().map(Arc::new).collect(), ..ResolvedChain::empty() }
-                }
-                KnownPatternResult::Type(PropType::HtmlAttributes { element, omitted }) => {
-                    let layer = InheritedLayer {
-                        type_name: type_name.to_owned(),
-                        file_name: resolve_react_types_file(consuming_file, ctx),
-                        omitted,
-                        html_element: Some(element),
-                        total_props: 0,
-                    };
-                    ResolvedChain { inheritance: vec![layer], ..ResolvedChain::empty() }
-                }
-                KnownPatternResult::Type(pt) => {
-                    if let PropType::Opaque(detail) = &pt {
-                        push_known_opaque_diagnostic(
-                            &mut state.diagnostics,
-                            detail.reason(),
-                            type_name_bare,
-                            consuming_file,
-                        );
-                    }
-                    ResolvedChain::empty_with_compose(pt.raw_string())
-                }
-                KnownPatternResult::Alias { name } => {
-                    resolve_props_chain(&name, &[], consuming_file, mapping, ctx, state, depth + 1)
-                }
-            };
+            return known_chain(result, type_name, consuming_file, mapping, ctx, state, depth);
         }
         None => {}
     }
@@ -189,7 +318,9 @@ pub(super) fn resolve_props_chain(
 
     // HTML attribute interfaces (`InputHTMLAttributes`, ...) are terminal in curated mode, like the builtins above: the
     // element's notable attributes come from the inheritance layer, not from expanding the interface.
-    if react_types::html_element_for(type_name_bare).is_some() {
+    if react_types::html_element_for(type_name_bare).is_some()
+        || super::declared_by_react(type_name, &canonical_name, consuming_file, ctx)
+    {
         return ResolvedChain::empty_with_compose(type_name.to_owned());
     }
 
@@ -240,7 +371,7 @@ fn collapsed_source(
             let prop_type = resolve_collected_type(&ty, file, ctx, state, depth);
             let (parents, parent) = (vec![parent.clone()], Some(parent.clone()));
             let tags = Default::default();
-            Arc::new(ParsedProp::new(
+            ctx.share(ParsedProp::new(
                 name.to_owned(),
                 prop_type,
                 required,
@@ -283,7 +414,7 @@ pub(super) fn resolve_interface_chain(
     if generic {
         return resolve_interface_chain_uncached(iface, type_args, consuming_file, mapping, ctx, state, depth);
     }
-    ctx.interface_chains.get_or_resolve(&iface.scoped_key, depth, state, mapping, |state| {
+    ctx.interface_chains.get_or_resolve(&iface.scoped_key, depth, state, Some(mapping), |state| {
         resolve_interface_chain_uncached(iface, type_args, consuming_file, mapping, ctx, state, depth)
     })
 }
@@ -307,10 +438,19 @@ fn resolve_interface_chain_uncached(
     if let Some(params) = declared_params {
         state.add_type_params(params.iter());
     }
-    // Supplied arguments replace the parameters; with none supplied the parameters stay placeholders.
+    // Supplied arguments replace the parameters, and an omitted one takes its default; a parameter with neither stays
+    // a placeholder.
+    let defaults = ctx.named_types.lookup_interface_param_defaults_for(iface);
     let substitution = match declared_params {
-        Some(params) if !params.is_empty() && !type_args.is_empty() => {
-            Some(super::substitute::build_substitution(params, type_args, consuming_file, &mut state.diagnostics))
+        Some(params) if !params.is_empty() && (!type_args.is_empty() || defaults.is_some()) => {
+            Some(super::substitute::bind_args(
+                params,
+                defaults,
+                type_args,
+                consuming_file,
+                &iface.file_path,
+                &mut state.diagnostics,
+            ))
         }
         _ => None,
     };
@@ -374,6 +514,22 @@ fn resolve_interface_chain_uncached(
     let parent = PropParent { name: iface.name.to_string(), file_name: iface.file_path.to_string() };
 
     for raw_prop in &iface.props {
+        // A `keyof` operand needs only the names; resolving each member's type cost Chakra's 705 style props per walk.
+        if state.keys_only {
+            let tags = Default::default();
+            let prop = ParsedProp::new(
+                raw_prop.name.clone(),
+                PropType::Unknown,
+                false,
+                None,
+                String::new(),
+                tags,
+                None,
+                vec![],
+            );
+            chain.props.push(ctx.share(prop));
+            continue;
+        }
         let prop_type = match &substitution {
             Some(subst) => {
                 let collected = super::substitute::substitute_type(&raw_prop.collected_type, subst);
@@ -416,7 +572,7 @@ fn resolve_interface_chain_uncached(
             Some(_) | None => raw_prop.description.clone(),
         };
 
-        chain.props.push(Arc::new(ParsedProp::new(
+        chain.props.push(ctx.share(ParsedProp::new(
             raw_prop.name.clone(),
             prop_type,
             raw_prop.required,

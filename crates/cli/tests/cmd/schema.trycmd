@@ -6,8 +6,11 @@ $ caliper-docgen schema
   "description": "Output schema for caliper-docgen component prop extraction",
   "type": "object",
   "required": [
+    "schemaVersion",
     "components",
     "props",
+    "propSets",
+    "nameLists",
     "enums",
     "diagnostics",
     "stats"
@@ -15,6 +18,16 @@ $ caliper-docgen schema
   "definitions": {
     "propId": {
       "description": "A prop's key in the top-level `props` table: the FNV-1a 64 hash of its compact JSON (ADR 0009)",
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "propSetId": {
+      "description": "A prop set's key in the top-level `propSets` table: the hash of its (name, prop id) entries (ADR 0018)",
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "nameListId": {
+      "description": "A list's key in the top-level `nameLists` table: the hash of its names, in order (ADR 0018)",
       "type": "string",
       "pattern": "^[0-9a-f]{16}$"
     },
@@ -63,6 +76,11 @@ $ caliper-docgen schema
     }
   },
   "properties": {
+    "schemaVersion": {
+      "description": "The shape of this JSON (ADR 0017). A reader checks it equals the version it was written for",
+      "type": "integer",
+      "const": 2
+    },
     "components": {
       "type": "object",
       "additionalProperties": {
@@ -86,10 +104,10 @@ $ caliper-docgen schema
             ]
           },
           "props": {
-            "description": "Prop name to prop id",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/definitions/propId"
+            "description": "The prop sets that together hold the component's props; a prop name is in one",
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/propSetId"
             }
           },
           "inheritance": {
@@ -104,10 +122,7 @@ $ caliper-docgen schema
                   "type": "string"
                 },
                 "omitted": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
+                  "$ref": "#/definitions/nameListId"
                 },
                 "htmlElement": {
                   "type": [
@@ -175,6 +190,26 @@ $ caliper-docgen schema
         "$ref": "#/definitions/prop"
       }
     },
+    "propSets": {
+      "description": "Every prop set the components refer to, by id: prop name to prop id",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/definitions/propId"
+        }
+      }
+    },
+    "nameLists": {
+      "description": "Every list of names the components and diagnostics refer to, by id",
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
     "enums": {
       "type": "object"
     },
@@ -227,10 +262,8 @@ $ caliper-docgen schema
             "type": "string"
           },
           "affects": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
+            "description": "The components whose resolution reported this diagnostic: a list id in `nameLists`",
+            "$ref": "#/definitions/nameListId"
           }
         }
       }

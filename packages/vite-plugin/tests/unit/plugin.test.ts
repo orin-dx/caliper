@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const SNAPSHOT = JSON.stringify({
+  schemaVersion: 2,
   components: { Button: { displayName: 'Button', filePath: '/project/src/Button.tsx' } },
   enums: {},
   diagnostics: [],
@@ -22,9 +23,12 @@ const component = (displayName: string, description = '') => ({
 
 const update = (revision: number, updated: string[], removed: string[] = [], description = '') =>
   JSON.stringify({
+    schemaVersion: 2,
     revision,
     updatedComponents: updated.map((name) => component(name, description)),
     props: {},
+    propSets: {},
+    nameLists: {},
     updatedKeys: updated,
     removedKeys: removed,
     affectedFiles: [],
@@ -220,6 +224,8 @@ describe('caliperDocgen', () => {
           updatedKeys: ['Panel'],
           updatedComponents: [component('Panel')],
           props: {},
+          propSets: {},
+          nameLists: {},
           removedKeys: ['Card'],
           diagnostics: [],
           removedDiagnostics: [],
@@ -600,6 +606,117 @@ describe('caliperDocgen', () => {
       const p = caliperDocgen({ srcDirs: ['src'] })
       ;(p.configResolved as Function)({ root: '/project' })
       expect(napi.createSession).toHaveBeenCalledWith(expect.objectContaining({ exclude: undefined }))
+    })
+  })
+
+  // ── Windows paths ──────────────────────────────────────────────────────────
+
+  describe('Windows paths', () => {
+    it('resolves a drive-letter srcDir and tracks backslash file paths under it', async () => {
+      const p = caliperDocgen({ srcDirs: ['C:\\project\\src', 'lib'] })
+      ;(p.configResolved as Function)({ root: 'C:\\project' })
+      expect(napi.createSession).toHaveBeenLastCalledWith(
+        expect.objectContaining({ srcDirs: ['C:/project/src', 'C:/project/lib'] }),
+      )
+      const ctx = { environment: { name: 'client', hot: { send: vi.fn() } } }
+      const opts = (file: string) => ({
+        file,
+        modules: [],
+        type: 'update' as const,
+        timestamp: 1,
+        read: vi.fn(),
+        server: {} as any,
+      })
+      await (p.hotUpdate as Function).call(ctx, opts('C:\\project\\src\\Button.tsx'))
+      expect(napi.extractFileIncremental).toHaveBeenCalledTimes(1)
+      await (p.hotUpdate as Function).call(ctx, opts('C:\\project\\other\\Card.tsx'))
+      expect(napi.extractFileIncremental).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  // ── htmlAttributes ─────────────────────────────────────────────────────────
+
+  describe('htmlAttributes', () => {
+    it('forwards htmlAttributes, ahead of skipHtmlProps', () => {
+      const p = caliperDocgen({ srcDirs: ['src'], htmlAttributes: 'full', skipHtmlProps: true })
+      ;(p.configResolved as Function)({ root: '/project' })
+      expect(napi.createSession).toHaveBeenLastCalledWith(expect.objectContaining({ htmlAttributes: 'full' }))
+      const q = caliperDocgen({ srcDirs: ['src'], skipHtmlProps: true })
+      ;(q.configResolved as Function)({ root: '/project' })
+      expect(napi.createSession).toHaveBeenLastCalledWith(expect.objectContaining({ htmlAttributes: 'none' }))
+    })
+  })
+
+  // ── diagnostics ────────────────────────────────────────────────────────────
+
+  describe('diagnostics', () => {
+    const diagnostic = (severity: 'error' | 'warning' | 'info', message: string) => ({
+      severity,
+      message,
+      file: '/project/src/Button.tsx',
+      line: 3,
+      column: 5,
+      help: null,
+      code: 'x',
+    })
+    const output = JSON.stringify({
+      schemaVersion: 2,
+      components: {},
+      enums: {},
+      stats: {},
+      diagnostics: [diagnostic('error', 'bad'), diagnostic('warning', 'iffy'), diagnostic('info', 'fyi')],
+    })
+    const logger = () => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn() })
+
+    async function build(options: Partial<Parameters<typeof caliperDocgen>[0]>, log = logger()) {
+      ;(napi.initializeSession as any).mockResolvedValue(output)
+      const p = caliperDocgen({ srcDirs: ['src'], ...options })
+      ;(p.configResolved as Function)({ root: '/project', command: 'build', logger: log })
+      await (p.buildStart as Function).call(pluginContext())
+      return log
+    }
+
+    it('logs errors and warnings once, with their location, and not info, by default', async () => {
+      const log = await build({})
+      expect(log.error).toHaveBeenCalledExactlyOnceWith('[caliper-docgen] /project/src/Button.tsx:3:5 bad')
+      expect(log.warn).toHaveBeenCalledExactlyOnceWith('[caliper-docgen] /project/src/Button.tsx:3:5 iffy')
+      expect(log.info).not.toHaveBeenCalled()
+    })
+
+    it('honors logLevel and calls onDiagnostic for every diagnostic', async () => {
+      const seen: string[] = []
+      const log = await build({ logLevel: 'error', onDiagnostic: (d) => seen.push(d.message) })
+      expect(log.error).toHaveBeenCalledTimes(1)
+      expect(log.warn).not.toHaveBeenCalled()
+      expect(seen).toEqual(['bad', 'iffy', 'fyi'])
+      const silent = await build({ logLevel: 'silent' })
+      expect(silent.error).not.toHaveBeenCalled()
+    })
+
+    it('reports a diagnostic an update adds once, and again after an update removes it', async () => {
+      const log = await build({})
+      const added = diagnostic('warning', 'new')
+      const change = (revision: number, diagnostics: unknown[], removedDiagnostics: unknown[] = []) =>
+        JSON.stringify({ ...JSON.parse(update(revision, [])), diagnostics, removedDiagnostics })
+      const p = caliperDocgen({ srcDirs: ['src'] })
+      ;(p.configResolved as Function)({ root: '/project', command: 'serve', logger: log })
+      const ctx = { environment: { name: 'client', hot: { send: vi.fn() } } }
+      const opts = {
+        file: '/project/src/Button.tsx',
+        modules: [],
+        type: 'update' as const,
+        timestamp: 1,
+        read: vi.fn(),
+        server: {} as any,
+      }
+      const warnsBefore = log.warn.mock.calls.length
+      ;(napi.extractFileIncremental as any)
+        .mockResolvedValueOnce(change(2, [added]))
+        .mockResolvedValueOnce(change(3, [added]))
+        .mockResolvedValueOnce(change(4, [], [added]))
+        .mockResolvedValueOnce(change(5, [added]))
+      for (let i = 0; i < 4; i++) await (p.hotUpdate as Function).call(ctx, opts)
+      expect(log.warn.mock.calls.length - warnsBefore).toBe(2)
     })
   })
 })

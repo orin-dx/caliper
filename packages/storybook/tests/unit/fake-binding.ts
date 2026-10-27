@@ -4,7 +4,9 @@ import type {
   ExtractionOutput,
   IncrementalUpdate,
   RdtComponentDoc,
+  WireDiagnostic,
 } from 'caliper-docgen-napi'
+import { SUPPORTED_SCHEMA_VERSION } from '../../src/schema.js'
 import type { SessionBinding } from '../../src/session.js'
 
 export function entry(displayName: string, filePath: string): ComponentEntry {
@@ -52,49 +54,106 @@ export function warning(affects: string[], severity: Diagnostic['severity'] = 'w
   }
 }
 
-/** A stand-in for the native binding: a fixed cold output, then one queued update per changed file. */
+type WithDiagnostics<T> = Omit<T, 'diagnostics' | 'removedDiagnostics'> & {
+  diagnostics?: Diagnostic[]
+  removedDiagnostics?: Diagnostic[]
+}
+
+/** Writes `diagnostics` as the binding does: each `affects` list is an entry of `lists`, under an id. */
+function wire(diagnostics: Diagnostic[] = [], lists: Record<string, string[]>): WireDiagnostic[] {
+  return diagnostics.map(({ affects, ...rest }) => {
+    if (!affects?.length) return rest
+    const id = affects.join('|')
+    lists[id] = affects
+    return { ...rest, affects: id }
+  })
+}
+
+/** A stand-in for the native binding: a fixed cold index, then one queued update per look at the files. */
 export class FakeBinding implements SessionBinding {
-  readonly changed: string[] = []
-  readonly updates = new Map<string, Partial<IncrementalUpdate>>()
+  /** How many times the files were looked at. */
+  looks = 0
+  /** The updates the next looks return, in order; a look with none queued finds nothing changed. */
+  readonly updates: Partial<WithDiagnostics<IncrementalUpdate>>[] = []
   docs: Record<string, RdtComponentDoc> = {}
-  /** Runs while a change is being extracted, before its update is returned. */
-  duringExtraction: (() => void) | undefined
+  /** Runs while a look is under way, before its update is returned. */
+  duringLook: (() => void) | undefined
   initializations = 0
   closed = false
   private revision = 1
 
-  constructor(public output: Partial<ExtractionOutput>) {}
+  constructor(public output: Partial<WithDiagnostics<ExtractionOutput>>) {}
 
   createSession = (): number => 7
 
-  initializeSession = async (): Promise<string> => {
+  initializeSessionIndex = async (): Promise<string> => {
     this.initializations++
-    return JSON.stringify({ components: {}, props: {}, enums: {}, diagnostics: [], ...this.output })
+    const nameLists: Record<string, string[]> = {}
+    const { diagnostics, ...rest } = this.output
+    return JSON.stringify({
+      schemaVersion: SUPPORTED_SCHEMA_VERSION,
+      components: {},
+      nameLists,
+      diagnostics: wire(diagnostics, nameLists),
+      ...rest,
+    })
   }
 
-  extractFileIncremental = async (filePath: string): Promise<string> => {
-    this.changed.push(filePath)
-    const during = this.duringExtraction
-    this.duringExtraction = undefined
+  ensureFresh = async (): Promise<string> => {
+    this.looks++
+    const during = this.duringLook
+    this.duringLook = undefined
     during?.()
     await Promise.resolve()
+    const next = this.updates.shift()
+    const nameLists: Record<string, string[]> = {}
+    const { diagnostics, removedDiagnostics, ...rest } = next ?? {}
     const update: IncrementalUpdate = {
-      revision: ++this.revision,
+      schemaVersion: SUPPORTED_SCHEMA_VERSION,
+      revision: next ? ++this.revision : this.revision,
       updatedComponents: [],
       props: {},
+      propSets: {},
       updatedKeys: [],
       removedKeys: [],
-      removedDiagnostics: [],
-      affectedFiles: [filePath],
-      diagnostics: [],
+      affectedFiles: [],
       durationMs: 0,
-      ...this.updates.get(filePath),
+      ...rest,
+      removedDiagnostics: wire(removedDiagnostics, nameLists),
+      diagnostics: wire(diagnostics, nameLists),
+      nameLists,
     }
     return JSON.stringify(update)
   }
 
   sessionDocgenInfo = (_sessionId: number, keys: string[]): string =>
     JSON.stringify(Object.fromEntries(keys.filter((key) => key in this.docs).map((key) => [key, this.docs[key]])))
+
+  /** Counts the components a lazy session was asked to resolve. */
+  resolved: string[] = []
+
+  sessionComponentAnswers = (_sessionId: number, keys: string[]): string => {
+    this.resolved.push(...keys)
+    const diagnostics = this.output.diagnostics ?? []
+    return JSON.stringify(
+      Object.fromEntries(
+        keys
+          .filter((key) => key in this.docs)
+          .map((key) => [
+            key,
+            { docgenInfo: this.docs[key], diagnostics: diagnostics.filter((each) => each.affects?.includes(key)) },
+          ]),
+      ),
+    )
+  }
+
+  /** The sessions asked to warm up, with how many components. */
+  warmUps: number[] = []
+
+  sessionWarmUp = async (_sessionId: number, count: number): Promise<number> => {
+    this.warmUps.push(count)
+    return count
+  }
 
   closeSession = (): void => {
     this.closed = true

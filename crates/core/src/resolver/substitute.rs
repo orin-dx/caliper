@@ -43,8 +43,47 @@ pub(super) fn build_substitution<'a>(
     origin_file: &Utf8Path,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Substitution<'a> {
-    if params.len() > args.len() {
-        let unfilled: Vec<&str> = params[args.len()..].iter().map(|p| p.as_str()).collect();
+    bind_args(params, None, args, origin_file, origin_file, diagnostics)
+}
+
+/// `ty` pinned to the `file` it was written in. A type that is already pinned names its own file, and wrapping it
+/// again would make a recursive alias's arguments (`CssVars<V> = ... | CssVars<V>[]`) a new type at every level, so
+/// the cycle through it would never be found.
+fn pinned_to(file: &Utf8Path, ty: CollectedType) -> CollectedType {
+    match ty {
+        CollectedType::AtFile { .. } => ty,
+        other => CollectedType::AtFile { file: file.to_owned(), inner: Box::new(other) },
+    }
+}
+
+/// `params` bound to `args`, written in `args_file`, with a parameter the reference omits taking its declared default
+/// (`defaults`, written in `declared_file`), as TypeScript's `fillMissingTypeArguments` does. A default may name an
+/// earlier parameter (`<T, U = T[]>`), so it is bound with the parameters before it. A parameter with neither stays
+/// unbound, with a warning when the reference supplied some arguments but not that one.
+pub(super) fn bind_args<'a>(
+    params: &'a [compact_str::CompactString],
+    defaults: Option<&[Option<CollectedType>]>,
+    args: &[CollectedType],
+    args_file: &Utf8Path,
+    declared_file: &Utf8Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Substitution<'a> {
+    let mut subst = Substitution::default();
+    let mut unfilled: Vec<&str> = Vec::new();
+    for (i, param) in params.iter().enumerate() {
+        if let Some(arg) = args.get(i) {
+            subst.insert(param.as_str(), pinned_to(args_file, arg.clone()));
+        } else if let Some(default) = defaults.and_then(|d| d.get(i)).and_then(Option::as_ref) {
+            let bound = substitute_type(default, &subst);
+            subst.insert(param.as_str(), pinned_to(declared_file, bound));
+        } else {
+            unfilled.push(param.as_str());
+        }
+    }
+    // A reference with no arguments to a declaration with defaults (`extends DOMAttributes`) leaves the parameters
+    // without one as placeholders, the way the declaration's own body reads them.
+    if !unfilled.is_empty() && (defaults.is_none() || !args.is_empty()) {
+        let origin_file = args_file;
         diagnostics.push(Diagnostic {
             severity: DiagnosticSeverity::Warning,
             message: format!(
@@ -62,11 +101,7 @@ pub(super) fn build_substitution<'a>(
             affects: Vec::new(),
         });
     }
-    params
-        .iter()
-        .map(|p| p.as_str())
-        .zip(args.iter().map(|a| CollectedType::AtFile { file: origin_file.to_owned(), inner: Box::new(a.clone()) }))
-        .collect()
+    subst
 }
 
 /// If `scoped_key` names a generic alias (type parameters were recorded during
@@ -93,10 +128,11 @@ pub(super) fn apply_generic_args(
     let Some(params) = ctx.named_types.lookup_type_alias_params(declared_file, declared_name) else {
         return alias;
     };
-    if params.is_empty() || type_args.is_empty() {
+    let defaults = ctx.named_types.lookup_type_param_defaults(declared_file, declared_name);
+    if params.is_empty() || (type_args.is_empty() && defaults.is_none()) {
         return alias;
     }
-    let subst = build_substitution(params, type_args, consuming_file, diagnostics);
+    let subst = bind_args(params, defaults, type_args, consuming_file, declared_file, diagnostics);
     substitute_alias(&alias, &subst)
 }
 
@@ -129,7 +165,8 @@ pub(super) fn generic_alias_with_structured_args(
     // `args` were written wherever `name` (the reference being resolved) appears,
     // i.e. `consuming_file` — not `canonical_file` (where the generic alias itself
     // is declared).
-    let subst = build_substitution(params, args, consuming_file, diagnostics);
+    let defaults = ctx.named_types.lookup_type_param_defaults(&canonical_file, &canonical_name);
+    let subst = bind_args(params, defaults, args, consuming_file, &canonical_file, diagnostics);
     Some(substitute_alias(alias, &subst))
 }
 
@@ -205,10 +242,23 @@ pub(super) fn substitute_type(ct: &CollectedType, subst: &Substitution) -> Colle
             true_type: Box::new(substitute_type(true_type, subst)),
             false_type: Box::new(substitute_type(false_type, subst)),
         },
-        CollectedType::Mapped { key_type, value_type } => CollectedType::Mapped {
-            key_type: Box::new(substitute_type(key_type, subst)),
-            value_type: Box::new(substitute_type(value_type, subst)),
-        },
+        CollectedType::Mapped { param, key_type, value_type, optional } => {
+            // The key variable shadows an outer parameter of the same name inside the value type.
+            let shadowed;
+            let value_subst = if subst.contains_key(param.as_str()) {
+                shadowed =
+                    subst.iter().filter(|(name, _)| **name != param.as_str()).map(|(k, v)| (*k, v.clone())).collect();
+                &shadowed
+            } else {
+                subst
+            };
+            CollectedType::Mapped {
+                param: param.clone(),
+                key_type: Box::new(substitute_type(key_type, subst)),
+                value_type: Box::new(substitute_type(value_type, value_subst)),
+                optional: *optional,
+            }
+        }
         // Leaves that can't structurally reference a type parameter.
         CollectedType::String
         | CollectedType::Number
@@ -294,19 +344,37 @@ pub(super) fn synthesize_utility_alias(
         "Required" if !args.is_empty() => {
             Some(CollectedTypeAlias::Required { base: args[0].clone(), file_path: file_path.to_owned() })
         }
-        // `PropsWithChildren<P>` is `P & { children?: ReactNode }`.
-        "PropsWithChildren" if !args.is_empty() => Some(CollectedTypeAlias::Intersection {
-            members: vec![
-                args[0].clone(),
-                CollectedType::Object(vec![CollectedObjectField {
-                    name: "children".into(),
-                    collected_type: CollectedType::Named { name: "React.ReactNode".into(), args: vec![] },
-                    required: false,
-                    description: String::new(),
-                }]),
-            ],
-            file_path: file_path.to_owned(),
-        }),
+        // `PropsWithChildren<P>` is `P & { children?: ReactNode }`, and with no argument (`P = unknown`) only the
+        // children.
+        "PropsWithChildren" => {
+            let children = CollectedType::Object(vec![CollectedObjectField {
+                name: "children".into(),
+                collected_type: CollectedType::Named { name: "React.ReactNode".into(), args: vec![] },
+                required: false,
+                description: String::new(),
+            }]);
+            Some(match args.first() {
+                Some(props) => CollectedTypeAlias::Intersection {
+                    members: vec![props.clone(), children],
+                    file_path: file_path.to_owned(),
+                },
+                None => CollectedTypeAlias::Passthrough { target: children, file_path: file_path.to_owned() },
+            })
+        }
+        // `Record<K, V>` is `{ [P in K]: V }`: one prop per member of a key union. A `string`, `number` or `symbol`
+        // key is an index signature, which names no prop to list.
+        "Record" if args.len() >= 2 => {
+            let target = match &args[0] {
+                CollectedType::String | CollectedType::Number | CollectedType::Symbol => CollectedType::Object(vec![]),
+                keys => CollectedType::Mapped {
+                    param: "K".into(),
+                    key_type: Box::new(keys.clone()),
+                    value_type: Box::new(args[1].clone()),
+                    optional: None,
+                },
+            };
+            Some(CollectedTypeAlias::Passthrough { target, file_path: file_path.to_owned() })
+        }
         "Readonly" | "PropsWithRef" if !args.is_empty() => {
             Some(CollectedTypeAlias::Passthrough { target: args[0].clone(), file_path: file_path.to_owned() })
         }

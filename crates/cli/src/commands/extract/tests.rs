@@ -7,12 +7,16 @@ fn args_for(src: &str, json: bool) -> crate::ExtractArgs {
         out: None,
         format: crate::OutputFormat::Canonical,
         cache_dir: None,
+        no_cache: false,
         html_attributes: None,
         extra_builtins: vec![],
         include_unexported: false,
         json,
         load_dependencies: false,
+        no_load_dependencies: false,
         collapse_inherited_props: None,
+        experimental_semantic_types: false,
+        tsc_path: None,
     }
 }
 
@@ -203,7 +207,7 @@ fn rdt_output_includes_composes() {
     std::fs::write(
         tmp.path().join("Comp.tsx"),
         r#"
-export type Weird<T> = T extends string ? { a: string } : { b: number };
+export type Weird<T> = T extends { kind: infer K } ? { a: K } : { b: number };
 export type CompProps = Weird<'x'> & { c: boolean };
 export function Comp(props: CompProps) { return null; }
 "#,
@@ -473,18 +477,29 @@ export function Button(props: ButtonProps) { return null; }
         out: Some(out.to_str().unwrap().to_owned()),
         format: crate::OutputFormat::Canonical,
         cache_dir: Some(tmp.path().join("cache").to_str().unwrap().to_owned()),
+        no_cache: false,
         html_attributes: Some(mode),
         extra_builtins: vec![],
         include_unexported: false,
         json: false,
         load_dependencies: false,
+        no_load_dependencies: false,
         collapse_inherited_props: None,
+        experimental_semantic_types: false,
+        tsc_path: None,
     };
 
     assert_eq!(cmd_extract(args, false, None).unwrap(), 0);
 
     let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(out).unwrap()).unwrap();
-    written["components"]["Button"].clone()
+    // Name to prop id, merged from the prop sets the component lists.
+    let mut button = written["components"]["Button"].clone();
+    let mut props = serde_json::Map::new();
+    for set in button["props"].as_array().unwrap() {
+        props.extend(written["propSets"][set.as_str().unwrap()].as_object().unwrap().clone());
+    }
+    button["props"] = serde_json::Value::Object(props);
+    button
 }
 
 fn keys(component: &serde_json::Value, field: &str) -> Vec<String> {
@@ -552,4 +567,59 @@ export function Comp(props: Props) { return null; }
     let rdt_json = serialize_rdt(&output, false).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&rdt_json).unwrap();
     assert_eq!(parsed["Comp"]["composes"], serde_json::json!(["\"a\" | \"b\""]));
+}
+
+/// `extract` over one component, optionally with the experimental checker pointed at a `tsc` that is not there.
+fn extract_with_semantic_flag(tmp: &tempfile::TempDir, semantic: bool) -> serde_json::Value {
+    std::fs::write(tmp.path().join("Plain.tsx"), "export function Plain(props: { a: string }) { return null; }\n")
+        .unwrap();
+    let out = tmp.path().join(format!("out-{semantic}.json"));
+    let args = crate::ExtractArgs {
+        src: vec![tmp.path().to_str().unwrap().to_owned()],
+        out: Some(out.to_str().unwrap().to_owned()),
+        format: crate::OutputFormat::Canonical,
+        cache_dir: Some(tmp.path().join("cache").to_str().unwrap().to_owned()),
+        no_cache: false,
+        html_attributes: None,
+        extra_builtins: vec![],
+        include_unexported: false,
+        json: false,
+        load_dependencies: false,
+        no_load_dependencies: false,
+        collapse_inherited_props: None,
+        experimental_semantic_types: semantic,
+        tsc_path: semantic.then(|| tmp.path().join("no-such-tsc").to_str().unwrap().to_owned()),
+    };
+
+    assert_eq!(cmd_extract(args, true, None).unwrap(), 0);
+
+    serde_json::from_str(&std::fs::read_to_string(out).unwrap()).unwrap()
+}
+
+#[test]
+fn the_default_output_has_no_semantic_backend_diagnostics() {
+    let output = extract_with_semantic_flag(&tempfile::TempDir::new().unwrap(), false);
+
+    let codes: Vec<_> = output["diagnostics"].as_array().unwrap().iter().map(|d| d["code"].clone()).collect();
+    assert!(!codes.contains(&serde_json::json!("SEMANTIC_BACKEND")), "{codes:?}");
+}
+
+#[test]
+fn an_unavailable_checker_adds_one_warning_and_leaves_every_component_as_it_was() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let plain = extract_with_semantic_flag(&tmp, false);
+    let flagged = extract_with_semantic_flag(&tmp, true);
+
+    assert_eq!(flagged["components"], plain["components"]);
+    assert_eq!(flagged["enums"], plain["enums"]);
+    let added: Vec<_> = flagged["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| !plain["diagnostics"].as_array().unwrap().contains(d))
+        .collect();
+    assert_eq!(added.len(), 1, "{added:?}");
+    assert_eq!(added[0]["code"], "SEMANTIC_BACKEND");
+    assert_eq!(added[0]["severity"], "warning");
+    assert!(added[0]["message"].as_str().unwrap().contains("no tsc binary at"), "{added:?}");
 }
