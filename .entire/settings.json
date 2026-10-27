@@ -1,0 +1,18 @@
+{
+  "enabled": true,
+  "strategy_options": {
+    "push_checkpoints": true,
+    "push_checkpoints_on_exit": true,
+    "push_sessions": true,
+    "summarize": {
+      "enabled": true
+    }
+  },
+  "telemetry": false,
+  "commit_linking": "always",
+  "checkpoints": {
+    "primary": {
+      "type": "git-refs"
+    }
+  }
+}
