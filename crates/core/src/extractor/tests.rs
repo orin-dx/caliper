@@ -1274,6 +1274,26 @@ fn wrapper_calls_carrying_props_in_a_type_argument_are_detected_by_shape() {
 }
 
 #[test]
+fn a_function_component_annotation_inside_an_intersection_carries_the_props() {
+    use crate::types::DetectionRule::FcAnnotation;
+    let source = r#"
+        import * as React from "react";
+        interface DrawerProps { open: boolean }
+        interface PanelProps { title: string }
+        export const Drawer: React.FC<DrawerProps> & { _Panel: React.FC<PanelProps> } = (props) => <div />;
+        export const Sheet: { size: number } & React.FC<DrawerProps> = (props) => <div />;
+        export const Plain: { size: number } & { depth: number } = { size: 1, depth: 2 };
+    "#;
+    let data = parse_file(Utf8Path::new("/test/drawer.tsx"), source);
+    let found: Vec<(&str, &str, crate::types::DetectionRule)> = data
+        .component_mappings
+        .iter()
+        .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule))
+        .collect();
+    assert_eq!(found, vec![("Drawer", "DrawerProps", FcAnnotation), ("Sheet", "DrawerProps", FcAnnotation)]);
+}
+
+#[test]
 fn a_wrapped_render_function_may_be_parenthesized_or_asserted() {
     use crate::types::DetectionRule::{HocWrapper, WrapperTypeArgument};
     let source = r#"
