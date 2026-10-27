@@ -1,0 +1,3 @@
+Cna we make sure our changesets are user-focused, friendly succinct, and to the point? Keeping it succinct, friendly, scannable and free of AI slop, wall of text, wordy prose, filler words, overly formal language
+
+We use headings, bullets, etc right? Consider that these are added to generated changelogs, we want them to be friendly and scanable there.
