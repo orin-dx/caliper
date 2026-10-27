@@ -1,0 +1,5 @@
+<environment_context>
+  <current_date>2026-10-26</current_date>
+  <timezone>America/Los_Angeles</timezone>
+  <filesystem><workspace_roots><root>/Users/gabe/Projects/caliper</root></workspace_roots><permission_profile type="managed"><file_system type="restricted"><entry access="read"><special>:root</special></entry><entry access="write"><path>/Users/gabe/Projects/caliper</path></entry><entry access="write"><special>:slash_tmp</special></entry><entry access="write"><special>:tmpdir</special></entry><entry access="read"><path>/Users/gabe/Projects/caliper/.git</path></entry><entry access="read"><path>/Users/gabe/Projects/caliper/.agents</path></entry><entry access="read"><path>/Users/gabe/Projects/caliper/.codex</path></entry><entry access="read"><path>/Users/gabe/Projects/caliper/.aws</path></entry></file_system></permission_profile></filesystem>
+</environment_context>
