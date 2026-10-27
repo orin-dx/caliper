@@ -1,0 +1,1 @@
+We should also do an adversarial check against claude looking for issues, performance optimizations, arch and semanticl model gaps
