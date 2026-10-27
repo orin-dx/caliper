@@ -10,7 +10,7 @@ Loading whole files along imports is the wrong unit. The file-level closures of 
 
 ## Decision
 
-Behind `PipelineOptions::load_dependencies` (off by default), a phase before `NamedTypeIndex::build` loads the dependency declarations the project's type positions name, transitively, and nothing else.
+Behind `PipelineOptions::load_dependencies` (off by default here; on by default since [0019](0019-load-dependencies-by-default.md)), a phase before `NamedTypeIndex::build` loads the dependency declarations the project's type positions name, transitively, and nothing else.
 
 - **Demands, not files.** A demand is a package specifier and an imported name used in a type position (a type reference, `typeof X`, heritage, a type argument). A loaded declaration's own references become new demands. One rayon scope runs them; each declaring file is claimed once, and results are keyed by file and name, so the outcome does not depend on scheduling.
 - **A separate, shared layer.** Loaded declarations live in a `DependencyLayer` behind an `Arc`, with its own type index and import map. Project lookups fall back to it; keys are file paths, so the layers never collide. Watch revisions share it; an edit that adds a demand gets a new layer version with the new declarations added, never a copy of the project's data.

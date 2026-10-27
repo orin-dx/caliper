@@ -2,9 +2,9 @@
 
 **Updated:** 2026-10-22
 
-Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are fully tested. Config file loading, watch mode (including rebuilds on config changes and polling with `ensure_fresh`), plugin architecture, TOON token-optimized output format, JSON schema export, LSP server scaffold, and bounded atomic DTS caching are implemented and verified.
+Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are fully tested. Config file loading, watch mode (including rebuilds on config changes and polling with `ensure_fresh`), plugin architecture, TOON token-optimized output format, JSON schema export, and bounded atomic DTS caching are implemented and verified.
 
-**Types from other packages.** Imports resolve to any file under a source directory, `.d.ts` included, so a monorepo whose packages are all source directories resolves across them. By default, from `node_modules` only `@types/react` and TypeScript's own lib files are read, and a prop whose type comes from any other installed package stays a named reference with an `UNRESOLVABLE_IMPORT` warning. `--load-dependencies` (config, NAPI and Vite `loadDependencies`) loads the declarations those names point to; it is off by default while its output is checked against RDT (ADR 0010).
+**Types from other packages.** Imports resolve to any file under a source directory, `.d.ts` included, so a monorepo whose packages are all source directories resolves across them. By default the declarations those names point to are loaded (ADR 0010, on by default since ADR 0019): a prop typed by an installed package resolves. `--no-load-dependencies` (config, NAPI and Vite `loadDependencies: false`) reads only `@types/react` and TypeScript's own lib files from `node_modules`, and then a prop whose type comes from any other installed package stays a named reference with an `UNRESOLVABLE_IMPORT` warning. Checked against RDT on five installed repos, loading reports far more of RDT's props and changes 11 matching types in 59,000. Chakra, the worst case, costs about 220 ms and 330 MiB against 50 ms and 100 MiB without (`docs/performance.md`).
 
 ## Numbers
 
@@ -22,14 +22,13 @@ Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are f
 - **TOON output format** (`--format toon` / `toon.rs`) — Token-optimized format for LLM agents, cutting context window token usage by ~65-75%.
 - **JSON schema export** (`caliper-docgen schema`) — Machine-readable Draft-07 JSON Schema export for component metadata validation.
 - **Atomic & Bounded DTS cache** (`cache.rs`) — Atomic temp-file swap writes, dirty flag tracking, and 5,000 entry eviction cap.
-- **LSP server scaffold** (`caliper-docgen lsp`) — bounded framing plus initialize/shutdown/exit lifecycle. It currently advertises `hoverProvider: false` and does not serve component prop hovers yet.
 - **Strict Safe Rust** — `unsafe_code = "deny"` via `[workspace.lints]`, active across all three crates (`core`, `cli`, `binding`) — none currently use `unsafe`, including the NAPI FFI boundary (napi-rs's `#[napi]` macros generate the glue without user-visible `unsafe`).
 
 ## Known gaps that won't get fixed without a type checker
 
-See the "Known gaps summary" table in `rdt-coverage.md` for the full, maintained list. The short version: conditional types, mapped types over an unbound generic, and a couple of `@emotion/styled`-specific call shapes all need real type inference OXC deliberately doesn't do. Not bugs.
+See the "Known gaps summary" table in `rdt-coverage.md` for the full, maintained list. The short version: conditional types that need inference (`infer`, an unbound generic), mapped types over an unbound generic, and a couple of `@emotion/styled`-specific call shapes all need real type inference OXC deliberately doesn't do. Not bugs. A conditional, indexed access or mapped type whose operands are known is evaluated (`resolver/evaluate.rs`).
 
-An opt-in TypeScript 7 semantic backend is designed (ADR 0006) but not implemented. Accuracy is verified against real RDT — 0 missing/extra props on 13 hand-picked components, and re-verified against the full 44-file fixture corpus (5,508/5,522 `required` matches, 5,265/5,522 type-string matches; the gap is explained noise, not a resolver bug) — and the RDT oracle that comparison depends on now runs on its own `typescript@6` install, separate from the semantic probe's `typescript@next`. Lifecycle (crash/restart/timeout handling for the `tsc --api` process) hasn't started; see `type-checker-integration.md`'s Gates table.
+An opt-in TypeScript 7 semantic backend is designed (ADR 0006) but not implemented; it will ship as an experimental opt-in, off by default. Accuracy is verified against real RDT — 0 missing/extra props on 13 hand-picked components, and re-verified on `7.1.0-beta` against the full 44-file fixture corpus (5,508/5,522 `required` matches, 5,266/5,522 type-string matches; the gap is explained noise, not a resolver bug) — and the RDT oracle that comparison depends on now runs on its own `typescript@6` install, separate from the semantic probe's `typescript@7.1.0-beta`. TypeScript 7.1's checker also runs, test-only, as an oracle for structural prop types (`docs/parity.md`). Lifecycle (crash/restart/timeout handling for the `tsc --api` process) hasn't started; see `type-checker-integration.md`'s Gates table.
 
 ## Where to look next
 

@@ -1,12 +1,22 @@
-import { readdir, stat } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
 import type * as Napi from 'caliper-docgen-napi'
-import type { Diagnostic, ExtractionOutput, IncrementalUpdate, RdtComponentDoc } from 'caliper-docgen-napi'
+import type { Diagnostic, IncrementalUpdate, RdtComponentDoc, SessionIndex } from 'caliper-docgen-napi'
+import { localNameOf } from './exports.js'
+import { Fill } from './fill.js'
+import { buildLookups, diagnosticId, incompleteMessages, type ComponentRef, type Lookups } from './lookups.js'
+import { assertSchemaVersion, expandDiagnostics } from './schema.js'
 
 /** The binding calls the session makes, so tests can stand in for the native module. */
 export type SessionBinding = Pick<
   typeof Napi,
-  'createSession' | 'initializeSession' | 'extractFileIncremental' | 'sessionDocgenInfo' | 'closeSession'
+  | 'createSession'
+  | 'initializeSessionIndex'
+  | 'ensureFresh'
+  | 'sessionDocgenInfo'
+  | 'sessionComponentAnswers'
+  | 'sessionWarmUp'
+  | 'closeSession'
 >
 
 export interface SessionOptions {
@@ -15,70 +25,67 @@ export interface SessionOptions {
   exclude?: string[]
   tsconfigPath?: string
   skipHtmlProps?: boolean
+  htmlAttributes?: Napi.JsExtractOptions['htmlAttributes']
+  /** Read and write the on-disk caches. Default: `true`. */
+  cache?: boolean
+  loadDependencies?: boolean
+  collapseInheritedProps?: Napi.JsExtractOptions['collapseInheritedProps']
+  /**
+   * Resolve a component when a story asks for it rather than every component at start. Default: `true`. The answers
+   * are the same; a session that serves a few components of many starts and holds less.
+   */
+  lazy?: boolean
+  /**
+   * After a lazy session starts, resolve a few components in the background so the dependency declarations and memos
+   * the stories share are loaded before the first one asks. Default: `false`: measured against the same stories, it
+   * did not make the first story faster, because the warm-up and the story compete for the same threads.
+   */
+  warmUp?: boolean
+  /**
+   * Once this many distinct components were asked for, resolve the rest in one background pass. Default: `0`, never:
+   * it lowers the median story latency but raises peak memory by 170 to 420 MB.
+   */
+  fillAfter?: number
 }
 
-interface ComponentRef {
-  filePath: string
-  displayName: string
-}
+/** How many components the background warm-up resolves, spread over the project. */
+const WARM_UP_COMPONENTS = 8
+const FILL_AFTER = 0
+/** The most components `sessionWarmUp` takes: all of them. */
+const ALL_COMPONENTS = 2 ** 32 - 1
 
-const SOURCE_FILE = /\.(ts|tsx)$/
-
-/** A file's identity for change detection: a save changes its mtime or its size. */
-async function signature(path: string): Promise<string | undefined> {
-  try {
-    const stats = await stat(path)
-    return `${stats.mtimeMs}:${stats.size}`
-  } catch {
-    return undefined
-  }
-}
-
-/** Every `.ts`/`.tsx` file under `dir` and its signature, skipping `node_modules` and dot-directories. */
-async function scan(dir: string, into: Map<string, string>): Promise<void> {
-  let entries
-  try {
-    entries = await readdir(dir, { withFileTypes: true })
-  } catch {
-    return
-  }
-  await Promise.all(
-    entries.map(async (entry) => {
-      const path = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        if (entry.name !== 'node_modules' && !entry.name.startsWith('.')) await scan(path, into)
-      } else if (SOURCE_FILE.test(entry.name)) {
-        const sig = await signature(path)
-        if (sig) into.set(path, sig)
-      }
-    }),
-  )
-}
-
-function diagnosticId(diagnostic: Diagnostic): string {
-  return JSON.stringify(diagnostic)
+/** What the session says about one component: its documentation and why its props may be incomplete. */
+export interface Documentation {
+  doc: RdtComponentDoc | undefined
+  /** The messages of the warnings and errors that say the props may be incomplete; empty when none does. */
+  degradedBy: string[]
 }
 
 /**
  * One watch session over the source directories, created on first use. Storybook gives no file events to a docgen
- * worker, so `fresh()` compares every source file's mtime and size with the last look and applies the changed ones
- * before a request is answered: an answer never trails a saved edit.
+ * worker, so `fresh()` has the native session compare every source file's mtime and size with the last look and apply
+ * the changed ones before a request is answered: an answer never trails a saved edit. The session holds the props;
+ * this class holds only where each component lives and, for an eager session, which ones a diagnostic says are
+ * incomplete. A lazy session (the default) resolves a component when `documentation` asks, and holds no answers.
  */
 export class DocgenSession {
   private readonly components = new Map<string, ComponentRef>()
   private readonly diagnostics = new Map<string, Diagnostic>()
-  private files = new Map<string, string>()
+  /** Rebuilt from `components` and `diagnostics` on the first lookup after either changes. */
+  private index: Lookups | undefined
   private sessionId: number | undefined
   private ready: Promise<void> | undefined
   private checking: Promise<void> | undefined
   private queued: Promise<void> | undefined
   private latestRevision = 0
+  private readonly fill: Fill
   private readonly options: SessionOptions
   private readonly napi: SessionBinding
 
   constructor(options: SessionOptions, napi: SessionBinding) {
     this.options = options
     this.napi = napi
+    this.fill = new Fill(options.fillAfter ?? FILL_AFTER)
   }
 
   private napiOptions(): Napi.JsExtractOptions {
@@ -86,49 +93,78 @@ export class DocgenSession {
       srcDirs: this.options.srcDirs,
       exclude: this.options.exclude,
       tsconfigPath: this.options.tsconfigPath,
-      htmlAttributes: this.options.skipHtmlProps ? 'none' : undefined,
+      htmlAttributes: this.options.htmlAttributes ?? (this.options.skipHtmlProps ? 'none' : undefined),
+      cache: this.options.cache,
+      loadDependencies: this.options.loadDependencies,
+      collapseInheritedProps: this.options.collapseInheritedProps,
+      lazy: this.lazy,
     }
   }
 
-  private async scanAll(): Promise<Map<string, string>> {
-    const files = new Map<string, string>()
-    await Promise.all(this.options.srcDirs.map((dir) => scan(dir, files)))
-    return files
+  private get lazy(): boolean {
+    return this.options.lazy ?? true
   }
 
   private async initialize(): Promise<void> {
-    this.files = await this.scanAll()
     this.sessionId = this.napi.createSession(this.napiOptions())
-    const output = JSON.parse(await this.napi.initializeSession(this.sessionId, this.napiOptions())) as ExtractionOutput
+    await this.reindex()
+    // Not awaited: the first story answers as soon as it can, and shares what the warm-up has loaded by then.
+    if (this.lazy && this.options.warmUp === true) void this.warmUp(this.sessionId, WARM_UP_COMPONENTS)
+  }
+
+  /** Best effort: a background resolution that fails costs the stories the time it would have saved. */
+  private async warmUp(sessionId: number, count: number): Promise<void> {
+    try {
+      await this.napi.sessionWarmUp(sessionId, count)
+    } catch {
+      // The stories resolve what they need themselves.
+    }
+  }
+
+  /** Reads where every component is declared (and, for an eager session, which diagnostics affect them). */
+  private async reindex(): Promise<void> {
+    const json = await this.napi.initializeSessionIndex(this.sessionId!, this.napiOptions())
+    const output = assertSchemaVersion(JSON.parse(json) as SessionIndex, 'session index')
+    this.components.clear()
     for (const [key, entry] of Object.entries(output.components)) {
       this.components.set(key, { filePath: resolve(entry.filePath), displayName: entry.displayName })
     }
-    for (const diagnostic of output.diagnostics) this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
+    for (const diagnostic of expandDiagnostics(output.diagnostics, output.nameLists)) {
+      this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
+    }
+    this.index = undefined
   }
 
   private apply(update: IncrementalUpdate): void {
     if (update.revision <= this.latestRevision) return
     this.latestRevision = update.revision
+    this.index = undefined
     for (const key of update.removedKeys) this.components.delete(key)
     update.updatedKeys.forEach((key, i) => {
       const entry = update.updatedComponents[i]
       if (entry) this.components.set(key, { filePath: resolve(entry.filePath), displayName: entry.displayName })
     })
-    for (const diagnostic of update.removedDiagnostics) this.diagnostics.delete(diagnosticId(diagnostic))
-    for (const diagnostic of update.diagnostics) this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
+    for (const diagnostic of expandDiagnostics(update.removedDiagnostics, update.nameLists)) {
+      this.diagnostics.delete(diagnosticId(diagnostic))
+    }
+    for (const diagnostic of expandDiagnostics(update.diagnostics, update.nameLists)) {
+      this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
+    }
   }
 
   private async check(): Promise<void> {
-    const now = await this.scanAll()
-    const changed = [...now].filter(([path, sig]) => this.files.get(path) !== sig).map(([path]) => path)
-    const removed = [...this.files.keys()].filter((path) => !now.has(path))
-    this.files = now
-    for (const file of [...changed, ...removed]) {
-      // One at a time: each update is a delta from the revision before it.
-      // oxlint-disable-next-line no-await-in-loop
-      const json = await this.napi.extractFileIncremental(file, this.sessionId!, this.napiOptions())
-      this.apply(JSON.parse(json) as IncrementalUpdate)
+    const json = await this.napi.ensureFresh(this.sessionId!)
+    const update = assertSchemaVersion(JSON.parse(json) as IncrementalUpdate, 'update')
+    if (this.lazy) {
+      // A lazy update names the keys an edit can change but carries no component to place them, so look again at where
+      // the components are; resolving none of them, that costs a parse-level listing.
+      if (update.revision > this.latestRevision) {
+        this.latestRevision = update.revision
+        if (update.updatedKeys.length > 0 || update.removedKeys.length > 0) await this.reindex()
+      }
+      return
     }
+    this.apply(update)
   }
 
   /**
@@ -165,29 +201,91 @@ export class DocgenSession {
     }
   }
 
+  private lookups(): Lookups {
+    return (this.index ??= buildLookups(this.components, this.diagnostics.values()))
+  }
+
   /**
    * The key of the component `exportName` names in `path`. A file's only component answers for its default export;
    * a path with no components (a barrel that re-exports them) falls back to the one component with that name.
    */
   keyOf(path: string, exportName: string): string | undefined {
-    const file = resolve(path)
-    const inFile = [...this.components].filter(([, ref]) => ref.filePath === file)
-    if (inFile.length > 0) {
-      const named = inFile.find(([, ref]) => ref.displayName === exportName)
-      if (named) return named[0]
-      return inFile.length === 1 && exportName === 'default' ? inFile[0]![0] : undefined
+    const { byFile, byName } = this.lookups()
+    const inFile = byFile.get(resolve(path))
+    if (inFile) {
+      const named = inFile.find((key) => this.components.get(key)?.displayName === exportName)
+      if (named) return named
+      return inFile.length === 1 && exportName === 'default' ? inFile[0] : undefined
     }
     if (exportName === 'default') return undefined
-    const byName = [...this.components].filter(([, ref]) => ref.displayName === exportName)
-    return byName.length === 1 ? byName[0]![0] : undefined
+    const sameName = byName.get(exportName)
+    return sameName?.length === 1 ? sameName[0] : undefined
   }
 
-  /** Whether a warning or error says `key`'s props may be incomplete. */
+  /**
+   * `keyOf`, and when the file holds several components and none has the export's name, the component the module's
+   * source exports under it (`export default Card`, `export { Inner as Card }`), then, for a default import, the one
+   * named as the story named its import (`importedAs`).
+   */
+  async resolveExport(path: string, exportName: string, importedAs?: string): Promise<string | undefined> {
+    const key = this.keyOf(path, exportName)
+    if (key) return key
+    const file = resolve(path)
+    const inFile = this.lookups().byFile.get(file)
+    if (!inFile) return undefined
+    const named = (name: string | undefined) => inFile.find((each) => this.components.get(each)?.displayName === name)
+    const source = await readFile(file, 'utf8').catch(() => '')
+    return named(localNameOf(source, exportName)) ?? (exportName === 'default' ? named(importedAs) : undefined)
+  }
+
+  /**
+   * The key of the sub-component `property` of `namespace` (`Select.Option`): the component with that display name,
+   * the one beside `near` if several share it.
+   */
+  keyOfMember(namespaces: string[], property: string, near: string): string | undefined {
+    const { byName } = this.lookups()
+    const matches = [...new Set(namespaces.flatMap((namespace) => byName.get(`${namespace}.${property}`) ?? []))]
+    if (matches.length <= 1) return matches[0]
+    const dir = dirname(resolve(near))
+    const beside = matches.filter((key) => dirname(this.components.get(key)?.filePath ?? '') === dir)
+    return beside.length === 1 ? beside[0] : undefined
+  }
+
+  /** The display names of the components in `path`, to say what a failed lookup had to choose from. */
+  namesIn(path: string): string[] {
+    const keys = this.lookups().byFile.get(resolve(path)) ?? []
+    return keys.flatMap((key) => this.components.get(key)?.displayName ?? [])
+  }
+
+  /** Whether a warning or error says `key`'s props may be incomplete. An eager session only: see `documentation`. */
   degraded(key: string): boolean {
-    for (const diagnostic of this.diagnostics.values()) {
-      if (diagnostic.severity !== 'info' && diagnostic.affects?.includes(key)) return true
+    return this.degradedBy(key).length > 0
+  }
+
+  /** The messages of the warnings and errors that say `key`'s props may be incomplete. */
+  degradedBy(key: string): string[] {
+    return [...(this.lookups().degradedBy.get(key) ?? [])]
+  }
+
+  /**
+   * The documentation of `key` and why its props may be incomplete. A lazy session resolves the component now, or
+   * answers from what an earlier story resolved; nothing is kept here, so an edit cannot leave a stale answer behind.
+   */
+  documentation(key: string): Documentation {
+    if (!this.lazy) return { doc: this.docgenInfo(key), degradedBy: this.degradedBy(key) }
+    if (this.sessionId === undefined) return { doc: undefined, degradedBy: [] }
+    const answers = JSON.parse(this.napi.sessionComponentAnswers(this.sessionId, [key])) as Record<
+      string,
+      { docgenInfo: RdtComponentDoc; diagnostics: Diagnostic[] }
+    >
+    const answer = answers[key]
+    if (!answer) {
+      // The listing includes a re-export of a package component that has nothing to show; it is no component.
+      if (this.components.delete(key)) this.index = undefined
+      return { doc: undefined, degradedBy: [] }
     }
-    return false
+    if (this.fill.asked(key)) void this.warmUp(this.sessionId, ALL_COMPONENTS)
+    return { doc: answer.docgenInfo, degradedBy: incompleteMessages(answer.diagnostics) }
   }
 
   docgenInfo(key: string): RdtComponentDoc | undefined {

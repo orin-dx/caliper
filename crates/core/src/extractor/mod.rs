@@ -218,6 +218,10 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) aliased_away: FxHashSet<CompactString>,
     /// Wrapper-call candidates, promoted to mappings in `finish()` once the whole file has been seen.
     pub(super) pending_wrappers: Vec<wrapper::PendingWrapper>,
+    /// Simple local aliases of generic functions, resolved after all declarations have been visited.
+    pub(super) pending_function_aliases: Vec<(String, String)>,
+    /// Local cast names and the base component and asserted props type they export.
+    pub(super) cast_component_aliases: rustc_hash::FxHashMap<CompactString, (String, CompactString)>,
     /// `export { local as exported }` without a source: the index into `data.exports` and the `local` name, so
     /// `finish()` can recognize a re-exported import once every import has been seen.
     pub(super) pending_local_exports: Vec<(usize, String)>,
@@ -232,6 +236,19 @@ pub(super) struct SourceDataCollector<'src> {
     /// `(sub-component, parent)` for each component attached to another (`Parent.Sub = Sub`,
     /// `Object.assign(Parent, { Sub })`): exported when its parent is.
     pub(super) attached_to: Vec<(CompactString, CompactString)>,
+    /// How many function bodies enclose the node being visited. A component declared inside one exists per call (a
+    /// factory's returned component, a story's local helper), so no module imports it under that name.
+    pub(super) function_depth: u32,
+    /// The span and type parameters of each generic function in the file, for `ComponentMapping::type_params`.
+    pub(super) function_type_params: Vec<(u32, u32, Vec<CompactString>)>,
+    /// `(scoped key, name, type parameters)` of each named class: a class is also a type, recorded in `finish` as an
+    /// interface with no members unless the file declares an interface or alias of that name.
+    pub(super) pending_classes: Vec<(String, CompactString, Vec<CompactString>)>,
+    /// The first parameter's name of each function being visited, innermost last: `const { size = 'md' } = props` in
+    /// the body destructures it.
+    pub(super) props_params: Vec<(Option<CompactString>, u32, u32)>,
+    /// `(start, end)` of a function whose body destructures its props parameter, with the defaults it declares there.
+    pub(super) body_defaults: Vec<(u32, u32, rustc_hash::FxHashMap<String, crate::types::RawDefault>)>,
 }
 
 impl<'src> SourceDataCollector<'src> {
@@ -248,12 +265,19 @@ impl<'src> SourceDataCollector<'src> {
             pending_display_name_renames: Vec::new(),
             aliased_away: FxHashSet::default(),
             pending_wrappers: Vec::new(),
+            pending_function_aliases: Vec::new(),
+            cast_component_aliases: Default::default(),
             pending_local_exports: Vec::new(),
             decline_reason: None,
             name_uses: Default::default(),
             takes_a_second_parameter: FxHashSet::default(),
             exported_locals: FxHashSet::default(),
             attached_to: Vec::new(),
+            function_depth: 0,
+            function_type_params: Vec::new(),
+            pending_classes: Vec::new(),
+            props_params: Vec::new(),
+            body_defaults: Vec::new(),
         }
     }
 
@@ -271,6 +295,15 @@ impl<'src> SourceDataCollector<'src> {
         );
     }
 
+    /// A component declared inside a function body: reported, not mapped (see `function_depth`).
+    pub(super) fn skip_local_component(&mut self, name: &str, span: Span) {
+        self.record_skip(
+            DiagnosticCode::SkippedCandidate,
+            format!("'{name}' is declared inside a function body, so no module can import it"),
+            span,
+        );
+    }
+
     pub(super) fn scoped_key(&self, name: &str) -> String {
         if self.namespace_stack.is_empty() {
             format!("{}:{}", self.file_path, name)
@@ -279,7 +312,146 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
+    /// `declare const Primitive: Primitives`: the type of a value declared without an initializer, as the alias
+    /// `typeof Primitive` (a name no source can write), so `typeof Primitive.div` and `(typeof NODES)[number]` can be
+    /// read from it. A declared object or intersection with static component members is indexed as well.
+    pub(super) fn record_declared_value_type(&mut self, declarator: &VariableDeclarator<'_>) {
+        let (BindingPattern::BindingIdentifier(id), Some(annotation)) = (&declarator.id, &declarator.type_annotation)
+        else {
+            return;
+        };
+        let target = self.ts_type_to_collected(&annotation.type_annotation);
+        // Keep static component members on a callable value without indexing arbitrary object declarations.
+        let has_component_member = |fields: &[crate::types::CollectedObjectField]| {
+            fields.iter().any(|field| {
+                matches!(&field.collected_type, crate::types::CollectedType::Named { name, .. }
+                    if name.ends_with("Component"))
+            })
+        };
+        let static_components = match &target {
+            crate::types::CollectedType::Intersection(members) => members.iter().any(|member| match member {
+                crate::types::CollectedType::Object(fields) => has_component_member(fields),
+                _ => false,
+            }),
+            crate::types::CollectedType::Object(fields) => has_component_member(fields),
+            _ => false,
+        };
+        if !matches!(target, crate::types::CollectedType::Named { .. } | crate::types::CollectedType::Tuple(_))
+            && !static_components
+        {
+            return;
+        }
+        let key = self.scoped_key(&format!("typeof {}", id.name));
+        self.data
+            .type_aliases
+            .entry(key)
+            .or_insert(crate::types::CollectedTypeAlias::Passthrough { target, file_path: self.file_path.clone() });
+    }
+
+    /// `const { size = 'md' } = props` in the body of a function whose first parameter is `props`: the defaults the
+    /// component declares there, like a destructured parameter's.
+    pub(super) fn record_body_defaults(&mut self, declarator: &VariableDeclarator<'_>) {
+        let (BindingPattern::ObjectPattern(pattern), Some(Expression::Identifier(init))) =
+            (&declarator.id, &declarator.init)
+        else {
+            return;
+        };
+        let Some((Some(props), start, end)) = self.props_params.last() else { return };
+        if props.as_str() != init.name.as_str() {
+            return;
+        }
+        let (start, end) = (*start, *end);
+        let defaults = self.pattern_defaults(pattern);
+        if !defaults.is_empty() {
+            self.body_defaults.push((start, end, defaults));
+        }
+    }
+
+    pub(super) fn record_function_type_params(
+        &mut self,
+        span: Span,
+        type_parameters: Option<&oxc_ast::ast::TSTypeParameterDeclaration<'_>>,
+    ) {
+        let Some(declaration) = type_parameters else { return };
+        let names: Vec<CompactString> = declaration.params.iter().map(|p| p.name.name.as_str().into()).collect();
+        if !names.is_empty() {
+            self.function_type_params.push((span.start, span.end, names));
+        }
+    }
+
+    /// Inside `namespace X {}` a sibling is written by its bare name but stored as `X.Name`, so a reference to it
+    /// would never find its declaration. Run when the innermost namespace's body has been walked, with every
+    /// member declared: rewrites the references in the namespace's aliases and interfaces to the qualified key,
+    /// except where a type parameter of the declaration shadows the name.
+    pub(super) fn qualify_namespace_references(&mut self) {
+        let prefix = self.namespace_stack.join(".");
+        // `@types/react`'s `React` namespace is looked up bare, by the index's own fallback (`NamedTypeIndex::lookup_*`).
+        if prefix == "React" {
+            return;
+        }
+        let key_prefix = format!("{}:{prefix}.", self.file_path);
+        let direct = |key: &str| key.strip_prefix(key_prefix.as_str()).filter(|rest| !rest.contains('.')).is_some();
+        let members: FxHashSet<CompactString> = self
+            .data
+            .type_aliases
+            .keys()
+            .chain(self.data.interfaces.keys())
+            .filter(|key| direct(key))
+            .filter_map(|key| key.strip_prefix(key_prefix.as_str()))
+            .map(CompactString::from)
+            .collect();
+        if members.is_empty() {
+            return;
+        }
+        let qualified = |params: Option<&Vec<CompactString>>, name: &str| -> Option<CompactString> {
+            if params.is_some_and(|p| p.iter().any(|p| p == name)) || !members.contains(name) {
+                return None;
+            }
+            Some(format!("{prefix}.{name}").into())
+        };
+        for (key, alias) in self.data.type_aliases.iter_mut().filter(|(key, _)| direct(key)) {
+            let params = self.data.type_alias_params.get(key);
+            *alias = alias.rename_named(&|name: &str| qualified(params, name));
+        }
+        for (key, interface) in self.data.interfaces.iter_mut().filter(|(key, _)| direct(key)) {
+            let params = self.data.interface_type_params.get(key);
+            let rename = |name: &str| qualified(params, name);
+            for prop in &mut interface.props {
+                prop.collected_type = prop.collected_type.rename_named(&rename);
+            }
+            for extends in &mut interface.extends {
+                *extends = extends.map_type_args(|arg| arg.rename_named(&rename));
+                if let ExtendsRef::SameFile { name, .. } = extends {
+                    if let Some(renamed) = rename(name) {
+                        *name = renamed;
+                    }
+                }
+            }
+        }
+    }
+
     fn finish(mut self) -> SourceData {
+        for (key, name, params) in std::mem::take(&mut self.pending_classes) {
+            if self.data.interfaces.contains_key(&key) || self.data.type_aliases.contains_key(&key) {
+                continue;
+            }
+            self.data.interfaces.insert(
+                key.clone(),
+                crate::types::CollectedInterface {
+                    scoped_key: key.clone(),
+                    name,
+                    file_path: self.file_path.clone(),
+                    props: Vec::new(),
+                    extends: Vec::new(),
+                    description: String::new(),
+                    tags: Default::default(),
+                },
+            );
+            if !params.is_empty() {
+                self.data.interface_type_params.insert(key, params);
+            }
+        }
+        self.promote_function_aliases();
         self.promote_wrapper_calls();
         self.promote_reexported_imports();
         // Filtered by original identifier first, before any displayName rename
@@ -304,6 +476,22 @@ impl<'src> SourceDataCollector<'src> {
         self.drop_functions_used_only_as_functions(&exported);
         for mapping in &mut self.data.component_mappings {
             mapping.exported = exported.contains(mapping.component_name.as_str());
+            for (start, end, defaults) in &self.body_defaults {
+                if *start >= mapping.span_start && *end <= mapping.span_end {
+                    for (name, default) in defaults {
+                        mapping.param_defaults.entry(name.clone()).or_insert_with(|| default.clone());
+                    }
+                }
+            }
+            for (start, end, params) in &self.function_type_params {
+                if *start >= mapping.span_start && *end <= mapping.span_end {
+                    for param in params {
+                        if !mapping.type_params.contains(param) {
+                            mapping.type_params.push(param.clone());
+                        }
+                    }
+                }
+            }
         }
         for (obj_name, display_name) in self.pending_display_name_renames.drain(..) {
             if let Some(mapping) = self.data.component_mappings.iter_mut().find(|m| m.component_name == obj_name) {
@@ -413,6 +601,15 @@ impl<'src> SourceDataCollector<'src> {
         match type_params {
             Some(tp) => tp.params.iter().map(|p| self.ts_type_to_collected_at_depth(p, 0)).collect(),
             None => vec![],
+        }
+    }
+
+    /// Record the defaults of a declaration's type parameters (`<TLength = string | 0, TTime = string>`), when any has one.
+    pub(super) fn record_type_param_defaults<'a>(&mut self, key: &str, params: &[TSTypeParameter<'a>]) {
+        let defaults: Vec<Option<CollectedType>> =
+            params.iter().map(|p| p.default.as_ref().map(|d| self.ts_type_to_collected(d))).collect();
+        if defaults.iter().any(Option::is_some) {
+            self.data.type_param_defaults.insert(key.to_owned(), defaults);
         }
     }
 
@@ -573,7 +770,12 @@ impl<'src> SourceDataCollector<'src> {
                     .as_ref()
                     .map(|ta| self.ts_type_to_collected_at_depth(ta, depth + 1))
                     .unwrap_or(CollectedType::Unknown);
-                CollectedType::Mapped { key_type: Box::new(key_type), value_type: Box::new(value_type) }
+                CollectedType::Mapped {
+                    param: m.key.name.as_str().into(),
+                    key_type: Box::new(key_type),
+                    value_type: Box::new(value_type),
+                    optional: m.optional.map(|modifier| modifier != TSMappedTypeModifierOperator::Minus),
+                }
             }
 
             TSType::TSParenthesizedType(p) => {

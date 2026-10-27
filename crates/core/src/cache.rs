@@ -30,7 +30,12 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 /// Extractor changes that keep the shape are covered by `CacheHeader::fingerprint` instead.
 /// 16: `LexedExport::LocalDeclaration` gained `declared_as`.
 /// 17: component mappings record whether they are exported.
-const CACHE_SCHEMA_VERSION: u32 = 17;
+/// 18: generic functions' result types, and the callee of a wrapper-built component.
+/// 19: a mapped type records its key variable and `?` modifier.
+/// 20: type parameter defaults.
+/// 21: the `ImportedMemberAlias` detection rule.
+/// 22: component mappings record the type parameters of the functions they contain.
+const CACHE_SCHEMA_VERSION: u32 = 24;
 
 const DATA_FILE: &str = "dts.msgpack";
 
@@ -122,6 +127,8 @@ const MAX_CACHE_FILE_BYTES: u64 = 256 * 1024 * 1024;
 pub struct DtsCache {
     store: DashMap<CacheKey, SourceData>,
     cache_dir: Utf8PathBuf,
+    /// Whether `save_to_disk` writes. An in-memory cache never does.
+    persistent: bool,
     dirty: std::sync::atomic::AtomicBool,
     lookups: std::sync::atomic::AtomicU32,
     hits: std::sync::atomic::AtomicU32,
@@ -166,10 +173,25 @@ impl DtsCache {
         Self {
             store,
             cache_dir: dir,
+            persistent: true,
             dirty: std::sync::atomic::AtomicBool::new(false),
             lookups: std::sync::atomic::AtomicU32::new(0),
             hits: std::sync::atomic::AtomicU32::new(0),
             load_diagnostic,
+        }
+    }
+
+    /// A cache that starts empty, reads nothing from disk and never writes (`PipelineOptions::use_cache` off). It still
+    /// shares parses within the run.
+    pub fn in_memory() -> Self {
+        Self {
+            store: DashMap::default(),
+            cache_dir: Utf8PathBuf::new(),
+            persistent: false,
+            dirty: std::sync::atomic::AtomicBool::new(false),
+            lookups: std::sync::atomic::AtomicU32::new(0),
+            hits: std::sync::atomic::AtomicU32::new(0),
+            load_diagnostic: None,
         }
     }
 
@@ -261,7 +283,7 @@ impl DtsCache {
     /// exit-code flip this project has already fixed once (see the
     /// resolver's discarded-return-type-resolution fix).
     pub fn save_to_disk(&self) -> Option<Diagnostic> {
-        if !self.dirty.load(std::sync::atomic::Ordering::Relaxed) {
+        if !self.persistent || !self.dirty.load(std::sync::atomic::Ordering::Relaxed) {
             return None;
         }
         self.try_save().err().map(|reason| Diagnostic {

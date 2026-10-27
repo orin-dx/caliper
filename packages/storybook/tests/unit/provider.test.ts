@@ -1,7 +1,8 @@
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { DocgenPayload, IndexEntry } from 'storybook/internal/types'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { logger } from 'storybook/internal/node-logger'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createDocgenProvider } from '../../src/provider.js'
 import { FakeBinding, entry, rdtDoc, warning } from './fake-binding.js'
 
@@ -99,10 +100,42 @@ describe('createDocgenProvider', () => {
     })
   })
 
+  it('looks at the files once per story, however many subcomponents it documents', async () => {
+    const fake = binding()
+    await request(fake, story('Button'))
+    expect(fake.looks).toBe(1)
+    const listed = binding()
+    await request(listed, story('List'))
+    expect(listed.looks).toBe(1)
+  })
+
+  it('documents a member of a named import as the sub-component with that display name', async () => {
+    const fake = binding()
+    fake.output.components!['Select.Option'] = entry('Select.Option', join(components, 'Select.tsx'))
+    fake.docs['Select.Option'] = rdtDoc('Select.Option', ['value'])
+    const { payload, nextCalls } = await request(fake, story('Option'))
+    expect(nextCalls).toBe(0)
+    expect(Object.keys(payload?.argTypes ?? {})).toEqual(['value'])
+  })
+
   it('asks the next provider when the session has no such component', async () => {
     const fake = binding()
     delete fake.output.components!.Card
     expect(await request(fake, story('Card'))).toEqual({ payload: NEXT, nextCalls: 1 })
+  })
+
+  it('says which components the file has when none matches the import', async () => {
+    const debug = vi.spyOn(logger, 'debug').mockImplementation(() => {})
+    const fake = binding()
+    fake.output.components = {
+      Header: entry('Header', join(components, 'Card.tsx')),
+      Footer: entry('Footer', join(components, 'Card.tsx')),
+    }
+    await request(fake, story('Card'))
+    expect(debug.mock.calls.map(([message]) => message)).toEqual([
+      `[caliper-docgen] ./src/stories/Card.stories.tsx: caliper-docgen found no component default in ${resolve(components, 'Card.tsx')}; its components are Header, Footer; asking the next docgen provider`,
+    ])
+    debug.mockRestore()
   })
 
   it('asks the next provider for a degraded component unless fallback is never', async () => {
@@ -112,6 +145,40 @@ describe('createDocgenProvider', () => {
     const { payload, nextCalls } = await request(fake, story('Button'), { fallback: 'never' })
     expect(nextCalls).toBe(0)
     expect(payload?.argTypes).toEqual({ label: labelArgType })
+  })
+
+  it('warns once per component handed on, with the reason', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const fake = binding()
+    fake.output.diagnostics = [warning(['Button'])]
+    const provider = createDocgenProvider({}, fake)(async () => NEXT)
+    await provider({ entry: story('Button') })
+    await provider({ entry: story('Button') })
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0]?.[0]).toBe(
+      "[caliper-docgen] Button: Cannot resolve type; Storybook's own docgen answers instead",
+    )
+    warn.mockRestore()
+  })
+
+  it('reads dependencies and lists inherited props unless told not to, and passes the HTML attribute choice on', async () => {
+    const seen: unknown[] = []
+    const spy = (fake: FakeBinding) => {
+      const init = fake.initializeSessionIndex
+      fake.initializeSessionIndex = async (id: number, options: unknown) => {
+        seen.push(options)
+        return init(id, options as never)
+      }
+      return fake
+    }
+    await request(spy(binding()), story('Button'))
+    expect(seen[0]).toMatchObject({ loadDependencies: true, collapseInheritedProps: 'none', htmlAttributes: undefined })
+    await request(spy(binding()), story('Button'), {
+      loadDependencies: false,
+      htmlAttributes: 'full',
+      collapseInheritedProps: 'all',
+    })
+    expect(seen[1]).toMatchObject({ loadDependencies: false, collapseInheritedProps: 'all', htmlAttributes: 'full' })
   })
 
   it('passes a docs-only entry straight on without starting a session', async () => {

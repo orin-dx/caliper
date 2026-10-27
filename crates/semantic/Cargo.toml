@@ -1,0 +1,29 @@
+[package]
+name = "caliper-docgen-semantic"
+description = "Experimental TypeScript 7.1 checker backend for caliper-docgen: asks `tsc --api` for each component's props"
+version = "0.1.1"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "replay-tsc"
+path = "tests/bin/replay_tsc.rs"
+
+[dependencies]
+caliper-docgen-core       = { path = "../core", version = "0.7.0" }
+caliper-docgen-tsc-client = { path = "../tsc-client", version = "0.1.1" }
+tokio                     = { workspace = true, features = ["time", "rt"] }
+serde.workspace           = true
+serde_json.workspace      = true
+camino.workspace          = true
+tracing.workspace         = true
+rustc-hash.workspace      = true
+
+[dev-dependencies]
+tempfile.workspace        = true

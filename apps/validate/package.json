@@ -15,7 +15,8 @@
     "compare:all": "tsx src/baseline.ts && tsx src/compare.ts",
     "analyze:all": "tsx src/baseline.ts && tsx src/analyze.ts",
     "parity": "tsx src/baseline.ts && tsx src/parity.ts",
-    "bench:cold": "./bench-cold.sh"
+    "bench:cold": "./bench-cold.sh",
+    "test": "vitest run"
   },
   "dependencies": {
     "chalk": "^6.0.1",
@@ -23,10 +24,11 @@
     "react-docgen": "^8.0.4",
     "react-docgen-typescript": "^2.4.0",
     "typescript": "^6.0.3",
-    "typescript-next": "npm:typescript@next"
+    "typescript-beta": "npm:typescript@7.1.0-beta"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
-    "tsx": "^4.23.15"
+    "tsx": "^4.23.15",
+    "vitest": "^5.0.5"
   }
 }

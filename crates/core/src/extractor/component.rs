@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use camino::Utf8Path;
 use oxc_ast::ast::*;
 
-use crate::types::{ComponentMapping, DetectionRule, DiagnosticCode};
+use crate::types::{CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode};
 
 use super::evidence::{renders, FunctionShape};
 use super::{is_pascal_case, SourceDataCollector};
@@ -21,6 +21,7 @@ pub(super) fn peel_expr<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> 
     let mut expr = expr;
     loop {
         expr = match expr {
+            Expression::ParenthesizedExpression(parenthesized) => &parenthesized.expression,
             Expression::TSAsExpression(as_expr) => &as_expr.expression,
             Expression::TSSatisfiesExpression(sat_expr) => &sat_expr.expression,
             Expression::TSNonNullExpression(non_null) => &non_null.expression,
@@ -72,6 +73,30 @@ pub(super) fn pascal_case_from_file_stem(file_path: &Utf8Path) -> Option<String>
 }
 
 impl<'src> SourceDataCollector<'src> {
+    /// An asserted React component alias can replace the inner component's props before the alias is exported.
+    pub(super) fn try_record_cast_component_alias<'a>(&mut self, decl: &VariableDeclarator<'a>, name: &str) {
+        let Some(Expression::TSAsExpression(assertion)) = decl.init.as_ref() else { return };
+        let Expression::Identifier(inner) = assertion.expression.without_parentheses() else { return };
+        let has_base = self.data.component_mappings.iter().any(|mapping| mapping.component_name == inner.name.as_str());
+        if !has_base {
+            return;
+        }
+        let TSType::TSTypeReference(reference) = &assertion.type_annotation else { return };
+        let type_name = self.extract_type_ref_name(reference);
+        let bare = type_name.strip_prefix("React.").unwrap_or(&type_name);
+        if !matches!(bare, "ForwardRefExoticComponent" | "FunctionComponent" | "FC" | "ComponentType") {
+            return;
+        }
+        let Some(props) = reference.type_arguments.as_ref().and_then(|args| args.params.first()) else { return };
+        let alias_name = format!("__{name}CastProps{}", decl.span.start);
+        let alias_key = self.scoped_key(&alias_name);
+        let target = self.ts_type_to_collected(props);
+        self.data
+            .type_aliases
+            .insert(alias_key, CollectedTypeAlias::Passthrough { target, file_path: self.file_path.clone() });
+        self.cast_component_aliases.insert(name.into(), (inner.name.as_str().to_owned(), alias_name.into()));
+    }
+
     // ─── Component detection helpers ──────────────────────────────────────────
 
     /// Try to extract a PascalCase name from a VariableDeclarator's binding.
@@ -149,6 +174,11 @@ impl<'src> SourceDataCollector<'src> {
             TSType::TSParenthesizedType(p) => {
                 self.extract_props_from_type_annotation(&p.type_annotation, name, span_start, span_end, init_params)
             }
+            // `FC<DrawerProps> & { Panel: typeof Panel }`: the function-component member carries the props, the
+            // other members are static properties attached to it.
+            TSType::TSIntersectionType(members) => members.types.iter().find_map(|member| {
+                self.extract_props_from_type_annotation(member, name, span_start, span_end, init_params)
+            }),
             _ => None,
         }
     }
@@ -299,25 +329,28 @@ impl<'src> SourceDataCollector<'src> {
         let param_defaults = self.extract_param_defaults(params);
         let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
 
-        Some(
-            ComponentMapping::new(
-                name.to_owned(),
-                props_name,
-                self.file_path.clone(),
-                decl.span.start,
-                decl.span.end,
-                DetectionRule::HocWrapper,
-            )
-            .with_props_type_args(type_args)
-            .with_doc(description, tags)
-            .with_param_defaults(param_defaults),
+        let mapping = ComponentMapping::new(
+            name.to_owned(),
+            props_name,
+            self.file_path.clone(),
+            decl.span.start,
+            decl.span.end,
+            DetectionRule::HocWrapper,
         )
+        .with_props_type_args(type_args)
+        .with_doc(description, tags)
+        .with_param_defaults(param_defaults);
+        // `factory<Payload>((props: P) => …)`: a generic wrapper's result type can add props, as in `wrapper.rs`.
+        Some(match self.wrapper_callee(call) {
+            Some(callee) => mapping.with_wrapper_callee(callee),
+            None => mapping,
+        })
     }
 
-    /// Try to detect: `declare const Button: React.ForwardRefExoticComponent<ButtonProps & RefAttributes<E>>`
+    /// Try to detect declared `ForwardRefExoticComponent<Props>` and `MemoExoticComponent<(props: Props) => JSX>` values.
     ///
     /// Common in .d.ts files — no initializer, just a type annotation.
-    pub(super) fn try_forward_ref_exotic_decl<'a>(
+    pub(super) fn try_exotic_component_decl<'a>(
         &mut self,
         decl: &VariableDeclarator<'a>,
         name: &str,
@@ -325,35 +358,69 @@ impl<'src> SourceDataCollector<'src> {
         let type_ann = decl.type_annotation.as_ref()?;
         let ct = self.ts_type_to_collected(&type_ann.type_annotation);
 
-        let (type_name, args) = match &ct {
-            crate::types::CollectedType::Named { name, args } => (name.as_str(), args.as_slice()),
-            _ => return None,
+        let is_react_type = |name: &str, expected: &str| {
+            name == expected
+                || name.rsplit_once('.').is_some_and(|(prefix, suffix)| {
+                    suffix == expected
+                        && (prefix == "React"
+                            || self.data.imports.iter().any(|binding| {
+                                binding.local_name == prefix
+                                    && binding.exported_name == "*"
+                                    && binding.specifier == "react"
+                            }))
+                })
         };
-
-        if !matches!(type_name, "ForwardRefExoticComponent" | "React.ForwardRefExoticComponent") {
-            return None;
-        }
+        let exotic_args = |ty: &crate::types::CollectedType| match ty {
+            crate::types::CollectedType::Named { name, args } if is_react_type(name, "ForwardRefExoticComponent") => {
+                Some((args.clone(), false))
+            }
+            crate::types::CollectedType::Named { name, args } if is_react_type(name, "MemoExoticComponent") => {
+                Some((args.clone(), true))
+            }
+            _ => None,
+        };
+        let (args, memoized) = match &ct {
+            crate::types::CollectedType::Intersection(members) => members.iter().find_map(exotic_args),
+            other => exotic_args(other),
+        }?;
 
         let first_arg = args.first()?;
 
-        // Extract P from P & RefAttributes<E>
+        // RefAttributes is metadata on the value, not a prop base. Keep every other member: declaration generators
+        // often write several props objects into one ForwardRefExoticComponent argument.
         let props_type = match first_arg {
-            crate::types::CollectedType::Intersection(members) => members
-                .iter()
-                .find(|m| {
-                    !matches!(m, crate::types::CollectedType::Named { name, .. }
-                            if matches!(name.as_str(), "RefAttributes" | "React.RefAttributes"))
-                })
-                .unwrap_or(first_arg),
-            other => other,
+            crate::types::CollectedType::Function { params, .. } if memoized => params.first()?.clone(),
+            _ if memoized => return None,
+            crate::types::CollectedType::Intersection(members) => {
+                let mut props: Vec<_> = members
+                    .iter()
+                    .filter(|member| {
+                        !matches!(member, crate::types::CollectedType::Named { name, .. }
+                            if is_react_type(name, "RefAttributes"))
+                    })
+                    .cloned()
+                    .collect();
+                match props.len() {
+                    0 => return None,
+                    1 => props.remove(0),
+                    _ => crate::types::CollectedType::Intersection(props),
+                }
+            }
+            other => other.clone(),
         };
 
         let (props_name, props_args) = match props_type {
-            crate::types::CollectedType::Named { name, args } => (name.clone(), args.clone()),
-            _ => return None,
+            crate::types::CollectedType::Named { name, args } => (name, args),
+            props => {
+                let name = format!("__anon_{}", self.data.type_aliases.len());
+                let key = self.scoped_key(&name);
+                self.data.type_aliases.insert(
+                    key,
+                    crate::types::CollectedTypeAlias::Passthrough { target: props, file_path: self.file_path.clone() },
+                );
+                (name.into(), vec![])
+            }
         };
-
-        let props_type_args = props_args;
 
         Some(
             ComponentMapping::new(
@@ -362,12 +429,94 @@ impl<'src> SourceDataCollector<'src> {
                 self.file_path.clone(),
                 decl.span.start,
                 decl.span.end,
-                DetectionRule::ForwardRefExoticDecl,
+                if memoized { DetectionRule::MemoExoticDecl } else { DetectionRule::ForwardRefExoticDecl },
             )
-            .with_props_type_args(props_type_args)
+            .with_props_type_args(props_args)
             .with_doc(self.find_jsdoc(decl.span.start), BTreeMap::new())
             .with_param_defaults(rustc_hash::FxHashMap::default()),
         )
+    }
+
+    /// A dependency can publish a component as `declare const Tab: (props: TabProps) => ReactElement | null`.
+    pub(super) fn try_declared_callable_component<'a>(
+        &mut self,
+        decl: &VariableDeclarator<'a>,
+        name: &str,
+    ) -> Option<ComponentMapping> {
+        let annotation = &decl.type_annotation.as_ref()?.type_annotation;
+        let (params, return_type, type_parameters) = if let TSType::TSFunctionType(function) = annotation {
+            (function.params.as_ref(), function.return_type.as_ref(), function.type_parameters.as_deref())
+        } else if let TSType::TSTypeLiteral(literal) = annotation {
+            let mut calls = literal.members.iter().filter_map(|member| match member {
+                TSSignature::TSCallSignatureDeclaration(call) => Some(call.as_ref()),
+                TSSignature::TSIndexSignature(_)
+                | TSSignature::TSPropertySignature(_)
+                | TSSignature::TSConstructSignatureDeclaration(_)
+                | TSSignature::TSMethodSignature(_) => None,
+            });
+            let call = calls.next()?;
+            if calls.next().is_some() {
+                return None;
+            }
+            (call.params.as_ref(), call.return_type.as_deref()?, call.type_parameters.as_deref())
+        } else {
+            return None;
+        };
+        let [parameter] = params.items.as_slice() else { return None };
+        let return_type = self.ts_type_to_collected(&return_type.type_annotation);
+        let is_element = |name: &str| {
+            matches!(name, "React.ReactElement" | "React.JSX.Element" | "JSX.Element")
+                || name.strip_suffix(".JSX.Element").is_some_and(|namespace| {
+                    self.data.imports.iter().any(|binding| {
+                        binding.local_name == namespace
+                            && binding.exported_name == "*"
+                            && matches!(binding.specifier.as_str(), "react/jsx-runtime" | "react/jsx-dev-runtime")
+                    })
+                })
+                || self.data.imports.iter().any(|binding| {
+                    binding.local_name == name
+                        && binding.exported_name == "ReactElement"
+                        && binding.specifier == "react"
+                })
+        };
+        let returns_element = |ty: &crate::types::CollectedType| match ty {
+            crate::types::CollectedType::Named { name, .. } => is_element(name),
+            crate::types::CollectedType::Union(members) => members.iter().any(|member| {
+                if let crate::types::CollectedType::Named { name, .. } = member {
+                    is_element(name)
+                } else {
+                    false
+                }
+            }),
+            _ => false,
+        };
+        if !returns_element(&return_type) {
+            return None;
+        }
+        let (props_name, mut props_args) =
+            self.extract_type_name_from_type(&parameter.type_annotation.as_ref()?.type_annotation)?;
+        let type_params: Vec<crate::types::TypeName> = type_parameters
+            .map(|declaration| declaration.params.iter().map(|param| param.name.name.as_str().into()).collect())
+            .unwrap_or_default();
+        if props_name.starts_with("__anon_") && !type_params.is_empty() {
+            self.data.type_alias_params.insert(self.scoped_key(&props_name), type_params.clone());
+            props_args = type_params
+                .iter()
+                .map(|name| crate::types::CollectedType::Named { name: name.clone(), args: Vec::new() })
+                .collect();
+        }
+        let mut mapping = ComponentMapping::new(
+            name.to_owned(),
+            props_name,
+            self.file_path.clone(),
+            decl.span.start,
+            decl.span.end,
+            DetectionRule::FunctionDeclaration,
+        )
+        .with_props_type_args(props_args)
+        .with_doc(self.find_jsdoc(decl.span.start), BTreeMap::new());
+        mapping.type_params = type_params;
+        Some(mapping)
     }
 
     /// Try to detect: `export default function(props: Props) { ... }` — an
@@ -535,6 +684,10 @@ impl<'src> SourceDataCollector<'src> {
             _ => return false,
         };
 
+        // The component it receives is not the one it builds when a type argument names the props.
+        if call.is_some_and(|call| self.call_names_props_type(call)) {
+            return false;
+        }
         let Some(base) = self.data.component_mappings.iter().find(|m| m.component_name == inner_name) else {
             return false;
         };
@@ -552,6 +705,34 @@ impl<'src> SourceDataCollector<'src> {
         alias.component_name = name.to_owned();
         self.data.component_mappings.push(alias);
         self.aliased_away.insert(inner_name.into());
+        true
+    }
+
+    /// Record `const X = Imported.Member` as a component whose props are the imported member's
+    /// (`ComponentProps<typeof Imported.Member>`), when `Imported` is an import binding and `Member` is PascalCase.
+    pub(super) fn try_record_imported_member_alias<'a>(&mut self, decl: &Binding<'_, 'a>, name: &str) -> bool {
+        let Some(init) = decl.init.as_ref() else { return false };
+        let Expression::StaticMemberExpression(member) = peel_expr(init) else { return false };
+        let Expression::Identifier(object) = &member.object else { return false };
+        let property = member.property.name.as_str();
+        if !self.imported_names.contains(object.name.as_str()) || !is_pascal_case(property) {
+            return false;
+        }
+        let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
+        self.data.component_mappings.push(
+            ComponentMapping::new(
+                name.to_owned(),
+                "ComponentProps".into(),
+                self.file_path.clone(),
+                decl.span.start,
+                decl.span.end,
+                DetectionRule::ImportedMemberAlias,
+            )
+            .with_props_type_args(vec![crate::types::CollectedType::TypeOf(
+                format!("{}.{property}", object.name).into(),
+            )])
+            .with_doc(description, tags),
+        );
         true
     }
 

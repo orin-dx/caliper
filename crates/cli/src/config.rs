@@ -16,9 +16,12 @@ struct DocgenConfigSchema {
     html_attributes: Option<String>,
     tsconfig_path: Option<String>,
     cache_dir: Option<String>,
+    cache: Option<bool>,
     extra_builtins: Option<Vec<String>>,
     load_dependencies: Option<bool>,
     collapse_inherited_props: Option<String>,
+    experimental_semantic_types: Option<bool>,
+    tsc_path: Option<String>,
 }
 
 impl DocgenConfigSchema {
@@ -45,6 +48,9 @@ impl DocgenConfigSchema {
         if let Some(dir) = self.cache_dir {
             opts.cache_dir = Some(dir.into());
         }
+        if let Some(cache) = self.cache {
+            opts.use_cache = cache;
+        }
         if let Some(names) = self.extra_builtins {
             opts.extra_builtins = names.into_iter().map(Into::into).collect();
         }
@@ -55,6 +61,12 @@ impl DocgenConfigSchema {
             opts.collapse_inherited_props = CollapseInheritedProps::parse(mode).map_err(|bad| {
                 format!("collapseInheritedProps is '{bad}', expected \"dependencies\", \"all\" or \"none\"")
             })?;
+        }
+        if let Some(on) = self.experimental_semantic_types {
+            opts.experimental_semantic_types = on;
+        }
+        if let Some(path) = self.tsc_path {
+            opts.semantic_tsc_path = Some(path.into());
         }
         Ok(opts)
     }
@@ -157,7 +169,7 @@ pub fn try_load_config(path: &std::path::Path) -> Result<Option<PipelineOptions>
             help = "Check docgen.config.ts's exported fields against the supported schema \
                     (srcDirs, excludePatterns, excludePrefixes, reactVersion, crossPackage, \
                     pandacssOutdir, variantFunctions, htmlAttributes, tsconfigPath, \
-                    vanillaExtract, cacheDir, extraBuiltins, loadDependencies, collapseInheritedProps).",
+                    vanillaExtract, cacheDir, extraBuiltins, loadDependencies, collapseInheritedProps, experimentalSemanticTypes, tscPath).",
             "docgen.config.ts at {} doesn't match the expected shape: {}",
             path.display(),
             e,
@@ -174,11 +186,15 @@ pub fn try_load_config(path: &std::path::Path) -> Result<Option<PipelineOptions>
 pub struct BuildOptionsArgs<'a> {
     pub src: &'a [String],
     pub cache_dir: Option<&'a str>,
+    /// `--no-cache`: turns the on-disk caches off over the config; absent leaves the config's choice.
+    pub no_cache: bool,
     pub html_attributes: Option<&'a str>,
     pub config_path: Option<&'a str>,
     pub extra_builtins: &'a [String],
     /// `--load-dependencies`: turns loading on over the config; absent leaves the config's choice.
     pub load_dependencies: bool,
+    /// `--no-load-dependencies`: turns loading off over the config; absent leaves the config's choice.
+    pub no_load_dependencies: bool,
     /// `--collapse-inherited-props`; absent leaves the config's choice.
     pub collapse_inherited_props: Option<CollapseInheritedProps>,
 }
@@ -198,6 +214,9 @@ pub fn build_options(args: BuildOptionsArgs) -> Result<PipelineOptions> {
     if let Some(dir) = args.cache_dir {
         opts.cache_dir = Some(dir.into());
     }
+    if args.no_cache {
+        opts.use_cache = false;
+    }
     if let Some(mode) = args.html_attributes {
         opts.html_attributes = HtmlAttributeMode::parse(mode).map_err(|bad| {
             miette::miette!(
@@ -212,6 +231,9 @@ pub fn build_options(args: BuildOptionsArgs) -> Result<PipelineOptions> {
     }
     if args.load_dependencies {
         opts.load_dependencies = true;
+    }
+    if args.no_load_dependencies {
+        opts.load_dependencies = false;
     }
     if let Some(mode) = args.collapse_inherited_props {
         opts.collapse_inherited_props = mode;

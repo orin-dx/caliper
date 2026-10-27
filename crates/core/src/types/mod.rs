@@ -17,6 +17,7 @@ pub mod collected;
 pub mod diagnostic;
 pub mod global;
 pub mod output;
+pub mod semantic;
 
 // Flat re-export so existing `use crate::types::*` keeps working unchanged.
 pub use collected::*;

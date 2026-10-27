@@ -1,7 +1,11 @@
 import type { Plugin, ResolvedConfig, ViteDevServer, HotUpdateOptions, EnvironmentModuleNode } from 'vite'
 import * as napi from 'caliper-docgen-napi'
 import type { ExtractionOutput, IncrementalUpdate, RdtComponentDoc } from 'caliper-docgen-napi'
+import { DiagnosticReporter } from './diagnostics.js'
 import { ComponentFiles, docgenAssignments, invalidateDeclaringModules } from './docgen-info.js'
+import type { CaliperDocgenOptions } from './options.js'
+import { isAbsolute, toPosix } from './paths.js'
+import { assertSchemaVersion, expandDiagnostics } from './schema.js'
 import { updatePayload } from './update.js'
 
 const VIRTUAL_ID = 'virtual:caliper-docgen'
@@ -10,22 +14,9 @@ const RESOLVED_VIRTUAL_ID = `\0${VIRTUAL_ID}`
 /** A session's cold extraction is revision 1; every change that alters the output publishes the next one. */
 const FIRST_REVISION = 1
 
-export interface CaliperDocgenOptions {
-  srcDirs: string[]
-  exclude?: string[]
-  skipHtmlProps?: boolean
-  /** Assign each component its react-docgen-typescript docs as `__docgenInfo`, for Storybook without a docgen server. */
-  injectDocgenInfo?: boolean
-  /** Load the type declarations your props reference from installed packages. Off by default. */
-  loadDependencies?: boolean
-  /**
-   * Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop: those from
-   * loaded dependencies (the default), every inherited source, or none.
-   */
-  collapseInheritedProps?: 'dependencies' | 'all' | 'none'
-}
-
 export type { CaliperDocgenUpdate } from './update.js'
+export type { CaliperDocgenOptions } from './options.js'
+export type { DiagnosticLevel } from './diagnostics.js'
 
 export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
   let sessionId: number
@@ -47,19 +38,24 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
   let pendingWatchChanges: Promise<unknown>[] = []
   let extracted = false
   const componentFiles = new ComponentFiles()
+  let reporter = new DiagnosticReporter(options.logLevel ?? 'warn', console, options.onDiagnostic)
 
   function napiOptions() {
     return {
       srcDirs: resolvedSrcDirs,
       exclude: options.exclude,
-      htmlAttributes: options.skipHtmlProps ? ('none' as const) : undefined,
+      htmlAttributes: options.htmlAttributes ?? (options.skipHtmlProps ? ('none' as const) : undefined),
+      cache: options.cache,
       loadDependencies: options.loadDependencies,
       collapseInheritedProps: options.collapseInheritedProps,
     }
   }
 
   function isSrcFile(file: string): boolean {
-    return (file.endsWith('.tsx') || file.endsWith('.ts')) && resolvedSrcDirs.some((dir) => file.startsWith(`${dir}/`))
+    const posix = toPosix(file)
+    return (
+      (posix.endsWith('.tsx') || posix.endsWith('.ts')) && resolvedSrcDirs.some((dir) => posix.startsWith(`${dir}/`))
+    )
   }
 
   /** A source file, or a tsconfig, `package.json` or lockfile whose change rebuilds the session. */
@@ -84,9 +80,13 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
 
   /** Applies one file change to the session; `undefined` when it produced no new revision. */
   async function applyChange(file: string): Promise<IncrementalUpdate | undefined> {
-    const update = JSON.parse(await napi.extractFileIncremental(file, sessionId, napiOptions())) as IncrementalUpdate
+    const json = await napi.extractFileIncremental(file, sessionId, napiOptions())
+    const update = assertSchemaVersion(JSON.parse(json) as IncrementalUpdate, 'update')
     if (update.revision <= latestRevision) return undefined
     latestRevision = update.revision
+    const added = expandDiagnostics(update.diagnostics, update.nameLists)
+    const removed = expandDiagnostics(update.removedDiagnostics, update.nameLists)
+    reporter.report(added, removed)
     componentFiles.apply(update)
     return update
   }
@@ -96,13 +96,17 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
 
     configResolved(config: ResolvedConfig) {
       ;({ root, command } = config)
+      root = toPosix(root)
+      if (config.logger)
+        reporter = new DiagnosticReporter(options.logLevel ?? 'warn', config.logger, options.onDiagnostic)
       isWatchBuild = command === 'build' && Boolean(config.build?.watch)
       // A trailing slash (relative `'src/'`, or an already-absolute dir
       // ending in `/`) must be stripped here — isSrcFile's `startsWith(`${dir}/`)`
       // check would otherwise require a double slash no real file path has,
       // silently excluding every file under that srcDir from HMR.
-      resolvedSrcDirs = options.srcDirs.map((d) => {
-        const abs = d.startsWith('/') ? d : `${root}/${d}`
+      resolvedSrcDirs = options.srcDirs.map((dir) => {
+        const posix = toPosix(dir)
+        const abs = isAbsolute(posix) ? posix : `${root}/${posix}`
         return abs.endsWith('/') ? abs.slice(0, -1) : abs
       })
       // sessionId is foundational to every other hook, so a failure here
@@ -133,7 +137,9 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
       if (extracted) return
       try {
         const json = await napi.initializeSession(sessionId, napiOptions())
-        componentFiles.index(JSON.parse(json) as ExtractionOutput)
+        const output = assertSchemaVersion(JSON.parse(json) as ExtractionOutput, 'output')
+        reporter.report(expandDiagnostics(output.diagnostics, output.nameLists))
+        componentFiles.index(output)
         extracted = true
       } catch (error) {
         this.error(`[caliper-docgen] extraction failed: ${String(error)}`)
@@ -166,7 +172,8 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
       initPromise = napi
         .initializeSession(sessionId, napiOptions())
         .then((json) => {
-          const output = JSON.parse(json) as ExtractionOutput
+          const output = assertSchemaVersion(JSON.parse(json) as ExtractionOutput, 'output')
+          reporter.report(expandDiagnostics(output.diagnostics, output.nameLists))
           componentFiles.index(output)
           // environments.client.hot is Vite 6+ API; cast avoids typing fight across patch versions
           ;(server as any).environments?.client?.hot?.send('caliper-docgen:ready', { components: output.components })

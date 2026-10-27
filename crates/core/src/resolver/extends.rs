@@ -46,7 +46,7 @@ pub(super) fn resolve_extends_ref(
             if let Some(element_name) = element {
                 let file_name = resolve_react_types_file(iface_file, ctx);
                 let real_chain = if ctx.html_attributes == HtmlAttributeMode::Full {
-                    real_html_attrs_chain(name.as_str(), &file_name, mapping, ctx, state, depth)
+                    real_html_attrs_chain(name.as_str(), type_args, iface_file, &file_name, mapping, ctx, state, depth)
                 } else {
                     None
                 };
@@ -135,15 +135,26 @@ pub(super) fn component_props_of(
         // A dependency's component, from the loaded layer's value index; never emitted itself (ADR 0010).
         .or_else(|| ctx.dependencies.as_ref()?.component(&canonical_file, &canonical_name));
     match target {
-        Some(target) => resolve_props_chain(
-            target.props_type_name.as_str(),
-            &target.props_type_args,
-            &target.file_path,
-            mapping,
-            ctx,
-            state,
-            depth + 1,
-        ),
+        Some(target) => {
+            // TypeScript instantiates an unbound generic callable with `unknown` in `ComponentProps<typeof X>`.
+            let props_type_args = instantiated_props_args(target);
+            resolve_props_chain(
+                target.props_type_name.as_str(),
+                &props_type_args,
+                &target.file_path,
+                mapping,
+                ctx,
+                state,
+                depth + 1,
+            )
+        }
+        // `typeof Primitive.div`: a member of a value whose declared type is a mapped type over its keys.
+        None if let Some((props, props_file)) = name
+            .rsplit_once('.')
+            .and_then(|(base, member)| super::callee::value_member_props(base, member, file, ctx)) =>
+        {
+            super::alias::resolve_base_as_chain(&props, &props_file, mapping, ctx, state, depth + 1)
+        }
         None => {
             state.diagnostics.push(
                 Diagnostic::new(
@@ -159,6 +170,13 @@ pub(super) fn component_props_of(
     }
 }
 
+/// TypeScript instantiates a generic component value referenced through `typeof` with `unknown` type arguments.
+pub(super) fn instantiated_props_args(target: &ComponentMapping) -> Vec<CollectedType> {
+    let substitution: super::substitute::Substitution<'_> =
+        target.type_params.iter().map(|param| (param.as_str(), CollectedType::Unknown)).collect();
+    target.props_type_args.iter().map(|arg| super::substitute::substitute_type(arg, &substitution)).collect()
+}
+
 /// Full mode only: look up `name` (e.g. "ButtonHTMLAttributes") directly in
 /// `GlobalSourceData.interfaces` under `react_file` — the exact path the pipeline
 /// merges @types/react's parsed interfaces under when Full mode is on — and
@@ -168,9 +186,13 @@ pub(super) fn component_props_of(
 /// namespace import, or no import at all in a `.d.ts`), so there's nothing for
 /// that path to resolve — we already know exactly which file these types live in.
 /// Returns `None` (not a diagnostic) when @types/react wasn't actually merged;
-/// callers fall back to the existing curated/metadata-only behavior.
+/// callers fall back to the existing curated/metadata-only behavior. `type_args`, written in `args_file`, bind the
+/// interface's element parameter (`DOMAttributes<T>` reached from `SVGProps<SVGSVGElement>`).
+#[allow(clippy::too_many_arguments)]
 fn real_html_attrs_chain(
     name: &str,
+    type_args: &[CollectedType],
+    args_file: &Utf8Path,
     react_file: &str,
     mapping: &ComponentMapping,
     ctx: &ResolutionContext,
@@ -190,5 +212,5 @@ fn real_html_attrs_chain(
         .named_types
         .lookup_interface_exact(react_file_path, &qualified_name)
         .or_else(|| ctx.named_types.lookup_interface_exact(react_file_path, bare_name))?;
-    Some(resolve_interface_chain(iface, &[], react_file_path, mapping, ctx, state, depth + 1))
+    Some(resolve_interface_chain(iface, type_args, args_file, mapping, ctx, state, depth + 1))
 }

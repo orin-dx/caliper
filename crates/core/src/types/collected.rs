@@ -105,10 +105,14 @@ pub enum CollectedType {
         false_type: Box<CollectedType>,
     },
 
-    // ── Mapped: { [K in Keys]: Value } — cannot resolve statically
+    // ── Mapped: { [K in Keys]: Value } — expanded as a props base when its keys are known (`resolver::evaluate`)
     Mapped {
+        /// The key variable (`K`), which `value_type` refers to.
+        param: CompactString,
         key_type: Box<CollectedType>,
         value_type: Box<CollectedType>,
+        /// `?` or `+?` (`Some(true)`), `-?` (`Some(false)`), or no modifier, which keeps each key's own optionality.
+        optional: Option<bool>,
     },
 
     // ── Fallback for syntax we don't recognise
@@ -116,6 +120,76 @@ pub enum CollectedType {
 }
 
 impl CollectedType {
+    /// Feed `hasher` everything that tells two types apart, without building their text: a cycle or cache key made of
+    /// this is a few bytes where the debug text of a long union is kilobytes.
+    pub fn structural_hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
+        use std::hash::Hash;
+        std::mem::discriminant(self).hash(hasher);
+        let all = |hasher: &mut H, members: &[CollectedType]| {
+            members.len().hash(hasher);
+            members.iter().for_each(|member| member.structural_hash(hasher));
+        };
+        match self {
+            CollectedType::String
+            | CollectedType::Number
+            | CollectedType::Boolean
+            | CollectedType::Null
+            | CollectedType::Undefined
+            | CollectedType::Any
+            | CollectedType::Never
+            | CollectedType::Unknown
+            | CollectedType::Void
+            | CollectedType::BigInt
+            | CollectedType::Symbol => {}
+            CollectedType::StringLiteral(s) | CollectedType::TypeOf(s) => s.hash(hasher),
+            CollectedType::NumberLiteral(n) => n.to_bits().hash(hasher),
+            CollectedType::BoolLiteral(b) => b.hash(hasher),
+            CollectedType::Union(members)
+            | CollectedType::Intersection(members)
+            | CollectedType::Tuple(members)
+            | CollectedType::TemplateLiteral(members) => all(hasher, members),
+            CollectedType::Array(inner) | CollectedType::KeyOf(inner) => inner.structural_hash(hasher),
+            CollectedType::Object(fields) => {
+                fields.len().hash(hasher);
+                for field in fields {
+                    field.name.hash(hasher);
+                    field.required.hash(hasher);
+                    field.collected_type.structural_hash(hasher);
+                }
+            }
+            CollectedType::Named { name, args } => {
+                name.hash(hasher);
+                all(hasher, args);
+            }
+            CollectedType::AtFile { file, inner } => {
+                file.hash(hasher);
+                inner.structural_hash(hasher);
+            }
+            CollectedType::IndexedAccess { obj, key } => {
+                obj.structural_hash(hasher);
+                key.structural_hash(hasher);
+            }
+            CollectedType::Function { type_params, params, param_names, return_type } => {
+                type_params.hash(hasher);
+                all(hasher, params);
+                param_names.hash(hasher);
+                return_type.structural_hash(hasher);
+            }
+            CollectedType::Conditional { check, extends_type, true_type, false_type } => {
+                for part in [check, extends_type, true_type, false_type] {
+                    part.structural_hash(hasher);
+                }
+            }
+            CollectedType::Mapped { param, key_type, value_type, optional } => {
+                param.hash(hasher);
+                key_type.structural_hash(hasher);
+                value_type.structural_hash(hasher);
+                optional.hash(hasher);
+            }
+            CollectedType::Raw(s) => s.hash(hasher),
+        }
+    }
+
     /// True if this type requires the TypeScript type checker to resolve.
     pub fn needs_type_checker(&self) -> bool {
         matches!(self, CollectedType::Conditional { .. } | CollectedType::Mapped { .. })
@@ -198,8 +272,13 @@ impl CollectedType {
                 true_type.to_raw_string(),
                 false_type.to_raw_string()
             ),
-            CollectedType::Mapped { key_type, value_type } => {
-                format!("{{ [K in {}]: {} }}", key_type.to_raw_string(), value_type.to_raw_string())
+            CollectedType::Mapped { param, key_type, value_type, optional } => {
+                let modifier = match optional {
+                    Some(true) => "?",
+                    Some(false) => "-?",
+                    None => "",
+                };
+                format!("{{ [{param} in {}]{modifier}: {} }}", key_type.to_raw_string(), value_type.to_raw_string())
             }
             CollectedType::Tuple(members) => {
                 format!("[{}]", members.iter().map(|m| m.to_raw_string()).collect::<Vec<_>>().join(", "))
@@ -308,9 +387,14 @@ impl CollectedType {
                     }
                 })
             }
-            // Mapped: {"mapped": {k, v}}
-            CollectedType::Mapped { key_type, value_type } => serde_json::json!({
-                "mapped": {"k": key_type.to_json_value(), "v": value_type.to_json_value()}
+            // Mapped: {"mapped": {p, k, v, o}}
+            CollectedType::Mapped { param, key_type, value_type, optional } => serde_json::json!({
+                "mapped": {
+                    "p": param.as_str(),
+                    "k": key_type.to_json_value(),
+                    "v": value_type.to_json_value(),
+                    "o": optional,
+                }
             }),
             // Raw fallback: {"raw": s}
             CollectedType::Raw(s) => serde_json::json!({"raw": s}),
@@ -458,7 +542,12 @@ impl CollectedType {
                 if let Some(inner) = map.get("mapped") {
                     let k = Self::from_json_value(inner.get("k").unwrap_or(&serde_json::Value::Null))?;
                     let vt = Self::from_json_value(inner.get("v").unwrap_or(&serde_json::Value::Null))?;
-                    return Ok(CollectedType::Mapped { key_type: Box::new(k), value_type: Box::new(vt) });
+                    return Ok(CollectedType::Mapped {
+                        param: inner.get("p").and_then(|p| p.as_str()).unwrap_or("K").into(),
+                        key_type: Box::new(k),
+                        value_type: Box::new(vt),
+                        optional: inner.get("o").and_then(serde_json::Value::as_bool),
+                    });
                 }
                 if let Some(s) = map.get("raw").and_then(|v| v.as_str()) {
                     return Ok(CollectedType::Raw(s.to_owned()));
@@ -512,12 +601,83 @@ pub struct EnumEntry {
 }
 
 /// The value of an enum entry.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", untagged)]
+///
+/// Serialized by hand as the bare value (`"a"`, `1`, `true`), and a spread as a one-element array (`["NAME"]`):
+/// serde's `untagged` cannot read a struct variant back from the cache's positional MessagePack.
+#[derive(Debug, Clone, PartialEq)]
 pub enum EnumValue {
     String(std::string::String),
     Number(f64),
     Bool(bool),
+    /// `...NAME` in a `const X = [...] as const` array: the elements of the array `NAME`, which the resolver looks up
+    /// when `(typeof X)[number]` is read. Only `SourceData::const_arrays` holds one; an enum's values never do.
+    Spread {
+        spread: std::string::String,
+    },
+}
+
+impl Serialize for EnumValue {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        match self {
+            EnumValue::String(s) => serializer.serialize_str(s),
+            EnumValue::Number(n) => serializer.serialize_f64(*n),
+            EnumValue::Bool(b) => serializer.serialize_bool(*b),
+            EnumValue::Spread { spread } => {
+                let mut seq = serializer.serialize_seq(Some(1))?;
+                seq.serialize_element(spread)?;
+                seq.end()
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for EnumValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = EnumValue;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a string, a number, a boolean, or a one-element array naming a spread")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<EnumValue, E> {
+                Ok(EnumValue::String(v.to_owned()))
+            }
+
+            fn visit_string<E: serde::de::Error>(self, v: std::string::String) -> Result<EnumValue, E> {
+                Ok(EnumValue::String(v))
+            }
+
+            fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<EnumValue, E> {
+                Ok(EnumValue::Number(v))
+            }
+
+            #[allow(clippy::cast_precision_loss)]
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<EnumValue, E> {
+                Ok(EnumValue::Number(v as f64))
+            }
+
+            #[allow(clippy::cast_precision_loss)]
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<EnumValue, E> {
+                Ok(EnumValue::Number(v as f64))
+            }
+
+            fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<EnumValue, E> {
+                Ok(EnumValue::Bool(v))
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<EnumValue, A::Error> {
+                let spread: std::string::String =
+                    seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                Ok(EnumValue::Spread { spread })
+            }
+        }
+
+        deserializer.deserialize_any(Visitor)
+    }
 }
 
 impl EnumValue {
@@ -528,6 +688,7 @@ impl EnumValue {
             EnumValue::String(s) => s.clone(),
             EnumValue::Number(n) => n.to_string(),
             EnumValue::Bool(b) => b.to_string(),
+            EnumValue::Spread { spread } => format!("...{spread}"),
         }
     }
 }
@@ -589,6 +750,32 @@ pub struct SourceData {
     /// TypeScript syntax errors). Drained into the pipeline's top-level diagnostics
     /// during `GlobalSourceData` merge — never dropped silently.
     pub diagnostics: Vec<Diagnostic>,
+
+    /// What each generic function declared in this file returns (see [`FunctionResult`]).
+    /// Key: "${absolute_file_path}:${name}"
+    pub function_results: FxHashMap<std::string::String, FunctionResult>,
+
+    /// Each declared type parameter's default (`interface DOMAttributes<T = FocusableElement>`), in declaration order,
+    /// for the generic aliases and interfaces that declare at least one. Keyed as `type_alias_params` and
+    /// `interface_type_params`; a reference that omits trailing arguments takes these, as TypeScript does.
+    pub type_param_defaults: FxHashMap<std::string::String, Vec<Option<CollectedType>>>,
+}
+
+/// What a generic function returns: its declared or asserted type, or a generic call stored in a returned local const.
+/// The wrapper call's type arguments bind to `type_params` before its result is resolved.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionResult {
+    pub type_params: Vec<TypeName>,
+    pub result: CollectedType,
+    /// A generic call assigned to a local const and returned by name, when there is no explicit result type.
+    pub returned_call: Option<WrapperCallee>,
+}
+
+/// The generic function a wrapper call invokes, as the call names it, and the type arguments it passes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WrapperCallee {
+    pub name: TypeName,
+    pub type_args: Vec<CollectedType>,
 }
 
 /// A collected interface declaration.
@@ -638,6 +825,120 @@ pub enum ExtendsRef {
         element: Option<std::string::String>,
         type_args: Vec<CollectedType>,
     },
+}
+
+impl CollectedType {
+    /// This type with each reference `rename` maps (a name with no type arguments of its own, or with them) replaced by
+    /// the name it returns. A type parameter or mapped key variable that shadows a name is left alone inside its scope.
+    #[must_use]
+    pub(crate) fn rename_named(&self, rename: &dyn Fn(&str) -> Option<TypeName>) -> CollectedType {
+        let all = |members: &[CollectedType]| members.iter().map(|m| m.rename_named(rename)).collect::<Vec<_>>();
+        match self {
+            CollectedType::Named { name, args } => {
+                CollectedType::Named { name: rename(name).unwrap_or_else(|| name.clone()), args: all(args) }
+            }
+            CollectedType::Union(members) => CollectedType::Union(all(members)),
+            CollectedType::Intersection(members) => CollectedType::Intersection(all(members)),
+            CollectedType::Tuple(members) => CollectedType::Tuple(all(members)),
+            CollectedType::TemplateLiteral(parts) => CollectedType::TemplateLiteral(all(parts)),
+            CollectedType::Array(inner) => CollectedType::Array(Box::new(inner.rename_named(rename))),
+            CollectedType::KeyOf(inner) => CollectedType::KeyOf(Box::new(inner.rename_named(rename))),
+            CollectedType::AtFile { file, inner } => {
+                CollectedType::AtFile { file: file.clone(), inner: Box::new(inner.rename_named(rename)) }
+            }
+            CollectedType::Object(fields) => CollectedType::Object(
+                fields
+                    .iter()
+                    .map(|f| CollectedObjectField {
+                        name: f.name.clone(),
+                        collected_type: f.collected_type.rename_named(rename),
+                        required: f.required,
+                        description: f.description.clone(),
+                    })
+                    .collect(),
+            ),
+            CollectedType::IndexedAccess { obj, key } => CollectedType::IndexedAccess {
+                obj: Box::new(obj.rename_named(rename)),
+                key: Box::new(key.rename_named(rename)),
+            },
+            CollectedType::Function { type_params, params, param_names, return_type } => {
+                let scoped = |name: &str| if type_params.iter().any(|p| p == name) { None } else { rename(name) };
+                CollectedType::Function {
+                    type_params: type_params.clone(),
+                    params: params.iter().map(|p| p.rename_named(&scoped)).collect(),
+                    param_names: param_names.clone(),
+                    return_type: Box::new(return_type.rename_named(&scoped)),
+                }
+            }
+            CollectedType::Conditional { check, extends_type, true_type, false_type } => CollectedType::Conditional {
+                check: Box::new(check.rename_named(rename)),
+                extends_type: Box::new(extends_type.rename_named(rename)),
+                true_type: Box::new(true_type.rename_named(rename)),
+                false_type: Box::new(false_type.rename_named(rename)),
+            },
+            CollectedType::Mapped { param, key_type, value_type, optional } => {
+                let scoped = |name: &str| if param == name { None } else { rename(name) };
+                CollectedType::Mapped {
+                    param: param.clone(),
+                    key_type: Box::new(key_type.rename_named(rename)),
+                    value_type: Box::new(value_type.rename_named(&scoped)),
+                    optional: *optional,
+                }
+            }
+            CollectedType::String
+            | CollectedType::Number
+            | CollectedType::Boolean
+            | CollectedType::Null
+            | CollectedType::Undefined
+            | CollectedType::Any
+            | CollectedType::Never
+            | CollectedType::Unknown
+            | CollectedType::Void
+            | CollectedType::BigInt
+            | CollectedType::Symbol
+            | CollectedType::StringLiteral(_)
+            | CollectedType::NumberLiteral(_)
+            | CollectedType::BoolLiteral(_)
+            | CollectedType::TypeOf(_)
+            | CollectedType::Raw(_) => self.clone(),
+        }
+    }
+}
+
+impl CollectedTypeAlias {
+    /// This alias with [`CollectedType::rename_named`] applied to every type in its body.
+    #[must_use]
+    pub(crate) fn rename_named(&self, rename: &dyn Fn(&str) -> Option<TypeName>) -> CollectedTypeAlias {
+        let all = |members: &[CollectedType]| members.iter().map(|m| m.rename_named(rename)).collect::<Vec<_>>();
+        match self {
+            CollectedTypeAlias::Omit { base, keys, file_path } => CollectedTypeAlias::Omit {
+                base: base.rename_named(rename),
+                keys: keys.rename_named(rename),
+                file_path: file_path.clone(),
+            },
+            CollectedTypeAlias::Pick { base, keys, file_path } => CollectedTypeAlias::Pick {
+                base: base.rename_named(rename),
+                keys: keys.rename_named(rename),
+                file_path: file_path.clone(),
+            },
+            CollectedTypeAlias::Partial { base, file_path } => {
+                CollectedTypeAlias::Partial { base: base.rename_named(rename), file_path: file_path.clone() }
+            }
+            CollectedTypeAlias::Required { base, file_path } => {
+                CollectedTypeAlias::Required { base: base.rename_named(rename), file_path: file_path.clone() }
+            }
+            CollectedTypeAlias::Union { members, file_path } => {
+                CollectedTypeAlias::Union { members: all(members), file_path: file_path.clone() }
+            }
+            CollectedTypeAlias::Intersection { members, file_path } => {
+                CollectedTypeAlias::Intersection { members: all(members), file_path: file_path.clone() }
+            }
+            CollectedTypeAlias::LiteralUnion { .. } => self.clone(),
+            CollectedTypeAlias::Passthrough { target, file_path } => {
+                CollectedTypeAlias::Passthrough { target: target.rename_named(rename), file_path: file_path.clone() }
+            }
+        }
+    }
 }
 
 impl ExtendsRef {
@@ -773,6 +1074,11 @@ pub enum DetectionRule {
     /// `const Button = wrapper<ButtonFactory>(...)` or `wrapper<El, ButtonProps>(...)`: a generic call whose type
     /// arguments carry the props type, chosen by shape from declarations in the same file.
     WrapperTypeArgument,
+    /// `const HiddenInput = ArkCheckbox.HiddenInput`: a PascalCase member of an imported module, re-exported under a
+    /// name of the project's own. Its props are the imported component's.
+    ImportedMemberAlias,
+    /// Detects a declared component typed as `MemoExoticComponent<(props: Props) => ReactElement>`.
+    MemoExoticDecl,
 }
 
 /// A component → prop type mapping.
@@ -794,6 +1100,12 @@ pub struct ComponentMapping {
     pub rule: DetectionRule,
     /// Whether its module exports it, directly or as a sub-component attached to an exported component.
     pub exported: bool,
+    /// For a component built by a generic call (`WrapperTypeArgument`, or a `HocWrapper` call with type arguments),
+    /// that call: its result type can add props the selected props type lacks.
+    pub wrapper_callee: Option<WrapperCallee>,
+    /// The type parameters of the functions the declaration contains (`function ActionBar<T extends object>(props:
+    /// ActionBarProps<T>)`): placeholders in the props type, not unresolvable names.
+    pub type_params: Vec<TypeName>,
 }
 
 impl ComponentMapping {
@@ -818,7 +1130,28 @@ impl ComponentMapping {
             param_defaults: FxHashMap::default(),
             rule,
             exported: false,
+            wrapper_callee: None,
+            type_params: Vec::new(),
         }
+    }
+
+    /// The mapping of no component, for a question about a type asked mid-walk (what a named type's props are, for a
+    /// property read): it has no parameter defaults, wrapper call or type parameters of its own to bring.
+    pub(crate) fn of_no_component(file_path: &camino::Utf8Path) -> Self {
+        Self::new(
+            std::string::String::new(),
+            TypeName::default(),
+            file_path.to_owned(),
+            0,
+            0,
+            DetectionRule::FunctionDeclaration,
+        )
+    }
+
+    #[must_use]
+    pub fn with_wrapper_callee(mut self, callee: WrapperCallee) -> Self {
+        self.wrapper_callee = Some(callee);
+        self
     }
 
     #[must_use]
