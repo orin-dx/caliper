@@ -1,0 +1,1 @@
+The confidence experiment should use a score without the TS 7.1 opt-in right? Is that the case? Do we have just 1 wrong type??? What about missing types??
