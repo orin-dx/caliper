@@ -1,0 +1,1 @@
+homebrew uses RB right so should we keep our code to RB instead of mixing in PY? Bash and RB seems best no?
