@@ -174,6 +174,11 @@ impl<'src> SourceDataCollector<'src> {
             TSType::TSParenthesizedType(p) => {
                 self.extract_props_from_type_annotation(&p.type_annotation, name, span_start, span_end, init_params)
             }
+            // `FC<DrawerProps> & { Panel: typeof Panel }`: the function-component member carries the props, the
+            // other members are static properties attached to it.
+            TSType::TSIntersectionType(members) => members.types.iter().find_map(|member| {
+                self.extract_props_from_type_annotation(member, name, span_start, span_end, init_params)
+            }),
             _ => None,
         }
     }
