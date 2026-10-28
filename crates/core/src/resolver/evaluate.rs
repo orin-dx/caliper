@@ -599,6 +599,25 @@ fn member_uncached(
     }
     match obj {
         CollectedType::AtFile { file, inner } => member(inner, key, file, ctx, depth + 1),
+        // A property of `A & B` is read from the constituents that declare it, as TypeScript reads it: a constituent
+        // with only an index signature (`{ spacing: SpacingToken } & { [token: string]: never }`) adds nothing to a
+        // declared name. Declared by several, it is their intersection.
+        CollectedType::Intersection(members) => {
+            let mut found: Vec<Located> = members.iter().filter_map(|m| member(m, key, file, ctx, depth + 1)).collect();
+            match found.len() {
+                0 => None,
+                1 => found.pop(),
+                _ => Some((
+                    CollectedType::Intersection(
+                        found
+                            .into_iter()
+                            .map(|(ty, at)| CollectedType::AtFile { file: at, inner: Box::new(ty) })
+                            .collect(),
+                    ),
+                    file.to_owned(),
+                )),
+            }
+        }
         CollectedType::Object(fields) => {
             Some((fields.iter().find(|f| f.name == key)?.collected_type.clone(), file.to_owned()))
         }

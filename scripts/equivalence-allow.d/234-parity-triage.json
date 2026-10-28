@@ -1,0 +1,5 @@
+{
+  "allow": [
+    "mantine/* prop-type-changed *.component"
+  ]
+}
