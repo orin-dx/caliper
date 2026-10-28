@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import type * as Napi from 'caliper-docgen-napi'
 import type { Diagnostic, IncrementalUpdate, RdtComponentDoc, SessionIndex } from 'caliper-docgen-napi'
-import { localNameOf } from './exports.js'
+import { declaresExport, localNameOf } from './exports.js'
 import { Fill } from './fill.js'
 import { buildLookups, diagnosticId, incompleteMessages, type ComponentRef, type Lookups } from './lookups.js'
 import { assertSchemaVersion, expandDiagnostics } from './schema.js'
@@ -223,19 +223,19 @@ export class DocgenSession {
   }
 
   /**
-   * `keyOf`, and when the file holds several components and none has the export's name, the component the module's
-   * source exports under it (`export default Card`, `export { Inner as Card }`), then, for a default import, the one
-   * named as the story named its import (`importedAs`).
+   * `keyOf`, else what the module's source exports under the name (`export default Card`, `export { Inner as Card }`),
+   * else for a default import the component named as the story named it (`importedAs`), else the file's only
+   * component when its source declares that export (the display name may differ).
    */
   async resolveExport(path: string, exportName: string, importedAs?: string): Promise<string | undefined> {
     const key = this.keyOf(path, exportName)
     if (key) return key
-    const file = resolve(path)
-    const inFile = this.lookups().byFile.get(file)
+    const inFile = this.lookups().byFile.get(resolve(path))
     if (!inFile) return undefined
     const named = (name: string | undefined) => inFile.find((each) => this.components.get(each)?.displayName === name)
-    const source = await readFile(file, 'utf8').catch(() => '')
-    return named(localNameOf(source, exportName)) ?? (exportName === 'default' ? named(importedAs) : undefined)
+    const source = await readFile(resolve(path), 'utf8').catch(() => '')
+    const sole = inFile.length === 1 && declaresExport(source, exportName) ? inFile[0] : undefined
+    return named(localNameOf(source, exportName)) ?? (exportName === 'default' ? named(importedAs) : sole)
   }
 
   /**
