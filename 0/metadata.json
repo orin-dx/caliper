@@ -1,0 +1,120 @@
+{
+  "cli_version": "0.12.3-nightly.202610261136.c4f103d8d",
+  "checkpoint_id": "01M60AG3NCQGP75AY8R9WEBEWY",
+  "session_id": "ba6a68d6-c702-4382-ab2f-60cd0f6af675",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-28T03:58:03.382071Z",
+  "branch": "deps/oxc-0.155",
+  "checkpoints_count": 3,
+  "save_step_count": 2,
+  "files_touched": [
+    "Cargo.lock",
+    "Cargo.toml",
+    "crates/core/Cargo.toml",
+    "crates/core/src/extractor/interface.rs",
+    "crates/core/src/extractor/js_text.rs",
+    "crates/core/src/extractor/mod.rs",
+    "crates/core/src/extractor/visit.rs",
+    "crates/core/src/extractor/wrapper.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "e019b3dac524",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 14,
+    "cache_creation_tokens": 9016,
+    "cache_read_tokens": 1854518,
+    "output_tokens": 5566,
+    "api_call_count": 6,
+    "subagent_tokens": {
+      "input_tokens": 76,
+      "cache_creation_tokens": 52823,
+      "cache_read_tokens": 12493307,
+      "output_tokens": 20209,
+      "api_call_count": 37
+    }
+  },
+  "redaction": {
+    "replacements": 1304,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 1304,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01QchtZUzPN3PMVrg8Gy3ykV",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "vanguard:research"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "759066964e9a",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 6111,
+        "end": 6112,
+        "entry_ids": [
+          "255a129b-35bc-4cc3-9675-402f9d83f595"
+        ],
+        "tool_use_id": "toolu_01QchtZUzPN3PMVrg8Gy3ykV"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01QchtZUzPN3PMVrg8Gy3ykV"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: vanguard:research",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": ".claude/worktrees/release-0.2.0:adr"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "759066964e9a",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 40539,
+        "end": 40540,
+        "entry_ids": [
+          "0a2d086d-18f7-41f9-b6a6-3a37c42b1182"
+        ],
+        "tool_use_id": "toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: .claude/worktrees/release-0.2.0:adr",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 18
+  }
+}
