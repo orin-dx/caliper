@@ -67,7 +67,7 @@ Apple Silicon laptop, macOS, load average 8 to 12, 10 runs per corpus, branch `c
 
 Scaling: one copy of mantine 26 ms, two copies 46 ms (1.77×).
 
-RDT's component and prop counts are not comparable with Caliper's here: without dependencies it reports every exported function and expands what it can of `@types/react`. Recall and precision against RDT are in `docs/precision.md` and `docs/projects/architecture-roadmap.md`; agreement with RDT on installed repos, gated weekly, is in `docs/parity.md`.
+RDT's component and prop counts are not comparable with Caliper's here: without dependencies it reports every exported function and expands what it can of `@types/react`. Precision is in `docs/precision.md`; recall and agreement with RDT on installed repos, gated weekly, are in `docs/parity.md`.
 
 ## Dependency loading against RDT, 2026-10-23
 
@@ -145,7 +145,7 @@ The earlier lazy-session measurements did not cover Spectrum with both options o
 
 ## Chained lazy dependency layers, 2026-10-25
 
-On the five installed parity corpora, `lazy_bench` with dependency loading and full HTML attributes, best of three runs per scenario. `random50` asks 50 seeded components one at a time; `all` asks every listed component in key order. Peak RSS is per process. The comparison uses the same build with the whole-demand threshold at three or 48 growths; this change sets the threshold to three (ADR 0020).
+On the five installed parity corpora, `lazy_bench` with dependency loading and full HTML attributes, best of three runs per scenario. `random50` asks 50 seeded components one at a time; `all` asks every listed component in key order. Peak RSS is per process. The comparison uses the same build with the whole-demand threshold at three or 48 growths; this change sets the threshold to three (design in `docs/architecture/pipeline-orchestration.md`, "Demand-driven dependencies").
 
 | Corpus   | 50 requests: 3 → 48 growths | Peak MB: 3 → 48 | All requests: 3 → 48 | Peak MB: 3 → 48 |
 | -------- | --------------------------: | --------------: | -------------------: | --------------: |

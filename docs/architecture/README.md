@@ -20,7 +20,7 @@ Read this first. Load only the file your task requires — never load all seven 
 
 - **Source code** — read it directly from the crate. These files summarize invariants, they don't replace reading the function you're about to change.
 - **Spec@1 artifacts** (`.claude/specs/`) — testable acceptance criteria for a specific unit of work. These files are broader and looser; specs are narrow and binding.
-- **`docs/edge-cases.md` / `docs/root-cause-analysis.md`** — the project's bug/gap tracker and its root-cause analysis. Files here cross-reference those rather than duplicating them; check those docs directly for current, itemized gap status.
+- **`docs/edge-cases.md`** — the project's open-gap list. Files here cross-reference it rather than duplicating it; check it directly for current gap status.
 - **`docs/adr/`** — hard-to-reverse decisions with their own record format. Files here cite the relevant ADR by number rather than re-explaining the decision.
 - **`ARCHITECTURE.md`, `AGENTS.md` files** — human-facing prose reference and contributor rules. Treat as context, not as the invariant source — the files here are the ones checked against real source per subsystem.
 
@@ -33,12 +33,7 @@ Read this first. Load only the file your task requires — never load all seven 
 
 ## Known doc-hygiene corrections found while writing this layer (2026-08-12)
 
-Writing these seven files against real source turned up several places where existing docs had drifted from the code they describe. Fixed inline in the source docs as part of this pass (see `docs/adr/0002-manual-serialize-for-prop-type.md`, `docs/root-cause-analysis.md`, `docs/edge-cases.md` for the corrections) — noted here so the correction itself doesn't get lost:
+Writing these seven files against real source turned up several places where existing docs had drifted from the code they describe. Fixed inline in the source docs as part of this pass (see `docs/adr/0002-manual-serialize-for-prop-type.md` for the corrections) — noted here so the correction itself doesn't get lost:
 
 - ADR-0002 claimed `OpaqueReason` hand-writes `Serialize`/is recursive — it doesn't and isn't; only `PropType`/`CollectedType` actually need the manual impl.
 - ADR-0002's "worth deleting as a follow-up" note about `#![recursion_limit = "2048"]` — already deleted; the ADR just hadn't been updated to say so.
-- `root-cause-analysis.md`'s claim that `build_substitution` silently truncates unfilled generic params — already fixed (pushes `GenericArgumentMismatch`); the doc was stale.
-- `root-cause-analysis.md`'s "empty RDT enum" gap — real, but imprecisely located; the serialization layer's `is_literal_union()` already correctly excludes 0/1-member unions, so the residual gap is upstream at resolver construction sites, not in serialization.
-- `edge-cases.md` P1-9 (NAPI `create_session`/`close_session` panic safety) — resolved by ADR-0005; was still listed as open.
-
-One new, previously-untracked gap surfaced and added to `edge-cases.md`: `resolve_named` (named.rs) has no cycle detection, unlike its chain-level sibling `resolve_props_chain` — bounded only by `MAX_DEPTH=20`, not caught with a friendly "circular reference" diagnostic. See `resolver-type-resolution.md` for detail.
