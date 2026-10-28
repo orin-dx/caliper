@@ -2974,3 +2974,47 @@ fn a_default_import_names_a_namespace_member_as_a_namespace_import_does() {
     assert_eq!(canonical_of(r#"import * as Lib from "./lib";"#), expected, "the namespace spelling");
     assert_eq!(canonical_of(r#"import Lib from "./lib";"#), expected, "the default spelling");
 }
+
+// ── Component lookup by file and name ─────────────────────────────────────
+
+/// The lookup answers as a scan of the mappings does: the first mapping with that file and name, nothing for a name
+/// the file does not declare, whatever other files declare under it.
+#[test]
+fn component_mapping_is_the_first_match_a_scan_finds() {
+    let mapping = |name: &str, props: &str, file: &str| {
+        ComponentMapping::new(
+            name.into(),
+            props.into(),
+            Utf8PathBuf::from(file),
+            0,
+            0,
+            crate::types::DetectionRule::FunctionDeclaration,
+        )
+    };
+    let mut global = GlobalSourceData::default();
+    global.component_mappings = vec![
+        mapping("Button", "FirstProps", "/a/button.tsx"),
+        mapping("Button", "SecondProps", "/b/button.tsx"),
+        mapping("Button", "ShadowedProps", "/a/button.tsx"),
+        mapping("Card", "CardProps", "/a/card.tsx"),
+    ];
+    let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
+    let props_of = |file: &str, name: &str| {
+        ctx.component_mapping(Utf8Path::new(file), name).map(|found| found.props_type_name.to_string())
+    };
+
+    assert_eq!(props_of("/a/button.tsx", "Button").as_deref(), Some("FirstProps"));
+    assert_eq!(props_of("/b/button.tsx", "Button").as_deref(), Some("SecondProps"));
+    assert_eq!(props_of("/a/card.tsx", "Card").as_deref(), Some("CardProps"));
+    assert_eq!(props_of("/b/button.tsx", "Card"), None, "another file's component");
+    assert_eq!(props_of("/a/button.tsx", "Missing"), None);
+    assert_eq!(props_of("/c/button.tsx", "Button"), None, "a file that declares none");
+    // A context derived for a dependency layer answers from the same index.
+    let derived = ctx.over_layer(ctx.named_types.clone(), None);
+    assert_eq!(
+        derived
+            .component_mapping(Utf8Path::new("/b/button.tsx"), "Button")
+            .map(|found| found.props_type_name.to_string()),
+        Some("SecondProps".to_owned())
+    );
+}

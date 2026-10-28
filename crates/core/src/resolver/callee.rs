@@ -243,10 +243,7 @@ fn component_props_type(
             let (canonical_file, canonical_name) = resolve_to_canonical(name, file, ctx, &mut ignored)
                 .unwrap_or_else(|| (file.to_owned(), name.to_string()));
             let mapping = ctx
-                .global
-                .component_mappings
-                .iter()
-                .find(|mapping| mapping.file_path == canonical_file && mapping.component_name == canonical_name)
+                .component_mapping(&canonical_file, &canonical_name)
                 .or_else(|| ctx.dependencies.as_ref()?.component(&canonical_file, &canonical_name));
             let Some(mapping) = mapping else {
                 let (base, member) = name.rsplit_once('.')?;

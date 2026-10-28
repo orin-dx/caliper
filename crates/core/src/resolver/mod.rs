@@ -282,6 +282,9 @@ pub struct ResolutionContext {
     pub(crate) props_reads:
         dashmap::DashMap<primitives::PropsReadKey, primitives::PropsRead, rustc_hash::FxBuildHasher>,
     pub extra_builtins: FxHashSet<CompactString>,
+    /// Positions in `global.component_mappings` by component name (`component_mapping`), built on first use and shared
+    /// by the contexts derived from this one, which have the same `global`.
+    mapping_index: Arc<std::sync::OnceLock<FxHashMap<CompactString, Vec<usize>>>>,
     /// Bare name → full scoped key ("file:name") index over `global.enums`,
     /// built once per resolution pass so `resolve_typeof` and
     /// `resolve_cva_variant_props` (VariantProps<typeof X>) can do an O(1)
@@ -386,6 +389,7 @@ impl ResolutionContext {
             types_first_resolver: Arc::new(resolvers.types_first),
             tsconfig_diagnostic,
             extra_builtins: options.extra_builtins.clone(),
+            mapping_index: Default::default(),
             enum_bare_index: Arc::new(enum_bare_index),
             const_array_bare_index: Arc::new(const_array_bare_index),
             html_attributes: options.html_attributes,
@@ -444,6 +448,24 @@ impl ResolutionContext {
             }
         }
         self.enum_bare_index.get(name).map(|key| key.to_string())
+    }
+
+    /// The detected component `name` declared in `file`: the first such mapping, as a scan of `global.component_mappings`
+    /// finds it. `ComponentProps<typeof X>` asks once per reference, and comparing the path of every mapping dominated a
+    /// design system's run.
+    pub(crate) fn component_mapping(&self, file: &Utf8Path, name: &str) -> Option<&ComponentMapping> {
+        let index = self.mapping_index.get_or_init(|| {
+            let mut index: FxHashMap<CompactString, Vec<usize>> = FxHashMap::default();
+            for (position, mapping) in self.global.component_mappings.iter().enumerate() {
+                index.entry(CompactString::from(mapping.component_name.as_str())).or_default().push(position);
+            }
+            index
+        });
+        index
+            .get(name)?
+            .iter()
+            .filter_map(|&position| self.global.component_mappings.get(position))
+            .find(|mapping| mapping.file_path == file)
     }
 
     /// `prop` as the run's one shared allocation of it: an equal prop built earlier, or `prop` itself.
@@ -518,6 +540,7 @@ impl ResolutionContext {
             member_reads: Default::default(),
             props_reads: Default::default(),
             extra_builtins: self.extra_builtins.clone(),
+            mapping_index: self.mapping_index.clone(),
             enum_bare_index: self.enum_bare_index.clone(),
             const_array_bare_index: self.const_array_bare_index.clone(),
             html_attributes: self.html_attributes,
