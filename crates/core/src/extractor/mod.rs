@@ -27,6 +27,7 @@ mod component;
 mod defaults;
 mod evidence;
 mod interface;
+mod js_text;
 mod jsdoc;
 mod uses;
 mod visit;
@@ -657,7 +658,7 @@ impl<'src> SourceDataCollector<'src> {
             TSType::TSObjectKeyword(_) => CollectedType::Named { name: "object".into(), args: vec![] },
 
             TSType::TSLiteralType(lit) => match &lit.literal {
-                TSLiteral::StringLiteral(s) => CollectedType::StringLiteral(s.value.as_str().into()),
+                TSLiteral::StringLiteral(s) => CollectedType::StringLiteral(js_text::lossy(s.value).as_ref().into()),
                 TSLiteral::NumericLiteral(n) => CollectedType::NumberLiteral(n.value),
                 TSLiteral::BooleanLiteral(b) => CollectedType::BoolLiteral(b.value),
                 TSLiteral::UnaryExpression(u) => {
@@ -858,7 +859,7 @@ impl<'src> SourceDataCollector<'src> {
     ) -> Option<CollectedObjectField> {
         match member {
             TSSignature::TSPropertySignature(sig) => {
-                let name = sig.key.static_name()?.to_string();
+                let name = js_text::property_name(&sig.key.static_name()?);
                 let collected_type = sig
                     .type_annotation
                     .as_ref()
@@ -868,7 +869,7 @@ impl<'src> SourceDataCollector<'src> {
                 Some(CollectedObjectField { name, collected_type, required: !sig.optional, description })
             }
             TSSignature::TSMethodSignature(sig) => {
-                let name = sig.key.static_name()?.to_string();
+                let name = js_text::property_name(&sig.key.static_name()?);
                 let (params, param_names, param_kinds) =
                     collect_params(&sig.params, |t| self.ts_type_to_collected_at_depth(t, depth + 1));
                 let return_type = sig
@@ -897,7 +898,7 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn expression_to_string<'a>(&self, expr: &Expression<'a>) -> String {
         match expr {
             Expression::NumericLiteral(n) => n.value.to_string(),
-            Expression::StringLiteral(s) => format!("\"{}\"", s.value.as_str()),
+            Expression::StringLiteral(s) => format!("\"{}\"", js_text::lossy(s.value)),
             Expression::BooleanLiteral(b) => b.value.to_string(),
             Expression::NullLiteral(_) => "null".to_owned(),
             _ => "unknown".to_owned(),
@@ -999,7 +1000,7 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn collect_property_signature<'a>(&mut self, sig: &TSSignature<'a>) -> Option<RawProp> {
         match sig {
             TSSignature::TSPropertySignature(ps) => {
-                let name = ps.key.static_name()?.to_string();
+                let name = js_text::property_name(&ps.key.static_name()?);
                 let collected_type = ps
                     .type_annotation
                     .as_ref()
@@ -1019,7 +1020,7 @@ impl<'src> SourceDataCollector<'src> {
                 })
             }
             TSSignature::TSMethodSignature(ms) => {
-                let name = ms.key.static_name()?.to_string();
+                let name = js_text::property_name(&ms.key.static_name()?);
                 let (description, tags) = self.find_jsdoc_with_tags(ms.span.start);
                 let (params, param_names, param_kinds) = collect_params(&ms.params, |t| self.ts_type_to_collected(t));
                 let return_type = ms
@@ -1105,7 +1106,7 @@ pub(super) fn declaration_name<'a>(decl: &Declaration<'a>) -> Option<&'a str> {
         Declaration::TSInterfaceDeclaration(iface) => Some(iface.id.name.as_str()),
         Declaration::TSEnumDeclaration(e) => Some(e.id.name.as_str()),
         Declaration::TSNamespaceDeclaration(ns) => Some(ns.id.name.as_str()),
-        Declaration::TSExternalModuleDeclaration(m) => Some(m.id.value.as_str()),
+        Declaration::TSExternalModuleDeclaration(m) => m.id.value.as_str(),
         _ => None,
     }
 }

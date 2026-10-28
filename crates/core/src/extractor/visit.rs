@@ -10,11 +10,11 @@ use crate::types::{
 };
 
 use super::component::Binding;
-use super::{declaration_name, is_pascal_case, SourceDataCollector};
+use super::{declaration_name, is_pascal_case, js_text, SourceDataCollector};
 
 impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     fn visit_import_declaration(&mut self, node: &ImportDeclaration<'a>) {
-        let specifier = node.source.value.as_str().to_owned();
+        let specifier = js_text::lossy(node.source.value).into_owned();
         let is_type_only = node.import_kind.is_type();
 
         if let Some(specifiers) = &node.specifiers {
@@ -96,7 +96,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
 
     /// `export { X } from "./y"`.
     fn visit_export_from_declaration(&mut self, node: &ExportFromDeclaration<'a>) {
-        let src = node.source.value.as_str().to_owned();
+        let src = js_text::lossy(node.source.value).into_owned();
         for spec in &node.specifiers {
             self.data.exports.push(LexedExport::ReExportNamed {
                 // local_name is what we call it here; source_name is the original
@@ -141,7 +141,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     }
 
     fn visit_export_all_declaration(&mut self, node: &ExportAllDeclaration<'a>) {
-        let src = node.source.value.as_str().to_owned();
+        let src = js_text::lossy(node.source.value).into_owned();
         if let Some(ns) = &node.exported {
             // `export * as Ns from "./y"`
             self.data.exports.push(LexedExport::ReExportNamespace {
@@ -239,8 +239,8 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             .filter_map(|member| {
                 let name = match &member.id {
                     TSEnumMemberName::Identifier(id) => id.name.as_str().to_owned(),
-                    TSEnumMemberName::String(s) => s.value.as_str().to_owned(),
-                    TSEnumMemberName::ComputedString(s) => s.value.as_str().to_owned(),
+                    TSEnumMemberName::String(s) => js_text::lossy(s.value).into_owned(),
+                    TSEnumMemberName::ComputedString(s) => js_text::lossy(s.value).into_owned(),
                     TSEnumMemberName::ComputedTemplateString(_) => return None,
                 };
 

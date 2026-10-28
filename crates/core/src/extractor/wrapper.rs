@@ -182,8 +182,10 @@ impl<'src> SourceDataCollector<'src> {
         let Some(Expression::StringLiteral(tag)) = tag.as_expression().map(super::component::peel_expr) else {
             return false;
         };
-        let is_tag = tag.value.starts_with(|c: char| c.is_ascii_lowercase())
-            && tag.value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+        let is_tag = tag.value.as_str().is_some_and(|name| {
+            name.starts_with(|c: char| c.is_ascii_lowercase())
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        });
         let has_config =
             matches!(config.as_expression().map(super::component::peel_expr), Some(Expression::ObjectExpression(_)));
         let Some(callee) = self.extract_callee_name(call) else { return false };
