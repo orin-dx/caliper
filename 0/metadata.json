@@ -1,0 +1,178 @@
+{
+  "cli_version": "0.12.3-nightly.202610261136.c4f103d8d",
+  "checkpoint_id": "01M60HHV4ZBKJJA25S6DZTA0CW",
+  "session_id": "ba6a68d6-c702-4382-ab2f-60cd0f6af675",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-28T06:01:20.590464Z",
+  "branch": "fix/lint-entire-files",
+  "checkpoints_count": 4,
+  "save_step_count": 1,
+  "files_touched": [
+    ".oxfmtrc.json"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "6a4d9733e098",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 22,
+    "cache_creation_tokens": 17724,
+    "cache_read_tokens": 3992641,
+    "output_tokens": 11814,
+    "api_call_count": 10,
+    "subagent_tokens": {
+      "input_tokens": 216,
+      "cache_creation_tokens": 217660,
+      "cache_read_tokens": 49287014,
+      "output_tokens": 81254,
+      "api_call_count": 106
+    }
+  },
+  "redaction": {
+    "replacements": 1340,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 1340,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01QchtZUzPN3PMVrg8Gy3ykV",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "vanguard:research"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "759066964e9a",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 6111,
+        "end": 6112,
+        "entry_ids": [
+          "255a129b-35bc-4cc3-9675-402f9d83f595"
+        ],
+        "tool_use_id": "toolu_01QchtZUzPN3PMVrg8Gy3ykV"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01QchtZUzPN3PMVrg8Gy3ykV"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: vanguard:research",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": ".claude/worktrees/release-0.2.0:adr"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "759066964e9a",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 40539,
+        "end": 40540,
+        "entry_ids": [
+          "0a2d086d-18f7-41f9-b6a6-3a37c42b1182"
+        ],
+        "tool_use_id": "toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: .claude/worktrees/release-0.2.0:adr",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 33
+  },
+  "summary": {
+    "intent": "Get the caliper repo (a Rust/OXC replacement for react-docgen-typescript) to a proper first release on the latest callisto, then clean up and simplify CI gates, ADRs, docs, trails and dependabot handling.",
+    "outcome": "Release prep PR #33 was merged, the release PR was fixed (oxfmt ignores generated changelogs) and callisto published 0.2.0. Later work landed OXC 0.155 (#253), Callisto 0.16.0 (#255) and a simplified weekly measurement setup (#256), and removed the dead Homebrew notifier (#258). Trails #87, #88 and #30 were set up, and forks were started for the apps/oracle and docs/ADR/dependabot PRs, which were still running at the end.",
+    "learnings": {
+      "repo": [
+        "Callisto releases any package whose version has no tag; with unreleased 0.1.0 the old release PR would skip to 0.1.1, so a minor changeset was added to make the first release 0.2.0.",
+        "npm provenance (NPM_CONFIG_PROVENANCE) requires package.json repository.url to match the GitHub repo, hence the oxc-react-docgen to caliper URL fix across 13 package.json files.",
+        "oxfmt rewrites double-quoted scoped package names in changesets to single quotes, which callisto does not strip; the name must be left unquoted.",
+        "Callisto-generated CHANGELOG.md files fail `oxfmt --check`, so release PRs failed Lint until `**/CHANGELOG.md` was added to ignorePatterns in .oxfmtrc.json.",
+        "Local main had 8 commits that were never pushed (including tsc-client and ADR 0006), so checking `rev-list --left-right main...origin/main` early would have exposed this.",
+        "The Homebrew tap is now pull-based: livecheck matches tags like `npm/caliper-docgen@x.y.z` and builds crates/cli from source, so no notifier step is needed in release.yml.",
+        "apps/validate holds the TS 7.1 oracle (kept, used by weekly.py --oracle) plus an obsolete July fixtures harness (about 1,250 lines); tsx for CI config tests comes from that package.",
+        "The Equivalence allow-list machinery cost more than it caught, so the PR gates were replaced with a weekly job, scripts/weekly.py, and a local `just bench`. The old criterion recipe is now `just bench-criterion`.",
+        "OXC 0.155 made string literals and property names JSStr, which broke Display and as_str; a small js_text module maps lone surrogates to U+FFFD.",
+        "Callisto 0.15 removed the [init] and [release.profiles] tables and the setup_git_user input, and now restricts which paths a version commit may touch; none of these affect caliper.",
+        "A release PR branch pushed with GITHUB_TOKEN gets no CI checks attached."
+      ],
+      "code": [
+        {
+          "path": "crates/cli/src/commands/extract.rs",
+          "line": 295,
+          "end_line": 320,
+          "finding": "The --out missing-parent test substring-matched a path that miette word-wraps when the CI temp path is long, making it fail in CI only; the test now unwraps the output."
+        },
+        {
+          "path": ".github/workflows/release.yml",
+          "line": 322,
+          "end_line": 342,
+          "finding": "Held the tag-finder and notify-homebrew-tap steps, which were dead after the tap moved to a pull model; removed in #258."
+        },
+        {
+          "path": "callisto.toml",
+          "line": 1,
+          "finding": "The header comment pins the callisto version and went stale versus the workflow pins; it must be updated alongside ci.yml and release.yml."
+        }
+      ],
+      "workflow": null
+    },
+    "friction": [
+      "The user's recollection of a callisto blocker could not be confirmed from the repo or docs.",
+      "Early statements were wrong because the local main was stale (0.8.0 pins, missing tsc-client); they had to be corrected.",
+      "git and gh commands were intermittently hooked or blocked, forcing /usr/bin/git and retried commands.",
+      "Stash apply silently did nothing and the carried changes had to be re-applied from a patch.",
+      "CI on main was red from transient install-action errors, a newly bumped oxfmt flagging archive docs, and stray allow-list files, each needing its own small PR.",
+      "Merging dependabot PRs triggered release-PR refreshes, and the user merged those instead of the release PR, causing confusion about whether anything was published.",
+      "The first publish attempt on #22's merge ran version-pr instead of plan/build/execute, so the release-candidate detection was still being investigated when the transcript was cut off.",
+      "A fork's first `callisto version` edited release files in the parent worktree and had to be reverted.",
+      "The apps/oracle fork failed on its first launch because it could not get a writable worktree and had to be relaunched with isolation.",
+      "The earlier #236 Homebrew notifier work was built against an outdated flow."
+    ],
+    "open_items": [
+      "Confirm the release actually published; the earlier run was green but registries and tags showed nothing, and why release-candidate skipped plan/execute was not resolved in the visible transcript.",
+      "Merge #239 as the first release on Callisto 0.16.0, and check that the pull-based tap picks up the tag and opens a formula PR with bottles.",
+      "Finish the apps/validate to apps/oracle PR (trail #87) and the docs/ADR/dependabot PRs (trail #88); both forks were still running.",
+      "Close dependabot #247 and #248 and add the oxc_* dependabot group; OXC 0.156 is already out.",
+      "Retire ADRs 0013, 0021, 0023 and 0024, and review 0002, 0003, 0008, 0009, 0010, 0011, 0012, 0014 and 0019 against the architecture-only test.",
+      "Run the weekly workflow by hand once after #256 to validate the corpus installs, cache, artifact download and issue step.",
+      "Protect main: confirm no ruleset bypass, require signed commits, and check merge-queue interaction; remove deleted required checks from Entire Gates if any.",
+      "Delete the TAP_APP_CLIENT_ID and TAP_APP_PRIVATE_KEY secrets, stale remote and local scratch branches, and leftover ~/Projects caliper-homebrew-tap and callisto-homebrew-tap worktrees; close stale trails.",
+      "Handle .claude/settings.json and .gemini/settings.json tool-config changes, which remained uncommitted and potentially destructive (removed deny rule, emptied plugins, wiped Gemini hooks).",
+      "Accuracy gaps: dropped syntax (readonly, index signatures, RefObject), memo(forwardRef) detection, Chakra NonNullable<union>, and shadcn/antd recall.",
+      "An intermittent `just test-rust` failure under parallel load was seen once and never identified.",
+      "Later features: TS 7.1 on-demand follow-ups, an in-process API for monokl agents, and Storybook latency tracking."
+    ]
+  }
+}
