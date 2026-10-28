@@ -1,0 +1,56 @@
+{
+  "cli_version": "0.12.3-nightly.202610261136.c4f103d8d",
+  "checkpoint_id": "01M60HJHE4J07PRANJVTX1HAR2",
+  "strategy": "manual-commit",
+  "branch": "oracle-only-work",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "ARCHITECTURE.md",
+    "apps/validate/src/parity.ts",
+    "apps/validate/src/run-ours.ts",
+    "crates/cli/tests/commands.rs",
+    "crates/core/src/pipeline/tests.rs",
+    "docs/benchmarks.md",
+    "packages/storybook/scripts/storybook-parity.mjs",
+    "scripts/rdg.mjs",
+    "scripts/rdt.mjs",
+    "scripts/weekly.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0,
+    "subagent_tokens": {
+      "input_tokens": 10,
+      "cache_creation_tokens": 3050,
+      "cache_read_tokens": 2452746,
+      "output_tokens": 1759,
+      "api_call_count": 5
+    }
+  },
+  "redaction": {
+    "replacements": 1340,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 1340,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
