@@ -55,3 +55,8 @@ Two habits that repeatedly caught real bugs during the 2026-08-12 spec-validatio
 - Never hard-wrap Markdown, commit messages or PR descriptions: one line per paragraph.
 - Comments: only the non-obvious why, no history (the commit records it). Fill to 120 columns (`.rustfmt.toml`). Rewriting a comment block counts as writing it: re-fill and cut it, don't inherit the old wrapping.
 - Commits: imperative subject, at most one or two sentences of why, no list of what changed, no "This commit...". Skip the body when the subject says it all.
+
+<!-- entire-agent:begin -->
+Read .entire/agent-guide.md for this repository's workflow, source inspection, and verification guidance.
+@.entire/agent-guide.md
+<!-- entire-agent:end -->
