@@ -137,7 +137,7 @@ impl<'src> SourceDataCollector<'src> {
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
         let Some(type_arguments) = call.type_arguments.as_ref() else { return false };
         let Some(callee) = self.extract_callee_name(call) else { return false };
-        let needs_payload = match component_argument_evidence(&callee, call, &|n| self.may_be_react(n)) {
+        let needs_payload = match component_argument_evidence(&callee, call, &*self) {
             Ok(ArgumentEvidence::Sufficient) => false,
             Ok(ArgumentEvidence::TagNeedsPayload) => true,
             Err(reason) => {

@@ -84,8 +84,32 @@ pub(super) fn result_chain(
     if chain.props.is_empty() && chain.inheritance.is_empty() {
         return None;
     }
+    erase_unbound_params(&mut chain, type_params.iter().chain(&factory_params));
     state.absorb(attempt);
     Some(chain)
+}
+
+/// A type parameter of the factory or of its result's call signature, beside other members of a union, stands for one
+/// of them (`C | ElementType` with `C extends ElementType`), and its bare name tells a reader nothing, so the union
+/// keeps the other members.
+fn erase_unbound_params<'p>(chain: &mut super::ResolvedChain, params: impl Iterator<Item = &'p TypeName> + Clone) {
+    let is_param = |member: &PropType| {
+        matches!(member, PropType::Named { name, args }
+            if args.is_empty() && params.clone().any(|p| p.as_str() == name.as_str()))
+    };
+    for prop in &mut chain.props {
+        let PropType::Union(members) = &prop.prop_type else { continue };
+        if !members.iter().any(is_param) {
+            continue;
+        }
+        let kept: Vec<PropType> = members.iter().filter(|member| !is_param(member)).cloned().collect();
+        if kept.is_empty() {
+            continue;
+        }
+        let mut edited = (**prop).clone();
+        edited.prop_type = super::primitives::union_of(kept);
+        *prop = Arc::new(edited);
+    }
 }
 
 fn result_props(
