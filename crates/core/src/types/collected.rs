@@ -1079,6 +1079,10 @@ pub enum DetectionRule {
     ImportedMemberAlias,
     /// Detects a declared component typed as `MemoExoticComponent<(props: Props) => ReactElement>`.
     MemoExoticDecl,
+    /// `const Center = chakra("div", { base: { ... } })`: a call given an intrinsic tag name and a config object,
+    /// bound to a PascalCase name, with a `CenterProps` type declared in the same file. The call styles an element,
+    /// and the neighbouring props type names its props.
+    TaggedFactory,
 }
 
 /// A component → prop type mapping.
