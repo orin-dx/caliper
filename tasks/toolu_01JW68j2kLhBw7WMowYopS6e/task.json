@@ -1,0 +1,18 @@
+{
+  "tool_use_id": "toolu_01JW68j2kLhBw7WMowYopS6e",
+  "agent_id": "ae97bf5b1544afbf5",
+  "subagent_type": "fork",
+  "task_description": "Adapt code to oxc 0.155",
+  "files": [
+    "crates/core/src/extractor/js_text.rs"
+  ],
+  "token_usage": {
+    "input_tokens": 184,
+    "cache_creation_tokens": 508769,
+    "cache_read_tokens": 33498631,
+    "output_tokens": 44760,
+    "api_call_count": 91
+  },
+  "started_at": "2026-10-27T20:41:57.324371-07:00",
+  "completed_at": "2026-10-27T21:14:41.552757-07:00"
+}
