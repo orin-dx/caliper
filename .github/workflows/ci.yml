@@ -220,9 +220,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@c3d524d3aba359f5e767007ea76d229e8a291dc3 # callisto@0.12.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@dec5841b123bf933993b50cfcd5fc17c98530b99 # callisto@0.16.0
         with:
-          version: callisto@0.12.0
+          version: callisto@0.16.0
           verification: require
       - run: callisto status --check
       - name: Preview the versioned release plan

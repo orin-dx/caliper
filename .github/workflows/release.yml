@@ -89,12 +89,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       # Pinned here, not inherited from the action's default.
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@c3d524d3aba359f5e767007ea76d229e8a291dc3 # callisto@0.12.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@dec5841b123bf933993b50cfcd5fc17c98530b99 # callisto@0.16.0
         with:
-          version: callisto@0.12.0
+          version: callisto@0.16.0
           verification: require
       - name: Compose, version, and open the release PR
-        uses: orin-dx/callisto/.github/actions/callisto-action@c3d524d3aba359f5e767007ea76d229e8a291dc3 # callisto@0.12.0
+        uses: orin-dx/callisto/.github/actions/callisto-action@dec5841b123bf933993b50cfcd5fc17c98530b99 # callisto@0.16.0
         with:
           setup_callisto: 'false'
           branch: main
@@ -117,9 +117,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@c3d524d3aba359f5e767007ea76d229e8a291dc3 # callisto@0.12.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@dec5841b123bf933993b50cfcd5fc17c98530b99 # callisto@0.16.0
         with:
-          version: callisto@0.12.0
+          version: callisto@0.16.0
           verification: require
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -246,9 +246,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@c3d524d3aba359f5e767007ea76d229e8a291dc3 # callisto@0.12.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@dec5841b123bf933993b50cfcd5fc17c98530b99 # callisto@0.16.0
         with:
-          version: callisto@0.12.0
+          version: callisto@0.16.0
           verification: require
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
