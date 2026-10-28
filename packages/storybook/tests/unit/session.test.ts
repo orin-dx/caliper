@@ -71,6 +71,28 @@ describe('DocgenSession.find', () => {
     expect(await session.resolveExport(join(real, 'Panel.tsx'), 'default')).toBeUndefined()
   })
 
+  it("answers a declared export with the file's only component whose display name differs", async () => {
+    writeFileSync(
+      join(real, 'Thumb.tsx'),
+      "export function Thumb() {}\nThumb.displayName = '@mantine/core/ColorPickerThumb'\nexport function helper() {}\nconst Hidden = 1",
+    )
+    const session = await sessionWith({
+      '@mantine/core/ColorPickerThumb': entry('@mantine/core/ColorPickerThumb', join(real, 'Thumb.tsx')),
+    })
+    expect(await session.resolveExport(join(real, 'Thumb.tsx'), 'Thumb')).toBe('@mantine/core/ColorPickerThumb')
+    expect(await session.resolveExport(join(real, 'Thumb.tsx'), 'Hidden')).toBeUndefined()
+    expect(await session.resolveExport(join(real, 'Thumb.tsx'), 'Missing')).toBeUndefined()
+  })
+
+  it('does not guess among several components when the export names none of their display names', async () => {
+    writeFileSync(join(real, 'Pair.tsx'), 'export function Left() {}\nexport function Right() {}')
+    const session = await sessionWith({
+      'ui/Left': entry('ui/Left', join(real, 'Pair.tsx')),
+      'ui/Right': entry('ui/Right', join(real, 'Pair.tsx')),
+    })
+    expect(await session.resolveExport(join(real, 'Pair.tsx'), 'Left')).toBeUndefined()
+  })
+
   it('lists the components of a file, to say what a failed lookup chose from', async () => {
     const session = await sessionWith({
       A: entry('A', join(src, 'List.tsx')),

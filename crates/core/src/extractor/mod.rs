@@ -170,6 +170,7 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
         .map(|c| OwnedComment { span_start: c.span.start, span_end: c.span.end, is_block: c.is_block() })
         .collect();
     collector.comments = comments;
+    collector.element_helpers = evidence::element_helpers(&ret.program);
     collector.visit_program(&ret.program);
     collector.finish()
     // allocator drops here — ALL arena memory freed
@@ -195,6 +196,8 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) comments: Vec<OwnedComment>,
     /// Names that came from imports — used to classify ExtendsRef.
     pub(super) imported_names: FxHashSet<CompactString>,
+    /// Module-level functions declared to return an element: see `evidence::element_helpers`.
+    pub(super) element_helpers: FxHashSet<String>,
     /// Tracks which JSDoc comment spans have already been consumed (by span_end).
     /// Prevents the same comment from leaking to both a component description and its first prop.
     pub(super) consumed_jsdoc: FxHashSet<u32>,
@@ -260,6 +263,7 @@ impl<'src> SourceDataCollector<'src> {
             data: SourceData::default(),
             comments: Vec::new(),
             imported_names: FxHashSet::default(),
+            element_helpers: FxHashSet::default(),
             consumed_jsdoc: FxHashSet::default(),
             namespace_stack: Vec::new(),
             pending_display_name_renames: Vec::new(),
@@ -1122,3 +1126,13 @@ fn line_and_column(source: &str, offset: u32) -> (u32, u32) {
 
 #[cfg(test)]
 mod tests;
+
+impl evidence::Scope for SourceDataCollector<'_> {
+    fn may_be_react(&self, name: &str) -> bool {
+        SourceDataCollector::may_be_react(self, name)
+    }
+
+    fn is_element_helper(&self, name: &str) -> bool {
+        self.element_helpers.contains(name)
+    }
+}

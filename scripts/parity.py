@@ -314,17 +314,25 @@ def control(t):
     return 'object'
 
 
+STRING_LITERAL = re.compile(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|`(?:[^`\\]|\\.)*`')
+
+
 def type_params(t):
-    return set(re.findall(r'\b(?:[A-Z]|T[A-Z][a-zA-Z]*|Target|Props)\b', t))
+    """The names in a type's text that look like type parameters, outside string literals: `"S" | "M"` is a literal
+    union (Spectrum's breakpoints), not two unbound parameters."""
+    return set(re.findall(r'\b(?:[A-Z]|T[A-Z][a-zA-Z]*|Target|Props)\b', STRING_LITERAL.sub('""', t)))
 
 
 UTILITY = re.compile(r'\b(Omit|Pick|Exclude|Extract|NonNullable|GetProp|Parameters|ReturnType)<')
 
 # Where Caliper's type text carries less than RDT's (ratcheted), and two where RDT's carries less (reported only).
+# A rest parameter is `...name:`; TypeScript also writes `... 3 more ...` when it elides a long union or tuple.
+REST_PARAM = re.compile(r'\.\.\.\w+\??:')
+
 LOSS_PATTERNS = {
     'member read left as X["k"]': lambda o, r: '["' in o and '["' not in r,
     'readonly lost': lambda o, r: 'readonly ' in r and 'readonly ' not in o,
-    'rest parameter lost': lambda o, r: '...' in r and '...' not in o,
+    'rest parameter lost': lambda o, r: bool(REST_PARAM.search(r)) and not REST_PARAM.search(o),
     'unbound type parameter': lambda o, r: bool(type_params(o) - type_params(r)) and not type_params(r),
     'utility type left as written': lambda o, r: bool(UTILITY.search(o)) and not UTILITY.search(r),
     'conditional left as source': lambda o, r: ' extends ' in o and '?' in o and ' extends ' not in r,
