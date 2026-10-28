@@ -1,5 +1,0 @@
-{
-  "allow": [
-    "chakra/deps* component-field-changed Group.detectedBy"
-  ]
-}
