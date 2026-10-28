@@ -89,7 +89,7 @@ napi-derive       = "3"
 criterion         = "0.8"
 insta             = { version = "1.48", features = ["json", "redactions"] }
 tempfile          = "3.20"
-rstest            = "0.27"
+rstest            = "0.28"
 trycmd            = "1.2"
 
 [profile.release]
