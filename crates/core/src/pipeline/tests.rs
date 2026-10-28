@@ -3332,6 +3332,7 @@ export const Link = polymorphicFactory<LinkPayload>((props) => <a>{props.label}<
     assert_eq!(prop_names(&output, "Link"), ["component", "label", "renderRoot"], "{:#?}", output.diagnostics);
     assert_eq!(output.components["Button"].props["label"].prop_type.raw_string(), "string");
     assert!(!output.components["Button"].props["component"].required);
+    assert_eq!(output.components["Button"].props["component"].prop_type.raw_string(), "ElementType");
     assert!(!output.components["Button"].props["renderRoot"].required);
     assert_eq!(output.components["Link"].props["component"].prop_type.raw_string(), "any");
 }
