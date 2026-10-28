@@ -1,0 +1,20 @@
+{
+  "tool_use_id": "toolu_016CNwGkcAtj4iakHd3vu9Uj",
+  "agent_id": "aa7b59897beb798ed",
+  "subagent_type": "fork",
+  "task_description": "apps/validate to oracle-only PR",
+  "files": [
+    ".corpora-link.py",
+    ".pr-body.md",
+    ".trial.py"
+  ],
+  "token_usage": {
+    "input_tokens": 132,
+    "cache_creation_tokens": 94178,
+    "cache_read_tokens": 30198218,
+    "output_tokens": 37975,
+    "api_call_count": 65
+  },
+  "started_at": "2026-10-27T22:54:05.197376-07:00",
+  "completed_at": "2026-10-27T23:02:53.044465-07:00"
+}
