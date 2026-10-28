@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01NaPVxfmGTtPiWctcM9R32a",
+  "agent_id": "af246074909220d5b",
+  "subagent_type": "fork",
+  "task_description": "Clear PR conflicts against restore branch",
+  "token_usage": {
+    "input_tokens": 130,
+    "cache_creation_tokens": 28150,
+    "cache_read_tokens": 18069805,
+    "output_tokens": 17065,
+    "api_call_count": 64
+  },
+  "started_at": "2026-10-27T18:42:28.752966-07:00",
+  "completed_at": "2026-10-27T18:49:04.689079-07:00"
+}
