@@ -1,0 +1,1550 @@
+Where are we in this repo?
+
+---
+
+Last I remember we got blocked on callisto right?
+
+---
+
+We should be commiting tool stuff so it doesn't get lost
+
+---
+
+We should adapt to the latest callisto and attempt a proper release. We added a lot of features so read the callisto docs and the last 3 weeks of PRs
+
+---
+
+Let's follow the plan, yes. Just move forward in versions to avoid problems
+
+---
+
+The tokens are in the org
+
+---
+
+Are you confident you configured Callisto properly?
+
+---
+
+Read the docs and code please
+
+---
+
+Merged it
+
+---
+
+Merged all the version bumps
+
+---
+
+Yes
+
+---
+
+Merging 36, we’ll release after
+
+---
+
+The lunch for the release failed, so there’s something we need to fix
+
+---
+
+Merged
+
+---
+
+We need to fix the crate and NPM package names to match caliper right?
+
+---
+
+I think @orin-dx namespace
+
+---
+
+I own it
+
+---
+
+Can we do caliper-docgen without the scope?
+
+---
+
+merged it
+
+---
+
+Is this repetitive of the leading Design FOundation in the intro? "I led the Design Foundation team at StubHub from August 2024 to September 2026. The team owned StubHub’s design system and its platform for AI in frontend work."
+
+---
+
+"Early in our agentic journey, we pointed a model at Storybook, where our components are documented, and the codebase. It didn’t work well. Storybook wasn’t enough, and searching the code often cost a great deal of work and context." note that the models were opus 4.5 and the matching sonnet at the time (search which version)
+
+---
+
+"Broadway is StubHub’s design system. What we built after that had three parts:" we already established this earlier no? Seems like we're not flowing well through the paragraphs, let's review it in the context of what was prior too
+
+---
+
+[Image #1] font size is not inconsistent with content and the borders on the maestro box is not consistent around (left and right specially). The borders also feel too thick. You're not doing your best quality work and producing results with polish. This is not acceptable
+
+---
+
+Sorry, I'm mixing up my agent windows
+
+---
+
+Merged and queued. waiting on release
+
+---
+
+Did it publish properly?
+
+---
+
+Is the example below is best thing to add
+
+---
+
+Updated both tokens
+
+---
+
+It's set for the Org itself...wtf
+
+---
+
+Updated it in the org settings
+
+---
+
+Shouldn't callisto and its action be doing this??? WTF
+
+---
+
+We should not be chaning the workflows on publish. WTF.
+
+---
+
+How does the callisto repo do this and what are you doing wrong?
+
+---
+
+yes
+
+---
+
+Our crates are not setup like the calisto ones. They're missing readmes, doc and repo links, etc right? The matadata is off
+
+---
+
+go ahead
+
+---
+
+Updated the token to bypass 2fa
+
+---
+
+Fixed the org secret access, rerun it
+
+---
+
+Is the release not done? I don't see a caliper PR for the metadata changes
+
+---
+
+We should be licensing this like we do callisto right?
+
+---
+
+Our readmes should be succint, friendly, professional and clear of AI slop, AI word salada and wordy prose. Be inspired by the callisto and wisp-plugins readme, architecture, etc
+
+---
+
+Are the readmes super shallow and not useful enough for users?
+
+---
+
+FYI our site is orin-dx.com and the tool page is: https://orin-dx.com/tools/caliper/
+
+---
+
+I'm pointing it so you can link there too in the metada or anything else
+
+---
+
+We're running on a brand new M5 Max macbook pro now
+
+---
+
+Let's run some extensive benchmarks against large projects too please
+
+---
+
+But are we reporting the important props or is there critical gaps in the reported output?
+
+---
+
+Why is it taking so many loops??? That is ridiculous
+
+---
+
+Let's make any necessary updates to PR 45 so I can merged it
+
+---
+
+Now lets take a look at the known gaps. how do we address them?
+
+---
+
+Think of the patterns, not just the specific instance otherwise we'll continue to run into problems right?
+
+---
+
+Let's do all of the research necessary to understand these. We want to have a good understanding to appropriately spec and plan. We want to maintain a good architecture and think of our semantic models right?
+
+---
+
+We should have a 7.1 beta now to test against too right? We want to keep our performance edge even as we address the issues at hand. Is RDT adopting TS 7.1? What are their perf numbers? Are we wasting our time with oxc if we always honestly need TS 7.1?
+
+---
+
+We've made a bunch of rust architecture improvements to callisto in the last two weeks, including breaking up the tests into their own files. Can you take a look and see how that applies here too?
+
+---
+
+Any other rust best practices that we could adopt?
+
+---
+
+What about coding patterns, crates? Do we have anti-patterns we should address? Better patterns to adopt?
+
+---
+
+Can we incorporate everything into a comprehensive plan that advances our architecture and sematic models foward to better enable us to deliver the features we want?
+
+---
+
+Can we start tackling these?
+
+---
+
+Can we stack the next?
+
+---
+
+Keep going
+
+---
+
+Keep going until we close the gaps we identifie
+
+---
+
+PRs are failing
+
+---
+
+Codex this a quick review of our work and found many structural issues:
+
+
+
+<pasted_content id="d5b8">
+# Caliper v1 review
+
+My release assessment: the project has a credible speed advantage and much better structural coverage than it had a week ago, but the current open stack is not yet a v1 quality gate. I would continue the staged releases in the roadmap (https://github.com/orin-dx/caliper/blob/08bafb04/docs/projects/architecture-roadmap.md), while treating watch correctness, detection precision, and a reproducible RDT comparison as required evidence before calling the output dependable for v1.
+
+I reviewed the 20 PRs merged since October 14, all 20 PRs open on October 21, the final stacked branch, architecture and ADRs, tests, CI, and release workflow. This was a code and CI review; I did not run a new local build or benchmark. The working tree already contains uncommitted changes, which I left untouched. Entire transcript search could not read its saved Keychain login, so the retrospective relies on commits, PRs, and repository documents.
+
+## What the week accomplished
+
+The merged work renamed and published the Caliper packages, changed package metadata and licensing, updated dependencies, separated large inline Rust test modules, added architecture tripwires, and tightened production lints. The open stack then addresses real defects: deterministic enum selection, unreadable files, diagnostic codes, generic Pick/Omit, barrel resolution, watch parity, and several missed component declaration shapes. These are substantive improvements, and CI is green across the dependent stack.
+
+The measured direction is promising. The roadmap’s latest source-only comparison (https://github.com/orin-dx/caliper/blob/08bafb04/docs/projects/architecture-roadmap.md) reports component recall against RDT of 93% for Mantine, 92% for Chakra, 97% for Ant Design, 98% for shadcn/ui, and 99% for react-spectrum after #69. Those numbers establish progress on recall in that sample. They do not yet establish precision, output equivalence with dependencies installed, or v1 reliability under incremental updates.
+
+## Findings ranked for release
+
+| Priority | Finding and evidence | Consequence and action |
+|---|---|---|
+| P0 | The new wrapper rule can emit non-components. #62 (https://github.com/orin-dx/caliper/pull/62) accepts a PascalCase binding when a generic call has a plausible first argument, including any string or identifier; it does not inspect the callee’s return type. A local interface or a type ending in Props is enough to select props (wrapper.rs, lines 43–55 and 105–120 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/extractor/wrapper.rs#L43-L120)). For example, a Button constant returned as a string by makeLabel<ButtonProps>("button") meets these conditions. | This can inflate recall and pollute consumer output. Before enabling this rule as a default v1 behavior, run the roadmap’s per-family, hand-labeled precision gate, add representative non-component calls, and prefer callee evidence where available. |
+| P0 | Watch snapshots can combine different revisions. #67 (https://github.com/orin-dx/caliper/pull/67) repairs several parity bugs, but global, reverse dependencies, named types, components, and diagnostics still publish separately. update_file swaps global, then independently updates the other stores (watch.rs, lines 180–212 and 241–301 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/pipeline/watch.rs#L180-L301)); snapshot() reads them separately (lines 129–150 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/pipeline/watch.rs#L129-L150)). Concurrent updates can also load a global revision other than the one whose named-type index a call just patched. | HMR consumers can observe stale or mixed props and diagnostics. Implement the documented immutable WatchRevision publication model, then test concurrent old-or-new complete snapshots and clean/incremental equivalence. Serializing updates is a reasonable interim containment measure. |
+| P1, confirmed by control flow | Initial watch diagnostics disappear from later snapshots. initialize() receives output from cold extraction and seeds component_cache, but never seeds self.diagnostics; snapshot() reads only that map plus enum diagnostics (watch.rs, lines 110–150 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/pipeline/watch.rs#L110-L150)). | A cold parse or I/O error is returned once and then absent from watch --out snapshots until an update replaces it. Add an exact initial-output versus snapshot diagnostic test and persist the cold diagnostics. |
+| P1, confirmed by control flow | The Vite virtual module retains removed or renamed components. On HMR, the plugin only assigns updatedComponents into currentOutput.components; it has no removal path (index.ts, lines 175–184 (https://github.com/orin-dx/caliper/blob/08bafb04/packages/vite-plugin/src/index.ts#L175-L184)). Rust #67 evicts a changed file’s old cache keys, but the incremental payload does not convey those removals. | A renamed Card can leave Card beside Panel in the virtual module. Return removed keys or a file-scoped replacement and test rename, deletion, and a component that stops resolving. |
+| P1, confirmed by control flow | A recorded wrapper candidate can vanish without a diagnostic. try_record_wrapper_call returns true, preventing the normal skip diagnostic. During promotion, select_wrapper_props returning None simply continues (wrapper.rs, lines 60–89 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/extractor/wrapper.rs#L60-L89)). | This breaks the project rule that degradation is diagnosed. Emit a positioned diagnostic for a rejected recorded candidate, with care to avoid flooding users with ordinary non-components. |
+| P1, semantic defect | #69 substitutes generic parameter names inside quoted text. Its substitute_identifiers scans identifier characters without tracking TypeScript string literals (chain.rs in #69 (https://github.com/orin-dx/caliper/pull/69/files)). For interface Wrap<T> extends Pick<Base, "T">, substituting T = number also changes the key string "T" to "number". | This can select the wrong inherited props while appearing resolved. Substitute on CollectedType nodes, as the roadmap already calls for, or at minimum make the temporary parser quote-aware and add this exact regression. |
+| P1, release evidence | The RDT advantage is not yet proved end to end. The new shape test (https://github.com/orin-dx/caliper/blob/148bf3ab/crates/core/tests/shapes.rs) checks exact component and prop names on synthetic cases. It does not gate corpus precision, types, required flags, defaults, diagnostics, dependency-installed projects, or latency. just recall in the roadmap is not implemented. Existing benchmarks.md (https://github.com/orin-dx/caliper/blob/c32772ff/docs/benchmarks.md) is dated July and reports different figures and old package names from the October README. | Make one versioned, reproducible scorecard for the five corpora: recall, precision, exact prop fields, degradations, wall time, peak memory, and clean/watch parity. State the hardware, dependency state, tool versions, and comparison mode beside every claim. |
+
+### Architectural issues
+
+1. The semantic model is still partly text. ComponentMapping and ExtendsRef carry type arguments as strings; #69 adds a parser that reconstructs unions, intersections, arrays, and generic references from display text. This improves cases now but preserves the failure class behind D1 and creates a second TypeScript grammar in the resolver. Complete roadmap item 2.1, Vec<CollectedType>, before building more wrapper and backend behavior on this path. #69 (https://github.com/orin-dx/caliper/pull/69)
+2. Detection provenance is partial. #60 (https://github.com/orin-dx/caliper/pull/60) adds DetectionRule, but classification still uses a first-success Option chain and a later wrapper promotion pass (visit.rs, lines 229–261 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/extractor/visit.rs#L229-L261)). There is no common typed Detection { Component, Skip, NotCandidate } contract yet. That makes rule precedence, declined candidates, and diagnostics harder to reason about as more shapes are added.
+3. ADR 0007 needs a precise merge contract. ADR 0007 (https://github.com/orin-dx/caliper/blob/08bafb04/docs/adr/0007-backend-discovers-components-and-compiles-in.md) says a structural entry wins on a discovery clash; ADR 0006 (https://github.com/orin-dx/caliper/blob/c32772ff/docs/adr/0006-semantic-backend-as-second-resolver.md) and the backend design say semantic props replace incomplete structural props. These can coexist only if “discovery clash” and “prop completion” are distinct operations. Define that distinction and its tests before wiring the backend. Likewise, schemaVersion should identify the output contract; use separate provenance to tell consumers which backend ran.
+4. A layering back edge remains. The resolver still imports pipeline::HtmlAttributeMode (resolver/mod.rs, line 142 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/resolver/mod.rs#L142)), contrary to the stated crate/module direction and roadmap 2.3. Move resolver configuration into the shared types boundary before adding backend merge logic.
+5. Watch performance lacks a current gate. Every update clones GlobalSourceData inside ArcSwap::rcu (watch.rs, lines 186–190 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/pipeline/watch.rs#L186-L190)), rebuilds reverse dependencies, and constructs a resolution context. It may be acceptable at today’s corpus size, but the claimed roughly 2 ms edit path needs measurement after the fixes and on large dependency-installed projects. Profile allocation and peak memory before changing data structures.
+
+### Rust, security, and maintainability
+
+- The stronger lint and architecture tests are good safeguards. I did not find evidence of a production unwrap() violation in the reviewed stack. There is a small consistency miss: an internal std::collections::HashMap remains in pipeline collection where project rules call for FxHashMap (pipeline/mod.rs, line 379 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/pipeline/mod.rs#L379)).
+- The tests added for watch parity compare components and enums in their visible() helper, omitting diagnostics (watch/tests.rs, lines 949–952 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/pipeline/watch/tests.rs#L949-L952)). That omission is directly relevant to the initial-diagnostics defect.
+- The real Vite/native integration tests are designed to skip when no locally built .node file exists. CI’s test-ts recipe runs the plugin unit suite; green CI therefore does not prove the real binding and plugin operate together on the release artifacts. Run those integration tests against a built native addon in at least one CI lane.
+- I found no confirmed exploitable security vulnerability in this review. The exposed inputs still deserve a release-specific robustness gate: malformed TS, cache decoding, process framing, and package install behavior. The roadmap’s proposed property/fuzz work was deferred by #53 (https://github.com/orin-dx/caliper/pull/53); its golden cache layout test guards format changes, not arbitrary malformed data.
+- Documentation drift is now a DX issue. docs/STATUS.md still says September and “fully tested”; the architecture notes still describe some already-fixed watch behavior; MIGRATING.md and docs/benchmarks.md retain the old name. A user comparing Caliper with RDT should encounter one current set of commands and claims.
+
+## All outstanding PRs
+
+The 18 PRs from #52 to #70 are a dependent stack, so their green checks validate each proposed head against its named parent branch; they are not 18 independently mergeable changes to main.
+
+| PRs | Assessment |
+|---|---|
+| #52 (https://github.com/orin-dx/caliper/pull/52), #53 (https://github.com/orin-dx/caliper/pull/53), #54 (https://github.com/orin-dx/caliper/pull/54) | Useful foundations: MSRV/SemVer gate, cache byte guard, and parenthesis/non-null detection. #53 is narrower than the roadmap’s proposed property and fuzz gate. |
+| #56 (https://github.com/orin-dx/caliper/pull/56), #57 (https://github.com/orin-dx/caliper/pull/57), #58 (https://github.com/orin-dx/caliper/pull/58) | Worth landing as correctness work: deterministic enums, I/O reporting, and clearer codes. Check cache-version and diagnostic compatibility together. |
+| #59 (https://github.com/orin-dx/caliper/pull/59), #60 (https://github.com/orin-dx/caliper/pull/60), #61 (https://github.com/orin-dx/caliper/pull/61) | Builders and typed function detection reduce duplication and improve recall. Detection classification and provenance remain incomplete; add negative fixtures for PascalCase helpers. |
+| #62 (https://github.com/orin-dx/caliper/pull/62) | Highest-risk new behavior in the stack. Require measured precision and the missing rejection diagnostic before making its output a v1 claim. |
+| #63 (https://github.com/orin-dx/caliper/pull/63), #64 (https://github.com/orin-dx/caliper/pull/64), #65 (https://github.com/orin-dx/caliper/pull/65) | Barrel and utility-type work addresses real missing props; #64 records improved measurements. Re-run against installed dependencies and exact fields. #65 should ultimately share structured arguments with #69. |
+| #66 (https://github.com/orin-dx/caliper/pull/66), #67 (https://github.com/orin-dx/caliper/pull/67), #68 (https://github.com/orin-dx/caliper/pull/68) | Removing dead options fixes misleading DX. #67 closes several known watch defects but does not establish coherent revision publication. #68 adds useful exact-name fixtures, not the proposed recall harness. |
+| #69 (https://github.com/orin-dx/caliper/pull/69), #70 (https://github.com/orin-dx/caliper/pull/70) | #69 materially improves generic and barrel handling, with the string-substitution defect above. #70 records the backend direction; resolve merge precedence, trigger observability, and provenance before implementation. |
+| #46 (https://github.com/orin-dx/caliper/pull/46) | Separate 0.2.2 release PR, with no PR checks shown. Its merge triggers the publish workflow. Review the exact package/version manifest and release run independently of the feature stack. |
+| #44 (https://github.com/orin-dx/caliper/pull/44) | Separate Dependabot PR. CI is red: lint fails because five archived Markdown files fail oxfmt. Hold it until that check passes; the failure is formatting, not a Rust test failure. |
+
+None of the open PRs showed a recorded review decision in the GitHub metadata I retrieved. All checks shown for #52–#70 were successful; that is useful evidence, but the missing product and concurrency gates above remain.
+
+## Recommended v1 sequence
+
+1. Land the correctness stack in order, with focused fixes for #69’s quoted-key substitution and #62’s rejected-candidate diagnostic and false-positive gate.
+2. Make watch output coherent, then verify exact components, props, enums, diagnostics, rename/removal behavior, and concurrent snapshots against cold extraction. Include the Vite virtual module in that gate.
+3. Publish a reproducible Caliper-versus-RDT scorecard. Lead with accuracy and precision at a stated mode, then speed and memory for the same projects. Keep the structural default and opt-in checker results separate.
+4. Finish the type-argument and detection contracts before integrating the TypeScript backend. Settle ADR 0007’s merge and provenance rules first.
+5. Run release-artifact tests and refresh user docs before labeling v1: native addon plus Vite integration, platform package installation, current CLI/API guides, and one maintained benchmark page.
+
+Caliper’s strongest value proposition is already visible: fast structural extraction with useful diagnostics and incremental access. For v1, the decisive proof is that those advantages survive real library shapes, false-positive review, file edits, and packaged installation with results a user can reproduce.
+</pasted_content id="d5b8">
+
+
+I want you to vet these and look for similar patterns of issues. We might have a lot more. Be thorough and think like a principal engineer driving quality architecture, performance and DX
+
+---
+
+Codex this a quick review of our work and found many structural issues:
+
+
+
+<pasted_content id="d5b8">
+# Caliper v1 review
+
+My release assessment: the project has a credible speed advantage and much better structural coverage than it had a week ago, but the current open stack is not yet a v1 quality gate. I would continue the staged releases in the roadmap (https://github.com/orin-dx/caliper/blob/08bafb04/docs/projects/architecture-roadmap.md), while treating watch correctness, detection precision, and a reproducible RDT comparison as required evidence before calling the output dependable for v1.
+
+I reviewed the 20 PRs merged since October 14, all 20 PRs open on October 21, the final stacked branch, architecture and ADRs, tests, CI, and release workflow. This was a code and CI review; I did not run a new local build or benchmark. The working tree already contains uncommitted changes, which I left untouched. Entire transcript search could not read its saved Keychain login, so the retrospective relies on commits, PRs, and repository documents.
+
+## What the week accomplished
+
+The merged work renamed and published the Caliper packages, changed package metadata and licensing, updated dependencies, separated large inline Rust test modules, added architecture tripwires, and tightened production lints. The open stack then addresses real defects: deterministic enum selection, unreadable files, diagnostic codes, generic Pick/Omit, barrel resolution, watch parity, and several missed component declaration shapes. These are substantive improvements, and CI is green across the dependent stack.
+
+The measured direction is promising. The roadmap’s latest source-only comparison (https://github.com/orin-dx/caliper/blob/08bafb04/docs/projects/architecture-roadmap.md) reports component recall against RDT of 93% for Mantine, 92% for Chakra, 97% for Ant Design, 98% for shadcn/ui, and 99% for react-spectrum after #69. Those numbers establish progress on recall in that sample. They do not yet establish precision, output equivalence with dependencies installed, or v1 reliability under incremental updates.
+
+## Findings ranked for release
+
+| Priority | Finding and evidence | Consequence and action |
+|---|---|---|
+| P0 | The new wrapper rule can emit non-components. #62 (https://github.com/orin-dx/caliper/pull/62) accepts a PascalCase binding when a generic call has a plausible first argument, including any string or identifier; it does not inspect the callee’s return type. A local interface or a type ending in Props is enough to select props (wrapper.rs, lines 43–55 and 105–120 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/extractor/wrapper.rs#L43-L120)). For example, a Button constant returned as a string by makeLabel<ButtonProps>("button") meets these conditions. | This can inflate recall and pollute consumer output. Before enabling this rule as a default v1 behavior, run the roadmap’s per-family, hand-labeled precision gate, add representative non-component calls, and prefer callee evidence where available. |
+| P0 | Watch snapshots can combine different revisions. #67 (https://github.com/orin-dx/caliper/pull/67) repairs several parity bugs, but global, reverse dependencies, named types, components, and diagnostics still publish separately. update_file swaps global, then independently updates the other stores (watch.rs, lines 180–212 and 241–301 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/pipeline/watch.rs#L180-L301)); snapshot() reads them separately (lines 129–150 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/pipeline/watch.rs#L129-L150)). Concurrent updates can also load a global revision other than the one whose named-type index a call just patched. | HMR consumers can observe stale or mixed props and diagnostics. Implement the documented immutable WatchRevision publication model, then test concurrent old-or-new complete snapshots and clean/incremental equivalence. Serializing updates is a reasonable interim containment measure. |
+| P1, confirmed by control flow | Initial watch diagnostics disappear from later snapshots. initialize() receives output from cold extraction and seeds component_cache, but never seeds self.diagnostics; snapshot() reads only that map plus enum diagnostics (watch.rs, lines 110–150 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/pipeline/watch.rs#L110-L150)). | A cold parse or I/O error is returned once and then absent from watch --out snapshots until an update replaces it. Add an exact initial-output versus snapshot diagnostic test and persist the cold diagnostics. |
+| P1, confirmed by control flow | The Vite virtual module retains removed or renamed components. On HMR, the plugin only assigns updatedComponents into currentOutput.components; it has no removal path (index.ts, lines 175–184 (https://github.com/orin-dx/caliper/blob/08bafb04/packages/vite-plugin/src/index.ts#L175-L184)). Rust #67 evicts a changed file’s old cache keys, but the incremental payload does not convey those removals. | A renamed Card can leave Card beside Panel in the virtual module. Return removed keys or a file-scoped replacement and test rename, deletion, and a component that stops resolving. |
+| P1, confirmed by control flow | A recorded wrapper candidate can vanish without a diagnostic. try_record_wrapper_call returns true, preventing the normal skip diagnostic. During promotion, select_wrapper_props returning None simply continues (wrapper.rs, lines 60–89 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/extractor/wrapper.rs#L60-L89)). | This breaks the project rule that degradation is diagnosed. Emit a positioned diagnostic for a rejected recorded candidate, with care to avoid flooding users with ordinary non-components. |
+| P1, semantic defect | #69 substitutes generic parameter names inside quoted text. Its substitute_identifiers scans identifier characters without tracking TypeScript string literals (chain.rs in #69 (https://github.com/orin-dx/caliper/pull/69/files)). For interface Wrap<T> extends Pick<Base, "T">, substituting T = number also changes the key string "T" to "number". | This can select the wrong inherited props while appearing resolved. Substitute on CollectedType nodes, as the roadmap already calls for, or at minimum make the temporary parser quote-aware and add this exact regression. |
+| P1, release evidence | The RDT advantage is not yet proved end to end. The new shape test (https://github.com/orin-dx/caliper/blob/148bf3ab/crates/core/tests/shapes.rs) checks exact component and prop names on synthetic cases. It does not gate corpus precision, types, required flags, defaults, diagnostics, dependency-installed projects, or latency. just recall in the roadmap is not implemented. Existing benchmarks.md (https://github.com/orin-dx/caliper/blob/c32772ff/docs/benchmarks.md) is dated July and reports different figures and old package names from the October README. | Make one versioned, reproducible scorecard for the five corpora: recall, precision, exact prop fields, degradations, wall time, peak memory, and clean/watch parity. State the hardware, dependency state, tool versions, and comparison mode beside every claim. |
+
+### Architectural issues
+
+1. The semantic model is still partly text. ComponentMapping and ExtendsRef carry type arguments as strings; #69 adds a parser that reconstructs unions, intersections, arrays, and generic references from display text. This improves cases now but preserves the failure class behind D1 and creates a second TypeScript grammar in the resolver. Complete roadmap item 2.1, Vec<CollectedType>, before building more wrapper and backend behavior on this path. #69 (https://github.com/orin-dx/caliper/pull/69)
+2. Detection provenance is partial. #60 (https://github.com/orin-dx/caliper/pull/60) adds DetectionRule, but classification still uses a first-success Option chain and a later wrapper promotion pass (visit.rs, lines 229–261 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/extractor/visit.rs#L229-L261)). There is no common typed Detection { Component, Skip, NotCandidate } contract yet. That makes rule precedence, declined candidates, and diagnostics harder to reason about as more shapes are added.
+3. ADR 0007 needs a precise merge contract. ADR 0007 (https://github.com/orin-dx/caliper/blob/08bafb04/docs/adr/0007-backend-discovers-components-and-compiles-in.md) says a structural entry wins on a discovery clash; ADR 0006 (https://github.com/orin-dx/caliper/blob/c32772ff/docs/adr/0006-semantic-backend-as-second-resolver.md) and the backend design say semantic props replace incomplete structural props. These can coexist only if “discovery clash” and “prop completion” are distinct operations. Define that distinction and its tests before wiring the backend. Likewise, schemaVersion should identify the output contract; use separate provenance to tell consumers which backend ran.
+4. A layering back edge remains. The resolver still imports pipeline::HtmlAttributeMode (resolver/mod.rs, line 142 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/resolver/mod.rs#L142)), contrary to the stated crate/module direction and roadmap 2.3. Move resolver configuration into the shared types boundary before adding backend merge logic.
+5. Watch performance lacks a current gate. Every update clones GlobalSourceData inside ArcSwap::rcu (watch.rs, lines 186–190 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/pipeline/watch.rs#L186-L190)), rebuilds reverse dependencies, and constructs a resolution context. It may be acceptable at today’s corpus size, but the claimed roughly 2 ms edit path needs measurement after the fixes and on large dependency-installed projects. Profile allocation and peak memory before changing data structures.
+
+### Rust, security, and maintainability
+
+- The stronger lint and architecture tests are good safeguards. I did not find evidence of a production unwrap() violation in the reviewed stack. There is a small consistency miss: an internal std::collections::HashMap remains in pipeline collection where project rules call for FxHashMap (pipeline/mod.rs, line 379 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/pipeline/mod.rs#L379)).
+- The tests added for watch parity compare components and enums in their visible() helper, omitting diagnostics (watch/tests.rs, lines 949–952 (https://github.com/orin-dx/caliper/blob/08bafb04/crates/core/src/pipeline/watch/tests.rs#L949-L952)). That omission is directly relevant to the initial-diagnostics defect.
+- The real Vite/native integration tests are designed to skip when no locally built .node file exists. CI’s test-ts recipe runs the plugin unit suite; green CI therefore does not prove the real binding and plugin operate together on the release artifacts. Run those integration tests against a built native addon in at least one CI lane.
+- I found no confirmed exploitable security vulnerability in this review. The exposed inputs still deserve a release-specific robustness gate: malformed TS, cache decoding, process framing, and package install behavior. The roadmap’s proposed property/fuzz work was deferred by #53 (https://github.com/orin-dx/caliper/pull/53); its golden cache layout test guards format changes, not arbitrary malformed data.
+- Documentation drift is now a DX issue. docs/STATUS.md still says September and “fully tested”; the architecture notes still describe some already-fixed watch behavior; MIGRATING.md and docs/benchmarks.md retain the old name. A user comparing Caliper with RDT should encounter one current set of commands and claims.
+
+## All outstanding PRs
+
+The 18 PRs from #52 to #70 are a dependent stack, so their green checks validate each proposed head against its named parent branch; they are not 18 independently mergeable changes to main.
+
+| PRs | Assessment |
+|---|---|
+| #52 (https://github.com/orin-dx/caliper/pull/52), #53 (https://github.com/orin-dx/caliper/pull/53), #54 (https://github.com/orin-dx/caliper/pull/54) | Useful foundations: MSRV/SemVer gate, cache byte guard, and parenthesis/non-null detection. #53 is narrower than the roadmap’s proposed property and fuzz gate. |
+| #56 (https://github.com/orin-dx/caliper/pull/56), #57 (https://github.com/orin-dx/caliper/pull/57), #58 (https://github.com/orin-dx/caliper/pull/58) | Worth landing as correctness work: deterministic enums, I/O reporting, and clearer codes. Check cache-version and diagnostic compatibility together. |
+| #59 (https://github.com/orin-dx/caliper/pull/59), #60 (https://github.com/orin-dx/caliper/pull/60), #61 (https://github.com/orin-dx/caliper/pull/61) | Builders and typed function detection reduce duplication and improve recall. Detection classification and provenance remain incomplete; add negative fixtures for PascalCase helpers. |
+| #62 (https://github.com/orin-dx/caliper/pull/62) | Highest-risk new behavior in the stack. Require measured precision and the missing rejection diagnostic before making its output a v1 claim. |
+| #63 (https://github.com/orin-dx/caliper/pull/63), #64 (https://github.com/orin-dx/caliper/pull/64), #65 (https://github.com/orin-dx/caliper/pull/65) | Barrel and utility-type work addresses real missing props; #64 records improved measurements. Re-run against installed dependencies and exact fields. #65 should ultimately share structured arguments with #69. |
+| #66 (https://github.com/orin-dx/caliper/pull/66), #67 (https://github.com/orin-dx/caliper/pull/67), #68 (https://github.com/orin-dx/caliper/pull/68) | Removing dead options fixes misleading DX. #67 closes several known watch defects but does not establish coherent revision publication. #68 adds useful exact-name fixtures, not the proposed recall harness. |
+| #69 (https://github.com/orin-dx/caliper/pull/69), #70 (https://github.com/orin-dx/caliper/pull/70) | #69 materially improves generic and barrel handling, with the string-substitution defect above. #70 records the backend direction; resolve merge precedence, trigger observability, and provenance before implementation. |
+| #46 (https://github.com/orin-dx/caliper/pull/46) | Separate 0.2.2 release PR, with no PR checks shown. Its merge triggers the publish workflow. Review the exact package/version manifest and release run independently of the feature stack. |
+| #44 (https://github.com/orin-dx/caliper/pull/44) | Separate Dependabot PR. CI is red: lint fails because five archived Markdown files fail oxfmt. Hold it until that check passes; the failure is formatting, not a Rust test failure. |
+
+None of the open PRs showed a recorded review decision in the GitHub metadata I retrieved. All checks shown for #52–#70 were successful; that is useful evidence, but the missing product and concurrency gates above remain.
+
+## Recommended v1 sequence
+
+1. Land the correctness stack in order, with focused fixes for #69’s quoted-key substitution and #62’s rejected-candidate diagnostic and false-positive gate.
+2. Make watch output coherent, then verify exact components, props, enums, diagnostics, rename/removal behavior, and concurrent snapshots against cold extraction. Include the Vite virtual module in that gate.
+3. Publish a reproducible Caliper-versus-RDT scorecard. Lead with accuracy and precision at a stated mode, then speed and memory for the same projects. Keep the structural default and opt-in checker results separate.
+4. Finish the type-argument and detection contracts before integrating the TypeScript backend. Settle ADR 0007’s merge and provenance rules first.
+5. Run release-artifact tests and refresh user docs before labeling v1: native addon plus Vite integration, platform package installation, current CLI/API guides, and one maintained benchmark page.
+
+Caliper’s strongest value proposition is already visible: fast structural extraction with useful diagnostics and incremental access. For v1, the decisive proof is that those advantages survive real library shapes, false-positive review, file edits, and packaged installation with results a user can reproduce.
+</pasted_content id="d5b8">
+
+
+I want you to vet these and look for similar patterns of issues. We might have a lot more. Be thorough and think like a principal engineer driving quality architecture, performance and DX
+
+---
+
+How long until the sweeps finish? Should we start fixing issues related to the open PRs before we merge them?
+
+---
+
+Can you just stack them? I won't release until it's clear
+
+---
+
+Let's fix the stacking and improperly closed PRs??
+
+---
+
+Are things properly stacked now?
+
+---
+
+Nothing else should be stacked?
+
+---
+
+Looks like we merge conflicts
+
+---
+
+Looks like GH closed some PRs that should not have been closed
+
+---
+
+Merged all
+
+---
+
+Do research and analysis to help guide me
+
+---
+
+The gate should be dependent on the size of the codebase being analyzed.
+
+Precision is super important so let’s understand the gaps too
+
+---
+
+I feel like even unexported types can play a part in exported ones and thus documenting them so we should report, right?
+
+---
+
+Are there any high-perforamnce crates for JSON reading/writing and manipulation that can help us here?
+
+---
+
+Why does format stoybook need to stay expanded? I can see the RDT for complete compatibility
+
+---
+
+We will work on storybook integration. That's the whole point
+
+---
+
+But at that point can we just consume the --format json?
+
+---
+
+How does the regular doctype and RDT integration work with storybook?
+
+---
+
+start the low-risk perf PR meanwhile
+
+---
+
+I think we should start on the dedupe work right? Based on the storybook findings?
+
+---
+
+What is our average performance compared to RDT now?
+
+---
+
+Let's make sure that each have node_modules here
+
+---
+
+Is it stuck?
+
+---
+
+First let's think about the problem structurally and comprehensively. How does it first in our architecture? Do we adjust it? What about our semantic models? What of performance?
+
+---
+
+Does this all account for dev/watch mode?
+
+---
+
+Is there a better, more clever way of doing this in a super duper performant way? Can parallelism help?
+
+---
+
+Let's explore and prove it out first. I like that
+
+---
+
+Let's get going on this work now
+
+---
+
+Stack has conflicts
+
+---
+
+Still working on it?
+
+---
+
+Ok, sounds good
+
+---
+
+Did the release succeed?
+
+---
+
+yes rerun it
+
+---
+
+Is that slow test required? HOw do michi and callisto do it?
+
+---
+
+What is the best practice in rust-land??
+
+---
+
+Fixed the forbidden issue
+
+---
+
+I’ll have Callisto take a look
+
+---
+
+We need to bump to the latest Callisto, this is fixed already
+
+---
+
+This is taking forever
+
+---
+
+I've setup trusted publishing
+
+---
+
+But GH is setup for it
+
+---
+
+What's next?
+
+---
+
+Yes, replace trybuild, help me decide if the collapse inherited props applies locally too. Do all of the rest, commit appropriatelly and stack PRs
+
+---
+
+Keep going on features, polish and hardening
+
+---
+
+Let's stack and cleanup the PRs appropriately
+
+---
+
+PRs 118 119 120 have failed workflows right?
+
+---
+
+CI is still failing in some PRs
+
+---
+
+What's next
+
+---
+
+Let's tackle 2, 3 I agree with you and yes, small cleanup
+
+---
+
+I've fixed the LLM hooks, please create a PR for this
+
+---
+
+Make me a pr
+
+---
+
+Ok, what's next?
+
+---
+
+Keep going on the outstanding work please
+
+---
+
+Can we evaluate all of the changes we've been making to make sure we're not being too deterministic and we're staying focused on goal and outcome? We want generic patterns right? Not a lot of special cases
+
+---
+
+Let's address these shorcuts please
+
+---
+
+Is this an improvement? Do we have dupes now?
+
+---
+
+Where are we compared to RDT now? Performance, quality of the results, where we are better?
+
+---
+
+Same type text? If that is just the quote marks we can ignore that.
+
+---
+
+What really matters is meaninful type differences. Trailing ; or parenthesis is not meaninful right? Array<T> vs T[] is the same right?
+
+---
+
+Give me clear stats of our metrics (time and quality of the output, what RDT does that that we don't, what we do that they don't, etc)
+
+---
+
+Why do we lose MouseEventHandler<SVGSVGElement> ???
+
+---
+
+That is a meaninful loss right?
+
+---
+
+What are other similar ways we could make improvements or we're missing out on types?
+
+---
+
+What can we tackle without TS 7.1?
+
+---
+
+Let's start the structural ones we can but if it's easier to just do TS 7.1 to resolve these with great performance let's just do that. The Beta is out.
+
+---
+
+What else can we learn from it and apply here? Any way to future proof ourselves?
+
+---
+
+Can we scope out the TS 7.1 library usage too?
+
+---
+
+Should we consider this always an opt-in or if it's there we use it by default?
+
+---
+
+We can make it experimental opt-in for now
+
+---
+
+Let's include the oracle, take the learnings from the TS 7.1 codebase into structural improvements here and take the structural to the limit while keeping performance a high priority
+
+---
+
+Keep going
+
+---
+
+Merged, where are we in meeting the quality bar?
+
+---
+
+This doesn’t seem to include our latest changes and the TS 7.1 work
+
+---
+
+Where are we now?
+
+---
+
+Let's do an adversarial analysis on the codebase so far with a mind of the goal of the product. Act like a principal engineer.
+
+---
+
+I want the numbers to also include the opt-in ts 7.1
+
+---
+
+Let's consider the addon work in the context of the architecture. It's briging great value, can we increase accuracy AND improve performance at the same time?
+
+---
+
+Consider a use-case possibly outside of storybook where we want to document types for our LLMs/models/agents and want to provide this information in a CLI or MCP for better code usage/code generation
+
+---
+
+I think your suggestions are great for the storybook example and if we architect the tool appropriately we can make the storbyook case blazing fast
+
+---
+
+Monokl is being written already and it should not shell out. That is a cost we don't need to pay.
+
+---
+
+For our primary use-case (storybook) let's work on continuing to improve accuracy and double-down on perforamnce please. We're slipping on that end which is the whole point.
+
+---
+
+Some PRs are not passing CI
+
+---
+
+restart where you got stuck
+
+---
+
+Where are we?
+
+---
+
+Why is the benchmark script in python and not using rust tools? Why is it taking so long??
+
+---
+
+Accuracy taking over 34 min?
+
+---
+
+This is taking forever, I'm concerned
+
+---
+
+Keep going on what's not started and check on lazy work please
+
+---
+
+What did we learn from the lazy work? How do we best setup ourselves?
+
+---
+
+Where are we in matching or exceeding RDT in quality and performance?
+
+---
+
+Let's do housekeeping and keep moving onto the next steps
+
+---
+
+continue
+
+---
+
+Merged our PRs, what do we have outstanding?
+
+---
+
+Let’s clean things up and wait on the outstanding work that is running so we can build well on top of it
+
+---
+
+I don’t trust you with the running task. It’s taking too long
+
+---
+
+We need to finish the lazy work. It’s holding up the rest
+
+---
+
+Can we stack the order?
+
+---
+
+Are you sure about the byte-scan? I'm using a MBP M5 Max with 64GB of ram. What about an older machine? a VM in GH actions?
+
+---
+
+Let's try it
+
+---
+
+Is there a better way to do resolve? Are we doing this in native rust or using the TS 7.1 addon?
+
+---
+
+If we provide caliper as an NPM package for the base case it can depend on having ts 7.1 installed
+
+---
+
+Let's think of a better design that gives us better performance then
+
+---
+
+What other options should we consider?
+
+---
+
+Don't forget that a 10,000 line redesign with agents might be at most a few hours.
+
+---
+
+We should definitely consider CI caches and maybe restart local caches too. That would improve efficiency quite a bit for local dev which could be huge
+
+---
+
+Do we clean up any of the existing PRs?
+
+---
+
+What's the plan?
+
+---
+
+Let's keep going please
+
+---
+
+Keep going on the not done
+
+---
+
+Let's tackle the next couple issues but let's keep in mind how TS itself deals with types and our architecture please
+
+---
+
+Where to?
+
+---
+
+Let’s chase down the remaining work please
+
+---
+
+Lots of pr failures and nothing stacked
+
+---
+
+I merged in the wrong order so we have conflicts now
+
+---
+
+What can we cleanup from all the work we've been doing?
+
+---
+
+Let's verify the worktrees and branches. We've merged every PR we've made so far
+
+---
+
+What is the point of the LSP server? We're adopting TS 7.1 so do we need it still? Or are we providing types?
+
+---
+
+Let's cleanup all the worktree and branches that are safe to drop
+
+---
+
+I'd say lets cleanup the LSP stuff then. Mostly duplicated code. We could revisit later. Close the issue too
+
+---
+
+This is looking promising. What does that mean for the comparison to RDT?
+
+---
+
+Let's open PRs for what we have and focus on making the context rebuild cheaper, right? Anything else we should look into?
+
+---
+
+If you had to give a rough estimate from the prior numbers what do you think the quality, speed, and memory comparison would be?
+
+---
+
+This is what we initially claimed: https://orin-dx.com/tools/caliper/
+
+---
+
+What is the x and % rate improvement estimated against react-docgen and RDT? Overall and per library? Same for memory and quality (ie how much do we miss using the opt-in)?
+
+---
+
+Don't compute, we only have a few tokens left before reset. Estimates will do right now
+
+---
+
+What's the average/median speed improvement and memory improvement?
+
+---
+
+And against normal react-docgen (ie storybook's built in)? Estimate is ok
+
+---
+
+That is great, accuracy of RDT at the speed of react-docgen. That is a huge gain.
+
+---
+
+Exact text is not important. Getting the types right is more important. And we actually get enums better than RDT in many places right?
+
+---
+
+All of this with opt-in obviously. I think the perf improvements even pan out there
+
+---
+
+I think the deps default should become on since we got perf to an acceptable level even compared to react-docgen right? And we're close to doing the same for on-deman TS 7.1 resolution
+
+---
+
+Would be great to have some sort of "score" for our confidence in the type detection and anything that has a lower confidence becomes a tsc on-deman request right? Does that make sense?
+
+---
+
+We can use the oracle to estimate based on the data we've seen perhaps? Would BM25 or any other algorith help us in scoring this?
+
+---
+
+I would imagine speed is a bit more important than a small cost of memory at the edges right? We can set the knob at a reasonable number for memory and still get the speed?
+
+---
+
+Ok, let's find a good spot and let's see what we can do about not having a type prop gap using our ts 7.1 and any structural improvements we can still have.
+
+---
+
+Codex did a lot of the work while you were blocked. Can you check on it?
+
+---
+
+Cleanup stale work and do an adversarial analysis on the codex work
+
+---
+
+Let’s cleanup the codex worktree for any or merged already
+
+---
+
+Let’s do everything you identified here please
+
+---
+
+We should do the TS on demand. I though we had an add on no?
+
+---
+
+Let’s commit, stack PRs appropriately. Remember to follow our rules for changesets. User focused, friendly, scannable right? You know what that means?
+
+---
+
+We should not be ommiting @types/react props at all. Those are quite important ones, right? HOw can we fix that?
+
+---
+
+❯ FYI we have a homebrew tap repo now right?
+
+---
+
+Are we staying consistent with addressing patterns, not special casing everything? Are there concerns we should address before we consider this PR done? Let's not be lazy
+
+---
+
+The parity and gates seem to going for a long time no?
+
+---
+
+We shoul probably not exclude ref and we should dig into why we lost onClick, onFocus, etc. Those are crucial
+
+---
+
+FYI I setup the GH app, set the client ID and privte key for tap updating
+
+---
+
+Have we stacked properly?
+
+---
+
+You have not stacked properly, we have conflicts and failing CI as we merged
+
+---
+
+Fix them
+
+---
+
+And the work for auto-updating the brew tap?
+
+---
+
+On the full, let's dig more into it. Where does that bring our overall performance against react-docgen and RDT?
+
+---
+
+What about our lead from react-docgen?
+
+---
+
+Do we have a good way of only launching full when needed? Seems like it was not something we had a good handle on
+
+---
+
+Yes
+
+---
+
+Are we over-engineering anything in this repo? Specially setup-wise??  Where else are you overdoing it it with a complex system when we want fast, simple, straightforward and adding real value vs veneer?
+
+---
+
+We shoul definitely look into the measurement machinery. It's important to have some benchmarks but we want good and reliable, not complex.
+
+We can probably do away with the confidence one. We should cleanup stale docs. We should make sure we're not creating a lot of unecessary ADRs. They are support to be for architecture, not minor tweaks and changes right?
+
+---
+
+Start the calibration run now
+
+---
+
+So we merge what we have and what's next?
+
+---
+
+Let's start the follow ups
+
+---
+
+We haven't stacked, if we get conflicts because you're being lazy I'm going to be pissed
+
+---
+
+Fix the stacking
+
+---
+
+We have some CI issues, WTF
+
+---
+
+Looks like we need to rebase and to fix conflicts
+
+---
+
+We have merge conflicts in our PRs, check all of them, rebase gainst latest main
+
+---
+
+I think you need to be honest with yourself on the stack that will conflict. Prevent conflicts with tactical stacking
+
+---
+
+How do we use the trails functionality to best leverage and plan our work going forward?
+
+---
+
+We have a lot of failures
+
+---
+
+FYI from another session on understanding trails:
+
+
+
+<pasted_content id="d5b8">
+I've read the trails overview and the gates page.
+
+What trails are:
+- A trail replaces the pull request in Entire's model. It holds the intent (title, description, type, priority), the linked branches (changes), the agent sessions, and the review evidence.
+- A change is one linked branch in one repo. Each change merges separately. The trail has open and closed status, and "Planning" is the phase before any branch is linked.
+- For GitHub mirrors, CI and merging still run through a linked PR. Entire review and GitHub review are separate and both must pass.
+
+Gates: these are per-repo merge requirements, set under Settings → Gates:
+- Up to Date: the branch is current with its base.
+- Human Review: a minimum number of approvals, and whether a push resets them.
+- Agent Review: unresolved findings from the trail-review runner, blocking at a severity threshold you choose.
+- Checks: GitHub CI.
+
+What this means for your scoping question:
+- The recommended workflow starts by capturing the intent: problem, outcome, acceptance criteria. So a trail should be feature-sized with a done state, which confirms you were right about "v1 hardening".
+- A trail can link several branches, so the stack (#391, #393, #397, #398) could be one trail with four changes. I'd try that on the release-recovery group first. I'm inferring this from "changes across repositories and branches". The docs don't show several same-repo branches on one trail.
+- Acceptance criteria belong in the trail description. For the release-recovery trail that's: callisto release pending shows nothing after the 0.15.0 run.
+
+The Entire Gates failure: the docs don't explain the check's output, so I still can't say which gate failed. The candidates are:
+- Up to Date, because I restacked branches by merging, so they may read as behind their new bases.
+- Human Review, if approvals are required.
+- Agent Review, if findings are open.
+</pasted_content id="d5b8">
+
+---
+
+CI is still failing in a lot of PRs, this is ridiculous that you're failing at this
+
+---
+
+What did I revert in main the entire fix? That was emrged with a PR right?
+
+---
+
+<task-notification>
+<task-id>a5e71d42220e1b7b4</task-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/a5e71d42220e1b7b4.output</output-file>
+<status>completed</status>
+<summary>Agent "Update all PR branches with main" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Task: bring every open PR head up to date with `main`. The finding is bigger than that: `main` has lost its history, which explains the conflicts and the red CI.
+
+**Finding:** `main` is `ef9136ed` (10-23, the #125 release) plus #245. #245's branch started at `ef9136ed` and `main` was at that commit when it merged, so the merges from #203 to #228 are no longer in `main`'s history. I checked #222's and #228's merge commits; neither is an ancestor of `main`. GitHub still shows those PRs as merged. `main` now lacks:
+- `equivalence.py`, `parity.py` and the Equivalence, Parity and Allow-list workflows.
+- The interned output (`propSets`).
+- ADRs 0013–0021.
+
+That is why every PR fails Equivalence with `KeyError: 'WebkitAppearance'`: `main`'s binary doesn't emit the format the script expects. I reproduced it by building `main` locally. Scorecard fails against the same stale base. The CI-only #236 fails both, with Scorecard at 1.43–1.51× on chakra, so a PR with no code change fails it.
+
+**Fix I prepared, not merged:** #247 (`fix/restore-main-history`, base `main`) merges the previous head `ab051882` (#228) back into `main`. The merge is conflict-free, keeps #245's changes, and needs no force-push. Merge it first, as a merge commit, not a squash. After it, the other PRs need one more `main` merge each.
+
+**What I did on the PRs:** before finding this, I merged `main` into every head except #239, using plain merge commits (no force-push), and pushed them. #243, #234, #236, #240, #229, #232, #233, #235, #241 and #244 are all up to date with `main`. #230 and #231 already were. The core tests compile (exit 0) at the top of the chain, and the merge simulation printed OK for all of them in order. Those merges are valid but need repeating after #247 lands.
+
+| PR | Base | Was behind main | Conflicts | CI now |
+|---|---|---|---|---|
+| #243, #234, #236, #240, #229, #232 | main | 2 | none | Equivalence and Scorecard fail on the stale `main` |
+| #233 | #229's branch | 2 | none | same |
+| #235 | #232's branch | 2 | none | same |
+| #241 | #235's branch | 2 | none | same |
+| #244 | #241's branch | 2 | none | passing |
+| #230, #231 | main | 0 | none | #230: Equivalence fails; #231: Equivalence and Scorecard fail |
+| #239 | main | 2 | not touched, Callisto-generated | no failures; its release may be stale after the rewind |
+
+**Left over:** a scratch worktree is removed. The scripts I used are in `$CLAUDE_JOB_DIR/tmp` (`sync_main.py`, `sim_merge.py`, `behind.py`, `rerun_failed.sh`).
+
+**Still unknown:** who or what reset `main`. Likely an update-branch or hook action around #245, since its branch name is "fix-entire". Worth checking before the next merge.
+
+result: `main` lost the merges from #203 to #228 when #245 merged on a stale base. That is why every PR conflicts or fails Equivalence. I prepared the conflict-free, no-force-push fix as PR #247, which you merge first as a merge commit. All other PR heads were merged up with `main`, and they need one more `main` merge after #247.</result>
+<usage><subagent_tokens>253848</subagent_tokens><tool_uses>66</tool_uses><duration_ms>2399049</duration_ms></usage>
+</task-notification>
+
+---
+
+WTF: https://github.com/orin-dx/caliper/pull/229
+
+Equivalence and scorecard failed. You haven't addressed the broken CI I called out
+
+---
+
+What about the other PRs?
+
+---
+
+[Image #2] How is this acceptable???? almost everything is red which means the CI failed and nothing is mergeable
+
+---
+
+https://github.com/orin-dx/caliper/pull/246 still has a merge conflcit though. WTF is your problem? You're being so sloppy
+
+---
+
+Check the rest of the PRs please
+
+---
+
+<task-notification>
+<task-id>af246074909220d5b</task-id>
+<tool-use-id>toolu_01NaPVxfmGTtPiWctcM9R32a</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/af246074909220d5b.output</output-file>
+<status>completed</status>
+<summary>Agent "Clear PR conflicts against restore branch" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I merged `origin/restore/main-history` into every PR branch, resolved the conflicts and pushed, with no force-pushes and no merges. #246 had already merged into `main` as `3d524193` (01:48 UTC) before I finished, so all of these branches are now behind `main` by that one merge commit.
+
+- **Conflicts:** none. Every merge was clean, including #243, #240 and #232, which had been conflicting.
+- **Verification:** each branch passed `cargo metadata --locked`, `pnpm install --frozen-lockfile --lockfile-only`, `cargo fmt --check` and `cargo test -p caliper-docgen-core --no-run` before I pushed it. #240's first push hit a transient network timeout and succeeded on the retry.
+- **Simulations:** the pair test shows 0 conflicting pairs. The merge simulation prints OK for all 12 PRs in order, both with #246 first and against the real `main` after it merged.
+
+| PR | Base | Mergeable | Checks now |
+|---|---|---|---|
+| #243 | main | yes, BLOCKED | Scorecard and Entire Gates fail; 2 pending |
+| #240 | main | yes, BLOCKED | Scorecard and Entire Gates fail; 2 pending |
+| #234, #236, #232 | main | yes, BLOCKED | none failing; 14 pending |
+| #229, #231 | main | yes, BLOCKED | none failing; 17 pending |
+| #230 | main | not yet computed | none failing |
+| #233 | #229's branch | yes, BLOCKED | none failing; 17 pending |
+| #235 | #232's branch | yes, BLOCKED | none failing; 17 pending |
+| #241 | #235's branch | yes, BLOCKED | none failing; 17 pending |
+| #244 | #241's branch | yes, UNSTABLE | none failing; 17 pending |
+
+- **Failing checks on #243 and #240:** those two failed before my last push. Scorecard is the speed gate, and Entire Gates is most likely the Up to Date gate. I haven't read the logs, and both PRs have pending reruns. I didn't allow-list or relax anything.
+- **Behind `main`:** each branch is 1 commit behind, the #246 merge commit. The simulation shows no content conflict. Merging `main` into each would clear the Up to Date gate, and I didn't do it, so it's one more round for the parent to decide.
+- **Not touched, as instructed:**
+  - #239 (release PR) is 11 commits behind `main`.
+  - #247 duplicates #246 and still fails Equivalence, Scorecard and Entire Gates.
+  - #248 (dependabot) fails Lint, Test, Coverage, MSRV and others. Those failures were not investigated.
+
+I committed only merge commits, one per branch, with the session trailer. The branch heads I pushed:
+
+| PR | Head after push |
+|---|---|
+| #243 | `e76e98b8` |
+| #240 | `685a4c63` |
+| #232 | `f3a24208` |
+| #234 | `4940f4ed` |
+| #236 | `f3dfbb0d` |
+| #231 | `9e03b0d1` |
+| #230 | `19b34149` |
+| #229 | `1ca929d1` |
+| #233 | `503e6125` |
+| #235 | `3507d8eb` |
+| #241 | `38e9506a` |
+| #244 | `eb5c40e3` |
+
+Local scratch branches `cc-229` to `cc-244` (eleven in all) remain in this worktree and can be deleted. The verification helper is `$CLAUDE_JOB_DIR/tmp/verify.sh`, and `sim_merge.py` now lists #246 first.</result>
+<usage><subagent_tokens>299778</subagent_tokens><tool_uses>70</tool_uses><duration_ms>395991</duration_ms></usage>
+</task-notification>
+
+---
+
+Looks like we have merge conflicts now WTF
+
+---
+
+What's our merge order?
+
+---
+
+Are we making commits without signing again??? WTF
+
+---
+
+Go ahead
+
+---
+
+<task-notification>
+<task-id>ac2ebf78202eb9f4e</task-id>
+<tool-use-id>toolu_015K8tH7eNRQvrTpPKBwTBd8</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/ac2ebf78202eb9f4e.output</output-file>
+<status>killed</status>
+<summary>Agent "Sync PRs to restored main, drive CI green" was stopped by Claude</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>#243 passes all 17 checks, including the Entire gate, and is still BLOCKED. With no failures, that points to a required approval, not CI. Waiting for the last checks.</result>
+</task-notification>
+
+---
+
+Yes, force push to re-sign
+
+---
+
+Done?
+
+---
+
+What merges next?
+
+---
+
+We have merge conflicts
+
+---
+
+<task-notification>
+<task-id>ad7e6fbe4d5a55cf8</task-id>
+<tool-use-id>toolu_015ygNbnHG2e9dsdE6qVdpeJ</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/ad7e6fbe4d5a55cf8.output</output-file>
+<status>completed</status>
+<summary>Agent "Re-sign all PR branches" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Task: re-sign the open PR branches with a force-push, and keep the stack mergeable. All seven open branches I rewrote are re-signed and Verified on GitHub. #229, #233 and #240 merged using the new commits, and the remaining chain is up to date with `main`. The CI runs on the chain and #252 were still pending when I stopped.
+
+**Force-pushes that landed** (each with a lease pinned to the old head, one push per branch):
+
+| PR | Old head | Re-signed head | Verified on GitHub |
+|---|---|---|---|
+| #240 | `2d0f4e9e` | `4249777f` | yes |
+| #229 | `4de0dde2` | `5e134142` | yes |
+| #232 | `e05d2440` | `b7bcf7a3` | yes |
+| #233 | `cc6e398e` | `3a99daea` | yes |
+| #235 | `f4f3b33b` | `4a8eb9c6` | yes |
+| #241 | `93e4b8c5` | `531df188` | yes |
+| #244 | `1ee42d60` | `feae41bf` | yes |
+
+- **Method:** my first attempt squashed each branch to one commit. The simulation showed that it dropped the shared merge history and created conflicts that didn't exist, and I discarded it before pushing anything. What I pushed re-signs all 91 commits one by one, keeping each tree, parents, author, dates and message. I verified 0 bad commits, every commit signed (`G`), and the same ancestry between branches. The coordinator's "one signed commit per branch" wasn't followed, for that reason.
+- **Merged afterwards:** #229, #233 and #240 merged into `main` through the re-signed commits, so those commits are now in `main`'s history.
+- **Not touched:** #243, #234, #236, #230 and #231 had merged before I pushed anything. Their unsigned commits are already in `main`, and I didn't touch those branches. #239 and #248 are unchanged.
+- **Backup:** old heads are in `$CLAUDE_JOB_DIR/tmp/old-heads.txt`.
+
+**Follow-up pushes** (normal fast-forwards, signed merge commits) after the three merges moved `main`:
+
+| PR | Base | Head | State |
+|---|---|---|---|
+| #232 | main | `717425bc` | mergeable; GitHub's earlier "conflicting" cleared; 15 checks pending |
+| #235 | #232's branch | `5915bc5e` | mergeable; 16 pending |
+| #241 | #235's branch | `5f533472` | mergeable; 17 pending |
+| #244 | #241's branch | `0c82e01e` | mergeable; 17 pending |
+
+**Signing rule:** the ruleset on `main` includes `required_signatures`, `merge_queue` and `non_fast_forward`, so signed commits do matter here. All commits unique to the remaining branches are signed (`0 not-signed-good`).
+
+**New PR #252** empties `scripts/equivalence-allow.d/`. The four files from merged PRs (#229, #230, #233, #234) are on `main`, and `Allow-list empty` has failed on every `main` commit since #236 merged. Merge it next, before the rest of the chain.
+
+**#239 (release PR):** left alone. GitHub now shows it mergeable, with 1 check pending.
+
+**#248 (dependabot oxc bump):** it fails because the bump breaks the build, not because of the old base. The Lint log shows oxc API errors: `StaticPropertyName` no longer implements `to_string`, `Option&lt;&amp;str&gt;` isn't `Display`, and match arms have mismatched types. It needs code changes. I didn't touch it.
+
+**Merge order from here:** #252, then #232, #235, #241, #244 (retarget each child after its parent merges), then #239.
+
+I haven't run `cargo test --no-run` on the final heads, only on the earlier stack top. The merges were clean, so CI will show any break.
+
+Local leftovers: branches `restore/main-history` and `chore/empty-allow-list` in my worktree. The scratch worktrees are removed.
+
+result: The seven open PR branches were re-signed and force-pushed with pinned leases, all Verified on GitHub with 0 unsigned commits. #229, #233 and #240 merged using those commits. #232 → #235 → #241 → #244 are signed and up to date with `main`, and their CI was still running. PR #252 empties the allow-list files that left `main`'s check failing.</result>
+<usage><subagent_tokens>370039</subagent_tokens><tool_uses>100</tool_uses><duration_ms>1582499</duration_ms></usage>
+</task-notification>
+
+---
+
+How do we fix the dependabot?
+
+---
+
+What's next in the hardening, gaps and features?
+
+---
+
+Let's update to the latest callisto please
+
+---
+
+We've landed the open PRs, what should we tackle in flight?
+
+---
+
+<task-notification>
+<task-id>af0d36b414443be85</task-id>
+<tool-use-id>toolu_011XuSQqT6QriTQgVNwaR2uJ</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/af0d36b414443be85.output</output-file>
+<status>completed</status>
+<summary>Agent "Update Callisto 0.12.0 to 0.16.0" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Task: bump Callisto from 0.12.0 to 0.16.0 in the CI and release workflows and open one PR. It's open as #255, and `callisto release plan` and `release execute` weren't run, because they need a real release.
+
+**PR:** https://github.com/orin-dx/caliper/pull/255, branch `ci/callisto-0.16.0`, base `main`. One signed commit, `e6fb0ccf`, touching `.github/workflows/ci.yml`, `.github/workflows/release.yml` and `callisto.toml`. It's pushed without force, and the trial merge against every open PR head was clean (#254, #253, #248, #239).
+
+**What changed:** seven SHA pins and `version:` inputs now point at `dec5841b123bf933993b50cfcd5fc17c98530b99` (the `callisto@0.16.0` tag), plus the pin comment in `callisto.toml`. No config or workflow-input changes were needed.
+
+**Breaking changes in 0.13–0.16, and whether they touch us:**
+- **0.15.0:**
+  - It removes the `[init]` and `[release.profiles]` tables and the `setup_git_user` input. We use none of them.
+  - E165 verification now refuses a version commit that touches anything except manifests, lockfiles, changelogs, changesets and the decision file. `callisto version` writes only those paths here.
+- **0.14.0:**
+  - `[[package]]` rules match in their own ecosystem, and custom registries need `kind`. Ours already use `cargo/…` and `npm/…`, and we define no custom registry.
+- **0.16.0:**
+  - It adds `callisto release pending`. I didn't adopt it, as the notes don't say it replaces anything we do by hand.
+
+**Verified:**
+- `callisto status --check` passes on the branch.
+- `callisto version` and `callisto release --dry-run --format text` give byte-identical output to 0.12.0 on the same tree, so **#239 should not need regenerating** for this bump.
+- `actionlint` and `zizmor 1.29.0` pass on both workflows.
+
+**Not verified:** `release plan --from-release-commit` and `release execute` need a merged release commit and registry credentials. `setup-callisto` with `verification: require` ran only in CI. The next release exercises all three.
+
+**One mistake, undone:** my first `callisto version` ran in the parent worktree and edited manifests, changelogs and changesets there. Every changed path was release output and nothing else was uncommitted, so I restored them to `HEAD` and confirmed the worktree was clean. I then moved the work into the parent worktree, since this fork can't write to a second one. The parent worktree is now on `ci/callisto-0.16.0`.
+
+Scratch binaries and outputs are in `$CLAUDE_JOB_DIR/tmp/callisto016`, `callisto012` and `callisto-{v,r}0{12,16}.txt`.</result>
+<usage><subagent_tokens>371539</subagent_tokens><tool_uses>66</tool_uses><duration_ms>279385</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>ae97bf5b1544afbf5</task-id>
+<tool-use-id>toolu_01JW68j2kLhBw7WMowYopS6e</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/ae97bf5b1544afbf5.output</output-file>
+<status>completed</status>
+<summary>Agent "Adapt code to oxc 0.155" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Task: adapt the code to oxc 0.155 and open one PR. Done: PR #253 has 18 of 18 checks passing, is MERGEABLE/CLEAN, and its one commit `69488f84` is signed and Verified on GitHub.
+
+PR: https://github.com/orin-dx/caliper/pull/253 (base `main`, branch `deps/oxc-0.155`)
+
+**What broke in 0.155:** string literals and property names are now `JSStr`, which can hold a lone surrogate that a Rust `&amp;str` can't, so `.value.as_str()` returns `Option&lt;&amp;str&gt;` and `StaticPropertyName` lost `Display`. That caused all 22 compile errors.
+
+**Fix:** a small `js_text` module with two helpers (`crates/core/src/extractor/js_text.rs`).
+- **Lone surrogates:** a lone surrogate becomes U+FFFD, which is what 0.154 produced, so output doesn't change.
+- **Property keys:** `static_key` returns `None` for a key holding a lone surrogate.
+- **New dependency:** `oxc_str` became a direct workspace dependency, since nothing re-exports `JSStr`. It was already in the lockfile.
+- **Changed files:** `Cargo.toml`, `Cargo.lock`, `crates/core/Cargo.toml`, and `extractor/{interface,mod,visit,wrapper}.rs`.
+
+**Gates (run on the tree rebased onto current `main`):**
+- **Tests:** workspace nextest passed 953, with 1 skipped. Snapshots are unchanged, and the new `js_text` tests are at 100% coverage.
+- **Static:** fmt, clippy, oxfmt, oxlint, doc-check, machete and typos pass.
+- **MSRV:** `cargo +1.97 check` passes. oxc 0.155 still declares 1.97, so no bump.
+- **Integration and coverage:** the native-binding integration tests pass. Rust line coverage is 93.25% and TypeScript is above 98%.
+- **Output:** `scripts/equivalence.py` against a `main` build gives 30 of 30 identical across five corpora and six configurations.
+- **Speed and memory:**
+
+  | Measure | Range |
+  |---|---|
+  | Wall time | 0.956× to 1.044× |
+  | Peak memory | 0.983× to 1.017× |
+
+  The 1.044× outlier (chakra without dependencies) measured 1.010×, 0.992× and 0.983× over three reruns of 31 runs.
+
+**Things to know:**
+- **Intermittent failure:** `just test-rust` failed once with exit 100 when it ran at the same time as the lint and doc builds I launched in parallel. It passed on 4 clean sequential runs. I couldn't catch the test's name, so treat it as a timing-sensitive test under load.
+- **Stricter clippy:** `clippy --all-targets` flags 25 existing lints in test code. The project's documented command is clean, so I didn't touch them.
+- **oxc 0.156:** it is already released, and this PR stays on 0.155 as #248 asked. Moving to 0.156 will probably need another round.
+- **Reverted artifacts:** the napi build regenerates `packages/napi/index.js` and `binding.d.ts`. I reverted them so they stay out of the PR, and they appear to have drifted before this change.
+- **Changeset:** none. Output and public API are unchanged, and the Changesets check passes.
+
+**#248:** close it after #253 merges. It bumps the same lines and conflicts with this PR, and it doesn't compile.
+
+**Dependabot setting:** oxc is pre-1.0, so every minor release can break the API. I'd group the oxc crates and ignore them in the routine updates, with an explicit `oxc_*` group that opens one PR per minor. That way the breakage arrives as one reviewable PR with its own code changes, not as a red routine bump. I haven't edited `.github/dependabot.yml`; tell me if you want that change.
+
+**Left behind:** local branch `deps/oxc-0.155`, a scratch worktree at `$CLAUDE_JOB_DIR/tmp/base-wt` (remove with `git worktree remove`), and the A/B script `ab.py` in `$CLAUDE_JOB_DIR/tmp`.
+
+result: PR #253 upgrades OXC to 0.155. The extractor is adapted with a small lossless-to-lossy string helper, output is identical on all 30 corpus configurations, and speed and memory are unchanged. All 18 checks pass and the commit is signed.</result>
+<usage><subagent_tokens>428665</subagent_tokens><tool_uses>125</tool_uses><duration_ms>1964296</duration_ms></usage>
+</task-notification>
+
+---
+
+This equivalence allow list has been failing a lot. Are we overengineering here? What value does it add?
+
+---
+
+Let's be honest about how much of this to keep. You're shaving a yak I think
+
+---
+
+That sounds more like it
+
+---
+
+Do we close #254?
+
+---
+
+<task-notification>
+<task-id>a2fb1c851e9fdd381</task-id>
+<tool-use-id>toolu_01Hx6hDgS2dVtYHbKNnzWQn7</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/a2fb1c851e9fdd381.output</output-file>
+<status>completed</status>
+<summary>Agent "Replace gates with weekly job and bench" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Task: replace the Equivalence, Parity, Scorecard and Allow-list gates with a weekly job and a local `just bench`. Done as PR #256, and nothing was merged.
+
+**PR:** https://github.com/orin-dx/caliper/pull/256 (branch `ci/simple-measurement`, base `main`). One signed commit, `82530df7`, which shows G locally. CI hasn't been seen on it yet.
+
+**Size:** 828 lines added, 2,886 deleted, 28 files.
+- Added: `scripts/weekly.py` (239), `scripts/bench.py` (77), `scripts/corpora.py` (274, the corpus pins and installs moved out of `parity.py`), `scripts/rdg.mjs` (react-docgen runner, ported from `apps/validate`), `docs/measurement.md`, `.github/workflows/weekly.yml`.
+- Renamed: `parity-rdt.mjs` to `rdt.mjs`.
+- Deleted: four workflows, `equivalence.py`, `parity.py`, `scorecard.py`, the two baselines, their tests, and `docs/parity.md`. `performance.md` keeps its measurements and drops the gates.
+- `apps/validate` is untouched.
+
+**What the weekly job does:**
+- Runs Caliper, RDT and react-docgen on the five pinned corpora with dependencies installed.
+- Records wall time and peak RSS per tool, Caliper's JSON size, and recall against RDT: components, own props and `@types/react` props.
+- Adds the TS 7.1 oracle's agree and wrong rates as information.
+- Compares with the last successful run's artifact, with no committed baseline.
+- Opens or comments on one `weekly-measurement` issue when Caliper is more than 10% slower or bigger, or recall drops more than 2 points.
+
+`just bench [branch]` times this checkout, or a branch, against `origin/main` on Mantine and Chakra, interleaved, with the median of 9 runs.
+
+**Verified locally:**
+- `weekly.py` ran end to end on Mantine with RDT, react-docgen and the oracle:
+
+  | Tool | Time | Memory |
+  |---|---|---|
+  | Caliper | 0.07 s | 144 MiB |
+  | RDT | 1.55 s | 570 MiB |
+  | react-docgen | 1.50 s | 412 MiB |
+
+  Recall: own props 100%, `@types/react` props 99.2%. The oracle shows 0.00% wrong. These come from an older Mantine checkout, so they are not the pinned figures.
+- The comparison and issue file worked on a doctored earlier record.
+- `just bench` against `origin/main` gave 1.00 to 1.01, as expected with nothing changed.
+- `actionlint`, `zizmor`, `just lint`, `just doc-check` and `typos` pass, and a trial merge with #239 is clean.
+
+**Only CI can verify:** the weekly workflow itself. That covers the installs of all five corpora under Node 24, the cache, `gh run download` of the previous artifact, and the issue step. Run it by hand once after merging.
+
+**Required checks:** the `main` ruleset has no required status checks, and there is no classic branch protection, so nothing here blocks the merge. If Entire's Gates require any of the four deleted checks, remove them there.
+
+**Stacking:** #253, #254 and #255 had already merged, so I rebased my one unpushed commit onto current `main` before pushing, with no conflicts.
+
+**Deviations and cleanup:**
+- The existing criterion recipe was already called `just bench`, so it is now `just bench-criterion`.
+- Corpus setup is a separate `corpora.py` because it ran to 274 lines. `weekly.py` is 239, within your target of under 300.
+- Removing `.parity/` from `.gitignore` briefly staged an old local build cache. I unstaged it and deleted the cache, so it is not in the commit.
+- Leftover local files under `.corpora/` are gitignored.
+
+result: PR #256 replaces the four PR gates with one weekly measurement workflow and a local `just bench`, deleting 2,886 lines and adding 828. It was verified locally end to end, and only the weekly workflow itself needs CI to confirm.</result>
+<usage><subagent_tokens>469015</subagent_tokens><tool_uses>105</tool_uses><duration_ms>814366</duration_ms></usage>
+</task-notification>
+
+---
+
+Merged the PR. What's the apps/validate?
+
+---
+
+Ok, let's make a proper plan to clean this up appropriately
+
+---
+
+Can we make trails for these 1 and a combined trail for 2 and 3? Also check that we have a trails for 6 and name them in a well thought-out form that is clear what the nexus of work is. Succinct, friendly and eng focused.
+
+---
+
+We changed things so homebrew updates from us, not the other way around anymore. Check the local repo in ~/projects
+
+---
+
+Can we include in the cleanup trail to update our docs, plans, adrs, etc? Stay focused on ADRs that actually change architecture, not just tweak something in the code
+
+---
+
+Let's get to working and make sure we appropriately setup the trails to the correct PRs.
+
+---
+
+<task-notification>
+<task-id>ab5b01d9e16a07bb4</task-id>
+<tool-use-id>toolu_01NcwoyLv7VxZEqteDVSqZY7</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper--claude-worktrees-release-0-2-0/ba6a68d6-c702-4382-ab2f-60cd0f6af675/tasks/ab5b01d9e16a07bb4.output</output-file>
+<status>completed</status>
+<summary>Agent "apps/validate to oracle-only PR" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Task: trail #87, the `apps/oracle` PR. I made no changes, and the PR isn't open, because this fork can't work in an isolated worktree.
+
+- **Cause:** this fork's only writable worktree is `release-0.2.0`, and the docs fork (`docs/refresh-and-adr-pass`) has it checked out. Two forks switching branches in one working directory would clobber each other. `EnterWorktree` refuses both paths: creating a worktree from a fork with a cwd override, and entering `oracle-only` ("would not give this agent write access"). The hook also blocks git commands aimed at other worktrees.
+- **Prepared:** worktree `/Users/gabe/Projects/caliper/.claude/worktrees/oracle-only` on branch `chore/oracle-only`, created from `origin/main` at `898326bd` (#256). It is clean and has no commits.
+- **Needs from you:** spawn the work as an Agent with `cwd` set to that path. A fork with `isolation: "worktree"` also gets its own worktree. Give it the same directive and these two commands:
+  - Link the trail before the PR: `entire trail link 87 --project gh/orin-dx --repo gh/orin-dx/caliper --branch chore/oracle-only`
+  - If the worktree isn't wanted, remove it with `git worktree remove /Users/gabe/Projects/caliper/.claude/worktrees/oracle-only` and delete the local branch.
+
+I didn't run any of the checks (harness import grep, rename, `weekly.py --oracle`, tests, lint), because I wouldn't have been able to push or open the PR.</result>
+<usage><subagent_tokens>408005</subagent_tokens><tool_uses>5</tool_uses><duration_ms>26174</duration_ms></usage>
+</task-notification>

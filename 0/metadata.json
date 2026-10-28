@@ -1,0 +1,141 @@
+{
+  "cli_version": "0.12.3-nightly.202610261136.c4f103d8d",
+  "checkpoint_id": "01M60HKHH7BE7WR8ACB485KPKN",
+  "session_id": "ba6a68d6-c702-4382-ab2f-60cd0f6af675",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-28T06:01:55.730382Z",
+  "branch": "docs/refresh-and-adr-pass",
+  "checkpoints_count": 4,
+  "save_step_count": 1,
+  "files_touched": [
+    "ARCHITECTURE.md",
+    "README.md",
+    "crates/core/src/dependency_types.rs",
+    "crates/core/src/dependency_types/tests.rs",
+    "crates/core/src/known.rs",
+    "crates/core/src/pipeline/mod.rs",
+    "crates/core/src/resolver/chain.rs",
+    "crates/core/src/resolver/evaluate.rs",
+    "crates/core/src/resolver/import.rs",
+    "crates/core/src/resolver/memo.rs",
+    "crates/core/src/resolver/mod.rs",
+    "crates/core/src/resolver/precedence.rs",
+    "crates/core/src/resolver/primitives.rs",
+    "crates/core/src/resolver/tests.rs",
+    "crates/core/src/types/global.rs",
+    "docs/STATUS.md",
+    "docs/adr/0008-parse-cache-keyed-by-build.md",
+    "docs/adr/0013-curated-mode-reads-react-attributes-apart.md",
+    "docs/adr/0014-declarations-before-shortcuts.md",
+    "docs/adr/README.md",
+    "docs/architecture/extractor-ast-visiting.md",
+    "docs/architecture/napi-binding.md",
+    "docs/architecture/pipeline-orchestration.md",
+    "docs/architecture/resolver-type-resolution.md",
+    "docs/architecture/serialization-formats.md",
+    "docs/architecture/types-and-output-contract.md",
+    "docs/performance.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "6a4d9733e098",
+  "checkpoint_transcript_start": 70479,
+  "transcript_lines_at_start": 70479,
+  "compact_transcript_start": 4653,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0,
+    "subagent_tokens": {
+      "input_tokens": 20,
+      "cache_creation_tokens": 5130,
+      "cache_read_tokens": 5094518,
+      "output_tokens": 3023,
+      "api_call_count": 10
+    }
+  },
+  "redaction": {
+    "replacements": 1340,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 1340,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01QchtZUzPN3PMVrg8Gy3ykV",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "vanguard:research"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "759066964e9a",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 6111,
+        "end": 6112,
+        "entry_ids": [
+          "255a129b-35bc-4cc3-9675-402f9d83f595"
+        ],
+        "tool_use_id": "toolu_01QchtZUzPN3PMVrg8Gy3ykV"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01QchtZUzPN3PMVrg8Gy3ykV"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: vanguard:research",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": ".claude/worktrees/release-0.2.0:adr"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "759066964e9a",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 40539,
+        "end": 40540,
+        "entry_ids": [
+          "0a2d086d-18f7-41f9-b6a6-3a37c42b1182"
+        ],
+        "tool_use_id": "toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: .claude/worktrees/release-0.2.0:adr",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 33
+  }
+}
