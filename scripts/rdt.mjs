@@ -1,12 +1,12 @@
 // react-docgen-typescript on one corpus (scripts/weekly.py): every component's props with their declaring file, plus
-// RDT's own wall time and peak RSS. RDT comes from apps/validate, with the options its harness uses.
+// RDT's own wall time and peak RSS. RDT comes from apps/oracle, with the options its harness uses.
 //
 // Usage: node scripts/rdt.mjs <file-list> <tsconfig> <out.json>
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
-const require = createRequire(fileURLToPath(new URL('../apps/validate/package.json', import.meta.url)))
+const require = createRequire(fileURLToPath(new URL('../apps/oracle/package.json', import.meta.url)))
 const { withCustomConfig } = require('react-docgen-typescript')
 
 const [listFile, tsconfig, out] = process.argv.slice(2)

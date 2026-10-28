@@ -7,7 +7,7 @@ projects:
   cli-npm: "packages/cli"
   crates-binding: "crates/binding"
   napi: "packages/napi"
-  validate: "apps/validate"
+  oracle: "apps/oracle"
   vite-plugin: "packages/vite-plugin"
   storybook: "packages/storybook"
 

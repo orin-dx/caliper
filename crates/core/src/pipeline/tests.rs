@@ -927,8 +927,7 @@ export function Comp(props: CompProps) { return null; }
 // colliding component silently overwrote the 2nd in the output BTreeMap
 // with no diagnostic at all — a real violation of "never fail silently"
 // for anyone pointing this tool at more than one directory in one call
-// (the default and only way `apps/validate` and any real monorepo build
-// would invoke it).
+// (the default and only way any real monorepo build would invoke it).
 
 #[test]
 fn test_same_display_name_across_files_with_identical_stem_does_not_collide() {

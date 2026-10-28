@@ -111,14 +111,14 @@ def rate(pair):
 
 
 def oracle(binary, name, src, root, work):
-    """How often TypeScript 7.1's checker contradicts Caliper's prop types (apps/validate/src/oracle.ts)."""
+    """How often TypeScript 7.1's checker contradicts Caliper's prop types (apps/oracle/src/oracle.ts)."""
     caliper_json = os.path.join(work, f'{name}.caliper.json')
     with open(caliper_json, 'w') as f:
         subprocess.run([binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported',
                         '--load-dependencies', '--quiet'], stdout=f, check=True)
     list_file, tsconfig = program_inputs(name, src, work)
     verdicts = os.path.join(work, f'{name}.oracle.json')
-    subprocess.run(['pnpm', '--dir', os.path.join(ROOT, 'apps', 'validate'), 'exec', 'tsx', 'src/oracle.ts', '--root', root,
+    subprocess.run(['pnpm', '--dir', os.path.join(ROOT, 'apps', 'oracle'), 'exec', 'tsx', 'src/oracle.ts', '--root', root,
                     '--src', src, '--tsconfig', tsconfig, '--caliper', caliper_json, '--out', verdicts, '--files',
                     list_file], check=True, timeout=3600)
     with open(verdicts) as f:

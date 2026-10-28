@@ -66,12 +66,6 @@ If you need the full attribute set and aren't ready to opt into `full` mode, thi
 
 ## Getting the exact diff for your codebase
 
-`apps/validate/` is the harness used to compare this tool's output against a real `react-docgen-typescript` run, field by field, across 20 real component libraries (shadcn, MUI, Chakra, Mantine, React Aria, Radix, Fluent UI, Base UI, Ant Design, Ark UI, Zendesk Garden, React Day Picker, Headless UI, Blueprint, and others — full list in `docs/rdt-coverage.md`).
-
-Don't just trust this document — run it against your own components:
-
-```bash
-pnpm --filter caliper-docgen-validate compare:all
-```
+`scripts/weekly.py` compares this tool's output against a real `react-docgen-typescript` run, prop by prop, on five pinned public libraries (Mantine, Chakra, shadcn, Ant Design, React Spectrum), and `docs/measurement.md` explains how to read it. To see the difference on your own components, run `caliper-docgen extract --src <dir> --format rdt` and compare its props with your current RDT output.
 
 `docs/rdt-coverage.md` tracks which pattern each fixture exercises and the bugs found along the way (almost all now fixed).

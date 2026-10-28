@@ -15,7 +15,7 @@
 //! cargo run -p caliper-docgen-tsc-client --example smoke_real_tsc
 //! ```
 //!
-//! Requires `apps/validate`'s `typescript-next` dependency to be installed (`pnpm
+//! Requires `apps/oracle`'s `typescript-next` dependency to be installed (`pnpm
 //! install` from the repo root) — see docs/type-checker-integration.md.
 
 use std::time::Duration;
@@ -29,10 +29,10 @@ async fn main() {
     let repo_root = Utf8PathBuf::from_path_buf(std::env::current_dir().expect("cwd")).expect("repo root is UTF-8");
 
     // `TSC_PACKAGE_DIR` points at any installed `typescript` package, so a new build can be probed without touching
-    // `apps/validate`.
+    // `apps/oracle`.
     let package_dir = std::env::var("TSC_PACKAGE_DIR")
         .map(Utf8PathBuf::from)
-        .unwrap_or_else(|_| repo_root.join("apps/validate/node_modules/typescript-next"));
+        .unwrap_or_else(|_| repo_root.join("apps/oracle/node_modules/typescript-next"));
     let tsc_path = package_dir.join("bin/tsc");
     let package_json_path = package_dir.join("package.json");
     let version = std::fs::read_to_string(&package_json_path)

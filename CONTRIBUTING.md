@@ -25,8 +25,8 @@ cargo fmt --all
 pnpm --filter caliper-docgen-vite-plugin test      # 33 unit tests (mocked NAPI)
 pnpm --filter caliper-docgen-vite-plugin test:integration  # 3 integration tests (real native binding)
 
-# Accuracy comparison (informational — exits 0 regardless of gaps)
-moon run validate:compare
+# Speed and memory of your branch against origin/main (Mantine and Chakra)
+just bench
 ```
 
 The pre-commit hook runs `cargo fmt`, `cargo clippy --all-targets -D warnings`, `typos`, and `cargo deny` on every commit. It's fast enough that skipping it isn't worth the trouble.
@@ -98,4 +98,4 @@ treated as opaque when it should expand the HTML attributes.
 3. Update snapshots if extraction output changes (`cargo insta review`)
 4. One logical change per PR — squash fixup commits before merging
 
-> `moon run validate:compare` is a developer tool for checking accuracy against real libraries. It exits 0 regardless of coverage gaps and is not a CI gate.
+> `just bench` is a local check of speed and memory against `main`; it prints a table and fails nothing. Accuracy against RDT and react-docgen is tracked by the weekly record (`docs/measurement.md`), not by a pull-request gate.

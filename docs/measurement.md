@@ -30,7 +30,7 @@ The run uploads `weekly.json` and a table to the job summary. It compares with t
 
 ### TypeScript's checker as the oracle
 
-RDT has mistakes of its own. With `--oracle` the run also asks TypeScript 7.1's checker (`apps/validate/src/oracle.ts`, `typescript/sync` of `7.1.0-beta`) for each prop's type and compares it structurally with Caliper's canonical `--json`. The weekly table shows the share of props that agree (identical, or the same type spelled by name) and the share the checker contradicts. This is information only: the checker is a beta and the backend that uses it is an opt-in (`docs/type-checker-integration.md`).
+RDT has mistakes of its own. With `--oracle` the run also asks TypeScript 7.1's checker (`apps/oracle/src/oracle.ts`, `typescript/sync` of `7.1.0-beta`) for each prop's type and compares it structurally with Caliper's canonical `--json`. The weekly table shows the share of props that agree (identical, or the same type spelled by name) and the share the checker contradicts. This is information only: the checker is a beta and the backend that uses it is an opt-in (`docs/type-checker-integration.md`).
 
 | Verdict           | Meaning                                                                          |
 | ----------------- | -------------------------------------------------------------------------------- |

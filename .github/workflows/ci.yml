@@ -57,7 +57,7 @@ jobs:
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: just,cargo-nextest
-      # The cli config tests spawn `node --import=tsx/esm`, and tsx is a devDependency of apps/validate.
+      # The cli config tests spawn `node --import=tsx/esm`, and tsx is a devDependency of apps/oracle.
       - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
         with:
           auto-install: true
