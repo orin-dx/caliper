@@ -1,114 +1,114 @@
 {
-  "caliper": "caliper-docgen 0.4.0",
+  "caliper": "caliper-docgen 0.6.0",
   "typescript": "7.1.0-beta",
   "corpora": {
     "fixtures": {
       "components_checker": 40,
-      "components_matched": 33,
-      "props_checker": 457,
-      "props_shared": 308,
+      "components_matched": 32,
+      "props_checker": 453,
+      "props_shared": 301,
       "verdicts": {
-        "identical": 204,
-        "spelled": 83,
-        "less precise": 19,
-        "wrong": 1,
+        "identical": 203,
+        "spelled": 79,
+        "less precise": 18,
+        "wrong": 0,
         "checker any/error": 1
       },
-      "distinct_comparisons": 305,
+      "distinct_comparisons": 299,
       "failed_exports": 0,
-      "program_ms": 26,
-      "compare_ms": 220,
-      "wall_ms": 610
+      "program_ms": 49,
+      "compare_ms": 227,
+      "wall_ms": 624
     },
     "mantine": {
       "components_checker": 370,
-      "components_matched": 332,
-      "props_checker": 20474,
-      "props_shared": 19752,
+      "components_matched": 331,
+      "props_checker": 20472,
+      "props_shared": 19816,
       "verdicts": {
-        "identical": 3307,
-        "spelled": 14473,
-        "less precise": 1897,
-        "wrong": 67,
+        "identical": 3515,
+        "spelled": 14499,
+        "less precise": 1794,
+        "wrong": 0,
         "checker any/error": 8
       },
-      "distinct_comparisons": 3091,
+      "distinct_comparisons": 2903,
       "failed_exports": 0,
-      "program_ms": 51,
-      "compare_ms": 811,
-      "wall_ms": 1224
+      "program_ms": 53,
+      "compare_ms": 901,
+      "wall_ms": 1318
     },
     "chakra": {
       "components_checker": 790,
-      "components_matched": 598,
-      "props_checker": 527677,
-      "props_shared": 470878,
+      "components_matched": 609,
+      "props_checker": 527659,
+      "props_shared": 477478,
       "verdicts": {
-        "identical": 4187,
-        "spelled": 466603,
-        "less precise": 86,
+        "identical": 4623,
+        "spelled": 472835,
+        "less precise": 20,
         "wrong": 0,
-        "checker any/error": 2
+        "checker any/error": 0
       },
-      "distinct_comparisons": 1241,
+      "distinct_comparisons": 1751,
       "failed_exports": 0,
-      "program_ms": 60,
-      "compare_ms": 3551,
-      "wall_ms": 4116
+      "program_ms": 75,
+      "compare_ms": 3600,
+      "wall_ms": 4146
     },
     "shadcn": {
       "components_checker": 1580,
-      "components_matched": 1531,
+      "components_matched": 1538,
       "props_checker": 14437,
-      "props_shared": 5160,
+      "props_shared": 6533,
       "verdicts": {
-        "identical": 3161,
-        "spelled": 1193,
-        "less precise": 748,
-        "wrong": 3,
-        "checker any/error": 55
+        "identical": 4237,
+        "spelled": 1546,
+        "less precise": 690,
+        "wrong": 0,
+        "checker any/error": 60
       },
-      "distinct_comparisons": 1796,
+      "distinct_comparisons": 2102,
       "failed_exports": 0,
-      "program_ms": 155,
-      "compare_ms": 1082,
-      "wall_ms": 1640
+      "program_ms": 186,
+      "compare_ms": 1160,
+      "wall_ms": 1739
     },
     "antd": {
       "components_checker": 310,
-      "components_matched": 185,
-      "props_checker": 7208,
-      "props_shared": 2751,
+      "components_matched": 184,
+      "props_checker": 7199,
+      "props_shared": 2902,
       "verdicts": {
-        "identical": 1537,
-        "spelled": 990,
-        "less precise": 216,
-        "wrong": 7,
+        "identical": 1661,
+        "spelled": 1035,
+        "less precise": 205,
+        "wrong": 0,
         "checker any/error": 1
       },
-      "distinct_comparisons": 2017,
+      "distinct_comparisons": 2122,
       "failed_exports": 0,
-      "program_ms": 91,
-      "compare_ms": 587,
-      "wall_ms": 1058
+      "program_ms": 90,
+      "compare_ms": 601,
+      "wall_ms": 1040
     },
     "spectrum": {
-      "components_checker": 1454,
-      "components_matched": 598,
-      "props_checker": 18114,
-      "props_shared": 11663,
+      "components_checker": 1365,
+      "components_matched": 512,
+      "props_checker": 5582,
+      "props_shared": 2023,
       "verdicts": {
-        "identical": 2356,
-        "spelled": 5546,
-        "less precise": 3521,
-        "wrong": 1,
-        "checker any/error": 239
+        "identical": 1205,
+        "spelled": 490,
+        "less precise": 120,
+        "wrong": 0,
+        "checker any/error": 208
       },
-      "distinct_comparisons": 2825,
+      "distinct_comparisons": 1476,
       "failed_exports": 0,
-      "program_ms": 91,
-      "compare_ms": 1115,
-      "wall_ms": 1602
+      "program_ms": 98,
+      "compare_ms": 623,
+      "wall_ms": 1098
     }
   }
 }
