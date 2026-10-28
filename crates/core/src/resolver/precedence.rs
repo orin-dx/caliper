@@ -70,7 +70,7 @@ pub(super) fn resolve_source_defined_or_known<'g>(
     ctx: &'g ResolutionContext,
     state: &mut ResolveState,
 ) -> (Utf8PathBuf, String, Option<SourceOrKnownMatch<'g>>) {
-    // A declaration, the project's or a loaded dependency's, before a known shortcut (ADR 0014): a shortcut stands in
+    // A declaration, the project's or a loaded dependency's, before a known shortcut (precedence): a shortcut stands in
     // for a declaration that isn't available, or, at the props-chain level, one that evaluates to nothing
     // (`chain::known_fallback`).
     let (canonical_file, canonical_name, declared) = find_declaration(name, consuming_file, ctx, state);

@@ -67,7 +67,7 @@ impl HtmlAttributeMode {
 }
 
 /// Which inherited sources of more than 30 props are recorded as an `InheritedLayer` instead of expanded prop by prop
-/// (ADR 0012). A component's own props type is always expanded.
+/// (collapse). A component's own props type is always expanded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CollapseInheritedProps {
@@ -118,8 +118,8 @@ pub struct PipelineOptions {
     /// Custom docgen extension plugins.
     pub plugins: crate::plugin::PluginRegistry,
     /// Load the dependency declarations project types reference, by name, before resolving (ADR 0010). On by default
-    /// (ADR 0019); off, a type imported from a package resolves only when it is a builtin or a known shortcut. A
-    /// project with no installed packages loads nothing either way.
+    /// (`docs/performance.md`); off, a type imported from a package resolves only when it is a builtin or a known
+    /// shortcut. A project with no installed packages loads nothing either way.
     pub load_dependencies: bool,
     /// Which large inherited sources to record as a layer instead of expanding.
     pub collapse_inherited_props: CollapseInheritedProps,

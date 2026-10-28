@@ -68,7 +68,7 @@ pub(crate) struct ResolveState {
     /// Set when an alias is shown by its name because its expansion holds a type the resolver can't evaluate, so an
     /// alias whose expansion contains that one is shown by name too — see `resolver::named::alias_display`.
     pub(crate) named_unevaluated: bool,
-    /// Expand every source, collapsing none (ADR 0012): set while resolving `Pick`'s base or a `keyof` operand, whose
+    /// Expand every source, collapsing none (collapse): set while resolving `Pick`'s base or a `keyof` operand, whose
     /// props are selected or counted by name. Interface chains are not shared while it is set.
     pub(crate) expand_all: bool,
     /// Only prop names are wanted (a `keyof` operand): members' types are not resolved. Interface chains recorded with

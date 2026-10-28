@@ -109,7 +109,7 @@ fn follow_reexports(
     if let Some(declared) = declared_name(ctx, &file, &name) {
         return (file, declared);
     }
-    // A package's re-export stubs are not in the layer; the loader's answer for them stands in (ADR 0011).
+    // A package's re-export stubs are not in the layer; the loader's answer for them stands in (the persisted index).
     if let Some(answer) = ctx.dependencies.as_ref().and_then(|layer| layer.export_of(&file, &name)) {
         return match answer {
             Some((declaring_file, declared_name)) => (declaring_file.clone(), declared_name.to_string()),

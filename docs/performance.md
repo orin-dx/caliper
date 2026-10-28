@@ -22,7 +22,7 @@ Apple Silicon laptop, macOS, load average 8 to 12, 10 runs per corpus, branch `c
 
 Scaling: one copy of mantine 26 ms, two copies 46 ms (1.77×).
 
-RDT's component and prop counts are not comparable with Caliper's here: without dependencies it reports every exported function and expands what it can of `@types/react`. Precision is in `docs/precision.md`; recall and agreement with RDT on installed repos, gated weekly, are in `docs/parity.md`.
+RDT's component and prop counts are not comparable with Caliper's here: without dependencies it reports every exported function and expands what it can of `@types/react`. Precision is in `docs/precision.md`; recall and agreement with RDT on installed repos are recorded weekly (`docs/measurement.md`).
 
 ## Dependency loading against RDT, 2026-10-23
 
@@ -100,3 +100,35 @@ On the five installed parity corpora, `lazy_bench` with dependency loading and f
 | Spectrum |                  20 → 47 ms |        102 → 90 |         162 → 222 ms |       134 → 134 |
 
 All ten output digests match across thresholds and the pre-chain build. The three-growth chain is also faster than the pre-chain three-growth build on 50 requests for all five corpora: 42 → 30 ms on Mantine, 313 → 234 on Chakra, 61 → 52 on shadcn, 23 → 18 on antd, and 27 → 20 on Spectrum. A file first parsed as a re-export stub must be indexed when later claimed; without that step, 28 shadcn components lost props in the whole-project run. The regression test and forward-order corpus parity check cover it.
+
+## Default changes
+
+Two defaults flipped after measurement. Both tables are history, not limits.
+
+### Dependency loading on, 2026-10-25
+
+`PipelineOptions::load_dependencies` defaults to `true` (the CLI, the config file, the Vite plugin, the NAPI binding and the addon; the addon already did). `--no-load-dependencies` turns it off, `--load-dependencies` still means the default, and a project with no packages installed loads nothing either way. It was off while Chakra took 497 ms and 1.3 GB with it on, against 43 ms and 82 MiB without; memo replay, `keyof` name walks, interned keys and a parallel lib parse (#136, #175, #177, #178, #182) took that to about 220 ms and 330 MiB. Five parity corpora, `extract --json`, best of 7, interleaved, on a laptop shared with other jobs (about ±10 ms), off → on:
+
+| Corpus   |  Wall ms | Peak RSS MiB |           Props | Unresolved warnings |
+| -------- | -------: | -----------: | --------------: | ------------------: |
+| mantine  |  50 → 60 |    112 → 128 | 19,834 → 19,834 |             14 → 10 |
+| chakra   | 50 → 220 |    101 → 330 |   592 → 479,235 |             315 → 0 |
+| shadcn   |  50 → 90 |    101 → 225 |   1,543 → 8,131 |           816 → 190 |
+| antd     |  40 → 50 |     95 → 114 |   3,349 → 3,856 |              76 → 8 |
+| spectrum |  70 → 90 |    136 → 161 | 32,585 → 32,587 |              13 → 5 |
+
+Output is exact: the new default is byte-identical to the previous build's `--load-dependencies` output, and `--no-load-dependencies` to the previous default. Share of react-docgen-typescript's props reported, off → on (the 0.4.0 baseline, since removed): Chakra 0.1% → 98.6%, shadcn 6.4% → 39.5%, antd 71.8% → 80.3%, Mantine and Spectrum 99.7% both. The cost lands on a few projects: Chakra is 4.4× slower and holds 3.3× the memory, shadcn takes 40 ms and 124 MiB more, the others 10 to 20 ms and 16 to 25 MiB. A CI job that needs the old speed passes `--no-load-dependencies`.
+
+### Every HTML attribute listed, 2026-10-26
+
+`PipelineOptions::html_attributes` defaults to `full` (the reasons are in `docs/rdt-coverage.md`, HtmlAttributeMode). Five parity corpora with dependencies loaded, canonical JSON, no cache, median of 11 (wall) and 21 (CPU, peak RSS), old default (`curated` at 338d1ddc) → new default:
+
+| Corpus   |   Wall ms |       CPU s | Peak RSS MiB |     JSON MB |
+| -------- | --------: | ----------: | -----------: | ----------: |
+| antd     |   56 → 62 | 0.33 → 0.37 |    130 → 151 |   3.6 → 6.3 |
+| chakra   | 424 → 470 | 3.13 → 3.72 |    514 → 577 | 11.1 → 16.7 |
+| mantine  | 149 → 164 | 1.05 → 1.21 |    175 → 229 |  8.4 → 14.2 |
+| spectrum |   90 → 98 | 0.68 → 0.73 |    171 → 191 |  8.3 → 11.7 |
+| shadcn   | 144 → 188 | 1.28 → 1.72 |    220 → 301 |  5.9 → 12.2 |
+
+The default is slower and larger than the old one at that commit: wall time +9 to +31%, peak RSS +12 to +37%, canonical JSON +42 to +105%. Most of the wall time was a lookup bug, fixed in #241 (indexing component lookups by name): shadcn `full` went from 153 to 127 ms, against 124 ms for the old default, with identical output. On the Storybook request path the first story was no slower with `full` than with `none`. Storybook parity (props Storybook lists that the addon lacks, antd / shadcn / Spectrum): 37 / 0 / 1 → 34 / 0 / 1. `ref` on `forwardRef` components written as `React.forwardRef(Inner)` is listed since #244; `PurePanel`'s 33 props, Drawer's own, remain because the declared type does not extend them.

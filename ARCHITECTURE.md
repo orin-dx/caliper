@@ -28,6 +28,8 @@ The watch path reuses analysis across file changes. A single-file update calls `
 
 `WatchSession` publishes one immutable `Revision` at a time: global source data, the named-type index, resolved components with their recorded dependencies, diagnostics and the assembled output. An update builds the next revision off to the side and publishes it with one atomic store, so a reader sees one complete revision. Cold extraction and watch revisions share `Revision::assemble()`, and a watch snapshot equals a cold extract of the same files (see `docs/architecture/pipeline-orchestration.md`).
 
+Between parse and resolve, the declarations of installed packages that project types name are loaded by name into a shared `DependencyLayer` (`dependency_types.rs`, on by default; ADR 0010). A lazy session (`WatchSession::lazy`, ADR 0016) parses and indexes every file but resolves a component only when a request names it, which is how the Storybook addon runs; every answer equals the batch extraction's for the same key. A session can also ask a warm TypeScript 7.1 checker for the requested component (`semanticTypes: 'on-demand'`, ADR 0022), experimental and off by default.
+
 ## Crate and package graph
 
 ```mermaid
@@ -35,6 +37,8 @@ graph TD
     core["crates/core\ncaliper-docgen-core\nPure extraction — no I/O, no async"]
     binding["crates/binding\ncaliper-docgen-napi\nNAPI + tokio runtime"]
     cli["crates/cli\ncaliper-docgen\nCLI binary"]
+    semantic["crates/semantic\ncaliper-docgen-semantic\nExperimental TS 7.1 backend"]
+    tsc["crates/tsc-client\ncaliper-docgen-tsc-client\ntsc --api transport"]
     napi["packages/napi\ncaliper-docgen-napi\nTS types + dev binary loader"]
     vite["packages/vite-plugin\ncaliper-docgen-vite-plugin\nVite HMR plugin"]
     storybook["packages/storybook\ncaliper-docgen-storybook\nStorybook 11 docgen provider"]
@@ -42,6 +46,10 @@ graph TD
 
     core --> binding
     core --> cli
+    core --> semantic
+    tsc --> semantic
+    semantic --> cli
+    semantic --> binding
     binding --> napi
     napi --> vite
     napi --> storybook
@@ -49,7 +57,7 @@ graph TD
     napi -.->|"runtime dep"| validate
 ```
 
-`crates/core` has no dependency on async runtimes, NAPI, or terminal libraries. It can be linked from any host.
+`crates/core` has no dependency on async runtimes, NAPI, or terminal libraries. It can be linked from any host. `crates/semantic` and `crates/tsc-client` are published crates, always compiled into the CLI and the binding and enabled at run time (ADR 0007); Callisto publishes them before the CLI.
 
 ## Module layout
 
@@ -58,18 +66,24 @@ graph TD
 ```
 types/
   collected.rs    — CollectedType, SourceData, RawProp, ImportBinding, LexedExport
-  output.rs       — PropType, ComponentEntry, ExtractionOutput, InheritedLayer, ParsedProp
+  output.rs       — PropType, ComponentEntry, ExtractionOutput, InheritedLayer, ParsedProp, SCHEMA_VERSION
+  output/interned.rs — the canonical JSON: props, prop sets and name lists written once (ADR 0009, 0018)
   diagnostic.rs   — Diagnostic, DiagnosticSeverity, DiagnosticCode
   global.rs       — GlobalSourceData, ScopedKey
+  semantic.rs     — what the TS checker backend hands back, and how it merges over the structural result
 
 extractor/
   mod.rs          — parse_file() entry point; SourceDataCollector struct
   visit.rs        — impl Visit for SourceDataCollector (AST walker)
-  component.rs    — component pattern detection (FC, forwardRef, HOC, exotic)
+  component.rs    — component pattern detection (FC, forwardRef, HOC, exotic, wrapper calls)
+  wrapper.rs      — components declared through a wrapper call whose props travel as a type argument
+  evidence.rs     — evidence that a function renders, so a typed PascalCase function is a component
+  uses.rs         — how each name is used and exported in its file
   interface.rs    — collect_interface, collect_raw_props, collect_object_fields
   alias.rs        — classify_type_alias (Omit/Pick/Passthrough/Union/Intersection)
   jsdoc.rs        — find_jsdoc, extract_jsdoc_tags, parse_jsdoc_text
   defaults.rs     — extract_param_defaults from destructured function parameters
+  js_text.rs      — Rust text for JavaScript strings that may hold a lone surrogate
 
 resolver/
   mod.rs          — resolve_component(); ResolutionContext; ResolveState (per-call)
@@ -77,8 +91,14 @@ resolver/
   extends.rs      — resolve_extends_ref
   alias.rs        — resolve_type_alias_chain, resolve_base_as_chain
   primitives.rs   — resolve_union, resolve_intersection, resolve_indexed_access
+  evaluate.rs     — type-level evaluation of a props base whose operands are known (conditionals, mapped types)
+  callee.rs       — the props of a component a generic call builds, from what the callee returns
   collected.rs    — CollectedType → PropType dispatch
   named.rs        — resolve_named (main named-type lookup and import following)
+  precedence.rs   — try the project's own source before falling back to a known shortcut
+  memo.rs         — interface chains and named types resolved once per run and shared
+  deps.rs         — what a component's resolution depended on, for watch-mode re-resolution
+  substitute.rs   — structural substitution for generic type aliases
   template.rs     — resolve_template_literal
   func.rs         — resolve_function_type, resolve_typeof
   import.rs       — resolve_to_canonical, resolve_import_specifier
@@ -89,27 +109,40 @@ pipeline/
   mod.rs          — extract(); PipelineOptions; resolution orchestration
   discover.rs     — discover_files (directory walk + gitignore via ignore crate)
   revision.rs     — Revision: cold build, incremental next(), assemble() shared by both
-  watch.rs        — WatchSession: publishes one Revision at a time
+  revision/lazy.rs — demand-driven revisions (ADR 0016)
+  watch.rs        — WatchSession: publishes one Revision at a time; the lazy session
+  semantic_hook.rs — asking a warm checker for the component a session was just asked about (ADR 0022)
+  rdt.rs          — react-docgen-typescript's ComponentDoc shape (--format rdt, __docgenInfo)
 
-known.rs          — library shortcuts: SxProps, VariantProps, sx, css, cva, tv, defineRecipe…
+dependency_types.rs — dependency declarations loaded by name before resolution into a shared layer (ADR 0010)
+named_type_index.rs — interfaces, type aliases and their declared members, by name
+known.rs          — library shortcuts: VariantProps, sx, css, cva, tv, defineRecipe…
 react_types.rs    — React builtin recognition + notable HTML attribute table
 import_map.rs     — import binding resolution
-cache.rs          — DTS parse cache (mtime + size invalidation, msgpack, atomic write)
+cache.rs          — DTS parse cache (content-hash keys, msgpack, atomic write, discarded when the build changes)
+plugin.rs         — DocgenPlugin and PluginRegistry hooks
+toon.rs           — TOON token-optimized output
+panic_guard.rs    — contain_panic, the one panic-containment boundary (ADR 0005)
 ```
 
 ### `crates/cli/src/`
 
 ```
 main.rs           — Cli struct, Command enum, main(), init_tracing()
-config.rs         — docgen.config.ts loading via node+tsx (result discarded; next milestone)
+config.rs         — docgen.config.ts loading via node+tsx, mapped to PipelineOptions
 output.rs         — print_summary, print_diagnostics, comfy-table helpers
 commands/
-  extract.rs      — cmd_extract (RDT / Storybook output)
+  extract.rs      — cmd_extract (RDT / canonical / TOON output)
   watch.rs        — cmd_watch (watchexec integration)
   inspect.rs      — cmd_inspect (single-file table view)
   check.rs        — cmd_check
+  schema.rs       — the canonical JSON Schema
   completions.rs  — shell completion generation
 ```
+
+### `crates/semantic/src/` and `crates/tsc-client/src/`
+
+`semantic` is the experimental TypeScript 7.1 backend: `lib.rs` (the whole-project run), `on_demand.rs` (a warm checker that answers one component at a time), `component.rs`, `convert.rs`, `locate.rs` (finds the project's `tsc`) and `rpc.rs` (typed calls over one `tsc --api` session). `tsc-client` is the process supervisor and JSON-RPC transport under it.
 
 ## Key types
 
@@ -169,7 +202,7 @@ Both are deeply recursive enums. `#[derive(Serialize, Deserialize)]` hit Rust's 
 
 ### DTS cache location: `node_modules/.cache/`
 
-`.d.ts` files from `node_modules` rarely change within a project session. The cache stores parsed `SourceData` keyed by file path, mtime, and size, serialized with msgpack and written atomically. `node_modules/.cache/` is the correct location: it is cleaned with `node_modules`, excluded from version control, and preserved across CI runs when `node_modules` is cached by layer.
+`.d.ts` files from `node_modules` rarely change within a project session. The cache stores parsed `SourceData` keyed by file path and content hash, serialized with msgpack and written atomically, and is discarded whenever the build that wrote it differs (the payload's header carries the schema version, the crate version and a source fingerprint). `node_modules/.cache/` is the correct location: it is cleaned with `node_modules`, excluded from version control, and preserved across CI runs when `node_modules` is cached by layer.
 
 ### `hotUpdate` returns `undefined`, not `[]`
 
@@ -187,4 +220,4 @@ Component props and enums are serialized as `BTreeMap<String, …>` rather than 
 | Conditional types (`T extends U ? X : Y`) | Emitted as `opaque` — needs a real type checker, see `docs/type-checker-integration.md`. |
 | Mapped types with computed keys | Emitted as `opaque`. |
 
-Config file loading is fully implemented. Imports resolve across packages only when the imported file is under a source directory; installed dependencies other than `@types/react` are not read. See `docs/STATUS.md` if you're checking whether an older doc's claim about either is still true.
+Config file loading is fully implemented. Imports resolve across packages when the imported file is under a source directory, and the declarations of installed packages that project types name are loaded by default (`--no-load-dependencies` turns that off). See `docs/STATUS.md` if you're checking whether an older doc's claim about either is still true.

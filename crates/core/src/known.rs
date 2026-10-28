@@ -1,7 +1,7 @@
 //! Resolution of known generic type patterns.
 //!
 //! A pattern stands in for a declaration that isn't available (its package isn't loaded), or that evaluates to nothing
-//! structurally; a declaration that resolves always wins (ADR 0014). Add one only when that fallback measurably beats
+//! structurally; a declaration that resolves always wins (precedence). Add one only when that fallback measurably beats
 //! leaving the name unresolved, against react-docgen-typescript on code that uses the library.
 
 use crate::types::*;
@@ -79,7 +79,7 @@ pub fn resolve_known(
         // vanilla-extract: RecipeVariants<typeof buttonRecipe>
         // tailwind-variants: VariantProps<typeof tv(...)>
         // The real declarations infer from the function's parameters (`Parameters<T>[0]`), which needs a checker, so
-        // this also stands in when they are loaded (ADR 0014).
+        // this also stands in when they are loaded (precedence).
         "VariantProps" | "RecipeVariantProps" | "RecipeVariants" => resolve_cva_variant_props(args, global, enum_key),
         "InferRecipeProps" => resolve_inferred_recipe_props(args, global, enum_key),
 
@@ -325,7 +325,7 @@ mod tests {
     use rustc_hash::FxHashMap;
 
     /// Library types whose declaration measured better than a shortcut, or whose shortcut only hid them, resolve like
-    /// any other name: their declaration when it is loaded, otherwise an unresolved named reference (ADR 0014).
+    /// any other name: their declaration when it is loaded, otherwise an unresolved named reference (precedence).
     #[test]
     fn library_types_with_a_usable_declaration_are_not_shortcuts() {
         for name in [

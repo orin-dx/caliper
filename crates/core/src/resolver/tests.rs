@@ -99,7 +99,7 @@ fn test_string_and_empty_object_normalizes_to_string() {
 #[test]
 fn test_sx_props_known_pattern() {
     let ctx = empty_ctx();
-    // No shortcut (ADR 0014): without MUI's declaration it stays the named reference RDT also prints.
+    // No shortcut (precedence): without MUI's declaration it stays the named reference RDT also prints.
     let ct = CollectedType::Named { name: "SxProps".into(), args: vec![] };
     let result = resolve_type(&ct, &ctx);
     assert_eq!(result, PropType::Named { name: "SxProps".into(), args: vec![] });
