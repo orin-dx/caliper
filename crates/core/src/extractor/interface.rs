@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap;
 
 use crate::types::{ComponentMapping, DefaultSource, DetectionRule, DiagnosticCode, EnumEntry, EnumValue, RawDefault};
 
-use super::{is_pascal_case, SourceDataCollector};
+use super::{is_pascal_case, js_text, SourceDataCollector};
 
 /// Extract the binding name and the `as const`-peeled inner expression from
 /// `const NAME = <expr> as const` (or `<const><expr>`). Shared by
@@ -27,7 +27,7 @@ fn as_const_literal<'a, 'b>(decl: &'b VariableDeclarator<'a>) -> Option<(std::st
 fn literal_member(ty: &TSType<'_>) -> Option<EnumValue> {
     let TSType::TSLiteralType(lit) = ty else { return None };
     match &lit.literal {
-        TSLiteral::StringLiteral(s) => Some(EnumValue::String(s.value.as_str().to_owned())),
+        TSLiteral::StringLiteral(s) => Some(EnumValue::String(js_text::lossy(s.value).into_owned())),
         TSLiteral::NumericLiteral(n) => Some(EnumValue::Number(n.value)),
         TSLiteral::BooleanLiteral(b) => Some(EnumValue::Bool(b.value)),
         TSLiteral::UnaryExpression(u) if u.operator == UnaryOperator::UnaryNegation => match &u.argument {
@@ -42,7 +42,7 @@ fn literal_member(ty: &TSType<'_>) -> Option<EnumValue> {
 fn static_key<'a>(key: &'a PropertyKey<'_>) -> Option<&'a str> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.as_str()),
-        PropertyKey::StringLiteral(s) => Some(s.value.as_str()),
+        PropertyKey::StringLiteral(s) => s.value.as_str(),
         _ => None,
     }
 }
@@ -131,7 +131,7 @@ impl<'src> SourceDataCollector<'src> {
             .iter()
             .filter_map(|prop| match prop {
                 ObjectPropertyKind::ObjectProperty(op) => {
-                    let key = op.key.static_name()?.to_string();
+                    let key = js_text::property_name(&op.key.static_name()?);
                     let value = self.expression_to_enum_value(&op.value)?;
                     let desc = self.find_jsdoc(op.span.start);
                     Some(EnumEntry { name: key, value, description: desc })
@@ -229,7 +229,7 @@ impl<'src> SourceDataCollector<'src> {
 
     pub(super) fn expression_to_enum_value<'a>(&self, expr: &Expression<'a>) -> Option<EnumValue> {
         match expr {
-            Expression::StringLiteral(s) => Some(EnumValue::String(s.value.as_str().to_owned())),
+            Expression::StringLiteral(s) => Some(EnumValue::String(js_text::lossy(s.value).into_owned())),
             Expression::NumericLiteral(n) => Some(EnumValue::Number(n.value)),
             Expression::BooleanLiteral(b) => Some(EnumValue::Bool(b.value)),
             Expression::UnaryExpression(u) if u.operator == UnaryOperator::UnaryNegation => match &u.argument {
@@ -263,7 +263,7 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn try_scan_display_name<'a>(&mut self, stmt: &ExpressionStatement<'a>) {
         let Some((obj_name, "displayName", right)) = self.static_member_assignment(stmt) else { return };
         let Expression::StringLiteral(s) = right else { return };
-        self.pending_display_name_renames.push((obj_name, s.value.as_str().to_owned()));
+        self.pending_display_name_renames.push((obj_name, js_text::lossy(s.value).into_owned()));
     }
 
     // ─── `defaultProps` scanning ───────────────────────────────────────────────
@@ -282,7 +282,7 @@ impl<'src> SourceDataCollector<'src> {
             .iter()
             .filter_map(|prop| match prop {
                 ObjectPropertyKind::ObjectProperty(op) => {
-                    let key = op.key.static_name()?.to_string();
+                    let key = js_text::property_name(&op.key.static_name()?);
                     let raw_default = self.eval_expr_as_default(&op.value, DefaultSource::DefaultProps);
                     Some((key, raw_default))
                 }
@@ -331,7 +331,7 @@ impl<'src> SourceDataCollector<'src> {
 
         for prop in &obj.properties {
             let ObjectPropertyKind::ObjectProperty(op) = prop else { continue };
-            let Some(key_name) = op.key.static_name().map(|n| n.to_string()) else { continue };
+            let Some(key_name) = op.key.static_name().map(|n| js_text::property_name(&n)) else { continue };
             if !is_pascal_case(&key_name) {
                 continue;
             }
