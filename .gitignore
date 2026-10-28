@@ -52,8 +52,5 @@ lcov.info
 .tmp*/
 
 
-# Performance scorecard corpora and outputs (scripts/scorecard.py)
-.scorecard/
-
-# RDT parity corpora, installs and dumps (scripts/parity.py)
-.parity/
+# Measurement corpora, installs and outputs (scripts/corpora.py, weekly.py, bench.py)
+.corpora/

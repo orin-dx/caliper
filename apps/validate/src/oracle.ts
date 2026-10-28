@@ -51,7 +51,7 @@ const files: string[] = args.files
 
 const api = new API({ cwd: root })
 const programStart = performance.now()
-// The same program react-docgen-typescript parses in scripts/parity.py: the component files, with the tsconfig it
+// The same program react-docgen-typescript parses in scripts/weekly.py: the component files, with the tsconfig it
 // uses. The options go through `parseConfigFile` because the 7.1 beta's server panics on string-valued enum options
 // passed to `createProgram` directly.
 const { options } = api.parseConfigFile(args.tsconfig)

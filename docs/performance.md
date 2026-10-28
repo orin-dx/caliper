@@ -1,57 +1,12 @@
-# Performance gates
+# Performance
 
-`scripts/scorecard.py` measures Caliper on five public corpora at pinned commits, and `.github/workflows/scorecard.yml` fails when it regresses. The criterion benches (`cargo bench -p caliper-docgen-core`) and `docs/benchmarks.md` cover single fixtures; this covers whole libraries.
+How fast Caliper is and what it costs is recorded in `docs/measurement.md`: a weekly run on five pinned corpora, and `just bench` for a change that touches the resolver. The criterion benches (`cargo bench -p caliper-docgen-core`) and `docs/benchmarks.md` cover single fixtures. This page keeps the measurements that explain where the time goes.
 
-## Corpora
-
-Each corpus is a shallow, sparse fetch of one directory at a pinned commit, plus the files above it (root `tsconfig.json`, `package.json`). No dependencies are installed, so imports from other packages stay unresolved; that is the "Unresolved" column. The scorecard therefore runs with `--no-load-dependencies`, whatever a build's default (loading is on by default, ADR 0019), so a base build with a different default compares like for like; the "With dependencies loading" column times the default mode over the same files.
-
-| Corpus   | Repository              | Commit     | Source directory             |
-| -------- | ----------------------- | ---------- | ---------------------------- |
-| mantine  | `mantinedev/mantine`    | `194d6524` | `packages/@mantine/core/src` |
-| chakra   | `chakra-ui/chakra-ui`   | `960ae222` | `packages/react/src`         |
-| shadcn   | `shadcn-ui/ui`          | `3d98900e` | `apps/v4`                    |
-| antd     | `ant-design/ant-design` | `f8f5595a` | `components`                 |
-| spectrum | `adobe/react-spectrum`  | `d5fb723a` | `packages`                   |
-
-Changing a pin or a directory changes every figure, so do it in its own PR with the new table.
-
-## What is recorded
-
-Per corpus:
-
-| Field | Meaning |
-| --- | --- |
-| kLOC | Lines in the `.ts`/`.tsx` files discovery includes |
-| Components, props | From `extract --json`; props are summed over components |
-| Unresolved | Warning and error diagnostics with an unresolved-type code (`UNRESOLVABLE_IMPORT`, `OPAQUE_TYPE`, `INDEXED_ACCESS_OPAQUE`, `TEMPLATE_LITERAL_OPAQUE`, `GENERIC_ARGUMENT_MISMATCH`, `UNKNOWN`) |
-| Wall ms | Median wall time of `extract --json` with a warm parse cache: process start to exit, output included |
-| Extract ms | Median of the run's own `stats.durationMs` |
-| Peak RSS | Largest peak RSS over the runs |
-| RDT ms | react-docgen-typescript parsing the same files as one program (`scripts/scorecard-rdt.mjs`), in-process, Node startup excluded |
-
-## Gates
-
-`--check` fails the run when any of these holds:
-
-| Gate | Fails when | Why |
-| --- | --- | --- |
-| Regression | Wall ms is more than 1.1× the base build's, on any corpus | The base (main) is built and timed in the same job, runs interleaved, so the runner's speed cancels out |
-| Dependency loading | The default mode takes more than 1.7× the time of `--no-load-dependencies`, on any corpus | With nothing installed every import fails after a directory walk, and the dependency index keeps only answers found inside a package, so each run repeats them: 1.15× to 1.2× on a laptop, up to about 1.5× on a CI runner (Mantine 61 → 71 ms, Chakra 58 → 67 ms). The limit catches a real jump, not that cost |
-| RDT ratio | Caliper is less than 10× faster than RDT, on any corpus | The point of the tool. Caliper's time includes process startup and RDT's does not, so the ratio is a lower bound |
-| Scaling | Two copies of mantine take more than 2.2× as long to extract as one | Doubling files, components and props must not more than double the work; name collisions between the copies exercise disambiguation |
-
-RDT takes 1 to 2 s per corpus here, so CI times it live instead of reading a committed baseline. `--rdt-baseline FILE` reads RDT times from an earlier scorecard JSON for machines without Node.
-
-### On pull requests
-
-The scorecard also runs on a pull request that touches `crates/core/src/{resolver,extractor,types,pipeline,dependency_types}` or the scorecard itself (`.github/workflows/scorecard.yml`). It builds the pull request and its base, passed through `github.base_ref` so a stacked pull request compares with its parent, and scores mantine and chakra only (`scorecard.py --corpus`), which keeps the job short; the scaling gate runs because mantine is one of them. It is `continue-on-error` and the result is in the job summary. It exists because a batch of 20 resolver pull requests merged on 2026-10-26 with Mantine 38% (109.9 ms against 79.9) and Chakra 47% (75.0 against 51.1) slower, found only by the run after the merge, and unattributable to one of them.
-
-Promotion: the job becomes blocking after ten consecutive green runs on pull requests that target `main`. A run that fails for the runner's noise rather than a regression resets nothing but must be named in the pull request that promotes it.
+The per-pull-request scorecard that used to enforce these numbers is gone. It caught one real regression (Mantine 38% and Chakra 47% slower after a batch of 20 resolver pull requests merged on 2026-10-26, found by the weekly run), and its gates failed on runner noise and on bases that had moved. The figures below came from it and are history, not limits.
 
 ## Size model
 
-Extraction time fits t ≈ 6.4 ms + 0.13 ms/kLOC + 3.8 ms/kprop (props as counted above). It is a sizing guide, reported as "Model ms", not a gate: a fixed cost that varies by machine dominates small corpora, so per-corpus residuals vary too much to gate on. On the run below the model is within 2× of the measured extract time on every corpus (0.45× for mantine to 1.6× for chakra).
+Extraction time fits t ≈ 6.4 ms + 0.13 ms/kLOC + 3.8 ms/kprop (props summed over components). It is a sizing guide, reported by the old scorecard as "Model ms", never a gate: a fixed cost that varies by machine dominates small corpora, so per-corpus residuals vary too much to gate on. On the run below the model is within 2× of the measured extract time on every corpus (0.45× for mantine to 1.6× for chakra).
 
 ## Results, 2026-10-22
 
@@ -113,17 +68,6 @@ What the profile found:
 - **Allocation.** `mimalloc` in the binding cuts session start by 15–30% (Chakra with dependencies 441–561 ms → 312–391 ms) and Chakra's peak by 9%. On small projects the peak is 20–30 MB higher.
 - **Left to the resolver.** On Chakra with dependencies the time is in resolution: the largest self-time entries are `StateReads::append` (dependency read tracking), `ParsedProp` map building (773 props per component) and memcpy. Sampled with `sample(1)`; not changed here.
 - **Not a cost:** `keyOf` and `degradedBy` (microseconds, now indexed), `docgenInfo` (0.05–0.1 ms per component, 2–3 ms on Chakra's 358 KB documents), the JavaScript side of a story (about 4 ms of CPU, the rest is waiting on native work).
-
-## Running it
-
-```bash
-cargo build --release -p caliper-docgen
-pnpm install                                   # for --rdt
-python3 scripts/scorecard.py --bin target/release/caliper-docgen --rdt --out scorecard.json
-python3 scripts/scorecard.py --bin NEW --base-bin OLD --rdt --check   # the CI gates
-```
-
-Corpora are cached in `.scorecard/corpora` (gitignored). In CI, run the workflow by hand on a branch to gate it against main, or pass `base` to compare with another ref.
 
 ## Lazy sessions, 2026-10-24
 

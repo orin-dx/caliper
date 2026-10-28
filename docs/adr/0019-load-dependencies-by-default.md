@@ -27,10 +27,10 @@ Measured on the five parity corpora, `extract --json`, best of 7, interleaved, o
 | spectrum |  70 → 90 |    136 → 161 | 32,585 → 32,587 |              13 → 5 |
 
 - **Output is exact.** On all five corpora the new default is byte-identical to the previous build's `--load-dependencies` output, and `--no-load-dependencies` is byte-identical to the previous default (canonical JSON without `durationMs` and `stats`).
-- **Accuracy against react-docgen-typescript.** Share of its props reported, off → on (`scripts/parity-baseline.json`, 0.4.0, not re-measured here): Chakra 0.1% → 98.6%, shadcn 6.4% → 39.5%, antd 71.8% → 80.3%, Mantine and Spectrum 99.7% both.
+- **Accuracy against react-docgen-typescript.** Share of its props reported, off → on (the 0.4.0 parity baseline, since removed; not re-measured here): Chakra 0.1% → 98.6%, shadcn 6.4% → 39.5%, antd 71.8% → 80.3%, Mantine and Spectrum 99.7% both.
 - **The cost lands on a few projects.** Chakra is 4.4× slower and holds 3.3× the memory by default; shadcn takes 40 ms and 124 MiB more. Mantine, antd and Spectrum take 10 to 20 ms and 16 to 25 MiB more. A CI job that needs the old speed passes `--no-load-dependencies`.
 - **No packages installed.** antd's `components` copied without `node_modules`: 3,349 props and 163 unresolved warnings either way, 40 ms with loading on against 30 ms off. One diagnostic's help text differs, because it says dependency types were loaded but a module could not be found.
-- **Tools that pinned the old default** (`scripts/parity.py`, `apps/validate/src/run-ours.ts`, the corpus snapshot tests) now pin it explicitly, so their baselines keep their meaning.
+- **Tools that pinned the old default** (the parity script, `apps/validate/src/run-ours.ts`, the corpus snapshot tests) now pin it explicitly, so their baselines keep their meaning.
 - **A changed default, not a changed API.** `PipelineOptions` keeps its shape; the changeset is a minor bump.
 
 ## Alternatives considered

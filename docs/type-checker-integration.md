@@ -1,6 +1,6 @@
 # Semantic backend (TypeScript 7)
 
-**Status:** slice 1 implemented as an experimental opt-in, off by default ([ADR 0006](adr/0006-semantic-backend-as-second-resolver.md), [ADR 0007](adr/0007-backend-discovers-components-and-compiles-in.md)): `extract --experimental-semantic-types` (see "Slice 1" below). Structural extraction stays the default and the fallback. `PipelineOptions::resolve_complex_types` exists and does nothing. Separately, TypeScript 7.1's checker runs as a test-only oracle for structural prop types (`scripts/parity.py oracle`, `docs/parity.md`). **Last verified:** 2026-10-23 for slice 1 against `7.1.0-beta`; 2026-09-27 for the Cost measurements, each naming its nightly; 2026-10-22 for the API table against the `7.1.0-beta` package; 2026-10-23 for the fixture-corpus parity on `7.1.0-beta`.
+**Status:** slice 1 implemented as an experimental opt-in, off by default ([ADR 0006](adr/0006-semantic-backend-as-second-resolver.md), [ADR 0007](adr/0007-backend-discovers-components-and-compiles-in.md)): `extract --experimental-semantic-types` (see "Slice 1" below). Structural extraction stays the default and the fallback. `PipelineOptions::resolve_complex_types` exists and does nothing. Separately, TypeScript 7.1's checker runs as a test-only oracle for structural prop types (`scripts/weekly.py --oracle`, `docs/measurement.md`). **Last verified:** 2026-10-23 for slice 1 against `7.1.0-beta`; 2026-09-27 for the Cost measurements, each naming its nightly; 2026-10-22 for the API table against the `7.1.0-beta` package; 2026-10-23 for the fixture-corpus parity on `7.1.0-beta`.
 
 ## Next step
 
@@ -81,7 +81,7 @@ Measured on `7.1.0-beta`, `extract --json` (best of 2 to 3), flag on against off
 
 Chakra's time is `tsc` computing 470,000 shared props' types, not round trips. Before shared props were interned in the merge, Caliper itself held 7.4 GiB on Chakra.
 
-Against the oracle (`scripts/parity.py oracle`, flag on, `7.1.0-beta`), wrong verdicts fall to 0.0% on every corpus but antd (0.1%), but the identical-or-spelled share also falls: mantine 91.3% to 22.0%, chakra 100% to 16.4%, shadcn 85.2% to 52.3%, antd 91.9% to 82.3%, spectrum 83.2% to 28.3%. The oracle credits the structural result for keeping a type's name (`StyleProp<MantineSpacing>`); the checker's answer is expanded to its members and compared as "less precise". Keeping the alias name and arguments needs a `PropType` that carries them, which is an output change.
+Against the oracle (`scripts/weekly.py --oracle`, flag on, `7.1.0-beta`), wrong verdicts fall to 0.0% on every corpus but antd (0.1%), but the identical-or-spelled share also falls: mantine 91.3% to 22.0%, chakra 100% to 16.4%, shadcn 85.2% to 52.3%, antd 91.9% to 82.3%, spectrum 83.2% to 28.3%. The oracle credits the structural result for keeping a type's name (`StyleProp<MantineSpacing>`); the checker's answer is expanded to its members and compared as "less precise". Keeping the alias name and arguments needs a `PropType` that carries them, which is an output change.
 
 ## On demand, per component (experimental, off by default)
 

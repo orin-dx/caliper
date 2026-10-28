@@ -72,8 +72,8 @@ test-integration:
 verify-install pm="pnpm":
     scripts/verify-install.sh {{ pm }}
 
-# Run benchmarks
-bench:
+# Run the criterion benchmarks (single fixtures); `just bench` compares a whole library against main
+bench-criterion:
     cargo bench --workspace --exclude caliper-docgen-napi
 
 # Rust and TypeScript line coverage; with a threshold, fails if either is below it
@@ -161,10 +161,9 @@ ci: lint test deny typos zizmor doc-check machete semver msrv (coverage "90")
 compare:
     moon run validate:compare
 
-# Does this build publish the same documentation as BASE (a git ref, default origin/main, or an executable)? Needs
-# `scripts/parity.py setup`; see docs/parity.md. Pass --oracle for TypeScript 7.1's checker, --lazy off|fixtures|all.
-equivalence *args:
-    python3 scripts/equivalence.py {{args}}
+# Time and memory of this checkout (or a branch) against origin/main on Mantine and Chakra; see docs/measurement.md.
+bench *args:
+    python3 scripts/bench.py {{args}}
 
 # Clean build artifacts
 clean:
