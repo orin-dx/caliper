@@ -59,7 +59,9 @@ pub(super) fn resolve_to_canonical(
     let namespace_ref = ctx.import_map.find_import(consuming_file, namespace)?;
     // A named import of a namespace (`import { Menu as MenuPrimitive } from "./ui"`, then `MenuPrimitive.Root`):
     // the member's name in that module is `Menu.Root`, which a namespace re-export or declaration answers.
-    let member = if namespace_ref.exported_name == "*" {
+    // A default import is the module's namespace for an `export =` module (`import React from "react"` under
+    // `esModuleInterop`, antd's spelling), so `React.CSSProperties` names the same member `import * as React` does.
+    let member = if namespace_ref.exported_name == "*" || namespace_ref.exported_name == "default" {
         member.to_owned()
     } else {
         format!("{}.{member}", namespace_ref.exported_name)
@@ -67,6 +69,15 @@ pub(super) fn resolve_to_canonical(
     let resolved_file = resolve_import_specifier(&namespace_ref.specifier, consuming_file, ctx, diagnostics)?;
     let mut visited = FxHashSet::default();
     Some(follow_reexports(resolved_file, member, ctx, diagnostics, &mut visited, 0))
+}
+
+/// The name `file` itself declares `name` under: a type, or any value it exports (`export function f`,
+/// `export { g as f }` gives `g`). `None` when the file only re-exports it, or doesn't have it.
+fn declared_name(ctx: &ResolutionContext, file: &Utf8Path, name: &str) -> Option<String> {
+    if ctx.named_types.is_declared_at(file, name) {
+        return Some(name.to_owned());
+    }
+    ctx.import_map.local_export(file, name)
 }
 
 /// A directly-imported name may land on a barrel file (`export { X } from
@@ -92,8 +103,11 @@ fn follow_reexports(
     }
 
     super::deps::record(&file);
-    if depth >= MAX_REEXPORT_DEPTH || ctx.named_types.is_declared_at(&file, &name) {
+    if depth >= MAX_REEXPORT_DEPTH {
         return (file, name);
+    }
+    if let Some(declared) = declared_name(ctx, &file, &name) {
+        return (file, declared);
     }
     // A package's re-export stubs are not in the layer; the loader's answer for them stands in (ADR 0011).
     if let Some(answer) = ctx.dependencies.as_ref().and_then(|layer| layer.export_of(&file, &name)) {
@@ -122,9 +136,11 @@ fn follow_reexports(
                 let Some(candidate_file) = resolve_import_specifier(specifier, &file, ctx, diagnostics) else {
                     continue;
                 };
-                let resolved = follow_reexports(candidate_file, name.clone(), ctx, diagnostics, visited, depth + 1);
-                if ctx.named_types.is_declared_at(&resolved.0, &resolved.1) {
-                    return resolved;
+                let (resolved_file, resolved_name) =
+                    follow_reexports(candidate_file, name.clone(), ctx, diagnostics, visited, depth + 1);
+                // A hop that found the declaration renames it to its local name; one that didn't returns `name`.
+                if resolved_name != name || declared_name(ctx, &resolved_file, &resolved_name).is_some() {
+                    return (resolved_file, resolved_name);
                 }
             }
             (file, name)

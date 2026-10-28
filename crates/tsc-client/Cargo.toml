@@ -1,10 +1,12 @@
 [package]
 name = "caliper-docgen-tsc-client"
 description = "Process supervisor and JSON-RPC transport client for TypeScript 7's tsc --api"
-version.workspace = true
+version = "0.1.1"
 edition.workspace = true
 license.workspace = true
-publish = false
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [lints]
 workspace = true

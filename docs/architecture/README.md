@@ -13,7 +13,7 @@ Read this first. Load only the file your task requires — never load all seven 
 | Type resolution, generic substitution, the source-vs-known-pattern precedence rule, the dependency layer's fallbacks, give-up/degrade discipline, cycle detection | `resolver-type-resolution.md` |
 | `PropType`/`CollectedType`/`ComponentEntry`/`Diagnostic` shapes, manual serde, `ParsedProp`'s sealed constructor, the msgpack cache wire format | `types-and-output-contract.md` |
 | RDT-compat/Storybook/TOON/JSON-Schema output, the `enum` shape rule, `composes`, truncation | `serialization-formats.md` |
-| Any `crates/cli` command, exit codes, config loading, the LSP scaffold | `cli-commands.md` |
+| Any `crates/cli` command, exit codes, config loading | `cli-commands.md` |
 | `crates/binding` (NAPI/Node), session lifecycle, FFI panic safety | `napi-binding.md` |
 
 ## What does NOT live here

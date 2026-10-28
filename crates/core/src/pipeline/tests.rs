@@ -41,6 +41,83 @@ fn merge_cached_dts_file_does_not_drop_parse_diagnostics() {
     );
 }
 
+#[test]
+fn the_default_cache_dir_is_under_the_project_the_source_directory_is_in() {
+    let tmp = TempDir::new().unwrap();
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+    write_file(&tmp, "package.json", "{}");
+    fs::create_dir_all(tmp.path().join("packages/ui/src")).unwrap();
+    let options = PipelineOptions { src_dirs: vec![root.join("packages/ui/src")], ..Default::default() };
+
+    // The nearest ancestor with a `package.json` or a `node_modules`, wherever the process runs.
+    assert_eq!(options.effective_cache_dir(), root.join("node_modules/.cache/caliper-docgen"));
+
+    // A `node_modules` nearer the source directory is the project's root.
+    fs::create_dir_all(tmp.path().join("packages/ui/node_modules")).unwrap();
+    assert_eq!(options.effective_cache_dir(), root.join("packages/ui/node_modules/.cache/caliper-docgen"));
+
+    // An explicit directory always wins.
+    let explicit = PipelineOptions { cache_dir: Some(root.join("elsewhere")), ..options };
+    assert_eq!(explicit.effective_cache_dir(), root.join("elsewhere"));
+}
+
+#[test]
+fn parsing_a_dts_file_apart_from_merging_it_gives_what_merging_it_in_one_step_gives() {
+    // A cold run parses the lib files while it parses the project's, then merges them in order: the split must lose
+    // nothing the one-step merge keeps, diagnostics included.
+    let tmp = TempDir::new().unwrap();
+    let nested = "(".repeat(2500) + &")".repeat(2500);
+    let cache_dir = Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap();
+    let cache = DtsCache::load_from_disk(Some(&cache_dir));
+
+    for (name, source, interfaces, nesting_reported) in [
+        ("clean.d.ts", "export interface Declared { a: string }".to_owned(), 1, false),
+        ("nested.d.ts", format!("const x = {nested};"), 0, true),
+    ] {
+        let path = write_file(&tmp, name, &source);
+
+        let mut one_step = GlobalSourceData::default();
+        let mut one_step_diagnostics = Vec::new();
+        merge_cached_dts_file(&path, &cache, &mut one_step, &mut one_step_diagnostics);
+
+        let mut split = GlobalSourceData::default();
+        let mut split_diagnostics = Vec::new();
+        merge_parsed_dts_file(&path, parse_cached_dts_file(&path, &cache), &mut split, &mut split_diagnostics);
+
+        assert_eq!(
+            split.interfaces.keys().collect::<Vec<_>>(),
+            one_step.interfaces.keys().collect::<Vec<_>>(),
+            "{name}"
+        );
+        assert_eq!(split.interfaces.len(), interfaces, "{name}");
+        assert_eq!(split_diagnostics, one_step_diagnostics, "{name}");
+        assert_eq!(
+            split_diagnostics.iter().any(|d| d.code == DiagnosticCode::ExcessiveNesting),
+            nesting_reported,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn an_unreadable_dts_file_is_reported_once_and_merges_nothing() {
+    let tmp = TempDir::new().unwrap();
+    let missing = Utf8PathBuf::from_path_buf(tmp.path().join("absent.d.ts")).unwrap();
+    let cache_dir = Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap();
+    let cache = DtsCache::load_from_disk(Some(&cache_dir));
+
+    let parsed = parse_cached_dts_file(&missing, &cache);
+    assert!(parsed.is_err(), "an unreadable file is not parsed as empty and cached");
+
+    let mut global = GlobalSourceData::default();
+    let mut diagnostics = Vec::new();
+    merge_parsed_dts_file(&missing, parsed, &mut global, &mut diagnostics);
+
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, DiagnosticCode::IoError);
+    assert!(global.interfaces.is_empty());
+}
+
 /// Write a file into a temp dir and return its Utf8PathBuf.
 fn write_file(dir: &TempDir, name: &str, content: &str) -> Utf8PathBuf {
     let path = dir.path().join(name);
@@ -607,6 +684,35 @@ fn full_mode_does_not_emit_components_declared_in_merged_react_types() {
     assert_eq!(names, vec!["Button"]);
 }
 
+#[test]
+fn full_mode_binds_the_element_in_inherited_react_event_handlers() {
+    // `SVGProps<SVGSVGElement>` reaches `DOMAttributes<T>` through `SVGAttributes<T>`; its handlers take the element.
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "Icon.tsx",
+        r#"
+import * as React from "react";
+interface IconProps extends React.SVGProps<SVGSVGElement> { label?: string }
+export function Icon(props: IconProps) { return null; }
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> { tone?: string }
+export function Button(props: ButtonProps) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        html_attributes: HtmlAttributeMode::Full,
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let handler = |component: &str, prop: &str| output.components[component].props[prop].prop_type.raw_string();
+    assert_eq!(handler("Icon", "onClick"), "(event: MouseEvent<SVGSVGElement>) => void");
+    assert_eq!(handler("Icon", "onCopy"), "(event: ClipboardEvent<SVGSVGElement>) => void");
+    assert_eq!(handler("Button", "onClick"), "(event: MouseEvent<HTMLButtonElement>) => void");
+}
+
 // ── test_html_attribute_mode_full_resolves_real_button_attrs_end_to_end ───
 
 #[test]
@@ -669,9 +775,9 @@ export function Button(props: ButtonProps) { return null; }
 }
 
 /// `ComponentProps<"div">` lists none of the div's attributes, but TypeScript still intersects one another member
-/// declares. Only Full mode reads React's declarations, so curated mode keeps the other member's type alone.
+/// declares. Curated mode reads React's declarations for this lookup too.
 #[test]
-fn a_prop_beside_an_html_layer_also_has_the_elements_attribute_type_in_full_mode() {
+fn a_prop_beside_an_html_layer_also_has_the_elements_attribute_type_in_full_and_curated_mode() {
     let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
     write_file(
         &tmp,
@@ -704,7 +810,17 @@ export function Omitted(props: Omit<React.ComponentProps<"div">, "onTimeUpdate">
         (format!("({legend}) & ({dom})"), declared(&["LegendProps", "DOMAttributes"]))
     );
     assert_eq!(on_time_update(&full, "Omitted"), (legend.to_owned(), declared(&["LegendProps"])));
-    assert_eq!(on_time_update(&curated, "Legend"), (legend.to_owned(), declared(&["LegendProps"])));
+    // Curated mode resolves nothing else from React's declarations, so the attribute keeps its alias name.
+    let dom = "ReactEventHandler<HTMLDivElement>";
+    assert_eq!(
+        on_time_update(&curated, "Legend"),
+        (format!("{dom} & ({legend})"), declared(&["DOMAttributes", "LegendProps"]))
+    );
+    assert_eq!(
+        on_time_update(&curated, "Flipped"),
+        (format!("({legend}) & {dom}"), declared(&["LegendProps", "DOMAttributes"]))
+    );
+    assert_eq!(on_time_update(&curated, "Omitted"), (legend.to_owned(), declared(&["LegendProps"])));
 }
 
 // ── test_generic_svg_attributes_extends_resolves_to_its_element_in_full_mode ─
@@ -775,7 +891,7 @@ fn test_unresolvable_intersection_member_records_raw_type_in_composes() {
         &tmp,
         "Comp.tsx",
         r#"
-export type Weird<T> = T extends string ? { a: string } : { b: number };
+export type Weird<T> = T extends { kind: infer K } ? { a: K } : { b: number };
 export type CompProps = Weird<'x'> & { c: boolean };
 export function Comp(props: CompProps) { return null; }
 "#,
@@ -796,11 +912,8 @@ export function Comp(props: CompProps) { return null; }
         !comp.composes.is_empty(),
         "expected the unresolvable Weird<'x'> member to be recorded in `composes` instead of silently vanishing"
     );
-    assert!(
-        comp.composes[0].contains("extends") && comp.composes[0].contains("string"),
-        "expected composes to carry the actual conditional-type expression, got {:?}",
-        comp.composes
-    );
+    // An `infer` needs a checker, so the conditional stays unevaluated.
+    assert_eq!(comp.composes, ["\"x\" extends { ... } ? { ... } : { ... }"]);
 }
 
 // ── test_same_display_name_across_files_with_identical_stem_does_not_collide ─
@@ -1431,7 +1544,7 @@ Button.defaultProps = { size: 'md' };
     let button = output.components.get("Button").expect("Button component not found");
     let size_prop = button.props.get("size").expect("'size' prop not found");
     let default = size_prop.default_value.as_ref().expect("expected a default value for 'size'");
-    assert_eq!(default.value, "\"md\"");
+    assert_eq!(default.value, "'md'");
     assert!(!default.computed);
 }
 
@@ -2508,8 +2621,10 @@ fn a_generic_alias_in_prop_position_takes_the_call_sites_arguments() {
     let output = extract(&options);
 
     let props = &output.components["Box"].props;
+    // The alias's members join the union; inside the array it stays the alias's own enum.
     let size = PropType::LiteralUnion { members: vec!["sm".into(), "lg".into()], has_default: false };
-    assert_eq!(props["size"].prop_type, PropType::Union(vec![size.clone(), PropType::Array(Box::new(size))]));
+    let (sm, lg) = (PropType::StringLiteral("sm".into()), PropType::StringLiteral("lg".into()));
+    assert_eq!(props["size"].prop_type, PropType::Union(vec![sm, lg, PropType::Array(Box::new(size))]));
     assert_eq!(props["label"].prop_type, PropType::Union(vec![PropType::String, PropType::Null]));
 }
 
@@ -2523,6 +2638,336 @@ fn extract_one(files: &[(&str, &str)]) -> ExtractionOutput {
         cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
         ..Default::default()
     })
+}
+
+/// The project is a directory inside the crate, so `react` and `typescript` resolve from the workspace's `node_modules`.
+fn extract_with_installed_libs(files: &[(&str, &str)]) -> ExtractionOutput {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    for (name, body) in files {
+        write_file(&tmp, name, body);
+    }
+    extract(&PipelineOptions { html_attributes: HtmlAttributeMode::Curated, ..full_mode_options_for(&tmp) })
+}
+
+fn severe(output: &ExtractionOutput) -> Vec<&crate::types::Diagnostic> {
+    output.diagnostics.iter().filter(|d| d.severity != DiagnosticSeverity::Info).collect()
+}
+
+/// A type React declares that no builtin list names is React's, imported under its name or another.
+#[test]
+fn a_type_declared_by_react_is_not_unresolvable_even_when_no_builtin_list_names_it() {
+    let output = extract_with_installed_libs(&[(
+        "Box.tsx",
+        "import type { UIEventHandler, Key, DOMAttributes as ReactDOMAttributes } from 'react';\n\
+         export function Box(props: { onScroll?: UIEventHandler<HTMLDivElement>; id?: Key; dom?: ReactDOMAttributes<Element> }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    assert_eq!(
+        props["onScroll"].prop_type,
+        PropType::Named {
+            name: "UIEventHandler".into(),
+            args: vec![PropType::Named { name: "HTMLDivElement".into(), args: vec![] }]
+        }
+    );
+    assert_eq!(props["id"].prop_type, PropType::Named { name: "Key".into(), args: vec![] });
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+}
+
+/// Base UI's `{ [K in keyof ComponentPropsWithRef<"div">]: Wrap<ComponentPropsWithRef<"div">[K]> } & Own`: the
+/// element's attributes, as `ComponentProps<"div">` lists them, beside the component's own props.
+#[test]
+fn a_mapped_type_over_an_elements_attributes_is_that_elements_layer() {
+    let output = extract_with_installed_libs(&[(
+        "Box.tsx",
+        "import type * as React from 'react';\n\
+         type Wrap<T> = T;\n\
+         type Own = { own?: number };\n\
+         export function Box(props: { [K in keyof React.ComponentPropsWithRef<\"div\">]: Wrap<React.ComponentPropsWithRef<\"div\">[K]> } & Own) { return null; }\n\
+         export function Plain(props: React.ComponentPropsWithRef<\"div\"> & Own) { return null; }\n",
+    )]);
+
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+    let layer = |name: &str| {
+        let component = &output.components[name];
+        (
+            component.props.keys().cloned().collect::<Vec<_>>(),
+            component.notable_inherited.keys().cloned().collect::<Vec<_>>(),
+        )
+    };
+    assert_eq!(layer("Box"), layer("Plain"));
+    assert_eq!(layer("Box").0, vec!["own".to_owned()]);
+    assert!(layer("Box").1.contains(&"className".to_owned()));
+}
+
+/// Spectrum's illustrations: `props: IconProps & { size?: 'S' | 'M' }` and `let { size = 'M', ...rest } = props` in the
+/// body. The inline field has the default as a declared one does.
+#[test]
+fn an_inline_object_field_takes_the_default_the_body_destructures() {
+    let output = extract_one(&[(
+        "Apps.tsx",
+        "interface Base { tone?: string }\n\
+         export default function Apps(props: Base & { size?: 'S' | 'M' }) {\n\
+           let { size = 'M', ...rest } = props;\n  return null;\n}\n",
+    )]);
+
+    let size = &output.components["Apps"].props["size"];
+    assert_eq!(size.default_value.as_ref().map(|d| d.value.as_str()), Some("'M'"));
+    assert_eq!(output.components["Apps"].props["tone"].default_value, None);
+}
+
+/// Chakra's recipes: `{ [K in keyof Variant]?: … }` over an interface whose members carry `@default "md"`; the mapped
+/// props keep the tag and so the default.
+#[test]
+fn a_mapped_type_keeps_the_default_tag_of_the_member_it_maps() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "interface Variant {\n  /**\n   * The size.\n   * @default \"md\"\n   */\n  size: \"sm\" | \"md\" | \"lg\";\n  tone: \"a\" | \"b\";\n}\n\
+         type VariantProps = { [K in keyof Variant]?: Variant[K] };\n\
+         export function Box(props: VariantProps & { own?: number }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    assert_eq!(props["size"].default_value.as_ref().map(|d| d.value.as_str()), Some("\"md\""));
+    assert_eq!(props["tone"].default_value, None);
+}
+
+#[test]
+fn a_chakra_factory_config_supplies_inferred_recipe_props() {
+    let output = extract_one(&[(
+        "Group.tsx",
+        r#"
+declare function chakra(element: string, config: unknown): unknown;
+const StyledGroup = chakra("div", {
+  variants: {
+    orientation: { horizontal: {}, vertical: {} },
+    attached: { true: {} },
+    grow: { true: {} },
+    stacking: { "first-on-top": {}, "last-on-top": {} },
+  },
+});
+type InferRecipeProps<T> = T extends unknown ? T : {};
+type VariantProps = InferRecipeProps<typeof StyledGroup>;
+interface GroupProps extends VariantProps { label?: string }
+export function Group(props: GroupProps) { return <div>{props.label}</div>; }
+"#,
+    )]);
+    assert_eq!(prop_names(&output, "Group"), ["attached", "grow", "label", "orientation", "stacking"]);
+    assert_eq!(
+        output.components["Group"].props["attached"].prop_type.raw_string(),
+        "ConditionalValue<boolean | undefined>"
+    );
+    assert_eq!(
+        output.components["Group"].props["orientation"].prop_type.raw_string(),
+        "ConditionalValue<\"horizontal\" | \"vertical\" | undefined>"
+    );
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| {
+            diagnostic.code != crate::types::DiagnosticCode::OpaqueType || !diagnostic.message.contains("StyledGroup")
+        }),
+        "{:#?}",
+        output.diagnostics
+    );
+}
+
+/// A component whose props extend what `typeof recipe` infers (the config's `variants`), after `setup` declares `recipe`.
+fn variant_bag_output(setup: &str) -> ExtractionOutput {
+    let source = format!(
+        "{setup}\n\
+         type InferRecipeProps<T> = T extends unknown ? T : {{}};\n\
+         type VariantProps = InferRecipeProps<typeof recipe>;\n\
+         interface BoxProps extends VariantProps {{ label?: string }}\n\
+         export function Box(props: BoxProps) {{ return <div>{{props.label}}</div>; }}\n"
+    );
+    extract_one(&[("Box.tsx", source.as_str())])
+}
+
+/// The variant bag is found by its shape, not by the name the call is imported under: `cva` as `c` still declares `size`
+/// and `tone`, with the config at argument 1.
+#[test]
+fn a_variant_bag_is_found_under_an_aliased_cva_import() {
+    let output = variant_bag_output(
+        "import { cva as c } from \"class-variance-authority\";\n\
+         const recipe = c(\"base\", { variants: { size: { sm: \"text-sm\", lg: [\"text-lg\"] }, tone: { a: `x`, b: \"y\" } } });",
+    );
+    assert_eq!(prop_names(&output, "Box"), ["label", "size", "tone"]);
+    assert_eq!(
+        output.components["Box"].props["size"].prop_type.raw_string(),
+        "ConditionalValue<\"sm\" | \"lg\" | undefined>"
+    );
+    assert_eq!(
+        output.components["Box"].props["tone"].prop_type.raw_string(),
+        "ConditionalValue<\"a\" | \"b\" | undefined>"
+    );
+}
+
+/// `tv({ variants })` keeps the config at argument 0, under an alias too.
+#[test]
+fn a_variant_bag_is_found_under_an_aliased_tv_import_with_the_config_first() {
+    let output = variant_bag_output(
+        "import { tv as t } from \"tailwind-variants\";\n\
+         const recipe = t({ base: \"b\", variants: { size: { sm: \"s\", md: \"m\" } }, defaultVariants: { size: \"md\" } });",
+    );
+    assert_eq!(prop_names(&output, "Box"), ["label", "size"]);
+    assert_eq!(
+        output.components["Box"].props["size"].prop_type.raw_string(),
+        "ConditionalValue<\"sm\" | \"md\" | undefined>"
+    );
+}
+
+/// A library nobody listed, with the same config shape, in any argument position.
+#[test]
+fn a_variant_bag_is_found_for_a_library_the_extractor_has_never_heard_of() {
+    let output = variant_bag_output(
+        "declare function makeVariants(first: string, second: number, config: unknown): unknown;\n\
+         const recipe = makeVariants(\"x\", 1, { variants: { density: { \"tight\": {}, \"loose\": { gap: 4 } } } });",
+    );
+    assert_eq!(prop_names(&output, "Box"), ["density", "label"]);
+    assert_eq!(
+        output.components["Box"].props["density"].prop_type.raw_string(),
+        "ConditionalValue<\"tight\" | \"loose\" | undefined>"
+    );
+}
+
+/// Real recipes mix literal groups with groups taken from another recipe or built by a call (Chakra's input addon:
+/// `size: inputRecipe.variants!.size`, `variant: { … }`). The literal groups still declare their props.
+#[test]
+fn a_variant_bag_keeps_its_literal_groups_when_other_groups_are_references() {
+    let output = variant_bag_output(
+        "declare const inputRecipe: { variants: { size: Record<string, unknown> } };\n\
+         declare function mapEntries(value: unknown, map: unknown): unknown;\n\
+         declare function defineRecipe(config: unknown): unknown;\n\
+         const recipe = defineRecipe({\n\
+           variants: {\n\
+             size: inputRecipe.variants!.size,\n\
+             variant: { outline: { bg: \"a\" }, subtle: { bg: \"b\" } },\n\
+             tone: mapEntries(inputRecipe, (key: string) => key),\n\
+           },\n\
+         });",
+    );
+    assert_eq!(prop_names(&output, "Box"), ["label", "variant"]);
+    assert_eq!(
+        output.components["Box"].props["variant"].prop_type.raw_string(),
+        "ConditionalValue<\"outline\" | \"subtle\" | undefined>"
+    );
+}
+
+/// An object with a `variants` property that is not a map of maps of styling is not a variant bag, and nothing is
+/// invented from it: a plain string, a list, a group that is not an object, or a leaf that is a number.
+#[test]
+fn an_object_with_a_variants_property_that_is_not_a_variant_bag_declares_no_props() {
+    for config in [
+        "{ variants: \"size\" }",
+        "{ variants: [\"a\", \"b\"] }",
+        "{ variants: { size: \"sm\" } }",
+        "{ variants: { size: { sm: 1, lg: 2 } } }",
+        "{ variants: { size: { sm: true } } }",
+        "{ variants: {} }",
+    ] {
+        let output = variant_bag_output(&format!(
+            "declare function use(config: unknown): unknown;\nconst recipe = use({config});"
+        ));
+        assert_eq!(prop_names(&output, "Box"), ["label"], "{config}");
+    }
+}
+
+/// A generic component's own type parameters are placeholders, the way an interface's are, and an ES2015 global
+/// (`Iterable`) is TypeScript's.
+#[test]
+fn a_generic_components_type_parameter_and_an_es2015_global_are_not_unresolvable() {
+    let output = extract_with_installed_libs(&[(
+        "List.tsx",
+        "interface ListProps<T> { items?: Iterable<T>; render?: (item: T) => null }\n\
+         export function List<T extends object>(props: ListProps<T>) { return null; }\n\
+         export const Wrapped = (function Inner<T extends object>(props: ListProps<T>) { return null; });\n",
+    )]);
+
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+    assert_eq!(
+        output.components["List"].props["items"].prop_type,
+        PropType::Named { name: "Iterable".into(), args: vec![PropType::Named { name: "T".into(), args: vec![] }] }
+    );
+}
+
+/// A class is also a type: `value: CalendarDate` names it, and nothing else about it is needed to print the name.
+#[test]
+fn a_class_used_as_a_type_is_declared() {
+    let output = extract_one(&[
+        ("date.ts", "export class CalendarDate { year = 0 }\n"),
+        (
+            "Cell.tsx",
+            "import { CalendarDate } from './date';\n\
+             export function Cell(props: { value: CalendarDate }) { return null; }\n",
+        ),
+    ]);
+
+    assert_eq!(
+        output.components["Cell"].props["value"].prop_type,
+        PropType::Named { name: "CalendarDate".into(), args: vec![] }
+    );
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+}
+
+/// A namespace member names its siblings bare (csstype's `DataType.Color`), and the union keeps every member.
+#[test]
+fn a_namespace_sibling_in_an_alias_body_resolves_to_its_members() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "namespace DataType { type Base = 'red' | 'blue'; export type Color = Base | 'green'; }\n\
+         export function Box(props: { color: DataType.Color }) { return null; }\n",
+    )]);
+
+    let members = ["red", "blue", "green"].map(|m| PropType::StringLiteral(m.to_owned())).to_vec();
+    assert_eq!(output.components["Box"].props["color"].prop_type, PropType::Union(members));
+    assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+}
+
+/// `T extends unknown ? Omit<T, K> : never`, the idiom that distributes over a union, is the true branch.
+#[test]
+fn everything_extends_unknown_so_a_distributing_props_base_takes_its_true_branch() {
+    let output = extract_one(&[(
+        "Card.tsx",
+        "type Distribute<T, K extends keyof any> = T extends unknown ? Omit<T, K> : never;\n\
+         interface Base { id: string; hidden: boolean }\n\
+         export function Card(props: Distribute<Base, 'hidden'> & { title: string }) { return null; }\n",
+    )]);
+
+    let mut card: Vec<&str> = output.components["Card"].props.keys().map(String::as_str).collect();
+    card.sort_unstable();
+    assert_eq!(card, vec!["id", "title"]);
+    assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+}
+
+/// The nesting limit counts one type expression; aliases referring to aliases are declarations, bounded by the names in
+/// progress, so a chain longer than the expression limit still resolves.
+#[test]
+fn a_chain_of_aliases_longer_than_the_expression_depth_limit_resolves() {
+    let mut source = String::from("type A0 = 'x' | 'y';\n");
+    for level in 1..40 {
+        source.push_str(&format!("type A{level} = A{} | 'z{level}';\n", level - 1));
+    }
+    source.push_str("export function Box(props: { chain: A39 }) { return null; }\n");
+    let output = extract_one(&[("Box.tsx", &source)]);
+
+    let literals = |names: Vec<String>| PropType::Union(names.into_iter().map(PropType::StringLiteral).collect());
+    let expected = ["x".to_owned(), "y".to_owned()].into_iter().chain((1..40).map(|level| format!("z{level}")));
+    assert_eq!(output.components["Box"].props["chain"].prop_type, literals(expected.collect()));
+    assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+}
+
+/// Mantine's `CssVars<V = CssVariable> = ... | CssVars<V>[]`: the argument of the recursive reference is the same type
+/// at every level, so the cycle is found at the second one, as information, not by running out of depth.
+#[test]
+fn a_recursive_alias_with_a_defaulted_parameter_is_a_cycle_not_a_depth_overrun() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "type Vars<V extends string = 'a'> = Record<V, string> | Vars<V>[];\n\
+         export function Box(props: { vars?: Vars }) { return null; }\n",
+    )]);
+
+    let severe: Vec<_> = output.diagnostics.iter().filter(|d| d.severity != DiagnosticSeverity::Info).collect();
+    assert!(severe.is_empty(), "{severe:?}");
+    assert!(output.diagnostics.iter().any(|d| d.code == DiagnosticCode::CircularReference), "{:?}", output.diagnostics);
 }
 
 #[test]
@@ -2766,4 +3211,695 @@ fn without_custom_conditions_a_source_only_workspace_package_does_not_resolve() 
     assert_eq!(prop_names(&output, "Card"), Vec::<String>::new());
     let unresolved = output.diagnostics.iter().find(|d| d.code == DiagnosticCode::UnresolvableImport);
     assert!(unresolved.is_some_and(|d| d.message.contains("@acme/ui")), "{:#?}", output.diagnostics);
+}
+
+/// Mantine's shape, through two barrels: `factory<Payload>` returns `MantineComponent<Payload>`, a component type whose
+/// props are the payload's props plus `component` and `renderRoot`. The wrapper-built component has those props, a name
+/// both declare intersects as in TypeScript, and a callee with no known result leaves the payload's props.
+#[test]
+fn a_wrapper_built_component_gets_the_props_its_callees_result_type_adds() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    fs::create_dir_all(tmp.path().join("core/factory")).unwrap();
+    write_file(&tmp, "core/factory/factory.tsx", CALLEE_FACTORY);
+    write_file(
+        &tmp,
+        "core/factory/index.ts",
+        "export { factory, opaque } from './factory';\nexport type { Factory } from './factory';\n",
+    );
+    write_file(&tmp, "core/index.ts", "export * from './factory';\n");
+    write_file(
+        &tmp,
+        "Button.tsx",
+        r#"
+import { factory, opaque, Factory } from "./core";
+export interface ButtonProps { label: string }
+export interface LinkProps { label: string; component: "a" | "span" }
+export type ButtonFactory = Factory<{ props: ButtonProps; ref: HTMLButtonElement }>;
+export type LinkFactory = Factory<{ props: LinkProps; ref: HTMLAnchorElement }>;
+export const Button = factory<ButtonFactory>((props) => <button>{props.label}</button>);
+export const Link = factory<LinkFactory>((props) => <a>{props.label}</a>);
+export const Plain = opaque<ButtonFactory>((props) => <button>{props.label}</button>);
+export const Typed = factory<ButtonFactory>((props: ButtonProps) => <button>{props.label}</button>);
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let props = |component: &str| {
+        output.components[component]
+            .props
+            .values()
+            .map(|p| (p.name.clone(), p.prop_type.raw_string(), p.required, p.description.clone()))
+            .collect::<Vec<_>>()
+    };
+    let prop = |name: &str, ty: &str, required: bool, description: &str| {
+        (name.to_owned(), ty.to_owned(), required, description.to_owned())
+    };
+    let render_root = prop("renderRoot", "(props: Record<string, any>) => React.ReactNode", false, "");
+    assert_eq!(
+        props("Button"),
+        [
+            prop("component", "any", false, "Root element or component."),
+            prop("label", "string", true, ""),
+            render_root.clone()
+        ]
+    );
+    // The payload's `component` and the result type's intersect, and `any` absorbs the intersection.
+    assert_eq!(
+        props("Link"),
+        [prop("component", "any", true, "Root element or component."), prop("label", "string", true, ""), render_root,]
+    );
+    assert_eq!(props("Plain"), [prop("label", "string", true, "")]);
+    // A typed render function makes this a HOC-wrapper detection; the callee still adds its props.
+    assert_eq!(props("Typed"), props("Button"));
+    let warnings: Vec<&str> = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity != DiagnosticSeverity::Info)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(warnings, Vec::<&str>::new());
+}
+
+#[test]
+fn a_polymorphic_factory_result_through_local_aliases_adds_its_props() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "factory.tsx",
+        r#"
+import * as React from "react";
+type PolymorphicComponentProps<C, Props> = C extends React.ElementType
+  ? Props & { component?: C; renderRoot?: (props: Record<string, any>) => React.ReactNode }
+  : Props & { component: React.ElementType; renderRoot?: (props: Record<string, any>) => React.ReactNode };
+export interface Payload { props: Record<string, any>; defaultComponent: React.ElementType }
+export type PolymorphicFactory<P extends Payload> = P;
+export function polymorphicFactory<P extends Payload>(ui: (props: P['props']) => React.ReactNode) {
+  type ComponentProps<C> = PolymorphicComponentProps<C, P['props']>;
+  type Callable = <C = P['defaultComponent']>(props: ComponentProps<C>) => React.ReactElement;
+  type ComponentProperties = Omit<React.FunctionComponent<ComponentProps<any>>, never>;
+  type PolymorphicComponent = Callable & ComponentProperties;
+  const Component = ui as unknown as PolymorphicComponent;
+  return Component as PolymorphicComponent;
+}
+
+"#,
+    );
+    write_file(
+        &tmp,
+        "Button.tsx",
+        r#"
+import { polymorphicFactory, PolymorphicFactory } from './factory';
+interface ButtonProps { label: string }
+type ButtonPayload = PolymorphicFactory<{ props: ButtonProps; defaultComponent: 'button' }>;
+export const Button = polymorphicFactory<ButtonPayload>((props) => <button>{props.label}</button>);
+interface LinkProps { label: string; component: any }
+type LinkPayload = PolymorphicFactory<{ props: LinkProps; defaultComponent: 'a' }>;
+export const Link = polymorphicFactory<LinkPayload>((props) => <a>{props.label}</a>);
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+    assert_eq!(prop_names(&output, "Button"), ["component", "label", "renderRoot"], "{:#?}", output.diagnostics);
+    assert_eq!(prop_names(&output, "Link"), ["component", "label", "renderRoot"], "{:#?}", output.diagnostics);
+    assert_eq!(output.components["Button"].props["label"].prop_type.raw_string(), "string");
+    assert!(!output.components["Button"].props["component"].required);
+    assert!(!output.components["Button"].props["renderRoot"].required);
+    assert_eq!(output.components["Link"].props["component"].prop_type.raw_string(), "any");
+}
+
+#[test]
+fn a_local_alias_of_a_generic_component_factory_keeps_its_result() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "factory.tsx",
+        r#"
+import * as React from "react";
+type ComponentProps<C, Props> = C extends React.ElementType
+  ? Props & { component?: C; renderRoot?: (props: any) => any }
+  : Props & { component: React.ElementType; renderRoot?: (props: any) => any };
+export function createPolymorphicComponent<Default, Props>(component: any) {
+  type Callable = <C = Default>(props: ComponentProps<C, Props>) => React.ReactElement;
+  return component as Callable;
+}
+
+export const polymorphic = createPolymorphicComponent;
+"#,
+    );
+    write_file(
+        &tmp,
+        "Box.tsx",
+        r#"
+import { polymorphic } from './factory';
+interface BoxProps { label: string }
+const _Box = (props: BoxProps) => <div>{props.label}</div>;
+export const Box = polymorphic<'div', BoxProps>(_Box);
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+    assert_eq!(prop_names(&output, "Box"), ["component", "label", "renderRoot"], "{:#?}", output.diagnostics);
+    assert!(
+        output.diagnostics.iter().all(|diagnostic| !diagnostic.message.contains("Cannot resolve type 'Props'")),
+        "{:#?}",
+        output.diagnostics
+    );
+}
+
+#[test]
+fn a_factory_returned_through_a_local_const_keeps_its_result_props() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "Table.tsx",
+        r#"
+import * as React from 'react';
+interface FactoryPayload { props: Record<string, any> }
+type Factory<P extends FactoryPayload> = P;
+function factory<P extends FactoryPayload>(render: (props: P['props']) => React.ReactNode): React.FC<P['props'] & { component?: React.ElementType; renderRoot?: (props: any) => any }> {
+  return render as any;
+}
+function tableElement<F extends FactoryPayload>(element: 'th') {
+  const Component = factory<F>((props) => <th>{props.label}</th>);
+  Component.displayName = 'TableTh';
+  return Component;
+}
+interface TableThProps { label: string }
+type TableThFactory = Factory<{ props: TableThProps }>;
+export const TableTh = tableElement<TableThFactory>('th');
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+    assert_eq!(prop_names(&output, "TableTh"), ["component", "label", "renderRoot"], "{:#?}", output.diagnostics);
+}
+
+/// An `export *` barrel reaches any exported value, not only types: `ComponentProps<typeof Button>` finds a component
+/// declared as a const two barrels away, renamed exports included.
+#[test]
+fn an_export_star_barrel_reaches_an_exported_value() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    fs::create_dir_all(tmp.path().join("ui/button")).unwrap();
+    write_file(
+        &tmp,
+        "ui/button/button.tsx",
+        "export interface ButtonProps { label: string }\n\
+         export const Button = (props: ButtonProps) => <button>{props.label}</button>;\n\
+         const Ghost = (props: { faint?: boolean }) => <button />;\nexport { Ghost as GhostButton };\n",
+    );
+    write_file(&tmp, "ui/button/index.ts", "export * from './button';\n");
+    write_file(&tmp, "ui/index.ts", "export * from './button';\n");
+    write_file(
+        &tmp,
+        "App.tsx",
+        r#"
+import * as React from "react";
+import { Button, GhostButton } from "./ui";
+export function Fancy(props: React.ComponentProps<typeof Button> & { extra?: boolean }) { return null; }
+export function Faint(props: React.ComponentProps<typeof GhostButton>) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let names = |component: &str| output.components[component].props.keys().cloned().collect::<Vec<_>>();
+    assert_eq!(names("Fancy"), ["extra", "label"]);
+    assert_eq!(names("Faint"), ["faint"]);
+    let warnings: Vec<&str> = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity != DiagnosticSeverity::Info)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(warnings, Vec::<&str>::new());
+}
+
+/// A destructuring default is the component's default for that prop wherever the prop's type is declared: `variant`
+/// and `size` come through `Pick<ComponentProps<typeof Button>, …>` (shadcn's `AlertDialogCancel`), not from an
+/// interface the component names, and the component that declares them keeps having none.
+#[test]
+fn a_destructuring_default_applies_to_a_prop_another_component_declares() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "Button.tsx",
+        "export interface ButtonProps { variant?: 'default' | 'outline'; size?: 'sm' | 'md'; label?: string }\n\
+         export function Button(props: ButtonProps) { return <button>{props.label}</button>; }\n",
+    );
+    write_file(
+        &tmp,
+        "Cancel.tsx",
+        r#"
+import * as React from "react";
+import { Button } from "./Button";
+export function Cancel({ variant = "outline", size = 'md', ...rest }: Pick<React.ComponentProps<typeof Button>, "variant" | "size">) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let default_of = |component: &str, prop: &str| {
+        output.components[component].props[prop].default_value.as_ref().map(|d| (d.value.clone(), d.computed))
+    };
+    assert_eq!(default_of("Cancel", "variant"), Some(("\"outline\"".to_owned(), false)));
+    assert_eq!(default_of("Cancel", "size"), Some(("'md'".to_owned(), false)));
+    assert_eq!(output.components["Cancel"].props["variant"].required, false);
+    assert_eq!(default_of("Button", "variant"), None);
+    assert_eq!(default_of("Button", "size"), None);
+}
+
+/// Two members of an intersection that both reach one type are not circular: `Optional<T, K>` is
+/// `Pick<Partial<T>, K> & Omit<T, K>` (Ark UI's), and the second member used to be dropped as a cycle.
+#[test]
+fn intersection_members_that_share_a_base_type_each_keep_its_props() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "Field.tsx",
+        r#"
+export interface Base { id: string; value?: string; disabled?: boolean }
+type Optional<T, K extends keyof T> = Pick<Partial<T>, K> & Omit<T, K>;
+export function Field(props: Optional<Base, "id">) { return null; }
+export function Both(props: Pick<Base, "id"> & Pick<Base, "disabled">) { return null; }
+export function Rest(props: Pick<Base, "id"> & Omit<Base, "id">) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let names = |component: &str| output.components[component].props.keys().cloned().collect::<Vec<_>>();
+    assert_eq!(names("Field"), ["disabled", "id", "value"]);
+    assert_eq!(names("Both"), ["disabled", "id"]);
+    assert_eq!(names("Rest"), ["disabled", "id", "value"]);
+    // `id` is required in `Base`, and `Optional` makes it optional.
+    assert_eq!(output.components["Field"].props["id"].required, false);
+    assert_eq!(output.components["Rest"].props["id"].required, true);
+    let circular: Vec<&str> = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::CircularReference)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(circular, Vec::<&str>::new());
+}
+
+/// Chakra's recipe props: a conditional on a literal picks its branch, indexed accesses read a generic interface's
+/// member, and a mapped type over `keyof` an interface lists one prop per key. Every step is evaluated from known
+/// operands, so nothing warns.
+#[test]
+fn recipe_props_evaluate_through_conditional_indexed_and_mapped_types() {
+    let tmp = TempDir::new().unwrap();
+    write_file(&tmp, "recipes.ts", RECIPES);
+    write_file(
+        &tmp,
+        "Button.tsx",
+        r#"
+import type { RecipeProps } from "./recipes";
+export interface ButtonProps extends RecipeProps<"button"> { loading?: boolean }
+export function Button(props: ButtonProps) { return <button />; }
+export interface OtherProps extends RecipeProps<"nope"> { label: string }
+export function Other(props: OtherProps) { return <div />; }
+export type FlagsProps = { [K in "compact" | "dense"]: boolean };
+export function Flags(props: FlagsProps) { return <div />; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let props = |component: &str| {
+        output.components[component]
+            .props
+            .values()
+            .map(|p| (p.name.clone(), p.prop_type.raw_string(), p.required, p.description.clone()))
+            .collect::<Vec<_>>()
+    };
+    let prop = |name: &str, ty: &str, required: bool, description: &str| {
+        (name.to_owned(), ty.to_owned(), required, description.to_owned())
+    };
+    let recipe = prop("recipe", "string", false, "");
+    assert_eq!(
+        props("Button"),
+        [
+            prop("loading", "boolean", false, ""),
+            recipe.clone(),
+            prop("size", "ConditionalValue<\"sm\" | \"md\" | \"lg\" | undefined>", false, "The button's size."),
+            prop("variant", "ConditionalValue<\"solid\" | \"outline\" | undefined>", false, ""),
+        ]
+    );
+    assert_eq!(props("Other"), [prop("label", "string", true, ""), recipe]);
+    assert_eq!(props("Flags"), [prop("compact", "boolean", true, ""), prop("dense", "boolean", true, "")]);
+    let warnings: Vec<&str> = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity != DiagnosticSeverity::Info)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(warnings, Vec::<&str>::new());
+}
+
+/// Recipe types in Chakra's shape (`styled-system/generated/recipes.gen.ts`).
+pub(crate) const RECIPES: &str = r#"
+export interface SystemRecipeFn<VP, VM> { __type: Partial<VP>; variantMap: VM }
+export interface ButtonVariant {
+  /** The button's size. */
+  size?: "sm" | "md" | "lg" | undefined;
+  variant?: "solid" | "outline" | undefined;
+}
+export interface Conditions { _hover: string; md: string }
+export type ConditionalValue<V> = V | Array<V | null> | { [K in keyof Conditions]?: ConditionalValue<V> };
+export type ButtonVariantProps = { [K in keyof ButtonVariant]?: ConditionalValue<ButtonVariant[K]> | undefined };
+export interface ConfigRecipes { button: SystemRecipeFn<ButtonVariantProps, unknown> }
+export type RecipeProps<T> = T extends keyof ConfigRecipes
+  ? ConfigRecipes[T]["__type"] & { recipe?: string | undefined }
+  : { recipe?: string | undefined };
+"#;
+
+/// A factory module in Mantine's shape: `factory` asserts its result type, `opaque` declares none.
+pub(crate) const CALLEE_FACTORY: &str = r#"
+import * as React from "react";
+export interface FactoryPayload { props: Record<string, any>; ref?: any }
+export type Factory<Payload extends FactoryPayload> = Payload;
+export type MantineComponent<Payload extends FactoryPayload> = React.NamedExoticComponent<
+  Payload["props"] & React.RefAttributes<Payload["ref"]> & {
+    /** Root element or component. */
+    component?: any;
+    renderRoot?: (props: Record<string, any>) => React.ReactNode;
+  }
+> & { extend: (input: any) => any };
+export function factory<Payload extends FactoryPayload>(ui: (props: Payload["props"]) => React.ReactNode) {
+  const Component = ui as any;
+  return Component as MantineComponent<Payload>;
+}
+export function opaque<Payload extends FactoryPayload>(ui: (props: Payload["props"]) => React.ReactNode) {
+  return ui;
+}
+"#;
+
+#[test]
+fn an_omitted_type_argument_takes_the_parameters_default() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "dom.ts",
+        "export type FocusableElement = Element;\n\
+         export interface DOMAttributes<T = FocusableElement> { onFocus?: (event: { currentTarget: T }) => void }\n",
+    );
+    write_file(
+        &tmp,
+        "Field.tsx",
+        r#"
+import type { DOMAttributes } from "./dom";
+type Pair<A, B = A[]> = { first: A; second: B };
+interface FieldProps extends DOMAttributes { label?: string }
+interface InputProps extends DOMAttributes<HTMLInputElement> {}
+interface Unbound<T> { value: T }
+export function Field(props: FieldProps & { pair: Pair<string>; both: Pair<number, boolean>; unbound: Unbound<number> }) { return null; }
+export function Input(props: InputProps) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let text = |component: &str, prop: &str| output.components[component].props[prop].prop_type.raw_string();
+    assert_eq!(text("Field", "onFocus"), "(event: { currentTarget: FocusableElement }) => void");
+    assert_eq!(text("Input", "onFocus"), "(event: { currentTarget: HTMLInputElement }) => void");
+    assert_eq!(text("Field", "pair"), "{ first: string; second: string[] }");
+    assert_eq!(text("Field", "both"), "{ first: number; second: boolean }");
+    let warnings: Vec<&str> = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity != DiagnosticSeverity::Info)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(warnings, Vec::<&str>::new());
+}
+
+#[test]
+fn literal_types_evaluate_as_typescript_does() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "Badge.tsx",
+        r#"
+type Size = "small" | "medium" | "large";
+type Fallback<T> = { [P in keyof T]: T[P] | NonNullable<T[P]>[] };
+interface Longhand { align?: "start" | "end" | undefined }
+interface Styles extends Fallback<Longhand> {}
+type Conditional<T> = T extends infer U ? U | U[] : never;
+type WithVariant = { variant: "solid" | "ghost" };
+type WithoutVariant = { props: string };
+type VariantOf<P> = P["variant"] extends string ? P["variant"] | "custom" : string;
+export function Badge(props: {
+    size: Exclude<Size, "large"> | "default";
+    picked: Extract<Size | number, string>;
+    level: NonNullable<1 | 2 | null | undefined>;
+    heading: `h${1 | 2 | 3}`;
+    align: Conditional<Styles["align"]>;
+    variant: VariantOf<WithVariant>;
+    plain: VariantOf<WithoutVariant>;
+}) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let text = |prop: &str| output.components["Badge"].props[prop].prop_type.raw_string();
+    assert_eq!(text("size"), "\"small\" | \"medium\" | \"default\"");
+    assert_eq!(text("picked"), "\"small\" | \"medium\" | \"large\"");
+    assert_eq!(text("level"), "1 | 2");
+    assert_eq!(text("heading"), "\"h1\" | \"h2\" | \"h3\"");
+    assert_eq!(text("align"), "Conditional<\"start\" | \"end\" | undefined | (\"start\" | \"end\")[]>");
+    assert_eq!(text("variant"), "\"solid\" | \"ghost\" | \"custom\"");
+    assert_eq!(text("plain"), "string");
+}
+
+#[test]
+fn a_conditional_alias_distributes_over_the_members_of_its_argument() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "sizes.ts",
+        "export type Size = \"xs\" | \"sm\" | \"md\";\nexport const TONES = [\"a\", \"b\", \"c\"] as const;\n",
+    );
+    write_file(
+        &tmp,
+        "Tag.tsx",
+        r#"
+import type { Size, TONES } from "./sizes";
+type Without<T, U> = T extends U ? never : T;
+type OnlyStrings<T> = T extends string ? T : never;
+type Tone = (typeof TONES)[number];
+export function Tag(props: {
+    size: Exclude<Size, "xs">;
+    own: Without<Size | 4 | null, "sm" | null>;
+    strings: OnlyStrings<Size | boolean | 7>;
+    tone: Exclude<Tone, "b">;
+    maybe: NonNullable<string | null | undefined>;
+    flag: Exclude<boolean, true>;
+    all: Exclude<Size, Size>;
+}) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let text = |prop: &str| output.components["Tag"].props[prop].prop_type.raw_string();
+    assert_eq!(text("size"), "\"sm\" | \"md\"");
+    assert_eq!(text("own"), "\"xs\" | \"md\" | 4");
+    assert_eq!(text("strings"), "\"xs\" | \"sm\" | \"md\"");
+    assert_eq!(text("tone"), "\"a\" | \"c\"");
+    assert_eq!(text("maybe"), "string");
+    assert_eq!(text("flag"), "false");
+    assert_eq!(text("all"), "never");
+}
+
+#[test]
+fn a_generic_alias_with_a_long_expansion_is_shown_by_name_with_its_arguments() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    let keys: Vec<String> = (0..80).map(|i| format!("\"k{i}\"")).collect();
+    write_file(
+        &tmp,
+        "Grid.tsx",
+        &format!(
+            "type Key = {keys};\ntype Small = \"a\" | \"b\";\ntype Responsive<T> = T | T[] | {{ [bp: string]: T }};\n\
+             export function Grid(props: {{ big: Responsive<Key>; small: Responsive<Small> }}) {{ return null; }}\n",
+            keys = keys.join(" | ")
+        ),
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let text = |prop: &str| output.components["Grid"].props[prop].prop_type.raw_string();
+    assert_eq!(text("big"), "Responsive<Key>");
+    assert!(text("small").starts_with("\"a\" | \"b\" | "), "got {}", text("small"));
+}
+
+#[test]
+fn an_indexed_member_reads_through_imported_generic_ancestors_with_their_arguments_bound() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(&tmp, "base.ts", "export interface Base<T> { value?: T; tone?: \"a\" | \"b\" }\n");
+    write_file(
+        &tmp,
+        "Field.tsx",
+        r#"
+import type { Base } from "./base";
+interface Mid<U> extends Base<U> {}
+interface Leaf extends Mid<number> {}
+export function Field(props: { value: Leaf["value"]; tone: Leaf["tone"] }) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let props = &output.components["Field"].props;
+    assert_eq!(props["value"].prop_type, PropType::Number);
+    assert_eq!(
+        props["tone"].prop_type,
+        PropType::Union(vec![PropType::StringLiteral("a".into()), PropType::StringLiteral("b".into())])
+    );
+}
+
+#[test]
+fn a_union_lists_each_member_once_however_it_was_spelled() {
+    let tmp = TempDir::new_in(camino::Utf8Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+    write_file(
+        &tmp,
+        "List.tsx",
+        r#"
+import * as React from "react";
+type SectionElement = React.ReactElement | null;
+type ItemElement = React.ReactElement | null;
+type CollectionElement = SectionElement | ItemElement;
+export function List(props: {
+    children: CollectionElement | CollectionElement[];
+    each: string[] | readonly string[];
+    tone: "a" | ("a" | "b") | "b";
+    onPick: (names: string[] | readonly string[]) => void;
+}) { return null; }
+"#,
+    );
+    let options = PipelineOptions {
+        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
+        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    let output = extract(&options);
+
+    let props = &output.components["List"].props;
+    let element = PropType::Union(vec![PropType::ReactNode, PropType::Null]);
+    assert_eq!(
+        props["children"].prop_type,
+        PropType::Union(vec![PropType::ReactNode, PropType::Null, PropType::Array(Box::new(element))])
+    );
+    assert_eq!(props["each"].prop_type, PropType::Array(Box::new(PropType::String)));
+    assert_eq!(
+        props["tone"].prop_type,
+        PropType::Union(vec![PropType::StringLiteral("a".into()), PropType::StringLiteral("b".into())])
+    );
+    assert_eq!(
+        props["onPick"].prop_type,
+        PropType::Function {
+            type_params: vec![],
+            params: vec![FunctionParam {
+                name: Some("names".into()),
+                param_type: PropType::Array(Box::new(PropType::String))
+            }],
+            return_type: Box::new(PropType::Void),
+        }
+    );
+}
+
+#[test]
+fn an_exported_component_cast_uses_the_asserted_props() {
+    let output = extract_one(&[(
+        "Card.tsx",
+        r#"
+import { forwardRef, ForwardRefExoticComponent } from 'react';
+type PropsWithoutRef<P> = P;
+interface CardProps { label: string }
+interface ItemProps<P> { title?: string; textValue?: string; href?: string }
+let Card = forwardRef<HTMLDivElement, CardProps>((props, ref) => <div ref={ref}>{props.label}</div>);
+let _Card = Card as ForwardRefExoticComponent<ItemProps<CardProps> & PropsWithoutRef<CardProps>>;
+export { _Card as Card };
+"#,
+    )]);
+    assert_eq!(
+        prop_names(&output, "Card"),
+        ["href", "label", "textValue", "title"],
+        "components: {:#?}; diagnostics: {:#?}",
+        output.components.keys().collect::<Vec<_>>(),
+        output.diagnostics
+    );
+    assert_eq!(output.components["Card"].props["label"].prop_type.raw_string(), "string");
+    assert_eq!(output.components["Card"].props["title"].prop_type.raw_string(), "string");
+}
+
+#[test]
+fn react_props_without_ref_keeps_the_base_props_in_alias_and_extends_positions() {
+    let output = extract_one(&[(
+        "Cards.tsx",
+        r#"
+import type { PropsWithoutRef } from 'react';
+interface Base { label: string; ref?: string }
+type Alias = PropsWithoutRef<Base>;
+interface Extended extends PropsWithoutRef<Base> {}
+export function AliasCard(props: Alias) { return <div>{props.label}</div>; }
+export function ExtendedCard(props: Extended) { return <div>{props.label}</div>; }
+"#,
+    )]);
+    assert_eq!(prop_names(&output, "AliasCard"), ["label"]);
+    assert_eq!(prop_names(&output, "ExtendedCard"), ["label"]);
 }

@@ -7,20 +7,35 @@ use compact_str::CompactString;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::collected::{
-    CollectedInterface, CollectedTypeAlias, ComponentMapping, EnumEntry, EnumValue, ImportBinding, LexedExport,
-    RawDefault, SourceData, TypeName,
+    CollectedInterface, CollectedType, CollectedTypeAlias, ComponentMapping, EnumEntry, EnumValue, FunctionResult,
+    ImportBinding, LexedExport, RawDefault, SourceData, TypeName,
 };
 use super::diagnostic::Diagnostic;
 
 // ─── ResolveState ─────────────────────────────────────────────────────────────
+
+/// The id of a cycle-set key, the same for every state in the process. The keys are `file:name<arguments>` strings tens
+/// of bytes long; the sets and the read logs of the interface-chain recordings (`resolver::memo`) hold ids instead,
+/// so copying a set or a log copies numbers, and no reference count is shared between the threads resolving components.
+/// Ids are never reused, so equal ids are equal keys.
+fn key_id(key: &str) -> u32 {
+    static IDS: std::sync::OnceLock<dashmap::DashMap<Box<str>, u32, rustc_hash::FxBuildHasher>> =
+        std::sync::OnceLock::new();
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let ids = IDS.get_or_init(Default::default);
+    if let Some(id) = ids.get(key) {
+        return *id;
+    }
+    *ids.entry(key.into()).or_insert_with(|| NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+}
 
 /// Mutable resolution state threaded through all resolver functions.
 /// Bundles the two fields that every recursive resolver function needs,
 /// eliminating long argument signatures.
 #[derive(Default)]
 pub(crate) struct ResolveState {
-    /// Cycle-detection set: "${file}:${type_name}" keys.
-    pub(crate) visited: FxHashSet<CompactString>,
+    /// Cycle-detection set: ids (`key_id`) of "${file}:${type_name}" keys.
+    pub(crate) visited: FxHashSet<u32>,
     /// `resolve_named`'s own cycle-detection set — deliberately separate from
     /// `visited` above. `visited` is chain.rs's, permanent for the rest of a
     /// given branch's resolution (with per-sibling-branch cloning to avoid
@@ -33,9 +48,17 @@ pub(crate) struct ResolveState {
     /// live call stack — inserted on entry to `resolve_named`, removed before
     /// it returns — the textbook DFS "on this path" set, which catches real
     /// self-reference while never flagging legitimate repeated reuse.
-    pub(crate) named_in_progress: FxHashSet<CompactString>,
+    pub(crate) named_in_progress: FxHashSet<u32>,
+    /// The most names `named_in_progress` has held since a recording began (`resolver::memo`), to bound how deep a
+    /// replayed resolution would go from a deeper state.
+    pub(crate) named_high: usize,
+    /// The deepest resolution depth checked against the limit since a recording began (`resolver::past_max_depth`), to
+    /// bound how deep a replayed resolution would go from a different starting depth.
+    pub(crate) depth_high: u8,
     /// Accumulated non-fatal issues.
     pub(crate) diagnostics: Vec<Diagnostic>,
+    /// Diagnostics of replayed or recorded interface chains, shared with the recording instead of copied.
+    pub(crate) shared_diagnostics: Vec<Arc<[Diagnostic]>>,
     /// Declared generic type parameter names (`TData`, `T`, `U`, ...) seen so far
     /// while resolving this component — accumulated as interfaces/aliases with
     /// their own type parameters are entered, never removed. A bare reference to
@@ -48,6 +71,9 @@ pub(crate) struct ResolveState {
     /// Expand every source, collapsing none (ADR 0012): set while resolving `Pick`'s base or a `keyof` operand, whose
     /// props are selected or counted by name. Interface chains are not shared while it is set.
     pub(crate) expand_all: bool,
+    /// Only prop names are wanted (a `keyof` operand): members' types are not resolved. Interface chains recorded with
+    /// it set answer only states with it set.
+    pub(crate) keys_only: bool,
     /// What resolution read from this state while an interface chain is being recorded for reuse, `None` otherwise —
     /// see `resolver::memo`. Every read of the three sets above goes through the methods below so none is missed.
     pub(crate) reads: Option<Box<StateReads>>,
@@ -56,17 +82,17 @@ pub(crate) struct ResolveState {
 /// The reads a recorded resolution made, so another component's state can be checked to give the same answers.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct StateReads {
-    /// Cycle-set keys looked up, each with whether it was already there. The keys are long and every enclosing
-    /// recording keeps them again, so they are shared.
-    pub(crate) visited: Vec<(Arc<str>, bool)>,
+    /// Cycle-set keys looked up, each with whether it was already there. Ids, not the long key strings: every enclosing
+    /// recording keeps them again, and copying a number needs no reference count shared between threads.
+    pub(crate) visited: Vec<(u32, bool)>,
     /// `named_in_progress` keys looked up, each with whether it was already there.
-    pub(crate) named: Vec<(Arc<str>, bool)>,
+    pub(crate) named: Vec<(u32, bool)>,
     /// In-scope type parameter names looked up, each with whether it was in scope.
     pub(crate) in_scope: Vec<(CompactString, bool)>,
     /// Prop names whose component default was looked up, with the default found.
     pub(crate) defaults: Vec<(CompactString, Option<(std::string::String, bool)>)>,
     /// Cycle-set keys this state itself added (a branch's own additions are dropped with the branch).
-    pub(crate) visited_added: Vec<Arc<str>>,
+    pub(crate) visited_added: Vec<u32>,
     /// In-scope type parameters this state itself added.
     pub(crate) in_scope_added: Vec<CompactString>,
 }
@@ -87,6 +113,44 @@ impl StateReads {
             self.in_scope_added.extend(other.in_scope_added.iter().cloned());
         }
     }
+
+    /// `append` for an `other` nobody reads again: its entries move instead of being cloned (a refcount bump each) and
+    /// dropped (another).
+    pub(crate) fn append_owned(&mut self, mut other: StateReads, with_cycle_sets: bool, with_effects: bool) {
+        if with_cycle_sets {
+            move_all(&mut self.visited, &mut other.visited);
+            move_all(&mut self.named, &mut other.named);
+        }
+        move_all(&mut self.in_scope, &mut other.in_scope);
+        move_all(&mut self.defaults, &mut other.defaults);
+        if with_effects {
+            move_all(&mut self.visited_added, &mut other.visited_added);
+            move_all(&mut self.in_scope_added, &mut other.in_scope_added);
+        }
+    }
+}
+
+fn move_all<T>(into: &mut Vec<T>, from: &mut Vec<T>) {
+    if into.is_empty() {
+        std::mem::swap(into, from);
+    } else {
+        into.append(from);
+    }
+}
+
+/// A component's resolution diagnostics: its own, and chunks shared with the interface-chain recordings it replayed.
+#[derive(Clone, Default, Debug)]
+pub(crate) struct ResolvedDiagnostics {
+    pub(crate) own: Vec<Diagnostic>,
+    pub(crate) shared: Vec<Arc<[Diagnostic]>>,
+}
+
+impl ResolvedDiagnostics {
+    /// Every diagnostic, copied out.
+    #[cfg(test)]
+    pub(crate) fn flatten(&self) -> Vec<Diagnostic> {
+        self.own.iter().chain(self.shared.iter().flat_map(|chunk| chunk.iter())).cloned().collect()
+    }
 }
 
 impl ResolveState {
@@ -96,10 +160,14 @@ impl ResolveState {
         ResolveState {
             visited: self.visited.clone(),
             named_in_progress: self.named_in_progress.clone(),
+            named_high: self.named_in_progress.len(),
+            depth_high: 0,
             diagnostics: Vec::new(),
+            shared_diagnostics: Vec::new(),
             in_scope_type_params: self.in_scope_type_params.clone(),
             named_unevaluated: false,
             expand_all: self.expand_all,
+            keys_only: self.keys_only,
             reads: self.reads.as_ref().map(|_| Box::default()),
         }
     }
@@ -110,6 +178,7 @@ impl ResolveState {
         ResolveState {
             in_scope_type_params: self.in_scope_type_params.clone(),
             expand_all: self.expand_all,
+            keys_only: self.keys_only,
             reads: self.reads.as_ref().map(|_| Box::default()),
             ..Self::default()
         }
@@ -117,44 +186,58 @@ impl ResolveState {
 
     /// Take a branch's diagnostics and whether it named an unevaluated alias. Its cycle sets and in-scope additions
     /// stay with the branch.
-    pub(crate) fn absorb(&mut self, branch: ResolveState) {
-        self.absorb_reads(&branch, true);
+    pub(crate) fn absorb(&mut self, mut branch: ResolveState) {
+        self.absorb_reads(branch.reads.take(), true);
+        self.named_high = self.named_high.max(branch.named_high);
+        self.depth_high = self.depth_high.max(branch.depth_high);
         self.diagnostics.extend(branch.diagnostics);
+        self.shared_diagnostics.extend(branch.shared_diagnostics);
         self.named_unevaluated |= branch.named_unevaluated;
     }
 
     /// `absorb` for a `detached` state.
-    pub(crate) fn absorb_detached(&mut self, detached: ResolveState) {
-        self.absorb_reads(&detached, false);
+    pub(crate) fn absorb_detached(&mut self, mut detached: ResolveState) {
+        self.absorb_reads(detached.reads.take(), false);
+        self.named_high = self.named_high.max(self.named_in_progress.len() + detached.named_high);
+        self.depth_high = self.depth_high.max(detached.depth_high);
         self.diagnostics.extend(detached.diagnostics);
+        self.shared_diagnostics.extend(detached.shared_diagnostics);
         self.named_unevaluated |= detached.named_unevaluated;
     }
 
-    fn absorb_reads(&mut self, other: &ResolveState, same_cycle_sets: bool) {
-        if let (Some(reads), Some(theirs)) = (self.reads.as_mut(), other.reads.as_ref()) {
-            reads.append(theirs, same_cycle_sets, false);
+    fn absorb_reads(&mut self, theirs: Option<Box<StateReads>>, same_cycle_sets: bool) {
+        if let (Some(reads), Some(theirs)) = (self.reads.as_mut(), theirs) {
+            reads.append_owned(*theirs, same_cycle_sets, false);
         }
     }
 
     /// Enter `key` into the cycle set; false if it was already there.
     pub(crate) fn visit(&mut self, key: CompactString) -> bool {
-        let Some(reads) = self.reads.as_mut() else { return self.visited.insert(key) };
-        let shared: Arc<str> = Arc::from(key.as_str());
-        let inserted = self.visited.insert(key);
-        if inserted {
-            reads.visited_added.push(Arc::clone(&shared));
+        let id = key_id(&key);
+        let inserted = self.visited.insert(id);
+        if let Some(reads) = self.reads.as_mut() {
+            if inserted {
+                reads.visited_added.push(id);
+            }
+            reads.visited.push((id, !inserted));
         }
-        reads.visited.push((shared, !inserted));
         inserted
     }
 
     /// Enter `key` into `named_in_progress`; false if it was already there.
-    pub(crate) fn enter_named(&mut self, key: CompactString) -> bool {
-        let Some(reads) = self.reads.as_mut() else { return self.named_in_progress.insert(key) };
-        let shared: Arc<str> = Arc::from(key.as_str());
-        let inserted = self.named_in_progress.insert(key);
-        reads.named.push((shared, !inserted));
+    pub(crate) fn enter_named(&mut self, key: &str) -> bool {
+        let id = key_id(key);
+        let inserted = self.named_in_progress.insert(id);
+        if let Some(reads) = self.reads.as_mut() {
+            reads.named.push((id, !inserted));
+        }
+        self.named_high = self.named_high.max(self.named_in_progress.len());
         inserted
+    }
+
+    /// Take `key` out of `named_in_progress`: its resolution has returned.
+    pub(crate) fn leave_named(&mut self, key: &str) {
+        self.named_in_progress.remove(&key_id(key));
     }
 
     /// Whether `name` is a type parameter in scope.
@@ -226,6 +309,14 @@ pub struct GlobalSourceData {
 
     /// All component mappings discovered
     pub component_mappings: Vec<ComponentMapping>,
+
+    /// Generic functions' result types across all files — see `SourceData::function_results`.
+    /// Key: "${absolute_file_path}:${name}"
+    pub function_results: FxHashMap<String, FunctionResult>,
+
+    /// Type parameter defaults across all files — see `SourceData::type_param_defaults`.
+    /// Key: "${absolute_file_path}:${name}"
+    pub type_param_defaults: FxHashMap<String, Vec<Option<CollectedType>>>,
 }
 
 impl GlobalSourceData {
@@ -249,6 +340,8 @@ impl GlobalSourceData {
         self.interface_type_params.extend(data.interface_type_params);
         self.enums.extend(data.enums);
         self.const_arrays.extend(data.const_arrays);
+        self.function_results.extend(data.function_results);
+        self.type_param_defaults.extend(data.type_param_defaults);
         self.import_map.insert(file_path.to_owned(), data.imports);
         self.re_export_map.insert(file_path.to_owned(), data.exports);
         self.component_mappings.extend(data.component_mappings);
@@ -263,8 +356,75 @@ impl GlobalSourceData {
         self.interface_type_params.retain(|k, _| !k.starts_with(&prefix));
         self.enums.retain(|k, _| !k.starts_with(&prefix));
         self.const_arrays.retain(|k, _| !k.starts_with(&prefix));
+        self.function_results.retain(|k, _| !k.starts_with(&prefix));
+        self.type_param_defaults.retain(|k, _| !k.starts_with(&prefix));
         self.import_map.remove(file_path);
         self.re_export_map.remove(file_path);
         self.component_mappings.retain(|m| m.file_path != file_path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reads(tag: &str) -> StateReads {
+        StateReads {
+            visited: vec![(key_id(&format!("{tag}-visited")), true)],
+            named: vec![(key_id(&format!("{tag}-named")), false)],
+            in_scope: vec![(CompactString::from(format!("{tag}-param")), true)],
+            defaults: vec![(CompactString::from(format!("{tag}-prop")), Some(("1".to_owned(), false)))],
+            visited_added: vec![key_id(&format!("{tag}-added"))],
+            in_scope_added: vec![CompactString::from(format!("{tag}-param-added"))],
+        }
+    }
+
+    #[test]
+    fn append_owned_takes_what_append_takes_for_every_flag_combination() {
+        for with_cycle_sets in [false, true] {
+            for with_effects in [false, true] {
+                for start_empty in [false, true] {
+                    let start = if start_empty { StateReads::default() } else { reads("mine") };
+                    let theirs = reads("theirs");
+                    let mut cloned = start.clone();
+                    cloned.append(&theirs, with_cycle_sets, with_effects);
+                    let mut moved = start;
+                    moved.append_owned(theirs, with_cycle_sets, with_effects);
+                    assert_eq!(
+                        format!("{moved:?}"),
+                        format!("{cloned:?}"),
+                        "with_cycle_sets={with_cycle_sets} with_effects={with_effects} start_empty={start_empty}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn absorbing_a_branch_moves_its_reads_into_a_recording_parent() {
+        let mut parent = ResolveState { reads: Some(Box::default()), ..ResolveState::default() };
+        let mut branch = parent.branch();
+        assert!(branch.visit(CompactString::from("a.ts:Props")));
+        assert!(!branch.has_type_param("T"));
+        parent.absorb(branch);
+        let reads = parent.reads.as_ref().map(|reads| format!("{reads:?}"));
+        let id = key_id("a.ts:Props");
+        assert_eq!(
+            reads.as_deref(),
+            Some(
+                format!(
+                    "StateReads {{ visited: [({id}, false)], named: [], in_scope: [(\"T\", false)], defaults: [], \
+                     visited_added: [], in_scope_added: [] }}"
+                )
+                .as_str()
+            )
+        );
+    }
+
+    #[test]
+    fn a_key_has_one_id_and_two_keys_have_two() {
+        let a = key_id("a.ts:A<1>");
+        assert_eq!(a, key_id("a.ts:A<1>"));
+        assert_ne!(a, key_id("a.ts:A<2>"));
     }
 }

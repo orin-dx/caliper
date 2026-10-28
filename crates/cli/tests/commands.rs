@@ -185,7 +185,7 @@ impl Watch {
             std::thread::sleep(Duration::from_millis(300));
             if let Ok(json) = std::fs::read_to_string(&self.out) {
                 let written: serde_json::Value = serde_json::from_str(&json).unwrap();
-                if written["components"]["Widget"]["props"]["size"].is_string() {
+                if prop_names(&written, "Widget").contains(&"size".to_string()) {
                     return written;
                 }
             }
@@ -232,10 +232,10 @@ fn watch_reports_a_change_and_writes_out_what_extract_produces() {
 
     let extracted: serde_json::Value =
         serde_json::from_str(&stdout_of(&run(&["extract", "--json", "--src", src.path().to_str().unwrap()]))).unwrap();
-    let props: Vec<&String> = watched["components"]["Widget"]["props"].as_object().unwrap().keys().collect();
-    assert_eq!(props, ["label", "size"]);
+    assert_eq!(prop_names(&watched, "Widget"), ["label", "size"]);
     assert_eq!(watched["components"], extracted["components"], "watch and extract must agree on the same tree");
     assert_eq!(watched["props"], extracted["props"], "watch and extract must agree on the props the ids name");
+    assert_eq!(watched["propSets"], extracted["propSets"], "watch and extract must agree on the sets the ids name");
 
     let stdout = watch.logged(&watch.stdout);
     assert!(
@@ -338,4 +338,15 @@ fn extract_finds_docgen_config_ts_in_the_working_directory_and_applies_it() {
     let parsed: serde_json::Value = serde_json::from_str(&stdout_of(&output)).unwrap();
     let components: Vec<&String> = parsed["components"].as_object().unwrap().keys().collect();
     assert_eq!(components, ["Widget"], "only the configured srcDirs are scanned");
+}
+
+/// The names of a canonical component's props, sorted, through the prop sets of `written`.
+fn prop_names(written: &serde_json::Value, component: &str) -> Vec<String> {
+    let sets = written["components"][component]["props"].as_array().unwrap();
+    let mut names: Vec<String> = sets
+        .iter()
+        .flat_map(|set| written["propSets"][set.as_str().unwrap()].as_object().unwrap().keys().cloned())
+        .collect();
+    names.sort();
+    names
 }

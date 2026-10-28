@@ -24,9 +24,11 @@ use crate::react_types;
 use crate::types::*;
 
 mod alias;
+mod callee;
 mod chain;
 mod collected;
 mod deps;
+mod evaluate;
 pub(crate) use deps::Dependencies;
 mod extends;
 mod func;
@@ -49,6 +51,19 @@ pub(crate) use import::{resolve_module_with, ModuleResolution};
 /// Maximum recursion depth for type resolution.
 /// Prevents infinite loops on circular type references.
 const MAX_DEPTH: u8 = 20;
+
+/// Whether `depth` is past the resolution depth limit. The deepest depth checked is kept in `state`, so a recording
+/// (`memo`) knows how much deeper a state may start and still resolve the same way.
+fn past_max_depth(state: &mut ResolveState, depth: u8) -> bool {
+    state.depth_high = state.depth_high.max(depth);
+    depth > MAX_DEPTH
+}
+
+/// Maximum named types being resolved at once: the declarations a reference passes through to reach another.
+const MAX_NAMED_NESTING: usize = 64;
+
+/// The most state reads a named type's recording may hold and still be kept (`memo::Memo::max_reads`).
+const NAMED_RESULT_MAX_READS: usize = 24;
 
 /// Shared "max resolution depth exceeded" diagnostic — every recursive
 /// resolver entry point (resolve_named, resolve_props_chain,
@@ -148,6 +163,24 @@ pub(super) fn may_be_react_builtin(name: &str, file: &Utf8Path, ctx: &Resolution
     }
 }
 
+/// Whether `name` in `file` is a type React declares (`UIEventHandler`, `Key`, `AriaRole`, …) that no builtin list names:
+/// it is bound to React, or to nothing, and React's own declarations have it. Such a reference is React's type, not an
+/// unresolvable one.
+pub(super) fn declared_by_react(name: &str, canonical_name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> bool {
+    if !may_be_react_builtin(name, file, ctx) {
+        return false;
+    }
+    let react_file = react::resolve_react_types_file(file, ctx);
+    let react_file = Utf8Path::new(&react_file);
+    let index = ctx.react_index();
+    // The name as written, or the one it is imported under (`import { DOMAttributes as ReactDOMAttributes }`).
+    [name.strip_prefix("React.").unwrap_or(name), canonical_name.strip_prefix("React.").unwrap_or(canonical_name)]
+        .into_iter()
+        .any(|bare| {
+            index.lookup_interface(react_file, bare).is_some() || index.lookup_type_alias(react_file, bare).is_some()
+        })
+}
+
 /// Reports that a builtin name bound to something else was given React's meaning because that binding didn't resolve.
 pub(super) fn builtin_fallback_diagnostic(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> Diagnostic {
     let bound_to = match name_binding(name, file, ctx) {
@@ -237,6 +270,18 @@ pub struct ResolutionContext {
     /// context, so nothing outlives one revision.
     pub(crate) module_resolutions:
         dashmap::DashMap<(Box<str>, Box<str>), import::ModuleResolution, rustc_hash::FxBuildHasher>,
+    /// React's declaration file by importing directory, cached as `module_resolutions` is.
+    pub(crate) react_types_files: dashmap::DashMap<Box<str>, String, rustc_hash::FxBuildHasher>,
+    /// Props already built this run, by structural hash. A design system builds the same prop for hundreds of
+    /// components (Chakra: 470,000 props, ~1,200 distinct), and `ComponentEntry` shares them by `Arc` (`share`).
+    pub(crate) shared_props: dashmap::DashMap<u64, Vec<Arc<ParsedProp>>, rustc_hash::FxBuildHasher>,
+    /// Member reads of a named type (`CssProperties["marker"]`) by `(file, name, key)`, with the files each depended
+    /// on: Chakra's style props read the same csstype members once per component (`evaluate::member`).
+    pub(crate) member_reads: dashmap::DashMap<evaluate::MemberReadKey, evaluate::MemberRead, rustc_hash::FxBuildHasher>,
+    /// Properties read from a named type's props chain (`ComponentProps<typeof Button>["variant"]`) by `(file, type,
+    /// key)`, with the files each depended on (`primitives::read_from_props_chain`).
+    pub(crate) props_reads:
+        dashmap::DashMap<primitives::PropsReadKey, primitives::PropsRead, rustc_hash::FxBuildHasher>,
     pub extra_builtins: FxHashSet<CompactString>,
     /// Bare name → full scoped key ("file:name") index over `global.enums`,
     /// built once per resolution pass so `resolve_typeof` and
@@ -246,10 +291,10 @@ pub struct ResolutionContext {
     /// files) resolve to whichever key `global.enums` yields first during
     /// this build pass — the same tie-break the old linear scan produced,
     /// since both iterate the same underlying map.
-    pub enum_bare_index: FxHashMap<CompactString, CompactString>,
+    pub enum_bare_index: Arc<FxHashMap<CompactString, CompactString>>,
     /// Same as `enum_bare_index`, but over `global.const_arrays` — for
     /// `(typeof X)[number]` on a flat `const X = [...] as const` array.
-    pub const_array_bare_index: FxHashMap<CompactString, CompactString>,
+    pub const_array_bare_index: Arc<FxHashMap<CompactString, CompactString>>,
     /// How much of an inherited HTML element's attributes to expose.
     pub html_attributes: crate::pipeline::HtmlAttributeMode,
     /// Paths to TypeScript's own `lib.es5.d.ts`/`lib.dom.d.ts`, if resolvable
@@ -262,8 +307,14 @@ pub struct ResolutionContext {
     pub(crate) tsconfig_diagnostic: Option<Diagnostic>,
     /// Interface chains already resolved this run, shared by the components that inherit them.
     pub(crate) interface_chains: memo::InterfaceChains,
+    /// Named types resolved once per run (`resolve_named`), shared by every component that names them.
+    pub(crate) named_results: memo::NamedResults,
+    /// An HTML element's attribute declarations (`html::react_attribute`), read once per element and name.
+    pub(crate) attribute_reads: memo::Memo<Option<ParsedProp>>,
     /// Loaded dependency declarations (`PipelineOptions::load_dependencies`, ADR 0010).
     pub(crate) dependencies: Option<Arc<crate::dependency_types::DependencyLayer>>,
+    /// React's own declarations in curated mode, which only HTML-attribute lookups read (`react_index`).
+    pub(crate) react_types: Option<Arc<crate::named_type_index::NamedTypeIndex>>,
     pub(crate) collapse_inherited_props: crate::pipeline::CollapseInheritedProps,
 }
 
@@ -334,15 +385,100 @@ impl ResolutionContext {
             types_first_resolver: Arc::new(resolvers.types_first),
             tsconfig_diagnostic,
             extra_builtins: options.extra_builtins.clone(),
-            enum_bare_index,
-            const_array_bare_index,
+            enum_bare_index: Arc::new(enum_bare_index),
+            const_array_bare_index: Arc::new(const_array_bare_index),
             html_attributes: options.html_attributes,
             ambient_global_files,
             module_resolutions: Default::default(),
+            react_types_files: Default::default(),
+            shared_props: Default::default(),
+            member_reads: Default::default(),
+            props_reads: Default::default(),
             interface_chains: Default::default(),
+            named_results: memo::NamedResults::with_max_reads(NAMED_RESULT_MAX_READS),
+            attribute_reads: memo::Memo::with_max_reads(NAMED_RESULT_MAX_READS),
             dependencies: None,
+            react_types: None,
             collapse_inherited_props: options.collapse_inherited_props,
         }
+    }
+
+    /// Add to this context the memos of `from` that a context over a larger dependency layer would compute again
+    /// identically (ADR 0016): file-system answers, shared props, and the interface chains and member reads whose
+    /// dependencies `keep` accepts, given the file each was read in, which a layer lacking a name they reached would
+    /// otherwise have poisoned.
+    pub(crate) fn inherit_memos(&self, from: &ResolutionContext, keep: impl Fn(&Dependencies, &str) -> bool) {
+        from.interface_chains.copy_into(&self.interface_chains, &keep);
+        for entry in from.member_reads.iter().filter(|entry| keep(entry.value().deps(), &entry.key().0)) {
+            self.member_reads.insert(entry.key().clone(), entry.value().clone());
+        }
+        for entry in from.props_reads.iter().filter(|entry| keep(entry.value().deps(), &entry.key().0)) {
+            self.props_reads.insert(entry.key().clone(), entry.value().clone());
+        }
+        for entry in from.shared_props.iter() {
+            self.shared_props.insert(*entry.key(), entry.value().clone());
+        }
+        for entry in from.module_resolutions.iter() {
+            self.module_resolutions.insert(entry.key().clone(), entry.value().clone());
+        }
+        for entry in from.react_types_files.iter() {
+            self.react_types_files.insert(entry.key().clone(), entry.value().clone());
+        }
+    }
+
+    /// The key in `global.enums` of the variants (`cva`, `tv`, recipes) `name` stands for as `consuming_file` writes
+    /// it: its own declaration, else the one it imports, else the first file by path that declares the bare name. Two
+    /// files can each declare an `itemVariants` (shadcn keeps a copy of every component per registry), and the bare
+    /// name alone would give both the same one.
+    pub(crate) fn enum_key_for(&self, name: &str, consuming_file: &Utf8Path) -> Option<String> {
+        let own = format!("{consuming_file}:{name}");
+        if self.global.enums.contains_key(&own) {
+            return Some(own);
+        }
+        if let Some((file, canonical)) = import::resolve_to_canonical(name, consuming_file, self, &mut Vec::new()) {
+            let imported = format!("{file}:{canonical}");
+            if self.global.enums.contains_key(&imported) {
+                return Some(imported);
+            }
+        }
+        self.enum_bare_index.get(name).map(|key| key.to_string())
+    }
+
+    /// `prop` as the run's one shared allocation of it: an equal prop built earlier, or `prop` itself.
+    pub(crate) fn share(&self, prop: ParsedProp) -> Arc<ParsedProp> {
+        use std::hash::Hasher;
+        let mut hasher = rustc_hash::FxHasher::default();
+        prop.structural_hash(&mut hasher);
+        let key = hasher.finish();
+        // Nearly every call finds the prop already built, so look under the shard's shared lock first.
+        if let Some(bucket) = self.shared_props.get(&key) {
+            if let Some(found) = bucket.iter().find(|shared| ***shared == prop) {
+                return Arc::clone(found);
+            }
+        }
+        let mut bucket = self.shared_props.entry(key).or_default();
+        // Another thread may have added it between the two locks.
+        if let Some(found) = bucket.iter().find(|shared| ***shared == prop) {
+            return Arc::clone(found);
+        }
+        let shared = Arc::new(prop);
+        bucket.push(Arc::clone(&shared));
+        shared
+    }
+
+    /// This context with React's own declarations indexed apart from the project's, for an HTML layer's attribute
+    /// lookups only (`html::react_attribute`, ADR 0010's amendment). Full mode merges them into `named_types` instead.
+    pub(crate) fn with_react_types(
+        mut self,
+        react_types: Option<Arc<crate::named_type_index::NamedTypeIndex>>,
+    ) -> Self {
+        self.react_types = react_types;
+        self
+    }
+
+    /// The index holding React's declarations, when this run has them.
+    pub(super) fn react_index(&self) -> &crate::named_type_index::NamedTypeIndex {
+        self.react_types.as_deref().unwrap_or(&self.named_types)
     }
 
     /// This context over a loaded dependency layer: imports and re-exports of dependency files come from it. The
@@ -356,6 +492,42 @@ impl ResolutionContext {
         }
         self.dependencies = layer;
         self
+    }
+
+    /// A context for the same project over a larger dependency `layer`, with empty memos. Everything about the project
+    /// that a layer cannot change is shared with this one rather than built again: the merged source data, the import
+    /// map and `named_types` declarations, the module resolvers (and their file-system caches), the tsconfig check, and
+    /// the bare-name indexes. `named_types` is the project's index with `layer` as its fallback.
+    pub(crate) fn over_layer(
+        &self,
+        named_types: Arc<crate::named_type_index::NamedTypeIndex>,
+        layer: Option<Arc<crate::dependency_types::DependencyLayer>>,
+    ) -> Self {
+        let import_map = self.import_map.with_fallback(layer.as_ref().map(|layer| layer.import_map.clone()));
+        Self {
+            global: self.global.clone(),
+            import_map: Arc::new(import_map),
+            named_types,
+            oxc_resolver: self.oxc_resolver.clone(),
+            types_first_resolver: self.types_first_resolver.clone(),
+            module_resolutions: Default::default(),
+            react_types_files: Default::default(),
+            shared_props: Default::default(),
+            member_reads: Default::default(),
+            props_reads: Default::default(),
+            extra_builtins: self.extra_builtins.clone(),
+            enum_bare_index: self.enum_bare_index.clone(),
+            const_array_bare_index: self.const_array_bare_index.clone(),
+            html_attributes: self.html_attributes,
+            ambient_global_files: self.ambient_global_files.clone(),
+            tsconfig_diagnostic: self.tsconfig_diagnostic.clone(),
+            interface_chains: Default::default(),
+            named_results: memo::NamedResults::with_max_reads(NAMED_RESULT_MAX_READS),
+            attribute_reads: memo::Memo::with_max_reads(NAMED_RESULT_MAX_READS),
+            dependencies: layer,
+            react_types: self.react_types.clone(),
+            collapse_inherited_props: self.collapse_inherited_props,
+        }
     }
 
     /// Whether `file` is a loaded dependency file.
@@ -555,6 +727,11 @@ pub struct TsLibs {
 
 const TS_LIB_FILES: [&str; 2] = ["lib.es5.d.ts", "lib.dom.d.ts"];
 
+/// The ES2015 collections and iteration (`Iterable`, `Set`, `Map`), which props name (`items?: Iterable<T>`). An install
+/// without one is not reported: they are not what a project's `lib` setting always includes.
+const TS_OPTIONAL_LIB_FILES: [&str; 3] =
+    ["lib.es2015.iterable.d.ts", "lib.es2015.collection.d.ts", "lib.es2015.promise.d.ts"];
+
 /// Locate `lib.es5.d.ts`/`lib.dom.d.ts`, which declare the ambient globals (`Date`, `Element`, ...). TS ≤6 keeps them
 /// in `typescript/lib`; TS 7 moves them into an optional `@typescript/typescript-<platform>` package whose `exports`
 /// hide `lib/`, so they're read off disk. They're identical across platforms, so the first installed package (by name)
@@ -571,18 +748,21 @@ pub fn resolve_ts_lib_paths(from_dir: &camino::Utf8Path) -> TsLibs {
     let mut platform_dirs = None;
     let mut paths = Vec::new();
     let mut missing = Vec::new();
-    for file in TS_LIB_FILES {
-        let found = lib_file_in(ts_dir, file).or_else(|| {
+    let mut find = |file: &str| {
+        lib_file_in(ts_dir, file).or_else(|| {
             platform_dirs
                 .get_or_insert_with(|| installed_platform_package_dirs(&resolver, ts_dir).unwrap_or_default())
                 .iter()
                 .find_map(|dir| lib_file_in(dir, file))
-        });
-        match found {
+        })
+    };
+    for file in TS_LIB_FILES {
+        match find(file) {
             Some(path) => paths.push(path.to_string_lossy().into_owned()),
             None => missing.push(file),
         }
     }
+    paths.extend(TS_OPTIONAL_LIB_FILES.iter().filter_map(|file| find(file)).map(|p| p.to_string_lossy().into_owned()));
 
     let diagnostic = (!missing.is_empty()).then(|| missing_lib_diagnostic(&missing, ts_dir));
     TsLibs { paths, diagnostic }
@@ -645,8 +825,8 @@ fn missing_lib_diagnostic(missing: &[&str], ts_dir: &std::path::Path) -> Diagnos
 pub(crate) fn resolve_component_tracked(
     mapping: &ComponentMapping,
     ctx: &ResolutionContext,
-) -> (ComponentEntry, Vec<Diagnostic>, Dependencies) {
-    let ((entry, diagnostics), mut deps) = deps::recording(|| resolve_component(mapping, ctx));
+) -> (ComponentEntry, ResolvedDiagnostics, Dependencies) {
+    let ((entry, diagnostics), mut deps) = deps::recording(|| resolve_component_shared(mapping, ctx));
     deps.files.insert(crate::path_key::PathKey::from(mapping.file_path.as_path()));
     (entry, diagnostics, deps)
 }
@@ -654,24 +834,40 @@ pub(crate) fn resolve_component_tracked(
 /// Resolve a `ComponentMapping` to a complete `ComponentEntry`.
 ///
 /// Called in parallel via rayon — must be `Send + Sync` (all data is owned/Arc'd).
+#[cfg(test)]
 pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) -> (ComponentEntry, Vec<Diagnostic>) {
-    let mut state = ResolveState::default();
+    let (entry, diagnostics) = resolve_component_shared(mapping, ctx);
+    (entry, diagnostics.flatten())
+}
 
-    let chain = chain::resolve_props_chain(
-        mapping.props_type_name.as_str(),
-        &mapping.props_type_args,
-        &mapping.file_path,
-        mapping,
-        ctx,
-        &mut state,
-        0,
-    );
+/// `resolve_component`, with the diagnostics of replayed interface chains shared rather than copied.
+pub(crate) fn resolve_component_shared(
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+) -> (ComponentEntry, ResolvedDiagnostics) {
+    let mut state = ResolveState::default();
+    state.add_type_params(mapping.type_params.iter());
+
+    // A component a generic call builds has the props its callee's result type declares; the props type the extractor
+    // selected is for a callee whose result isn't known.
+    let chain = callee::result_chain(mapping, ctx, &mut state).unwrap_or_else(|| {
+        chain::resolve_props_chain(
+            mapping.props_type_name.as_str(),
+            &mapping.props_type_args,
+            &mapping.file_path,
+            mapping,
+            ctx,
+            &mut state,
+            0,
+        )
+    });
 
     // Build props BTreeMap — own props win over inherited props with same name.
     let mut props: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
     for prop in chain.props {
         props.entry(prop.name.clone()).or_insert(prop);
     }
+    apply_param_defaults(mapping, &mut props, ctx);
 
     // Populate notable_inherited from HTML element layers and non-HTML inherited layers.
     let mut notable_inherited: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
@@ -696,7 +892,7 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
                 let prop_type = html::infer_html_attr_prop_type(attr_name);
                 notable_inherited.insert(
                     attr_name.to_string(),
-                    Arc::new(ParsedProp::new(
+                    ctx.share(ParsedProp::new(
                         attr_name.to_string(),
                         prop_type,
                         false,
@@ -738,8 +934,26 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
             detected_by: mapping.rule,
             exported: mapping.exported,
         },
-        state.diagnostics,
+        ResolvedDiagnostics { own: state.diagnostics, shared: state.shared_diagnostics },
     )
+}
+
+/// A destructuring default is the component's default for that prop wherever the prop's type was declared, as
+/// TypeScript's docgen reads it. The chain applied it only to props an interface or an object alias declares, so a prop
+/// that arrives through `Pick<ComponentProps<typeof Button>, "variant">` or another resolved type has none yet.
+fn apply_param_defaults(
+    mapping: &ComponentMapping,
+    props: &mut BTreeMap<String, Arc<ParsedProp>>,
+    ctx: &ResolutionContext,
+) {
+    for (name, raw) in &mapping.param_defaults {
+        let Some(prop) = props.get_mut(name) else { continue };
+        if prop.default_value.is_some() {
+            continue;
+        }
+        let default = DefaultValue { value: raw.value.clone(), computed: raw.computed };
+        *prop = ctx.share(prop.with_default_value(default));
+    }
 }
 
 // ─── Intermediate Resolution Result ──────────────────────────────────────────
@@ -747,7 +961,7 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
 /// Result of resolving a props chain (including extends). Props are shared: a parent's props move into every chain
 /// that inherits them, and into the component, without being copied.
 #[derive(Clone)]
-struct ResolvedChain {
+pub(crate) struct ResolvedChain {
     /// Resolved props (may include inherited props).
     props: Vec<Arc<ParsedProp>>,
     /// Inheritance layers, outermost first.
@@ -863,9 +1077,14 @@ fn intersect_declarations(first: &ParsedProp, second: &ParsedProp) -> ParsedProp
             types.push(member);
         }
     }
-    let prop_type = match <[PropType; 1]>::try_from(types) {
-        Ok([only]) => only,
-        Err(types) => common_literals(&types).unwrap_or(PropType::Intersection(types)),
+    // `any` absorbs an intersection, as in TypeScript.
+    let prop_type = if types.contains(&PropType::Any) {
+        PropType::Any
+    } else {
+        match <[PropType; 1]>::try_from(types) {
+            Ok([only]) => only,
+            Err(types) => common_literals(&types).unwrap_or(PropType::Intersection(types)),
+        }
     };
     let documented = if first.description.is_empty() && first.tags.is_empty() { second } else { first };
     let mut declarations = first.declarations.clone();

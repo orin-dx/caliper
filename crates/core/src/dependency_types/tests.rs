@@ -72,6 +72,59 @@ fn prop_types(output: &crate::types::ExtractionOutput, component: &str) -> Vec<(
     output.components[component].props.values().map(|p| (p.name.clone(), p.prop_type.raw_string())).collect()
 }
 
+#[test]
+fn extract_selects_an_imported_discriminated_member_through_an_optional_array() {
+    let (_tmp, root) = project(&[
+        ("node_modules/menu-kit/package.json", r#"{ "name": "menu-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        (
+            "node_modules/menu-kit/index.d.ts",
+            "export interface SubMenuType { type?: 'submenu'; disabled?: boolean; title?: string; children: ItemType[] }\n\
+             export interface MenuItemType { type?: 'item'; extra?: number }\n\
+             export type ItemType = SubMenuType | MenuItemType | null;\n\
+             export interface MenuProps { items?: ItemType[] }\n",
+        ),
+        (
+            "src/SubMenu.tsx",
+            "import type { MenuProps } from 'menu-kit';\n\
+             type Item = NonNullable<NonNullable<MenuProps['items']>[number]>;\n\
+             type RcSubMenu = Extract<Item, { type?: 'submenu' }>;\n\
+             interface SubMenuProps extends Omit<RcSubMenu, 'children' | 'title'> { title?: string; icon?: string }\n\
+             export function SubMenu(props: SubMenuProps) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+    assert_eq!(
+        prop_types(&output, "SubMenu"),
+        [
+            ("disabled".into(), "boolean".into()),
+            ("icon".into(), "string".into()),
+            ("title".into(), "string".into()),
+            ("type".into(), "\"submenu\"".into()),
+        ]
+    );
+    assert!(output.diagnostics.iter().all(|diag| !diag.message.contains("Cannot determine the object members")));
+}
+
+#[test]
+fn undecidable_extract_filter_emits_a_diagnostic() {
+    let (_tmp, root) = project(&[(
+        "src/Items.tsx",
+        "interface Known { type?: 'submenu'; known?: string }\n\
+         interface Unknown { type?: any; unknown?: string }\n\
+         type Selected = Extract<Known | Unknown, { type?: 'submenu' }>;\n\
+         interface Props extends Selected { own?: boolean }\n\
+         export function Items(props: Props) { return null; }\n",
+    )]);
+
+    let output = extract(&options(&root, false));
+    assert_eq!(prop_types(&output, "Items"), [("own".into(), "boolean".into())]);
+    assert!(output.diagnostics.iter().any(|diag| {
+        diag.code == crate::types::DiagnosticCode::OpaqueType
+            && diag.message.contains("Cannot determine the object members selected by 'Extract'")
+    }));
+}
+
 fn demand(root: &Utf8Path, specifier: &str, name: &str) -> Demand {
     Demand { from: root.join("src/Badge.tsx"), specifier: specifier.into(), name: name.into() }
 }
@@ -80,6 +133,250 @@ const BADGE: &str = "import type { ButtonProps, B, Tokens, Tone } from 'ui-kit';
     import * as React from 'react';\n\
     export function Badge(props: ButtonProps & { b?: B; gap?: Tokens.Gap; tone?: Tone }) { return null; }\n\
     export function Wrapped(props: React.ComponentProps<typeof Button>) { return null; }\n";
+
+#[test]
+fn component_props_reads_an_imported_callable_declaration() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/callable-kit/package.json",
+            r#"{ "name": "callable-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/callable-kit/index.d.ts",
+            "import * as React from 'react';\n\
+             export interface TabProps { id: string; disabled?: boolean }\n\
+             export declare const Tab: (props: TabProps & React.RefAttributes<HTMLDivElement>) => React.ReactElement | null;\n",
+        ),
+        (
+            "src/Tabs.tsx",
+            "import * as React from 'react';\nimport { Tab as TabPrimitive } from 'callable-kit';\n\
+             export function TabsTrigger(props: React.ComponentProps<typeof TabPrimitive>) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+
+    assert_eq!(
+        prop_types(&output, "TabsTrigger"),
+        [("disabled".into(), "boolean".into()), ("id".into(), "string".into())]
+    );
+}
+
+#[test]
+fn component_props_reads_a_declared_component_member_of_an_imported_value() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/combo-kit/package.json",
+            r#"{ "name": "combo-kit", "version": "1.0.0", "types": "es/index.d.ts" }"#,
+        ),
+        ("node_modules/combo-kit/es/index.d.ts", "import Combo from './Combo';\nexport default Combo;\n"),
+        (
+            "node_modules/combo-kit/es/Combo.d.ts",
+            "import * as React from 'react';\nimport Group from './Group';\n\
+             interface Compounded<P> extends React.FC<P> { Group: typeof Group }\n\
+             declare const Combo: Compounded<{ id?: string }>;\n\
+             export default Combo;\n",
+        ),
+        (
+            "node_modules/combo-kit/es/Group.d.ts",
+            "import * as React from 'react';\n\
+             export interface GroupProps { items?: string[]; disabled?: boolean }\n\
+             declare const Group: React.FC<GroupProps>;\n\
+             export default Group;\n",
+        ),
+        (
+            "src/Group.tsx",
+            "import * as React from 'react';\nimport Combo from 'combo-kit';\n\
+             export function Group(props: React.ComponentProps<typeof Combo.Group>) { return null; }\n\
+             type GetProps<T extends React.ComponentType<any> | object> =\n\
+               T extends React.Context<infer CP> ? CP :\n\
+               T extends React.ComponentType<infer P> ? P :\n\
+               T extends object ? T : never;\n\
+             interface WrappedProps extends Omit<GetProps<typeof Combo.Group>, 'disabled'> { own?: boolean }\n\
+             export function Wrapped(props: WrappedProps) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+    assert_eq!(
+        prop_types(&output, "Group"),
+        [("disabled".into(), "boolean".into()), ("items".into(), "string[]".into())]
+    );
+    assert_eq!(prop_types(&output, "Wrapped"), [("items".into(), "string[]".into()), ("own".into(), "boolean".into())]);
+}
+
+#[test]
+fn component_props_reads_a_call_signature_in_an_imported_namespace() {
+    let (_tmp, root) = project(&[
+        ("node_modules/call-kit/package.json", r#"{ "name": "call-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/call-kit/index.d.ts", "import * as Menu from './menu';\nexport { Menu as Menubar };\n"),
+        (
+            "node_modules/call-kit/menu.d.ts",
+            "import * as react_jsx_runtime from 'react/jsx-runtime';\n\
+             type ScopedProps<P> = P & { __scopeMenubar?: string };\n\
+             interface MenuProps { value?: string; children?: string }\n\
+             declare const Menu: { (props: ScopedProps<MenuProps>): react_jsx_runtime.JSX.Element; displayName: string };\n\
+             export { Menu };\n",
+        ),
+        (
+            "src/Menubar.tsx",
+            "import * as React from 'react';\nimport { Menubar as Primitive } from 'call-kit';\n\
+             export function MenubarMenu(props: React.ComponentProps<typeof Primitive.Menu>) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+    assert_eq!(
+        prop_types(&output, "MenubarMenu"),
+        [
+            ("__scopeMenubar".into(), "string".into()),
+            ("children".into(), "string".into()),
+            ("value".into(), "string".into()),
+        ]
+    );
+}
+
+#[test]
+fn component_props_reads_a_generic_callable_with_imported_react_element() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/callable-kit/package.json",
+            r#"{ "name": "callable-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/callable-kit/index.d.ts",
+            "import * as React from 'react';\nimport { ReactElement } from 'react';\n\
+             export interface MenuProps<T> { id: string; value?: T }\n\
+             export declare const Menu: <T>(props: MenuProps<T> & React.RefAttributes<HTMLDivElement>) => ReactElement | null;\n",
+        ),
+        (
+            "src/Menu.tsx",
+            "import * as React from 'react';\nimport { Menu as MenuPrimitive } from 'callable-kit';\n\
+             export function Menu(props: React.ComponentProps<typeof MenuPrimitive>) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+
+    assert_eq!(prop_types(&output, "Menu"), [("id".into(), "string".into()), ("value".into(), "unknown".into())]);
+    assert!(output.diagnostics.iter().all(|d| !d.message.contains("Cannot resolve type 'T'")));
+}
+
+#[test]
+fn component_props_reads_a_lowercase_dependency_value_exported_as_a_component() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/callable-kit/package.json",
+            r#"{ "name": "callable-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/callable-kit/index.d.ts",
+            "import * as React from 'react';\n\
+             interface CommandProps { asChild?: boolean; label?: string }\n\
+             declare const pkg: React.ForwardRefExoticComponent<CommandProps & { loop?: boolean } & React.RefAttributes<HTMLDivElement>> & { Item: React.ForwardRefExoticComponent<{ value: string }> };\n\
+             declare const Command: React.ForwardRefExoticComponent<{ rootOnly?: number }>;\n\
+             export { pkg as Command, Command as CommandRoot };\n",
+        ),
+        (
+            "src/Command.tsx",
+            "import * as React from 'react';\nimport { Command as CommandPrimitive } from 'callable-kit';\n\
+             export function Command(props: React.ComponentProps<typeof CommandPrimitive>) { return null; }\n\
+             export function CommandItem(props: React.ComponentProps<typeof CommandPrimitive.Item>) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+
+    assert_eq!(
+        prop_types(&output, "Command"),
+        [("asChild".into(), "boolean".into()), ("label".into(), "string".into()), ("loop".into(), "boolean".into())]
+    );
+    assert_eq!(prop_types(&output, "CommandItem"), [("value".into(), "string".into())]);
+}
+
+#[test]
+fn component_props_reads_members_of_a_declared_component_namespace() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/drawer-kit/package.json",
+            r#"{ "name": "drawer-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/drawer-kit/index.d.ts",
+            "import * as React from 'react';\n\
+             interface RootProps<T> { open?: boolean; title: string; value?: T }\n\
+             declare function Root<T>(props: RootProps<T>): React.JSX.Element;\n\
+             export declare const Drawer: { Root: typeof Root; Trigger: React.ForwardRefExoticComponent<{ disabled?: boolean }> };\n",
+        ),
+        (
+            "src/Drawer.tsx",
+            "import * as React from 'react';\nimport { Drawer as Primitive } from 'drawer-kit';\n\
+             export function DrawerRoot(props: React.ComponentProps<typeof Primitive.Root>) { return null; }\n\
+             export function DrawerTrigger(props: React.ComponentProps<typeof Primitive.Trigger>) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+
+    assert_eq!(
+        prop_types(&output, "DrawerRoot"),
+        [("open".into(), "boolean".into()), ("title".into(), "string".into()), ("value".into(), "unknown".into())]
+    );
+    assert_eq!(prop_types(&output, "DrawerTrigger"), [("disabled".into(), "boolean".into())]);
+    assert!(output.diagnostics.iter().all(|d| !d.message.contains("Cannot resolve type 'T'")));
+}
+
+#[test]
+fn component_props_reads_forward_ref_with_renamed_react_namespace() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/otp-kit/package.json",
+            r#"{ "name": "otp-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/otp-kit/index.d.ts",
+            "import * as React$1 from 'react';\n\
+             interface OTPProps { maxLength: number; value?: string }\n\
+             export declare const OTPInput: React$1.ForwardRefExoticComponent<OTPProps & React$1.RefAttributes<HTMLInputElement>>;\n",
+        ),
+        (
+            "src/OTP.tsx",
+            "import * as React from 'react';\nimport { OTPInput } from 'otp-kit';\n\
+             export function InputOTP(props: React.ComponentProps<typeof OTPInput>) { return null; }\n",
+        ),
+    ]);
+    let output = extract(&options(&root, true));
+    assert_eq!(
+        prop_types(&output, "InputOTP"),
+        [("maxLength".into(), "number".into()), ("value".into(), "string".into())]
+    );
+}
+
+#[test]
+fn component_props_reads_memoized_callable_dependency() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/markdown-kit/package.json",
+            r#"{ "name": "markdown-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/markdown-kit/index.d.ts",
+            "import * as react from 'react';\n\
+             interface MarkdownProps { children: string; streaming?: boolean }\n\
+             export declare const Markdown: react.MemoExoticComponent<(props: MarkdownProps) => react.JSX.Element>;\n",
+        ),
+        (
+            "src/Markdown.tsx",
+            "import * as React from 'react';\nimport { Markdown as Primitive } from 'markdown-kit';\n\
+             export function Markdown(props: React.ComponentProps<typeof Primitive>) { return null; }\n",
+        ),
+    ]);
+    let output = extract(&options(&root, true));
+    assert_eq!(
+        prop_types(&output, "Markdown"),
+        [("children".into(), "string".into()), ("streaming".into(), "boolean".into())]
+    );
+}
 
 #[test]
 fn package_types_resolve_through_star_exports_cycles_and_namespaces_and_the_value_index() {
@@ -132,8 +429,10 @@ fn without_the_flag_package_types_stay_unresolved() {
     );
 }
 
+/// cva's `VariantProps` is `Omit<OmitUndefined<Parameters<C>[0]>, …>`, which needs inference: loaded, it evaluates to
+/// nothing, so the shortcut stands in for it (ADR 0014).
 #[test]
-fn a_curated_shortcut_still_wins_over_the_packages_own_declaration() {
+fn a_shortcut_stands_in_for_a_loaded_declaration_that_evaluates_to_nothing() {
     let source = "import { cva, type VariantProps } from 'class-variance-authority';\n\
         const variants = cva('', { variants: { intent: { primary: '', danger: '' } } });\n\
         export function Pill(props: VariantProps<typeof variants>) { return null; }\n";
@@ -144,6 +443,197 @@ fn a_curated_shortcut_still_wins_over_the_packages_own_declaration() {
 
     assert_eq!(prop_types(&on, "Pill"), prop_types(&off, "Pill"));
     assert_eq!(prop_types(&on, "Pill"), [("intent".into(), "\"primary\" | \"danger\" | null".into())]);
+}
+
+/// The same fallback where `VariantProps<…>` is a member of an intersection (shadcn's `Button`): the alias is expanded
+/// where it is written, a sibling of the props-chain path above, and gives way to the shortcut the same way.
+#[test]
+fn a_shortcut_stands_in_for_an_evaluated_to_nothing_declaration_inside_an_intersection() {
+    let source = "import { cva, type VariantProps } from 'class-variance-authority';\n\
+        const variants = cva('', { variants: { intent: { primary: '', danger: '' } } });\n\
+        export function Pill(props: VariantProps<typeof variants> & { asChild?: boolean }) { return null; }\n";
+    let (_tmp, root) = project(&[("src/Pill.tsx", source)]);
+
+    let off = extract(&options(&root, false));
+    let on = extract(&options(&root, true));
+
+    assert_eq!(prop_types(&on, "Pill"), prop_types(&off, "Pill"));
+    assert_eq!(
+        prop_types(&on, "Pill"),
+        [("asChild".into(), "boolean".into()), ("intent".into(), "\"primary\" | \"danger\" | null".into())]
+    );
+    assert_eq!(on.diagnostics, off.diagnostics);
+}
+
+/// Radix's `Primitive`: `declare const Primitive: Primitives`, a mapped type over `(typeof NODES)[number]` whose value
+/// is an interface extending `ForwardRefExoticComponent<PrimitivePropsWithRef<E>>`. `typeof Primitive.div` has the
+/// props of that component with `E` bound to `"div"`.
+#[test]
+fn component_props_of_a_member_of_a_value_with_a_mapped_type_bind_the_key() {
+    let (_tmp, root) = project(&[
+        ("node_modules/prim-kit/package.json", r#"{ "name": "prim-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        (
+            "node_modules/prim-kit/index.d.ts",
+            "import * as React from 'react';\n\
+             declare const NODES: readonly [\"a\", \"div\"];\n\
+             type Primitives = { [E in (typeof NODES)[number]]: PrimitiveForwardRefComponent<E> };\n\
+             type PrimitivePropsWithRef<E extends React.ElementType> = Own<E> & { asChild?: boolean };\n\
+             interface Own<E> { tag?: E }\n\
+             interface PrimitiveForwardRefComponent<E extends React.ElementType> \
+             extends React.ForwardRefExoticComponent<PrimitivePropsWithRef<E>> {}\n\
+             declare const Primitive: Primitives;\n\
+             export { Primitive };\n",
+        ),
+        (
+            "src/Box.tsx",
+            "import { Primitive } from 'prim-kit';\nimport * as React from 'react';\n\
+             export function Box(props: React.ComponentProps<typeof Primitive.div> & { extra?: number }) { return null; }\n",
+        ),
+    ]);
+
+    let on = extract(&options(&root, true));
+
+    assert_eq!(
+        prop_types(&on, "Box"),
+        [("asChild".into(), "boolean".into()), ("extra".into(), "number".into()), ("tag".into(), "\"div\"".into())]
+    );
+}
+
+/// antd's `ComponentProps<typeof RcTooltip>`: the package's default export is an imported component re-exported as
+/// the default, declared as `declare const Tooltip: ForwardRefExoticComponent<TooltipProps & RefAttributes<R>>`.
+#[test]
+fn component_props_of_a_default_exported_package_component_resolve_through_its_barrel() {
+    let (_tmp, root) = project(&[
+        ("node_modules/tip-kit/package.json", r#"{ "name": "tip-kit", "version": "1.0.0", "types": "es/index.d.ts" }"#),
+        ("node_modules/tip-kit/es/index.d.ts", "import Tooltip from './Tooltip';\nexport default Tooltip;\n"),
+        (
+            "node_modules/tip-kit/es/Tooltip.d.ts",
+            "import * as React from 'react';\n\
+             export interface TooltipProps { overlay: string; visible?: boolean }\n\
+             declare const Tooltip: React.ForwardRefExoticComponent<TooltipProps & React.RefAttributes<HTMLDivElement>>;\n\
+             export default Tooltip;\n",
+        ),
+        (
+            "src/Tip.tsx",
+            "import RcTooltip from 'tip-kit';\nimport * as React from 'react';\n\
+             export function Tip(props: React.ComponentProps<typeof RcTooltip> & { extra?: number }) { return null; }\n",
+        ),
+    ]);
+
+    let on = extract(&options(&root, true));
+
+    assert_eq!(
+        prop_types(&on, "Tip"),
+        [("extra".into(), "number".into()), ("overlay".into(), "string".into()), ("visible".into(), "boolean".into())]
+    );
+    // The test project has no `react`; nothing else is unresolved.
+    assert!(on.diagnostics.iter().all(|d| d.message.contains("'react'")), "{:?}", on.diagnostics);
+}
+
+/// `export const HiddenInput = Ark.HiddenInput` documents the imported component's props when its package is loaded,
+/// and is left out when it isn't (there is nothing to show).
+#[test]
+fn a_member_alias_of_an_imported_component_takes_that_components_props() {
+    let (_tmp, root) = project(&[
+        ("node_modules/ark-kit/package.json", r#"{ "name": "ark-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        (
+            "node_modules/ark-kit/index.d.ts",
+            "import * as React from 'react';\n\
+             export interface HiddenInputProps { asChild?: boolean; name?: string }\n\
+             export declare const HiddenInput: React.ForwardRefExoticComponent<HiddenInputProps>;\n",
+        ),
+        (
+            "src/Checkbox.tsx",
+            "import * as Ark from 'ark-kit';\nexport const CheckboxHiddenInput = Ark.HiddenInput;\nexport const lower = Ark.hidden;\n",
+        ),
+    ]);
+
+    let on = extract(&options(&root, true));
+    let off = extract(&options(&root, false));
+
+    assert_eq!(
+        prop_types(&on, "CheckboxHiddenInput"),
+        [("asChild".into(), "boolean".into()), ("name".into(), "string".into())]
+    );
+    assert_eq!(on.components["CheckboxHiddenInput"].detected_by, crate::types::DetectionRule::ImportedMemberAlias);
+    assert_eq!(off.components.keys().collect::<Vec<_>>(), Vec::<&String>::new());
+}
+
+/// A loaded declaration that resolves wins over a shortcut of the same name (ADR 0014); without it, the shortcut (an
+/// HTML layer for the element) is the fallback.
+#[test]
+fn a_loaded_declaration_wins_over_a_shortcut_of_the_same_name() {
+    let (_tmp, root) = project(&[
+        (
+            "node_modules/style-kit/package.json",
+            r#"{ "name": "style-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        ("node_modules/style-kit/index.d.ts", "export interface HTMLChakraProps<T> { tone?: \"calm\" | \"loud\" }\n"),
+        (
+            "src/Panel.tsx",
+            "import type { HTMLChakraProps } from 'style-kit';\n\
+             export interface PanelProps extends HTMLChakraProps<'div'> { label: string }\n\
+             export function Panel(props: PanelProps) { return null; }\n",
+        ),
+    ]);
+
+    let on = extract(&options(&root, true));
+    let off = extract(&options(&root, false));
+
+    assert_eq!(
+        prop_types(&on, "Panel"),
+        [("label".into(), "string".into()), ("tone".into(), "\"calm\" | \"loud\"".into())]
+    );
+    assert_eq!(prop_types(&off, "Panel"), [("label".into(), "string".into())]);
+    let layers: Vec<Option<&str>> =
+        off.components["Panel"].inheritance.iter().map(|layer| layer.html_element.as_deref()).collect();
+    assert_eq!(layers, [Some("div")]);
+}
+
+/// `@types/react`'s shape around `CSSProperties`: a UMD namespace whose interface extends csstype's, which it imports.
+const REACT_WITH_CSSTYPE: [(&str, &str); 4] = [
+    (
+        "node_modules/@types/react/package.json",
+        r#"{ "name": "@types/react", "version": "19.0.0", "types": "index.d.ts" }"#,
+    ),
+    (
+        "node_modules/@types/react/index.d.ts",
+        "import * as CSS from 'csstype';\nexport = React;\nexport as namespace React;\n\
+         declare namespace React {\n  interface CSSProperties extends CSS.Properties<string | number> {}\n}\n",
+    ),
+    ("node_modules/csstype/package.json", r#"{ "name": "csstype", "version": "3.1.3", "types": "index.d.ts" }"#),
+    (
+        "node_modules/csstype/index.d.ts",
+        "export interface StandardLonghandProperties<TLength = (string & {}) | 0> {\n\
+           zIndex?: Property.ZIndex | undefined;\n  width?: Property.Width<TLength> | undefined;\n}\n\
+         export interface Properties<TLength = (string & {}) | 0> extends StandardLonghandProperties<TLength> {}\n\
+         type Globals = \"inherit\" | \"initial\";\n\
+         export namespace Property {\n  export type ZIndex = Globals | \"auto\" | (number & {});\n\
+           export type Width<TLength = (string & {}) | 0> = Globals | TLength | \"auto\";\n}\n",
+    ),
+];
+const CSS_Z_INDEX: &str = "\"inherit\" | \"initial\" | \"auto\" | number";
+const CSS_WIDTH: &str = "\"inherit\" | \"initial\" | string | number | \"auto\"";
+
+/// `React.CSSProperties["zIndex"]` reads csstype's declaration, which React imports, when dependencies are loaded, with
+/// or without an import of React (its UMD global); without them, a shortcut answers.
+#[test]
+fn a_member_of_a_react_type_reads_what_react_imports_when_dependencies_load() {
+    let box_source = "import * as React from 'react';\n\
+        export function Box(props: { z?: React.CSSProperties['zIndex']; w?: React.CSSProperties['width'] }) { return null; }\n";
+    let umd_source = "export function Umd(props: { z?: React.CSSProperties['zIndex'] }) { return null; }\n";
+    let mut files = REACT_WITH_CSSTYPE.to_vec();
+    files.extend([("src/Box.tsx", box_source), ("src/Umd.tsx", umd_source)]);
+    let (_tmp, root) = project(&files);
+
+    let on = extract(&options(&root, true));
+    let off = extract(&options(&root, false));
+
+    let (z_index, width) = (CSS_Z_INDEX, CSS_WIDTH);
+    assert_eq!(prop_types(&on, "Box"), [("w".into(), width.into()), ("z".into(), z_index.into())]);
+    assert_eq!(prop_types(&on, "Umd"), [("z".into(), z_index.into())]);
+    assert_eq!(prop_types(&off, "Box"), [("w".into(), "string".into()), ("z".into(), "number".into())]);
+    assert_eq!(prop_types(&off, "Umd"), [("z".into(), "number".into())]);
 }
 
 /// `z.infer<typeof schema>` indexes the type of a runtime value, which no static reading evaluates: it keeps its name
@@ -269,7 +759,7 @@ fn the_loader_is_deterministic_across_demand_order_and_threads() {
             exports,
             files,
             unresolved,
-            layer.global.component_mappings.iter().map(|m| m.component_name.clone()).collect::<Vec<_>>(),
+            layer.component_mappings.iter().map(|m| m.component_name.clone()).collect::<Vec<_>>(),
         )
     };
 
@@ -277,6 +767,74 @@ fn the_loader_is_deterministic_across_demand_order_and_threads() {
     for (reverse, threads) in [(true, 1), (false, 4), (true, 18)] {
         assert_eq!(snapshot(reverse, threads), first, "reverse {reverse}, {threads} threads");
     }
+}
+
+#[test]
+fn chained_layer_and_flatten_resolve_like_one_cold_load() {
+    let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
+    let options = PipelineOptions { use_cache: false, ..options(&root, true) };
+    let names = [
+        "B",
+        "ButtonProps",
+        "Tone",
+        "Tokens.Gap",
+        "Button",
+        "Missing0",
+        "Missing1",
+        "Missing2",
+        "Missing3",
+        "Missing4",
+        "Missing5",
+        "Missing6",
+    ];
+    let demands: Vec<_> = names.iter().map(|name| demand(&root, "ui-kit", name)).collect();
+    let cold = load(demands.clone(), &options, None);
+    let mut chained = Arc::new(load(vec![demands[0].clone()], &options, None));
+    for next in demands.iter().skip(1) {
+        chained = Arc::new(load(vec![next.clone()], &options, Some(&chained)));
+    }
+
+    assert_eq!(chained.depth, 2, "the ninth extension flattened the chain");
+    assert_eq!(chained.file_count(), cold.file_count());
+    assert!(chained.resolves_like(&cold));
+    assert!(chained.covers(&demands));
+    assert_eq!(chained.missing(&demands), Vec::<Demand>::new());
+    let dist = root.join("node_modules/ui-kit/dist");
+    for name in names {
+        assert_eq!(chained.export_of(&dist.join("index.d.ts"), name), cold.export_of(&dist.join("index.d.ts"), name));
+    }
+    for name in names.iter().filter(|name| name.starts_with("Missing")) {
+        assert_eq!(chained.unresolved_reason(&root.join("src"), "ui-kit", name), Some(Unresolved::NotExported));
+    }
+    let prop_names = |layer: &DependencyLayer| {
+        layer
+            .named_types
+            .lookup_interface(&dist.join("button.d.ts"), "ButtonProps")
+            .map(|iface| iface.props.iter().map(|prop| prop.name.clone()).collect::<Vec<_>>())
+    };
+    assert_eq!(prop_names(&chained), prop_names(&cold));
+    assert_eq!(
+        chained.component(&dist.join("button.d.ts"), "Button").map(|m| m.props_type_name.as_str()),
+        cold.component(&dist.join("button.d.ts"), "Button").map(|m| m.props_type_name.as_str())
+    );
+}
+
+#[test]
+fn a_file_parsed_as_a_reexport_stub_is_indexed_when_a_later_demand_claims_it() {
+    let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
+    let options = PipelineOptions { use_cache: false, ..options(&root, true) };
+    let button = root.join("node_modules/ui-kit/dist/button.d.ts");
+    let first = Arc::new(load(vec![demand(&root, "ui-kit", "Missing")], &options, None));
+    assert!(first.parsed_data(button.as_str()).is_some());
+    assert!(!first.is_dependency_file(&button));
+
+    let extended = load(vec![demand(&root, "ui-kit", "ButtonProps")], &options, Some(&first));
+    let props = extended
+        .named_types
+        .lookup_interface(&button, "ButtonProps")
+        .map(|iface| iface.props.iter().map(|prop| prop.name.as_str()).collect::<Vec<_>>());
+    assert_eq!(props, Some(vec!["size", "label"]));
+    assert_eq!(extended.file_count(), 2, "ButtonProps also reaches Size in tokens.d.ts");
 }
 
 #[test]
@@ -300,6 +858,31 @@ fn output_is_the_same_on_any_thread_count_and_with_a_cold_or_warm_index() {
     for threads in [4, 1, 18] {
         assert_eq!(run(threads), cold, "{threads} threads, warm index");
     }
+}
+
+/// The project's own imports are resolved on every run and never reach the index, so a run that learned nothing from
+/// a package leaves the index file alone instead of writing the same answers again.
+#[test]
+fn a_warm_run_does_not_rewrite_the_index() {
+    let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
+    let index = || {
+        let path = root
+            .join("cache")
+            .read_dir_utf8()
+            .unwrap()
+            .map(|entry| entry.unwrap().path().to_owned())
+            .find(|path| path.file_name().is_some_and(|name| name.starts_with("dependency-index-")))
+            .expect("the cold run writes the index");
+        (std::fs::metadata(&path).unwrap().modified().unwrap(), std::fs::read(&path).unwrap())
+    };
+
+    let cold = extract(&options(&root, true));
+    let written = index();
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    let warm = extract(&options(&root, true));
+
+    assert_eq!(index(), written, "the warm run neither rewrote the index file nor changed it");
+    assert_eq!((warm.components, warm.diagnostics), (cold.components, cold.diagnostics));
 }
 
 /// A package's changed `package.json` invalidates its answers, so an updated install is walked again.
@@ -378,6 +961,37 @@ fn watch_revisions_with_dependencies_match_a_cold_extract() {
         assert_eq!(watched.enums, cold.enums, "after:\n{edit}");
         assert_eq!(watched.diagnostics, cold.diagnostics, "after:\n{edit}");
         assert_eq!(watched.components["Badge"].props.keys().collect::<Vec<_>>(), expected, "after:\n{edit}");
+    }
+}
+
+/// A revision whose edit first reaches React's `CSSProperties` extends the layer with csstype as a cold run loads it.
+#[test]
+fn a_watch_revision_that_first_reads_a_react_member_matches_a_cold_extract() {
+    let first = "export function Box(props: { plain: string }) { return null; }\n";
+    let mut files = REACT_WITH_CSSTYPE.to_vec();
+    files.push(("src/Box.tsx", first));
+    let (_tmp, root) = project(&files);
+    let path = root.join("src/Box.tsx");
+    let session = crate::pipeline::WatchSession::new(options(&root, true));
+    let _initial = session.initialize();
+    let edits = [
+        "export function Box(props: { z?: React.CSSProperties['zIndex'] }) { return null; }\n",
+        // A new demand (`A`) extends the layer the previous revision loaded.
+        "import type { A } from 'ui-kit';\n\
+         export function Box(props: { a: A; z?: React.CSSProperties['zIndex']; w?: React.CSSProperties['width'] }) { return null; }\n",
+    ];
+    let expected: [&[(&str, &str)]; 2] =
+        [&[("z", CSS_Z_INDEX)], &[("a", "string"), ("w", CSS_WIDTH), ("z", CSS_Z_INDEX)]];
+    for (edit, expected) in edits.into_iter().zip(expected) {
+        std::fs::write(&path, edit).unwrap();
+        let _update = session.update_file(&path);
+        let watched = session.snapshot();
+        let cold = extract(&options(&root, true));
+        assert_eq!(watched.components, cold.components, "after:\n{edit}");
+        assert_eq!(watched.diagnostics, cold.diagnostics, "after:\n{edit}");
+        let types = prop_types(&watched, "Box");
+        let types: Vec<(&str, &str)> = types.iter().map(|(n, t)| (n.as_str(), t.as_str())).collect();
+        assert_eq!(types, expected, "after:\n{edit}");
     }
 }
 

@@ -10,10 +10,12 @@ pub fn cmd_check(args: crate::CheckArgs, quiet: bool, config_path: Option<&str>)
     let options = build_options(BuildOptionsArgs {
         src: &args.src,
         cache_dir: None,
+        no_cache: false,
         html_attributes: None,
         config_path,
         extra_builtins: &[],
         load_dependencies: args.load_dependencies,
+        no_load_dependencies: args.no_load_dependencies,
         collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
     let output = caliper_docgen_core::pipeline::extract(&options);
@@ -39,6 +41,7 @@ mod tests {
             strict: false,
             json: true,
             load_dependencies: false,
+            no_load_dependencies: false,
             collapse_inherited_props: None,
         };
         let code = cmd_check(args, true, None).expect("cmd_check itself should not error");
@@ -63,6 +66,7 @@ mod tests {
             strict: false,
             json: true,
             load_dependencies: false,
+            no_load_dependencies: false,
             collapse_inherited_props: None,
         };
         let code = cmd_check(args, true, None).expect("cmd_check should not error");
@@ -95,6 +99,7 @@ mod tests {
             strict: true,
             json: true,
             load_dependencies: false,
+            no_load_dependencies: false,
             collapse_inherited_props: None,
         };
         let code = cmd_check(args, true, None).expect("cmd_check should not error");
@@ -112,6 +117,7 @@ mod tests {
             strict: false,
             json: true,
             load_dependencies: false,
+            no_load_dependencies: false,
             collapse_inherited_props: None,
         };
         let code = cmd_check(args, true, None).expect("cmd_check should not error");
@@ -142,6 +148,7 @@ mod tests {
             strict: true,
             json: true,
             load_dependencies: false,
+            no_load_dependencies: false,
             collapse_inherited_props: None,
         };
         let code = cmd_check(args, true, None).expect("cmd_check should not error");

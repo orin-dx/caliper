@@ -32,10 +32,12 @@ fn start_session(
     let options = build_options(BuildOptionsArgs {
         src: &args.src,
         cache_dir: None,
+        no_cache: false,
         html_attributes: None,
         config_path,
         extra_builtins: &[],
         load_dependencies: args.load_dependencies,
+        no_load_dependencies: args.no_load_dependencies,
         collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
 
@@ -324,7 +326,13 @@ mod tests {
     }
 
     fn prop_names(written: &serde_json::Value, component: &str) -> Vec<String> {
-        written["components"][component]["props"].as_object().unwrap().keys().cloned().collect()
+        let sets = written["components"][component]["props"].as_array().unwrap();
+        let mut names: Vec<String> = sets
+            .iter()
+            .flat_map(|set| written["propSets"][set.as_str().unwrap()].as_object().unwrap().keys().cloned())
+            .collect();
+        names.sort();
+        names
     }
 
     #[test]
@@ -584,6 +592,7 @@ mod tests {
                 src: vec![dir.clone()],
                 out: Some(out.to_str().unwrap().to_owned()),
                 load_dependencies: false,
+                no_load_dependencies: false,
                 collapse_inherited_props: None,
             };
 

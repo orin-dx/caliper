@@ -14,24 +14,30 @@ impl<'src> SourceDataCollector<'src> {
         &self,
         params: &FormalParameters<'a>,
     ) -> rustc_hash::FxHashMap<String, RawDefault> {
-        let mut defaults = rustc_hash::FxHashMap::default();
-
         let Some(first_param) = params.items.first() else {
-            return defaults;
+            return rustc_hash::FxHashMap::default();
         };
         // In OXC 0.135, BindingPattern is an enum directly (not a struct with .kind)
         let BindingPattern::ObjectPattern(obj) = &first_param.pattern else {
-            return defaults;
+            return rustc_hash::FxHashMap::default();
         };
+        self.pattern_defaults(obj)
+    }
 
+    /// The defaults of an object pattern, by the prop each destructures: `({ size = 'md', tone: t = 'a' })` gives
+    /// `size` and `tone`.
+    pub(super) fn pattern_defaults<'a>(&self, obj: &ObjectPattern<'a>) -> rustc_hash::FxHashMap<String, RawDefault> {
+        let mut defaults = rustc_hash::FxHashMap::default();
         for prop in &obj.properties {
             // In OXC 0.135, BindingProperty.value is BindingPattern.
             // A default value `{ size = 'md' }` is represented as
             // BindingProperty { key: "size", value: BindingPattern::AssignmentPattern { left: "size", right: 'md' } }
             let (name, default_expr) = match &prop.value {
                 BindingPattern::AssignmentPattern(ap) => {
-                    let name = match &ap.left {
-                        BindingPattern::BindingIdentifier(id) => id.name.as_str().to_owned(),
+                    // The prop is the key; the local name after `:` is only what the body calls it.
+                    let name = match (&prop.key, &ap.left) {
+                        (PropertyKey::StaticIdentifier(key), _) => key.name.as_str().to_owned(),
+                        (_, BindingPattern::BindingIdentifier(id)) => id.name.as_str().to_owned(),
                         _ => continue,
                     };
                     (name, &ap.right)
@@ -46,17 +52,15 @@ impl<'src> SourceDataCollector<'src> {
 
     pub(super) fn eval_expr_as_default<'a>(&self, expr: &Expression<'a>, source: DefaultSource) -> RawDefault {
         match expr {
-            Expression::StringLiteral(s) => {
-                RawDefault { value: format!("\"{}\"", s.value.as_str()), computed: false, source }
-            }
             Expression::NumericLiteral(n) => RawDefault { value: n.value.to_string(), computed: false, source },
             Expression::BooleanLiteral(b) => RawDefault { value: b.value.to_string(), computed: false, source },
             Expression::NullLiteral(_) => RawDefault { value: "null".into(), computed: false, source },
             Expression::Identifier(id) if id.name.as_str() == "undefined" => {
                 RawDefault { value: "undefined".into(), computed: false, source }
             }
-            // Array and object literals: capture source text, not computed
-            Expression::ArrayExpression(_) | Expression::ObjectExpression(_) => {
+            // String, array and object literals keep their source text, quotes included, as react-docgen-typescript and
+            // Storybook's React docgen print them.
+            Expression::StringLiteral(_) | Expression::ArrayExpression(_) | Expression::ObjectExpression(_) => {
                 use oxc_span::GetSpan;
                 let span = expr.span();
                 RawDefault {

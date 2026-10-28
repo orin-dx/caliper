@@ -99,9 +99,10 @@ fn test_string_and_empty_object_normalizes_to_string() {
 #[test]
 fn test_sx_props_known_pattern() {
     let ctx = empty_ctx();
+    // No shortcut (ADR 0014): without MUI's declaration it stays the named reference RDT also prints.
     let ct = CollectedType::Named { name: "SxProps".into(), args: vec![] };
     let result = resolve_type(&ct, &ctx);
-    assert_eq!(result, PropType::SxProps, "Expected SxProps, got {:?}", result);
+    assert_eq!(result, PropType::Named { name: "SxProps".into(), args: vec![] });
 }
 
 // ── Test: P0-1 regression — a project-defined SxProps extended via
@@ -1704,9 +1705,10 @@ fn test_template_literal_expansion() {
 
 #[test]
 fn test_conditional_type_is_opaque() {
+    // An unbound type parameter as the check: nothing decides it without a checker.
     let ctx = empty_ctx();
     let ct = CollectedType::Conditional {
-        check: Box::new(CollectedType::String),
+        check: Box::new(CollectedType::Named { name: "T".into(), args: vec![] }),
         extends_type: Box::new(CollectedType::String),
         true_type: Box::new(CollectedType::Boolean),
         false_type: Box::new(CollectedType::Number),
@@ -1719,14 +1721,41 @@ fn test_conditional_type_is_opaque() {
     );
 }
 
+#[test]
+fn a_conditional_over_known_types_takes_its_branch() {
+    let ctx = empty_ctx();
+    let conditional = |check: CollectedType, extends_type: CollectedType| CollectedType::Conditional {
+        check: Box::new(check),
+        extends_type: Box::new(extends_type),
+        true_type: Box::new(CollectedType::Boolean),
+        false_type: Box::new(CollectedType::Number),
+    };
+    let literal = |s: &str| CollectedType::StringLiteral(s.into());
+    assert_eq!(resolve_type(&conditional(CollectedType::String, CollectedType::String), &ctx), PropType::Boolean);
+    assert_eq!(resolve_type(&conditional(literal("a"), CollectedType::String), &ctx), PropType::Boolean);
+    assert_eq!(resolve_type(&conditional(CollectedType::String, literal("a")), &ctx), PropType::Number);
+    assert_eq!(
+        resolve_type(
+            &conditional(
+                CollectedType::Null,
+                CollectedType::Union(vec![CollectedType::Null, CollectedType::Undefined])
+            ),
+            &ctx
+        ),
+        PropType::Boolean
+    );
+}
+
 // ── Test 15: Mapped type → Opaque ─────────────────────────────────────────
 
 #[test]
 fn test_mapped_type_is_opaque() {
     let ctx = empty_ctx();
     let ct = CollectedType::Mapped {
+        param: "K".into(),
         key_type: Box::new(CollectedType::String),
         value_type: Box::new(CollectedType::Boolean),
+        optional: None,
     };
     let result = resolve_type(&ct, &ctx);
     assert!(
@@ -1869,23 +1898,32 @@ fn test_unhandled_intersection_member_gets_diagnostic_not_silent_drop() {
 
 // ── Test 20: resolve_known's Opaque results must emit a diagnostic ─────────
 // Regression test for: adversarial review finding — a KnownPatternResult::Type
-// that's actually PropType::Opaque (ThemingProps, StylesApiProps, cva/tv
-// without discoverable variants, ...) never got a diagnostic pushed at
-// either call site (named.rs step 5, chain.rs step 2), even though
-// resolve_known has no diagnostics channel of its own to push through.
+// that's actually PropType::Opaque (cva/tv without discoverable variants)
+// never got a diagnostic pushed at either call site (named.rs step 5,
+// chain.rs step 2), even though resolve_known has no diagnostics channel of
+// its own to push through.
+
+fn variants_of_missing() -> CollectedType {
+    CollectedType::Named { name: "VariantProps".into(), args: vec![CollectedType::TypeOf("missingVariants".into())] }
+}
 
 #[test]
 fn test_known_opaque_result_emits_diagnostic_at_type_level() {
     let ctx = empty_ctx();
     let mut state = ResolveState::default();
-    let ct = CollectedType::Named { name: "ThemingProps".into(), args: vec![] };
-    let result = super::collected::resolve_collected_type(&ct, Utf8Path::new("/test/button.tsx"), &ctx, &mut state, 0);
+    let result = super::collected::resolve_collected_type(
+        &variants_of_missing(),
+        Utf8Path::new("/test/button.tsx"),
+        &ctx,
+        &mut state,
+        0,
+    );
 
     assert!(matches!(result, PropType::Opaque(_)), "expected Opaque, got {:?}", result);
-    assert!(
-        !state.diagnostics.is_empty(),
-        "expected a diagnostic for the known-but-runtime-dependent ThemingProps result, got none"
-    );
+    // A named type's diagnostics are shared with its recording (`memo`), not copied into the state.
+    let diagnostics: Vec<_> =
+        state.diagnostics.iter().chain(state.shared_diagnostics.iter().flat_map(|chunk| chunk.iter())).collect();
+    assert!(!diagnostics.is_empty(), "expected a diagnostic for VariantProps without variants, got none");
 }
 
 #[test]
@@ -1895,20 +1933,61 @@ fn test_known_opaque_result_emits_diagnostic_at_chain_level() {
     let file_path = Utf8PathBuf::from("/test/box.tsx");
     let mapping = ComponentMapping::new(
         "Box".into(),
-        "ThemingProps".into(),
+        "VariantProps".into(),
         file_path.clone(),
         0,
         0,
         crate::types::DetectionRule::FunctionDeclaration,
     );
+    let CollectedType::Named { args, .. } = variants_of_missing() else { unreachable!() };
 
-    let chain = super::chain::resolve_props_chain("ThemingProps", &[], &file_path, &mapping, &ctx, &mut state, 0);
+    let chain = super::chain::resolve_props_chain("VariantProps", &args, &file_path, &mapping, &ctx, &mut state, 0);
 
-    assert!(!chain.composes.is_empty(), "expected ThemingProps to still surface via composes");
-    assert!(
-        !state.diagnostics.is_empty(),
-        "expected a diagnostic for the known-but-runtime-dependent ThemingProps result at chain level, got none"
+    assert!(!chain.composes.is_empty(), "expected VariantProps to still surface via composes");
+    assert!(!state.diagnostics.is_empty(), "expected a diagnostic for VariantProps without variants, got none");
+}
+
+// `VariantProps<typeof itemVariants>` reads the variants of the `itemVariants` its own file declares: shadcn keeps a
+// copy of every component per registry, each with variants of its own, and the bare name alone gave all of them the
+// first file's by path.
+#[test]
+fn test_variant_props_reads_the_variants_its_own_file_declares() {
+    use crate::types::{EnumEntry, EnumValue};
+
+    let entry = |name: &str, value: &str| EnumEntry {
+        name: name.into(),
+        value: EnumValue::String(value.into()),
+        description: String::new(),
+    };
+    let mut global = GlobalSourceData::default();
+    global.enums.insert("/a/item.tsx:itemVariants".into(), vec![entry("size", "default"), entry("size", "sm")]);
+    global.enums.insert(
+        "/b/item.tsx:itemVariants".into(),
+        vec![entry("size", "default"), entry("size", "sm"), entry("size", "xs")],
     );
+    let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
+    let args = [CollectedType::TypeOf("itemVariants".into())];
+
+    let sizes_in = |path: &str| {
+        let file_path = Utf8PathBuf::from(path);
+        let mapping = ComponentMapping::new(
+            "Item".into(),
+            "VariantProps".into(),
+            file_path.clone(),
+            0,
+            0,
+            crate::types::DetectionRule::FunctionDeclaration,
+        );
+        let mut state = ResolveState::default();
+        let chain = super::chain::resolve_props_chain("VariantProps", &args, &file_path, &mapping, &ctx, &mut state, 0);
+        let size = chain.props.iter().find(|p| p.name == "size").unwrap_or_else(|| panic!("no size prop in {path}"));
+        let PropType::Union(members) = &size.prop_type else { panic!("size is {:?}", size.prop_type) };
+        let PropType::LiteralUnion { members, .. } = &members[0] else { panic!("size is {:?}", size.prop_type) };
+        members.clone()
+    };
+
+    assert_eq!(sizes_in("/a/item.tsx"), ["default", "sm"]);
+    assert_eq!(sizes_in("/b/item.tsx"), ["default", "sm", "xs"]);
 }
 
 // ── Test 21: collected.rs's Conditional/Mapped/KeyOf/Raw-fallback Opaque
@@ -1934,8 +2013,10 @@ fn test_mapped_type_opaque_emits_diagnostic() {
     let ctx = empty_ctx();
     let mut state = ResolveState::default();
     let ct = CollectedType::Mapped {
+        param: "P".into(),
         key_type: Box::new(CollectedType::Named { name: "K".into(), args: vec![] }),
         value_type: Box::new(CollectedType::String),
+        optional: None,
     };
     let result = super::collected::resolve_collected_type(&ct, Utf8Path::new("/test/button.tsx"), &ctx, &mut state, 0);
     assert!(matches!(result, PropType::Opaque(_)));
@@ -2619,32 +2700,42 @@ export function C({ tone = "b" }: CProps) { return null; }
 "#;
 
 /// A context over real files in a temp dir, so imports resolve as in a run.
-fn parsed_ctx(dir: &Utf8Path, files: &[(&str, &str)]) -> ResolutionContext {
+fn parsed_ctx(dir: &Utf8Path, files: &[(&str, &str)], options: &PipelineOptions) -> ResolutionContext {
     let mut global = GlobalSourceData::default();
     for (name, source) in files {
         let path = dir.join(name);
         std::fs::write(&path, source).unwrap();
         global.merge(&path, crate::extractor::parse_file(&path, source));
     }
-    ResolutionContext::new(Arc::new(global), &PipelineOptions::default())
+    ResolutionContext::new(Arc::new(global), options)
 }
+
+type SharedResults = BTreeMap<String, (ComponentEntry, Vec<Diagnostic>, deps::Dependencies)>;
 
 /// Resolve `components` in order on one context, asserting each gives exactly what it gives on a context of its own:
 /// entry, dependencies, and each distinct diagnostic in the order first reported (a reused chain reports each once).
-fn resolve_shared(
+fn resolve_shared(dir: &Utf8Path, files: &[(&str, &str)], components: &[&str]) -> (ResolutionContext, SharedResults) {
+    resolve_shared_with(dir, files, components, &PipelineOptions::default())
+}
+
+fn resolve_shared_with(
     dir: &Utf8Path,
     files: &[(&str, &str)],
     components: &[&str],
-) -> (ResolutionContext, BTreeMap<String, (ComponentEntry, Vec<Diagnostic>, deps::Dependencies)>) {
-    let shared = parsed_ctx(dir, files);
+    options: &PipelineOptions,
+) -> (ResolutionContext, SharedResults) {
+    let shared = parsed_ctx(dir, files, options);
     let mapping = |ctx: &ResolutionContext, name: &str| {
         ctx.global.component_mappings.iter().find(|m| m.component_name == name).unwrap().clone()
     };
     let mut results = BTreeMap::new();
     for name in components {
-        let fresh = parsed_ctx(dir, files);
-        let alone = resolve_component_tracked(&mapping(&fresh, name), &fresh);
-        let reused = resolve_component_tracked(&mapping(&shared, name), &shared);
+        let fresh = parsed_ctx(dir, files, options);
+        let flat = |(entry, diagnostics, deps): (ComponentEntry, ResolvedDiagnostics, deps::Dependencies)| {
+            (entry, diagnostics.flatten(), deps)
+        };
+        let alone = flat(resolve_component_tracked(&mapping(&fresh, name), &fresh));
+        let reused = flat(resolve_component_tracked(&mapping(&shared, name), &shared));
         assert_eq!(serde_json::to_value(&reused.0).unwrap(), serde_json::to_value(&alone.0).unwrap(), "{name}");
         let firsts = |diagnostics: &[Diagnostic]| {
             let mut seen = FxHashSet::default();
@@ -2661,6 +2752,29 @@ fn canonical_temp_dir() -> (tempfile::TempDir, Utf8PathBuf) {
     let tmp = tempfile::TempDir::new().unwrap();
     let dir = Utf8PathBuf::from_path_buf(std::fs::canonicalize(tmp.path()).unwrap()).unwrap();
     (tmp, dir)
+}
+
+#[test]
+fn equal_props_built_for_different_components_are_one_allocation() {
+    // A generic interface's chain is resolved per instantiation, so each component builds its own `value` prop; the two
+    // `string` ones are equal and share an allocation, the `number` one is not.
+    let (_tmp, dir) = canonical_temp_dir();
+    let source = r#"
+interface Box<T> { /** held */ value: T; label?: string }
+interface AProps extends Box<string> {}
+interface BProps extends Box<string> {}
+interface CProps extends Box<number> {}
+export function A(props: AProps) { return null; }
+export function B(props: BProps) { return null; }
+export function C(props: CProps) { return null; }
+"#;
+    let (_shared, results) = resolve_shared(&dir, &[("Comp.tsx", source)], &["A", "B", "C"]);
+
+    let prop = |component: &str, name: &str| &results[component].0.props[name];
+    assert!(Arc::ptr_eq(prop("A", "value"), prop("B", "value")));
+    assert!(Arc::ptr_eq(prop("A", "label"), prop("C", "label")));
+    assert!(!Arc::ptr_eq(prop("A", "value"), prop("C", "value")));
+    assert_eq!(prop("C", "value").prop_type, PropType::Number);
 }
 
 #[test]
@@ -2694,6 +2808,80 @@ fn a_shared_interface_chain_resolves_like_a_fresh_one_for_every_component() {
 }
 
 #[test]
+fn a_named_type_is_resolved_once_and_every_component_that_names_it_gets_the_same_answer() {
+    // `resolve_shared` asserts that each component resolves identically with and without the shared recordings,
+    // diagnostics and dependencies included; A and B name `Tone`, and A also names a self-referential `Loop`.
+    let (_tmp, dir) = canonical_temp_dir();
+    let source = r#"
+type Tone = "a" | "b" | NotDeclaredAnywhere;
+type Loop = { next?: Loop } | "end";
+export function A(props: { tone?: Tone; loop?: Loop }) { return null; }
+export function B(props: { tone?: Tone }) { return null; }
+"#;
+    let (shared, results) = resolve_shared(&dir, &[("Comp.tsx", source)], &["A", "B"]);
+
+    for name in ["A", "B"] {
+        let unresolved = results[name].1.iter().filter(|d| d.message.contains("NotDeclaredAnywhere")).count();
+        assert_eq!(unresolved, 1, "{name}: {:?}", results[name].1);
+    }
+    let tone_recordings: usize = memo::recording_counts(&shared.named_results)
+        .into_iter()
+        .filter(|(key, _)| key.contains("Comp.tsx:Tone<"))
+        .map(|(_, count)| count)
+        .sum();
+    assert_eq!(tone_recordings, 1);
+}
+
+#[test]
+fn an_interface_chain_read_for_its_keys_is_not_reused_where_its_props_are_listed() {
+    // K reads only Base's names (`keyof Base`), so its resolution of Base skips member types; N lists Base's props.
+    // Both reach Base at depth 2, so only the mode tells the recordings apart.
+    let (_tmp, dir) = canonical_temp_dir();
+    let source = r#"
+type Tone = "a" | "b";
+interface Base { tone?: Tone; label: string }
+interface Own { tone?: number; extra?: boolean }
+interface Mid extends Base {}
+interface NProps extends Mid {}
+export function K(props: Omit<Own, keyof Base>) { return null; }
+export function N(props: NProps) { return null; }
+"#;
+    let (shared, results) = resolve_shared(&dir, &[("Comp.tsx", source)], &["K", "N"]);
+
+    let types = |component: &str| {
+        results[component].0.props.iter().map(|(name, p)| (name.as_str(), p.prop_type.clone())).collect::<Vec<_>>()
+    };
+    assert_eq!(types("K"), [("extra", PropType::Boolean)]);
+    let tone = PropType::LiteralUnion { members: vec!["a".into(), "b".into()], has_default: false };
+    assert_eq!(types("N"), [("label", PropType::String), ("tone", tone)]);
+    assert_eq!(memo::recording_counts(&shared.interface_chains)[&format!("{dir}/Comp.tsx:Base")], 2);
+}
+
+#[test]
+fn an_interface_chain_expanded_for_a_pick_is_not_reused_where_it_collapses() {
+    // `Pick` expands its base so it can pick from the props; Q inherits the same 31-prop interface, which collapses
+    // to a layer. Both reach Big at depth 1, so only the mode tells the recordings apart.
+    let (_tmp, dir) = canonical_temp_dir();
+    let fields: String = (0..31).map(|i| format!("p{i}?: string; ")).collect();
+    let source = format!(
+        "export interface Big {{ {fields}}}\ninterface QProps extends Big {{ own?: boolean }}\n\
+         export function P(props: Pick<Big, \"p0\">) {{ return null; }}\n\
+         export function Q(props: QProps) {{ return null; }}\n"
+    );
+    let options = PipelineOptions {
+        collapse_inherited_props: crate::pipeline::CollapseInheritedProps::All,
+        ..Default::default()
+    };
+    let (shared, results) = resolve_shared_with(&dir, &[("Comp.tsx", &source)], &["P", "Q"], &options);
+
+    let names = |component: &str| results[component].0.props.keys().map(String::as_str).collect::<Vec<_>>();
+    assert_eq!((names("P"), names("Q")), (vec!["p0"], vec!["own"]));
+    let layers: Vec<&str> = results["Q"].0.inheritance.iter().map(|layer| layer.type_name.as_str()).collect();
+    assert_eq!(layers, ["Big"]);
+    assert_eq!(memo::recording_counts(&shared.interface_chains)[&format!("{dir}/Comp.tsx:Big")], 2);
+}
+
+#[test]
 fn an_interface_chain_cut_short_by_a_cycle_is_not_reused_where_the_cycle_is_not_open() {
     // P reaches Base through Loop, so Base's own `extends Loop` closes a cycle there; Q reaches Base at the same depth
     // through Z, where Loop has not been entered, so Base's chain takes Loop's props.
@@ -2712,4 +2900,73 @@ export function Q(props: Y) { return null; }
     let names = |component: &str| results[component].0.props.keys().map(String::as_str).collect::<Vec<_>>();
     assert_eq!((names("P"), names("Q")), (vec!["b", "l"], vec!["b", "l", "z"]));
     assert_eq!(memo::recording_counts(&shared.interface_chains)[&format!("{dir}/Comp.tsx:Base")], 2);
+}
+
+#[test]
+fn an_interface_chain_reached_at_different_depths_is_one_recording_with_the_same_answer() {
+    // A reaches Base at depth 1 and B at depth 3; nothing in Base's resolution is near the depth limit, so one recording
+    // answers both (the key once held the depth, and Base was resolved again at each one).
+    let (_tmp, dir) = canonical_temp_dir();
+    let source = r#"
+interface Base { label: string; size?: number }
+interface M2 extends Base { m2?: boolean }
+interface M1 extends M2 { m1?: boolean }
+interface AProps extends Base { a?: string }
+interface BProps extends M1 { b?: string }
+export function A(props: AProps) { return null; }
+export function B(props: BProps) { return null; }
+"#;
+    let (shared, results) = resolve_shared(&dir, &[("Comp.tsx", source)], &["A", "B"]);
+
+    let names = |component: &str| results[component].0.props.keys().map(String::as_str).collect::<Vec<_>>();
+    assert_eq!(names("A"), ["a", "label", "size"]);
+    assert_eq!(names("B"), ["b", "label", "m1", "m2", "size"]);
+    assert_eq!(memo::recording_counts(&shared.interface_chains)[&format!("{dir}/Comp.tsx:Base")], 1);
+}
+
+#[test]
+fn an_interface_chain_that_hit_the_depth_limit_is_not_reused_from_a_shallower_start() {
+    // P walks a 25-interface extends chain from the top and stops at the limit, so its recording of the chain from L10
+    // holds a depth-exceeded stop; Q starts at L10 itself and reaches the bottom. `resolve_shared` checks that each
+    // resolves as it does alone.
+    let (_tmp, dir) = canonical_temp_dir();
+    let interfaces: String = (0..25)
+        .map(|i| match i {
+            24 => format!("interface L{i} {{ p{i}?: string }}\n"),
+            _ => format!("interface L{i} extends L{} {{ p{i}?: string }}\n", i + 1),
+        })
+        .collect();
+    let source = format!(
+        "{interfaces}export function P(props: L0) {{ return null; }}\nexport function Q(props: L10) {{ return null; }}\n"
+    );
+    let (_shared, results) = resolve_shared(&dir, &[("Comp.tsx", &source)], &["P", "Q"]);
+
+    let count = |component: &str| results[component].0.props.len();
+    assert_eq!((count("P"), count("Q")), (21, 15));
+    assert!(results["P"].1.iter().any(|d| d.message.contains("Max resolution depth")), "{:?}", results["P"].1);
+    assert!(results["Q"].1.iter().all(|d| !d.message.contains("Max resolution depth")), "{:?}", results["Q"].1);
+}
+
+// `import React from "react"` of an `export =` module binds the module's namespace, as `import * as React` does, so
+// `React.CSSProperties` names the same member under either spelling (antd imports React the first way).
+#[test]
+fn a_default_import_names_a_namespace_member_as_a_namespace_import_does() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+    write(root.as_std_path(), "lib.ts", "export interface Options { size: string }\n");
+    let canonical_of = |import: &str| {
+        let source = format!("{import}\nexport const x = 1;\n");
+        let consumer = root.join("c.tsx");
+        write(root.as_std_path(), "c.tsx", &source);
+        let mut global = GlobalSourceData::default();
+        for path in [root.join("lib.ts"), consumer.clone()] {
+            let text = std::fs::read_to_string(&path).unwrap();
+            global.merge(&path, crate::extractor::parse_file(&path, &text));
+        }
+        let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
+        super::import::resolve_to_canonical("Lib.Options", &consumer, &ctx, &mut Vec::new())
+    };
+    let expected = Some((root.join("lib.ts"), "Options".to_owned()));
+    assert_eq!(canonical_of(r#"import * as Lib from "./lib";"#), expected, "the namespace spelling");
+    assert_eq!(canonical_of(r#"import Lib from "./lib";"#), expected, "the default spelling");
 }

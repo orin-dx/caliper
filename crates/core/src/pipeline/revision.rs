@@ -14,17 +14,84 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::cache::DtsCache;
-use crate::dependency_types::{self, DependencyLayer};
+use crate::dependency_types::{self, Demand, DependencyLayer};
 use crate::named_type_index::NamedTypeIndex;
 use crate::resolver::{Dependencies, ResolutionContext};
 use crate::types::output::severity_rank;
 use crate::types::*;
 
 use super::discover::{discover_files, is_source_file, should_skip};
+
+mod lazy;
 use super::{
-    canonicalize_first_src_dir, collect_public_enums, merge_cached_dts_file, resolve_guarded, HtmlAttributeMode,
-    IncrementalUpdate, PipelineOptions,
+    canonicalize_first_src_dir, collect_public_enums, merge_parsed_dts_file, parse_cached_dts_file, resolve_guarded,
+    HtmlAttributeMode, IncrementalUpdate, PipelineOptions,
 };
+pub use lazy::{ComponentAnswer, ComponentLocation};
+
+/// `@types/react` indexed on its own, for curated mode's HTML-attribute lookups: a prop that an HTML layer's element
+/// also declares has both types, as in Full mode, while every other name still resolves without React's declarations.
+/// No `@types/react` means no lookups, as before, and no diagnostic: curated mode never needed it.
+fn curated_react_types(
+    react_dts: &Utf8Path,
+    parsed: Result<SourceData, Diagnostic>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Arc<NamedTypeIndex> {
+    let mut react = GlobalSourceData::default();
+    merge_parsed_dts_file(react_dts, parsed, &mut react, diagnostics);
+    Arc::new(NamedTypeIndex::build(&react))
+}
+
+/// The declaration files every cold run merges besides the project's own, found and parsed. They depend on nothing the
+/// project's parse produces, so a run does this while it parses the project (see [`Indexed::build`]).
+struct AmbientDts {
+    react: ReactDts,
+    /// TypeScript's lib files, in merge order, parsed.
+    libs: Vec<(Utf8PathBuf, Result<SourceData, Diagnostic>)>,
+    /// Set when the installed `typescript` lacks a lib file.
+    libs_diagnostic: Option<Diagnostic>,
+}
+
+/// `@types/react`, as far as the HTML attribute mode needs it.
+enum ReactDts {
+    /// The mode does not use it, so it was not looked for.
+    NotWanted,
+    /// Looked for and not found; Full mode reports it.
+    Missing,
+    Found(Box<(Utf8PathBuf, Result<SourceData, Diagnostic>)>),
+}
+
+impl AmbientDts {
+    fn load(options: &PipelineOptions, cache: &DtsCache) -> AmbientDts {
+        let from_dir = canonicalize_first_src_dir(&options.src_dirs);
+        // Full mode falls back to the current directory; curated mode needs a source directory.
+        let react_from = match options.html_attributes {
+            HtmlAttributeMode::Full => Some(from_dir.clone().unwrap_or_else(|| Utf8PathBuf::from("."))),
+            HtmlAttributeMode::Curated => from_dir.clone(),
+            _ => None,
+        };
+        let react_wanted = react_from.is_some();
+        let react_path = react_from
+            .and_then(|from| crate::resolver::resolve_package_dts_path(&from, "react", options).map(Utf8PathBuf::from));
+        let (lib_paths, libs_diagnostic) = match &from_dir {
+            Some(from_dir) => {
+                let libs = crate::resolver::resolve_ts_lib_paths(from_dir);
+                (libs.paths.into_iter().map(Utf8PathBuf::from).collect::<Vec<_>>(), libs.diagnostic)
+            }
+            None => (Vec::new(), None),
+        };
+        // One pass over react's file and the libs, so they parse side by side.
+        let files: Vec<&Utf8Path> = react_path.iter().chain(&lib_paths).map(Utf8PathBuf::as_path).collect();
+        let mut parsed =
+            files.par_iter().map(|path| parse_cached_dts_file(path, cache)).collect::<Vec<_>>().into_iter();
+        let react = match react_path {
+            Some(path) => parsed.next().map_or(ReactDts::Missing, |parsed| ReactDts::Found(Box::new((path, parsed)))),
+            None if react_wanted => ReactDts::Missing,
+            None => ReactDts::NotWanted,
+        };
+        AmbientDts { react, libs: lib_paths.into_iter().zip(parsed).collect(), libs_diagnostic }
+    }
+}
 
 /// A component's identity across revisions: its file, its name, and which same-named declaration in that file it is.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -37,13 +104,13 @@ pub(crate) struct ComponentId {
 /// A resolved component, the diagnostics its resolution produced, and what that resolution depended on.
 pub(crate) struct Resolved {
     entry: ComponentEntry,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: ResolvedDiagnostics,
     depends_on: Dependencies,
 }
 
 impl Resolved {
     /// The entry and diagnostics, moved out when nothing else shares this resolution.
-    fn into_parts(shared: Arc<Resolved>) -> (ComponentEntry, Vec<Diagnostic>) {
+    fn into_parts(shared: Arc<Resolved>) -> (ComponentEntry, ResolvedDiagnostics) {
         match Arc::try_unwrap(shared) {
             Ok(resolved) => (resolved.entry, resolved.diagnostics),
             Err(shared) => (shared.entry.clone(), shared.diagnostics.clone()),
@@ -79,6 +146,8 @@ pub(crate) struct Revision {
     named_types: Arc<NamedTypeIndex>,
     /// The loaded dependency declarations, with `load_dependencies`.
     dependencies: Option<Arc<DependencyLayer>>,
+    /// React's own declarations in curated mode, indexed apart for HTML-attribute lookups (ADR 0010).
+    react_types: Option<Arc<NamedTypeIndex>>,
     ambient_global_files: Vec<Utf8PathBuf>,
     /// Source-directory and discovery diagnostics.
     head_diagnostics: Vec<Diagnostic>,
@@ -98,6 +167,16 @@ pub(crate) struct Revision {
     pub(crate) output: Arc<ExtractionOutput>,
     /// The output key each component was published under.
     keys: FxHashMap<ComponentId, String>,
+    /// Set on a lazy revision (ADR 0016): components resolve on request and `resolved` stays empty.
+    lazy: Option<lazy::Lazy>,
+}
+
+/// Frees `value` on another thread. Freeing a large project's parsed data or memos one allocation at a time takes tens
+/// of milliseconds, and the caller only wants what it already took out.
+fn free_in_background<T: Send + 'static>(value: T) {
+    let spawned = std::thread::Builder::new().name("caliper-drop".into()).spawn(move || drop(value));
+    // A failed spawn drops the closure, and the value with it, right here.
+    drop(spawned);
 }
 
 /// The mapping identities of `global`, in output order: by file, then by position in the file.
@@ -105,19 +184,29 @@ fn component_ids<'g>(
     global: &'g GlobalSourceData,
     options: &PipelineOptions,
 ) -> Vec<(ComponentId, &'g ComponentMapping)> {
+    ordered_ids(global, options)
+        .into_iter()
+        .filter_map(|(id, index)| Some((id, global.component_mappings.get(index)?)))
+        .collect()
+}
+
+/// [`component_ids`] with each mapping's position in `global.component_mappings` instead of the mapping.
+fn ordered_ids(global: &GlobalSourceData, options: &PipelineOptions) -> Vec<(ComponentId, usize)> {
     let mut ordinals: FxHashMap<(&Utf8Path, &str), u32> = FxHashMap::default();
-    let mut ids: Vec<(ComponentId, &ComponentMapping)> = global
+    let mut ids: Vec<(ComponentId, usize)> = global
         .component_mappings
         .iter()
-        .filter(|m| !should_skip(&m.component_name, &options.exclude_prefixes))
-        .map(|m| {
+        .enumerate()
+        .filter(|(_, m)| !should_skip(&m.component_name, &options.exclude_prefixes))
+        .map(|(index, m)| {
             let ordinal = ordinals.entry((m.file_path.as_path(), m.component_name.as_str())).or_insert(0);
             let id = ComponentId { file: m.file_path.clone(), name: m.component_name.clone(), ordinal: *ordinal };
             *ordinal += 1;
-            (id, m)
+            (id, index)
         })
         .collect();
-    ids.sort_by(|(a, ma), (b, mb)| (&a.file, ma.span_start, a.ordinal).cmp(&(&b.file, mb.span_start, b.ordinal)));
+    let span = |index: &usize| global.component_mappings.get(*index).map(|m| m.span_start);
+    ids.sort_by(|(a, ia), (b, ib)| (&a.file, span(ia), a.ordinal).cmp(&(&b.file, span(ib), b.ordinal)));
     ids
 }
 
@@ -135,35 +224,30 @@ fn resolve_all(
         .collect()
 }
 
-impl Revision {
-    /// Discover, parse, merge, resolve and assemble every source file.
-    pub(crate) fn cold(options: &PipelineOptions, id: u64) -> Revision {
-        let mut revision = Revision::resolve_cold(options, id);
-        let (output, keys) = revision
-            .assemble(options, |id| revision.resolved.get(id).map(|r| (r.entry.clone(), r.diagnostics.clone())));
-        revision.output = Arc::new(output);
-        revision.keys = keys;
-        revision
-    }
+/// What a cold run knows once every file is discovered, parsed and merged, before any dependency is loaded or any
+/// component resolved. A lazy revision stops here.
+struct Indexed {
+    start: Instant,
+    cache: Arc<DtsCache>,
+    src_files: Vec<Utf8PathBuf>,
+    global: GlobalSourceData,
+    head_diagnostics: Vec<Diagnostic>,
+    file_diagnostics: BTreeMap<Utf8PathBuf, Vec<Diagnostic>>,
+    lib_diagnostics: Vec<Diagnostic>,
+    react_types: Option<Arc<NamedTypeIndex>>,
+    /// Each project file's dependency demands, in file order; empty without `load_dependencies`.
+    file_demands: Vec<(Utf8PathBuf, Vec<Demand>)>,
+}
 
-    /// The output of a cold run that is never updated, so each entry moves into it instead of being copied.
-    pub(crate) fn cold_output(options: &PipelineOptions) -> ExtractionOutput {
-        let mut revision = Revision::resolve_cold(options, 0);
-        let mut resolved = std::mem::take(&mut revision.resolved);
-        let (output, _) = revision.assemble(options, |id| resolved.remove(id).map(Resolved::into_parts));
-        // Freeing the parsed project takes milliseconds on a large one, and the caller only wants the output.
-        let spawned = std::thread::Builder::new().name("caliper-drop".into()).spawn(move || drop(revision));
-        // A failed spawn drops the closure, and the revision with it, right here; the output is unaffected.
-        drop(spawned);
-        output
-    }
-
-    /// Everything [`Revision::cold`] does except assembling the output.
-    fn resolve_cold(options: &PipelineOptions, id: u64) -> Revision {
+impl Indexed {
+    fn build(options: &PipelineOptions) -> Indexed {
         let start = Instant::now();
         let mut head_diagnostics = source_dir_diagnostics(options);
 
-        let cache = Arc::new(DtsCache::load_from_disk(options.cache_dir.as_deref()));
+        let cache = Arc::new(match options.use_cache {
+            true => DtsCache::load_from_disk(Some(&options.effective_cache_dir())),
+            false => DtsCache::in_memory(),
+        });
         head_diagnostics.extend(cache.load_diagnostic().cloned());
 
         let (src_files, discover_diagnostics) = discover_files(&options.src_dirs, &options.exclude_patterns);
@@ -171,28 +255,35 @@ impl Revision {
 
         // The whole closure body is wrapped in `contain_panic` so one file's parse panicking degrades to a per-file
         // diagnostic instead of poisoning the `.collect()` and crashing the whole extraction run.
-        let parsed: Vec<(Utf8PathBuf, SourceData, Option<Diagnostic>)> = src_files
-            .par_iter()
-            .map(|path| {
-                let label = format!("parse:{path}");
-                crate::panic_guard::contain_panic(&label, || {
-                    #[cfg(test)]
-                    if path.file_name() == Some(super::PARSE_PANIC_TEST_SENTINEL) {
-                        panic!("simulated parse-phase panic (test-only sentinel)");
-                    }
-                    let (data, io_diag) = parse_source_file(path, &cache);
-                    (path.clone(), data, io_diag)
-                })
-                .unwrap_or_else(|diag| (path.clone(), SourceData::default(), Some(diag)))
-            })
-            .collect();
+        // TypeScript's lib files and `@types/react` are the same files whatever the project, and cost 10-12 ms to parse on
+        // a cold cache: parse them alongside the project's files instead of after them.
+        let (ambient, parsed): (AmbientDts, Vec<(Utf8PathBuf, SourceData, Option<Diagnostic>)>) = rayon::join(
+            || AmbientDts::load(options, &cache),
+            || {
+                src_files
+                    .par_iter()
+                    .map(|path| {
+                        let label = format!("parse:{path}");
+                        crate::panic_guard::contain_panic(&label, || {
+                            #[cfg(test)]
+                            if path.file_name() == Some(super::PARSE_PANIC_TEST_SENTINEL) {
+                                panic!("simulated parse-phase panic (test-only sentinel)");
+                            }
+                            let (data, io_diag) = parse_source_file(path, &cache);
+                            (path.clone(), data, io_diag)
+                        })
+                        .unwrap_or_else(|diag| (path.clone(), SourceData::default(), Some(diag)))
+                    })
+                    .collect()
+            },
+        );
 
         let mut global = GlobalSourceData::default();
         let mut file_diagnostics: BTreeMap<Utf8PathBuf, Vec<Diagnostic>> = BTreeMap::new();
-        let mut demands = Vec::new();
+        let mut file_demands = Vec::new();
         for (path, mut data, io_diag) in parsed {
             if options.load_dependencies {
-                demands.extend(dependency_types::project_demands(&path, &data));
+                file_demands.push((path.clone(), dependency_types::project_demands(&path, &data)));
             }
             let mut diags: Vec<Diagnostic> = io_diag.into_iter().collect();
             diags.append(&mut data.diagnostics);
@@ -206,92 +297,74 @@ impl Revision {
         let mut lib_diagnostics = Vec::new();
         // Full HTML attribute mode needs @types/react's real interfaces merged before resolution, so the resolver can
         // look them up like any other interface instead of only recording an InheritedLayer.
-        if options.html_attributes == HtmlAttributeMode::Full {
-            let from_dir = canonicalize_first_src_dir(&options.src_dirs).unwrap_or_else(|| Utf8PathBuf::from("."));
-            match crate::resolver::resolve_package_dts_path(&from_dir, "react", options) {
-                Some(react_dts_path) => {
-                    let react_dts_path = Utf8PathBuf::from(react_dts_path);
-                    merge_cached_dts_file(&react_dts_path, &cache, &mut global, &mut lib_diagnostics);
-                }
-                None => lib_diagnostics.push(
-                    Diagnostic::new(
-                        DiagnosticSeverity::Warning,
-                        DiagnosticCode::MissingTypeLibrary,
-                        "HtmlAttributeMode::Full requested but @types/react could not be resolved",
-                    )
-                    .with_help("Check that @types/react is installed. Falling back to curated attributes."),
-                ),
+        let mut react_types = None;
+        match (ambient.react, options.html_attributes) {
+            (ReactDts::Found(found), HtmlAttributeMode::Full) => {
+                let (path, parsed) = *found;
+                merge_parsed_dts_file(&path, parsed, &mut global, &mut lib_diagnostics);
             }
+            (ReactDts::Found(found), _) => {
+                let (path, parsed) = *found;
+                react_types = Some(curated_react_types(&path, parsed, &mut lib_diagnostics));
+            }
+            (ReactDts::Missing, HtmlAttributeMode::Full) => lib_diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticSeverity::Warning,
+                    DiagnosticCode::MissingTypeLibrary,
+                    "HtmlAttributeMode::Full requested but @types/react could not be resolved",
+                )
+                .with_help("Check that @types/react is installed. Falling back to curated attributes."),
+            ),
+            (ReactDts::Missing | ReactDts::NotWanted, _) => {}
         }
         // Ambient globals (Date, Element, ...) live in TS's lib files and are never imported, so merge them in every
         // mode. An install missing a lib file (TS 7 without its platform package) is reported here.
-        if let Some(from_dir) = canonicalize_first_src_dir(&options.src_dirs) {
-            let libs = crate::resolver::resolve_ts_lib_paths(&from_dir);
-            lib_diagnostics.extend(libs.diagnostic);
-            for lib_path in libs.paths {
-                merge_cached_dts_file(&Utf8PathBuf::from(lib_path), &cache, &mut global, &mut lib_diagnostics);
-            }
+        lib_diagnostics.extend(ambient.libs_diagnostic);
+        for (lib_path, parsed) in ambient.libs {
+            merge_parsed_dts_file(&lib_path, parsed, &mut global, &mut lib_diagnostics);
         }
 
-        let dependencies = options.load_dependencies.then(|| Arc::new(dependency_types::load(demands, options, None)));
-        let global = Arc::new(global);
-        let mut named_types = NamedTypeIndex::build(&global);
-        named_types.fallback = dependencies.as_ref().map(|layer| layer.named_types.clone());
-        let named_types = Arc::new(named_types);
-        let ambient_global_files = crate::resolver::compute_ambient_global_files(options);
-        let ctx = ResolutionContext::new_with_cached_ambient_global_files(
-            global.clone(),
-            options,
-            ambient_global_files.clone(),
-            named_types.clone(),
-        )
-        .with_dependencies(dependencies.clone());
-        lib_diagnostics.extend(ctx.tsconfig_diagnostic.clone());
-        let resolved = resolve_all(&component_ids(&global, options), &ctx);
-        let files = Arc::new(src_files.into_iter().collect());
-
-        let (dts_files_parsed, dts_cache_hits) = cache.counts();
-        // Arc::try_unwrap succeeds because all rayon workers have finished.
-        let tail_diagnostics: Vec<Diagnostic> = match Arc::try_unwrap(cache) {
-            Ok(c) => c.save_to_disk(),
-            Err(arc) => arc.save_to_disk(),
-        }
-        .into_iter()
-        .collect();
-
-        Revision {
-            id,
+        Indexed {
+            start,
+            cache,
+            src_files,
             global,
-            named_types,
-            dependencies,
-            ambient_global_files,
             head_diagnostics,
             file_diagnostics,
             lib_diagnostics,
-            tail_diagnostics,
-            resolved,
-            files,
-            dts_files_parsed,
-            dts_cache_hits,
-            duration_ms: start.elapsed().as_millis() as u64,
-            output: Arc::new(empty_output()),
-            keys: FxHashMap::default(),
+            react_types,
+            file_demands,
         }
     }
+}
 
-    /// The revision after `changed` was edited, created or deleted, and the delta from this one. `None` when the path
-    /// is not a source file of this project (outside every source directory, excluded, or not TypeScript).
-    pub(crate) fn next(&self, options: &PipelineOptions, changed: &Utf8Path) -> Option<(Revision, IncrementalUpdate)> {
-        if !is_source_file(changed, &options.src_dirs, &options.exclude_patterns) {
-            return None;
-        }
-        let start = Instant::now();
+/// One file's change applied to a copy of a revision's parsed state.
+struct Applied<'c> {
+    global: GlobalSourceData,
+    named_types: NamedTypeIndex,
+    file_diagnostics: BTreeMap<Utf8PathBuf, Vec<Diagnostic>>,
+    files: FxHashSet<Utf8PathBuf>,
+    dependencies: Option<Arc<DependencyLayer>>,
+    change: Change<'c>,
+    /// The changed file's dependency demands after the change; empty when it was deleted or demands are not loaded.
+    demands: Vec<Demand>,
+}
 
+impl Revision {
+    /// This revision's parsed state with `changed` re-read: re-parsed, created or deleted. With `extend_dependencies`,
+    /// names the file newly references are loaded now; a lazy revision loads them when a component needs them.
+    fn apply_change<'c>(
+        &self,
+        options: &PipelineOptions,
+        changed: &'c Utf8Path,
+        extend_dependencies: bool,
+    ) -> Applied<'c> {
         let mut global = (*self.global).clone();
         let mut named_types = (*self.named_types).clone();
         let mut file_diagnostics = self.file_diagnostics.clone();
         let mut files = (*self.files).clone();
         let mut dependencies = self.dependencies.clone();
+        let mut demands = Vec::new();
         let mut bare_names: FxHashSet<String> = bare_names_declared(changed, &self.global.enums).into_iter().collect();
         bare_names.extend(bare_names_declared(changed, &self.global.const_arrays));
         global.remove_file(changed);
@@ -320,9 +393,12 @@ impl Revision {
                 }
                 bare_names.extend(bare_names_declared(changed, &data.enums));
                 bare_names.extend(bare_names_declared(changed, &data.const_arrays));
+                if options.load_dependencies {
+                    demands = dependency_types::project_demands(changed, &data);
+                }
                 // Only names no earlier revision loaded cost a load; the new layer keeps everything the old one had.
-                if let Some(layer) = &self.dependencies {
-                    let missing = layer.missing(&dependency_types::project_demands(changed, &data));
+                if let (true, Some(layer)) = (extend_dependencies, &self.dependencies) {
+                    let missing = layer.missing(&demands);
                     if !missing.is_empty() {
                         let extended = dependency_types::load(missing, options, Some(layer));
                         named_types.fallback = Some(extended.named_types.clone());
@@ -334,7 +410,118 @@ impl Revision {
                 files.insert(changed.to_owned())
             }
         };
-        let change = Change { file: changed, created, bare_names };
+        Applied {
+            global,
+            named_types,
+            file_diagnostics,
+            files,
+            dependencies,
+            change: Change { file: changed, created, bare_names },
+            demands,
+        }
+    }
+}
+
+impl Revision {
+    /// Discover, parse, merge, resolve and assemble every source file.
+    pub(crate) fn cold(options: &PipelineOptions, id: u64) -> Revision {
+        let mut revision = Revision::resolve_cold(options, id);
+        let (output, keys) = revision
+            .assemble(options, |id| revision.resolved.get(id).map(|r| (r.entry.clone(), r.diagnostics.clone())));
+        revision.output = Arc::new(output);
+        revision.keys = keys;
+        revision
+    }
+
+    /// The output of a cold run that is never updated, so each entry moves into it instead of being copied.
+    pub(crate) fn cold_output(options: &PipelineOptions) -> ExtractionOutput {
+        let mut revision = Revision::resolve_cold(options, 0);
+        let mut resolved = std::mem::take(&mut revision.resolved);
+        let (output, _) = revision.assemble(options, |id| resolved.remove(id).map(Resolved::into_parts));
+        free_in_background(revision);
+        output
+    }
+
+    /// Everything [`Revision::cold`] does except assembling the output.
+    fn resolve_cold(options: &PipelineOptions, id: u64) -> Revision {
+        let Indexed {
+            start,
+            cache,
+            src_files,
+            global,
+            head_diagnostics,
+            file_diagnostics,
+            mut lib_diagnostics,
+            react_types,
+            file_demands,
+        } = Indexed::build(options);
+        let demands: Vec<Demand> = file_demands.into_iter().flat_map(|(_, demands)| demands).collect();
+
+        let dependencies = options.load_dependencies.then(|| Arc::new(dependency_types::load(demands, options, None)));
+        let global = Arc::new(global);
+        let mut named_types = NamedTypeIndex::build(&global);
+        named_types.fallback = dependencies.as_ref().map(|layer| layer.named_types.clone());
+        let named_types = Arc::new(named_types);
+        let ambient_global_files = crate::resolver::compute_ambient_global_files(options);
+        let ctx = ResolutionContext::new_with_cached_ambient_global_files(
+            global.clone(),
+            options,
+            ambient_global_files.clone(),
+            named_types.clone(),
+        )
+        .with_dependencies(dependencies.clone())
+        .with_react_types(react_types.clone());
+        lib_diagnostics.extend(ctx.tsconfig_diagnostic.clone());
+        let resolved = resolve_all(&component_ids(&global, options), &ctx);
+        // Every component is resolved, so the memos are garbage: free them beside output assembly. A failed spawn
+        // drops the context on this thread instead.
+        drop(std::thread::Builder::new().name("caliper-drop".into()).spawn(move || drop(ctx)));
+        let files = Arc::new(src_files.into_iter().collect());
+
+        let (dts_files_parsed, dts_cache_hits) = cache.counts();
+        // Arc::try_unwrap succeeds because all rayon workers have finished.
+        let tail_diagnostics: Vec<Diagnostic> = match Arc::try_unwrap(cache) {
+            Ok(c) => c.save_to_disk(),
+            Err(arc) => arc.save_to_disk(),
+        }
+        .into_iter()
+        .collect();
+
+        Revision {
+            id,
+            global,
+            named_types,
+            dependencies,
+            react_types,
+            ambient_global_files,
+            head_diagnostics,
+            file_diagnostics,
+            lib_diagnostics,
+            tail_diagnostics,
+            resolved,
+            files,
+            dts_files_parsed,
+            dts_cache_hits,
+            duration_ms: start.elapsed().as_millis() as u64,
+            output: Arc::new(empty_output()),
+            keys: FxHashMap::default(),
+            lazy: None,
+        }
+    }
+
+    /// The revision after `changed` was edited, created or deleted, and the delta from this one. `None` when the path
+    /// is not a source file of this project (outside every source directory, excluded, or not TypeScript).
+    pub(crate) fn next(&self, options: &PipelineOptions, changed: &Utf8Path) -> Option<(Revision, IncrementalUpdate)> {
+        if self.lazy.is_some() {
+            return self.next_lazy(options, changed);
+        }
+        if !is_source_file(changed, &options.src_dirs, &options.exclude_patterns) {
+            return None;
+        }
+        let start = Instant::now();
+
+        let Applied { global, named_types, file_diagnostics, files, dependencies, change, .. } =
+            self.apply_change(options, changed, true);
 
         let global = Arc::new(global);
         let named_types = Arc::new(named_types);
@@ -349,7 +536,8 @@ impl Revision {
             self.ambient_global_files.clone(),
             named_types.clone(),
         )
-        .with_dependencies(dependencies.clone());
+        .with_dependencies(dependencies.clone())
+        .with_react_types(self.react_types.clone());
         let fresh = resolve_all(&stale, &ctx);
         let mut resolved: FxHashMap<ComponentId, Arc<Resolved>> =
             kept.into_iter().filter_map(|(id, _)| self.resolved.get(&id).map(|r| (id, r.clone()))).collect();
@@ -361,6 +549,7 @@ impl Revision {
             global,
             named_types,
             dependencies,
+            react_types: self.react_types.clone(),
             ambient_global_files: self.ambient_global_files.clone(),
             head_diagnostics: self.head_diagnostics.clone(),
             file_diagnostics,
@@ -373,6 +562,7 @@ impl Revision {
             duration_ms: self.duration_ms,
             output: Arc::new(empty_output()),
             keys: FxHashMap::default(),
+            lazy: None,
         };
         let (output, keys) =
             next.assemble(options, |id| next.resolved.get(id).map(|r| (r.entry.clone(), r.diagnostics.clone())));
@@ -422,6 +612,9 @@ impl Revision {
     /// rebuilt from scratch, and the delta from this one: every component whose entry differs, every key that went
     /// away, every diagnostic added or dropped.
     pub(crate) fn rebuilt(&self, options: &PipelineOptions) -> (Revision, IncrementalUpdate) {
+        if let Some(rebuilt) = self.rebuilt_lazy(options) {
+            return rebuilt;
+        }
         let start = Instant::now();
         let next = Revision::cold(options, self.id + 1);
         let update = output_delta(&self.output, &next.output, next.id, start);
@@ -439,7 +632,7 @@ impl Revision {
     fn assemble(
         &self,
         options: &PipelineOptions,
-        mut take: impl FnMut(&ComponentId) -> Option<(ComponentEntry, Vec<Diagnostic>)>,
+        mut take: impl FnMut(&ComponentId) -> Option<(ComponentEntry, ResolvedDiagnostics)>,
     ) -> (ExtractionOutput, FxHashMap<ComponentId, String>) {
         let mut diagnostics = DiagnosticSet::default();
         diagnostics.extend(self.head_diagnostics.iter().cloned(), None);
@@ -453,6 +646,13 @@ impl Revision {
         let mut seen_names: FxHashMap<String, u32> = FxHashMap::default();
         for (id, _) in component_ids(&self.global, options) {
             let Some((mut entry, resolved_diagnostics)) = take(&id) else { continue };
+            // An alias of an imported component whose package isn't loaded has nothing to document.
+            if entry.detected_by == DetectionRule::ImportedMemberAlias
+                && entry.props.is_empty()
+                && entry.inheritance.is_empty()
+            {
+                continue;
+            }
             let base_name = entry.display_name.clone();
             let count = seen_names.entry(base_name.clone()).or_insert(0);
             *count += 1;
@@ -479,7 +679,10 @@ impl Revision {
                     None,
                 );
             }
-            diagnostics.extend(resolved_diagnostics, Some(&key));
+            diagnostics.extend(resolved_diagnostics.own, Some(&key));
+            for chunk in &resolved_diagnostics.shared {
+                diagnostics.extend_shared(chunk, &key);
+            }
             keys.insert(id, key);
         }
 
@@ -541,6 +744,8 @@ pub(crate) fn output_delta(
 struct DiagnosticSet {
     index: FxHashMap<Diagnostic, usize>,
     items: Vec<Diagnostic>,
+    /// Where each shared chunk's diagnostics are in `items`, so a chunk many components share is hashed once.
+    chunks: FxHashMap<*const Diagnostic, Vec<usize>>,
 }
 
 impl DiagnosticSet {
@@ -558,6 +763,30 @@ impl DiagnosticSet {
         }
     }
 
+    fn extend_shared(&mut self, chunk: &Arc<[Diagnostic]>, component: &str) {
+        let at = match self.chunks.get(&chunk.as_ptr()) {
+            Some(at) => at.clone(),
+            None => {
+                let at: Vec<usize> = chunk
+                    .iter()
+                    .map(|diagnostic| match self.index.get(diagnostic) {
+                        Some(&at) => at,
+                        None => {
+                            self.index.insert(diagnostic.clone(), self.items.len());
+                            self.items.push(diagnostic.clone());
+                            self.items.len() - 1
+                        }
+                    })
+                    .collect();
+                self.chunks.insert(chunk.as_ptr(), at.clone());
+                at
+            }
+        };
+        for at in at {
+            self.items[at].affects.push(component.to_owned());
+        }
+    }
+
     fn extend(&mut self, diagnostics: impl IntoIterator<Item = Diagnostic>, component: Option<&str>) {
         for diagnostic in diagnostics {
             self.add(diagnostic, component);
@@ -567,10 +796,11 @@ impl DiagnosticSet {
     /// The diagnostics by file, position and message; run-wide ones (no file) first.
     fn finish(self) -> Vec<Diagnostic> {
         let mut items = self.items;
-        for diagnostic in &mut items {
-            diagnostic.affects.sort();
+        // Chakra with dependencies lists hundreds of thousands of component keys across its diagnostics.
+        items.par_iter_mut().for_each(|diagnostic| {
+            diagnostic.affects.sort_unstable();
             diagnostic.affects.dedup();
-        }
+        });
         // Severity by explicit rank, worst first, and code by name: neither enum's declaration order is an ordering.
         items.sort_by(|a, b| {
             (&a.file, a.line, a.column, &a.message)

@@ -156,9 +156,11 @@ fn type_refs(ty: &CollectedType, out: &mut FxHashSet<CompactString>) {
                 type_refs(part, out);
             }
         }
-        CollectedType::Mapped { key_type, value_type } => {
+        CollectedType::Mapped { param, key_type, value_type, .. } => {
             type_refs(key_type, out);
-            type_refs(value_type, out);
+            let mut inner = FxHashSet::default();
+            type_refs(value_type, &mut inner);
+            out.extend(inner.into_iter().filter(|name| name != param));
         }
         CollectedType::String
         | CollectedType::Number
@@ -185,7 +187,11 @@ fn imported_demand(file: &Utf8Path, imports: &[ImportBinding], reference: &str) 
         Some((head, rest)) => (head, Some(rest)),
         None => (reference, None),
     };
-    let binding = imports.iter().find(|binding| binding.local_name == head)?;
+    let Some(binding) = imports.iter().find(|binding| binding.local_name == head) else {
+        // `@types/react`'s UMD global (`export as namespace React`): `React.CSSProperties` without an import.
+        let name = rest.filter(|_| head == "React")?;
+        return Some(Demand { from: file.to_owned(), specifier: Box::from("react"), name: CompactString::from(name) });
+    };
     let name = match (binding.exported_name.as_str(), rest) {
         ("*", Some(rest)) => CompactString::from(rest),
         ("*", None) => return None,
@@ -211,47 +217,128 @@ pub(crate) fn project_demands(file: &Utf8Path, data: &SourceData) -> Vec<Demand>
 
 // ─── The layer ────────────────────────────────────────────────────────────────
 
-/// The dependency declarations a run loaded. Immutable once built; a watch revision that needs more builds a new one
-/// from it.
+/// How many layers a chain holds before the next extension flattens it into one.
+///
+/// An extension adds only the files it loaded, as a layer over the one it extends, so a growth costs what it loads and
+/// not what the session already holds. Lookups walk the chain, so it is kept short: a flatten copies everything once
+/// and the chain starts again.
+const MAX_CHAIN_DEPTH: usize = 8;
+
+/// The sizes of a layer and its parents together, for [`DependencyLayer::resolves_like`] and `file_count`.
+#[derive(Clone, Copy, Default)]
+struct Totals {
+    files: usize,
+    react_files: usize,
+    exports: usize,
+    resolutions: usize,
+    unresolved: usize,
+}
+
+/// The dependency declarations a run loaded. Immutable once built; a watch revision or a lazy session that needs more
+/// builds a new one over it, holding only what the extension added.
 pub(crate) struct DependencyLayer {
-    /// Declaring files' data. Their component mappings are the value index; nothing here is emitted.
-    pub(crate) global: GlobalSourceData,
+    /// The layer this one extends. Everything below is this layer's own additions; the parent's are consulted through
+    /// the accessors, `named_types` and `import_map`.
+    parent: Option<Arc<DependencyLayer>>,
+    /// Layers below this one.
+    depth: usize,
+    totals: Totals,
+    /// Declaring files' component mappings: the value index. Nothing here is emitted.
+    component_mappings: Vec<ComponentMapping>,
+    /// Falls back to the parent's.
     pub(crate) named_types: Arc<NamedTypeIndex>,
+    /// Falls back to the parent's.
     pub(crate) import_map: Arc<ImportResolutionMap>,
     /// `(module, name)` → the declaring `(file, name)`, or `None` when the module's types do not export it.
     exports: FxHashMap<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>>,
     /// `(directory, specifier)` → module, for every resolution the loader made.
     resolutions: FxHashMap<(Box<str>, Box<str>), Result<Utf8PathBuf, Unresolved>>,
     files: FxHashSet<PathKey>,
+    /// React's files whose declarations' imports were followed; their imports are in `import_map`.
+    react_files: FxHashSet<PathKey>,
     demands: FxHashSet<DemandKey>,
     unresolved: FxHashMap<DemandKey, Unresolved>,
-    /// Every parsed file's data (stubs included), so a watch revision's extension reuses them.
+    /// The `(file, name)` declarations whose references were followed.
+    claimed: FxHashSet<(PathKey, CompactString)>,
+    /// Every parsed file's data (stubs included), so an extension reuses them.
     parsed: FxHashMap<PathKey, Option<Arc<SourceData>>>,
 }
 
 impl DependencyLayer {
+    /// This layer and then each one it extends.
+    fn chain(&self) -> impl Iterator<Item = &DependencyLayer> {
+        std::iter::successors(Some(self), |layer| layer.parent.as_deref())
+    }
+
+    /// How many declaration files this layer holds, with its parents'.
+    pub(crate) fn file_count(&self) -> usize {
+        self.totals.files
+    }
+
     pub(crate) fn is_dependency_file(&self, file: &Utf8Path) -> bool {
-        self.files.contains(file.as_str())
+        self.chain().any(|layer| layer.files.contains(file.as_str()))
     }
 
     /// The declaring `(file, name)` of `name` exported from `module`, when the loader answered it.
     pub(crate) fn export_of(&self, module: &Utf8Path, name: &str) -> Option<&Option<(Utf8PathBuf, CompactString)>> {
-        self.exports.get(&(PathKey::from(module), CompactString::from(name)))
+        self.export_entry(&(PathKey::from(module), CompactString::from(name)))
+    }
+
+    fn export_entry(&self, key: &(PathKey, CompactString)) -> Option<&Option<(Utf8PathBuf, CompactString)>> {
+        self.chain().find_map(|layer| layer.exports.get(key))
+    }
+
+    fn resolution(&self, key: &(Box<str>, Box<str>)) -> Option<&Result<Utf8PathBuf, Unresolved>> {
+        self.chain().find_map(|layer| layer.resolutions.get(key))
+    }
+
+    fn parsed_data(&self, file: &str) -> Option<&Option<Arc<SourceData>>> {
+        self.chain().find_map(|layer| layer.parsed.get(file))
+    }
+
+    fn has_react_file(&self, file: &str) -> bool {
+        self.chain().any(|layer| layer.react_files.contains(file))
+    }
+
+    fn has_demand(&self, key: &DemandKey) -> bool {
+        self.chain().any(|layer| layer.demands.contains(key))
+    }
+
+    fn has_claimed(&self, key: &(PathKey, CompactString)) -> bool {
+        self.chain().any(|layer| layer.claimed.contains(key))
     }
 
     /// A dependency component by its declaring `(file, name)`.
     pub(crate) fn component(&self, file: &Utf8Path, name: &str) -> Option<&ComponentMapping> {
-        self.global.component_mappings.iter().find(|m| m.file_path == file && m.component_name == name)
+        self.chain()
+            .find_map(|layer| layer.component_mappings.iter().find(|m| m.file_path == file && m.component_name == name))
     }
 
     /// Why the loader found no declaration for `name` imported from `specifier` by a file in `dir`, if it didn't.
     pub(crate) fn unresolved_reason(&self, dir: &Utf8Path, specifier: &str, name: &str) -> Option<Unresolved> {
-        self.unresolved.get(&(Box::from(dir.as_str()), Box::from(specifier), CompactString::from(name))).copied()
+        let key = (Box::from(dir.as_str()), Box::from(specifier), CompactString::from(name));
+        self.chain().find_map(|layer| layer.unresolved.get(&key)).copied()
+    }
+
+    /// Whether `other`, a layer this one was extended from, resolves every name the way this one does: extending only
+    /// adds, so equal counts mean nothing was added.
+    pub(crate) fn resolves_like(&self, other: &DependencyLayer) -> bool {
+        let (a, b) = (self.totals, other.totals);
+        a.files == b.files
+            && a.react_files == b.react_files
+            && a.exports == b.exports
+            && a.resolutions == b.resolutions
+            && a.unresolved == b.unresolved
+    }
+
+    /// Whether this layer has followed every one of `demands`.
+    pub(crate) fn covers(&self, demands: &[Demand]) -> bool {
+        demands.iter().all(|d| self.has_demand(&d.key()))
     }
 
     /// The demands of `demands` this layer has not followed.
     pub(crate) fn missing(&self, demands: &[Demand]) -> Vec<Demand> {
-        demands.iter().filter(|d| !self.demands.contains(&d.key())).cloned().collect()
+        demands.iter().filter(|d| !self.has_demand(&d.key())).cloned().collect()
     }
 }
 
@@ -260,11 +347,14 @@ impl DependencyLayer {
 struct Loader<'a> {
     resolvers: &'a ModuleResolvers,
     project_dirs: &'a [Utf8PathBuf],
+    /// The layer being extended, consulted before the maps below so an extension holds only its own additions.
+    parent: Option<&'a DependencyLayer>,
     parsed: FxDashMap<PathKey, Arc<OnceLock<Option<Arc<SourceData>>>>>,
     resolutions: FxDashMap<(Box<str>, Box<str>), Result<Utf8PathBuf, Unresolved>>,
     exports: FxDashMap<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>>,
     claimed: FxDashSet<(PathKey, CompactString)>,
     declaring: FxDashSet<PathKey>,
+    react_files: FxDashSet<PathKey>,
     demands: FxDashSet<DemandKey>,
     unresolved: FxDashMap<DemandKey, Unresolved>,
     /// Package directory of each directory asked about, for grouping the index.
@@ -275,6 +365,9 @@ struct Loader<'a> {
 
 impl Loader<'_> {
     fn parse(&self, file: &Utf8Path) -> Option<Arc<SourceData>> {
+        if let Some(found) = self.parent.and_then(|parent| parent.parsed_data(file.as_str())) {
+            return found.clone();
+        }
         let cell = self.parsed.entry(PathKey::from(file)).or_default().clone();
         cell.get_or_init(|| {
             let source = std::fs::read_to_string(file).ok()?;
@@ -293,6 +386,9 @@ impl Loader<'_> {
         if let Some(found) = self.resolutions.get(&key) {
             return found.clone();
         }
+        if let Some(found) = self.parent.and_then(|parent| parent.resolution(&key)) {
+            return found.clone();
+        }
         let result = match crate::resolver::resolve_module_with(
             &self.resolvers.main,
             &self.resolvers.types_first,
@@ -304,7 +400,7 @@ impl Loader<'_> {
             ModuleResolution::File(_) => Err(Unresolved::NoTypes),
             ModuleResolution::Unresolved(_) => Err(Unresolved::Unresolvable),
         };
-        self.learned.store(true, Ordering::Relaxed);
+        self.learn(Utf8Path::new(dir));
         self.resolutions.insert(key, result.clone());
         result
     }
@@ -338,6 +434,9 @@ impl Loader<'_> {
         if let Some(found) = self.exports.get(&key) {
             return found.clone();
         }
+        if let Some(found) = self.parent.and_then(|parent| parent.export_entry(&key)) {
+            return found.clone();
+        }
         if !visited.insert(key.clone()) {
             *cut = true;
             return None;
@@ -348,7 +447,9 @@ impl Loader<'_> {
         if own_cut {
             *cut = true;
         } else {
-            self.learned.store(true, Ordering::Relaxed);
+            if let Some(dir) = module.parent() {
+                self.learn(dir);
+            }
             self.exports.insert(key, found.clone());
         }
         found
@@ -363,6 +464,10 @@ impl Loader<'_> {
     ) -> Option<(Utf8PathBuf, CompactString)> {
         let data = self.parse(module)?;
         if declares(&data, module, name) {
+            return Some((module.to_owned(), CompactString::from(name)));
+        }
+        // A member of a value the module declares (`Primitive.div`): its declaration is the value's.
+        if name.split_once('.').is_some_and(|(head, _)| declares(&data, module, head)) {
             return Some((module.to_owned(), CompactString::from(name)));
         }
         let (head, rest) = match name.split_once('.') {
@@ -396,9 +501,18 @@ impl Loader<'_> {
                 _ => {}
             }
         }
-        // An import exported under its own name is recorded as an import plus a local export.
-        if let Some(demand) = imported_demand(module, &data.imports, name) {
-            if data.exports.iter().any(|e| matches!(e, LexedExport::LocalDeclaration { name: n, .. } if n == head)) {
+        // A local export can name an imported binding (`import Image from './Image'; export default Image`).
+        if let Some(local) = data.exports.iter().find_map(|export| match export {
+            LexedExport::LocalDeclaration { name: exported, declared_as, .. } if exported == head => {
+                Some(declared_as.as_deref().unwrap_or(head))
+            }
+            LexedExport::LocalDeclaration { .. }
+            | LexedExport::ReExportNamed { .. }
+            | LexedExport::ReExportAll { .. }
+            | LexedExport::ReExportNamespace { .. } => None,
+        }) {
+            let reference = rest.map_or_else(|| local.to_owned(), |rest| format!("{local}.{rest}"));
+            if let Some(demand) = imported_demand(module, &data.imports, &reference) {
                 let target = self.resolve(module, &demand.specifier).ok()?;
                 return self.find_export_in(&target, &demand.name, visited, cut);
             }
@@ -419,7 +533,7 @@ impl Loader<'_> {
 
     fn demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand) {
         let key = demand.key();
-        if !self.demands.insert(key.clone()) {
+        if self.parent.is_some_and(|parent| parent.has_demand(&key)) || !self.demands.insert(key.clone()) {
             return;
         }
         let module = match self.resolve(&demand.from, &demand.specifier) {
@@ -429,7 +543,15 @@ impl Loader<'_> {
                 return;
             }
         };
-        if self.in_project(&module) || Self::is_react(&module) {
+        if self.in_project(&module) {
+            return;
+        }
+        if Self::is_react(&module) {
+            // `@types/react` declares its exports inside `declare namespace React` (`export = React`).
+            let qualified = CompactString::from(format!("React.{}", demand.name));
+            if self.parse(&module).is_some_and(|data| declares(&data, &module, &qualified)) {
+                self.load_declaration(scope, module, qualified);
+            }
             return;
         }
         match self.find_export(&module, &demand.name) {
@@ -441,27 +563,59 @@ impl Loader<'_> {
     }
 
     /// Mark `(file, name)` loaded and follow the names its declaration references: same-file ones in place, imported
-    /// ones as new demands.
+    /// ones as new demands. React's own declarations stay with the resolver's React handling (builtins, curated HTML
+    /// attributes), so React's files never enter the layer, but what they import does: `CSSProperties` extends
+    /// csstype's `Properties`.
     fn load_declaration<'s>(&'s self, scope: &rayon::Scope<'s>, file: Utf8PathBuf, name: CompactString) {
-        if Self::is_react(&file) || self.in_project(&file) {
+        if self.in_project(&file) {
             return;
         }
+        let react = Self::is_react(&file);
         let Some(data) = self.parse(&file) else { return };
-        let mut stack = vec![name];
+        // `Primitive.div` is a member of the value `Primitive`, whose declared type has it.
+        let mut stack: Vec<CompactString> =
+            name.split_once('.').map(|(head, _)| CompactString::from(head)).into_iter().collect();
+        stack.push(name);
         while let Some(name) = stack.pop() {
-            if !self.claimed.insert((PathKey::from(file.as_path()), name.clone())) {
+            let claim = (PathKey::from(file.as_path()), name.clone());
+            if self.parent.is_some_and(|parent| parent.has_claimed(&claim)) || !self.claimed.insert(claim) {
                 continue;
             }
-            self.declaring.insert(PathKey::from(file.as_path()));
+            if react {
+                if !self.parent.is_some_and(|parent| parent.has_react_file(file.as_str())) {
+                    self.react_files.insert(PathKey::from(file.as_path()));
+                }
+            } else if !self.parent.is_some_and(|parent| parent.is_dependency_file(&file)) {
+                self.declaring.insert(PathKey::from(file.as_path()));
+            }
+            // The type a value is declared with (`declare const Primitive: Primitives`) goes with the value.
+            let value_type = CompactString::from(format!("typeof {name}"));
+            if declares(&data, &file, &value_type) {
+                stack.push(value_type);
+            }
             let mut refs = FxHashSet::default();
             declaration_refs(&data, &file, &name, &mut refs);
             for reference in refs {
+                let qualified = react.then(|| CompactString::from(format!("React.{reference}")));
                 if declares(&data, &file, &reference) {
                     stack.push(reference);
+                } else if declares(&data, &file, &format!("typeof {reference}")) {
+                    // `typeof NODES` names a value that has only its declared type.
+                    stack.push(CompactString::from(format!("typeof {reference}")));
+                } else if let Some(qualified) = qualified.filter(|q| declares(&data, &file, q)) {
+                    stack.push(qualified);
                 } else if let Some(demand) = imported_demand(&file, &data.imports, &reference) {
                     scope.spawn(move |scope| self.demand(scope, demand));
                 }
             }
+        }
+    }
+
+    /// Note that an answer about `dir` is new, when `write_index` would keep it. A project file's own imports are
+    /// resolved on every run and never reach the index, so they must not make a warm run rewrite it.
+    fn learn(&self, dir: &Utf8Path) {
+        if dir.as_str().contains("/node_modules/") && self.package_of(dir).is_some() {
+            self.learned.store(true, Ordering::Relaxed);
         }
     }
 
@@ -488,6 +642,8 @@ fn declares(data: &SourceData, file: &Utf8Path, name: &str) -> bool {
         || data.enums.contains_key(&key)
         || data.const_arrays.contains_key(&key)
         || data.component_mappings.iter().any(|m| m.component_name == name)
+        // A constant declared by its type alone (`declare const Primitive: Primitives`).
+        || data.type_aliases.contains_key(&format!("{file}:typeof {name}"))
 }
 
 /// The names `(file, name)`'s declaration references, without its own type parameters.
@@ -502,6 +658,10 @@ fn declaration_refs(data: &SourceData, file: &Utf8Path, name: &str, out: &mut Fx
     for mapping in data.component_mappings.iter().filter(|m| m.component_name == name) {
         mapping_refs(mapping, out);
     }
+    // A reference that omits an argument reads the default (`DOMAttributes<T = FocusableElement>`).
+    for default in data.type_param_defaults.get(&key).into_iter().flatten().flatten() {
+        type_refs(default, out);
+    }
     for params in [data.interface_type_params.get(&key), data.type_alias_params.get(&key)].into_iter().flatten() {
         for param in params {
             out.remove(param.as_str());
@@ -509,12 +669,15 @@ fn declaration_refs(data: &SourceData, file: &Utf8Path, name: &str, out: &mut Fx
     }
 }
 
-/// Load what `demands` reference: from scratch for a cold run, or on top of `previous` when a watch revision found
-/// names the session hasn't loaded.
+/// Load what `demands` reference: from scratch for a cold run, or on top of `previous` when a watch revision or a lazy
+/// session found names it hasn't loaded.
+///
+/// An extension is a layer over `previous` holding only what it added, until the chain reaches [`MAX_CHAIN_DEPTH`]; then
+/// it takes everything the chain holds into one layer, and the chain starts again.
 pub(crate) fn load(
     demands: Vec<Demand>,
     options: &PipelineOptions,
-    previous: Option<&DependencyLayer>,
+    previous: Option<&Arc<DependencyLayer>>,
 ) -> DependencyLayer {
     let resolvers = ModuleResolvers::new(options);
     let project_dirs: Vec<Utf8PathBuf> = options
@@ -523,42 +686,63 @@ pub(crate) fn load(
         .filter_map(|dir| std::fs::canonicalize(dir).ok())
         .filter_map(|dir| Utf8PathBuf::from_path_buf(dir).ok())
         .collect();
+    let parent: Option<Arc<DependencyLayer>> = previous.filter(|layer| layer.depth < MAX_CHAIN_DEPTH).cloned();
+    let flatten = previous.filter(|_| parent.is_none());
     let loader = Loader {
         resolvers: &resolvers,
         project_dirs: &project_dirs,
+        parent: parent.as_deref(),
         parsed: DashMap::default(),
         resolutions: DashMap::default(),
         exports: DashMap::default(),
         claimed: DashSet::default(),
         declaring: DashSet::default(),
+        react_files: DashSet::default(),
         demands: DashSet::default(),
         unresolved: DashMap::default(),
         packages: DashMap::default(),
         learned: AtomicBool::new(false),
     };
-    let index_path = index_path(options);
-    match previous {
-        Some(previous) => {
-            for (key, value) in &previous.resolutions {
-                loader.resolutions.insert(key.clone(), value.clone());
-            }
-            for (key, value) in &previous.exports {
-                loader.exports.insert(key.clone(), value.clone());
-            }
-            for (key, data) in &previous.parsed {
-                loader.parsed.insert(key.clone(), Arc::new(OnceLock::from(data.clone())));
-            }
-            for key in &previous.demands {
-                loader.demands.insert(key.clone());
-            }
-            for (key, reason) in &previous.unresolved {
-                loader.unresolved.insert(key.clone(), *reason);
-            }
-            for file in &previous.files {
-                loader.declaring.insert(file.clone());
+    // With the cache off the index is neither read nor written, and the run learns everything again.
+    let index_path = options.use_cache.then(|| index_path(options));
+    match (previous, flatten) {
+        (None, _) => {
+            if let Some(path) = &index_path {
+                read_index(path, &loader);
             }
         }
-        None => read_index(&index_path, &loader),
+        // A chain at its depth limit: take everything it holds, so this layer stands alone.
+        (Some(_), Some(full)) => {
+            let mut chain: Vec<_> = full.chain().collect();
+            chain.reverse();
+            for layer in chain {
+                for (key, value) in &layer.resolutions {
+                    loader.resolutions.insert(key.clone(), value.clone());
+                }
+                for (key, value) in &layer.exports {
+                    loader.exports.insert(key.clone(), value.clone());
+                }
+                for (key, data) in &layer.parsed {
+                    loader.parsed.insert(key.clone(), Arc::new(OnceLock::from(data.clone())));
+                }
+                for key in &layer.demands {
+                    loader.demands.insert(key.clone());
+                }
+                for key in &layer.claimed {
+                    loader.claimed.insert(key.clone());
+                }
+                for (key, reason) in &layer.unresolved {
+                    loader.unresolved.insert(key.clone(), *reason);
+                }
+                for file in &layer.files {
+                    loader.declaring.insert(file.clone());
+                }
+                for file in &layer.react_files {
+                    loader.react_files.insert(file.clone());
+                }
+            }
+        }
+        (Some(_), None) => {}
     }
     rayon::scope(|scope| {
         for demand in demands {
@@ -569,31 +753,71 @@ pub(crate) fn load(
             });
         }
     });
-    if previous.is_none() && loader.learned.load(Ordering::Relaxed) {
-        write_index(&index_path, &loader);
+    if let (None, Some(path)) = (previous, &index_path) {
+        if loader.learned.load(Ordering::Relaxed) {
+            write_index(path, &loader);
+        }
     }
 
     let mut files: Vec<PathKey> = loader.declaring.iter().map(|f| f.clone()).collect();
     files.sort();
-    let mut global = GlobalSourceData::default();
+    // Each file's declarations go straight into the index, and only what the import map reads (imports and
+    // re-exports) and the value index (component mappings) is kept apart; a merged copy of every file's data would
+    // hold the same declarations twice. An extension indexes only its own files; the parent's answer for the rest.
+    let mut named = NamedTypeIndex::default();
+    named.fallback = parent.as_ref().map(|layer| layer.named_types.clone());
+    let mut component_mappings: Vec<ComponentMapping> = Vec::new();
+    let mut imports = GlobalSourceData::default();
     for file in &files {
         let path = Utf8Path::new(std::borrow::Borrow::<str>::borrow(file));
-        if let Some(Some(data)) = loader.parsed.get(file).and_then(|cell| cell.get().cloned()) {
-            global.merge(path, (*data).clone());
+        if let Some(data) = loader.parse(path) {
+            named.merge_file(&data);
+            component_mappings.extend(data.component_mappings.iter().cloned());
+            imports.import_map.insert(path.to_owned(), data.imports.clone());
+            imports.re_export_map.insert(path.to_owned(), data.exports.clone());
         }
     }
-    global.component_mappings.sort_by(|a, b| (&a.file_path, a.span_start).cmp(&(&b.file_path, b.span_start)));
-    let named_types = Arc::new(NamedTypeIndex::build(&global));
-    let import_map = Arc::new(ImportResolutionMap::build(&global));
+    component_mappings.sort_by(|a, b| (&a.file_path, a.span_start).cmp(&(&b.file_path, b.span_start)));
+    let named_types = Arc::new(named);
+    // React's declarations reference what React imports (`CSS.Properties`), so those imports must resolve too; its
+    // declarations stay out of `named_types`.
+    let react_files: FxHashSet<PathKey> = loader.react_files.iter().map(|file| file.clone()).collect();
+    for file in &react_files {
+        let path = Utf8Path::new(std::borrow::Borrow::<str>::borrow(file));
+        if let Some(data) = loader.parse(path) {
+            imports.import_map.insert(path.to_owned(), data.imports.clone());
+            imports.re_export_map.insert(path.to_owned(), Vec::new());
+        }
+    }
+    let import_map = Arc::new(
+        ImportResolutionMap::build(&imports).with_fallback(parent.as_ref().map(|layer| layer.import_map.clone())),
+    );
+    let exports: FxHashMap<_, _> = loader.exports.into_iter().collect();
+    let resolutions: FxHashMap<_, _> = loader.resolutions.into_iter().collect();
+    let unresolved: FxHashMap<_, _> = loader.unresolved.into_iter().collect();
+    let files: FxHashSet<PathKey> = files.into_iter().collect();
+    let below = parent.as_ref().map(|layer| layer.totals).unwrap_or_default();
+    let totals = Totals {
+        files: below.files + files.len(),
+        react_files: below.react_files + react_files.len(),
+        exports: below.exports + exports.len(),
+        resolutions: below.resolutions + resolutions.len(),
+        unresolved: below.unresolved + unresolved.len(),
+    };
     DependencyLayer {
-        global,
+        depth: parent.as_ref().map_or(0, |layer| layer.depth + 1),
+        parent: parent.clone(),
+        totals,
+        component_mappings,
         named_types,
         import_map,
-        exports: loader.exports.into_iter().collect(),
-        resolutions: loader.resolutions.into_iter().collect(),
-        files: files.into_iter().collect(),
+        exports,
+        resolutions,
+        files,
+        react_files,
         demands: loader.demands.into_iter().collect(),
-        unresolved: loader.unresolved.into_iter().collect(),
+        unresolved,
+        claimed: loader.claimed.into_iter().collect(),
         parsed: loader.parsed.into_iter().map(|(key, cell)| (key, cell.get().cloned().flatten())).collect(),
     }
 }
@@ -625,7 +849,7 @@ struct IndexFile {
 /// Next to the parse cache, named by the resolution fingerprint so a changed configuration or build never reads
 /// another's answers.
 fn index_path(options: &PipelineOptions) -> (Utf8PathBuf, u64) {
-    let dir = options.cache_dir.clone().unwrap_or_else(|| Utf8PathBuf::from("node_modules/.cache/caliper-docgen"));
+    let dir = options.effective_cache_dir();
     let fingerprint = crate::resolver::resolution_fingerprint(options);
     (dir.join(format!("dependency-index-{fingerprint:016x}.msgpack")), fingerprint)
 }

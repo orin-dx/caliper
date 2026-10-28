@@ -78,6 +78,8 @@ jobs:
       group: version-pr
       cancel-in-progress: false
     runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: never
     permissions:
       contents: write
       pull-requests: write
@@ -106,6 +108,8 @@ jobs:
     if: needs.release-candidate.outputs.is_release_pr == 'true'
     timeout-minutes: 20
     runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: never
     permissions:
       contents: read
     steps:

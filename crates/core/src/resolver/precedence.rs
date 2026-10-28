@@ -31,6 +31,33 @@ pub(super) enum SourceOrKnownMatch<'g> {
     Known(KnownPatternResult),
 }
 
+/// A declaration found for a name: an alias or an interface, before any shortcut.
+pub(super) enum Declared<'g> {
+    TypeAlias { matched_key: String, alias: Box<CollectedTypeAlias> },
+    Interface(&'g CollectedInterface),
+}
+
+/// Resolve `name` to canonical `(file, name)` and find its declaration, the project's or a loaded dependency's. It
+/// takes no arguments, so a caller that expands an alias doesn't resolve the reference's arguments first.
+pub(super) fn find_declaration<'g>(
+    name: &str,
+    consuming_file: &Utf8Path,
+    ctx: &'g ResolutionContext,
+    state: &mut ResolveState,
+) -> (Utf8PathBuf, String, Option<Declared<'g>>) {
+    super::deps::record(consuming_file);
+    let (canonical_file, canonical_name) = resolve_to_canonical(name, consuming_file, ctx, &mut state.diagnostics)
+        .unwrap_or_else(|| (consuming_file.to_owned(), name.to_owned()));
+
+    if let Some((matched_key, alias)) = lookup_type_alias(ctx, canonical_file.as_str(), &canonical_name) {
+        let declared = Declared::TypeAlias { matched_key: matched_key.to_string(), alias: Box::new(alias.clone()) };
+        return (canonical_file, canonical_name, Some(declared));
+    }
+
+    let declared = lookup_interface(ctx, canonical_file.as_str(), &canonical_name).map(Declared::Interface);
+    (canonical_file, canonical_name, declared)
+}
+
 /// Resolve `name` to canonical `(file, name)`, then try — in this fixed
 /// order — a type alias, an interface, and only then a known-pattern
 /// shortcut. Returns the canonical `(file, name)` pair (callers need it
@@ -43,32 +70,26 @@ pub(super) fn resolve_source_defined_or_known<'g>(
     ctx: &'g ResolutionContext,
     state: &mut ResolveState,
 ) -> (Utf8PathBuf, String, Option<SourceOrKnownMatch<'g>>) {
-    super::deps::record(consuming_file);
-    let (canonical_file, canonical_name) = resolve_to_canonical(name, consuming_file, ctx, &mut state.diagnostics)
-        .unwrap_or_else(|| (consuming_file.to_owned(), name.to_owned()));
-
-    // A project declaration, then a known shortcut, then a dependency's own declaration (ADR 0010): the shortcuts exist
-    // because those declarations (cva's `VariantProps`, MUI's `SxProps`) are conditional or mapped types this resolver
-    // can't expand.
-    if ctx.is_dependency_file(&canonical_file) {
-        if let Some(result) = resolve_known(name, resolved_args, &ctx.global, &ctx.enum_bare_index) {
-            return (canonical_file, canonical_name, Some(SourceOrKnownMatch::Known(result)));
+    // A declaration, the project's or a loaded dependency's, before a known shortcut (ADR 0014): a shortcut stands in
+    // for a declaration that isn't available, or, at the props-chain level, one that evaluates to nothing
+    // (`chain::known_fallback`).
+    let (canonical_file, canonical_name, declared) = find_declaration(name, consuming_file, ctx, state);
+    match declared {
+        Some(Declared::TypeAlias { matched_key, alias }) => {
+            return (
+                canonical_file,
+                canonical_name,
+                Some(SourceOrKnownMatch::TypeAlias { matched_key, alias: *alias }),
+            );
         }
+        Some(Declared::Interface(iface)) => {
+            return (canonical_file, canonical_name, Some(SourceOrKnownMatch::Interface(iface)));
+        }
+        None => {}
     }
 
-    if let Some((matched_key, alias)) = lookup_type_alias(ctx, canonical_file.as_str(), &canonical_name) {
-        return (
-            canonical_file,
-            canonical_name,
-            Some(SourceOrKnownMatch::TypeAlias { matched_key: matched_key.to_string(), alias: alias.clone() }),
-        );
-    }
-
-    if let Some(iface) = lookup_interface(ctx, canonical_file.as_str(), &canonical_name) {
-        return (canonical_file, canonical_name, Some(SourceOrKnownMatch::Interface(iface)));
-    }
-
-    if let Some(result) = resolve_known(name, resolved_args, &ctx.global, &ctx.enum_bare_index) {
+    let enum_key = |name: &str| ctx.enum_key_for(name, consuming_file);
+    if let Some(result) = resolve_known(name, resolved_args, &ctx.global, &enum_key) {
         return (canonical_file, canonical_name, Some(SourceOrKnownMatch::Known(result)));
     }
 

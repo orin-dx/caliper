@@ -13,7 +13,6 @@ use commands::check::cmd_check;
 use commands::completions::cmd_completions;
 use commands::extract::cmd_extract;
 use commands::inspect::cmd_inspect;
-use commands::lsp::cmd_lsp;
 use commands::schema::cmd_schema;
 use commands::watch::cmd_watch;
 
@@ -62,9 +61,6 @@ enum Command {
     /// Export JSON Schema for docgen output format
     Schema,
 
-    /// Start LSP language server for IDE component prop hovers
-    Lsp,
-
     /// Generate shell completions
     Completions(CompletionsArgs),
 }
@@ -88,6 +84,11 @@ pub struct ExtractArgs {
     #[arg(long)]
     pub cache_dir: Option<String>,
 
+    /// Neither read nor write the on-disk caches (the declaration parse cache and the dependency index); the output is
+    /// the same, a run just parses everything
+    #[arg(long)]
+    pub no_cache: bool,
+
     /// How much of an inherited HTML element's attributes to expose
     #[arg(long, value_enum)]
     pub html_attributes: Option<HtmlAttributeModeArg>,
@@ -107,13 +108,26 @@ pub struct ExtractArgs {
     /// paths below), and suppresses the human-readable summary/diagnostics.
     #[arg(long, short = 'j')]
     pub json: bool,
-    /// Load the type declarations props reference from installed packages (off by default)
+    /// Load the type declarations props reference from installed packages (on by default; this flag turns it back on
+    /// over a config that sets `loadDependencies: false`)
     #[arg(long)]
     pub load_dependencies: bool,
+    /// Do not load the type declarations props reference from installed packages
+    #[arg(long, conflicts_with = "load_dependencies")]
+    pub no_load_dependencies: bool,
 
     /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
+
+    /// Experimental: ask TypeScript 7.1's `tsc --api` for each component's props and merge them over the structural
+    /// result, which stands wherever the checker cannot answer (off by default)
+    #[arg(long)]
+    pub experimental_semantic_types: bool,
+
+    /// The `tsc` binary `--experimental-semantic-types` runs, instead of `node_modules/typescript/bin/tsc`
+    #[arg(long, requires = "experimental_semantic_types")]
+    pub tsc_path: Option<String>,
 }
 
 #[derive(clap::ValueEnum, Clone)]
@@ -164,9 +178,13 @@ pub struct InspectArgs {
     /// Source directories to scan [default: ./src]
     #[arg(long, short, value_delimiter = ',')]
     pub src: Vec<String>,
-    /// Load the type declarations props reference from installed packages (off by default)
+    /// Load the type declarations props reference from installed packages (on by default; this flag turns it back on
+    /// over a config that sets `loadDependencies: false`)
     #[arg(long)]
     pub load_dependencies: bool,
+    /// Do not load the type declarations props reference from installed packages
+    #[arg(long, conflicts_with = "load_dependencies")]
+    pub no_load_dependencies: bool,
 
     /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
     #[arg(long, value_enum)]
@@ -182,9 +200,13 @@ pub struct WatchArgs {
     /// Output file to write on each change
     #[arg(long, short)]
     pub out: Option<String>,
-    /// Load the type declarations props reference from installed packages (off by default)
+    /// Load the type declarations props reference from installed packages (on by default; this flag turns it back on
+    /// over a config that sets `loadDependencies: false`)
     #[arg(long)]
     pub load_dependencies: bool,
+    /// Do not load the type declarations props reference from installed packages
+    #[arg(long, conflicts_with = "load_dependencies")]
+    pub no_load_dependencies: bool,
 
     /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
     #[arg(long, value_enum)]
@@ -204,9 +226,13 @@ pub struct CheckArgs {
     /// Machine-readable JSON diagnostics instead of the human-readable table
     #[arg(long, short = 'j')]
     pub json: bool,
-    /// Load the type declarations props reference from installed packages (off by default)
+    /// Load the type declarations props reference from installed packages (on by default; this flag turns it back on
+    /// over a config that sets `loadDependencies: false`)
     #[arg(long)]
     pub load_dependencies: bool,
+    /// Do not load the type declarations props reference from installed packages
+    #[arg(long, conflicts_with = "load_dependencies")]
+    pub no_load_dependencies: bool,
 
     /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
     #[arg(long, value_enum)]
@@ -234,10 +260,6 @@ fn main() -> Result<()> {
             cmd_schema()?;
             0
         }
-        Command::Lsp => {
-            cmd_lsp()?;
-            0
-        }
         Command::Completions(args) => {
             cmd_completions(args)?;
             0
@@ -263,11 +285,7 @@ fn log_filter(verbose: u8) -> Option<&'static str> {
 fn init_tracing(verbose: u8) {
     let Some(filter) = log_filter(verbose) else { return };
     use tracing_subscriber::{fmt, EnvFilter};
-    // stderr, never stdout: `lsp` reserves stdout exclusively for
-    // Content-Length-framed protocol messages — any other byte written there
-    // (a tracing::error!/warn! call firing mid-session) corrupts the
-    // transport and desyncs a real editor's LSP client. stderr is safe for
-    // every command, so this isn't LSP-specific special-casing.
+    // stderr, never stdout: command payloads (JSON, TOON) own stdout, and a tracing line there corrupts them.
     fmt().with_env_filter(EnvFilter::new(filter)).with_writer(std::io::stderr).init();
 }
 

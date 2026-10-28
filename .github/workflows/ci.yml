@@ -212,12 +212,29 @@ jobs:
   changesets:
     name: Changesets
     runs-on: ubuntu-latest
+    # Callisto matches Cargo's plain-text registry response when a version is absent.
+    env:
+      CARGO_TERM_COLOR: never
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/callisto-validate@c3d524d3aba359f5e767007ea76d229e8a291dc3 # callisto@0.12.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@c3d524d3aba359f5e767007ea76d229e8a291dc3 # callisto@0.12.0
+        with:
+          version: callisto@0.12.0
+          verification: require
+      - run: callisto status --check
+      - name: Preview the versioned release plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          preview_dir="${RUNNER_TEMP}/caliper-release-preview"
+          git worktree add --detach "$preview_dir" HEAD
+          trap 'cd "$GITHUB_WORKSPACE"; git worktree remove --force "$preview_dir"' EXIT
+          cd "$preview_dir"
+          callisto version
+          callisto release --dry-run --format text
 
   # The one check to require in branch protection.
   ci:

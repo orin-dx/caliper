@@ -20,12 +20,21 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
     let options = build_options(BuildOptionsArgs {
         src: &args.src,
         cache_dir: args.cache_dir.as_deref(),
+        no_cache: args.no_cache,
         html_attributes,
         config_path,
         extra_builtins: &args.extra_builtins,
         load_dependencies: args.load_dependencies,
+        no_load_dependencies: args.no_load_dependencies,
         collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
+    let mut options = options;
+    if args.experimental_semantic_types {
+        options.experimental_semantic_types = true;
+    }
+    if let Some(path) = &args.tsc_path {
+        options.semantic_tsc_path = Some(path.into());
+    }
 
     let pb = if !quiet && !args.json {
         let pb = ProgressBar::new_spinner();
@@ -37,7 +46,10 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
         None
     };
 
-    let output = caliper_docgen_core::pipeline::extract(&options);
+    let mut output = caliper_docgen_core::pipeline::extract(&options);
+    if options.experimental_semantic_types {
+        apply_semantic_backend(&options, &mut output);
+    }
 
     if let Some(pb) = pb {
         pb.finish_and_clear();
@@ -73,6 +85,34 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
     // than letting the OS reclaim it.
     std::mem::forget(output);
     Ok(exit_code)
+}
+
+/// Resolve the components the structural pass found with TypeScript's checker and merge the answer over `output`. An
+/// unavailable checker leaves `output` as it was, plus one diagnostic.
+fn apply_semantic_backend(
+    options: &caliper_docgen_core::pipeline::PipelineOptions,
+    output: &mut caliper_docgen_core::types::ExtractionOutput,
+) {
+    let project_root = options
+        .src_dirs
+        .first()
+        .and_then(|dir| std::fs::canonicalize(dir).ok())
+        .and_then(|dir| camino::Utf8PathBuf::from_path_buf(dir).ok())
+        .or_else(|| std::env::current_dir().ok().and_then(|dir| camino::Utf8PathBuf::from_path_buf(dir).ok()));
+    let Some(project_root) = project_root else {
+        let outcome = caliper_docgen_core::types::semantic::SemanticOutcome::unavailable("no project directory");
+        caliper_docgen_core::types::semantic::merge_semantic(output, outcome);
+        return;
+    };
+    let mut request =
+        caliper_docgen_semantic::SemanticRequest::new(project_root, caliper_docgen_semantic::targets_of(output));
+    request.tsconfig = options
+        .tsconfig_path
+        .clone()
+        .or_else(|| request.project_root.ancestors().map(|dir| dir.join("tsconfig.json")).find(|file| file.is_file()));
+    request.tsc_path = options.semantic_tsc_path.clone();
+    let outcome = caliper_docgen_semantic::resolve(request);
+    caliper_docgen_core::types::semantic::merge_semantic(output, outcome);
 }
 
 /// `--format rdt`: react-docgen-typescript's shape, shared with the NAPI binding. Like react-docgen-typescript, only

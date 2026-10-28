@@ -45,6 +45,13 @@ function tagLists(tags: Record<string, string>): Record<string, string[]> | unde
   return entries.length > 0 ? Object.fromEntries(entries.map(([tag, value]) => [tag, [value]])) : undefined
 }
 
+/** Says there is no component `name` in `path`, and which ones the file does have. */
+function noComponent(session: DocgenSession, name: string, path: string): string {
+  const names = session.namesIn(path)
+  const choice = names.length > 0 ? `; its components are ${names.join(', ')}` : ''
+  return `caliper-docgen found no component ${name} in ${path}${choice}`
+}
+
 export function createDocgenProvider(
   options: CaliperStorybookOptions = {},
   binding?: SessionBinding,
@@ -55,6 +62,14 @@ export function createDocgenProvider(
     exclude: options.exclude,
     tsconfigPath: options.tsconfigPath && resolve(cwd, options.tsconfigPath),
     skipHtmlProps: options.skipHtmlProps,
+    htmlAttributes: options.htmlAttributes,
+    cache: options.cache,
+    // Richer than Storybook's own docgen by default: caliper-docgen is fast enough to read the dependencies' types.
+    loadDependencies: options.loadDependencies ?? true,
+    collapseInheritedProps: options.collapseInheritedProps ?? 'none',
+    lazy: options.lazy,
+    warmUp: options.warmUp,
+    fillAfter: options.fillAfter,
   }
   // The native binding loads on the first story request, not when Storybook starts the worker.
   let sessionPromise: Promise<DocgenSession> | undefined
@@ -64,29 +79,83 @@ export function createDocgenProvider(
   const resolveMeta = createMetaComponentResolver()
   const fallback = options.fallback ?? 'degraded'
   let extractArgTypes: Promise<ExtractArgTypes> | undefined
+  // A component handed on is reported once, not on every story request that names it.
+  const reported = new Set<string>()
 
-  /** The session key and file of the component `name` (default: `meta.component`) names, or why there is none. */
-  async function component(csf: CsfFile, storyPath: string, name?: string): Promise<{ key: string; path: string }> {
+  function reportFallback(key: string, reason: string): void {
+    if (reported.has(key)) return
+    reported.add(key)
+    logger.warn(`[caliper-docgen] ${key}: ${reason}; Storybook's own docgen answers instead`)
+  }
+
+  /** The session key and file `target`'s component points at, or an error that says what the session had instead. */
+  async function locate(
+    session: DocgenSession,
+    target: CsfFile,
+    storyPath: string,
+  ): Promise<{ key: string; path: string }> {
+    const resolution = resolveMeta(target, storyPath)
+    if ('component' in resolution) {
+      const { path, exportName, localName } = resolution.component
+      if (!path) throw new Error(`no file for the import of ${exportName}`)
+      const key = await session.resolveExport(path, exportName, localName)
+      if (key) return { key, path }
+      throw new Error(noComponent(session, exportName, path))
+    }
+    // Storybook reads `Namespace.Member` only for `import * as Namespace`; `Select.Option` of a named import is common.
+    const member = memberComponent(session, target, storyPath)
+    if (member) return member
+    throw new Error(`meta.component: ${resolution.reason}`)
+  }
+
+  /** The sub-component a `Namespace.Member` expression names, when `Namespace` is a named or default import. */
+  function memberComponent(
+    session: DocgenSession,
+    csf: CsfFile,
+    storyPath: string,
+  ): { key: string; path: string } | undefined {
+    const node = csf._metaAnnotations.component as
+      | {
+          type?: string
+          computed?: boolean
+          object?: { type?: string; name?: string }
+          property?: { type?: string; name?: string }
+        }
+      | undefined
+    if (node?.type !== 'MemberExpression' || node.computed) return undefined
+    if (node.object?.type !== 'Identifier' || !node.object.name || !node.property?.name) return undefined
+    const owner = resolveMeta(
+      { _metaAnnotations: { component: node.object }, _file: csf._file } as unknown as CsfFile,
+      storyPath,
+    )
+    if (!('component' in owner) || !owner.component.path) return undefined
+    const { path, exportName, localName } = owner.component
+    const key = session.keyOfMember([localName, exportName], node.property.name, path)
+    return key ? { key, path } : undefined
+  }
+
+  /**
+   * The session key, file and documentation of the component `name` (default: `meta.component`) names, or why there
+   * is none. The caller has brought the session up to date for this request.
+   */
+  async function component(
+    csf: CsfFile,
+    storyPath: string,
+    name?: string,
+  ): Promise<{ key: string; path: string; doc: RdtComponentDoc }> {
     const target = name
       ? ({ _metaAnnotations: { component: expressionFor(name) }, _file: csf._file } as unknown as CsfFile)
       : csf
-    const resolution = resolveMeta(target, storyPath)
-    if (!('component' in resolution)) throw new Error(`meta.component: ${resolution.reason}`)
-    const { path, exportName } = resolution.component
-    if (!path) throw new Error(`no file for the import of ${exportName}`)
     const session = await getSession()
-    await session.fresh()
-    const key = session.keyOf(path, exportName)
-    if (!key) throw new Error(`caliper-docgen found no component ${exportName} in ${path}`)
-    if (fallback === 'degraded' && session.degraded(key)) throw new Error(`${key}'s props may be incomplete`)
-    return { key, path }
-  }
-
-  async function docgen(key: string): Promise<RdtComponentDoc> {
-    const session = await getSession()
-    const doc = session.docgenInfo(key)
-    if (!doc) throw new Error(`${key} left the session`)
-    return doc
+    const { key, path } = await locate(session, target, storyPath)
+    const { doc, degradedBy } = session.documentation(key)
+    if (fallback === 'degraded' && degradedBy.length > 0) {
+      const reason = degradedBy.join('; ')
+      reportFallback(key, reason)
+      throw new Error(`${key}'s props may be incomplete: ${reason}`)
+    }
+    if (!doc) throw new Error(noComponent(session, key, path))
+    return { key, path, doc }
   }
 
   async function argTypes(doc: RdtComponentDoc): Promise<DocgenPayload['argTypes']> {
@@ -99,8 +168,7 @@ export function createDocgenProvider(
     { name, componentName }: { name: string; componentName: string },
   ): Promise<Subcomponent> {
     try {
-      const { key, path } = await component(csf, storyPath, componentName)
-      const doc = await docgen(key)
+      const { path, doc } = await component(csf, storyPath, componentName)
       const { description, summary, jsDocTags } = extractComponentDescription(
         undefined,
         doc.description || undefined,
@@ -121,8 +189,10 @@ export function createDocgenProvider(
     const storyPath = resolve(cwd, importPath)
     const code = await readFile(storyPath, 'utf8')
     const csf = loadCsf(code, { fileName: storyPath, makeTitle: () => entry.title }).parse()
-    const { key } = await component(csf, storyPath)
-    const doc = await docgen(key)
+    // One look at the files for the story and its subcomponents: they are all answered from the same moment.
+    const session = await getSession()
+    await session.fresh()
+    const { doc } = await component(csf, storyPath)
     const { description, summary, jsDocTags } = extractComponentDescription(
       extractDescription(csf._metaStatement) || undefined,
       doc.description || undefined,

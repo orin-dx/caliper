@@ -839,6 +839,50 @@ expression: value
           "parent": null,
           "declarations": []
         },
+        "colorScheme": {
+          "name": "colorScheme",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "The color scheme to use, maps to a key in `theme.colors`.\nCommon values: `'blue'`, `'green'`, `'red'`, `'gray'`, `'teal'`, etc.",
+          "tags": {},
+          "parent": {
+            "name": "ThemingProps",
+            "fileName": "[ROOT]/fixtures/chakra/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ThemingProps",
+              "fileName": "[ROOT]/fixtures/chakra/Button.d.ts"
+            }
+          ]
+        },
+        "isAttached": {
+          "name": "isAttached",
+          "type": {
+            "kind": "boolean"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "",
+          "tags": {},
+          "parent": null,
+          "declarations": []
+        },
+        "isDisabled": {
+          "name": "isDisabled",
+          "type": {
+            "kind": "boolean"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "",
+          "tags": {},
+          "parent": null,
+          "declarations": []
+        },
         "mx": {
           "name": "mx",
           "type": {
@@ -898,6 +942,89 @@ expression: value
           "tags": {},
           "parent": null,
           "declarations": []
+        },
+        "size": {
+          "name": "size",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "The size of the component as defined in the component theme.\nCommon values: `'xs'`, `'sm'`, `'md'`, `'lg'`.",
+          "tags": {},
+          "parent": {
+            "name": "ThemingProps",
+            "fileName": "[ROOT]/fixtures/chakra/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ThemingProps",
+              "fileName": "[ROOT]/fixtures/chakra/Button.d.ts"
+            }
+          ]
+        },
+        "spacing": {
+          "name": "spacing",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "",
+          "tags": {},
+          "parent": null,
+          "declarations": []
+        },
+        "styleConfig": {
+          "name": "styleConfig",
+          "type": {
+            "kind": "named",
+            "name": "Record",
+            "args": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "unknown"
+              }
+            ]
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "",
+          "tags": {
+            "internal": "Used for type inference on the theme component key."
+          },
+          "parent": {
+            "name": "ThemingProps",
+            "fileName": "[ROOT]/fixtures/chakra/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ThemingProps",
+              "fileName": "[ROOT]/fixtures/chakra/Button.d.ts"
+            }
+          ]
+        },
+        "variant": {
+          "name": "variant",
+          "type": {
+            "kind": "string"
+          },
+          "required": false,
+          "defaultValue": null,
+          "description": "The visual variant of the component as defined in the component theme.\nCommon built-in values: `'solid'`, `'outline'`, `'ghost'`, `'link'`.",
+          "tags": {},
+          "parent": {
+            "name": "ThemingProps",
+            "fileName": "[ROOT]/fixtures/chakra/Button.d.ts"
+          },
+          "declarations": [
+            {
+              "name": "ThemingProps",
+              "fileName": "[ROOT]/fixtures/chakra/Button.d.ts"
+            }
+          ]
         }
       },
       "inheritance": [
@@ -3393,7 +3520,7 @@ expression: value
     "componentsExtracted": 8,
     "componentsSkipped": 0,
     "filesParsed": 3,
-    "dtsFilesParsed": 4,
+    "dtsFilesParsed": 8,
     "dtsCacheHits": 0,
     "durationMs": 0,
     "tier1Count": 0,

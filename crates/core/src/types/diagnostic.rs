@@ -147,6 +147,9 @@ pub enum DiagnosticCode {
     /// `@types/react` or a TypeScript `lib.*.d.ts` file the run needs could not be found, as opposed to a type or
     /// import in the user's own code that failed to resolve.
     MissingTypeLibrary,
+    /// The experimental TypeScript checker backend (`--experimental-semantic-types`) could not answer for the run or
+    /// for a component, so the structural result stands. The message says why.
+    SemanticBackend,
 }
 
 #[cfg(test)]
