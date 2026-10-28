@@ -1,4 +1,4 @@
-# Pinned to callisto 0.12.0 in .github/workflows/release.yml.
+# Pinned to callisto 0.16.0 in .github/workflows/release.yml.
 
 # `match` is a package name ("<ecosystem>/<name>"), never a directory path.
 # Root package.json is `caliper-docgen-workspace` so bare `caliper-docgen` stays unambiguous.
