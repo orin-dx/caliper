@@ -90,7 +90,7 @@ fn function_components_get_the_checkers_props_merged_over_the_structural_ones() 
         prop(&output, "Button", "onClick").prop_type,
         PropType::Function {
             type_params: vec![],
-            params: vec![FunctionParam { name: Some("event".to_string()), param_type: PropType::Number }],
+            params: vec![FunctionParam::new(Some("event".to_string()), PropType::Number)],
             return_type: Box::new(PropType::Void),
         }
     );

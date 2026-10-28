@@ -234,10 +234,10 @@ fn render_props(args: &[PropType]) -> Vec<ParsedProp> {
             value.clone(),
             PropType::Function {
                 type_params: vec![],
-                params: vec![FunctionParam {
-                    name: Some("values".into()),
-                    param_type: PropType::Named { name: state.clone().into(), args: vec![] },
-                }],
+                params: vec![FunctionParam::new(
+                    Some("values".into()),
+                    PropType::Named { name: state.clone().into(), args: vec![] },
+                )],
                 return_type: Box::new(value),
             },
         ])

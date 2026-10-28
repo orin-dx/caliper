@@ -40,7 +40,7 @@ pub enum PropType {
     Tuple(Vec<PropType>), Object(Vec<ObjectField>),
     Named { name: TypeName, args: Vec<PropType> },
     ReactNode, CssProperties,
-    Function { type_params: Vec<String>, params: Vec<FunctionParam>, return_type: Box<PropType> },
+    Function { type_params: Vec<String>, params: Vec<FunctionParam>, return_type: Box<PropType> }, // FunctionParam: name, type, optional, rest (ADR 0023)
     Ref { element: Option<String> },
     ElementType,
     HtmlAttributes { element: String, omitted: Vec<String> },
@@ -287,4 +287,4 @@ This is also _why_ `CollectedObjectField` (collected.rs:469-475) still plainly d
 
 ## Known gaps (cross-referenced, not re-derived)
 
-- `docs/edge-cases.md` P0-1: `known.rs` shortcut lookup-precedence is inconsistent between `resolver/named.rs` (source-defined types checked first, correct) and `resolver/chain.rs`'s `extends`-clause path (hardcoded shortcuts checked first) — a project defining its own `interface SxProps {...}` and extending it gets silently replaced by the hardcoded MUI opaque shape. This is a resolver call-site bug, not a `types/` shape problem, but it's the kind of thing that would be invisible without knowing `OpaqueDetail::new`'s two call sites (`known.rs` vs. resolver `give_up` sites) both ultimately produce the same `PropType::Opaque` shape — you can't tell from the _type_ alone which path produced a given opaque value.
+- `known.rs` shortcut lookup precedence once differed between `resolver/named.rs` (source-defined types first) and `resolver/chain.rs`'s `extends`-clause path (hardcoded shortcuts first), so a project's own `interface SxProps {...}` was silently replaced by the hardcoded MUI opaque shape; both now share `resolver/precedence.rs` (see `resolver-type-resolution.md`). It was a resolver call-site bug, not a `types/` shape problem, but it's the kind of thing that would be invisible without knowing `OpaqueDetail::new`'s two call sites (`known.rs` vs. resolver `give_up` sites) both ultimately produce the same `PropType::Opaque` shape — you can't tell from the _type_ alone which path produced a given opaque value.
