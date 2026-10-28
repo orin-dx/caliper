@@ -381,16 +381,14 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 if is_pascal_case(name) && declaration && self.function_depth > 0 {
                     let typed = func.params.items.first().is_some_and(|p| p.type_annotation.is_some());
                     let shape = super::evidence::FunctionShape::of_function(func);
-                    if typed && super::evidence::renders(&shape, &|n| self.may_be_react(n)).is_ok() {
+                    if typed && super::evidence::renders(&shape, &*self).is_ok() {
                         self.skip_local_component(name, func.span);
                     }
                 } else if is_pascal_case(name) && declaration {
                     if let Some(first_param) = func.params.items.first() {
                         if let Some(type_ann) = &first_param.type_annotation {
                             if let Err(reason) =
-                                super::evidence::renders(&super::evidence::FunctionShape::of_function(func), &|n| {
-                                    self.may_be_react(n)
-                                })
+                                super::evidence::renders(&super::evidence::FunctionShape::of_function(func), &*self)
                             {
                                 // A `declare function` with a non-element return type is an API declaration, not a
                                 // component that failed to qualify: lib.dom.d.ts alone declares dozens of them.
