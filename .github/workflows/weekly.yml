@@ -1,0 +1,99 @@
+name: Weekly
+
+# Caliper, react-docgen-typescript and react-docgen on five public repos with their dependencies installed: time,
+# memory and recall (docs/measurement.md). It compares with last week's record and opens or updates one issue when
+# Caliper got slower, bigger or less complete. It never runs on a pull request and never fails one.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  weekly:
+    name: Weekly
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: rust
+        run: echo "version=$(sed -n 's/^rust = "\(.*\)"/\1/p' .prototools)" >> "$GITHUB_OUTPUT"
+      - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+      # The corpora's own package managers run under Node 24: Yarn 4.18, which Mantine and React Spectrum pin, crashes
+      # under the repository's Node 26 ("Dynamic require of "util" is not supported"). This step comes before the
+      # toolchain's so that the toolchain's Node stays first on PATH for everything else; only the installs use this one.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - id: corpus-node
+        run: echo "dir=$(dirname "$(command -v node)")" >> "$GITHUB_OUTPUT"
+      # RDT, react-docgen and the oracle run from apps/validate's dependencies.
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+        with:
+          auto-install: true
+      - uses: orin-dx/actions/setup-pnpm-cache@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+      - run: pnpm install --frozen-lockfile
+      - run: cargo build --release --locked -p caliper-docgen
+      # About 10 GB of installed node_modules is too large to cache; the package managers' stores are not.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .corpora/caches
+          key: weekly-${{ hashFiles('scripts/corpora.py', 'pnpm-lock.yaml') }}
+      # A corpus that fails to install is named in the log with the tail of the install log; the others still install.
+      - name: Fetch and install the corpora
+        env:
+          INSTALL_NODE_DIR: ${{ steps.corpus-node.outputs.dir }}
+        run: python3 scripts/corpora.py setup --install-node-dir "$INSTALL_NODE_DIR"
+      - name: Fetch last week's record
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(gh run list --workflow weekly.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          if [ -n "$id" ]; then gh run download "$id" --name weekly --dir previous; fi
+      - name: Measure
+        run: >-
+          python3 scripts/weekly.py --bin target/release/caliper-docgen --oracle --previous previous/weekly.json
+          --out weekly.json --markdown weekly.md --issue issue.md
+      - if: always()
+        run: cat weekly.md >> "$GITHUB_STEP_SUMMARY" || true
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: weekly
+          path: |
+            weekly.json
+            weekly.md
+            .corpora/logs
+          if-no-files-found: ignore
+      - name: Open or update the issue
+        if: ${{ hashFiles('issue.md') != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create weekly-measurement --description "Caliper got worse in the weekly record" --color D93F0B 2>/dev/null || true
+          existing=$(gh issue list --label weekly-measurement --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file issue.md
+          else
+            gh issue create --title "The weekly record got worse" --label weekly-measurement --body-file issue.md
+          fi

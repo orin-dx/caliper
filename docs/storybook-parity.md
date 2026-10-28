@@ -4,7 +4,7 @@
 
 ```bash
 pnpm --filter caliper-docgen-storybook build
-node packages/storybook/scripts/storybook-parity.mjs --corpora .parity/repos --sample 120 --out report/storybook-parity
+node packages/storybook/scripts/storybook-parity.mjs --corpora .corpora/repos --sample 120 --out report/storybook-parity
 ```
 
 Output: `<out>.json` (every number) and `<out>.md` (tables). Storybook writes its cache into each corpus's `node_modules/.cache`, so the run needs write access there.

@@ -1,7 +1,7 @@
-// react-docgen-typescript on one parity corpus (scripts/parity.py): every component's props with their declaring file,
-// plus RDT's own wall time and peak RSS. RDT comes from apps/validate, with the options its harness uses.
+// react-docgen-typescript on one corpus (scripts/weekly.py): every component's props with their declaring file, plus
+// RDT's own wall time and peak RSS. RDT comes from apps/validate, with the options its harness uses.
 //
-// Usage: node scripts/parity-rdt.mjs <file-list> <tsconfig> <out.json>
+// Usage: node scripts/rdt.mjs <file-list> <tsconfig> <out.json>
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
@@ -11,7 +11,7 @@ const { withCustomConfig } = require('react-docgen-typescript')
 
 const [listFile, tsconfig, out] = process.argv.slice(2)
 if (!out) {
-  console.error('usage: node scripts/parity-rdt.mjs <file-list> <tsconfig> <out.json>')
+  console.error('usage: node scripts/rdt.mjs <file-list> <tsconfig> <out.json>')
   process.exit(2)
 }
 const files = readFileSync(listFile, 'utf8').split('\n').filter(Boolean)
