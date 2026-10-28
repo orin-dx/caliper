@@ -3854,10 +3854,7 @@ export function List(props: {
         props["onPick"].prop_type,
         PropType::Function {
             type_params: vec![],
-            params: vec![FunctionParam {
-                name: Some("names".into()),
-                param_type: PropType::Array(Box::new(PropType::String))
-            }],
+            params: vec![FunctionParam::new(Some("names".into()), PropType::Array(Box::new(PropType::String)))],
             return_type: Box::new(PropType::Void),
         }
     );
@@ -3903,4 +3900,76 @@ export function ExtendedCard(props: Extended) { return <div>{props.label}</div>;
     )]);
     assert_eq!(prop_names(&output, "AliasCard"), ["label"]);
     assert_eq!(prop_names(&output, "ExtendedCard"), ["label"]);
+}
+
+// ── Optional and rest parameters survive into the output type ─────────────
+
+fn function_params(output: &ExtractionOutput, component: &str, prop: &str) -> Vec<FunctionParam> {
+    match &output.components[component].props[prop].prop_type {
+        PropType::Function { params, .. } => params.clone(),
+        other => panic!("expected a function type for {component}.{prop}, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_function_prop_keeps_its_optional_and_rest_parameters() {
+    let output = extract_one(&[(
+        "Menu.tsx",
+        r#"
+export function Menu(props: {
+    onChange?: (value: string, extra?: number, ...rest: boolean[]) => void;
+    onClose: (...args: any[]) => void;
+}) { return null; }
+"#,
+    )]);
+
+    let flags = |params: &[FunctionParam]| {
+        params.iter().map(|p| (p.name.clone().unwrap_or_default(), p.optional, p.rest)).collect::<Vec<_>>()
+    };
+    assert_eq!(
+        flags(&function_params(&output, "Menu", "onChange")),
+        [("value".to_owned(), false, false), ("extra".to_owned(), true, false), ("rest".to_owned(), false, true)]
+    );
+    assert_eq!(flags(&function_params(&output, "Menu", "onClose")), [("args".to_owned(), false, true)]);
+    assert_eq!(
+        output.components["Menu"].props["onChange"].prop_type.raw_string(),
+        "(value: string, extra?: number, ...rest: boolean[]) => void"
+    );
+    assert_eq!(output.components["Menu"].props["onClose"].prop_type.raw_string(), "(...args: any[]) => void");
+}
+
+#[test]
+fn a_method_signature_keeps_its_optional_and_rest_parameters() {
+    let output = extract_one(&[(
+        "Tabs.tsx",
+        r#"
+interface TabsProps {
+    onSelect(key: string, more?: number, ...tail: string[]): void;
+}
+export function Tabs(props: TabsProps) { return null; }
+"#,
+    )]);
+
+    assert_eq!(
+        output.components["Tabs"].props["onSelect"].prop_type.raw_string(),
+        "(key: string, more?: number, ...tail: string[]) => void"
+    );
+}
+
+#[test]
+fn a_destructured_parameter_stays_unnamed_next_to_an_optional_one() {
+    let output = extract_one(&[(
+        "Row.tsx",
+        r#"
+export function Row(props: { render: ({ id }: { id: string }, index?: number) => void }) { return null; }
+"#,
+    )]);
+
+    let params = function_params(&output, "Row", "render");
+    assert_eq!((params[0].name.clone(), params[0].optional, params[0].rest), (None, false, false));
+    assert_eq!((params[1].name.clone(), params[1].optional, params[1].rest), (Some("index".to_owned()), true, false));
+    assert_eq!(
+        output.components["Row"].props["render"].prop_type.raw_string(),
+        "(__0: { id: string }, index?: number) => void"
+    );
 }

@@ -98,10 +98,7 @@ pub(super) fn infer_html_attr_prop_type(attr_name: &str) -> PropType {
         | "onReset" | "onLoad" | "onError" | "onPress" | "onPressStart" | "onPressEnd" | "onHoverStart"
         | "onHoverEnd" | "onFocusChange" | "onPressChange" => PropType::Function {
             type_params: vec![],
-            params: vec![FunctionParam {
-                name: Some("e".into()),
-                param_type: PropType::Named { name: "Event".into(), args: vec![] },
-            }],
+            params: vec![FunctionParam::new(Some("e".into()), PropType::Named { name: "Event".into(), args: vec![] })],
             return_type: Box::new(PropType::Void),
         },
         "disabled" | "readOnly" | "required" | "checked" | "multiple" | "noValidate" | "autoFocus" | "fullWidth"

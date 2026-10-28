@@ -16,6 +16,9 @@ function workerOptions(options: CaliperStorybookOptions): CaliperStorybookOption
     lazy,
     warmUp,
     fillAfter,
+    semanticTypes,
+    tscPath,
+    semanticWaitMs,
     fallback,
   } = options
   return {
@@ -30,6 +33,9 @@ function workerOptions(options: CaliperStorybookOptions): CaliperStorybookOption
     lazy,
     warmUp,
     fillAfter,
+    semanticTypes,
+    tscPath,
+    semanticWaitMs,
     fallback,
   }
 }

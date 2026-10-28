@@ -234,6 +234,21 @@ describe('DocgenSession.fresh', () => {
     expect(seen[1]).toMatchObject({ htmlAttributes: 'full' })
   })
 
+  it('asks the binding for an on-demand checker only when told to, with the binary and the wait', async () => {
+    const fake = new FakeBinding({})
+    const seen: unknown[] = []
+    fake.createSession = ((options: unknown) => (seen.push(options), 7)) as never
+    await new DocgenSession({ srcDirs: [src] }, fake).fresh()
+    await new DocgenSession(
+      { srcDirs: [src], semanticTypes: 'on-demand', tscPath: '/opt/ts/bin/tsc', semanticWaitMs: 80 },
+      fake,
+    ).fresh()
+    expect(seen).toMatchObject([
+      { semanticTypes: undefined, tscPath: undefined, semanticWaitMs: undefined },
+      { semanticTypes: 'on-demand', tscPath: '/opt/ts/bin/tsc', semanticWaitMs: 80 },
+    ])
+  })
+
   it('turns the on-disk caches off when told to, and leaves them to the binding otherwise', async () => {
     const fake = new FakeBinding({})
     const seen: unknown[] = []

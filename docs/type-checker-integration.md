@@ -82,6 +82,12 @@ Chakra's time is `tsc` computing 470,000 shared props' types, not round trips. B
 
 Against the oracle (`scripts/parity.py oracle`, flag on, `7.1.0-beta`), wrong verdicts fall to 0.0% on every corpus but antd (0.1%), but the identical-or-spelled share also falls: mantine 91.3% to 22.0%, chakra 100% to 16.4%, shadcn 85.2% to 52.3%, antd 91.9% to 82.3%, spectrum 83.2% to 28.3%. The oracle credits the structural result for keeping a type's name (`StyleProp<MantineSpacing>`); the checker's answer is expanded to its members and compared as "less precise". Keeping the alias name and arguments needs a `PropType` that carries them, which is an output change.
 
+## On demand, per component (experimental, off by default)
+
+A long-lived session (the Storybook addon, the lazy `WatchSession`) can attach a warm checker instead of running the whole-project pass above: `semanticTypes: 'on-demand'` (ADR 0022). `caliper-docgen-semantic` keeps one `tsc --api` process on its own thread, builds a program rooted at only the requested component's file, and returns its props. `WatchSession::component` merges them into the structural answer by name (the checker's type wins, a structural prop the checker did not return stays, and `htmlAttributes` applies once after the merge, as in the structural pass) when they arrive within `semanticWaitMs` (default 150 ms); otherwise it returns the structural answer plus an `Info` diagnostic, and the checker's late answer serves the next request of the same, unedited file.
+
+Measured with `crates/semantic/examples/ondemand_bench.rs` (50 random components, TypeScript 7.1.0-beta): the first answer takes 82 to 137 ms (Chakra 703 ms), a component asked for alone 21 to 41 ms (Chakra 534 ms), and 2 to 9 ms when asked for in batches of 8 to 32. Where the structural pass is behind (shadcn) the checker reports 2.3 times the props; where it is not (Mantine, Chakra, Spectrum) it reports the same count. The in-memory cache, the 64-program process replacement and the failure modes are in the ADR.
+
 ## The algorithm
 
 Mirrors RDT 2.4.0 (`lib/parser.js`). Method names are from the 7.1 client.

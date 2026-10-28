@@ -19,7 +19,7 @@ use rustc_hash::FxHashSet;
 use crate::types::LexedExport;
 use crate::types::{
     CollectedObjectField, CollectedType, CollectedTypeAlias, Diagnostic, DiagnosticCode, DiagnosticSeverity,
-    ExtendsRef, RawProp, SourceData,
+    ExtendsRef, ParamKind, RawProp, SourceData,
 };
 
 mod alias;
@@ -716,25 +716,15 @@ impl<'src> SourceDataCollector<'src> {
 
             TSType::TSFunctionType(f) => {
                 // In OXC 0.135, FormalParameter has type_annotation as a separate field
-                let params: Vec<CollectedType> = f
-                    .params
-                    .items
-                    .iter()
-                    .map(|p| {
-                        p.type_annotation
-                            .as_ref()
-                            .map(|ta| self.ts_type_to_collected_at_depth(&ta.type_annotation, depth + 1))
-                            .unwrap_or(CollectedType::Any)
-                    })
-                    .collect();
-                let param_names: Vec<Option<CompactString>> =
-                    f.params.items.iter().map(|p| binding_pattern_name(&p.pattern)).collect();
+                let (params, param_names, param_kinds) =
+                    collect_params(&f.params, |t| self.ts_type_to_collected_at_depth(t, depth + 1));
                 // return_type on TSFunctionType is Box<TSTypeAnnotation> (not Option)
                 let return_type = self.ts_type_to_collected_at_depth(&f.return_type.type_annotation, depth + 1);
                 CollectedType::Function {
                     type_params: type_param_names(f.type_parameters.as_deref()),
                     params,
                     param_names,
+                    param_kinds,
                     return_type: Box::new(return_type),
                 }
             }
@@ -879,19 +869,8 @@ impl<'src> SourceDataCollector<'src> {
             }
             TSSignature::TSMethodSignature(sig) => {
                 let name = sig.key.static_name()?.to_string();
-                let params: Vec<CollectedType> = sig
-                    .params
-                    .items
-                    .iter()
-                    .map(|p| {
-                        p.type_annotation
-                            .as_ref()
-                            .map(|ta| self.ts_type_to_collected_at_depth(&ta.type_annotation, depth + 1))
-                            .unwrap_or(CollectedType::Any)
-                    })
-                    .collect();
-                let param_names: Vec<Option<CompactString>> =
-                    sig.params.items.iter().map(|p| binding_pattern_name(&p.pattern)).collect();
+                let (params, param_names, param_kinds) =
+                    collect_params(&sig.params, |t| self.ts_type_to_collected_at_depth(t, depth + 1));
                 let return_type = sig
                     .return_type
                     .as_ref()
@@ -903,6 +882,7 @@ impl<'src> SourceDataCollector<'src> {
                         type_params: type_param_names(sig.type_parameters.as_deref()),
                         params,
                         param_names,
+                        param_kinds,
                         return_type: Box::new(return_type),
                     },
                     required: !sig.optional,
@@ -1041,19 +1021,7 @@ impl<'src> SourceDataCollector<'src> {
             TSSignature::TSMethodSignature(ms) => {
                 let name = ms.key.static_name()?.to_string();
                 let (description, tags) = self.find_jsdoc_with_tags(ms.span.start);
-                let params: Vec<CollectedType> = ms
-                    .params
-                    .items
-                    .iter()
-                    .map(|p| {
-                        p.type_annotation
-                            .as_ref()
-                            .map(|ta| self.ts_type_to_collected(&ta.type_annotation))
-                            .unwrap_or(CollectedType::Any)
-                    })
-                    .collect();
-                let param_names: Vec<Option<CompactString>> =
-                    ms.params.items.iter().map(|p| binding_pattern_name(&p.pattern)).collect();
+                let (params, param_names, param_kinds) = collect_params(&ms.params, |t| self.ts_type_to_collected(t));
                 let return_type = ms
                     .return_type
                     .as_ref()
@@ -1065,6 +1033,7 @@ impl<'src> SourceDataCollector<'src> {
                         type_params: type_param_names(ms.type_parameters.as_deref()),
                         params,
                         param_names,
+                        param_kinds,
                         return_type: Box::new(return_type),
                     },
                     required: !ms.optional,
@@ -1091,6 +1060,28 @@ fn type_param_names(declaration: Option<&TSTypeParameterDeclaration>) -> Vec<Com
     declaration
         .map(|d| d.params.iter().map(|p| CompactString::from(p.name.name.as_str())).collect())
         .unwrap_or_default()
+}
+
+/// A signature's parameters as collected: their types, simple names and kinds, with the rest parameter last.
+/// OXC keeps `...rest` apart from the other parameters, and its annotation is the array type as written.
+fn collect_params(
+    params: &FormalParameters,
+    mut convert: impl FnMut(&TSType) -> CollectedType,
+) -> (Vec<CollectedType>, Vec<Option<CompactString>>, Vec<ParamKind>) {
+    let mut types = Vec::with_capacity(params.items.len() + 1);
+    let mut names = Vec::with_capacity(params.items.len() + 1);
+    let mut kinds = Vec::with_capacity(params.items.len() + 1);
+    for p in &params.items {
+        types.push(p.type_annotation.as_ref().map(|ta| convert(&ta.type_annotation)).unwrap_or(CollectedType::Any));
+        names.push(binding_pattern_name(&p.pattern));
+        kinds.push(ParamKind::new(p.optional, false));
+    }
+    if let Some(rest) = &params.rest {
+        types.push(rest.type_annotation.as_ref().map(|ta| convert(&ta.type_annotation)).unwrap_or(CollectedType::Any));
+        names.push(binding_pattern_name(&rest.rest.argument));
+        kinds.push(ParamKind::Rest);
+    }
+    (types, names, kinds)
 }
 
 /// A parameter's simple identifier name, if it has one (not a destructured pattern).

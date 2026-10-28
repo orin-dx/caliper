@@ -4,8 +4,11 @@ import type * as Napi from 'caliper-docgen-napi'
 import type { Diagnostic, IncrementalUpdate, RdtComponentDoc, SessionIndex } from 'caliper-docgen-napi'
 import { declaresExport, localNameOf } from './exports.js'
 import { Fill } from './fill.js'
+import { toNapiOptions, type SessionOptions } from './options.js'
 import { buildLookups, diagnosticId, incompleteMessages, type ComponentRef, type Lookups } from './lookups.js'
 import { assertSchemaVersion, expandDiagnostics } from './schema.js'
+
+export type { SessionOptions } from './options.js'
 
 /** The binding calls the session makes, so tests can stand in for the native module. */
 export type SessionBinding = Pick<
@@ -18,35 +21,6 @@ export type SessionBinding = Pick<
   | 'sessionWarmUp'
   | 'closeSession'
 >
-
-export interface SessionOptions {
-  /** Absolute source directories. */
-  srcDirs: string[]
-  exclude?: string[]
-  tsconfigPath?: string
-  skipHtmlProps?: boolean
-  htmlAttributes?: Napi.JsExtractOptions['htmlAttributes']
-  /** Read and write the on-disk caches. Default: `true`. */
-  cache?: boolean
-  loadDependencies?: boolean
-  collapseInheritedProps?: Napi.JsExtractOptions['collapseInheritedProps']
-  /**
-   * Resolve a component when a story asks for it rather than every component at start. Default: `true`. The answers
-   * are the same; a session that serves a few components of many starts and holds less.
-   */
-  lazy?: boolean
-  /**
-   * After a lazy session starts, resolve a few components in the background so the dependency declarations and memos
-   * the stories share are loaded before the first one asks. Default: `false`: measured against the same stories, it
-   * did not make the first story faster, because the warm-up and the story compete for the same threads.
-   */
-  warmUp?: boolean
-  /**
-   * Once this many distinct components were asked for, resolve the rest in one background pass. Default: `0`, never:
-   * it lowers the median story latency but raises peak memory by 170 to 420 MB.
-   */
-  fillAfter?: number
-}
 
 /** How many components the background warm-up resolves, spread over the project. */
 const WARM_UP_COMPONENTS = 8
@@ -89,16 +63,7 @@ export class DocgenSession {
   }
 
   private napiOptions(): Napi.JsExtractOptions {
-    return {
-      srcDirs: this.options.srcDirs,
-      exclude: this.options.exclude,
-      tsconfigPath: this.options.tsconfigPath,
-      htmlAttributes: this.options.htmlAttributes ?? (this.options.skipHtmlProps ? 'none' : undefined),
-      cache: this.options.cache,
-      loadDependencies: this.options.loadDependencies,
-      collapseInheritedProps: this.options.collapseInheritedProps,
-      lazy: this.lazy,
-    }
+    return toNapiOptions(this.options, this.lazy)
   }
 
   private get lazy(): boolean {

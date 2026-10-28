@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { SUPPORTED_SCHEMA_VERSION } from '../../src/schema.js'
 
 const SNAPSHOT = JSON.stringify({
-  schemaVersion: 2,
+  schemaVersion: SUPPORTED_SCHEMA_VERSION,
   components: { Button: { displayName: 'Button', filePath: '/project/src/Button.tsx' } },
   enums: {},
   diagnostics: [],
@@ -23,7 +24,7 @@ const component = (displayName: string, description = '') => ({
 
 const update = (revision: number, updated: string[], removed: string[] = [], description = '') =>
   JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: SUPPORTED_SCHEMA_VERSION,
     revision,
     updatedComponents: updated.map((name) => component(name, description)),
     props: {},
@@ -660,7 +661,7 @@ describe('caliperDocgen', () => {
       code: 'x',
     })
     const output = JSON.stringify({
-      schemaVersion: 2,
+      schemaVersion: SUPPORTED_SCHEMA_VERSION,
       components: {},
       enums: {},
       stats: {},

@@ -45,6 +45,10 @@ export interface FunctionParam {
   /** `null` for a destructured parameter. */
   name: string | null
   type: PropType
+  /** The parameter is written `name?: T`. Absent when false. */
+  optional?: boolean
+  /** The parameter is the rest parameter `...name: T[]`; `type` is the array type as written. Absent when false. */
+  rest?: boolean
 }
 
 export interface ObjectField {
