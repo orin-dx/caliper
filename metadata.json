@@ -1,0 +1,45 @@
+{
+  "cli_version": "0.12.3-nightly.202610261136.c4f103d8d",
+  "checkpoint_id": "01M60GT3J7055G8XP5X2N7PB91",
+  "strategy": "manual-commit",
+  "branch": "ci/stop-notifying-the-tap",
+  "checkpoints_count": 4,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 56,
+    "cache_creation_tokens": 43894,
+    "cache_read_tokens": 9932370,
+    "output_tokens": 14759,
+    "api_call_count": 27,
+    "subagent_tokens": {
+      "input_tokens": 102,
+      "cache_creation_tokens": 61186,
+      "cache_read_tokens": 22395569,
+      "output_tokens": 31743,
+      "api_call_count": 51
+    }
+  },
+  "redaction": {
+    "replacements": 1319,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 1319,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}

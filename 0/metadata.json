@@ -1,0 +1,188 @@
+{
+  "cli_version": "0.12.3-nightly.202610261136.c4f103d8d",
+  "checkpoint_id": "01M60GT3J7055G8XP5X2N7PB91",
+  "session_id": "ba6a68d6-c702-4382-ab2f-60cd0f6af675",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-28T05:48:26.052173Z",
+  "branch": "ci/stop-notifying-the-tap",
+  "checkpoints_count": 4,
+  "save_step_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "551ff17d4cc6",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 56,
+    "cache_creation_tokens": 43894,
+    "cache_read_tokens": 9932370,
+    "output_tokens": 14759,
+    "api_call_count": 27,
+    "subagent_tokens": {
+      "input_tokens": 102,
+      "cache_creation_tokens": 61186,
+      "cache_read_tokens": 22395569,
+      "output_tokens": 31743,
+      "api_call_count": 51
+    }
+  },
+  "redaction": {
+    "replacements": 1319,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 1319,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01QchtZUzPN3PMVrg8Gy3ykV",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "vanguard:research"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "759066964e9a",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 6111,
+        "end": 6112,
+        "entry_ids": [
+          "255a129b-35bc-4cc3-9675-402f9d83f595"
+        ],
+        "tool_use_id": "toolu_01QchtZUzPN3PMVrg8Gy3ykV"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01QchtZUzPN3PMVrg8Gy3ykV"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: vanguard:research",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": ".claude/worktrees/release-0.2.0:adr"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "759066964e9a",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 40539,
+        "end": 40540,
+        "entry_ids": [
+          "0a2d086d-18f7-41f9-b6a6-3a37c42b1182"
+        ],
+        "tool_use_id": "toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: .claude/worktrees/release-0.2.0:adr",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 29
+  },
+  "summary": {
+    "intent": "Get the caliper repo (Rust/OXC replacement for react-docgen-typescript) through its first real public release on Callisto, then clean up CI gates, dependencies, ADRs and release tooling around it.",
+    "outcome": "Release prep PR #33 merged and 0.2.0 shipped after fixing CI and changelog formatting. Later work re-signed PR branches, adapted to OXC 0.155 (#253), bumped Callisto to 0.16.0 (#255), and replaced four PR gates with a weekly job and `just bench` (#256). Three trails were created or retitled, and the stale Homebrew notifier steps were removed from release.yml in a signed commit that has not been pushed.",
+    "learnings": {
+      "repo": [
+        "Local `main` can hold unpushed commits and lag `origin/main`; the first release prep found 8 unpushed commits, including tsc-client, that had to be cherry-picked onto the release branch.",
+        "Callisto releases any package whose current version has no tag. With every package at 0.1.0 and untagged, the leftover release PR #22 would have skipped to 0.1.1, so a minor changeset was added to land 0.2.0.",
+        "npm provenance requires each package.json `repository.url` to match the GitHub repo, so URLs had to move from orin-dx/oxc-react-docgen to orin-dx/caliper.",
+        "`oxfmt` rewrites double-quoted scoped package names in changeset frontmatter to single quotes, which Callisto does not strip. Leave scoped names unquoted.",
+        "Callisto-generated CHANGELOG.md files fail `oxfmt --check`, so `**/CHANGELOG.md` is now in `.oxfmtrc.json` ignorePatterns (PR #37).",
+        "`oxc-react-docgen-tsc-client` is set to `publish = false` until something consumes it.",
+        "A CI test on `--out` failed because miette word-wrapped a long temp path mid-name. Tests asserting on miette output must unwrap lines.",
+        "OXC 0.155 made string literals and property names `JSStr`, which can hold lone surrogates. A `js_text` module maps them to U+FFFD to keep output identical. OXC is pre-1.0 and every minor release can break.",
+        "The `main` ruleset includes `required_signatures`, `merge_queue` and `non_fast_forward`, so unsigned commits matter. Commits from #243, #234 and #236 landed unsigned before the re-sign.",
+        "The equivalence allow-list mechanism cost more than it caught: it was `continue-on-error` and silenced by blanket entries, and stray files kept turning `main` red. It was replaced by `scripts/weekly.py`, `scripts/bench.py` and `scripts/corpora.py` (PR #256).",
+        "`apps/validate` holds the TS 7.1 oracle (kept, used by the weekly job via `pnpm exec tsx`) plus the old July fixtures harness (to delete). CI's CLI config tests also depend on `tsx` from this package.",
+        "The Homebrew tap flow reversed: the tap now pulls from caliper, and the `notify-homebrew-tap` action was removed from orin-dx/actions. release.yml still called it at an old SHA with `continue-on-error`."
+      ],
+      "code": [
+        {
+          "path": ".github/workflows/release.yml",
+          "line": 322,
+          "end_line": 342,
+          "finding": "The tag finder and `notify-homebrew-tap` steps were stale because the action no longer exists upstream. They were removed in a signed commit."
+        },
+        {
+          "path": "crates/cli/src/commands/extract.rs",
+          "line": 295,
+          "end_line": 320,
+          "finding": "The `--out` missing-parent test asserted a substring that miette's wrapping broke on long CI temp paths, so it was changed to unwrap lines."
+        },
+        {
+          "path": "callisto.toml",
+          "line": 1,
+          "finding": "The pin comment was stale at 0.8.0 and was updated with the workflow SHA pins, most recently to 0.16.0 in #255."
+        }
+      ],
+      "workflow": [
+        "The Callisto binary can be downloaded from its GitHub release assets to run `status --check` and `release --dry-run` locally. `release plan` and `release execute` need a real merged release commit.",
+        "Check a reference workflow against the exact tag via `gh api ...?ref=callisto@X`, because the local callisto checkout was at 0.10.0 rather than 0.11.0.",
+        "Each merge to main regenerates the Callisto release PR through `version-pr`, so wait for that run and for main CI before merging the release PR.",
+        "A green workflow run can mean the release job was skipped. Verify registries, tags and releases rather than trusting the check.",
+        "Do not merge PRs while a force-push re-sign is rewriting branches; merges moved `main` and created conflicts mid-run.",
+        "Forks whose first plan creates problems should discard it. The re-sign fork's squash plan created fake conflicts, so it re-signed all 91 commits one by one instead.",
+        "A fork ran `callisto version` in the parent worktree and edited release files. Run release tooling in a scratch checkout instead.",
+        "Plain `git` was aliased or shimmed in this environment, so `/usr/bin/git` was used for reliable results."
+      ]
+    },
+    "friction": [
+      "Early claims were wrong because the local checkout was stale: Callisto pins looked like 0.8.0 when origin already had 0.10.0.",
+      "The reported Callisto blocker could not be confirmed from the repo, and prior sessions were unavailable.",
+      "The first release attempt ran only `version-pr` and did not publish. The merge commit was not treated as a release-PR merge, and the cause was still being investigated when the transcript was cut off.",
+      "Release PR #22 failed Lint on generated changelogs. Dependabot's oxfmt bump also turned main's Lint red.",
+      "The CI `install-action` error on main was transient and was never diagnosed.",
+      "A force-push earlier rewound `main` and lost about 295 commits of history.",
+      "The release workflow hit a race ('release PR snapshot changed after Callisto made its decision') when merges landed back to back.",
+      "`just test-rust` failed once intermittently under parallel load on the OXC upgrade branch and could not be reproduced.",
+      "The Homebrew notifier work in #236 was declared done without rechecking the tap's changed direction.",
+      "The local homebrew-tap checkout was 15 commits behind and described the old push-based flow.",
+      "Dependabot #248 failed Lint, tests and MSRV because the OXC API changed."
+    ],
+    "open_items": [
+      "Push the signed commit removing the stale Homebrew steps from release.yml, and confirm how the tap learns of releases.",
+      "Merge release PR #239 (0.8.0 on Callisto 0.16.0) after the cleanups. It is the first real test of `release plan`, `release execute` and the post-Homebrew flow.",
+      "Run the new weekly workflow by hand once after #256 to verify corpus installs, caching, artifact download and the issue step.",
+      "Delete the July harness in `apps/validate` and rename the package to `apps/oracle`, tracked in trail #87.",
+      "Retire ADRs 0023, 0024 and 0013, add a dependabot `oxc_*` group, and close #247 and #248, tracked in trail #88.",
+      "OXC 0.156 is already out and will likely need another upgrade.",
+      "Delete remote scratch branches and local leftovers (`rc-*`, `cc-*`, `deps/oxc-0.155`, `restore/main-history`).",
+      "Protect `main`: confirm no actor can bypass the ruleset, require signed commits for all, and decide how the merge queue interacts with Up to Date. Remove any required checks for the deleted gates in Entire's Gates.",
+      "Uncommitted `.claude/settings.json` and `.gemini/settings.json` changes in the main checkout still need a decision. They drop the deny rule and plugins, and empty the Gemini hooks.",
+      "Accuracy gaps: `readonly`, index signatures, `RefObject`, `memo(forwardRef(...))` detection, Chakra `NonNullable<union>`, shadcn about 40% and antd about 80% recall, and the PurePanel pairing mismatch.",
+      "Replace the `{Name}Props` naming heuristic in tagged-factory detection with a shape rule, with an ADR if it holds.",
+      "Close stale trails and make one trail per goal.",
+      "Follow-ups for the TS 7.1 on-demand backend, the `monokl` in-process API, and Issue #1 (presets, recommended to close)."
+    ]
+  }
+}

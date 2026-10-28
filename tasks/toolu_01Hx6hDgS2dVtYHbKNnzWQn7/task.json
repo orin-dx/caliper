@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01Hx6hDgS2dVtYHbKNnzWQn7",
+  "agent_id": "a2fb1c851e9fdd381",
+  "subagent_type": "fork",
+  "task_description": "Replace gates with weekly job and bench",
+  "token_usage": {
+    "input_tokens": 136,
+    "cache_creation_tokens": 123113,
+    "cache_read_tokens": 28316133,
+    "output_tokens": 57759,
+    "api_call_count": 67
+  },
+  "started_at": "2026-10-27T21:21:29.800584-07:00",
+  "completed_at": "2026-10-27T21:35:04.106378-07:00"
+}
