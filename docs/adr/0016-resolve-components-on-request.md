@@ -2,7 +2,7 @@
 
 **Status:** Accepted **Date:** 2026-10-24 **Amended:** 2026-10-25 (the dependency bullet: after 48 layer growths the rest of the project's names load in the background; a growth shares the project's indexes)
 
-The 48-growth threshold and full-layer rebuild described below were superseded by [0020](0020-chain-dependency-layers.md).
+The 48-growth threshold and full-layer rebuild described below were replaced by chained dependency layers and a three-growth threshold, described in `docs/architecture/pipeline-orchestration.md` ("Demand-driven dependencies").
 
 ## Context
 

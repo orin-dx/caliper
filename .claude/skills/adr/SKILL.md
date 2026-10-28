@@ -30,4 +30,4 @@ Don't hard-wrap paragraphs at a fixed column. One line per paragraph, let the ed
 
 Read it back once as the target contributor, not the author. Cut every sentence that would survive being deleted — check against `docs/adr/README.md`'s banned-word list and before/after table. If a section reads like a corporate template ("In conclusion, this represents..."), delete it; ADRs stop when the decision's been explained, they don't wrap up with a summary of themselves.
 
-Short beats complete. If the technical depth genuinely doesn't fit on a screen, split it into its own doc and link it — see how `0004-defer-type-checker-integration.md` points at `docs/type-checker-integration.md` instead of inlining it.
+Short beats complete. If the technical depth genuinely doesn't fit on a screen, split it into its own doc and link it — see how `0006-semantic-backend-as-second-resolver.md` points at `docs/type-checker-integration.md` instead of inlining it.
