@@ -234,7 +234,7 @@ fn test_exclude_stories() {
 
 // ── test_discover_files_reports_diagnostic_for_permission_denied_subtree ─
 //
-// Bug A (root-cause-analysis.md): `discover_files` used `walker.flatten()`,
+// Bug A: `discover_files` used `walker.flatten()`,
 // silently dropping every `ignore::Walk` `Err` — a permission-denied
 // subtree, a broken symlink, or any other I/O error mid-walk vanished with
 // no diagnostic, no warning, nothing. This exercises the permission-denied
@@ -376,7 +376,7 @@ fn test_extract_missing_src_dir() {
 
 // ── test_extract_empty_src_dirs_produces_diagnostic ───────────────────────
 //
-// Bug B (root-cause-analysis.md): the guard
+// Bug B: the guard
 // `!options.src_dirs.is_empty() && missing_src_dirs.len() == options.src_dirs.len()`
 // short-circuits to `false` when `src_dirs` itself is empty (`!true` is
 // `false`), so an explicitly empty `src_dirs` bypassed both the "all
@@ -1701,7 +1701,7 @@ fn a_panicking_plugin_hook_degrades_to_a_diagnostic_and_other_work_still_complet
 
 // ── test_duplicate_component_declarations_in_one_file_emit_a_collision_diagnostic ─
 //
-// Bug C (root-cause-analysis.md): `components.insert(key, entry)` in Phase
+// Bug C: `components.insert(key, entry)` in Phase
 // 5 discarded the `Option<ComponentEntry>` `BTreeMap::insert` already hands
 // back — a same-key collision (three or more resolutions landing on the
 // identical disambiguated key) silently overwrote the earlier entry with
