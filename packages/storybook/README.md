@@ -34,7 +34,7 @@ Before answering, the provider compares every source file's mtime and size with 
 | `exclude` |  | Glob patterns to skip. |
 | `tsconfigPath` |  | tsconfig for path aliases. |
 | `skipHtmlProps` | `false` | Leave out the HTML attributes a component inherits from its element. |
-| `htmlAttributes` | `curated` | `curated` lists the notable HTML attributes, `full` all of them, `none` none. Wins over `skipHtmlProps`. |
+| `htmlAttributes` | `full` | `full` lists all of the HTML attributes, `curated` a compact subset (handlers, `aria-*`, `ref`, common attributes), `none` none. Wins over `skipHtmlProps`. |
 | `cache` | `true` | Read and write the on-disk caches under `node_modules/.cache`. `false` reads and writes nothing there and parses everything every run; the output is the same. |
 | `loadDependencies` | `true` | Read the type declarations your props reference from installed packages, so library-typed props resolve instead of degrading. `false` skips the work. |
 | `collapseInheritedProps` | `none` | `none` lists every inherited prop. `dependencies` or `all` list inherited sources of more than 30 props as one layer. |

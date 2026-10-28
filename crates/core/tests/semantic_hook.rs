@@ -297,15 +297,15 @@ fn curated_and_none_take_the_checkers_react_props_only_where_the_structural_pass
 }
 
 #[test]
-fn full_takes_everything_the_checker_reports_except_key_and_ref() {
+fn full_takes_everything_the_checker_reports_except_key() {
     let project = project(&REACT_PROP_COMPONENTS);
     let checked = session_in(&project, HtmlAttributeMode::Full, reports_react_props);
     for key in ["WithChildren", "OwnChildren", "Div"] {
         let got = names(&checked, key);
-        for wanted in ["label", "children", "className", "id"] {
+        for wanted in ["label", "children", "className", "id", "ref"] {
             assert!(got.iter().any(|name| name == wanted), "{key} lacks {wanted}: {got:?}");
         }
-        assert!(!got.iter().any(|name| name == "key" || name == "ref"), "{key} lists key or ref: {got:?}");
+        assert!(!got.iter().any(|name| name == "key"), "{key} lists key: {got:?}");
     }
 }
 

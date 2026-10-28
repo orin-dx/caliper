@@ -6,8 +6,8 @@ export interface CaliperStorybookOptions {
   /** Leave out the HTML attributes a component inherits from its element. Same as `htmlAttributes: 'none'`. */
   skipHtmlProps?: boolean
   /**
-   * Which HTML attributes a component inherits from its element to list: `'curated'` (the notable ones, the default),
-   * `'full'` (all of them) or `'none'`. Wins over `skipHtmlProps`.
+   * Which HTML attributes a component inherits from its element to list: `'full'` (all of them, the default),
+   * `'curated'` (a compact subset: handlers, `aria-*`, `ref`, common attributes) or `'none'`. Wins over `skipHtmlProps`.
    */
   htmlAttributes?: 'curated' | 'full' | 'none'
   /**

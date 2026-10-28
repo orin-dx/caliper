@@ -798,7 +798,7 @@ pub(super) fn alias_body(
 /// An interface of React's that curated mode indexes apart from the run's declarations (ADR 0013): reading a member
 /// of one reads its declaration, as Full mode does.
 fn react_interface<'c>(ctx: &'c ResolutionContext, file: &Utf8Path, name: &str) -> Option<&'c CollectedInterface> {
-    ctx.react_types.as_deref()?.lookup_interface(file, name)
+    ctx.react_index().lookup_interface(file, name)
 }
 
 fn canonical(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> (Utf8PathBuf, String) {

@@ -20,7 +20,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::import_map::ImportResolutionMap;
 use crate::pipeline::PipelineOptions;
-use crate::react_types;
 use crate::types::*;
 
 mod alias;
@@ -311,6 +310,8 @@ pub struct ResolutionContext {
     pub(crate) named_results: memo::NamedResults,
     /// An HTML element's attribute declarations (`html::react_attribute`), read once per element and name.
     pub(crate) attribute_reads: memo::Memo<Option<ParsedProp>>,
+    /// The attribute names an HTML layer lists for an element and mode (`html::layer_attributes`), computed once.
+    pub(crate) attribute_names: dashmap::DashMap<String, Arc<[String]>, rustc_hash::FxBuildHasher>,
     /// Loaded dependency declarations (`PipelineOptions::load_dependencies`, ADR 0010).
     pub(crate) dependencies: Option<Arc<crate::dependency_types::DependencyLayer>>,
     /// React's own declarations in curated mode, which only HTML-attribute lookups read (`react_index`).
@@ -397,6 +398,7 @@ impl ResolutionContext {
             interface_chains: Default::default(),
             named_results: memo::NamedResults::with_max_reads(NAMED_RESULT_MAX_READS),
             attribute_reads: memo::Memo::with_max_reads(NAMED_RESULT_MAX_READS),
+            attribute_names: Default::default(),
             dependencies: None,
             react_types: None,
             collapse_inherited_props: options.collapse_inherited_props,
@@ -524,6 +526,7 @@ impl ResolutionContext {
             interface_chains: Default::default(),
             named_results: memo::NamedResults::with_max_reads(NAMED_RESULT_MAX_READS),
             attribute_reads: memo::Memo::with_max_reads(NAMED_RESULT_MAX_READS),
+            attribute_names: Default::default(),
             dependencies: layer,
             react_types: self.react_types.clone(),
             collapse_inherited_props: self.collapse_inherited_props,
@@ -869,44 +872,70 @@ pub(crate) fn resolve_component_shared(
     }
     apply_param_defaults(mapping, &mut props, ctx);
 
-    // Populate notable_inherited from HTML element layers and non-HTML inherited layers.
+    // Populate notable_inherited from HTML element layers and non-HTML inherited layers. Curated mode lists the
+    // curated attributes there; Full mode lists all of them in `props`, except for a layer whose attributes the
+    // interface chain already merged (`total_props`); None mode lists none.
     let mut notable_inherited: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
     for layer in &chain.inheritance {
-        if let Some(ref element) = layer.html_element {
-            // Curated-mode synthesis only: Full mode already merged the real
-            // attributes directly into `props` (see resolver/extends.rs); None
-            // mode wants no HTML attrs synthesized at all.
-            if ctx.html_attributes != crate::pipeline::HtmlAttributeMode::Curated {
-                continue;
+        if layer.html_element.is_none() {
+            continue;
+        }
+        match ctx.html_attributes {
+            crate::pipeline::HtmlAttributeMode::None => {}
+            crate::pipeline::HtmlAttributeMode::Full => {
+                if layer.total_props == 0 {
+                    let added =
+                        html::layer_attributes(layer, true, |name| props.contains_key(name), ctx, &mut state, 0);
+                    for prop in added {
+                        props.entry(prop.name.clone()).or_insert(prop);
+                    }
+                }
             }
-            let notable_attrs = react_types::notable_html_attrs(element);
-            for attr_name in notable_attrs {
-                if props.contains_key(*attr_name) {
-                    continue;
-                } // own prop wins
-                if notable_inherited.contains_key(*attr_name) {
-                    continue;
-                } // already added
-
-                // Synthesize a minimal prop for display purposes
-                let prop_type = html::infer_html_attr_prop_type(attr_name);
-                notable_inherited.insert(
-                    attr_name.to_string(),
-                    ctx.share(ParsedProp::new(
-                        attr_name.to_string(),
-                        prop_type,
-                        false,
-                        None,
-                        String::new(),
-                        Default::default(),
-                        Some(PropParent {
-                            name: format!("{}HTMLAttributes", html::capitalize_element(element)),
-                            file_name: "node_modules/@types/react/index.d.ts".to_string(),
-                        }),
-                        vec![],
-                    )),
+            crate::pipeline::HtmlAttributeMode::Curated => {
+                let added = html::layer_attributes(
+                    layer,
+                    false,
+                    |name| props.contains_key(name) || notable_inherited.contains_key(name),
+                    ctx,
+                    &mut state,
+                    0,
                 );
+                for prop in added {
+                    notable_inherited.entry(prop.name.clone()).or_insert(prop);
+                }
             }
+        }
+    }
+    // A `forwardRef` component takes `ref` whatever its props type declares. The element type isn't recorded, so it is
+    // `Ref<unknown>` unless the props or an HTML layer gave the real declaration.
+    let takes_ref = matches!(mapping.rule, DetectionRule::ForwardRef | DetectionRule::ForwardRefExoticDecl);
+    if takes_ref && ctx.html_attributes != crate::pipeline::HtmlAttributeMode::None {
+        let target = if ctx.html_attributes == crate::pipeline::HtmlAttributeMode::Full {
+            &mut props
+        } else {
+            &mut notable_inherited
+        };
+        if !target.contains_key("ref") {
+            let ref_type = PropType::Named {
+                name: "Ref".into(),
+                args: vec![PropType::Named { name: "unknown".into(), args: vec![] }],
+            };
+            // The component takes it, so no interface is its parent, and a consumer that hides React's inherited props
+            // (the addon's `collapseInheritedProps`) still shows it.
+            let parent = None;
+            target.insert(
+                "ref".to_owned(),
+                ctx.share(ParsedProp::new(
+                    "ref".to_owned(),
+                    ref_type,
+                    false,
+                    None,
+                    String::new(),
+                    Default::default(),
+                    parent,
+                    vec![],
+                )),
+            );
         }
     }
     // A collapsed source's notable props (ADR 0012); the only non-HTML layers.
@@ -1071,12 +1100,22 @@ fn intersect_declarations(first: &ParsedProp, second: &ParsedProp) -> ParsedProp
         PropType::Intersection(members) => members.clone(),
         other => vec![other.clone()],
     };
+    // The same type written twice (`ReactNode` as the builtin and as a named reference) is one member.
+    let same = |a: &PropType, b: &PropType| a == b || a.raw_string() == b.raw_string();
     let mut types = members(&first.prop_type);
     for member in members(&second.prop_type) {
-        if !types.contains(&member) {
+        if !types.iter().any(|known| same(known, &member)) {
             types.push(member);
         }
     }
+    // `A & (A | B)` is `A`: a union that has another member as one of its own adds nothing.
+    let snapshot = types.clone();
+    types.retain(|member| match member {
+        PropType::Union(alternatives) => {
+            !snapshot.iter().any(|other| other != member && alternatives.iter().any(|alt| same(alt, other)))
+        }
+        _ => true,
+    });
     // `any` absorbs an intersection, as in TypeScript.
     let prop_type = if types.contains(&PropType::Any) {
         PropType::Any

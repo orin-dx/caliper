@@ -157,10 +157,51 @@ pub fn is_react_builtin(name: &str, extra: &rustc_hash::FxHashSet<compact_str::C
         )
 }
 
-/// Props React itself adds to every element, which are not part of a component's API. The one place that decides what
-/// to do with them when the checker reports them (ADR 0022); they are omitted today. Making `ref` visible for function
-/// components, as React 19 does, is a one-line change here.
-const REACT_SPECIAL_PROPS: &[&str] = &["key", "ref"];
+/// Props React consumes itself and never passes to a component. The one place that decides what to do with them when
+/// the checker reports them (ADR 0022). `ref` is not here: React 19 passes it to function components as an ordinary
+/// prop, and `forwardRef` components take it, so a props table shows it.
+const REACT_SPECIAL_PROPS: &[&str] = &["key"];
+
+/// Whether `name` is a React event handler (`onClick`, `onPointerDownCapture`).
+fn is_event_handler(name: &str) -> bool {
+    name.strip_prefix("on").and_then(|rest| rest.chars().next()).is_some_and(char::is_uppercase)
+}
+
+/// Whether curated mode keeps `@types/react`'s attribute `name` on `element`: `ref`, `aria-*`, every event handler but
+/// the `*Capture` twins that repeat each one, the attributes any element takes, and the element's own notable ones.
+/// `key` never is. `full` keeps all the rest.
+pub fn is_curated_html_attr(element: &str, name: &str) -> bool {
+    const GLOBAL: &[&str] = &[
+        "ref",
+        "id",
+        "className",
+        "style",
+        "tabIndex",
+        "title",
+        "role",
+        "lang",
+        "dir",
+        "hidden",
+        "draggable",
+        "slot",
+        "translate",
+        "spellCheck",
+        "contentEditable",
+        "inputMode",
+        "autoFocus",
+        "accessKey",
+        "nonce",
+        "popover",
+        "children",
+    ];
+    if REACT_SPECIAL_PROPS.contains(&name) {
+        return false;
+    }
+    name.starts_with("aria-")
+        || (is_event_handler(name) && !name.ends_with("Capture"))
+        || GLOBAL.contains(&name)
+        || notable_html_attrs(element).contains(&name)
+}
 
 /// Whether the checker's answer for a prop is used, under `mode`. The structural pass keeps the props the checker does
 /// not return either way, so this decides only what the checker adds: its own props always, and the props

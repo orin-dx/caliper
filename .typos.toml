@@ -9,3 +9,5 @@ sme = "sme"
 ratatui = "ratatui"
 # beng is a real Unicode CLDR numbering-system identifier (Bengali)
 beng = "beng"
+# onSeeked is React's media event handler
+Seeked = "Seeked"

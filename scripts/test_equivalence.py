@@ -111,3 +111,31 @@ class ResolveBase(unittest.TestCase):
             with self.assertRaises(SystemExit) as raised:
                 equivalence.resolve_base(os.path.join(tmp, 'no-such-binary'), tmp, 5)
             self.assertIn('not an executable and not a commit', str(raised.exception))
+
+
+class Allowed(unittest.TestCase):
+    PATTERNS = [
+        'chakra/deps* prop-added *.accessKey',
+        'chakra/deps* prop-added *.aria-label.declarations',
+        "shadcn/deps* diagnostic-added info OPAQUE_TYPE 'Foo*",
+        'chakra/deps* component-field-changed Box.inheritance',
+    ]
+
+    def matches_like_fnmatch(self, label, kind, item):
+        return any(equivalence.fnmatch.fnmatchcase(f'{label} {kind} {item}', p) for p in self.PATTERNS)
+
+    def test_a_prop_name_entry_allows_that_prop_of_any_component_and_nothing_else(self):
+        cases = [
+            ('chakra/deps', 'prop-added', 'AccordionItem.accessKey', True),
+            ('chakra/deps+html-full', 'prop-added', 'Card (/src/card.tsx).accessKey', True),
+            ('chakra/deps', 'prop-added', 'AccordionItem.aria-label.declarations', True),
+            ('chakra/deps', 'prop-added', 'AccordionItem.accessKeys', False),
+            ('chakra/deps', 'prop-removed', 'AccordionItem.accessKey', False),
+            ('shadcn/deps', 'prop-added', 'AccordionItem.accessKey', False),
+            ('chakra/deps', 'component-field-changed', 'Box.inheritance', True),
+            ('chakra/deps', 'component-field-changed', 'Flex.inheritance', False),
+        ]
+        for label, kind, item, expected in cases:
+            with self.subTest(label=label, kind=kind, item=item):
+                self.assertEqual(equivalence.allowed(label, kind, item, self.PATTERNS), expected)
+                self.assertEqual(self.matches_like_fnmatch(label, kind, item), expected)

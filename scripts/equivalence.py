@@ -13,6 +13,9 @@ fnmatch patterns matched against `<corpus>/<config> <kind> <item>` as printed in
 to alter output adds its own file there, named for it, so two pull requests never edit the same lines; main has no
 files, and then the patterns say exactly which differences are meant.
 
+The `none` configurations compare every field exactly. The curated and full ones leave out the props, notable props and
+layers that `@types/react` gives an element, which ADR 0024 changes on purpose.
+
 Two optional stages:
   --lazy {off,fixtures,all}  lazy-vs-batch parity (crates/core/tests/lazy_parity.rs): the fixtures, and with `all`
                              also the selected corpora's sources. Default: all.
@@ -33,8 +36,10 @@ Usage: scripts/equivalence.py [BASE] [--bin BIN] [--corpora DIR] [--corpus NAME]
 import argparse
 import collections
 import fnmatch
+import functools
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -46,8 +51,10 @@ import parity  # noqa: E402  (corpus list and setup, the oracle and its gate)
 
 ROOT = parity.ROOT
 CONFIGS = {
-    'default': [],
-    'deps': ['--load-dependencies'],
+    'none': ['--html-attributes', 'none'],
+    'deps+none': ['--load-dependencies', '--html-attributes', 'none'],
+    'default': ['--html-attributes', 'curated'],
+    'deps': ['--load-dependencies', '--html-attributes', 'curated'],
     'html-full': ['--html-attributes', 'full'],
     'deps+html-full': ['--load-dependencies', '--html-attributes', 'full'],
 }
@@ -132,7 +139,13 @@ def extract(binary, src, flags, cache_dir, timeout):
     return json.loads(out[out.index('{'):])
 
 
-def canonical(output):
+def is_react_attribute(prop):
+    """Whether `@types/react` is the interface that gives the prop its name, which the HTML-attribute modes change on
+    purpose (ADR 0024); `none` configurations compare everything else exactly."""
+    return '/@types/react/' in ((prop.get('parent') or {}).get('fileName') or '')
+
+
+def canonical(output, html=False):
     """The output with its interned tables expanded where they are used, and nothing that varies run to run.
 
     A component's `props` (prop set ids) becomes one map of name to prop; an inheritance layer's `omitted` and a
@@ -152,6 +165,10 @@ def canonical(output):
                 expanded[name] = props[prop_id]
         layers = [{**layer, 'omitted': names(layer.get('omitted'))} for layer in c.get('inheritance', [])]
         notable = {name: props.get(prop_id, prop_id) for name, prop_id in c.get('notableInherited', {}).items()}
+        if html:
+            expanded = {name: prop for name, prop in expanded.items() if not is_react_attribute(prop)}
+            layers = [layer for layer in layers if not layer.get('htmlElement')]
+            notable = {name: prop for name, prop in notable.items() if not is_react_attribute(prop)}
         components[key] = {**c, 'props': expanded, 'inheritance': layers, 'notableInherited': notable}
     diagnostics = [{**d, 'affects': names(d['affects'])} if 'affects' in d else d for d in output['diagnostics']]
     return {
@@ -235,6 +252,24 @@ def diagnostic_item(text):
     return f'{head} | {text[:100]}'
 
 
+PROP_TAIL = re.compile(r'^(\S+) (\S+) \*\.([^*?\[\]]+)$')
+
+
+@functools.lru_cache(maxsize=4)
+def index_allow(patterns):
+    """The entries shaped `<label> <kind> *.<name>` (one per prop a change adds) by label and kind, their names in a
+    set; the others stay a list. A change to what every component lists can need thousands of such entries, and
+    matching each difference against each one in turn would take longer than the extraction."""
+    names, rest = {}, []
+    for pattern in patterns:
+        m = PROP_TAIL.match(pattern)
+        if m:
+            names.setdefault((m[1], m[2]), set()).add(m[3])
+        else:
+            rest.append(pattern)
+    return names, rest, {}
+
+
 def load_allow(directory):
     """The entries of every `*.json` file in the allow-list directory as (file name, pattern), in name order. A missing
     directory has none: main has no files, and a pull request adds one named for it."""
@@ -247,7 +282,15 @@ def load_allow(directory):
 
 
 def allowed(label, kind, item, patterns):
-    return any(fnmatch.fnmatchcase(f'{label} {kind} {item}', p) for p in patterns)
+    names, rest, covering = index_allow(tuple(patterns))
+    if (label, kind) not in covering:
+        covering[label, kind] = [
+            tails for (l, k), tails in names.items() if fnmatch.fnmatchcase(label, l) and fnmatch.fnmatchcase(kind, k)
+        ]
+    # `*.name` matches an item that ends in `.name`: any suffix after one of its dots.
+    if any(item[i + 1:] in tails for tails in covering[label, kind] for i, c in enumerate(item) if c == '.'):
+        return True
+    return any(fnmatch.fnmatchcase(f'{label} {kind} {item}', p) for p in rest)
 
 
 def allow_problems(patterns):
@@ -287,7 +330,7 @@ def compare(args, base_bin, head_bin, patterns):
             for tag, binary in (('base', base_bin), ('head', head_bin)):
                 cache = os.path.join(args.work, 'cache', tag)
                 os.makedirs(cache, exist_ok=True)
-                outputs.append(canonical(extract(binary, src, CONFIGS[name], cache, args.timeout_extract)))
+                outputs.append(canonical(extract(binary, src, CONFIGS[name], cache, args.timeout_extract), html='none' not in name))
             found = diff(*outputs)
             unexpected = [d for d in found if not allowed(label, d[0], d[1], patterns)]
             n_components = len(outputs[1]['components'])

@@ -1554,7 +1554,7 @@ Button.defaultProps = { size: 'md' };
 fn test_pipeline_options_default() {
     let opts = PipelineOptions::default();
     assert_eq!(opts.src_dirs, vec![Utf8PathBuf::from("./src")]);
-    assert_eq!(opts.html_attributes, HtmlAttributeMode::Curated);
+    assert_eq!(opts.html_attributes, HtmlAttributeMode::Full);
     assert!(opts.exclude_patterns.is_empty() && opts.exclude_prefixes.is_empty() && opts.extra_builtins.is_empty());
     assert_eq!((opts.tsconfig_path, opts.cache_dir), (None, None));
 }

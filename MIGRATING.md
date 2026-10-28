@@ -54,8 +54,8 @@ RDT inlines every inherited HTML attribute (e.g. all ~250-300 members of `Button
 
 | Mode | Behavior | Reaches `--format rdt` |
 | --- | --- | --- |
-| `curated` (default) | ~15-20 commonly-documented attributes per element (`onClick`, `disabled`, `type`, ARIA attrs) in `notableInherited`. `inheritance` (canonical format only) still records the full layer — element, `Omit`-ted keys. | No |
-| `full` | Resolves `@types/react`'s real `HTMLAttributes`/`AriaAttributes`/`DOMAttributes`/`<Element>HTMLAttributes` chain and merges it directly into `props`, matching RDT's flat behavior. | Yes |
+| `curated` | A compact subset per element (handlers, `aria-*`, `ref`, common attributes, the element's notable ones) in `notableInherited`. `inheritance` (canonical format only) still records the full layer — element, `Omit`-ted keys. | No |
+| `full` (default) | Resolves `@types/react`'s real `HTMLAttributes`/`AriaAttributes`/`DOMAttributes`/`<Element>HTMLAttributes` chain and merges it directly into `props`, matching RDT's flat behavior. | Yes |
 | `none` | Own-declared props only. | Yes (nothing to add) |
 
 Flag by layer: `--html-attributes full` (CLI), `htmlAttributes: 'full'` (NAPI), `htmlAttributes: "full"` (`docgen.config.ts`).

@@ -42,13 +42,12 @@ const RESOLVE_PANIC_TEST_SENTINEL: &str = "ResolvePanicTestSentinel";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum HtmlAttributeMode {
-    /// ~15-20 curated, commonly-documented attributes per element (onClick,
-    /// disabled, aria-*, etc.) — the default. Matches RDT's shape for consumers
-    /// that filter node_modules-sourced props, just with a smaller, hand-picked set.
+    /// A compact subset per element: `ref`, `aria-*`, every event handler but the `*Capture` twins, the global
+    /// attributes and the element's own notable ones, kept in `notableInherited`. Opt-in; `Full` is the default.
     Curated,
     /// Actually resolve `@types/react`'s real `HTMLAttributes`/`AriaAttributes`/
     /// `DOMAttributes`/`<Element>HTMLAttributes` interface chain, matching RDT's
-    /// full ~250-300 attributes per element.
+    /// full ~250-300 attributes per element — the default.
     Full,
     /// Don't synthesize any inherited HTML attributes at all — own props only.
     None,
@@ -140,7 +139,7 @@ impl Default for PipelineOptions {
             src_dirs: vec![Utf8PathBuf::from("./src")],
             exclude_patterns: vec![],
             exclude_prefixes: vec![],
-            html_attributes: HtmlAttributeMode::Curated,
+            html_attributes: HtmlAttributeMode::Full,
             tsconfig_path: None,
             extra_builtins: Default::default(),
             cache_dir: None,

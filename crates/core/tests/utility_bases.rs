@@ -10,7 +10,7 @@
 //! interfaces (antd's `ProgressAriaProps`), `Record` over a union of literals (antd's `Partial<Record<Breakpoint, …>>`
 //! on `Col`), and `PropsWithChildren` with no argument.
 
-use caliper_docgen_core::pipeline::{extract, PipelineOptions};
+use caliper_docgen_core::pipeline::{extract, HtmlAttributeMode, PipelineOptions};
 use caliper_docgen_core::types::{DiagnosticSeverity, ExtractionOutput};
 use camino::Utf8PathBuf;
 use serde_json::{json, Value};
@@ -18,13 +18,21 @@ use tempfile::TempDir;
 
 /// Extracts a project of `files`, inside this crate so that `react` resolves to the workspace's `@types/react`.
 fn extract_files(files: &[(&str, &str)]) -> ExtractionOutput {
+    extract_files_in(PipelineOptions::default().html_attributes, files)
+}
+
+fn extract_files_in(mode: HtmlAttributeMode, files: &[(&str, &str)]) -> ExtractionOutput {
     let tmp = TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
     let root = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
     for (name, body) in files {
         std::fs::write(root.join(name), body).unwrap();
     }
-    let options =
-        PipelineOptions { src_dirs: vec![root.clone()], cache_dir: Some(root.join(".cache")), ..Default::default() };
+    let options = PipelineOptions {
+        src_dirs: vec![root.clone()],
+        cache_dir: Some(root.join(".cache")),
+        html_attributes: mode,
+        ..Default::default()
+    };
     extract(&options)
 }
 
@@ -69,14 +77,17 @@ fn a_pick_of_a_react_interface_lists_the_picked_members_from_its_declaration() {
 #[test]
 fn a_pick_of_html_attributes_reaches_the_members_its_parent_interfaces_declare() {
     // `className` and `role` are `HTMLAttributes`' own; `onClick` is `DOMAttributes`', one parent up.
-    let output = extract_files(&[(
-        "Group.tsx",
-        r#"
+    let output = extract_files_in(
+        HtmlAttributeMode::Curated,
+        &[(
+            "Group.tsx",
+            r#"
         import * as React from 'react';
         interface GroupProps extends Pick<React.HTMLAttributes<HTMLDivElement>, 'className' | 'onClick' | 'role'> {}
         export function Group(props: GroupProps) { return <div />; }
         "#,
-    )]);
+        )],
+    );
     let props = props_of(&output, "Group");
     let names: Vec<_> = props.iter().map(|(name, ..)| name.as_str()).collect();
     assert_eq!(names, ["className", "onClick", "role"]);

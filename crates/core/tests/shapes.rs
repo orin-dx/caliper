@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 
-use caliper_docgen_core::pipeline::{extract, PipelineOptions};
+use caliper_docgen_core::pipeline::{extract, HtmlAttributeMode, PipelineOptions};
 use camino::Utf8PathBuf;
 
 struct Case {
@@ -296,8 +296,13 @@ fn run(case: &Case) -> BTreeMap<String, Vec<String>> {
         case.source.replace("\"./barrel\"", "\"./barrel/index\"").replace("\"./barrel2\"", "\"./barrel2/index\""),
     )
     .unwrap();
-    let options =
-        PipelineOptions { src_dirs: vec![root.clone()], cache_dir: Some(root.join(".cache")), ..Default::default() };
+    // Curated keeps `ref` (a `forwardRef` component's) apart from `props`, so the cases state the declared props only.
+    let options = PipelineOptions {
+        src_dirs: vec![root.clone()],
+        cache_dir: Some(root.join(".cache")),
+        html_attributes: HtmlAttributeMode::Curated,
+        ..Default::default()
+    };
     extract(&options)
         .components
         .into_iter()

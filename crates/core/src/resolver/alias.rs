@@ -63,12 +63,26 @@ pub(super) fn resolve_type_alias_chain(
                 chain.props.clear();
                 return chain;
             };
-            // React's declarations are merged only for `full` attributes; the base was then a `composes` entry with no props.
+            let picked_set: FxHashSet<&str> = picked.iter().map(String::as_str).collect();
+            chain.props.retain(|p| picked_set.contains(p.name.as_str()));
+            // The base was a `composes` entry with no picked props (React's declarations stay out of the run unless the
+            // attributes are `full`, and then a base interface can still list none of them): read them from React.
             if chain.props.is_empty() {
                 chain.props = react_picked_props(base, &picked, file_path, mapping, ctx, state, depth);
             }
-            let picked_set: FxHashSet<&str> = picked.iter().map(String::as_str).collect();
-            chain.props.retain(|p| picked_set.contains(p.name.as_str()));
+            // Only the picked attributes remain: each is read from the element's layer, which then has nothing left to list.
+            for name in &picked {
+                if chain.props.iter().any(|prop| &prop.name == name) {
+                    continue;
+                }
+                let attribute = chain.inheritance.iter().find_map(|layer| {
+                    layer_attribute(layer, name, ctx, state, depth).filter(|_| layer.html_element.is_some())
+                });
+                if let Some(attribute) = attribute {
+                    chain.props.push(ctx.share(attribute));
+                }
+            }
+            chain.inheritance.retain(|layer| layer.html_element.is_none());
             chain
         }
 
@@ -573,7 +587,7 @@ fn has_element(layer: &InheritedLayer, element: &str, ctx: &ResolutionContext) -
 }
 
 /// The declaration of attribute `name` an HTML layer's element has, unless the layer omits it.
-fn layer_attribute(
+pub(super) fn layer_attribute(
     layer: &InheritedLayer,
     name: &str,
     ctx: &ResolutionContext,

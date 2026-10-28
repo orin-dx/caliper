@@ -321,7 +321,23 @@ pub(super) fn resolve_props_chain(
     if react_types::html_element_for(type_name_bare).is_some()
         || super::declared_by_react(type_name, &canonical_name, consuming_file, ctx)
     {
-        return ResolvedChain::empty_with_compose(type_name.to_owned());
+        // The element's attributes are still the props' (`Omit<HTMLAttributes<HTMLDivElement>, "title">`), so the
+        // layer records them for the mode to list; `Omit` and `Pick` narrow it.
+        let element = type_args
+            .first()
+            .and_then(react_types::html_element_from_collected)
+            .or_else(|| react_types::html_element_for(type_name_bare));
+        let mut chain = ResolvedChain::empty_with_compose(type_name.to_owned());
+        if let Some(element) = element {
+            chain.inheritance.push(InheritedLayer {
+                type_name: type_name.to_owned(),
+                file_name: resolve_react_types_file(consuming_file, ctx),
+                omitted: vec![],
+                html_element: Some(element.to_owned()),
+                total_props: 0,
+            });
+        }
+        return chain;
     }
 
     // ── Step 6: Unresolvable ──────────────────────────────────────────────────

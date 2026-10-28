@@ -249,8 +249,15 @@ fn resolve_named_uncycled(
     // ── 7. Unresolvable — emit diagnostic, return Named ───────────────────────
     let location_note =
         super::unresolved_location_note(name.as_str(), consuming_file, &canonical_file, &canonical_name);
+    // A name React's own declarations use (`TrustedHTML`, `Iterable`) is not the project's to install, and `full` reads
+    // those declarations by default.
+    let severity = if consuming_file.as_str().contains("/@types/react/") {
+        DiagnosticSeverity::Info
+    } else {
+        DiagnosticSeverity::Warning
+    };
     state.diagnostics.push(Diagnostic {
-        severity: DiagnosticSeverity::Warning,
+        severity,
         message: format!(
             "Cannot resolve type '{}' in '{}'{} — it will appear as an unexpanded named reference",
             name, consuming_file, location_note
