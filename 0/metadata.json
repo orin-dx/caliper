@@ -1,0 +1,175 @@
+{
+  "cli_version": "0.12.3-nightly.202610261136.c4f103d8d",
+  "checkpoint_id": "01M60BD6NM9MSHNQPPHT9PV69S",
+  "session_id": "ba6a68d6-c702-4382-ab2f-60cd0f6af675",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-28T04:13:55.137992Z",
+  "branch": "ci/callisto-0.16.0",
+  "checkpoints_count": 1,
+  "save_step_count": 1,
+  "files_touched": [
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.yml",
+    "callisto.toml"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "bec1b501ca18",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 1688,
+    "cache_read_tokens": 1332285,
+    "output_tokens": 1371,
+    "api_call_count": 4,
+    "subagent_tokens": {
+      "input_tokens": 64,
+      "cache_creation_tokens": 17666,
+      "cache_read_tokens": 11442278,
+      "output_tokens": 10395,
+      "api_call_count": 32
+    }
+  },
+  "redaction": {
+    "replacements": 1312,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 1312,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01QchtZUzPN3PMVrg8Gy3ykV",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "vanguard:research"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "759066964e9a",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 6111,
+        "end": 6112,
+        "entry_ids": [
+          "255a129b-35bc-4cc3-9675-402f9d83f595"
+        ],
+        "tool_use_id": "toolu_01QchtZUzPN3PMVrg8Gy3ykV"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01QchtZUzPN3PMVrg8Gy3ykV"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: vanguard:research",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": ".claude/worktrees/release-0.2.0:adr"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "759066964e9a",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 40539,
+        "end": 40540,
+        "entry_ids": [
+          "0a2d086d-18f7-41f9-b6a6-3a37c42b1182"
+        ],
+        "tool_use_id": "toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: .claude/worktrees/release-0.2.0:adr",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 20
+  },
+  "summary": {
+    "intent": "Get the Caliper repo (Rust/OXC replacement for react-docgen-typescript) to a proper first public release on the latest Callisto, then keep CI and the PR stack healthy, restore a rewound main, and plan next hardening work.",
+    "outcome": "Release prep PR #33 merged and the release flow ran, but the release PR merge only ran version-pr and published nothing, so the first release was not confirmed. Later work restored main's lost history via #246, re-signed PR branches, got the stack landed, and started forks for the oxc 0.155 upgrade (#253) and a Callisto 0.16.0 bump, with #254 cleaning stray allow-list files.",
+    "learnings": {
+      "repo": [
+        "Callisto releases any package whose current version has no tag; with no tags and everything at 0.1.0, release PR #22 would have skipped to 0.1.1, so a minor changeset was added to make the first release 0.2.0.",
+        "oxfmt rewrites double-quoted scoped package names in .changeset/*.md to single quotes, which callisto does not strip; the name must be left unquoted.",
+        "oxfmt --check on markdown flags callisto-generated CHANGELOG.md files, so release PRs fail Lint unless **/CHANGELOG.md is in ignorePatterns of .oxfmtrc.json (PR #37).",
+        "A CLI test on the --out missing parent directory failed in CI because miette word-wraps long temp paths mid-name; substring checks must unwrap the output (crates/cli/src/commands/extract.rs).",
+        "npm provenance (NPM_CONFIG_PROVENANCE) requires package.json repository.url to match the GitHub repo, so URLs had to move from oxc-react-docgen to caliper.",
+        "crates/tsc-client was marked publish = false because nothing consumes it yet.",
+        "The main ruleset requires signed commits (required_signatures), a merge queue and non_fast_forward; Equivalence and Scorecard gates compare PRs against main, so a rewound main makes every PR red (KeyError: 'WebkitAppearance').",
+        "The Allow-list empty check fails on main whenever per-PR files remain in scripts/equivalence-allow.d/ after merge.",
+        "Release & Publish can fail with 'release PR snapshot changed after Callisto made its decision' when merges land back to back; the next run succeeds.",
+        "Dependabot oxc bumps can break the build because pre-1.0 OXC minors change APIs (e.g. StaticPropertyName no longer has to_string)."
+      ],
+      "code": [
+        {
+          "path": "callisto.toml",
+          "line": 1,
+          "finding": "Header comment said 'Pinned to callisto 0.8.0' and went stale next to the real pins; updated alongside release.yml and ci.yml."
+        },
+        {
+          "path": ".github/workflows/release.yml",
+          "finding": "Callisto actions are SHA-pinned with a version comment; the guard step reads .artifactSlots from the intent JSON, matching callisto 0.11.0's own release workflow."
+        }
+      ],
+      "workflow": [
+        "Local main can silently hold unpushed commits; compare with origin/main (rev-list --left-right) before assuming a checkout reflects the remote.",
+        "A green workflow run is not proof of publish; verify on npm, crates.io and tags, since jobs can be skipped when the release-candidate step decides it is not a release merge.",
+        "Verify tool configuration against the pinned version's own help output and reference workflow rather than only a dry run.",
+        "Forks/sub-agents commit unsigned unless told otherwise; instruct them to sign and to stop on signing failure rather than bypass it.",
+        "Merging PRs while a branch-rewrite is running causes new conflicts; wait for the rewrite report.",
+        "Recheck main before telling the user a PR is ready, since dependabot merges move it and re-introduce lockfile conflicts.",
+        "Destructive actions like retargeting PR bases or force-pushes were blocked by the permission check until the user gave explicit, specific authorization."
+      ]
+    },
+    "friction": [
+      "The user was repeatedly frustrated by red CI, conflicts on #246, unsigned commits, and slow progress while the assistant waited for user decisions.",
+      "main was force-pushed back to ef9136ed, losing about 295 commits; the actor was never determined (activity log showed castrog, the user's account).",
+      "CI on main was red from an install-action error, then Lint, Equivalence, Scorecard and Entire Gates failures stemming from the rewound base.",
+      "The 2026-09-30 install-action failure was not reproduced or diagnosed.",
+      "The first merge of the release PR run did not publish: nothing appeared on npm, crates.io or tags, and the cause was still being traced when the transcript cut off.",
+      "The permission check blocked retargeting PR bases and an initial force-push re-sign.",
+      "The user's 'merged all the version bumps' meant dependabot PRs, not release PR #22, causing a misunderstanding.",
+      "Local callisto checkout was at 0.10.0 and the mise shim at 0.5.0, so docs had to be read via the GitHub API for the 0.11.0 tag.",
+      "Several git commands needed /usr/bin/git because a shell wrapper interfered."
+    ],
+    "open_items": [
+      "Confirm whether the first release (0.2.0 and later versions) actually published to npm and crates.io; the earlier run skipped plan/build/execute.",
+      "Merge #254 (stray allow-list cleanup), #253 (oxc 0.155 upgrade, replacing #248) and the Callisto 0.16.0 bump PR; then #239 (release PR) after regeneration.",
+      "Close duplicate restore PR #247.",
+      "Decide how the ruleset treated unsigned commits from #243, #234, #236, #230 and #231 already in main, and confirm no actor can bypass protection on main.",
+      "Rebuild the gates: 1.10x wall / 1.20x memory speed gate, output diff with no allow-list, weekly accuracy record against RDT and react-docgen.",
+      "Accuracy gaps: readonly, index signatures, RefObject; memo(forwardRef(function…)) detection; Chakra NonNullable<union>; shadcn (~40%) and antd (~80%) recall via on-demand TS; PurePanel pairing mismatch; replace the {Name}Props heuristic with a shape rule.",
+      "Uncommitted .claude/settings.json and .gemini/settings.json changes remain in the main checkout (deny rule and enabledPlugins removal, Gemini hooks wiped), awaiting a decision.",
+      "Housekeeping: retire ADRs 0023/0024, delete stale remote and local scratch branches, close stale Entire trails, close issue #1 (presets), consider a dependabot setting for OXC.",
+      "TS 7.1 on-demand follow-ups, tsc --api process lifecycle (crash, restart, timeout), monokl in-process API, and first real run of the Homebrew tap notifier."
+    ]
+  }
+}

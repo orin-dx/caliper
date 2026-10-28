@@ -1,0 +1,49 @@
+{
+  "cli_version": "0.12.3-nightly.202610261136.c4f103d8d",
+  "checkpoint_id": "01M60BD6NM9MSHNQPPHT9PV69S",
+  "strategy": "manual-commit",
+  "branch": "ci/callisto-0.16.0",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.yml",
+    "callisto.toml"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 1688,
+    "cache_read_tokens": 1332285,
+    "output_tokens": 1371,
+    "api_call_count": 4,
+    "subagent_tokens": {
+      "input_tokens": 64,
+      "cache_creation_tokens": 17666,
+      "cache_read_tokens": 11442278,
+      "output_tokens": 10395,
+      "api_call_count": 32
+    }
+  },
+  "redaction": {
+    "replacements": 1312,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 1312,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
