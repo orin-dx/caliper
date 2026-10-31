@@ -1920,9 +1920,12 @@ expression: value
                 "kind": "number"
               },
               {
-                "kind": "array",
+                "kind": "readonly",
                 "element": {
-                  "kind": "string"
+                  "kind": "array",
+                  "element": {
+                    "kind": "string"
+                  }
                 }
               }
             ]
@@ -11915,9 +11918,12 @@ expression: value
                 "kind": "number"
               },
               {
-                "kind": "array",
+                "kind": "readonly",
                 "element": {
-                  "kind": "string"
+                  "kind": "array",
+                  "element": {
+                    "kind": "string"
+                  }
                 }
               }
             ]
@@ -20200,9 +20206,12 @@ expression: value
                 "kind": "string"
               },
               {
-                "kind": "array",
+                "kind": "readonly",
                 "element": {
-                  "kind": "string"
+                  "kind": "array",
+                  "element": {
+                    "kind": "string"
+                  }
                 }
               },
               {
@@ -22346,9 +22355,12 @@ expression: value
                 "kind": "number"
               },
               {
-                "kind": "array",
+                "kind": "readonly",
                 "element": {
-                  "kind": "string"
+                  "kind": "array",
+                  "element": {
+                    "kind": "string"
+                  }
                 }
               }
             ]
@@ -30995,9 +31007,12 @@ expression: value
                 "kind": "string"
               },
               {
-                "kind": "array",
+                "kind": "readonly",
                 "element": {
-                  "kind": "string"
+                  "kind": "array",
+                  "element": {
+                    "kind": "string"
+                  }
                 }
               },
               {

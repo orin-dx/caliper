@@ -58,6 +58,7 @@ pub(super) fn as_written(ct: &CollectedType) -> PropType {
         CollectedType::Intersection(members) => PropType::Intersection(members.iter().map(as_written).collect()),
         CollectedType::Array(inner) => PropType::Array(Box::new(as_written(inner))),
         CollectedType::Tuple(members) => PropType::Tuple(members.iter().map(as_written).collect()),
+        CollectedType::Readonly(inner) => PropType::Readonly(Box::new(as_written(inner))),
         CollectedType::Object(fields) => PropType::Object(
             fields
                 .iter()
@@ -66,6 +67,8 @@ pub(super) fn as_written(ct: &CollectedType) -> PropType {
                     prop_type: as_written(&f.collected_type),
                     required: f.required,
                     description: f.description.clone(),
+                    readonly: f.readonly,
+                    index_key: f.index_key.as_deref().map(|key| Box::new(as_written(key))),
                 })
                 .collect(),
         ),

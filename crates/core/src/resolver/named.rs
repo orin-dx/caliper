@@ -432,6 +432,9 @@ fn displayed_arg(
         CollectedType::Array(inner) => {
             CollectedType::Array(Box::new(displayed_arg(inner, file, ctx, state, depth + 1)))
         }
+        CollectedType::Readonly(inner) => {
+            CollectedType::Readonly(Box::new(displayed_arg(inner, file, ctx, state, depth + 1)))
+        }
         CollectedType::TemplateLiteral(parts) => {
             match super::template::try_expand_template_literal(parts, file, ctx, state, depth + 1) {
                 Some(values) => CollectedType::Union(
@@ -471,7 +474,7 @@ fn exceeds_expanded_size(ty: &PropType) -> bool {
                 *budget = budget.saturating_sub(members.len());
                 *budget == 0
             }
-            PropType::Array(inner) => count(inner, budget),
+            PropType::Array(inner) | PropType::Readonly(inner) => count(inner, budget),
             PropType::Object(fields) => fields.iter().any(|field| count(&field.prop_type, budget)),
             PropType::Named { args, .. } => args.iter().any(|arg| count(arg, budget)),
             _ => false,

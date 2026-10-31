@@ -325,7 +325,11 @@ impl<'src> SourceDataCollector<'src> {
         else {
             return;
         };
-        let target = self.ts_type_to_collected(&annotation.type_annotation);
+        let target = match self.ts_type_to_collected(&annotation.type_annotation) {
+            // `declare const X: readonly ["a", "b"]` is read as the tuple it holds.
+            crate::types::CollectedType::Readonly(inner) => *inner,
+            other => other,
+        };
         // Keep static component members on a callable value without indexing arbitrary object declarations.
         let has_component_member = |fields: &[crate::types::CollectedObjectField]| {
             fields.iter().any(|field| {
@@ -780,20 +784,18 @@ impl<'src> SourceDataCollector<'src> {
 
             // TSTypeOperatorType covers keyof, unique, readonly. `keyof` is kept
             // structured (its operand may itself need substitution or resolution —
-            // see `CollectedType::KeyOf`). `readonly`/`unique` are peeled
-            // transparently to their operand — docgen doesn't track mutability or
-            // symbol uniqueness, so there's nothing to preserve — rather than
-            // capturing the whole modified type as raw source text, which used to
-            // make `readonly string[]` (real @types/react's ButtonHTMLAttributes
-            // `defaultValue`/`value` shape) degrade to Opaque even though the
-            // element type is fully knowable.
+            // see `CollectedType::KeyOf`), and so does `readonly`. `unique` is peeled to its operand,
+            // since docgen doesn't track symbol uniqueness. Neither is captured as raw source text, which made
+            // `readonly string[]` (real @types/react's ButtonHTMLAttributes `defaultValue`/`value`
+            // shape) degrade to Opaque even though the element type is fully knowable.
             TSType::TSTypeOperatorType(op) => match op.operator {
                 TSTypeOperatorOperator::Keyof => {
                     CollectedType::KeyOf(Box::new(self.ts_type_to_collected_at_depth(&op.type_annotation, depth + 1)))
                 }
-                TSTypeOperatorOperator::Unique | TSTypeOperatorOperator::Readonly => {
-                    self.ts_type_to_collected_at_depth(&op.type_annotation, depth + 1)
-                }
+                TSTypeOperatorOperator::Readonly => CollectedType::Readonly(Box::new(
+                    self.ts_type_to_collected_at_depth(&op.type_annotation, depth + 1),
+                )),
+                TSTypeOperatorOperator::Unique => self.ts_type_to_collected_at_depth(&op.type_annotation, depth + 1),
             },
 
             TSType::TSInferType(i) => {
@@ -866,7 +868,25 @@ impl<'src> SourceDataCollector<'src> {
                     .map(|ta| self.ts_type_to_collected_at_depth(&ta.type_annotation, depth + 1))
                     .unwrap_or(CollectedType::Any);
                 let description = self.find_jsdoc(sig.span.start);
-                Some(CollectedObjectField { name, collected_type, required: !sig.optional, description })
+                Some(CollectedObjectField {
+                    name,
+                    collected_type,
+                    required: !sig.optional,
+                    description,
+                    readonly: sig.readonly,
+                    index_key: None,
+                })
+            }
+            TSSignature::TSIndexSignature(sig) => {
+                let key = self.ts_type_to_collected_at_depth(&sig.parameter.type_annotation.type_annotation, depth + 1);
+                Some(CollectedObjectField {
+                    name: sig.parameter.name.to_string(),
+                    collected_type: self.ts_type_to_collected_at_depth(&sig.type_annotation.type_annotation, depth + 1),
+                    required: true,
+                    description: self.find_jsdoc(sig.span.start),
+                    readonly: sig.readonly,
+                    index_key: Some(Box::new(key)),
+                })
             }
             TSSignature::TSMethodSignature(sig) => {
                 let name = js_text::property_name(&sig.key.static_name()?);
@@ -888,6 +908,8 @@ impl<'src> SourceDataCollector<'src> {
                     },
                     required: !sig.optional,
                     description: String::new(),
+                    readonly: false,
+                    index_key: None,
                 })
             }
             _ => None,

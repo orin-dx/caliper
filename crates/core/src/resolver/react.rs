@@ -32,7 +32,7 @@ pub(super) fn react_type_to_prop_type(
         // Ref types.
         "Ref" | "RefObject" | "ForwardedRef" | "MutableRefObject" | "RefCallback" | "LegacyRef" => {
             let element = args.first().map(|a| a.to_raw_string());
-            PropType::Ref { element }
+            PropType::Ref { name: strip.to_owned(), element }
         }
 
         // ElementType — component-as-prop.
@@ -77,7 +77,7 @@ pub(super) fn react_type_to_prop_type(
         }
 
         // ElementRef.
-        "ElementRef" => PropType::Ref { element: None },
+        "ElementRef" => PropType::Ref { name: "ElementRef".into(), element: None },
 
         // Context / Consumer / Provider — surface as Named.
         "Context" | "Consumer" | "Provider" | "RefAttributes" => {

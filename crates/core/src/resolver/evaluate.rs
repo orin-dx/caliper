@@ -332,6 +332,7 @@ fn object_union_members(
         }
         CollectedType::Intersection(_)
         | CollectedType::Array(_)
+        | CollectedType::Readonly(_)
         | CollectedType::Tuple(_)
         | CollectedType::TypeOf(_)
         | CollectedType::Conditional { .. }
@@ -384,6 +385,7 @@ fn array_element(arg: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, 
             array_element(one, file, ctx, depth + 1)
         }
         CollectedType::Array(inner) => Some((inner.as_ref().clone(), file.to_owned())),
+        CollectedType::Readonly(inner) => array_element(inner, file, ctx, depth + 1),
         CollectedType::Object(_)
         | CollectedType::Intersection(_)
         | CollectedType::Tuple(_)
@@ -420,7 +422,7 @@ pub(super) fn extracted_object_members(
 ) -> Option<Vec<Located>> {
     let CollectedType::Object(fields) = filter else { return None };
     let [field] = fields.as_slice() else { return None };
-    if field.required {
+    if field.required || !field.is_member() {
         return None;
     }
     let CollectedType::StringLiteral(wanted) = &field.collected_type else { return None };
@@ -445,8 +447,8 @@ fn lacks_member(obj: &CollectedType, key: &str, file: &Utf8Path, ctx: &Resolutio
     }
     match obj {
         CollectedType::AtFile { file, inner } => lacks_member(inner, key, file, ctx, depth + 1),
-        // An index signature isn't recorded, so an object with no fields may still have the member.
-        CollectedType::Object(fields) => !fields.is_empty() && !fields.iter().any(|f| f.name == key),
+        // An index signature may still hold the member, as may an object with no fields.
+        CollectedType::Object(fields) => !fields.is_empty() && fields.iter().all(|f| f.is_member() && f.name != key),
         CollectedType::Named { name, args } => alias_body(name, args, file, ctx)
             .is_some_and(|(body, body_file)| lacks_member(&body, key, &body_file, ctx, depth + 1)),
         _ => false,
@@ -463,6 +465,7 @@ fn keys_of(target: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, dep
         CollectedType::Object(fields) => Some(
             fields
                 .iter()
+                .filter(|f| f.is_member())
                 .map(|f| Key {
                     name: f.name.clone(),
                     required: f.required,
@@ -619,7 +622,7 @@ fn member_uncached(
             }
         }
         CollectedType::Object(fields) => {
-            Some((fields.iter().find(|f| f.name == key)?.collected_type.clone(), file.to_owned()))
+            Some((fields.iter().find(|f| f.is_member() && f.name == key)?.collected_type.clone(), file.to_owned()))
         }
         CollectedType::Named { name, args } => {
             let (canonical_file, canonical_name) = canonical(name, file, ctx);

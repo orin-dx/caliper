@@ -30,6 +30,8 @@ export interface ButtonProps<TValue = string> extends Base {
   size: (typeof SIZES)[number];
   value?: TValue;
   onPress?: (event: MouseEvent) => void;
+  tags?: readonly string[];
+  slots: { readonly id: string; [key: string]: number };
 }
 
 export type Alias = Pick2<ButtonProps, "tone"> & { extra?: number };

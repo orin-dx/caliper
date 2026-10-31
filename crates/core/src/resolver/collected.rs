@@ -54,6 +54,9 @@ pub fn resolve_collected_type(
         CollectedType::Tuple(members) => PropType::Tuple(
             members.iter().map(|m| resolve_collected_type(m, consuming_file, ctx, state, depth + 1)).collect(),
         ),
+        CollectedType::Readonly(inner) => {
+            PropType::Readonly(Box::new(resolve_collected_type(inner, consuming_file, ctx, state, depth + 1)))
+        }
         CollectedType::Object(fields) => PropType::Object(
             fields
                 .iter()
@@ -62,6 +65,11 @@ pub fn resolve_collected_type(
                     prop_type: resolve_collected_type(&f.collected_type, consuming_file, ctx, state, depth + 1),
                     required: f.required,
                     description: f.description.clone(),
+                    readonly: f.readonly,
+                    index_key: f
+                        .index_key
+                        .as_ref()
+                        .map(|key| Box::new(resolve_collected_type(key, consuming_file, ctx, state, depth + 1))),
                 })
                 .collect(),
         ),
