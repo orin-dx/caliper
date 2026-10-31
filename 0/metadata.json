@@ -1,0 +1,99 @@
+{
+  "cli_version": "0.12.3-nightly.202610300619.cea1b3cee",
+  "checkpoint_id": "01M67YBDVZCHRGD25CX4H5SH93",
+  "session_id": "cd0b1cc5-b31e-40d5-8c38-bf89ad8b231e",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-31T02:59:32.597764Z",
+  "branch": "feat/harden-on-demand-checker",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "40a598206c85",
+  "checkpoint_transcript_start": 108,
+  "transcript_lines_at_start": 108,
+  "compact_transcript_start": 8,
+  "token_usage": {
+    "input_tokens": 462,
+    "cache_creation_tokens": 368928,
+    "cache_read_tokens": 64115975,
+    "output_tokens": 146552,
+    "api_call_count": 231,
+    "subagent_tokens": {
+      "input_tokens": 198,
+      "cache_creation_tokens": 194082,
+      "cache_read_tokens": 13026415,
+      "output_tokens": 62398,
+      "api_call_count": 99
+    }
+  },
+  "redaction": {
+    "replacements": 29,
+    "layers": {
+      "betterleaks": 4,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 25,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "summary": {
+    "intent": "Clean up old git branches/worktrees, then work through a multi-step plan for the caliper repo: baseline weekly benchmark run, four tracked trails, schema v4 (readonly/index signatures/ref kind), detection-by-shape, and on-demand tsc hardening, each as its own PR.",
+    "outcome": "Cleaned 142 merged branches (two worktrees with uncommitted files left). Baseline run recorded on trail #125, schema v4 PR #266 and detect-by-shape PR #267 opened and marked ready, and the tsc-hardening branch was linted, tested and had its signed commit created; push, trail #128 link and PR were still pending when the transcript ended.",
+    "learnings": {
+      "repo": [
+        "Schema bumps follow a template: ADR 0023 (schema v3) shows the file footprint, a changeset, TS reader bumps, trycmd updates, napi typings and serialization-formats docs.",
+        "Snapshot tests resolve node_modules relative to the checkout, so a fresh worktree must install node deps or snapshots pick up a different @types/react and show path noise/spurious diffs.",
+        "Repo lint recipes: clippy without --all-targets, oxfmt/oxlint, doc-check, and typos; typos flags scratch files and words like 'alikes'.",
+        "Commits are signed and verified (signature status 'G'); pushing a branch and linking it to a trail via entire causes a draft PR to be opened automatically, which is then filled in and marked ready.",
+        "`just bench` compares time/RSS against origin/main; results are judged within noise (~1.0x).",
+        "The union normalizer already drops `| undefined` from values, so tests expecting it must expect the plain type.",
+        "Real-tsc tests skip locally when tsc is absent; CI was changed to fail on missing tsc instead of skipping.",
+        "The sandbox blocks `ps`, so RSS-cap tests need to run outside the sandbox.",
+        "Chakra has no unreduced NonNullable without dependencies loaded; NonNullable reduces fine for local unions."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/extractor/mod.rs",
+          "finding": "Index signatures `[key: string]: T` became object fields named `key` and were wrongly read as props by props-base code; consumers of object fields must skip index-signature fields."
+        },
+        {
+          "path": "crates/core/src/extractor/component.rs",
+          "finding": "Wrapper detection (forwardRef/memo, memo(forwardRef(fn))) was name-based and was made import-source-aware via a ReactApi binding."
+        },
+        {
+          "path": "crates/core/src/extractor/wrapper.rs",
+          "finding": "The tagged-factory `{Name}Props` heuristic was replaced by a shape rule that must skip props types already claimed by another component in the file (e.g. Chakra's private StyledGroup recipe) to avoid false positives."
+        }
+      ],
+      "workflow": [
+        "For unexpected snapshot diffs, bisect by temporarily reverting one change (e.g. peeling readonly) and compare against a baseline patch run in the same environment.",
+        "Before and after comparisons of component sets on real corpora (Chakra, Mantine) caught a false positive that unit tests missed.",
+        "Delegating a read-only root-cause analysis to a separate agent in its own worktree lets implementation proceed in parallel.",
+        "Use one worktree and one PR per trail item; keep earlier worktrees when moving on."
+      ]
+    },
+    "friction": [
+      "Earlier file listing was a stale checkout, wrongly suggesting the weekly workflow was missing.",
+      "The harness required literal script paths and simpler commands, forcing helper scripts in a job tmp dir and split commands.",
+      "Fresh worktrees lacked node_modules, causing misleading snapshot diffs until deps were installed.",
+      "Two agent worktrees had uncommitted files and could not be cleaned up.",
+      "Shell loops were disallowed or awkward, so a Python script was used for snapshot diffs.",
+      "A shadcn source path was off by one directory, requiring a rerun of the latency measurement.",
+      "Scratch files and the word 'alikes' tripped the typos check."
+    ],
+    "open_items": [
+      "Finish tsc-hardening: push branch, link to trail #128, fill in and mark the PR ready.",
+      "The NonNullable detection item was parked pending evidence from a dependency-loaded run.",
+      "Two agent worktrees with uncommitted files remain for the user to review.",
+      "shadcn/antd recall gap root-cause findings were recorded on trail #125 and may need follow-up work."
+    ]
+  }
+}

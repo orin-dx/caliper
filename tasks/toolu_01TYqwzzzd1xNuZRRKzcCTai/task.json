@@ -1,0 +1,25 @@
+{
+  "tool_use_id": "toolu_01TYqwzzzd1xNuZRRKzcCTai",
+  "agent_id": "a9b87f2da7f20385f",
+  "subagent_type": "claude",
+  "task_description": "Root-cause shadcn/antd recall gap",
+  "files": [
+    "scratch/rep/a.tsx",
+    "scratch/rep/b.tsx",
+    "scratch/rep/c.tsx",
+    "scripts/scratch_antd.py",
+    "scripts/scratch_classify.py",
+    "scripts/scratch_gap.py",
+    "scripts/scratch_recall.py",
+    "scripts/scratch_run.py"
+  ],
+  "token_usage": {
+    "input_tokens": 198,
+    "cache_creation_tokens": 194082,
+    "cache_read_tokens": 13026415,
+    "output_tokens": 62398,
+    "api_call_count": 99
+  },
+  "started_at": "2026-10-30T19:41:58.034045-07:00",
+  "completed_at": "2026-10-30T19:54:10.977461-07:00"
+}
