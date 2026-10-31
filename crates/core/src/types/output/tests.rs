@@ -54,14 +54,28 @@ fn to_tagged_value(pt: &PropType) -> serde_json::Value {
             "kind": "tuple",
             "elements": members.iter().map(|m| to_tagged_value(m)).collect::<Vec<_>>()
         }),
+        PropType::Readonly(inner) => serde_json::json!({
+            "kind": "readonly",
+            "element": to_tagged_value(inner)
+        }),
         PropType::Object(fields) => serde_json::json!({
             "kind": "object",
-            "fields": fields.iter().map(|f| serde_json::json!({
-                "name": f.name,
-                "propType": to_tagged_value(&f.prop_type),
-                "required": f.required,
-                "description": f.description,
-            })).collect::<Vec<_>>()
+            "fields": fields.iter().map(|f| {
+                let mut field = serde_json::json!({
+                    "name": f.name,
+                    "propType": to_tagged_value(&f.prop_type),
+                    "required": f.required,
+                    "description": f.description,
+                });
+                // Written only when set, so a field without them is the shape it always had.
+                if f.readonly {
+                    field["readonly"] = serde_json::Value::Bool(true);
+                }
+                if let Some(key) = &f.index_key {
+                    field["indexKey"] = to_tagged_value(key);
+                }
+                field
+            }).collect::<Vec<_>>()
         }),
         // Struct variants — fields merge directly with kind
         PropType::Named { name, args } => serde_json::json!({
@@ -84,8 +98,9 @@ fn to_tagged_value(pt: &PropType) -> serde_json::Value {
             }).collect::<Vec<_>>(),
             "returnType": to_tagged_value(return_type)
         }),
-        PropType::Ref { element } => serde_json::json!({
+        PropType::Ref { name, element } => serde_json::json!({
             "kind": "ref",
+            "name": name,
             "element": element
         }),
         PropType::HtmlAttributes { element, omitted } => serde_json::json!({
@@ -173,6 +188,8 @@ fn object_raw_string_renders_real_fields_not_a_placeholder() {
         prop_type: PropType::String,
         required: true,
         description: String::new(),
+        readonly: false,
+        index_key: None,
     }]);
     assert_eq!(ty.raw_string(), "{ '--accent': string }");
 }
@@ -180,12 +197,21 @@ fn object_raw_string_renders_real_fields_not_a_placeholder() {
 #[test]
 fn object_raw_string_quotes_non_identifier_keys_only() {
     let ty = PropType::Object(vec![
-        ObjectField { name: "label".into(), prop_type: PropType::String, required: true, description: String::new() },
+        ObjectField {
+            name: "label".into(),
+            prop_type: PropType::String,
+            required: true,
+            description: String::new(),
+            readonly: false,
+            index_key: None,
+        },
         ObjectField {
             name: "data-testid".into(),
             prop_type: PropType::String,
             required: false,
             description: String::new(),
+            readonly: false,
+            index_key: None,
         },
     ]);
     assert_eq!(ty.raw_string(), "{ label: string; 'data-testid'?: string }");
@@ -320,6 +346,8 @@ mod number_literal_roundtrip_tests {
                 prop_type: PropType::NumberLiteral(f64::NAN),
                 required: true,
                 description: String::new(),
+                readonly: false,
+                index_key: None,
             }]),
             PropType::Named { name: "Foo".into(), args: vec![PropType::NumberLiteral(f64::NAN)] },
         ]);
@@ -423,8 +451,22 @@ mod prop_type_composite_roundtrip_tests {
     #[test]
     fn object_with_fields_round_trips_exactly() {
         let original = PropType::Object(vec![
-            ObjectField { name: "a".into(), prop_type: PropType::String, required: true, description: "desc".into() },
-            ObjectField { name: "b".into(), prop_type: PropType::Boolean, required: false, description: String::new() },
+            ObjectField {
+                name: "a".into(),
+                prop_type: PropType::String,
+                required: true,
+                description: "desc".into(),
+                readonly: false,
+                index_key: None,
+            },
+            ObjectField {
+                name: "b".into(),
+                prop_type: PropType::Boolean,
+                required: false,
+                description: String::new(),
+                readonly: false,
+                index_key: None,
+            },
         ]);
         let json = serde_json::to_value(&original).expect("serialize");
         let restored: PropType = serde_json::from_value(json).expect("deserialize");
@@ -750,6 +792,8 @@ mod streaming_serialize_tests {
                 prop_type: PropType::Union(vec![PropType::String, PropType::Number]),
                 required: true,
                 description: "The x.".into(),
+                readonly: false,
+                index_key: None,
             }]),
             PropType::Named { name: "Box".into(), args: vec![PropType::StringLiteral("div".into())] },
             PropType::Function {
@@ -765,8 +809,29 @@ mod streaming_serialize_tests {
             },
             PropType::Function { type_params: vec![], params: vec![], return_type: Box::new(PropType::Void) },
             signature_with_optional_and_rest(),
-            PropType::Ref { element: Some("HTMLDivElement".into()) },
-            PropType::Ref { element: None },
+            PropType::Ref { name: "Ref".into(), element: Some("HTMLDivElement".into()) },
+            PropType::Ref { name: "RefObject".into(), element: Some("HTMLDivElement".into()) },
+            PropType::Ref { name: "ElementRef".into(), element: None },
+            PropType::Readonly(Box::new(PropType::Array(Box::new(PropType::String)))),
+            PropType::Readonly(Box::new(PropType::Tuple(vec![PropType::String, PropType::Number]))),
+            PropType::Object(vec![
+                ObjectField {
+                    name: "id".into(),
+                    prop_type: PropType::String,
+                    required: true,
+                    description: String::new(),
+                    readonly: true,
+                    index_key: None,
+                },
+                ObjectField {
+                    name: "key".into(),
+                    prop_type: PropType::Number,
+                    required: true,
+                    description: String::new(),
+                    readonly: false,
+                    index_key: Some(Box::new(PropType::String)),
+                },
+            ]),
             PropType::HtmlAttributes { element: "button".into(), omitted: vec!["type".into()] },
             PropType::LiteralUnion { members: vec!["sm".into(), "lg".into()], has_default: true },
         ];

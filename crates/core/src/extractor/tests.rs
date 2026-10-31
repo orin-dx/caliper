@@ -75,9 +75,9 @@ fn fixture_path(rel: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn test_readonly_array_type_operator_peeled_transparently() {
+fn test_readonly_array_type_operator_is_kept_over_a_known_element() {
     // `readonly string[]` (the type-operator form, not the `Readonly<T>` utility
-    // type — already handled separately) captured its entire span as raw source
+    // type — already handled separately) once captured its entire span as raw source
     // text unconditionally, found while investigating whether fully resolving
     // @types/react's real HTMLAttributes chain was tractable: ButtonHTMLAttributes'
     // real `defaultValue`/`value` fields use exactly this shape. Downstream
@@ -94,8 +94,9 @@ interface Props { items: readonly string[]; }
     let items = iface.props.iter().find(|p| p.name == "items").expect("'items' prop not found");
 
     assert!(
-        matches!(&items.collected_type, CollectedType::Array(inner) if matches!(**inner, CollectedType::String)),
-        "expected Array(String), got {:?}",
+        matches!(&items.collected_type, CollectedType::Readonly(array)
+            if matches!(&**array, CollectedType::Array(inner) if matches!(**inner, CollectedType::String))),
+        "expected Readonly(Array(String)), got {:?}",
         items.collected_type
     );
 }

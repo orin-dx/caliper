@@ -192,7 +192,7 @@ fn value_member_props_at_depth(
         CollectedTypeAlias::Passthrough { target: CollectedType::Object(fields), .. } => {
             return fields
                 .iter()
-                .find(|field| field.name == member)
+                .find(|field| field.is_member() && field.name == member)
                 .and_then(|field| component_props_type(&field.collected_type, &base_file, ctx, depth + 1))
                 .map(|(props, file, _)| (props, file));
         }
@@ -200,7 +200,7 @@ fn value_member_props_at_depth(
             return members.iter().find_map(|part| match part {
                 CollectedType::Object(fields) => fields
                     .iter()
-                    .find(|field| field.name == member)
+                    .find(|field| field.is_member() && field.name == member)
                     .and_then(|field| component_props_type(&field.collected_type, &base_file, ctx, depth + 1))
                     .map(|(props, file, _)| (props, file)),
                 _ => None,

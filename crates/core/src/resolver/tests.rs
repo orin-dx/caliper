@@ -457,7 +457,7 @@ fn test_ref_type() {
     };
     let result = resolve_type(&ct, &ctx);
     assert!(
-        matches!(&result, PropType::Ref { element: Some(e) } if e == "HTMLButtonElement"),
+        matches!(&result, PropType::Ref { element: Some(e), .. } if e == "HTMLButtonElement"),
         "Expected Ref<HTMLButtonElement>, got {:?}",
         result
     );
@@ -1101,6 +1101,8 @@ fn test_component_props_without_ref_in_intersection_alias() {
                     collected_type: CollectedType::Boolean,
                     required: false,
                     description: String::new(),
+                    readonly: false,
+                    index_key: None,
                 }]),
             ],
             file_path: file_path.clone(),
@@ -1884,6 +1886,8 @@ fn test_unhandled_intersection_member_gets_diagnostic_not_silent_drop() {
             collected_type: CollectedType::Boolean,
             required: false,
             description: String::new(),
+            readonly: false,
+            index_key: None,
         }]),
     ]);
 

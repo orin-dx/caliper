@@ -100,6 +100,8 @@ pub enum CollectedType {
     Intersection(Vec<CollectedType>),
     Array(Box<CollectedType>),
     Tuple(Vec<CollectedType>),
+    /// `readonly T[]` or `readonly [A, B]`: the operand under the `readonly` operator.
+    Readonly(Box<CollectedType>),
     Object(Vec<CollectedObjectField>),
 
     // ── Named type reference (possibly generic, possibly not yet resolved)
@@ -207,12 +209,18 @@ impl CollectedType {
             | CollectedType::Intersection(members)
             | CollectedType::Tuple(members)
             | CollectedType::TemplateLiteral(members) => all(hasher, members),
-            CollectedType::Array(inner) | CollectedType::KeyOf(inner) => inner.structural_hash(hasher),
+            CollectedType::Array(inner) | CollectedType::Readonly(inner) | CollectedType::KeyOf(inner) => {
+                inner.structural_hash(hasher)
+            }
             CollectedType::Object(fields) => {
                 fields.len().hash(hasher);
                 for field in fields {
                     field.name.hash(hasher);
                     field.required.hash(hasher);
+                    field.readonly.hash(hasher);
+                    if let Some(key) = &field.index_key {
+                        key.structural_hash(hasher);
+                    }
                     field.collected_type.structural_hash(hasher);
                 }
             }
@@ -290,6 +298,7 @@ impl CollectedType {
                 members.iter().map(|m| m.to_raw_string()).collect::<Vec<_>>().join(" & ")
             }
             CollectedType::Array(inner) => format!("{}[]", inner.to_raw_string()),
+            CollectedType::Readonly(inner) => format!("readonly {}", inner.to_raw_string()),
             CollectedType::Named { name, args } if args.is_empty() => name.to_string(),
             CollectedType::Named { name, args } => {
                 format!("{}<{}>", name, args.iter().map(|a| a.to_raw_string()).collect::<Vec<_>>().join(", "))
@@ -400,18 +409,31 @@ impl CollectedType {
             }),
             // Array: {"arr": inner}
             CollectedType::Array(inner) => serde_json::json!({"arr": inner.to_json_value()}),
+            // Readonly: {"ro": inner}
+            CollectedType::Readonly(inner) => serde_json::json!({"ro": inner.to_json_value()}),
             // Tuple: {"tup": [members...]}
             CollectedType::Tuple(members) => serde_json::json!({
                 "tup": members.iter().map(|m| m.to_json_value()).collect::<Vec<_>>()
             }),
-            // Object: {"obj": [{name, t, req, desc}...]}
+            // Object: {"obj": [{name, t, req, desc, ro?, ik?}...]}
             CollectedType::Object(fields) => serde_json::json!({
-                "obj": fields.iter().map(|f| serde_json::json!({
-                    "name": f.name,
-                    "t": f.collected_type.to_json_value(),
-                    "req": f.required,
-                    "desc": f.description,
-                })).collect::<Vec<_>>()
+                "obj": fields.iter().map(|f| {
+                    let mut field = serde_json::json!({
+                        "name": f.name,
+                        "t": f.collected_type.to_json_value(),
+                        "req": f.required,
+                        "desc": f.description,
+                    });
+                    if let Some(map) = field.as_object_mut() {
+                        if f.readonly {
+                            map.insert("ro".into(), serde_json::Value::Bool(true));
+                        }
+                        if let Some(key) = &f.index_key {
+                            map.insert("ik".into(), key.to_json_value());
+                        }
+                    }
+                    field
+                }).collect::<Vec<_>>()
             }),
             // TypeOf: {"to": name}
             CollectedType::TypeOf(name) => serde_json::json!({"to": name.as_str()}),
@@ -523,6 +545,9 @@ impl CollectedType {
                 if let Some(inner) = map.get("arr") {
                     return Ok(CollectedType::Array(Box::new(Self::from_json_value(inner)?)));
                 }
+                if let Some(inner) = map.get("ro") {
+                    return Ok(CollectedType::Readonly(Box::new(Self::from_json_value(inner)?)));
+                }
                 if let Some(arr) = map.get("tup").and_then(|v| v.as_array()) {
                     return Ok(CollectedType::Tuple(arr.iter().map(Self::from_json_value).collect::<Result<_, _>>()?));
                 }
@@ -553,6 +578,8 @@ impl CollectedType {
                                 collected_type: Self::from_json_value(o.get("t").unwrap_or(&serde_json::Value::Null))?,
                                 required: o.get("req").and_then(|v| v.as_bool()).unwrap_or(false),
                                 description: o.get("desc").and_then(|v| v.as_str()).unwrap_or("").to_owned(),
+                                readonly: o.get("ro").and_then(|v| v.as_bool()).unwrap_or(false),
+                                index_key: o.get("ik").map(Self::from_json_value).transpose()?.map(Box::new),
                             })
                         })
                         .collect::<Result<_, std::string::String>>()?;
@@ -664,6 +691,19 @@ pub struct CollectedObjectField {
     pub collected_type: CollectedType,
     pub required: bool,
     pub description: std::string::String,
+    /// The field is written `readonly name: T`.
+    #[serde(default)]
+    pub readonly: bool,
+    /// Set for an index signature `[name: K]: T`: the key type `K`, with `collected_type` the value type `T`.
+    #[serde(default)]
+    pub index_key: Option<Box<CollectedType>>,
+}
+
+impl CollectedObjectField {
+    /// A named member, as opposed to an index signature: only a named member is a prop, a key or a lookup target.
+    pub(crate) fn is_member(&self) -> bool {
+        self.index_key.is_none()
+    }
 }
 
 // ─── Enum Types (used in both SourceData and ExtractionOutput) ────────────────
@@ -919,6 +959,7 @@ impl CollectedType {
             CollectedType::Tuple(members) => CollectedType::Tuple(all(members)),
             CollectedType::TemplateLiteral(parts) => CollectedType::TemplateLiteral(all(parts)),
             CollectedType::Array(inner) => CollectedType::Array(Box::new(inner.rename_named(rename))),
+            CollectedType::Readonly(inner) => CollectedType::Readonly(Box::new(inner.rename_named(rename))),
             CollectedType::KeyOf(inner) => CollectedType::KeyOf(Box::new(inner.rename_named(rename))),
             CollectedType::AtFile { file, inner } => {
                 CollectedType::AtFile { file: file.clone(), inner: Box::new(inner.rename_named(rename)) }
@@ -931,6 +972,8 @@ impl CollectedType {
                         collected_type: f.collected_type.rename_named(rename),
                         required: f.required,
                         description: f.description.clone(),
+                        readonly: f.readonly,
+                        index_key: f.index_key.as_ref().map(|key| Box::new(key.rename_named(rename))),
                     })
                     .collect(),
             ),
@@ -1316,6 +1359,8 @@ mod tests {
             collected_type: CollectedType::String,
             required: true,
             description: "the label".to_owned(),
+            readonly: false,
+            index_key: None,
         };
 
         let bytes = rmp_serde::to_vec(&field).expect("serialization should succeed");
@@ -1342,6 +1387,8 @@ mod tests {
                 collected_type: CollectedType::Boolean,
                 required: true,
                 description: String::new(),
+                readonly: false,
+                index_key: None,
             }]),
         ]);
         let json = original.to_json_value();

@@ -56,6 +56,10 @@ export interface ObjectField {
   propType: PropType
   required: boolean
   description: string
+  /** Written `readonly name: T`. Absent when false. */
+  readonly?: true
+  /** Set for an index signature `[name: K]: T`: the key type `K`, with `name` the key parameter and `propType` the value. */
+  indexKey?: PropType
 }
 
 export type PropType =
@@ -79,10 +83,11 @@ export type PropType =
   | { kind: 'intersection'; members: PropType[] }
   | { kind: 'array'; element: PropType }
   | { kind: 'tuple'; elements: PropType[] }
+  | { kind: 'readonly'; element: PropType }
   | { kind: 'object'; fields: ObjectField[] }
   | { kind: 'named'; name: string; args: PropType[] }
   | { kind: 'function'; typeParams: string[]; params: FunctionParam[]; returnType: PropType }
-  | { kind: 'ref'; element: string | null }
+  | { kind: 'ref'; name: string; element: string | null }
   | { kind: 'htmlAttributes'; element: string; omitted: string[] }
   | { kind: 'literalUnion'; members: string[]; hasDefault: boolean }
   | { kind: 'opaque'; raw: string; reason: OpaqueReason }
