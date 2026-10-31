@@ -1,0 +1,48 @@
+{
+  "cli_version": "0.12.3-nightly.202610300619.cea1b3cee",
+  "checkpoint_id": "01M67XYZKSYMS3W4SXQY1EXF3X",
+  "strategy": "manual-commit",
+  "branch": "feat/detect-by-shape",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".changeset/detect-components-by-shape.md",
+    "crates/core/src/extractor/component.rs",
+    "crates/core/src/extractor/evidence.rs",
+    "crates/core/src/extractor/mod.rs",
+    "crates/core/src/extractor/tests.rs",
+    "crates/core/src/extractor/uses.rs",
+    "crates/core/src/extractor/wrapper.rs",
+    "crates/core/tests/detect_by_shape.rs",
+    "docs/architecture/extractor-ast-visiting.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  },
+  "redaction": {
+    "replacements": 7,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 7,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}

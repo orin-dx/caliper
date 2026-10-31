@@ -1,0 +1,8 @@
+{
+  "tool_use_id": "toolu_01TYqwzzzd1xNuZRRKzcCTai",
+  "agent_id": "a9b87f2da7f20385f",
+  "subagent_type": "claude",
+  "task_description": "Root-cause shadcn/antd recall gap",
+  "started_at": "2026-10-30T19:41:58.034045-07:00",
+  "transcript_unavailable_reason": "transcript path unresolvable"
+}

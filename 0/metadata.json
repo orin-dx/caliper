@@ -1,0 +1,50 @@
+{
+  "cli_version": "0.12.3-nightly.202610300619.cea1b3cee",
+  "checkpoint_id": "01M67XYZKSYMS3W4SXQY1EXF3X",
+  "session_id": "cd0b1cc5-b31e-40d5-8c38-bf89ad8b231e",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-31T02:52:32.335195Z",
+  "branch": "feat/detect-by-shape",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".changeset/detect-components-by-shape.md",
+    "crates/core/src/extractor/component.rs",
+    "crates/core/src/extractor/evidence.rs",
+    "crates/core/src/extractor/mod.rs",
+    "crates/core/src/extractor/tests.rs",
+    "crates/core/src/extractor/uses.rs",
+    "crates/core/src/extractor/wrapper.rs",
+    "crates/core/tests/detect_by_shape.rs",
+    "docs/architecture/extractor-ast-visiting.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "74c794538ec2",
+  "checkpoint_transcript_start": 1701,
+  "transcript_lines_at_start": 1701,
+  "compact_transcript_start": 8,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  },
+  "redaction": {
+    "replacements": 7,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 7,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 1
+  }
+}
