@@ -13,8 +13,8 @@ use oxc_ast::ast::*;
 use oxc_span::Span;
 
 use crate::types::{
-    CollectedType, CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode, FunctionResult, TypeName,
-    WrapperCallee,
+    CollectedType, CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode, ExtendsRef, FunctionResult,
+    TypeName, WrapperCallee,
 };
 
 use super::evidence::{renders, FunctionShape, ReactBinding};
@@ -31,6 +31,9 @@ pub(crate) struct PendingWrapper {
     name: String,
     /// The only evidence was a tag name, so the props must come from a factory payload.
     needs_payload: bool,
+    /// The intrinsic tag of a tagged factory (`"div"` in `chakra("div", { … })`), whose props type is then the
+    /// declaration in this file that gives that tag.
+    tag: Option<String>,
     type_args: Vec<WrapperTypeArg>,
     callee: Option<WrapperCallee>,
     rule: DetectionRule,
@@ -78,11 +81,11 @@ enum ArgumentEvidence {
 /// also describes `makeLabel<P>("button")`, and a lowercase value describes a context default or a store, so neither
 /// counts.
 fn component_argument_evidence(
-    callee: &str,
+    creates_context: bool,
     call: &CallExpression<'_>,
     react: ReactBinding<'_>,
 ) -> Result<ArgumentEvidence, &'static str> {
-    if callee.rsplit('.').next() == Some("createContext") {
+    if creates_context {
         return Err("creates a context");
     }
     let Some(first) = call.arguments.first().and_then(Argument::as_expression).map(super::component::peel_expr) else {
@@ -103,7 +106,9 @@ fn component_argument_evidence(
         Expression::StaticMemberExpression(m) if is_component_reference(m.property.name.as_str()) => {
             Ok(ArgumentEvidence::Sufficient)
         }
-        Expression::CallExpression(inner) if super::component::is_component_wrapper_call(inner) => {
+        Expression::CallExpression(inner)
+            if react.is_react_wrapper(inner) || super::component::is_component_wrapper_call(inner) =>
+        {
             Ok(ArgumentEvidence::Sufficient)
         }
         _ => Err("is given an argument that is not a render function, a tag or a component reference"),
@@ -137,7 +142,8 @@ impl<'src> SourceDataCollector<'src> {
         let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
         let Some(type_arguments) = call.type_arguments.as_ref() else { return false };
         let Some(callee) = self.extract_callee_name(call) else { return false };
-        let needs_payload = match component_argument_evidence(&callee, call, &*self) {
+        let creates_context = self.react_api(&call.callee) == Some(super::ReactApi::CreateContext);
+        let needs_payload = match component_argument_evidence(creates_context, call, &*self) {
             Ok(ArgumentEvidence::Sufficient) => false,
             Ok(ArgumentEvidence::TagNeedsPayload) => true,
             Err(reason) => {
@@ -155,6 +161,7 @@ impl<'src> SourceDataCollector<'src> {
         self.pending_wrappers.push(PendingWrapper {
             name: name.to_owned(),
             needs_payload,
+            tag: None,
             type_args,
             callee: Some(callee),
             rule: DetectionRule::WrapperTypeArgument,
@@ -166,8 +173,9 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     /// Record `const Center = chakra("div", { ... })` as a candidate: a call given an intrinsic tag name and a config
-    /// object, whose props type is the `CenterProps` declared in this file. Nothing here names a library; calls that
-    /// build elements rather than components (`createElement("div", { ... })`) are excluded by name, as React's own API.
+    /// object, whose props type is the one declared in this file for that tag (`interface CenterProps extends
+    /// HTMLChakraProps<"div">`). Nothing here names a library; calls that build elements rather than components
+    /// (`createElement("div", { ... })`) are excluded by name, as React's own API.
     pub(super) fn try_record_tagged_factory<'a>(
         &mut self,
         decl: &super::component::Binding<'_, 'a>,
@@ -182,6 +190,7 @@ impl<'src> SourceDataCollector<'src> {
         let Some(Expression::StringLiteral(tag)) = tag.as_expression().map(super::component::peel_expr) else {
             return false;
         };
+        let tag_name = tag.value.as_str().map(str::to_owned);
         let is_tag = tag.value.as_str().is_some_and(|name| {
             name.starts_with(|c: char| c.is_ascii_lowercase())
                 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
@@ -200,7 +209,8 @@ impl<'src> SourceDataCollector<'src> {
         self.pending_wrappers.push(PendingWrapper {
             name: name.to_owned(),
             needs_payload: false,
-            type_args: vec![WrapperTypeArg { reference: Some((TypeName::from(format!("{name}Props")), Vec::new())) }],
+            tag: tag_name,
+            type_args: Vec::new(),
             callee: None,
             rule: DetectionRule::TaggedFactory,
             description,
@@ -225,8 +235,41 @@ impl<'src> SourceDataCollector<'src> {
 
     /// Turn the recorded candidates into mappings, now that every declaration in the file is known.
     pub(super) fn promote_wrapper_calls(&mut self) {
-        for pending in std::mem::take(&mut self.pending_wrappers) {
+        let pending_wrappers = std::mem::take(&mut self.pending_wrappers);
+        let tag_uses =
+            |tag: &str| pending_wrappers.iter().filter(|pending| pending.tag.as_deref() == Some(tag)).count();
+        let shared_tags: Vec<bool> = pending_wrappers
+            .iter()
+            .map(|pending| pending.tag.as_deref().is_some_and(|tag| tag_uses(tag) > 1))
+            .collect();
+        for (pending, shared_tag) in pending_wrappers.into_iter().zip(shared_tags) {
             if self.data.component_mappings.iter().any(|m| m.component_name == pending.name) {
+                continue;
+            }
+            if let Some(tag) = &pending.tag {
+                let Some((props_name, props_args)) = self.tagged_factory_props(&pending.name, tag, shared_tag) else {
+                    self.record_skip(
+                        DiagnosticCode::SkippedCandidate,
+                        format!(
+                            "'{}' is built from a tag and a config object, but no props type declared in this file gives the tag \"{tag}\"",
+                            pending.name
+                        ),
+                        pending.span,
+                    );
+                    continue;
+                };
+                self.data.component_mappings.push(
+                    ComponentMapping::new(
+                        pending.name,
+                        props_name,
+                        self.file_path.clone(),
+                        pending.span.start,
+                        pending.span.end,
+                        pending.rule,
+                    )
+                    .with_props_type_args(props_args)
+                    .with_doc(pending.description, pending.tags),
+                );
                 continue;
             }
             let selected = match self.select_wrapper_props(&pending.type_args) {
@@ -262,14 +305,6 @@ impl<'src> SourceDataCollector<'src> {
                 );
                 continue;
             };
-            // A tag and a config object also describe a call that is not a component, so the props type must be
-            // seen in this file: the naming convention alone does not vouch for it.
-            if pending.rule == DetectionRule::TaggedFactory
-                && !self.data.interfaces.contains_key(&self.scoped_key(&props_name))
-                && !self.data.type_aliases.contains_key(&self.scoped_key(&props_name))
-            {
-                continue;
-            }
             let mut mapping = ComponentMapping::new(
                 pending.name,
                 props_name,
@@ -285,6 +320,47 @@ impl<'src> SourceDataCollector<'src> {
             }
             self.data.component_mappings.push(mapping);
         }
+    }
+
+    /// The props type a tagged factory builds from: the interface or alias declared in this file whose heritage or body
+    /// gives the factory's tag as a type argument, `interface CenterProps extends HTMLChakraProps<"div">` for
+    /// `chakra("div", …)`, or extends the element's own attributes. Of several, or when other factories in the file
+    /// share the tag, the one named for the binding. A props type another component in the file takes is not a candidate.
+    fn tagged_factory_props(
+        &self,
+        binding: &str,
+        tag: &str,
+        shared_tag: bool,
+    ) -> Option<(TypeName, Vec<CollectedType>)> {
+        let prefix = format!("{}:", self.file_path);
+        let mut found: Vec<TypeName> = Vec::new();
+        for interface in self.data.interfaces.values().filter(|interface| interface.file_path == self.file_path) {
+            if interface.extends.iter().any(|extends| extends_gives_tag(extends, tag)) {
+                found.push(interface.name.clone());
+            }
+        }
+        for (key, alias) in &self.data.type_aliases {
+            let Some(name) = key.strip_prefix(&prefix) else { continue };
+            let gives = match alias {
+                CollectedTypeAlias::Passthrough { target, .. } => gives_tag(target, tag),
+                CollectedTypeAlias::Intersection { members, .. } => members.iter().any(|member| gives_tag(member, tag)),
+                _ => false,
+            };
+            if gives {
+                found.push(TypeName::from(name));
+            }
+        }
+        // A props type another component in the file already takes belongs to that component: `StyledGroup =
+        // chakra("div", …)` is the private recipe `Group` is built on, not a component with `GroupProps`.
+        found.retain(|name| !self.data.component_mappings.iter().any(|mapping| mapping.props_type_name == *name));
+        found.sort();
+        found.dedup();
+        let wanted = format!("{binding}Props");
+        let chosen = match found.as_slice() {
+            [only] if !shared_tag => only.clone(),
+            _ => found.into_iter().find(|name| name.as_str() == wanted)?,
+        };
+        Some((chosen, Vec::new()))
     }
 
     /// The callee of a generic call that builds a component, and its type arguments, for the props its result type
@@ -360,6 +436,32 @@ impl<'src> SourceDataCollector<'src> {
             _ => None,
         })
     }
+}
+
+/// Whether a type gives `tag` as a type argument: `HTMLChakraProps<"div">`, in an intersection or a union with others.
+fn gives_tag(ty: &CollectedType, tag: &str) -> bool {
+    match ty {
+        CollectedType::Named { args, .. } => args.iter().any(|arg| {
+            matches!(arg, CollectedType::StringLiteral(value) if value.as_str() == tag) || gives_tag(arg, tag)
+        }),
+        CollectedType::Intersection(members) | CollectedType::Union(members) => {
+            members.iter().any(|member| gives_tag(member, tag))
+        }
+        CollectedType::AtFile { inner, .. } => gives_tag(inner, tag),
+        _ => false,
+    }
+}
+
+/// Whether an `extends` clause gives `tag`: as a type argument, or as the element a built-in attributes type is for.
+fn extends_gives_tag(extends: &ExtendsRef, tag: &str) -> bool {
+    let (type_args, element) = match extends {
+        ExtendsRef::SameFile { type_args, .. } | ExtendsRef::Imported { type_args, .. } => (type_args, None),
+        ExtendsRef::Builtin { type_args, element, .. } => (type_args, element.as_deref()),
+    };
+    element == Some(tag)
+        || type_args.iter().any(|arg| {
+            gives_tag(arg, tag) || matches!(arg, CollectedType::StringLiteral(value) if value.as_str() == tag)
+        })
 }
 
 /// A single top-level `return Local` where `Local` is a const initialized by a generic call.
