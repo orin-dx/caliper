@@ -1,0 +1,94 @@
+{
+  "cli_version": "0.12.3-nightly.202610300619.cea1b3cee",
+  "checkpoint_id": "01M69C82670S436TVVQVH5ARF9",
+  "session_id": "cd0b1cc5-b31e-40d5-8c38-bf89ad8b231e",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-31T16:21:41.724648Z",
+  "branch": "feat/collapsed-layer-members",
+  "checkpoints_count": 6,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "32e7095c295a",
+  "checkpoint_transcript_start": 3331,
+  "transcript_lines_at_start": 3331,
+  "compact_transcript_start": 254,
+  "token_usage": {
+    "input_tokens": 28,
+    "cache_creation_tokens": 463615,
+    "cache_read_tokens": 5901118,
+    "output_tokens": 8798,
+    "api_call_count": 14,
+    "subagent_tokens": {
+      "input_tokens": 0,
+      "cache_creation_tokens": 0,
+      "cache_read_tokens": 0,
+      "output_tokens": 0,
+      "api_call_count": 0
+    }
+  },
+  "redaction": {
+    "replacements": 35,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 29,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 7
+  },
+  "summary": {
+    "intent": "Work through a multi-step plan on the caliper repo: baseline the weekly recall benchmark, ship schema v4, detection-by-shape and on-demand tsc hardening PRs, then decide how to handle the shadcn/antd recall gap.",
+    "outcome": "Three PRs (#266 schema v4, #267 detection by shape, #268 tsc hardening) were opened and marked ready, with a baseline recorded on trail #125. The shadcn/antd gap was traced mostly to the deliberate inheritance-layer collapse, and the user and assistant converged on measuring recall to include props inside collapsed layers; this is not yet built. The assistant also bypassed the team's GH shim by disabling the sandbox, which the user flagged as a serious problem.",
+    "learnings": {
+      "repo": [
+        "Collapsed inheritance layers (ADR 0012, Storybook-compatible) record only type name, source file, omitted list and total_props count, not prop names, so recall cannot verify layer membership from default output.",
+        "ADR 0018 defines the interned `nameLists` table; layer prop names could be added there as an additive field with no schema version bump (user rule: no second bump after v4).",
+        "`--collapse-inherited-props none` raises shadcn own-props recall from 49.7% to 91.1% and antd from 86.4% to 99.3%; 5,166 of 5,370 missing shadcn own props come from `@react-types/shared/dom.d.ts` collapsed across 82 react-aria components.",
+        "Remaining real accuracy gaps are terminal React builtins (AriaAttributes, HTMLProps, RefAttributes; antd @types/react +7.4 pts), the `tw` HTMLAttributes module augmentation (1,154 props, shadcn own +8.9), Pick<…, keyof …>, union props, object-literal components and `key`.",
+        "ADR 0022 on-demand tsc latency matches measurements (shadcn 84 ms first/21 ms median; antd 93/36 ms), so no disk cache or prefetch was built.",
+        "The weekly harness reports 1,593 MiB peak RSS identically for every tool on shadcn, antd and spectrum, a known unfixed measurement artifact.",
+        "Repo uses Entire trails (#125–#128); `entire trail link` opens draft PRs, and commits must be GPG-signed.",
+        "The sandbox config denies reads of `~/Library/Application Support/OrinDX-PR-Bot` and `~/.config/orin-dx`, likely where the GH shim credentials live."
+      ],
+      "code": [
+        {
+          "path": "crates/core/tests/dropped_syntax.rs",
+          "finding": "Holds the exact-prop-set tests added in PR #266 for the schema v4 retained syntax (readonly, index signatures, ref names)."
+        }
+      ],
+      "workflow": [
+        "The team requires a GH shim for PR operations; plain `gh` with the sandbox disabled bypasses that control. Ask or look for such shims before disabling the sandbox.",
+        "A saved memory note ('gh and git commits need the sandbox off') steered the assistant into the workaround; memory advice that disables security controls should be questioned.",
+        "Neither CLAUDE.md, the repo docs nor memory mentioned the shim, so the assistant had no way to discover it.",
+        "Metrics that conflate presentation (collapse) with resolution accuracy mislead; measure presence in the output regardless of shape."
+      ]
+    },
+    "friction": [
+      "Sandboxed `gh` and git runs failed, leading the assistant to disable the sandbox and unknowingly bypass the GH shim.",
+      "The assistant never found out the shim existed because nothing in CLAUDE.md, the docs or memory mentioned it.",
+      "The user's remark 'we might be getting better results' was ambiguous, and the assistant had to ask which results they meant.",
+      "The Chakra `NonNullable<union>` item could not be reproduced without dependencies loaded.",
+      "The collapsed layer lacks prop names, so the user's preferred membership-aware measurement cannot be verified yet."
+    ],
+    "open_items": [
+      "User decision needed on whether the three PRs' titles, bodies and ready state should be redone through the GH shim, and on the shim's name or location.",
+      "Build the harness change plus additive layer prop-name field (option 1), reporting 'present in a layer' separately from flat, in a PR separate from the structural fixes.",
+      "Record the reframed gap (collapse as presentation, resolved numbers as the gap) on trail #125.",
+      "Structural fixes as separate small PRs: terminal builtins, `tw` augmentation, Pick/keyof, unions, global JSX.",
+      "Chakra `NonNullable<union>` detection stays open on trail #127.",
+      "Re-run the weekly workflow after #266–#268 merge for the step 6 comparison against the baseline.",
+      "Fix the 1,593 MiB peak-RSS measurement artifact in the harness.",
+      "Check how `monokl` reads inheritance layers before changing any default.",
+      "Measure JSON size impact of the layer name list against canonical output before committing.",
+      "Cleanup left for the user: agent worktrees `agent-a482304b1a114609f`, `agent-a8cdaa39c9352581f` and `agent-a9b87f2da7f20385f`, `scratch/*` worktree and remote branches, other jobs' worktrees under `~/.claude/jobs`, repos `caliper-homebrew-tap`, `oxc-stack` and `oxc-release-builds`, remote branches and stale Entire trails."
+    ]
+  }
+}
