@@ -5,7 +5,7 @@
 //! way the resolver will (`resolve_module_with`), finds the file declaring the name by following re-exports
 //! (`export *`, `export { a as b } from`, `export * as ns from`, `import x; export { x }`), parses that file, then
 //! follows the names its declaration references the same way. Only declaring files enter the layer; re-export stubs are
-//! walked once and their answers kept, in the layer and in a per-package index on disk (ADR 0011), so later runs never
+//! walked once and their answers kept, in the layer and in a per-package index on disk, so later runs never
 //! open them. The resolver consults the layer after the project's own data: its import map and named-type index fall
 //! back to it, re-export answers come from it, and dependency components form a value index for `typeof` that is never
 //! emitted.
@@ -836,7 +836,7 @@ pub(crate) fn load(
     }
 }
 
-// ─── The persisted index (ADR 0011) ───────────────────────────────────────────
+// ─── The persisted index ───────────────────────────────────────────
 
 /// `(directory, specifier, module or reason)`.
 type ResolutionRow = (String, String, Result<String, Unresolved>);

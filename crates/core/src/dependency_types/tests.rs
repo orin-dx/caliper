@@ -430,7 +430,7 @@ fn without_the_flag_package_types_stay_unresolved() {
 }
 
 /// cva's `VariantProps` is `Omit<OmitUndefined<Parameters<C>[0]>, …>`, which needs inference: loaded, it evaluates to
-/// nothing, so the shortcut stands in for it (ADR 0014).
+/// nothing, so the shortcut stands in for it (precedence).
 #[test]
 fn a_shortcut_stands_in_for_a_loaded_declaration_that_evaluates_to_nothing() {
     let source = "import { cva, type VariantProps } from 'class-variance-authority';\n\
@@ -559,7 +559,7 @@ fn a_member_alias_of_an_imported_component_takes_that_components_props() {
     assert_eq!(off.components.keys().collect::<Vec<_>>(), Vec::<&String>::new());
 }
 
-/// A loaded declaration that resolves wins over a shortcut of the same name (ADR 0014); without it, the shortcut (an
+/// A loaded declaration that resolves wins over a shortcut of the same name (precedence); without it, the shortcut (an
 /// HTML layer for the element) is the fallback.
 #[test]
 fn a_loaded_declaration_wins_over_a_shortcut_of_the_same_name() {
@@ -995,7 +995,7 @@ fn a_watch_revision_that_first_reads_a_react_member_matches_a_cold_extract() {
     }
 }
 
-// ─── collapseInheritedProps (ADR 0012) ────────────────────────────────────────
+// ─── collapseInheritedProps (collapse) ────────────────────────────────────────
 
 /// `big` declares `BigProps` (31 props, two of them notable), `SmallProps` (1) and `BigAlias` (31); the project declares
 /// `LocalBig` (31), and components inheriting each.

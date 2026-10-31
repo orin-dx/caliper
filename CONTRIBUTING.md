@@ -48,7 +48,7 @@ Accept any snapshot change that is intentional (i.e., the output got more accura
 
 **`crates/cli`** — user-facing output only. No extraction logic. Commands parse args and delegate to `core::pipeline`. Error formatting uses `miette`; progress uses `indicatif`; table output uses `comfy-table`.
 
-**`crates/binding`** — thin NAPI wrapper. Owns the async runtime (tokio) and exposes the five NAPI functions (`extractAll`, `createSession`, `initializeSession`, `extractFileIncremental`, `closeSession`). No business logic.
+**`crates/binding`** — thin NAPI wrapper. Owns the async runtime (tokio) and exposes the NAPI functions listed in `packages/napi/binding.d.ts` (batch extraction, sessions, and the lazy session's index, answers and warm-up). No business logic.
 
 **`packages/napi`** — `caliper-docgen-napi`. TypeScript types (`index.d.ts`) and the dev binary loader (`index.js`) that finds the `.node` file from `target/` or `NAPI_RS_NATIVE_LIBRARY_PATH`. No logic.
 
@@ -76,7 +76,7 @@ let Some(entry) = map.get(key) else { return None };
 
 ## Commits
 
-- GPG-signed, `Signed-off-by` trailer (both configured in `.git/config`)
+- GPG-signed, `Signed-off-by` trailer (both configured in `.git/config`). `main` requires signed commits, so an unsigned commit in a pull request blocks the merge.
 - `feat:` / `fix:` / `refactor:` / `chore:` / `docs:` prefix
 - No line wrapping at any column
 - Subject line says it all — skip the body if it adds nothing
@@ -90,6 +90,14 @@ Updated the resolver to also handle the case where ComponentPropsWithoutRef
 appears inside an intersection type alias, which was causing it to be
 treated as opaque when it should expand the HTML attributes.
 ```
+
+## Releases
+
+Add a changeset for a consumer-visible change (`.changeset/`; see `AGENTS.md` for how to write one). Callisto 0.16 plans the versions from the changesets and opens a release pull request (`callisto/version-packages`); merging it runs `.github/workflows/release.yml`, which publishes the crates and npm packages and tags the CLI release `npm/caliper-docgen@x.y.z`.
+
+Homebrew pulls from us: the tap's daily `brew bump` finds that tag with `livecheck`, builds `crates/cli` from source and bottles it, and a maintainer merges the formula pull request. Nothing in this repository notifies the tap.
+
+Speed, memory and accuracy are recorded weekly and compared with the previous run (`docs/measurement.md`); there is no pull-request gate. Run `just bench` when a change touches the resolver.
 
 ## Pull requests
 

@@ -141,7 +141,7 @@ pub(super) fn resolve_indexed_access(
         }
     }
 
-    // A shortcut for React's own types when their declarations aren't loaded (ADR 0014).
+    // A shortcut for React's own types when their declarations aren't loaded (precedence).
     let known = match (obj_name, key_str) {
         (
             "CSSProperties" | "React.CSSProperties",

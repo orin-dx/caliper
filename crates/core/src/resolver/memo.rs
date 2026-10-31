@@ -118,7 +118,7 @@ struct Recording<T> {
     expand_all: bool,
     keys_only: bool,
     /// The depth the resolution started at, and how much deeper than that it checked against the limit. Depth decides
-    /// the result only through the limit and `depth > 0` (ADR 0012's collapse, which the key holds), so a state that
+    /// the result only through the limit and `depth > 0` (collapse, which the key holds), so a state that
     /// starts at another depth, shallower or deeper, resolves the same while its deepest check stays within the limit.
     entry_depth: u8,
     depth_reach: u8,
@@ -203,7 +203,7 @@ impl<T: Clone> Memo<T> {
         resolve: impl FnOnce(&mut ResolveState) -> T,
     ) -> T {
         // The modes never answer each other, so they must not compete for one key's recordings. Depth enters the key
-        // only as whether it is the component's own props type (0): a source reached deeper collapses (ADR 0012), one
+        // only as whether it is the component's own props type (0): a source reached deeper collapses (collapse), one
         // reached at 0 does not. The rest of what depth decides, the limit, a recording checks in `applies_to`.
         let mode = u8::from(depth > 0) | (u8::from(state.expand_all) << 6) | (u8::from(state.keys_only) << 7);
         let map_key = (CompactString::from(key), mode);

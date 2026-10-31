@@ -18,7 +18,7 @@ use super::{ResolutionContext, ResolvedChain};
 
 /// A declaration's props chain, unless it evaluated to nothing (no props, no inherited layer, and something left
 /// unevaluated: cva's `VariantProps` is `Omit<OmitUndefined<Parameters<…>[0]>, …>`) and a known shortcut covers the
-/// name, which then stands in (ADR 0014). An `attempt` that is kept is merged into `state`; a replaced one is dropped
+/// name, which then stands in (precedence). An `attempt` that is kept is merged into `state`; a replaced one is dropped
 /// with its diagnostics.
 #[allow(clippy::too_many_arguments)]
 fn known_fallback(
@@ -368,7 +368,7 @@ fn is_notable(name: &str) -> bool {
     react_types::notable_html_attrs("").contains(&name)
 }
 
-/// A source recorded as a layer instead of expanded (ADR 0012): `total` is how many props it declares; only `notable`
+/// A source recorded as a layer instead of expanded (collapse): `total` is how many props it declares; only `notable`
 /// fields are resolved.
 #[allow(clippy::too_many_arguments)]
 fn collapsed_source(

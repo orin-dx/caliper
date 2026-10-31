@@ -572,7 +572,7 @@ impl ResolutionContext {
     }
 
     /// Whether a source declaring `declared` props in `file`, reached at `depth`, is recorded as a layer instead of
-    /// expanded (ADR 0012). Depth 0 is the component's own props type. React's and TypeScript's own declarations stay
+    /// expanded (collapse). Depth 0 is the component's own props type. React's and TypeScript's own declarations stay
     /// with `html_attributes` even under `All`.
     pub(crate) fn collapses(&self, file: &Utf8Path, declared: usize, depth: u8, state: &ResolveState) -> bool {
         use crate::pipeline::CollapseInheritedProps;
@@ -593,7 +593,7 @@ impl ResolutionContext {
 pub(crate) const COLLAPSE_THRESHOLD: usize = 30;
 
 /// Changes whenever the options could change what a specifier resolves to: the resolver configuration, the governing
-/// tsconfig and its modification time, and the build. Keys the dependency loader's persisted index (ADR 0011).
+/// tsconfig and its modification time, and the build. Keys the dependency loader's persisted index.
 pub(crate) fn resolution_fingerprint(options: &PipelineOptions) -> u64 {
     let tsconfig = governing_tsconfig(options);
     let tsconfig_mtime = tsconfig
@@ -961,7 +961,7 @@ pub(crate) fn resolve_component_shared(
             );
         }
     }
-    // A collapsed source's notable props (ADR 0012); the only non-HTML layers.
+    // A collapsed source's notable props (collapse); the only non-HTML layers.
     for prop in &chain.notable {
         if !props.contains_key(&prop.name) && !notable_inherited.contains_key(&prop.name) {
             notable_inherited.insert(prop.name.clone(), prop.clone());
