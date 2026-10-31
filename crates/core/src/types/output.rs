@@ -15,7 +15,7 @@ pub(crate) mod interned;
 /// [`IncrementalUpdate`](crate::pipeline::IncrementalUpdate) and a session index. Bumped whenever a reader of the
 /// previous shape would misread or lose data from the new one; never by an addition it can ignore. Version 2 writes a
 /// component's props as prop set ids and an inheritance layer's `omitted` as a name list id (ADR 0018).
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 // ─── Top-level output ─────────────────────────────────────────────────────────
 
@@ -331,6 +331,8 @@ pub enum PropType {
     Intersection(Vec<PropType>),
     Array(Box<PropType>),
     Tuple(Vec<PropType>),
+    /// `readonly string[]` or `readonly [a, b]`: the array or tuple under the `readonly` operator.
+    Readonly(Box<PropType>),
     Object(Vec<ObjectField>),
 
     // ── Named reference (post-resolution)
@@ -352,8 +354,10 @@ pub enum PropType {
         params: Vec<FunctionParam>,
         return_type: Box<PropType>,
     },
-    /// `Ref<T>` / `RefObject<T>` / `ForwardedRef<T>`
+    /// `Ref<T>`, `RefObject<T>`, `ForwardedRef<T>` and the other ref types React declares.
     Ref {
+        /// The React type as written, without a `React.` prefix: `RefObject`, `ForwardedRef`, `RefCallback`.
+        name: std::string::String,
         /// Inner element type if known
         element: Option<std::string::String>,
     },
@@ -459,12 +463,16 @@ impl PropType {
             PropType::Union(members) | PropType::Intersection(members) | PropType::Tuple(members) => {
                 all(hasher, members)
             }
-            PropType::Array(inner) => inner.structural_hash(hasher),
+            PropType::Array(inner) | PropType::Readonly(inner) => inner.structural_hash(hasher),
             PropType::Object(fields) => {
                 fields.len().hash(hasher);
                 for field in fields {
                     field.name.hash(hasher);
                     field.required.hash(hasher);
+                    field.readonly.hash(hasher);
+                    if let Some(key) = &field.index_key {
+                        key.structural_hash(hasher);
+                    }
                     field.description.hash(hasher);
                     field.prop_type.structural_hash(hasher);
                 }
@@ -484,7 +492,10 @@ impl PropType {
                 }
                 return_type.structural_hash(hasher);
             }
-            PropType::Ref { element } => element.hash(hasher),
+            PropType::Ref { name, element } => {
+                name.hash(hasher);
+                element.hash(hasher);
+            }
             PropType::HtmlAttributes { element, omitted } => {
                 element.hash(hasher);
                 omitted.hash(hasher);
@@ -523,8 +534,11 @@ impl PropType {
             PropType::Union(members) | PropType::Intersection(members) | PropType::Tuple(members) => {
                 members.iter().any(|member| member.holds_opaque_where(test))
             }
-            PropType::Array(inner) => inner.holds_opaque_where(test),
-            PropType::Object(fields) => fields.iter().any(|f| f.prop_type.holds_opaque_where(test)),
+            PropType::Array(inner) | PropType::Readonly(inner) => inner.holds_opaque_where(test),
+            PropType::Object(fields) => fields.iter().any(|f| {
+                f.prop_type.holds_opaque_where(test)
+                    || f.index_key.as_ref().is_some_and(|key| key.holds_opaque_where(test))
+            }),
             PropType::Named { args, .. } => args.iter().any(|arg| arg.holds_opaque_where(test)),
             PropType::Function { params, return_type, .. } => {
                 params.iter().any(|p| p.param_type.holds_opaque_where(test)) || return_type.holds_opaque_where(test)
@@ -591,6 +605,7 @@ impl PropType {
                 members.iter().map(|m| m.operand_string(Precedence::Intersection)).collect::<Vec<_>>().join(" & ")
             }
             PropType::Array(inner) => format!("{}[]", inner.operand_string(Precedence::Array)),
+            PropType::Readonly(inner) => format!("readonly {}", inner.operand_string(Precedence::Array)),
             PropType::Tuple(members) => {
                 format!("[{}]", members.iter().map(|m| m.raw_string()).collect::<Vec<_>>().join(", "))
             }
@@ -598,9 +613,18 @@ impl PropType {
                 let fields_str = fields
                     .iter()
                     .map(|f| {
+                        let readonly = if f.readonly { "readonly " } else { "" };
+                        if let Some(key) = &f.index_key {
+                            return format!(
+                                "{readonly}[{}: {}]: {}",
+                                f.name,
+                                key.raw_string(),
+                                f.prop_type.raw_string()
+                            );
+                        }
                         let name = if is_valid_identifier(&f.name) { f.name.clone() } else { format!("'{}'", f.name) };
                         let optional = if f.required { "" } else { "?" };
-                        format!("{}{}: {}", name, optional, f.prop_type.raw_string())
+                        format!("{readonly}{}{}: {}", name, optional, f.prop_type.raw_string())
                     })
                     .collect::<Vec<_>>()
                     .join("; ");
@@ -625,8 +649,8 @@ impl PropType {
                 let params = params.iter().enumerate().map(|(i, p)| p.signature(i)).collect::<Vec<_>>().join(", ");
                 format!("{type_params}({params}) => {}", return_type.raw_string())
             }
-            PropType::Ref { element: Some(e) } => format!("Ref<{}>", e),
-            PropType::Ref { element: None } => "Ref<unknown>".into(),
+            PropType::Ref { name, element: Some(e) } => format!("{name}<{e}>"),
+            PropType::Ref { name, element: None } => format!("{name}<unknown>"),
             PropType::ElementType => "ElementType".into(),
             PropType::HtmlAttributes { element, .. } => {
                 format!("{}HTMLAttributes", element_to_type_name(element))
@@ -730,6 +754,10 @@ impl serde::Serialize for PropType {
                 map.serialize_entry("kind", "tuple")?;
                 map.serialize_entry("elements", members)?;
             }
+            PropType::Readonly(inner) => {
+                map.serialize_entry("kind", "readonly")?;
+                map.serialize_entry("element", inner)?;
+            }
             PropType::Object(fields) => {
                 map.serialize_entry("kind", "object")?;
                 map.serialize_entry("fields", &WireFields(fields))?;
@@ -746,8 +774,9 @@ impl serde::Serialize for PropType {
                 map.serialize_entry("params", params)?;
                 map.serialize_entry("returnType", return_type)?;
             }
-            PropType::Ref { element } => {
+            PropType::Ref { name, element } => {
                 map.serialize_entry("kind", "ref")?;
+                map.serialize_entry("name", name)?;
                 map.serialize_entry("element", element)?;
             }
             PropType::HtmlAttributes { element, omitted } => {
@@ -771,7 +800,7 @@ impl serde::Serialize for PropType {
     }
 }
 
-/// An object type's fields as `{ name, propType, required, description }`.
+/// An object type's fields as `{ name, propType, required, description }`, plus `readonly` and `indexKey` when set.
 struct WireFields<'a>(&'a [ObjectField]);
 
 impl serde::Serialize for WireFields<'_> {
@@ -781,11 +810,17 @@ impl serde::Serialize for WireFields<'_> {
         struct Field<'a>(&'a ObjectField);
         impl serde::Serialize for Field<'_> {
             fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                let mut map = serializer.serialize_map(Some(4))?;
+                let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("name", &self.0.name)?;
                 map.serialize_entry("propType", &self.0.prop_type)?;
                 map.serialize_entry("required", &self.0.required)?;
                 map.serialize_entry("description", &self.0.description)?;
+                if self.0.readonly {
+                    map.serialize_entry("readonly", &true)?;
+                }
+                if let Some(key) = &self.0.index_key {
+                    map.serialize_entry("indexKey", key)?;
+                }
                 map.end()
             }
         }
@@ -908,6 +943,10 @@ impl PropType {
                     .unwrap_or(Ok(vec![]))?;
                 Ok(PropType::Tuple(members))
             }
+            "readonly" => {
+                let inner = Self::from_tagged_value(&v["element"])?;
+                Ok(PropType::Readonly(Box::new(inner)))
+            }
             "object" => {
                 let fields = v["fields"]
                     .as_array()
@@ -919,6 +958,11 @@ impl PropType {
                                     prop_type: Self::from_tagged_value(&f["propType"])?,
                                     required: f["required"].as_bool().unwrap_or(false),
                                     description: f["description"].as_str().unwrap_or("").to_owned(),
+                                    readonly: f["readonly"].as_bool().unwrap_or(false),
+                                    index_key: match f.get("indexKey") {
+                                        Some(key) => Some(Box::new(Self::from_tagged_value(key)?)),
+                                        None => None,
+                                    },
                                 })
                             })
                             .collect::<Result<Vec<_>, std::string::String>>()
@@ -958,8 +1002,9 @@ impl PropType {
                 Ok(PropType::Function { type_params, params, return_type })
             }
             "ref" => {
+                let name = v["name"].as_str().unwrap_or("Ref").to_owned();
                 let element = v["element"].as_str().map(|s| s.to_owned());
-                Ok(PropType::Ref { element })
+                Ok(PropType::Ref { name, element })
             }
             "htmlAttributes" | "html_attributes" => {
                 let element = v["element"].as_str().unwrap_or("div").to_owned();
@@ -1095,10 +1140,41 @@ impl FunctionParam {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectField {
+    /// The field's name; for an index signature, the key parameter's (`key` in `[key: string]: T`).
     pub name: std::string::String,
     pub prop_type: PropType,
     pub required: bool,
     pub description: std::string::String,
+    /// The field is written `readonly name: T`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub readonly: bool,
+    /// Set for an index signature `[name: K]: T`: the key type `K`. The field's `prop_type` is the value type `T`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index_key: Option<Box<PropType>>,
+}
+
+impl ObjectField {
+    /// A named member, as opposed to an index signature.
+    pub(crate) fn is_member(&self) -> bool {
+        self.index_key.is_none()
+    }
+
+    /// A named field that isn't `readonly`.
+    pub fn new(
+        name: impl Into<std::string::String>,
+        prop_type: PropType,
+        required: bool,
+        description: impl Into<std::string::String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            prop_type,
+            required,
+            description: description.into(),
+            readonly: false,
+            index_key: None,
+        }
+    }
 }
 
 // ─── Statistics ────────────────────────────────────────────────────────────────

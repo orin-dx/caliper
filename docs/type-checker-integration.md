@@ -4,7 +4,7 @@
 
 ## Next step
 
-Slice 1 below covers function components by their export. Next, in order: carry what `PropType` cannot (optional and rest parameters, index signatures, `readonly`), per-prop `tags` and `parent`, class and generic components, `batchRequests` to cut round trips, watch-mode notifications, then the NAPI binding. The client's open Lifecycle items in the Gates table still stand.
+Slice 1 below covers function components by their export. Next, in order: set what `PropType` now carries (optional and rest parameters, index signatures, `readonly`, a ref type's name), per-prop `tags` and `parent`, class and generic components, `batchRequests` to cut round trips, watch-mode notifications, then the NAPI binding. The client's open Lifecycle items in the Gates table still stand.
 
 Some props can't be resolved from the AST alone. An opt-in backend asks TypeScript's checker instead, using the algorithm react-docgen-typescript (RDT) uses, and merges the answer into the structural result. Structural extraction stays the default.
 
@@ -66,7 +66,7 @@ The structural result returns immediately. The semantic result follows: the CLI 
 - **Output type:** no new `PropType` variant and no schema change. Primitives, literals, unions (with `boolean` collapsed and `undefined` dropped from optional props), arrays, tuples, inline objects of up to 16 fields and single-signature functions map onto existing variants; `ReactNode`, `ElementType`, `CSSProperties` and `ReactElement` map to their terminals; anything else (named interfaces, enums, generics, overloads, anything past depth 4) is `Named` with the checker's own text. Union members keep the checker's order, which is creation order, not source order.
 - **Provenance:** `Info` diagnostics with code `SEMANTIC_BACKEND` whose `affects` lists the output keys: one for the components the checker resolved, one per fallback reason. A first-class per-component field would change the canonical JSON and needs an output schema version first.
 - **Fallback:** a missing, unpinned, crashed or timed-out `tsc` gives the structural result plus one `SEMANTIC_BACKEND` warning, never an error. Per component, the structural result stands for: not exported, class or non-function, overloaded, no props parameter, `any`/`unknown`/generic/union props type, export not found by name (a display name such as `@mantine/core/Accordion` also tries its last segment), or a request the checker rejected. Each is listed with its reason.
-- **Not carried:** optional and rest parameters, index signatures, `readonly`, generic parameters of functions, per-prop `tags`, `parent`/`declarations` from the checker. Default exports match by `default` when no export has the component's name.
+- **Not carried:** optional and rest parameters, index signatures, `readonly` and ref names (`PropType` has them since schema version 4; `convert.rs` doesn't set them), generic parameters of functions, per-prop `tags`, `parent`/`declarations` from the checker. Default exports match by `default` when no export has the component's name.
 - **Tests:** `crates/semantic/tests/replay.rs` runs the backend against `replay-tsc`, which answers from a recording of the real `7.1.0-beta` (`tests/fixtures/recording.json`, refreshed by `cargo run -p caliper-docgen-semantic --example record_fixture -- <typescript package dir>`); a request the recording lacks fails the test. Fallbacks (no `tsc`, unpinned version, bad path, crash, hang) are asserted as the structural output plus one warning. The CLI test asserts the default output has no `SEMANTIC_BACKEND` diagnostic.
 
 Measured on `7.1.0-beta`, `extract --json` (best of 2 to 3), flag on against off, plus the base commit's output compared byte for byte (identical apart from `durationMs` on all five corpora, with and without `--load-dependencies`). Peak RSS is the larger of the two processes; on Chakra Caliper is 117 MiB and `tsc` 945 MiB.
@@ -203,7 +203,7 @@ The removed harness's `compare.ts`/`analyze.ts` (caliper-docgen vs RDT/react-doc
 
 ## Open decisions
 
-1. **Output type.** Checker types don't fit `PropType` losslessly: `Named` has no file or symbol, `Tuple` has no optional or rest elements, and `Object` has no index signatures. Add a variant or map into existing ones. `ExtractionOutput` has no schema version, so add one first.
+1. **Output type.** Checker types don't fit `PropType` losslessly: `Named` has no file or symbol, and `Tuple` has no optional or rest elements. Add a variant or map into existing ones. `ExtractionOutput` has no schema version, so add one first.
 2. **`ref` and `key`.** RDT emits both, and nothing else records forwardRef metadata. Semantic mode must match whatever the structural path does.
 3. **Trigger.** Run on every exported component or only on files with degrade diagnostics. Bare generic parameters and TypeScript utility types resolve to `Named` with no diagnostic by design, so the second misses them.
 4. **Union order.** Sort in canonical output, or keep source order for structural results.

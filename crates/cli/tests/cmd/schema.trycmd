@@ -79,7 +79,7 @@ $ caliper-docgen schema
     "schemaVersion": {
       "description": "The shape of this JSON (ADR 0017). A reader checks it equals the version it was written for",
       "type": "integer",
-      "const": 3
+      "const": 4
     },
     "components": {
       "type": "object",

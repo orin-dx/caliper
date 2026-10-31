@@ -210,7 +210,9 @@ fn shared_inline_keys(
             return;
         }
         match ty {
-            CollectedType::Object(fields) => keys.extend(fields.iter().map(|field| field.name.clone())),
+            CollectedType::Object(fields) => {
+                keys.extend(fields.iter().filter(|field| field.is_member()).map(|field| field.name.clone()))
+            }
             CollectedType::Intersection(members) => {
                 for member in members {
                     collect(member, file, ctx, depth + 1, keys);
@@ -306,7 +308,7 @@ pub(super) fn resolve_base_as_chain(
             // Inline object type in an intersection: `ComponentPropsWithoutRef<'button'> & { asChild?: boolean }`
             // Expand the object fields directly as own props.
             let mut chain = ResolvedChain::empty();
-            for field in fields {
+            for field in fields.iter().filter(|field| field.is_member()) {
                 let prop_type = if state.keys_only {
                     PropType::Unknown
                 } else {
@@ -422,6 +424,7 @@ pub(super) fn resolve_base_as_chain(
         | CollectedType::NumberLiteral(_)
         | CollectedType::BoolLiteral(_)
         | CollectedType::Array(_)
+        | CollectedType::Readonly(_)
         | CollectedType::Tuple(_)
         | CollectedType::TypeOf(_)
         | CollectedType::IndexedAccess { .. }

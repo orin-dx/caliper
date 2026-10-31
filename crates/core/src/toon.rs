@@ -144,7 +144,11 @@ fn format_type_compact(prop_type: &PropType) -> String {
         PropType::ReactNode => "ReactNode".into(),
         PropType::CssProperties => "CSSProperties".into(),
         PropType::ElementType => "ElementType".into(),
-        PropType::Ref { element } => format!("Ref<{}>", element.as_deref().unwrap_or("unknown")),
+        PropType::Ref { name, element } => format!("{name}<{}>", element.as_deref().unwrap_or("unknown")),
+        PropType::Readonly(inner) => match &**inner {
+            PropType::Array(element_type) => format!("ReadonlyArray<{}>", format_type_compact(element_type)),
+            other => format!("readonly {}", format_type_compact(other)),
+        },
         PropType::Object(_) => prop_type.raw_string(),
         PropType::Array(element_type) => format!("Array<{}>", format_type_compact(element_type)),
         PropType::Tuple(_) => prop_type.raw_string(),
@@ -260,7 +264,7 @@ mod tests {
     fn test_format_type_compact_complex_types() {
         assert_eq!(format_type_compact(&PropType::Array(Box::new(PropType::String))), "Array<string>");
         assert_eq!(
-            format_type_compact(&PropType::Ref { element: Some("HTMLButtonElement".into()) }),
+            format_type_compact(&PropType::Ref { name: "Ref".into(), element: Some("HTMLButtonElement".into()) }),
             "Ref<HTMLButtonElement>"
         );
         let on_select = PropType::Function {

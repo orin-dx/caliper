@@ -255,7 +255,7 @@ pub(super) fn resolve_props_chain(
                 if ctx.collapses(file_path, fields.len(), depth, state) {
                     let notable = fields
                         .iter()
-                        .filter(|field| is_notable(&field.name))
+                        .filter(|field| field.is_member() && is_notable(&field.name))
                         .map(|f| (f.name.as_str(), f.collected_type.clone(), f.required, f.description.as_str()));
                     return collapsed_source(
                         &canonical_name,

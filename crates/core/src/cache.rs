@@ -37,7 +37,7 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 /// 22: component mappings record the type parameters of the functions they contain.
 /// 25: the `TaggedFactory` detection rule.
 /// 26: function parameters record whether they are optional or rest.
-const CACHE_SCHEMA_VERSION: u32 = 26;
+const CACHE_SCHEMA_VERSION: u32 = 27;
 
 const DATA_FILE: &str = "dts.msgpack";
 

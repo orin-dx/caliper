@@ -187,7 +187,7 @@ pub(super) fn resolve_indexed_access(
     // Try to resolve the object type and look for the key.
     let obj_resolved = resolve_collected_type(obj, consuming_file, ctx, state, depth + 1);
     if let PropType::Object(fields) = &obj_resolved {
-        if let Some(field) = fields.iter().find(|f| f.name == key_str) {
+        if let Some(field) = fields.iter().find(|f| f.is_member() && f.name == key_str) {
             return field.prop_type.clone();
         }
     }
