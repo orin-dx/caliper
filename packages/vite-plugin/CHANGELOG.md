@@ -1,5 +1,14 @@
 # caliper-docgen-vite-plugin
 
+## 0.8.0
+
+- Components typed as a function component plus extra static members, like `const Drawer: React.FC<DrawerProps> & { Panel: … } = …` in Ant Design, are now found with their props. No action needed.
+- Components built with `forwardRef` now list `ref` however the call is written: `forwardRef(Inner)` as in Ant Design's `Breadcrumb`, a render function without type arguments as in React Spectrum's `TreeView`, or React Aria's `(forwardRef as forwardRefType)(…)`. No action needed.
+- Function props now show which arguments you can leave out and which repeat, so `(value: string, extra?: number, ...rest: boolean[]) => void` no longer reads as `(value: string)`. The JSON output moves to schema version 3: update `caliper-docgen`, the Vite plugin and the Storybook addon together, and a mismatched install stops with a message naming both versions.
+- Components built by a factory call whose render function is wrapped in extra parentheses or a type assertion, like Mantine's `RadioGroup`, `CheckboxGroup` and `SwitchGroup`, are now found, so their props show up in Storybook. No action needed.
+- Components styled by a call that takes a tag name and a config object, like Chakra's `const Center = chakra("div", { … })` with a `CenterProps` type beside it, are now found with their props. Components report a new `taggedFactory` detection rule. No action needed.
+- Variant props from recipe-style components, such as the `size` and `tone` options of a `cva` or `tv` call, now show up even when the function is imported under another name or comes from a library caliper has never heard of. Nothing to change on your side.
+
 ## 0.7.0
 
 - Installed package types now load by default, revealing more props and reducing unresolved warnings. Use `--no-load-dependencies` or `loadDependencies: false` to keep the previous behavior. On Chakra, extraction rises from about 50 to 220 ms and from 100 to 330 MiB.
