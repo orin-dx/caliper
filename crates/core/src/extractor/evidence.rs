@@ -30,6 +30,8 @@ pub(super) trait Scope {
     fn may_be_react(&self, name: &str) -> bool;
     /// Whether a call to this name returns an element: a same-file function declared to return one.
     fn is_element_helper(&self, name: &str) -> bool;
+    /// Whether the call is React's `memo(…)` or `forwardRef(…)`, by where its callee was imported from.
+    fn is_react_wrapper(&self, call: &CallExpression<'_>) -> bool;
 }
 
 fn leftmost_and_rightmost<'n>(name: &'n TSTypeName<'_>) -> Option<(&'n str, &'n str)> {
@@ -346,6 +348,10 @@ impl Scope for Foreign<'_> {
     }
 
     fn is_element_helper(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn is_react_wrapper(&self, _call: &CallExpression<'_>) -> bool {
         false
     }
 }
