@@ -1,5 +1,9 @@
 # npm/caliper-docgen
 
+## 0.9.0
+
+- Prop types now keep `readonly` on arrays, tuples and object fields, index signatures such as `{ [key: string]: number }`, and the ref type a prop was written with (`RefObject<T>`, `ForwardedRef<T>`, `RefCallback<T>`) instead of printing them as `string[]`, `{}` and `Ref<T>`. The JSON output moves to schema version 4, which adds a `readonly` type kind, a `name` on `ref` types, and `readonly` and `indexKey` on object fields: update `caliper-docgen`, the Vite plugin and the Storybook addon together, and a mismatched install stops with a message naming both versions. A union such as `string[] | readonly string[]` now lists both members.
+
 ## 0.8.0
 
 - Components typed as a function component plus extra static members, like `const Drawer: React.FC<DrawerProps> & { Panel: … } = …` in Ant Design, are now found with their props. No action needed.

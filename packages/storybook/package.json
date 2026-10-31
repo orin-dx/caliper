@@ -1,6 +1,6 @@
 {
   "name": "caliper-docgen-storybook",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Storybook addon for caliper-docgen — argTypes from a live caliper-docgen session",
   "keywords": [
     "docgen",
