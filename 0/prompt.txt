@@ -1,0 +1,67 @@
+# caliper-docgen: new session (2026-10-31)
+
+You are working on caliper-docgen (github.com/orin-dx/caliper): a Rust/OXC React props extractor. The product is accurate AND fast Storybook docs, and agents via `monokl` use it in-process (no shell-out). It should beat react-docgen-typescript (RDT) on speed and match it on accuracy, and be competitive with react-docgen.
+
+## Your task: close the v1 alpha gap = accuracy gaps + TS 7.1 on-demand work
+
+Start by reading docs/STATUS.md, ARCHITECTURE.md, docs/architecture/, docs/measurement.md, docs/adr/README.md and AGENTS.md. Then restate the definition of done below to the user and get a yes before you build.
+
+Definition of done (agree on numbers using step 1's baseline):
+- Recall vs RDT with TS 7.1 off: shadcn and antd close to Mantine/Chakra/Spectrum (those are 98.6-99.7% of props with dependencies loaded). Report own props and @types/react props separately.
+- Dropped syntax is kept: readonly, index signatures, RefObject, each with an exact-prop-set test, in ONE schema bump (v4).
+- On-demand TS 7.1 is safe to ship as an experimental opt-in: version range plus self-check, bounded memory, no startup stall, and a real-tsc test running in CI. Promotion past experimental is out of scope until TS 7.1 is stable and the oracle wrong-rate stays near 0%.
+
+Order:
+1. Baseline: run the weekly workflow by hand (workflow_dispatch on weekly.yml). Record per-corpus recall, time, peak RSS and oracle wrong-rate. Every later change is judged against it.
+2. Schema v4 batch FIRST, one PR: readonly, index signatures, RefObject, with exact-prop-set tests. Bump SCHEMA_VERSION once, update docs/architecture/serialization-formats.md, and write a changeset in consumer terms (what must be updated together). ADR 0017 is the versioning rule.
+3. Root-cause the shadcn and antd recall gap BEFORE building: diff caliper against RDT per missing prop and group by cause (ComponentProps<typeof X> of dependencies, Radix/base-ui wrappers, Omit/Pick chains, polymorphic generics; antd PurePanel's 33 props may be a harness pairing bug). Fix by shape, never by library name. Any fix that changes the JSON must not bump the version again. Each fix gets an exact-content test and a bench check (time AND peak RSS).
+4. Detection by shape: memo(forwardRef(function...)) without type arguments; React APIs (forwardRef, memo, createContext) matched by import source instead of name; the {Name}Props naming heuristic in tagged-factory becomes a shape rule; Chakra NonNullable<union> reduction.
+5. On-demand hardening (crates/semantic, crates/tsc-client, ADR 0022): version range plus self-check against the installed typescript (it is pinned to the exact 7.1.0-beta today); a memory cap for the tsc process (157-612 MiB observed); a disk cache and prefetch only if numbers justify them; enable the real-tsc test in CI (skipped today). Re-measure first-story latency (82-137 ms, Chakra 703) and later-story latency (21-41 ms).
+6. Re-run the weekly workflow, compare with step 1, and update docs/STATUS.md and the numbers on the site.
+
+If a gap only closes with the TS checker, say so in its trail instead of forcing it into the structural resolver.
+
+Trails: create one per goal with acceptance criteria BEFORE any branch: (a) recall gaps shadcn/antd, (b) schema v4 dropped syntax, (c) detection by shape, (d) on-demand hardening. Name each by the area of work, succinct and friendly. Link each branch with `entire trail link <n> --project gh/orin-dx --repo gh/orin-dx/caliper --branch <branch>` BEFORE `gh pr create` (Entire opens a draft PR when you link; fill that one in and mark it ready, don't open a second). Do not approve trails yourself.
+
+## Current state
+- main is green. All of last week's stack merged (#229-#264). The release PR #239 (0.7.0 to 0.8.0, the first release on Callisto 0.16.0, schema v3) is being released by the user now. Schema v4 ships in the release after it, so the v4 changeset must carry the migration note.
+- The tap (orin-dx/homebrew-tap) pulls from our tags (npm/caliper-docgen@x.y.z) with brew bump and builds crates/cli from source. We push nothing.
+- Shipped recently: lazy sessions, full HTML-attribute default (curated is opt-in), TS 7.1 on-demand (semanticTypes: 'on-demand', experimental, off by default), tagged-factory and forwardRef-by-shape detection, intersection reads, function optional/rest params, OXC 0.155, Callisto 0.16.0.
+- Measurement is now ONE weekly workflow (scripts/weekly.py: caliper vs RDT vs react-docgen plus the TS oracle, artifacts, one issue on regression) and `just bench [branch]` (local A/B vs origin/main, median of 9). The PR gates (Equivalence, Parity, Scorecard, allow-list) were deleted. Do not rebuild them.
+- Earlier numbers (one machine, not the pinned run): 22-67x faster than RDT and 3.8-9.5x less memory; 17-43x faster than react-docgen on shadcn/antd/Mantine/Spectrum (Chakra only about 4x); @types/react recall 92-99% with full. Treat them as stale until the step-1 baseline exists.
+- ADRs only for architecture. Kept: 0001, 0002, 0003, 0005, 0006, 0007, 0009, 0010, 0016, 0017, 0018, 0022. The others are retired with tombstones in docs/adr/README.md.
+
+## Rules (they cost us real incidents)
+- Commits MUST be GPG-signed: main requires signatures, a merge queue and 1 approving review, and blocks non-fast-forward. Run git with the sandbox OFF, never use --no-gpg-sign, and check `git log -1 --format='%h %G?'` shows G.
+- Never force-push, never merge PRs, never push to main. The user merges, with MERGE COMMITS only (squash and rebase are off). main was force-pushed backwards once and lost about 295 commits; verify main's tip before assuming anything.
+- Prefer independent PRs off main, small, with new tests in new files. Entire "stacks" cannot be retargeted after the parent merges. Stack only when a PR truly depends on an unmerged one, and say so in the body.
+- Forks and parallel agents need `isolation: "worktree"`; two agents in one worktree clobber each other.
+- git here: use /usr/bin/git, one plain git command per call; other worktrees can only be inspected through a python subprocess. Don't pipe lint or test output into tail or head; read the exit code directly.
+- AGENTS.md rules: no unwrap outside tests, FxHashMap internally and BTreeMap for JSON, CompactString for names, no AST refs escape parse_file, emit a Diagnostic whenever you degrade. Add sibling-path parity tests and assert exact content, not presence.
+- Writing: succinct, friendly, no hard-wrapping. A changeset is one short consumer-facing paragraph that starts with the outcome (read AGENTS.md). Commits: imperative subject, at most one or two sentences of why. Commits end with `Claude-Session: <session url>`; PR bodies end with the session url.
+- Measure time AND peak RSS for any resolver change (`just bench`, the weekly job). Calibrated noise: wall 1.10x and RSS 1.20x, median of 9 interleaved runs.
+- Keep it simple. The user rejected heavy gate machinery ("you're shaving a yak"). Prefer small, boring, reliable.
+- Closing, retargeting or deleting other people's PRs, branches and trails is the user's call: list them, don't do them.
+
+## Useful
+- Tools: `just lint doc-check typos`, `cargo nextest run -p cabench`, scripts/weekly.py, apps/oracle (the TS 7.1 oracle),packages/storybook/scripts/storybook-parity.mjs (build napi first), corpus pins in scripts/corpora.py.
+- Entire Gates needs a human approval on each trail; that is t
+
+## Housekeeping the user owns
+- Delete the remote branches `scratch/gate-calibration` and `scratch/parity-allow-probe`, plus merged and old scratch branches.
+- Delete TAP_APP_CLIENT_ID and TAP_APP_PRIVATE_KEY from calipeey are set here.
+- Close stale Entire trails.
+
+---
+
+yes, go ahead; fetch origin first. CLeanup any old branches and worktrees
+
+---
+
+<task-notification>
+<task-id>b842v5ly1</task-id>
+<tool-use-id>toolu_013bYNkv8kGTFDxDXbpZCQBQ</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/cd0b1cc5-b31e-40d5-8c38-bf89ad8b231e/tasks/b842v5ly1.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for baseline run to finish" completed (exit code 0)</summary>
+</task-notification>

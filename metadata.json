@@ -1,0 +1,80 @@
+{
+  "cli_version": "0.12.3-nightly.202610300619.cea1b3cee",
+  "checkpoint_id": "01M67X83PQSSGX39TXSESQDDXH",
+  "strategy": "manual-commit",
+  "branch": "feat/schema-v4-dropped-syntax",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".changeset/keep-readonly-index-signatures-ref-names.md",
+    "crates/cli/tests/cmd/schema.trycmd",
+    "crates/core/src/cache.rs",
+    "crates/core/src/cache/golden.rs",
+    "crates/core/src/cache/snapshots/caliper_docgen_core__cache__golden__source_data_bytes_are_stable_for_the_current_schema_version.snap",
+    "crates/core/src/dependency_types.rs",
+    "crates/core/src/extractor/mod.rs",
+    "crates/core/src/extractor/tests.rs",
+    "crates/core/src/known.rs",
+    "crates/core/src/pipeline/tests.rs",
+    "crates/core/src/resolver/alias.rs",
+    "crates/core/src/resolver/callee.rs",
+    "crates/core/src/resolver/chain.rs",
+    "crates/core/src/resolver/collected.rs",
+    "crates/core/src/resolver/evaluate.rs",
+    "crates/core/src/resolver/func.rs",
+    "crates/core/src/resolver/named.rs",
+    "crates/core/src/resolver/primitives.rs",
+    "crates/core/src/resolver/react.rs",
+    "crates/core/src/resolver/substitute.rs",
+    "crates/core/src/resolver/tests.rs",
+    "crates/core/src/toon.rs",
+    "crates/core/src/types/collected.rs",
+    "crates/core/src/types/output.rs",
+    "crates/core/src/types/output/tests.rs",
+    "crates/core/tests/dropped_syntax.rs",
+    "crates/core/tests/snapshots/snapshots__snapshot_chakra.snap",
+    "crates/core/tests/snapshots/snapshots__snapshot_mantine.snap",
+    "crates/core/tests/snapshots/snapshots__snapshot_mui.snap",
+    "crates/core/tests/snapshots/snapshots__snapshot_panda.snap",
+    "crates/core/tests/snapshots/snapshots__snapshot_radix.snap",
+    "crates/core/tests/snapshots/snapshots__snapshot_rdt_compat.snap",
+    "crates/core/tests/snapshots/snapshots__snapshot_shadcn.snap",
+    "crates/semantic/src/convert.rs",
+    "crates/semantic/tests/replay.rs",
+    "docs/architecture/extractor-ast-visiting.md",
+    "docs/architecture/serialization-formats.md",
+    "docs/type-checker-integration.md",
+    "packages/napi/index.d.ts",
+    "packages/storybook/src/schema.ts",
+    "packages/vite-plugin/src/schema.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 232,
+    "cache_creation_tokens": 239319,
+    "cache_read_tokens": 21802840,
+    "output_tokens": 71206,
+    "api_call_count": 116
+  },
+  "redaction": {
+    "replacements": 13,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 13,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}

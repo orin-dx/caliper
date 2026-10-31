@@ -1,0 +1,129 @@
+{
+  "cli_version": "0.12.3-nightly.202610300619.cea1b3cee",
+  "checkpoint_id": "01M67X83PQSSGX39TXSESQDDXH",
+  "session_id": "cd0b1cc5-b31e-40d5-8c38-bf89ad8b231e",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-31T02:40:17.493515Z",
+  "branch": "feat/schema-v4-dropped-syntax",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".changeset/keep-readonly-index-signatures-ref-names.md",
+    "crates/cli/tests/cmd/schema.trycmd",
+    "crates/core/src/cache.rs",
+    "crates/core/src/cache/golden.rs",
+    "crates/core/src/cache/snapshots/caliper_docgen_core__cache__golden__source_data_bytes_are_stable_for_the_current_schema_version.snap",
+    "crates/core/src/dependency_types.rs",
+    "crates/core/src/extractor/mod.rs",
+    "crates/core/src/extractor/tests.rs",
+    "crates/core/src/known.rs",
+    "crates/core/src/pipeline/tests.rs",
+    "crates/core/src/resolver/alias.rs",
+    "crates/core/src/resolver/callee.rs",
+    "crates/core/src/resolver/chain.rs",
+    "crates/core/src/resolver/collected.rs",
+    "crates/core/src/resolver/evaluate.rs",
+    "crates/core/src/resolver/func.rs",
+    "crates/core/src/resolver/named.rs",
+    "crates/core/src/resolver/primitives.rs",
+    "crates/core/src/resolver/react.rs",
+    "crates/core/src/resolver/substitute.rs",
+    "crates/core/src/resolver/tests.rs",
+    "crates/core/src/toon.rs",
+    "crates/core/src/types/collected.rs",
+    "crates/core/src/types/output.rs",
+    "crates/core/src/types/output/tests.rs",
+    "crates/core/tests/dropped_syntax.rs",
+    "crates/core/tests/snapshots/snapshots__snapshot_chakra.snap",
+    "crates/core/tests/snapshots/snapshots__snapshot_mantine.snap",
+    "crates/core/tests/snapshots/snapshots__snapshot_mui.snap",
+    "crates/core/tests/snapshots/snapshots__snapshot_panda.snap",
+    "crates/core/tests/snapshots/snapshots__snapshot_radix.snap",
+    "crates/core/tests/snapshots/snapshots__snapshot_rdt_compat.snap",
+    "crates/core/tests/snapshots/snapshots__snapshot_shadcn.snap",
+    "crates/semantic/src/convert.rs",
+    "crates/semantic/tests/replay.rs",
+    "docs/architecture/extractor-ast-visiting.md",
+    "docs/architecture/serialization-formats.md",
+    "docs/type-checker-integration.md",
+    "packages/napi/index.d.ts",
+    "packages/storybook/src/schema.ts",
+    "packages/vite-plugin/src/schema.ts"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "74c794538ec2",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 232,
+    "cache_creation_tokens": 239319,
+    "cache_read_tokens": 21802840,
+    "output_tokens": 71206,
+    "api_call_count": 116
+  },
+  "redaction": {
+    "replacements": 13,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 13,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "summary": {
+    "intent": "Close the caliper-docgen v1 alpha gap: establish a baseline, ship a schema v4 batch (readonly, index signatures, RefObject), fix shadcn/antd recall gaps, add shape-based detection, and harden on-demand TS 7.1. Session began with reading docs, restating the definition of done, and getting the user's yes.",
+    "outcome": "After the user approved the definition of done, the assistant cleaned up old branches, dispatched the baseline weekly run, created four trails (#125-#128), and implemented schema v4 in a worktree. Core types, resolvers, docs, TS readers, a changeset and exact-prop-set tests were done; lint and tests passed, bench was within noise, and a signed commit was made. The PR, trail link, baseline comparison and steps 3-6 remain.",
+    "learnings": {
+      "repo": [
+        "Local checkout was stale at first: docs/measurement.md and scripts/weekly.py appeared missing until origin was fetched. Verify main's tip after fetching before trusting the local tree.",
+        "ADR 0023 / the schema v3 commit is the template for a schema bump: core types, cache golden fixture, snapshots, TS schema readers, trycmd, a changeset and serialization-formats.md.",
+        "Snapshot tests resolve @types/react via node_modules, so a fresh worktree needs its own install or snapshots show path noise and a spurious `key` prop.",
+        "Keeping index signatures as object fields made consumers that read object fields as props (props-base code) emit a bogus prop named `key`; those consumers must filter index-signature fields.",
+        "The existing union normalizer drops `| undefined` from values, so exact-prop-set tests must expect the plain type.",
+        "Extractor sites that match `Array` with a wildcard fallback silently miss the new `Readonly` wrapper; readonly must be peeled in declared const values.",
+        "Hand-maintained typings (packages/napi/index.d.ts, packages/storybook/src/schema.ts, packages/vite-plugin/src/schema.ts) and the crates/semantic converter must be updated along with core for a PropType change.",
+        "Repo lint recipes run clippy without --all-targets; `just bench` compares against origin/main."
+      ],
+      "code": [
+        {
+          "path": "crates/core/tests/dropped_syntax.rs",
+          "finding": "New file with exact-prop-set tests for readonly, index signatures and RefObject, following the rule of new tests in new files."
+        },
+        {
+          "path": "crates/core/src/cache/golden.rs",
+          "finding": "The golden fixture for cache bytes was extended to cover the new shapes, and its snapshot regenerated."
+        }
+      ],
+      "workflow": [
+        "Bisect an unexpected snapshot diff by toggling one change (peel readonly) and re-running snapshots, which isolated the index-signature cause.",
+        "Compare against baseline code in the same environment, by saving a patch and re-running, to tell your own regressions from environment noise.",
+        "Use small Python scripts in the job tmp dir for mechanical edits and diffs, since the harness requires literal script paths and shell loops are discouraged.",
+        "Run the compiler-driven loop (change core types, follow the non-exhaustive match errors) for enum-shape changes."
+      ]
+    },
+    "friction": [
+      "Local main was behind origin, so the first listing of docs and scripts was misleading.",
+      "Two agent worktrees had uncommitted files and could not be cleaned up automatically.",
+      "The worktree lacked node_modules, which produced misleading snapshot diffs and cost a bisect.",
+      "Many test struct literals needed mechanical patching for the new fields.",
+      "The harness required literal script paths, so scripts were written into the job tmp dir."
+    ],
+    "open_items": [
+      "Record baseline numbers from weekly run 41159666463 (recall, time, RSS, oracle wrong-rate) and set concrete targets.",
+      "Link the schema-v4 branch to its trail with `entire trail link`, then fill in the draft PR and mark it ready; do not approve trails.",
+      "Step 3: root-cause the shadcn (39.5%) and antd (80.3%) recall gaps, including whether PurePanel is a pairing bug.",
+      "Step 4: shape-based detection (memo(forwardRef) without type args, import-source matching, {Name}Props heuristic, Chakra NonNullable<union>).",
+      "Step 5: on-demand TS 7.1 hardening (version range plus self-check, memory cap, real-tsc CI test, latency re-measure).",
+      "Step 6: re-run weekly, compare with the baseline, and update STATUS.md and the site numbers.",
+      "Two leftover agent worktrees with uncommitted files need a decision.",
+      "Housekeeping the user owns: delete scratch remote branches, remove tap secrets, close stale Entire trails."
+    ]
+  }
+}
