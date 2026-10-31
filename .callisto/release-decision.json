@@ -3,7 +3,7 @@
   "entries": [
     {
       "package": "cargo/caliper-docgen",
-      "targetVersion": "0.8.0",
+      "targetVersion": "0.9.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -12,7 +12,7 @@
     },
     {
       "package": "cargo/caliper-docgen-core",
-      "targetVersion": "0.8.0",
+      "targetVersion": "0.9.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -21,7 +21,7 @@
     },
     {
       "package": "cargo/caliper-docgen-napi",
-      "targetVersion": "0.8.0",
+      "targetVersion": "0.9.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -30,16 +30,18 @@
     },
     {
       "package": "cargo/caliper-docgen-semantic",
-      "targetVersion": "0.2.0",
+      "targetVersion": "0.2.1",
       "reasons": [
         {
-          "kind": "changeset"
+          "kind": "cascade",
+          "from": "cargo/caliper-docgen-core",
+          "edgeKind": "Runtime"
         }
       ]
     },
     {
       "package": "npm/caliper-docgen",
-      "targetVersion": "0.8.0",
+      "targetVersion": "0.9.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -48,7 +50,7 @@
     },
     {
       "package": "npm/caliper-docgen-napi",
-      "targetVersion": "0.8.0",
+      "targetVersion": "0.9.0",
       "reasons": [
         {
           "kind": "fixedGroup",
@@ -58,7 +60,7 @@
     },
     {
       "package": "npm/caliper-docgen-storybook",
-      "targetVersion": "0.8.0",
+      "targetVersion": "0.9.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -67,7 +69,7 @@
     },
     {
       "package": "npm/caliper-docgen-vite-plugin",
-      "targetVersion": "0.8.0",
+      "targetVersion": "0.9.0",
       "reasons": [
         {
           "kind": "changeset"
@@ -75,5 +77,5 @@
       ]
     }
   ],
-  "digest": "46a85bc0a83d247567c948dd339fbb8acaf424dbcf10f9b73135505f3a69e961"
+  "digest": "a388e7afcdac739cc2e7893c40c257f047cee3a04a78d2736125937226d56311"
 }
