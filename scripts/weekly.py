@@ -87,22 +87,47 @@ def caliper_components(binary, src, root):
             for c in json.loads(out[out.index('{'):]).values()}
 
 
-def recall(reference, found, root):
+def caliper_layer_members(binary, src, root):
+    """The props Caliper's collapsed inheritance layers hold, as (file, name) -> prop names: the output names them in a
+    layer instead of listing them as props (ADR 0012), and the canonical JSON is the one that carries the layers."""
+    command = [binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported', '--quiet',
+               '--load-dependencies']
+    out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
+    document = json.loads(out[out.index('{'):])
+    lists = document.get('nameLists', {})
+    members = {}
+    for c in document['components'].values():
+        names = set()
+        for layer in c.get('inheritance', []):
+            if layer.get('members'):
+                names |= set(lists[layer['members']])
+        members[(relative(c['filePath'], root), norm_name(c['displayName']))] = names
+    return members
+
+
+def recall(reference, found, root, layered=None):
     """Against RDT: the components the tool also reports and, of those, RDT's props it lists, apart from and with
-    `@types/react`'s, so a missing component and a missing prop are counted once each."""
-    count = {'components': [0, 0], 'own': [0, 0], 'react': [0, 0]}
+    `@types/react`'s, so a missing component and a missing prop are counted once each. `own` and `react` count the props
+    listed as props; `own_layers` and `react_layers` also count those held in a collapsed layer (`layered`), which the
+    output names without listing them."""
+    layered = layered or {}
+    count = {'components': [0, 0], 'own': [0, 0], 'react': [0, 0], 'own_layers': [0, 0], 'react_layers': [0, 0]}
     for comp in reference:
         if not comp['props']:
             continue
         count['components'][1] += 1
-        props = found.get((relative(comp['file'], root), norm_name(comp['name'])))
+        key = (relative(comp['file'], root), norm_name(comp['name']))
+        props = found.get(key)
         if props is None:
             continue
+        in_layers = layered.get(key, set())
         count['components'][0] += 1
         for prop, info in comp['props'].items():
             kind = 'react' if 'node_modules/@types/react/' in (info.get('parent') or '') else 'own'
             count[kind][1] += 1
             count[kind][0] += prop in props
+            count[f'{kind}_layers'][1] += 1
+            count[f'{kind}_layers'][0] += prop in props or prop in in_layers
     return count
 
 
@@ -148,7 +173,8 @@ def measure(args, corpus, work):
         'caliper': caliper_run(args.bin, src, args.runs),
         'rdt': rdt,
         'react_docgen': rdg,
-        'recall': {'caliper': recall(rdt_components, caliper_components(args.bin, src, root), root),
+        'recall': {'caliper': recall(rdt_components, caliper_components(args.bin, src, root), root,
+                                     caliper_layer_members(args.bin, src, root)),
                    'react_docgen': recall(rdt_components, found, root)},
     }
     if args.oracle:
@@ -169,7 +195,9 @@ def findings(record, previous):
         for key, label in (('ms', 'time'), ('rss_mib', 'peak memory')):
             if entry['caliper'][key] > SLOWER * old['caliper'][key]:
                 out.append(f"{name}: {label} {old['caliper'][key]} -> {entry['caliper'][key]}")
-        for kind in ('components', 'own', 'react'):
+        for kind in ('components', 'own', 'react', 'own_layers', 'react_layers'):
+            if kind not in old['recall']['caliper']:
+                continue  # a record from before layers were counted
             now, before = rate(entry['recall']['caliper'][kind]), rate(old['recall']['caliper'][kind])
             if now < before - RECALL_DROP:
                 out.append(f'{name}: recall of {kind} {100 * before:.1f}% -> {100 * now:.1f}%')
@@ -185,12 +213,15 @@ def markdown(record, notes):
         lines.append(f"| {name} | {cell(e['caliper'])} | {e['caliper']['json_mb']} MB | {cell(e['rdt'])} | "
                      f"{cell(e['react_docgen'])} |")
     lines += ['', '### Recall against RDT', '',
-              '| Corpus | Tool | Components | Own props | `@types/react` props |', '| --- | --- | --: | --: | --: |']
+              '| Corpus | Tool | Components | Own props | Own, with layers | `@types/react` props | `@types/react`, with layers |',
+              '| --- | --- | --: | --: | --: | --: | --: |']
     for name, e in record['corpora'].items():
         for tool in ('caliper', 'react_docgen'):
             r = e['recall'][tool]
-            lines.append(f'| {name} | {tool} | ' + ' | '.join(f'{100 * rate(r[k]):.1f}%' for k in ('components', 'own', 'react'))
-                         + ' |')
+            # A tool that writes no layers (react-docgen) has the same count with and without them.
+            kinds = ('components', 'own', 'own_layers', 'react', 'react_layers')
+            lines.append(f'| {name} | {tool} | ' + ' | '.join(f'{100 * rate(r.get(k, r[k.removesuffix("_layers")])):.1f}%'
+                                                              for k in kinds) + ' |')
     oracle_rows = [(n, e['oracle']) for n, e in record['corpora'].items() if 'oracle' in e]
     if oracle_rows:
         lines += ['', "### TypeScript 7.1's checker (information)", '', '| Corpus | Shared props | Agree | Wrong |',

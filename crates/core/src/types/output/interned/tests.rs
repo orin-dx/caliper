@@ -29,6 +29,19 @@ fn layer(omitted: &[&str]) -> InheritedLayer {
         omitted: omitted.iter().map(|name| name.to_string()).collect(),
         html_element: Some("button".to_string()),
         total_props: 3,
+        members: vec![],
+    }
+}
+
+/// A collapsed source: it lists the props it declares and none of them as props.
+fn collapsed(members: &[&str]) -> InheritedLayer {
+    InheritedLayer {
+        type_name: "DOMProps".to_string(),
+        file_name: "dom.d.ts".to_string(),
+        omitted: vec![],
+        html_element: None,
+        total_props: members.len() as u32,
+        members: members.iter().map(|name| name.to_string()).collect(),
     }
 }
 
@@ -179,6 +192,40 @@ fn an_omitted_list_two_layers_share_is_written_once() {
             (list(&[]), json!([])),
         ])
     );
+}
+
+#[test]
+fn a_collapsed_layer_writes_its_members_once_and_an_expanded_layer_writes_none() {
+    let mut accordion = component("Accordion", &[], &[]);
+    accordion.inheritance = vec![collapsed(&["onClick", "onFocus"]), layer(&[])];
+    let mut button = component("Button", &[], &[]);
+    button.inheritance = vec![collapsed(&["onClick", "onFocus"])];
+
+    let json = serde_json::to_value(output(vec![accordion, button])).unwrap();
+
+    let list = |names: &[&str]| PropId::of_list(&names.iter().map(|n| n.to_string()).collect::<Vec<_>>()).to_string();
+    let members = list(&["onClick", "onFocus"]);
+    let layers = |key: &str| json["components"][key]["inheritance"].clone();
+    assert_eq!(
+        layers("Accordion"),
+        json!([
+            {"typeName": "DOMProps", "fileName": "dom.d.ts", "omitted": list(&[]), "htmlElement": null, "totalProps": 2, "members": members},
+            {"typeName": "ButtonHTMLAttributes", "fileName": "react.d.ts", "omitted": list(&[]), "htmlElement": "button", "totalProps": 3},
+        ])
+    );
+    assert_eq!(layers("Button")[0]["members"], json!(members));
+    let lists: BTreeMap<String, Value> = serde_json::from_value(json["nameLists"].clone()).unwrap();
+    assert_eq!(lists, BTreeMap::from([(members, json!(["onClick", "onFocus"])), (list(&[]), json!([]))]));
+}
+
+#[test]
+fn a_collapsed_layers_members_read_back() {
+    let mut accordion = component("Accordion", &[prop("size", None)], &[]);
+    accordion.inheritance = vec![collapsed(&["onClick", "onFocus"]), layer(&["ref"])];
+    let out = output(vec![accordion]);
+    let read: ExtractionOutput = serde_json::from_str(&serde_json::to_string(&out).unwrap()).unwrap();
+    assert_eq!(read, out);
+    assert_eq!(read.components["Accordion"].inheritance[0].members, ["onClick", "onFocus"]);
 }
 
 #[test]

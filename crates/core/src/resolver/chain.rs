@@ -94,6 +94,7 @@ fn known_chain(
                 omitted,
                 html_element: Some(element),
                 total_props: 0,
+                members: vec![],
             };
             ResolvedChain { inheritance: vec![layer], ..ResolvedChain::empty() }
         }
@@ -260,7 +261,7 @@ pub(super) fn resolve_props_chain(
                     return collapsed_source(
                         &canonical_name,
                         file_path,
-                        fields.len(),
+                        fields.iter().map(|field| field.name.clone()).collect(),
                         notable.collect(),
                         ctx,
                         state,
@@ -335,6 +336,7 @@ pub(super) fn resolve_props_chain(
                 omitted: vec![],
                 html_element: Some(element.to_owned()),
                 total_props: 0,
+                members: vec![],
             });
         }
         return chain;
@@ -374,7 +376,7 @@ fn is_notable(name: &str) -> bool {
 fn collapsed_source(
     type_name: &str,
     file: &Utf8Path,
-    total: usize,
+    members: Vec<String>,
     notable: Vec<(&str, CollectedType, bool, &str)>,
     ctx: &ResolutionContext,
     state: &mut ResolveState,
@@ -404,7 +406,8 @@ fn collapsed_source(
         file_name: file.to_string(),
         omitted: vec![],
         html_element: None,
-        total_props: u32::try_from(total).unwrap_or(u32::MAX),
+        total_props: u32::try_from(members.len()).unwrap_or(u32::MAX),
+        members,
     };
     ResolvedChain { inheritance: vec![layer], notable, ..ResolvedChain::empty() }
 }
@@ -511,8 +514,15 @@ fn resolve_interface_chain_uncached(
             };
             (prop.name.as_str(), ty, prop.required, prop.description.as_str())
         });
-        let collapsed =
-            collapsed_source(&iface.name, &iface.file_path, iface.props.len(), notable.collect(), ctx, state, depth);
+        let collapsed = collapsed_source(
+            &iface.name,
+            &iface.file_path,
+            iface.props.iter().map(|prop| prop.name.clone()).collect(),
+            notable.collect(),
+            ctx,
+            state,
+            depth,
+        );
         chain.merge_parent(collapsed);
         return chain;
     }

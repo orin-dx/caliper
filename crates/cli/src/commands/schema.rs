@@ -71,7 +71,8 @@ fn schema_value() -> serde_json::Value {
                                     "fileName": { "type": "string" },
                                     "omitted": { "$ref": "#/definitions/nameListId" },
                                     "htmlElement": { "type": ["string", "null"] },
-                                    "totalProps": { "type": "integer" }
+                                    "totalProps": { "type": "integer" },
+                                    "members": { "$ref": "#/definitions/nameListId" }
                                 }
                             }
                         },

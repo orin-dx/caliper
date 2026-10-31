@@ -132,6 +132,9 @@ $ caliper-docgen schema
                 },
                 "totalProps": {
                   "type": "integer"
+                },
+                "members": {
+                  "$ref": "#/definitions/nameListId"
                 }
               }
             }

@@ -88,6 +88,10 @@ pub struct InheritedLayer {
     pub html_element: Option<String>,
     /// Number of props this layer contributes (for display).
     pub total_props: u32,
+    /// For a collapsed source, the names of the props it declares, which the output otherwise leaves out (only the
+    /// notable ones are listed as props). Empty for a layer whose props are expanded.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<String>,
 }
 
 /// A single React component with its resolved props.

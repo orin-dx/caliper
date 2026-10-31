@@ -57,6 +57,7 @@ pub(super) fn resolve_extends_ref(
                     omitted: vec![],
                     html_element: Some(element_name.clone()),
                     total_props,
+                    members: vec![],
                 };
                 (real_chain.unwrap_or_else(ResolvedChain::empty), Some(layer))
             } else {
@@ -73,6 +74,7 @@ pub(super) fn resolve_extends_ref(
                                 omitted: vec![],
                                 html_element: Some(tag.to_lowercase().to_string()),
                                 total_props: 0,
+                                members: vec![],
                             };
                             return (ResolvedChain::empty(), Some(layer));
                         }

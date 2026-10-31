@@ -66,11 +66,12 @@ impl Serialize for PropId {
 }
 
 /// What a component's JSON refers to by id: its prop sets, its notable inherited props by name, and one omitted-names
-/// list per inheritance layer, in layer order.
+/// list per inheritance layer, in layer order, with a members list for each layer that has members.
 pub(crate) struct ComponentIds<'a> {
     props: Vec<SetId>,
     notable_inherited: Vec<(&'a str, PropId)>,
     omitted: Vec<ListId>,
+    members: Vec<Option<ListId>>,
 }
 
 /// The tables a set of components refer to: their distinct props, prop sets and omitted-names lists.
@@ -266,10 +267,22 @@ pub(crate) fn intern<'a, E: serde::ser::Error>(
             .iter()
             .map(|layer| add_list(&mut name_lists, &layer.omitted))
             .collect::<Result<Vec<_>, E>>()?;
+        let members =
+            entry
+                .inheritance
+                .iter()
+                .map(|layer| {
+                    if layer.members.is_empty() {
+                        Ok(None)
+                    } else {
+                        add_list(&mut name_lists, &layer.members).map(Some)
+                    }
+                })
+                .collect::<Result<Vec<_>, E>>()?;
         let by_name = |slots: Vec<(&'a str, usize)>| -> Vec<(&'a str, PropId)> {
             slots.into_iter().map(|(name, slot)| (name, ids[slot])).collect()
         };
-        components.push(ComponentIds { props: set_ids, notable_inherited: by_name(notable), omitted });
+        components.push(ComponentIds { props: set_ids, notable_inherited: by_name(notable), omitted, members });
     }
     Ok((components, Tables { props: table, prop_sets, name_lists }))
 }
@@ -326,22 +339,26 @@ impl Serialize for IdMap<'_> {
 }
 
 /// An inheritance layer as the canonical JSON writes it: every field as `InheritedLayer` derives, except that `omitted`
-/// is the id of a list in the `nameLists` table.
+/// and `members` are ids of lists in the `nameLists` table, and `members` is written only for a layer that has some.
 struct InternedLayer<'a> {
     layer: &'a InheritedLayer,
     omitted: ListId,
+    members: Option<ListId>,
 }
 
 impl Serialize for InternedLayer<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         // Destructured so a new field fails to compile here instead of going missing from the JSON.
-        let InheritedLayer { type_name, file_name, omitted: _, html_element, total_props } = self.layer;
-        let mut out = serializer.serialize_struct("InheritedLayer", 5)?;
+        let InheritedLayer { type_name, file_name, omitted: _, html_element, total_props, members: _ } = self.layer;
+        let mut out = serializer.serialize_struct("InheritedLayer", 5 + usize::from(self.members.is_some()))?;
         out.serialize_field("typeName", type_name)?;
         out.serialize_field("fileName", file_name)?;
         out.serialize_field("omitted", &self.omitted)?;
         out.serialize_field("htmlElement", html_element)?;
         out.serialize_field("totalProps", total_props)?;
+        if let Some(members) = &self.members {
+            out.serialize_field("members", members)?;
+        }
         out.end()
     }
 }
@@ -349,12 +366,18 @@ impl Serialize for InternedLayer<'_> {
 struct InternedLayers<'a> {
     layers: &'a [InheritedLayer],
     omitted: &'a [ListId],
+    members: &'a [Option<ListId>],
 }
 
 impl Serialize for InternedLayers<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer
-            .collect_seq(self.layers.iter().zip(self.omitted).map(|(layer, &omitted)| InternedLayer { layer, omitted }))
+        serializer.collect_seq(
+            self.layers.iter().zip(self.omitted).zip(self.members).map(|((layer, &omitted), &members)| InternedLayer {
+                layer,
+                omitted,
+                members,
+            }),
+        )
     }
 }
 
@@ -380,7 +403,10 @@ impl Serialize for InternedComponent<'_> {
         out.serialize_field("filePath", file_path)?;
         out.serialize_field("description", description)?;
         out.serialize_field("props", &self.ids.props)?;
-        out.serialize_field("inheritance", &InternedLayers { layers: inheritance, omitted: &self.ids.omitted })?;
+        out.serialize_field(
+            "inheritance",
+            &InternedLayers { layers: inheritance, omitted: &self.ids.omitted, members: &self.ids.members },
+        )?;
         out.serialize_field("notableInherited", &IdMap(&self.ids.notable_inherited))?;
         out.serialize_field("discriminantProp", discriminant_prop)?;
         out.serialize_field("composes", composes)?;
@@ -526,6 +552,16 @@ fn expand(mut component: serde_json::Value, tables: &ReadTables<'_>) -> Result<C
                 .get(id)
                 .ok_or_else(|| format!("name list id {id} is not in the `nameLists` table"))?;
             *omitted = serde_json::json!(names);
+            if let Some(members) = layer.get_mut("members") {
+                let id = members
+                    .as_str()
+                    .ok_or_else(|| format!("`members` holds {members} where a name list id belongs"))?;
+                let names = tables
+                    .name_lists
+                    .get(id)
+                    .ok_or_else(|| format!("name list id {id} is not in the `nameLists` table"))?;
+                *members = serde_json::json!(names);
+            }
         }
     }
     serde_json::from_value(component).map_err(|e| e.to_string())

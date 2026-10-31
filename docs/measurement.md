@@ -23,6 +23,9 @@ Recall is measured against RDT, on the components both tools report (same file, 
 | Components           | RDT's components with props that the tool also reports                                    |
 | Own props            | Of those components, RDT's props not declared by `@types/react` that the tool lists       |
 | `@types/react` props | RDT's props that `@types/react` declares (`onClick`, `aria-*`, `ref`) that the tool lists |
+| ... with layers      | The same two, also counting a prop held in a collapsed inheritance layer                  |
+
+Caliper collapses an inherited dependency source of more than 30 props into a layer (ADR 0012) and lists only its notable members as props, as Storybook does. A prop in a layer is in the output, named by the layer's `members`, but is not in the flat list, so the table reports both: the plain columns say what the default output lists, "with layers" says what it holds. react-docgen writes no layers, so its two columns are equal.
 
 react-docgen reads each file alone with its default resolver and importer, as Storybook does, so it lists no types declared elsewhere. That is the point of the comparison.
 
