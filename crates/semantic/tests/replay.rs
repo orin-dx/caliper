@@ -164,13 +164,13 @@ fn no_typescript_installed_falls_back_with_one_diagnostic() {
 }
 
 #[test]
-fn an_unpinned_typescript_version_falls_back_with_one_diagnostic() {
+fn an_unsupported_typescript_version_falls_back_with_one_diagnostic() {
     let project = project(true);
     let output = structural(&project);
     let mut request = request(&project, &output, None);
     request.expected_versions = &["7.1.0-beta"];
 
-    assert_falls_back(&project, request, &output, "not pinned");
+    assert_falls_back(&project, request, &output, "not a supported version");
 }
 
 #[test]

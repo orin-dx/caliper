@@ -18,7 +18,7 @@ use camino::Utf8PathBuf;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::rpc::Rpc;
-use crate::{answer_with, supervisor_config, SemanticRequest, PINNED_VERSIONS};
+use crate::{answer_with, supervisor_config, SemanticRequest, SUPPORTED_VERSIONS};
 
 /// Crashes the checker may have before it stays down for the session.
 const MAX_RESTARTS: u32 = 3;
@@ -26,6 +26,17 @@ const MAX_RESTARTS: u32 = 3;
 /// Programs one `tsc` process builds before it is replaced. Its memory grows with every program it has loaded
 /// (measured: antd reached 600 MiB after 50 single-component programs), and a fresh process costs 30 to 70 ms.
 const MAX_REQUESTS_PER_PROCESS: u32 = 64;
+
+/// Resident memory, in MiB, past which a `tsc` process is replaced between requests. Measured single-component programs
+/// peak at 157 to 612 MiB (antd the highest); a process past this has loaded more than a story session needs.
+const DEFAULT_MAX_RSS_MIB: u64 = 768;
+
+/// How many requests pass between memory checks: each reads the process table, which costs a few milliseconds.
+const RSS_CHECK_EVERY: u32 = 4;
+
+/// How long dropping a checker waits, by default, for its worker to finish a request and stop `tsc`, before leaving the
+/// worker to finish on its own. Closing a session must not wait for a 60 s request.
+const DEFAULT_SHUTDOWN_WAIT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub struct OnDemandConfig {
@@ -37,6 +48,11 @@ pub struct OnDemandConfig {
     /// Bound on each request to the checker, and on its start-up handshake.
     pub request_timeout: Duration,
     pub expected_versions: &'static [&'static str],
+    /// Resident memory of the `tsc` process, in MiB, past which it is replaced after a request. A request that needs
+    /// more finishes first: the bound is between requests, not inside one.
+    pub max_rss_mib: u64,
+    /// How long dropping the checker waits for a request in progress before it lets the worker finish alone.
+    pub shutdown_wait: Duration,
     /// Environment for the `tsc` process; the tests use it to pick a replay scenario.
     pub extra_env: Vec<(String, String)>,
 }
@@ -48,10 +64,30 @@ impl OnDemandConfig {
             tsconfig: None,
             tsc_path: None,
             request_timeout: Duration::from_secs(60),
-            expected_versions: PINNED_VERSIONS,
+            expected_versions: SUPPORTED_VERSIONS,
+            max_rss_mib: DEFAULT_MAX_RSS_MIB,
+            shutdown_wait: DEFAULT_SHUTDOWN_WAIT,
             extra_env: Vec::new(),
         }
     }
+}
+
+/// The resident memory of a process in MiB: `/proc` where it exists, else `ps`. `None` when neither answers.
+fn resident_mib(pid: u32) -> Option<u64> {
+    let kib = match std::fs::read_to_string(format!("/proc/{pid}/status")) {
+        Ok(status) => status
+            .lines()
+            .find_map(|line| line.strip_prefix("VmRSS:"))?
+            .split_whitespace()
+            .next()?
+            .parse::<u64>()
+            .ok()?,
+        Err(_) => {
+            let output = std::process::Command::new("ps").args(["-o", "rss=", "-p", &pid.to_string()]).output().ok()?;
+            String::from_utf8_lossy(&output.stdout).trim().parse::<u64>().ok()?
+        }
+    };
+    Some(kib / 1024)
 }
 
 enum Job {
@@ -67,15 +103,30 @@ enum Job {
 pub struct OnDemand {
     jobs: Option<UnboundedSender<Job>>,
     thread: Option<JoinHandle<()>>,
+    /// Receives once when the worker has stopped `tsc` and is about to exit.
+    stopped: std::sync::Mutex<Option<mpsc::Receiver<()>>>,
+    shutdown_wait: Duration,
 }
 
 impl OnDemand {
     /// Starts the worker thread. The `tsc` process itself starts on the first request, or on [`OnDemand::warm_up`].
     pub fn new(config: OnDemandConfig) -> Self {
+        let shutdown_wait = config.shutdown_wait;
         let (jobs, queue) = unbounded_channel();
-        let thread =
-            std::thread::Builder::new().name("caliper-tsc".to_string()).spawn(move || worker(config, queue)).ok();
-        Self { jobs: thread.as_ref().map(|_| jobs), thread }
+        let (stopped_tx, stopped) = mpsc::channel();
+        let thread = std::thread::Builder::new()
+            .name("caliper-tsc".to_string())
+            .spawn(move || {
+                worker(config, queue);
+                stopped_tx.send(()).ok();
+            })
+            .ok();
+        Self {
+            jobs: thread.as_ref().map(|_| jobs),
+            thread,
+            stopped: std::sync::Mutex::new(Some(stopped)),
+            shutdown_wait,
+        }
     }
 
     /// Starts `tsc` in the background so the first request does not pay for it.
@@ -107,10 +158,15 @@ impl SemanticProvider for OnDemand {
 
 impl Drop for OnDemand {
     fn drop(&mut self) {
-        // Closing the queue ends the worker loop, which shuts `tsc` down before the thread exits.
+        // Closing the queue ends the worker loop, which shuts `tsc` down before the thread exits. A worker still inside
+        // a long request is left to finish it: `tsc` stops when it does, or with this process.
         self.jobs.take();
+        let receiver = self.stopped.get_mut().ok().and_then(Option::take);
+        let stopped = receiver.is_none_or(|receiver| receiver.recv_timeout(self.shutdown_wait).is_ok());
         if let Some(thread) = self.thread.take() {
-            thread.join().ok();
+            if stopped {
+                thread.join().ok();
+            }
         }
     }
 }
@@ -137,6 +193,8 @@ fn worker(config: OnDemandConfig, mut queue: UnboundedReceiver<Job>) {
                 }
                 Job::Answer { targets, reply } => {
                     reply.send(checker.answer(&config, targets).await).ok();
+                    // After the reply, so the caller never waits for the memory check or the replacement.
+                    checker.maintain(&config).await;
                 }
             }
         }
@@ -225,14 +283,39 @@ impl Checker {
         request.prepared_options.clone_from(&self.options);
         let outcome = answer_with(supervisor, &request).await;
         self.served += 1;
-        if self.served >= MAX_REQUESTS_PER_PROCESS {
-            // A planned replacement, not a crash: the next request starts a fresh process.
+        outcome
+    }
+
+    /// Replaces the process when it has built enough programs or grown past the memory bound. A planned replacement,
+    /// not a crash: the next request starts a fresh process.
+    async fn maintain(&mut self, config: &OnDemandConfig) {
+        let Some(supervisor) = self.supervisor.as_ref() else { return };
+        let worn = self.served >= MAX_REQUESTS_PER_PROCESS;
+        let bloated = !worn
+            && self.served.is_multiple_of(RSS_CHECK_EVERY)
+            && supervisor.process_id().and_then(resident_mib).is_some_and(|mib| mib > config.max_rss_mib);
+        if worn || bloated {
             if let Some(old) = self.supervisor.take() {
                 old.shutdown().await.ok();
             }
             self.options = None;
             self.served = 0;
         }
-        outcome
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resident_mib;
+
+    #[test]
+    fn a_running_process_has_resident_memory() {
+        let mib = resident_mib(std::process::id()).expect("this process is listed");
+        assert!((1..16_384).contains(&mib), "{mib} MiB");
+    }
+
+    #[test]
+    fn a_process_that_does_not_exist_has_none() {
+        assert_eq!(resident_mib(u32::MAX - 1), None);
     }
 }

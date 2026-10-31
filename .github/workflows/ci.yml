@@ -64,7 +64,11 @@ jobs:
           auto-install: true
       - uses: orin-dx/actions/setup-pnpm-cache@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
       - run: pnpm install --frozen-lockfile
+      # The two tests that run the real TypeScript 7.1 checker use apps/oracle's `typescript-beta`; without this they
+      # skip, and in CI a skip is a failure.
       - run: just test-rust
+        env:
+          CALIPER_TEST_TSC: ${{ github.workspace }}/apps/oracle/node_modules/typescript-beta/bin/tsc
 
   test-ts:
     name: Test / TypeScript / Node ${{ matrix.node }}
