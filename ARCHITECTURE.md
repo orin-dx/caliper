@@ -38,15 +38,15 @@ graph TD
     napi["packages/napi\ncaliper-docgen-napi\nTS types + dev binary loader"]
     vite["packages/vite-plugin\ncaliper-docgen-vite-plugin\nVite HMR plugin"]
     storybook["packages/storybook\ncaliper-docgen-storybook\nStorybook 11 docgen provider"]
-    validate["apps/validate\nAccuracy comparison harness"]
+    oracle["apps/oracle\nTS 7.1 oracle, RDT and react-docgen runners"]
 
     core --> binding
     core --> cli
     binding --> napi
     napi --> vite
     napi --> storybook
-    cli -.->|"runtime dep"| validate
-    napi -.->|"runtime dep"| validate
+    cli -.->|"runtime dep"| oracle
+    napi -.->|"runtime dep"| oracle
 ```
 
 `crates/core` has no dependency on async runtimes, NAPI, or terminal libraries. It can be linked from any host.

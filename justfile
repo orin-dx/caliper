@@ -60,7 +60,7 @@ test-rust:
 test-ts:
     pnpm --filter caliper-docgen-vite-plugin test
     pnpm --filter caliper-docgen-storybook test
-    pnpm --filter caliper-docgen-validate test
+    pnpm --filter caliper-docgen-oracle test
 
 # Build the native binding and run the Vite plugin against it
 test-integration:
@@ -111,9 +111,9 @@ machete:
 mutants:
     cargo mutants --workspace --exclude caliper-docgen-napi
 
-ts_src := "'packages/vite-plugin/src/**/*.ts' 'packages/vite-plugin/tests/**/*.ts' 'packages/vite-plugin/vitest.config.ts' 'packages/storybook/src/**/*.ts' 'packages/storybook/tests/**/*.ts' 'packages/storybook/*.config.ts' 'packages/napi/*.d.ts' 'packages/cli/bin/**/*.js' 'apps/validate/src/**/*.ts' 'apps/validate/tests/**/*.ts'"
-ts_src_only := "'packages/vite-plugin/src' 'packages/vite-plugin/vitest.config.ts' 'packages/storybook/src' 'packages/storybook/vitest.config.ts' 'packages/napi/*.d.ts' 'packages/cli/bin/**/*.js' 'apps/validate/src'"
-ts_tests_only := "'packages/vite-plugin/tests' 'packages/storybook/tests' 'apps/validate/tests'"
+ts_src := "'packages/vite-plugin/src/**/*.ts' 'packages/vite-plugin/tests/**/*.ts' 'packages/vite-plugin/vitest.config.ts' 'packages/storybook/src/**/*.ts' 'packages/storybook/tests/**/*.ts' 'packages/storybook/*.config.ts' 'packages/napi/*.d.ts' 'packages/cli/bin/**/*.js' 'apps/oracle/src/**/*.ts' 'apps/oracle/tests/**/*.ts'"
+ts_src_only := "'packages/vite-plugin/src' 'packages/vite-plugin/vitest.config.ts' 'packages/storybook/src' 'packages/storybook/vitest.config.ts' 'packages/napi/*.d.ts' 'packages/cli/bin/**/*.js' 'apps/oracle/src'"
+ts_tests_only := "'packages/vite-plugin/tests' 'packages/storybook/tests' 'apps/oracle/tests'"
 md_src := "'**/*.md' '!node_modules/**' '!target/**' '!dist/**'"
 
 # Lint and format check
@@ -156,10 +156,6 @@ pre-commit:
 
 # Everything the CI jobs run, minus the Node version matrix and verify-install
 ci: lint test deny typos zizmor doc-check machete semver msrv (coverage "90")
-
-# Run moon compare task (accuracy vs react-docgen + react-docgen-typescript)
-compare:
-    moon run validate:compare
 
 # Time and memory of this checkout (or a branch) against origin/main on Mantine and Chakra; see docs/measurement.md.
 bench *args:

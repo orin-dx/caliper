@@ -38,7 +38,7 @@
       "plugins": ["typescript", "unicorn", "oxc", "vitest"]
     },
     {
-      "files": ["apps/validate/src/**/*.ts", "packages/cli/bin/cli.js"],
+      "files": ["apps/oracle/src/**/*.ts", "packages/cli/bin/cli.js"],
       "rules": {
         "node/no-sync": "off"
       }

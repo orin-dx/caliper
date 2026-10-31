@@ -603,7 +603,7 @@ async function main() {
     // The addon build to measure; another build of the package runs the same stories for a before/after.
     dist: resolve(values.dist ?? join(here, '../dist')),
     typescript: resolve(
-      values.typescript ?? join(here, '../../../apps/validate/node_modules/typescript/lib/typescript.js'),
+      values.typescript ?? join(here, '../../../apps/oracle/node_modules/typescript/lib/typescript.js'),
     ),
     tsconfig: values.tsconfig,
   }

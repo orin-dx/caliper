@@ -13,7 +13,7 @@ Output: `<out>.json` (every number) and `<out>.md` (tables). Storybook writes it
 
 | Side | How it runs |
 | --- | --- |
-| Storybook's docgen | `@storybook/react`'s own `docgen-worker.js` (react-component-meta), unmodified, called as a middleware. It needs the TypeScript 5/6 compiler API, so `typescript` is redirected to `apps/validate`'s TypeScript 6 (`--typescript` overrides); this package's TypeScript 7 has none. |
+| Storybook's docgen | `@storybook/react`'s own `docgen-worker.js` (react-component-meta), unmodified, called as a middleware. It needs the TypeScript 5/6 compiler API, so `typescript` is redirected to `apps/oracle`'s TypeScript 6 (`--typescript` overrides); this package's TypeScript 7 has none. |
 | The addon | `dist/provider.js`, the real `createDocgenProvider`, with Storybook's `meta.component` resolver and argTypes converter. |
 
 Variants of the addon:

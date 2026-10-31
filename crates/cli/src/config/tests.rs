@@ -67,12 +67,12 @@ fn config_schema_defaults_are_used_when_a_field_is_absent() {
 fn try_load_config_maps_a_real_docgen_config_ts_file() {
     // Real end-to-end proof: an actual docgen.config.ts, evaluated by the real
     // node+tsx subprocess this module spawns, not just the pure schema mapping
-    // tested above. Placed under apps/validate/ (not a bare system tempdir) —
+    // tested above. Placed under apps/oracle/ (not a bare system tempdir) —
     // tsx is only a devDependency there, not hoisted to the repo root, and the
     // subprocess resolves it via Node's own ancestor-walking package resolution
     // starting from the config file's directory.
-    let validate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/validate");
-    let tmp = tempfile::TempDir::new_in(&validate_dir).unwrap();
+    let oracle_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/oracle");
+    let tmp = tempfile::TempDir::new_in(&oracle_dir).unwrap();
     let config_path = tmp.path().join("docgen.config.ts");
     std::fs::write(
         &config_path,
@@ -105,16 +105,16 @@ fn try_load_config_resolves_a_relative_path_whose_parent_is_not_the_cwd() {
     // actual cwd failed with ERR_MODULE_NOT_FOUND even though the file
     // existed. Constructs a relative path without mutating the process's
     // actual cwd (cargo test's default cwd for this crate is
-    // CARGO_MANIFEST_DIR, i.e. crates/cli — mirrors how `validate_dir`
+    // CARGO_MANIFEST_DIR, i.e. crates/cli — mirrors how `oracle_dir`
     // above is itself expressed relative to that same cwd) so this stays
     // safe under parallel test execution.
-    let validate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/validate");
-    let tmp = tempfile::TempDir::new_in(&validate_dir).unwrap();
+    let oracle_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/oracle");
+    let tmp = tempfile::TempDir::new_in(&oracle_dir).unwrap();
     let config_path = tmp.path().join("docgen.config.ts");
     std::fs::write(&config_path, "export default { srcDirs: [\"src/components\"] };\n").unwrap();
 
     let tmp_dir_name = tmp.path().file_name().expect("tmp dir has a name");
-    let relative_config_path = std::path::Path::new("../../apps/validate").join(tmp_dir_name).join("docgen.config.ts");
+    let relative_config_path = std::path::Path::new("../../apps/oracle").join(tmp_dir_name).join("docgen.config.ts");
 
     let opts = try_load_config(&relative_config_path)
         .expect("a relative --config path should resolve regardless of its parent directory")
@@ -132,8 +132,8 @@ fn try_load_config_resolves_a_relative_path_whose_parent_is_not_the_cwd() {
 
 #[test]
 fn config_path_containing_quotes_and_an_exit_payload_is_not_interpreted_as_javascript() {
-    let validate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/validate");
-    let tmp = tempfile::TempDir::new_in(&validate_dir).unwrap();
+    let oracle_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/oracle");
+    let tmp = tempfile::TempDir::new_in(&oracle_dir).unwrap();
     // Combines a single quote, a double quote, and the exact "break out of
     // a string literal and call process.exit(1)" payload AC-001 names —
     // if try_load_config ever regressed to string-concatenating this path
@@ -164,14 +164,14 @@ fn try_load_config_surfaces_the_real_syntax_error_not_just_an_exit_status() {
     // generic "failed to evaluate (exit status: 1)" with the actual
     // syntax error/stack trace thrown away — the one piece of
     // information that would actually tell the user what's wrong.
-    let validate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/validate");
-    let tmp = tempfile::TempDir::new_in(&validate_dir).unwrap();
+    let oracle_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/oracle");
+    let tmp = tempfile::TempDir::new_in(&oracle_dir).unwrap();
     let config_path = tmp.path().join("docgen.config.ts");
     std::fs::write(&config_path, "export default {{{{ this is not valid javascript").unwrap();
 
     let err = try_load_config(&config_path).expect_err("a real syntax error should fail to evaluate");
     let message = format!("{err:?}");
-    // This repo's apps/validate uses tsx's esbuild-based transform, which
+    // This repo's apps/oracle uses tsx's esbuild-based transform, which
     // reports "ERROR: Expected identifier..."; a native TS-stripping
     // toolchain would instead say "SyntaxError" — accept either so this
     // isn't pinned to one specific transpiler's exact wording.
@@ -203,11 +203,11 @@ fn build_options_maps_extra_builtins_cli_flag() {
 
 #[test]
 fn build_options_extra_builtins_cli_flag_overrides_config_file() {
-    // Real end-to-end proof (same apps/validate tempdir rationale as
+    // Real end-to-end proof (same apps/oracle tempdir rationale as
     // try_load_config_maps_a_real_docgen_config_ts_file above): the CLI flag
     // must win over a config-file value, not merge with or lose to it.
-    let validate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/validate");
-    let tmp = tempfile::TempDir::new_in(&validate_dir).unwrap();
+    let oracle_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/oracle");
+    let tmp = tempfile::TempDir::new_in(&oracle_dir).unwrap();
     let config_path = tmp.path().join("docgen.config.ts");
     std::fs::write(
         &config_path,
@@ -417,10 +417,10 @@ fn load_config_file_stops_at_a_workspace_marker_without_reading_configs_above_it
     assert!(load_config_file(&package).unwrap().is_none());
 }
 
-/// A `docgen.config.ts` with `source`, placed under apps/validate so `tsx` resolves (see the real-file test above).
+/// A `docgen.config.ts` with `source`, placed under apps/oracle so `tsx` resolves (see the real-file test above).
 fn write_config(source: &str) -> (tempfile::TempDir, std::path::PathBuf) {
-    let validate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/validate");
-    let tmp = tempfile::TempDir::new_in(validate_dir).unwrap();
+    let oracle_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/oracle");
+    let tmp = tempfile::TempDir::new_in(oracle_dir).unwrap();
     let path = tmp.path().join("docgen.config.ts");
     std::fs::write(&path, source).unwrap();
     let path = path.canonicalize().unwrap();

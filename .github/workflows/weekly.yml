@@ -46,7 +46,7 @@ jobs:
           package-manager-cache: false
       - id: corpus-node
         run: echo "dir=$(dirname "$(command -v node)")" >> "$GITHUB_OUTPUT"
-      # RDT, react-docgen and the oracle run from apps/validate's dependencies.
+      # RDT, react-docgen and the oracle run from apps/oracle's dependencies.
       - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
         with:
           auto-install: true

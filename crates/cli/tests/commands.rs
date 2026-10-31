@@ -317,8 +317,8 @@ fn extract_reports_diagnostics_on_stderr_only_when_neither_quiet_nor_json() {
 
 #[test]
 fn extract_finds_docgen_config_ts_in_the_working_directory_and_applies_it() {
-    // tsx, which evaluates the config, is only installed under apps/validate.
-    let project = TempDir::new_in(concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/validate")).unwrap();
+    // tsx, which evaluates the config, is only installed under apps/oracle.
+    let project = TempDir::new_in(concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/oracle")).unwrap();
     for (dir, component) in [("components", "Widget"), ("elsewhere", "Gadget")] {
         std::fs::create_dir(project.path().join(dir)).unwrap();
         std::fs::write(

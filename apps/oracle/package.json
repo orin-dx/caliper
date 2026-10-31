@@ -1,0 +1,21 @@
+{
+  "name": "caliper-docgen-oracle",
+  "version": "0.1.0",
+  "private": true,
+  "license": "FSL-1.1-MIT",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react-docgen": "^8.0.4",
+    "react-docgen-typescript": "^2.4.0",
+    "typescript": "^6.0.3",
+    "typescript-beta": "npm:typescript@7.1.0-beta"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "vitest": "^5.0.5"
+  }
+}

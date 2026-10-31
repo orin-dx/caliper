@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 
-const require = createRequire(fileURLToPath(new URL('../apps/validate/package.json', import.meta.url)))
+const require = createRequire(fileURLToPath(new URL('../apps/oracle/package.json', import.meta.url)))
 const { parse } = await import(pathToFileURL(require.resolve('react-docgen')).href)
 
 const [listFile, out] = process.argv.slice(2)
