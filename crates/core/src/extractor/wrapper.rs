@@ -242,7 +242,12 @@ impl<'src> SourceDataCollector<'src> {
             .iter()
             .map(|pending| pending.tag.as_deref().is_some_and(|tag| tag_uses(tag) > 1))
             .collect();
-        for (pending, shared_tag) in pending_wrappers.into_iter().zip(shared_tags) {
+        // A tagged factory takes the props type no other component in the file takes, so every other candidate is
+        // promoted first, in source order: `StyledGroup = chakra("div", …)` comes before `Group = withContext<…,
+        // GroupProps>(StyledGroup)` and would otherwise take `GroupProps` before `Group` claims it.
+        let (tagged, others): (Vec<_>, Vec<_>) =
+            pending_wrappers.into_iter().zip(shared_tags).partition(|(pending, _)| pending.tag.is_some());
+        for (pending, shared_tag) in others.into_iter().chain(tagged) {
             if self.data.component_mappings.iter().any(|m| m.component_name == pending.name) {
                 continue;
             }
@@ -341,12 +346,7 @@ impl<'src> SourceDataCollector<'src> {
         }
         for (key, alias) in &self.data.type_aliases {
             let Some(name) = key.strip_prefix(&prefix) else { continue };
-            let gives = match alias {
-                CollectedTypeAlias::Passthrough { target, .. } => gives_tag(target, tag),
-                CollectedTypeAlias::Intersection { members, .. } => members.iter().any(|member| gives_tag(member, tag)),
-                _ => false,
-            };
-            if gives {
+            if alias_gives_tag(alias, tag) {
                 found.push(TypeName::from(name));
             }
         }
@@ -449,6 +449,23 @@ fn gives_tag(ty: &CollectedType, tag: &str) -> bool {
         }
         CollectedType::AtFile { inner, .. } => gives_tag(inner, tag),
         _ => false,
+    }
+}
+
+/// Whether a type alias gives `tag`, whatever shape the extractor classified it as: `Omit<ComponentProps<"button">, "x">`
+/// is an `Omit` of a base that gives it. Every variant is named, so a new one fails to compile here instead of being
+/// ignored.
+fn alias_gives_tag(alias: &CollectedTypeAlias, tag: &str) -> bool {
+    match alias {
+        CollectedTypeAlias::Passthrough { target: ty, .. }
+        | CollectedTypeAlias::Omit { base: ty, .. }
+        | CollectedTypeAlias::Pick { base: ty, .. }
+        | CollectedTypeAlias::Partial { base: ty, .. }
+        | CollectedTypeAlias::Required { base: ty, .. } => gives_tag(ty, tag),
+        CollectedTypeAlias::Union { members, .. } | CollectedTypeAlias::Intersection { members, .. } => {
+            members.iter().any(|member| gives_tag(member, tag))
+        }
+        CollectedTypeAlias::LiteralUnion { .. } => false,
     }
 }
 
