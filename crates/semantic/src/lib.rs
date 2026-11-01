@@ -32,9 +32,10 @@ use crate::component::Answer;
 use crate::convert::Converter;
 use crate::rpc::{CallError, Rpc};
 
-/// The `typescript` package versions whose protocol this backend was traced against. The protocol has no version
-/// handshake, so the package's `package.json` version is the whole check.
-pub const PINNED_VERSIONS: &[&str] = &["7.1.0-beta"];
+/// The `typescript` releases whose protocol this backend was traced against: the 7.1 series, from `7.1.0-beta` on. The
+/// protocol has no version handshake, so the package's `package.json` version and the initialize call that follows
+/// the spawn are the whole check; a build that fails either takes the structural result with one warning.
+pub const SUPPORTED_VERSIONS: &[&str] = &["7.1"];
 
 /// How many files are asked about at once. `tsc` answers requests one at a time; this keeps it from idling on round
 /// trips.
@@ -92,7 +93,7 @@ impl SemanticRequest {
             tsc_path: None,
             targets,
             request_timeout: Duration::from_secs(60),
-            expected_versions: PINNED_VERSIONS,
+            expected_versions: SUPPORTED_VERSIONS,
             record_to: None,
             extra_env: Vec::new(),
             prepared_options: None,
