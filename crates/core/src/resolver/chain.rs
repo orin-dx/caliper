@@ -97,6 +97,26 @@ fn known_chain(
             };
             ResolvedChain { inheritance: vec![layer], ..ResolvedChain::empty() }
         }
+        // A union of tags: a layer for each distinct element.
+        KnownPatternResult::Type(PropType::Union(members))
+            if !members.is_empty() && members.iter().all(|m| matches!(m, PropType::HtmlAttributes { .. })) =>
+        {
+            let mut inheritance: Vec<InheritedLayer> = Vec::new();
+            for member in members {
+                let PropType::HtmlAttributes { element, omitted } = member else { continue };
+                if inheritance.iter().any(|layer| layer.html_element.as_deref() == Some(element.as_str())) {
+                    continue;
+                }
+                inheritance.push(InheritedLayer {
+                    type_name: type_name.to_owned(),
+                    file_name: resolve_react_types_file(consuming_file, ctx),
+                    omitted,
+                    html_element: Some(element),
+                    total_props: 0,
+                });
+            }
+            ResolvedChain { inheritance, ..ResolvedChain::empty() }
+        }
         KnownPatternResult::Type(pt) => {
             if let PropType::Opaque(detail) = &pt {
                 let bare = type_name.strip_prefix("React.").unwrap_or(type_name);
@@ -344,7 +364,8 @@ pub(super) fn resolve_props_chain(
         let element = type_args
             .first()
             .and_then(react_types::html_element_from_collected)
-            .or_else(|| react_types::html_element_for(type_name_bare));
+            .or_else(|| react_types::html_element_for(type_name_bare))
+            .or_else(|| react_types::html_element_from_args(type_args));
         let mut chain = ResolvedChain::empty_with_compose(type_name.to_owned());
         // `HTMLProps<T>` is `AllHTMLAttributes<T>` and `ClassAttributes<T>`: more than the element's own attributes, so
         // `full` reads it whole, as the interface chain does for `extends HTMLProps<T>`, and the layer has nothing to add.
