@@ -3844,7 +3844,9 @@ export function List(props: {
         props["children"].prop_type,
         PropType::Union(vec![PropType::ReactNode, PropType::Null, PropType::Array(Box::new(element))])
     );
-    assert_eq!(props["each"].prop_type, PropType::Array(Box::new(PropType::String)));
+    let strings = PropType::Array(Box::new(PropType::String));
+    let readonly_strings = PropType::Readonly(Box::new(strings.clone()));
+    assert_eq!(props["each"].prop_type, PropType::Union(vec![strings.clone(), readonly_strings.clone()]));
     assert_eq!(
         props["tone"].prop_type,
         PropType::Union(vec![PropType::StringLiteral("a".into()), PropType::StringLiteral("b".into())])
@@ -3853,7 +3855,7 @@ export function List(props: {
         props["onPick"].prop_type,
         PropType::Function {
             type_params: vec![],
-            params: vec![FunctionParam::new(Some("names".into()), PropType::Array(Box::new(PropType::String)))],
+            params: vec![FunctionParam::new(Some("names".into()), PropType::Union(vec![strings, readonly_strings]))],
             return_type: Box::new(PropType::Void),
         }
     );

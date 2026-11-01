@@ -187,6 +187,7 @@ pub(super) fn substitute_type(ct: &CollectedType, subst: &Substitution) -> Colle
             CollectedType::Intersection(members.iter().map(|m| substitute_type(m, subst)).collect())
         }
         CollectedType::Array(inner) => CollectedType::Array(Box::new(substitute_type(inner, subst))),
+        CollectedType::Readonly(inner) => CollectedType::Readonly(Box::new(substitute_type(inner, subst))),
         CollectedType::Tuple(members) => {
             CollectedType::Tuple(members.iter().map(|m| substitute_type(m, subst)).collect())
         }
@@ -198,6 +199,8 @@ pub(super) fn substitute_type(ct: &CollectedType, subst: &Substitution) -> Colle
                     collected_type: substitute_type(&f.collected_type, subst),
                     required: f.required,
                     description: f.description.clone(),
+                    readonly: f.readonly,
+                    index_key: f.index_key.as_deref().map(|key| Box::new(substitute_type(key, subst))),
                 })
                 .collect(),
         ),
@@ -353,6 +356,8 @@ pub(super) fn synthesize_utility_alias(
                 collected_type: CollectedType::Named { name: "React.ReactNode".into(), args: vec![] },
                 required: false,
                 description: String::new(),
+                readonly: false,
+                index_key: None,
             }]);
             Some(match args.first() {
                 Some(props) => CollectedTypeAlias::Intersection {

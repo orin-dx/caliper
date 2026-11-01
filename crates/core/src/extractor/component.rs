@@ -8,7 +8,7 @@ use oxc_ast::ast::*;
 use crate::types::{CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode};
 
 use super::evidence::{renders, FunctionShape};
-use super::{is_pascal_case, SourceDataCollector};
+use super::{is_pascal_case, ReactApi, SourceDataCollector};
 
 /// Peel any wrapping `as X` casts, `satisfies X` checks or `!` assertions down to the real
 /// expression underneath. Needed because component libraries commonly cast a
@@ -190,9 +190,7 @@ impl<'src> SourceDataCollector<'src> {
             Expression::CallExpression(ce) => ce,
             _ => return None,
         };
-        let callee_name = self.extract_callee_name(call)?;
-
-        if !matches!(callee_name.as_str(), "forwardRef" | "React.forwardRef") {
+        if !self.is_forward_ref_call(call) {
             return None;
         }
 
@@ -276,33 +274,49 @@ impl<'src> SourceDataCollector<'src> {
         // First arg should be a function with a typed props param — or a forwardRef() call.
         let first_arg = call.arguments.first()?;
 
-        // Handle memo(forwardRef<Ref, Props>(...)) — inner call is forwardRef
+        // `memo(forwardRef(…))`: the props come from forwardRef's type arguments, or from its render function.
         if let Argument::CallExpression(inner) = first_arg {
-            if let Some(inner_name) = self.extract_callee_name(inner) {
-                if matches!(inner_name.as_str(), "forwardRef" | "React.forwardRef") {
-                    let type_params = inner.type_arguments.as_ref()?;
-                    if type_params.params.len() >= 2 {
-                        let (props_name, type_args) = self.extract_type_name_from_type(&type_params.params[1])?;
-                        let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
-                        return Some(
-                            ComponentMapping::new(
-                                name.to_owned(),
-                                props_name,
-                                self.file_path.clone(),
-                                decl.span.start,
-                                decl.span.end,
-                                DetectionRule::ForwardRef,
-                            )
-                            .with_props_type_args(type_args)
-                            .with_doc(description, tags),
-                        );
-                    }
-                }
+            if !self.is_forward_ref_call(inner) {
+                return None;
             }
-            return None;
+            // `forwardRef<Ref, Props>(…)` names the props in its second type argument; otherwise the render function's
+            // first parameter does. A call with one type argument and no function (`forwardRef<Ref>()`) names neither.
+            let props_type = inner.type_arguments.as_ref().and_then(|type_params| type_params.params.get(1));
+            let Some(props_type) = props_type else {
+                let render = inner.arguments.first()?;
+                return self.mapping_from_typed_function(decl, name, call, render, DetectionRule::ForwardRef);
+            };
+            let (props_name, type_args) = self.extract_type_name_from_type(props_type)?;
+            let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
+            return Some(
+                ComponentMapping::new(
+                    name.to_owned(),
+                    props_name,
+                    self.file_path.clone(),
+                    decl.span.start,
+                    decl.span.end,
+                    DetectionRule::ForwardRef,
+                )
+                .with_props_type_args(type_args)
+                .with_doc(description, tags),
+            );
         }
+        let rule = if self.is_forward_ref_call(call) { DetectionRule::ForwardRef } else { DetectionRule::HocWrapper };
+        self.mapping_from_typed_function(decl, name, call, first_arg, rule)
+    }
 
-        let (fn_name, params, shape) = match first_arg {
+    /// The component a wrapper call builds from a render function whose first parameter names the props type:
+    /// `memo(function Button(props: ButtonProps) {…})`, and the same inside `memo(forwardRef(…))`. `call` is the outermost
+    /// wrapper call, whose type arguments may add props (`wrapper.rs`).
+    fn mapping_from_typed_function<'a>(
+        &mut self,
+        decl: &Binding<'_, 'a>,
+        name: &str,
+        call: &CallExpression<'a>,
+        function: &Argument<'a>,
+        rule: DetectionRule,
+    ) -> Option<ComponentMapping> {
+        let (fn_name, params, shape) = match function {
             Argument::FunctionExpression(fe) => {
                 (fe.id.as_ref().map(|id| id.name.as_str()), &fe.params, FunctionShape::of_function(fe))
             }
@@ -335,7 +349,7 @@ impl<'src> SourceDataCollector<'src> {
             self.file_path.clone(),
             decl.span.start,
             decl.span.end,
-            if is_forward_ref_call(call) { DetectionRule::ForwardRef } else { DetectionRule::HocWrapper },
+            rule,
         )
         .with_props_type_args(type_args)
         .with_doc(description, tags)
@@ -694,7 +708,7 @@ impl<'src> SourceDataCollector<'src> {
         // `getDisplayName(Card)` has the same shape as `memo(Card)` but returns a string; only a call that follows the
         // component-wrapper conventions produces a component.
         if let Some(call) = call {
-            if !is_component_wrapper_call(call) {
+            if !super::evidence::Scope::is_react_wrapper(&*self, call) && !is_component_wrapper_call(call) {
                 self.decline_reason = Some(format!(
                     "'{name}' passes component '{inner_name}' to a call that does not look like a component wrapper"
                 ));
@@ -703,7 +717,7 @@ impl<'src> SourceDataCollector<'src> {
         }
         let mut alias = base.clone();
         // `forwardRef(Inner)` makes a component that takes a `ref` even when `Inner` is a plain typed function.
-        if call.is_some_and(is_forward_ref_call) {
+        if call.is_some_and(|call| self.is_forward_ref_call(call)) {
             alias.rule = DetectionRule::ForwardRef;
         }
         alias.component_name = name.to_owned();
@@ -740,6 +754,20 @@ impl<'src> SourceDataCollector<'src> {
         true
     }
 
+    /// Whether `call` makes a component that takes a `ref` whatever its props type declares: React's `forwardRef` however
+    /// it is imported or spelled, or another module's own `forwardRef` (React Aria's).
+    fn is_forward_ref_call(&self, call: &CallExpression<'_>) -> bool {
+        if self.react_api(&call.callee) == Some(ReactApi::ForwardRef) {
+            return true;
+        }
+        let name = match peel_expr(&call.callee) {
+            Expression::Identifier(id) => id.name.as_str(),
+            Expression::StaticMemberExpression(member) => member.property.name.as_str(),
+            _ => return false,
+        };
+        name == "forwardRef" && self.react_api(&call.callee).is_none()
+    }
+
     /// Extract the callee name of a call expression (simple ident or member expr).
     pub(super) fn extract_callee_name<'a>(&self, call: &CallExpression<'a>) -> Option<String> {
         match &call.callee {
@@ -749,16 +777,6 @@ impl<'src> SourceDataCollector<'src> {
             }
             _ => None,
         }
-    }
-}
-
-/// Whether `call` is React's `forwardRef(…)` however it is spelled: bare, `React.forwardRef`, or React Aria's
-/// `(forwardRef as forwardRefType)(…)`. Such a component takes a `ref` whatever its props type declares.
-fn is_forward_ref_call(call: &CallExpression<'_>) -> bool {
-    match peel_expr(&call.callee) {
-        Expression::Identifier(id) => id.name == "forwardRef",
-        Expression::StaticMemberExpression(m) => m.property.name == "forwardRef",
-        _ => false,
     }
 }
 

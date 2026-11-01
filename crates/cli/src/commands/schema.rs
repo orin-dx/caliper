@@ -213,6 +213,7 @@ mod tests {
                     omitted: vec!["ref".into()],
                     html_element: Some("button".into()),
                     total_props: 3,
+                    members: vec![],
                 }],
                 notable_inherited: BTreeMap::from([(
                     "onClick".to_string(),

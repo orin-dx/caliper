@@ -102,6 +102,7 @@ fn format_component_renders_header_description_props_table_and_inherited_note() 
             omitted: vec![],
             html_element: Some("button".into()),
             total_props: 0,
+            members: vec![],
         }],
         notable_inherited: [(
             "onClick".to_owned(),

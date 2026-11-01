@@ -2010,9 +2010,12 @@ expression: value
                 "kind": "number"
               },
               {
-                "kind": "array",
+                "kind": "readonly",
                 "element": {
-                  "kind": "string"
+                  "kind": "array",
+                  "element": {
+                    "kind": "string"
+                  }
                 }
               }
             ]
@@ -10642,9 +10645,12 @@ expression: value
                 "kind": "string"
               },
               {
-                "kind": "array",
+                "kind": "readonly",
                 "element": {
-                  "kind": "string"
+                  "kind": "array",
+                  "element": {
+                    "kind": "string"
+                  }
                 }
               },
               {
@@ -12884,13 +12890,34 @@ expression: value
         "descriptionProps": {
           "name": "descriptionProps",
           "type": {
-            "kind": "named",
-            "name": "React.HTMLAttributes",
-            "args": [
+            "kind": "intersection",
+            "members": [
               {
                 "kind": "named",
-                "name": "HTMLParagraphElement",
-                "args": []
+                "name": "React.HTMLAttributes",
+                "args": [
+                  {
+                    "kind": "named",
+                    "name": "HTMLParagraphElement",
+                    "args": []
+                  }
+                ]
+              },
+              {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "key",
+                    "propType": {
+                      "kind": "unknown"
+                    },
+                    "required": true,
+                    "description": "",
+                    "indexKey": {
+                      "kind": "string"
+                    }
+                  }
+                ]
               }
             ]
           },
@@ -13060,13 +13087,34 @@ expression: value
         "errorProps": {
           "name": "errorProps",
           "type": {
-            "kind": "named",
-            "name": "React.HTMLAttributes",
-            "args": [
+            "kind": "intersection",
+            "members": [
               {
                 "kind": "named",
-                "name": "HTMLParagraphElement",
-                "args": []
+                "name": "React.HTMLAttributes",
+                "args": [
+                  {
+                    "kind": "named",
+                    "name": "HTMLParagraphElement",
+                    "args": []
+                  }
+                ]
+              },
+              {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "key",
+                    "propType": {
+                      "kind": "unknown"
+                    },
+                    "required": true,
+                    "description": "",
+                    "indexKey": {
+                      "kind": "string"
+                    }
+                  }
+                ]
               }
             ]
           },
@@ -13631,13 +13679,34 @@ expression: value
         "labelProps": {
           "name": "labelProps",
           "type": {
-            "kind": "named",
-            "name": "React.LabelHTMLAttributes",
-            "args": [
+            "kind": "intersection",
+            "members": [
               {
                 "kind": "named",
-                "name": "HTMLLabelElement",
-                "args": []
+                "name": "React.LabelHTMLAttributes",
+                "args": [
+                  {
+                    "kind": "named",
+                    "name": "HTMLLabelElement",
+                    "args": []
+                  }
+                ]
+              },
+              {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "key",
+                    "propType": {
+                      "kind": "unknown"
+                    },
+                    "required": true,
+                    "description": "",
+                    "indexKey": {
+                      "kind": "string"
+                    }
+                  }
+                ]
               }
             ]
           },
@@ -20964,6 +21033,7 @@ expression: value
           "name": "ref",
           "type": {
             "kind": "ref",
+            "name": "Ref",
             "element": "HTMLInputElement"
           },
           "required": false,
