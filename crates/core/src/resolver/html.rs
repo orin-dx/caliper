@@ -23,10 +23,20 @@ pub(super) fn intrinsic_element<'a>(
     Some(&elements.props.iter().find(|prop| prop.name == element)?.collected_type)
 }
 
+/// Record that this resolution reads React's augmentations: every file that declares into the `React` namespace, and
+/// that the set of such files matters. Called wherever augmentations are read, and on the path that reuses a cached
+/// attribute list, so every component that depends on them records it.
+fn note_augmentations(react_file: &Utf8Path, ctx: &ResolutionContext) {
+    use std::borrow::Borrow;
+    let files = ctx.named_types.react_augmenting_files(react_file);
+    super::deps::record_augmentations(files.into_iter().map(Borrow::<str>::borrow));
+}
+
 /// React's interface `key` (`React.HTMLAttributes`) followed by the augmentations other files merge into it
 /// (`NamedTypeIndex::react_augmentations`): the project's and the loaded dependencies' in every mode, since curated mode
 /// indexes only React's own file apart.
 fn merged_interfaces<'a>(key: &str, react_file: &Utf8Path, ctx: &'a ResolutionContext) -> Vec<&'a CollectedInterface> {
+    note_augmentations(react_file, ctx);
     let mut layers: Vec<&CollectedInterface> =
         ctx.react_index().lookup_interface_exact(react_file, key).into_iter().collect();
     layers.extend(ctx.named_types.react_augmentations(react_file, key));
@@ -191,6 +201,7 @@ pub(super) fn layer_attributes(
     let bare = layer.type_name.strip_prefix("React.").unwrap_or(&layer.type_name);
     let takes_ref = matches!(bare, "ComponentProps" | "ComponentPropsWithRef");
     let key = format!("{}\0{element}\0{full}", layer.file_name);
+    note_augmentations(file, ctx);
     let cached = ctx.attribute_names.get(&key).map(|names| names.clone());
     let names: Arc<[String]> = match cached {
         Some(names) => names,

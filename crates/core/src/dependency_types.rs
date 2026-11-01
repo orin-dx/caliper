@@ -389,6 +389,8 @@ struct Loader<'a> {
     declaring: FxDashSet<PathKey>,
     react_files: FxDashSet<PathKey>,
     augmenters: FxDashMap<PathKey, Vec<Utf8PathBuf>>,
+    /// For each module in `augmenters`, the stamps of the other packages its search read files from.
+    augmenter_crossed: FxDashMap<PathKey, Vec<PackageStampRow>>,
     demands: FxDashSet<DemandKey>,
     unresolved: FxDashMap<DemandKey, Unresolved>,
     /// Package directory of each directory asked about, for grouping the index.
@@ -614,11 +616,11 @@ impl Loader<'_> {
         let known = self.augmenters.get(&key).map(|files| files.clone());
         let known = known.or_else(|| self.parent.and_then(|parent| parent.augmenters_of(&key)).cloned());
         let files = known.unwrap_or_else(|| {
-            let files = self.find_augmenting_files(module);
-            self.augmenters.insert(key, files.clone());
-            if !files.is_empty() {
-                module.parent().inspect(|dir| self.learn(dir));
-            }
+            let (files, crossed) = self.find_augmenting_files(module);
+            self.augmenters.insert(key.clone(), files.clone());
+            self.augmenter_crossed.insert(key, crossed);
+            // An empty answer is persisted too, or the next run would scan the module's re-exports again.
+            module.parent().inspect(|dir| self.learn(dir));
             files
         });
         for file in files {
@@ -635,7 +637,9 @@ impl Loader<'_> {
         }
     }
 
-    fn find_augmenting_files(&self, module: &Utf8Path) -> Vec<Utf8PathBuf> {
+    /// The files `module`'s re-exports lead to that augment React, and the stamps of the other packages the search read
+    /// files from: the answer holds only while those packages do not change, as well as the module's own.
+    fn find_augmenting_files(&self, module: &Utf8Path) -> (Vec<Utf8PathBuf>, Vec<PackageStampRow>) {
         let mut found = Vec::new();
         let mut seen: FxHashSet<Utf8PathBuf> = FxHashSet::default();
         let mut queue = std::collections::VecDeque::from([module.to_owned()]);
@@ -664,7 +668,20 @@ impl Loader<'_> {
             }
         }
         found.sort();
-        found
+        let own = module.parent().and_then(|dir| self.package_of(dir));
+        let mut crossed: Vec<PackageStampRow> = seen
+            .iter()
+            .filter_map(|file| self.package_of(file.parent()?))
+            .filter(|package| Some(package) != own.as_ref())
+            .collect::<FxHashSet<_>>()
+            .into_iter()
+            .filter_map(|package| {
+                let (mtime_ns, size) = package_stamp(&package)?;
+                Some((package.to_string(), mtime_ns, size))
+            })
+            .collect();
+        crossed.sort();
+        (found, crossed)
     }
 
     /// Mark `(file, name)` loaded and follow the names its declaration references: same-file ones in place, imported
@@ -804,6 +821,7 @@ pub(crate) fn load(
         declaring: DashSet::default(),
         react_files: DashSet::default(),
         augmenters: DashMap::default(),
+        augmenter_crossed: DashMap::default(),
         demands: DashSet::default(),
         unresolved: DashMap::default(),
         packages: DashMap::default(),
@@ -944,7 +962,9 @@ type ResolutionRow = (String, String, Result<String, Unresolved>);
 /// `(module, name, declaring (file, name))`.
 type ExportRow = (String, String, Option<(String, String)>);
 /// `(module, the files its re-exports lead to that augment React)`.
-type AugmenterRow = (String, Vec<String>);
+/// `(package directory, package.json modification time, size)`.
+type PackageStampRow = (String, u128, u64);
+type AugmenterRow = (String, Vec<String>, Vec<PackageStampRow>);
 
 /// One package's answers: module resolutions from its directories and export lookups on its modules. Valid while its
 /// `package.json` keeps its modification time and size.
@@ -955,7 +975,8 @@ struct PackageIndex {
     size: u64,
     resolutions: Vec<ResolutionRow>,
     exports: Vec<ExportRow>,
-    /// `(module, the files its re-exports lead to that augment React)`.
+    /// `(module, the files its re-exports lead to that augment React, the other packages that search read files from)`.
+    /// A row is dropped on read when any of those packages' `package.json` changed, as well as this package's.
     #[serde(default)]
     augmenters: Vec<AugmenterRow>,
 }
@@ -998,9 +1019,14 @@ fn read_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
             let found = found.map(|(file, name)| (Utf8PathBuf::from(file), CompactString::from(name)));
             loader.exports.insert((PathKey::from(Utf8Path::new(&module)), CompactString::from(name)), found);
         }
-        for (module, files) in package.augmenters {
-            let files = files.into_iter().map(Utf8PathBuf::from).collect();
-            loader.augmenters.insert(PathKey::from(Utf8Path::new(&module)), files);
+        for (module, files, crossed) in package.augmenters {
+            // The search read files of other packages too, so an upgrade of any of them voids the answer.
+            if crossed.iter().any(|(dir, mtime_ns, size)| package_stamp(dir) != Some((*mtime_ns, *size))) {
+                continue;
+            }
+            let key = PathKey::from(Utf8Path::new(&module));
+            loader.augmenters.insert(key.clone(), files.into_iter().map(Utf8PathBuf::from).collect());
+            loader.augmenter_crossed.insert(key, crossed);
         }
     }
 }
@@ -1049,7 +1075,8 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
         let (module, files): (&str, _) = (std::borrow::Borrow::borrow(item.key()), item.value());
         let Some(dir) = Utf8Path::new(module).parent() else { continue };
         if let Some(package) = entry(dir) {
-            augmenters.push((package, (module.to_owned(), files.iter().map(ToString::to_string).collect())));
+            let crossed = loader.augmenter_crossed.get(item.key()).map(|crossed| crossed.clone()).unwrap_or_default();
+            augmenters.push((package, (module.to_owned(), files.iter().map(ToString::to_string).collect(), crossed)));
         }
     }
     for (package, row) in augmenters {
@@ -1087,3 +1114,6 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod augmentation_tests;
