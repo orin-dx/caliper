@@ -105,29 +105,200 @@ def caliper_layer_members(binary, src, root):
     return members
 
 
-def recall(reference, found, root, layered=None):
-    """Against RDT: the components the tool also reports and, of those, RDT's props it lists, apart from and with
-    `@types/react`'s, so a missing component and a missing prop are counted once each. `own` and `react` count the props
-    listed as props; `own_layers` and `react_layers` also count those held in a collapsed layer (`layered`), which the
-    output names without listing them."""
-    layered = layered or {}
-    count = {'components': [0, 0], 'own': [0, 0], 'react': [0, 0], 'own_layers': [0, 0], 'react_layers': [0, 0]}
-    for comp in reference:
+LIB_FILE = re.compile(r'/typescript/lib/lib\.[^/]*\.d\.ts$')
+REACT_DIR = 'node_modules/@types/react/'
+EXTENSIONS = ('', '.tsx', '.ts', '/index.tsx', '/index.ts')
+
+
+def declared_in_react(info):
+    return REACT_DIR in (info.get('parent') or '')
+
+
+def exclusion(comp):
+    """Why RDT's entry is not a component, from what RDT reports about it, or None. RDT lists every function it can
+    give a parameter to, so hooks, route handlers, helpers and context objects come with it. The evidence is the shape:
+    props that are the members of a TypeScript lib type (`String`, `Function`, `Request`) mean the parameter is not an
+    object of props; a hook is named `use` and a capital; a `value` declared by `@types/react` and nothing else is a
+    context's Provider; a lowercase name cannot be a JSX tag unless it takes the attributes of one (a `@types/react`
+    prop) or is the file's or directory's own name, which RDT gives a default export; and props that are all promises
+    are handed over by a router, not by a parent."""
+    props = comp['props']
+    in_lib = sum(bool(LIB_FILE.search(i.get('parent') or '')) for i in props.values())
+    if in_lib * 2 > len(props):
+        return 'lib_members'
+    name = comp['name']
+    if re.match(r'use[A-Z0-9]', name):
+        return 'hook'
+    if 'value' in props and set(props) <= {'value', 'children'} and all(map(declared_in_react, props.values())):
+        return 'context_value'
+    path = comp['file']
+    own_names = {norm_name(os.path.splitext(os.path.basename(path))[0]), norm_name(os.path.basename(os.path.dirname(path)))}
+    if name[:1].islower() and norm_name(name) not in own_names and not any(map(declared_in_react, props.values())):
+        return 'not_jsx'
+    if all(i.get('type', '').startswith('Promise<') for i in props.values()):
+        return 'promise_props'
+    return None
+
+
+def read_text(path):
+    """A source file's text, or None if there is no such file."""
+    if not os.path.isfile(path):
+        return None
+    with open(path, errors='replace') as f:
+        return f.read()
+
+
+def import_binding(text, name):
+    """Where `name` was imported from in `text`: (module, imported name) or None."""
+    for match in re.finditer(r"^import\s+(?:type\s+)?([^;'\"]*?)\s+from\s+['\"]([^'\"]+)['\"]", text, re.M):
+        clause, module = match.groups()
+        if not clause.startswith('{'):
+            default, _, clause = clause.partition(',')
+            if default.strip() == name:
+                return module, 'default'
+        for original, alias in re.findall(r'(\w+)(?:\s+as\s+(\w+))?', clause.partition('{')[2].partition('}')[0]):
+            if (alias or original) == name:
+                return module, original
+    return None
+
+
+def export_source(text, name):
+    """How `text` exports `name` (`default` or a name): ('local', local name), ('from', module, name) or None."""
+    if name == 'default':
+        for pattern in (r'^export\s+default\s+(?:async\s+)?(?:function\*?|class)\s+(\w+)', r'^export\s+default\s+(\w+)'):
+            match = re.search(pattern, text, re.M)
+            if match:
+                return 'local', match.group(1)
+    else:
+        declaration = rf'^export\s+(?:declare\s+)?(?:const|let|var|function\*?|class|async\s+function)\s+{re.escape(name)}\b'
+        if re.search(declaration, text, re.M):
+            return 'local', name
+    for match in re.finditer(r"^export\s*\{([^}]*)\}\s*(?:from\s*['\"]([^'\"]+)['\"])?", text, re.M):
+        for original, alias in re.findall(r'(\w+)(?:\s+as\s+(\w+))?', match.group(1)):
+            if (alias or original) == name:
+                return ('from', match.group(2), original) if match.group(2) else ('local', original)
+    return None
+
+
+def resolve_module(file, module, exists):
+    """The file `module` names from `file` (relative paths only), as a path relative to the root."""
+    if not module.startswith('.'):
+        return None
+    base = os.path.normpath(os.path.join(os.path.dirname(file), module))
+    return next((base + ext for ext in EXTENSIONS if exists(base + ext)), None)
+
+
+def export_target(file, read, exists, name='default', hops=6):
+    """The file and local name where what `file` exports as `name` is defined: follows `export default X`,
+    `import X from`, `export { X } from` and `export { default as X }` through re-exports. None where it ends elsewhere."""
+    text = read(file)
+    exported = export_source(text, name) if text and hops else None
+    if not exported:
+        return None
+    if exported[0] == 'from':
+        target = resolve_module(file, exported[1], exists)
+        return export_target(target, read, exists, exported[2], hops - 1) if target else None
+    imported = import_binding(text, exported[1])
+    if imported:
+        target = resolve_module(file, imported[0], exists)
+        return export_target(target, read, exists, imported[1], hops - 1) if target else None
+    return file, exported[1]
+
+
+def counterpart(file, name, found_by_file):
+    """Caliper's key in `file` for a component called `name`: the one with that name, else the file's only one."""
+    in_file = found_by_file.get(file, {})
+    if norm_name(name) in in_file:
+        return file, norm_name(name)
+    return (file, next(iter(in_file))) if len(in_file) == 1 else None
+
+
+def pair(comp, root, found_by_file, read, exists):
+    """Caliper's key and the evidence for RDT's entry that Caliper reports in another file: where the default export of
+    RDT's file is defined (RDT names a default export after the file or directory) or, for a named export, where that is,
+    else the file that declares its props, when Caliper reports a component of that name there. None if neither leads to one."""
+    file = relative(comp['file'], root)
+    for export in ('default', comp['name']):
+        target = export_target(file, read, exists, export)
+        found = counterpart(target[0], target[1], found_by_file) if target and target[0] != file else None
+        if found:
+            return found, 'default_export' if export == 'default' else 'named_export'
+    name = norm_name(comp['name'])
+    for info in comp['props'].values():
+        parent = info.get('parent') or ''
+        declared = relative(parent, root) if parent and REACT_DIR not in parent else None
+        if declared and declared != file and name in found_by_file.get(declared, {}):
+            return (declared, name), 'declaration'
+    return None
+
+
+def reference(rdt_components, found, root):
+    """The components recall is measured on, from RDT's output: entries with props, minus those that are not components
+    (`exclusion`), with every RDT entry for one component counted once. An entry that Caliper reports under another file
+    pairs with it by evidence (`pair`) and joins the entry in that file; RDT's repeats of one key join too. Each item is
+    {'keys': every (file, name) a tool may report it under, 'props': prop -> 'own' | 'react'}, so one list serves every
+    tool. Also the counts, so a change in the reference shows in weekly.json."""
+    found_by_file = {}
+    for file, name in found:
+        found_by_file.setdefault(file, {})[name] = None
+    exists = lambda rel: os.path.isfile(os.path.join(root, rel))
+    read = lambda rel: read_text(os.path.join(root, rel))
+    stats = {'rdt_with_props': 0, 'excluded': {}, 'exact': 0, 'paired': {}, 'merged': 0}
+    groups = {}
+    for comp in rdt_components:
         if not comp['props']:
             continue
-        count['components'][1] += 1
+        stats['rdt_with_props'] += 1
+        why = exclusion(comp)
+        if why:
+            stats['excluded'][why] = stats['excluded'].get(why, 0) + 1
+            continue
         key = (relative(comp['file'], root), norm_name(comp['name']))
-        props = found.get(key)
-        if props is None:
+        target = key if key in found else None
+        if target:
+            stats['exact'] += 1
+        else:
+            paired = pair(comp, root, found_by_file, read, exists)
+            if paired:
+                target = paired[0]
+                stats['paired'][paired[1]] = stats['paired'].get(paired[1], 0) + 1
+        keys = [key] + ([target] if target else [])
+        group = groups.get(target or key)
+        if group is None:
+            groups[target or key] = {'keys': keys, 'comp': comp, 'exact': key == target}
+            continue
+        stats['merged'] += 1
+        group['keys'] += keys
+        if key == target and not group['exact']:
+            group.update(comp=comp, exact=True)
+    items = [{'keys': list(dict.fromkeys(g['keys'])),
+              'props': {p: 'react' if declared_in_react(i) else 'own' for p, i in g['comp']['props'].items()}}
+             for g in groups.values()]
+    stats['reference'] = len(items)
+    stats['unpaired'] = sum(not any(k in found for k in item['keys']) for item in items)
+    stats['excluded_total'] = sum(stats['excluded'].values())
+    return items, stats
+
+
+def recall(items, found, layered=None):
+    """Against the reference: the components the tool also reports and, of those, RDT's props it lists, apart from and
+    with `@types/react`'s, so a missing component and a missing prop are counted once each. `own` and `react` count the
+    props listed as props; `own_layers` and `react_layers` also count those held in a collapsed layer (`layered`), which
+    the output names without listing them."""
+    layered = layered or {}
+    count = {'components': [0, 0], 'own': [0, 0], 'react': [0, 0], 'own_layers': [0, 0], 'react_layers': [0, 0]}
+    for item in items:
+        count['components'][1] += 1
+        key = next((k for k in item['keys'] if k in found), None)
+        if key is None:
             continue
         in_layers = layered.get(key, set())
         count['components'][0] += 1
-        for prop, info in comp['props'].items():
-            kind = 'react' if 'node_modules/@types/react/' in (info.get('parent') or '') else 'own'
+        for prop, kind in item['props'].items():
             count[kind][1] += 1
-            count[kind][0] += prop in props
+            count[kind][0] += prop in found[key]
             count[f'{kind}_layers'][1] += 1
-            count[f'{kind}_layers'][0] += prop in props or prop in in_layers
+            count[f'{kind}_layers'][0] += prop in found[key] or prop in in_layers
     return count
 
 
@@ -168,14 +339,16 @@ def measure(args, corpus, work):
     rdg, rdg_components = tool_run(['node', os.path.join(ROOT, 'scripts', 'rdg.mjs'), list_file, rdg_out], rdg_out)
     print(f"{corpus['name']}: Caliper", file=sys.stderr, flush=True)
     found = {(relative(c['file'], root), norm_name(c['name'])): set(c['props']) for c in rdg_components}
+    caliper_found = caliper_components(args.bin, src, root)
+    items, counts = reference(rdt_components, caliper_found, root)
     entry = {
         'commit': corpus['commit'],
         'caliper': caliper_run(args.bin, src, args.runs),
         'rdt': rdt,
         'react_docgen': rdg,
-        'recall': {'caliper': recall(rdt_components, caliper_components(args.bin, src, root), root,
-                                     caliper_layer_members(args.bin, src, root)),
-                   'react_docgen': recall(rdt_components, found, root)},
+        'reference': counts,
+        'recall': {'caliper': recall(items, caliper_found, caliper_layer_members(args.bin, src, root)),
+                   'react_docgen': recall(items, found)},
     }
     if args.oracle:
         try:
@@ -212,7 +385,14 @@ def markdown(record, notes):
         cell = lambda t: f"{t['ms'] / 1000:.2f} s, {t['rss_mib']:,} MiB"
         lines.append(f"| {name} | {cell(e['caliper'])} | {e['caliper']['json_mb']} MB | {cell(e['rdt'])} | "
                      f"{cell(e['react_docgen'])} |")
-    lines += ['', '### Recall against RDT', '',
+    lines += ['', '### Reference (RDT, cleaned)', '',
+              '| Corpus | RDT entries with props | Not components | Repeats merged | Reference | Same file | Paired | Unpaired |',
+              '| --- | --: | --: | --: | --: | --: | --: | --: |']
+    for name, e in record['corpora'].items():
+        r = e['reference']
+        lines.append(f"| {name} | {r['rdt_with_props']} | {r['excluded_total']} | {r['merged']} | {r['reference']} | "
+                     f"{r['exact']} | {sum(r['paired'].values())} | {r['unpaired']} |")
+    lines += ['', '### Recall against the reference', '',
               '| Corpus | Tool | Components | Own props | Own, with layers | `@types/react` props | `@types/react`, with layers |',
               '| --- | --- | --: | --: | --: | --: | --: |']
     for name, e in record['corpora'].items():
