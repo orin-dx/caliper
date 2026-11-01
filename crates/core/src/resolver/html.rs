@@ -34,9 +34,22 @@ pub(super) fn react_attribute(
     state: &mut ResolveState,
     depth: u8,
 ) -> Option<ParsedProp> {
+    attribute_from(intrinsic_element(element, react_file, ctx)?.clone(), name, react_file, ctx, state, depth)
+}
+
+/// The declaration of attribute `name` among the members `root` (a type of React's) names, found through the interfaces
+/// and aliases it extends and intersects.
+fn attribute_from(
+    root: CollectedType,
+    name: &str,
+    react_file: &Utf8Path,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> Option<ParsedProp> {
     // Declared inside `declare namespace React`, so keyed by their qualified names whichever way they are referenced.
     let key = |type_name: &str| format!("React.{}", type_name.strip_prefix("React.").unwrap_or(type_name));
-    let mut pending = VecDeque::from([intrinsic_element(element, react_file, ctx)?.clone()]);
+    let mut pending = VecDeque::from([root]);
     // React's attribute types are a small tree; the bound only guards against a malformed declaration file.
     for _ in 0..64 {
         match pending.pop_front()? {
@@ -96,11 +109,16 @@ pub(super) fn react_attribute(
 /// Every attribute name `JSX.IntrinsicElements[element]` declares in React's own types at `react_file`, in the order
 /// `react_attribute` reads them; empty without those types.
 fn react_attribute_names(element: &str, react_file: &Utf8Path, ctx: &ResolutionContext) -> Vec<String> {
+    match intrinsic_element(element, react_file, ctx) {
+        Some(root) => attribute_names_from(root.clone(), react_file, ctx),
+        None => Vec::new(),
+    }
+}
+
+/// Every attribute name `root` (a type of React's) carries, in the order `attribute_from` reads them.
+fn attribute_names_from(root: CollectedType, react_file: &Utf8Path, ctx: &ResolutionContext) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
-    let Some(root) = intrinsic_element(element, react_file, ctx) else {
-        return names;
-    };
-    let mut pending = VecDeque::from([root.clone()]);
+    let mut pending = VecDeque::from([root]);
     for _ in 0..64 {
         let Some(next) = pending.pop_front() else {
             break;
@@ -155,9 +173,10 @@ pub(super) fn layer_attributes(
         return Vec::new();
     };
     let file = Utf8Path::new(&layer.file_name);
-    // `ref` is a prop of `ComponentProps<"div">` (`ClassAttributes`) but not of `HTMLAttributes<HTMLDivElement>`.
+    // `ref` is a prop of `ComponentProps<"div">` and `HTMLProps<HTMLDivElement>` (`ClassAttributes`) but not of
+    // `HTMLAttributes<HTMLDivElement>`.
     let bare = layer.type_name.strip_prefix("React.").unwrap_or(&layer.type_name);
-    let takes_ref = matches!(bare, "ComponentProps" | "ComponentPropsWithRef");
+    let takes_ref = matches!(bare, "ComponentProps" | "ComponentPropsWithRef" | "HTMLProps");
     let key = format!("{}\0{element}\0{full}", layer.file_name);
     let cached = ctx.attribute_names.get(&key).map(|names| names.clone());
     let names: Arc<[String]> = match cached {
@@ -224,6 +243,80 @@ pub(super) fn layer_attributes(
                 Some(parent.clone()),
                 vec![],
             )))
+        })
+        .collect()
+}
+
+/// The props of `React.AriaAttributes` or `React.RefAttributes<T>` (`bare`, applied to `args`), read from React's own
+/// interface: `full` takes every one but `key`, else the curated subset. Empty without React's types, apart from the
+/// `ref` a `RefAttributes` always has.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn builtin_attributes(
+    bare: &str,
+    args: &[CollectedType],
+    full: bool,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> Vec<Arc<ParsedProp>> {
+    let react_file = super::react::resolve_react_types_file(file, ctx);
+    let react_file = Utf8Path::new(&react_file);
+    let root = CollectedType::Named { name: bare.into(), args: args.to_vec() };
+    let key = format!("{react_file}\0{bare}");
+    let cached = ctx.attribute_names.get(&key).map(|names| names.clone());
+    let declared: Arc<[String]> = match cached {
+        Some(names) => names,
+        None => {
+            let names: Arc<[String]> = attribute_names_from(root.clone(), react_file, ctx).into();
+            ctx.attribute_names.insert(key, names.clone());
+            names
+        }
+    };
+    if declared.is_empty() {
+        if bare == "RefAttributes" {
+            let ref_type = PropType::Named { name: "Ref".into(), args: vec![] };
+            let parent = PropParent { name: bare.to_owned(), file_name: react_file.to_string() };
+            let prop = ParsedProp::new(
+                "ref".into(),
+                ref_type,
+                false,
+                None,
+                String::new(),
+                Default::default(),
+                Some(parent),
+                vec![],
+            );
+            return vec![ctx.share(prop)];
+        }
+        if full {
+            state.diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticSeverity::Info,
+                    DiagnosticCode::MissingTypeLibrary,
+                    format!("@types/react could not be resolved, so the attributes of {bare} are left out"),
+                )
+                .with_help("Check that @types/react is installed."),
+            );
+        }
+        return Vec::new();
+    }
+    let arg_element = args.first().and_then(crate::react_types::html_element_from_collected);
+    let element = arg_element.unwrap_or("div");
+    // The reads are shared by every component that names the same interface for the same element.
+    let shared = args.is_empty() || arg_element.is_some();
+    declared
+        .iter()
+        .filter(|name| *name != "key" && (full || crate::react_types::is_curated_html_attr(element, name)))
+        .filter_map(|name| {
+            let read = |state: &mut ResolveState| attribute_from(root.clone(), name, react_file, ctx, state, depth);
+            let prop = if shared {
+                let memo_key = format!("{react_file}\0{bare}\0{}\0{name}", arg_element.unwrap_or(""));
+                ctx.attribute_reads.get_or_resolve(&memo_key, depth, state, None, read)
+            } else {
+                read(state)
+            };
+            prop.map(|prop| ctx.share(prop))
         })
         .collect()
 }

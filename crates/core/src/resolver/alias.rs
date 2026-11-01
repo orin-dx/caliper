@@ -65,10 +65,13 @@ pub(super) fn resolve_type_alias_chain(
             };
             let picked_set: FxHashSet<&str> = picked.iter().map(String::as_str).collect();
             chain.props.retain(|p| picked_set.contains(p.name.as_str()));
+            chain.notable.retain(|p| picked_set.contains(p.name.as_str()));
             // The base was a `composes` entry with no picked props (React's declarations stay out of the run unless the
             // attributes are `full`, and then a base interface can still list none of them): read them from React.
-            if chain.props.is_empty() {
-                chain.props = react_picked_props(base, &picked, file_path, mapping, ctx, state, depth);
+            let missing: Vec<String> =
+                picked.iter().filter(|name| !chain.props.iter().any(|prop| &prop.name == *name)).cloned().collect();
+            if !missing.is_empty() {
+                chain.props.extend(react_picked_props(base, &missing, file_path, mapping, ctx, state, depth));
             }
             // Only the picked attributes remain: each is read from the element's layer, which then has nothing left to list.
             for name in &picked {

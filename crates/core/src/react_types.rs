@@ -77,6 +77,12 @@ pub fn html_element_from_type_arg(type_arg: &str) -> Option<&'static str> {
     }
 }
 
+/// React's attribute interfaces that carry props but name no element (`HTMLProps<T>` names one, in its argument): the
+/// resolver reads their members from React's own declaration under the HTML attribute mode.
+pub fn is_attribute_builtin(bare_name: &str) -> bool {
+    matches!(bare_name, "AriaAttributes" | "RefAttributes")
+}
+
 /// Types that are terminal — never need further resolution.
 ///
 /// These are React-specific type names that we recognize as builtins and don't
