@@ -1,0 +1,17 @@
+{
+  "tool_use_id": "aada6ec8190e6cda3",
+  "agent_id": "aada6ec8190e6cda3",
+  "subagent_type": "workflow-subagent",
+  "files": [
+    "crates/core/tests/scratch_aug.rs"
+  ],
+  "token_usage": {
+    "input_tokens": 49,
+    "cache_creation_tokens": 97296,
+    "cache_read_tokens": 1904856,
+    "output_tokens": 13402,
+    "api_call_count": 26
+  },
+  "started_at": "2026-10-31T17:54:39.407314-07:00",
+  "completed_at": "2026-10-31T17:58:50.895423-07:00"
+}

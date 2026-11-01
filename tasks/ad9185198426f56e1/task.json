@@ -1,0 +1,17 @@
+{
+  "tool_use_id": "ad9185198426f56e1",
+  "agent_id": "ad9185198426f56e1",
+  "subagent_type": "workflow-subagent",
+  "files": [
+    ".scratch_probe.py"
+  ],
+  "token_usage": {
+    "input_tokens": 19,
+    "cache_creation_tokens": 65256,
+    "cache_read_tokens": 495722,
+    "output_tokens": 7883,
+    "api_call_count": 10
+  },
+  "started_at": "2026-10-31T17:54:38.840219-07:00",
+  "completed_at": "2026-10-31T17:57:39.319254-07:00"
+}
