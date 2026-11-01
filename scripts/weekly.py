@@ -165,7 +165,10 @@ def import_binding(text, name):
 def export_source(text, name):
     """How `text` exports `name` (`default` or a name): ('local', local name), ('from', module, name) or None."""
     if name == 'default':
-        for pattern in (r'^export\s+default\s+(?:async\s+)?(?:function\*?|class)\s+(\w+)', r'^export\s+default\s+(\w+)'):
+        # The second pattern unwraps calls whose first argument is an identifier (`memo(Foo)`, `observer(forwardRef(Foo))`):
+        # the wrapper is whatever function the file calls, so the name that matters is the innermost identifier.
+        for pattern in (r'^export\s+default\s+(?:async\s+)?(?:function\*?|class)\s+(\w+)',
+                        r'^export\s+default\s+(?:\w+\s*(?:<[^>]*>)?\s*\(\s*)*(\w+)(?=\s*(?:[,);]|$))'):
             match = re.search(pattern, text, re.M)
             if match:
                 return 'local', match.group(1)
@@ -206,11 +209,9 @@ def export_target(file, read, exists, name='default', hops=6):
 
 
 def counterpart(file, name, found_by_file):
-    """Caliper's key in `file` for a component called `name`: the one with that name, else the file's only one."""
-    in_file = found_by_file.get(file, {})
-    if norm_name(name) in in_file:
-        return file, norm_name(name)
-    return (file, next(iter(in_file))) if len(in_file) == 1 else None
+    """Caliper's key in `file` for a component called `name`, or None: the names must agree, since a file's only
+    component says nothing about whether RDT's entry is that component."""
+    return (file, norm_name(name)) if norm_name(name) in found_by_file.get(file, {}) else None
 
 
 def pair(comp, root, found_by_file, read, exists):
@@ -265,15 +266,16 @@ def reference(rdt_components, found, root):
         keys = [key] + ([target] if target else [])
         group = groups.get(target or key)
         if group is None:
-            groups[target or key] = {'keys': keys, 'comp': comp, 'exact': key == target}
-            continue
-        stats['merged'] += 1
+            group = groups[target or key] = {'keys': [], 'exact': {}, 'other': {}}
+        else:
+            stats['merged'] += 1
         group['keys'] += keys
-        if key == target and not group['exact']:
-            group.update(comp=comp, exact=True)
-    items = [{'keys': list(dict.fromkeys(g['keys'])),
-              'props': {p: 'react' if declared_in_react(i) else 'own' for p, i in g['comp']['props'].items()}}
-             for g in groups.values()]
+        # The props of the entries in the component's own file when there are any, else of all the repeats united, so the
+        # reference does not depend on the order RDT lists them in. A prop any repeat takes from `@types/react` is one.
+        into = group['exact' if key == target else 'other']
+        for prop, info in comp['props'].items():
+            into[prop] = 'react' if into.get(prop) == 'react' or declared_in_react(info) else 'own'
+    items = [{'keys': list(dict.fromkeys(g['keys'])), 'props': g['exact'] or g['other']} for g in groups.values()]
     stats['reference'] = len(items)
     stats['unpaired'] = sum(not any(k in found for k in item['keys']) for item in items)
     stats['excluded_total'] = sum(stats['excluded'].values())

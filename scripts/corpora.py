@@ -96,6 +96,8 @@ def measure_child(args):
     if pid == 0:
         try:
             os.execvp(args[0], args)
+        except OSError as error:
+            os.write(2, f'cannot run {args[0]}: {error}\n'.encode())
         finally:
             os._exit(127)
     _, status, usage = os.wait4(pid, 0)
@@ -104,13 +106,21 @@ def measure_child(args):
 
 def run_once(args, stdout=subprocess.DEVNULL):
     """Wall seconds and peak RSS in MiB of one process, measured by a small helper process so that this process's own
-    memory never leaks into the number."""
+    memory never leaks into the number. A helper that fails, a result it did not write and a command that cannot run or
+    exits non-zero are each a RuntimeError saying what happened, with the end of the helper's stderr."""
+    command = ' '.join(args)
     with tempfile.NamedTemporaryFile('r', suffix='.json') as result:
         helper = [sys.executable, '-I', os.path.abspath(__file__), 'measure', result.name, '--'] + list(args)
-        subprocess.run(helper, stdout=stdout, stderr=subprocess.DEVNULL, check=True)
-        seconds, rss, code = json.load(result)
+        done = subprocess.run(helper, stdout=stdout, stderr=subprocess.PIPE, text=True, errors='replace')
+        detail = done.stderr.strip()[-500:]
+        if done.returncode != 0:
+            raise RuntimeError(f'the measuring helper failed (exit {done.returncode}) running {command}: {detail}')
+        try:
+            seconds, rss, code = json.load(result)
+        except ValueError as error:
+            raise RuntimeError(f'the measuring helper wrote no result for {command}: {error}') from error
     if code != 0:
-        raise RuntimeError(f"{' '.join(args)} exited with {code}")
+        raise RuntimeError(f'{command} exited with {code}' + (f': {detail}' if detail else ''))
     return seconds, rss
 
 
