@@ -97,7 +97,8 @@ impl<'src> SourceDataCollector<'src> {
         if let Expression::Identifier(callee) = super::component::peel_expr(&call.callee) {
             self.uses_of(callee.name.as_str()).calls += 1;
         }
-        let renders_argument = super::component::is_component_wrapper_call(call)
+        let renders_argument = super::evidence::Scope::is_react_wrapper(&*self, call)
+            || super::component::is_component_wrapper_call(call)
             || matches!(
                 super::component::peel_expr(&call.callee),
                 Expression::Identifier(id) if id.name == "createElement"

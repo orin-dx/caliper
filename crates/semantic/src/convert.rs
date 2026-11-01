@@ -213,12 +213,12 @@ impl Converter {
         let mut fields = Vec::new();
         for (property, ty) in properties.iter().zip(&types) {
             let required = property.flags & flag::SYMBOL_OPTIONAL == 0;
-            fields.push(ObjectField {
-                name: property.name.clone(),
-                prop_type: without_undefined(self.convert(ty, depth + 1).await?, !required),
+            fields.push(ObjectField::new(
+                property.name.clone(),
+                without_undefined(self.convert(ty, depth + 1).await?, !required),
                 required,
-                description: String::new(),
-            });
+                String::new(),
+            ));
         }
         Ok(PropType::Object(fields))
     }

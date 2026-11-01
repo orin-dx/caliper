@@ -138,9 +138,16 @@ fn type_refs(ty: &CollectedType, out: &mut FxHashSet<CompactString>) {
         | CollectedType::Intersection(members)
         | CollectedType::Tuple(members)
         | CollectedType::TemplateLiteral(members) => members.iter().for_each(|member| type_refs(member, out)),
-        CollectedType::Array(inner) | CollectedType::KeyOf(inner) => type_refs(inner, out),
+        CollectedType::Array(inner) | CollectedType::Readonly(inner) | CollectedType::KeyOf(inner) => {
+            type_refs(inner, out)
+        }
         CollectedType::AtFile { inner, .. } => type_refs(inner, out),
-        CollectedType::Object(fields) => fields.iter().for_each(|field| type_refs(&field.collected_type, out)),
+        CollectedType::Object(fields) => fields.iter().for_each(|field| {
+            type_refs(&field.collected_type, out);
+            if let Some(key) = &field.index_key {
+                type_refs(key, out);
+            }
+        }),
         CollectedType::IndexedAccess { obj, key } => {
             type_refs(obj, out);
             type_refs(key, out);

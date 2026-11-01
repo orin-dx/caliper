@@ -101,7 +101,7 @@ pub fn resolve_known(
         "ComponentPropsWithoutRef" | "ComponentProps" | "ComponentPropsWithRef" => component_props(args),
 
         // ElementRef<typeof X> → opaque Ref
-        "ElementRef" => Some(KnownPatternResult::Type(PropType::Ref { element: None })),
+        "ElementRef" => Some(KnownPatternResult::Type(PropType::Ref { name: "ElementRef".into(), element: None })),
 
         // ── Unknown type names (including TS utility types like Partial/Omit/Pick —
         // structurally handled in resolver/alias.rs, silently no-op'd via
@@ -435,7 +435,9 @@ mod tests {
     #[test]
     fn test_element_ref_returns_ref() {
         let result = resolve_known("ElementRef", &[], &GlobalSourceData::default(), &|_| None);
-        assert!(matches!(result, Some(KnownPatternResult::Type(PropType::Ref { element: None }))));
+        assert!(
+            matches!(result, Some(KnownPatternResult::Type(PropType::Ref { ref name, element: None })) if name == "ElementRef")
+        );
     }
 
     #[test]

@@ -33,6 +33,31 @@ mod uses;
 mod visit;
 mod wrapper;
 
+/// A React API the extractor recognizes a call to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReactApi {
+    ForwardRef,
+    Memo,
+    CreateContext,
+}
+
+impl ReactApi {
+    /// The API a module exports under this name.
+    fn of_export(name: &str) -> Option<Self> {
+        match name {
+            "forwardRef" => Some(Self::ForwardRef),
+            "memo" => Some(Self::Memo),
+            "createContext" => Some(Self::CreateContext),
+            _ => None,
+        }
+    }
+}
+
+/// Whether an import specifier is React itself: `react`, a subpath of it, or Preact's compatibility layer.
+fn is_react_module(specifier: &str) -> bool {
+    specifier == "react" || specifier.starts_with("react/") || specifier == "preact/compat"
+}
+
 // ─── Entry Point ─────────────────────────────────────────────────────────────
 
 /// Maximum bracket-nesting depth a source file may contain before we refuse to parse it.
@@ -325,7 +350,11 @@ impl<'src> SourceDataCollector<'src> {
         else {
             return;
         };
-        let target = self.ts_type_to_collected(&annotation.type_annotation);
+        let target = match self.ts_type_to_collected(&annotation.type_annotation) {
+            // `declare const X: readonly ["a", "b"]` is read as the tuple it holds.
+            crate::types::CollectedType::Readonly(inner) => *inner,
+            other => other,
+        };
         // Keep static component members on a callable value without indexing arbitrary object declarations.
         let has_component_member = |fields: &[crate::types::CollectedObjectField]| {
             fields.iter().any(|field| {
@@ -540,6 +569,38 @@ impl<'src> SourceDataCollector<'src> {
 
     /// Whether `name` here can be React's (imported from React) or a global (not imported at all): an element-like
     /// type name imported from another module is that module's type.
+    /// Which React API a call's callee names, by where it was imported from and not by what it is called:
+    /// `forwardRef`, `React.forwardRef`, `R.forwardRef` for `import * as R from "react"`, and `import { forwardRef as fr }`
+    /// all name the same one, while a `forwardRef` imported from another module is not React's. A name no import binds
+    /// (the global `React`, or `const { forwardRef } = React`) is read as written.
+    pub(super) fn react_api(&self, callee: &Expression<'_>) -> Option<ReactApi> {
+        let import_of = |local: &str| self.data.imports.iter().find(|import| import.local_name.as_str() == local);
+        match component::peel_expr(callee) {
+            Expression::Identifier(id) => match import_of(id.name.as_str()) {
+                Some(import) if is_react_module(&import.specifier) => {
+                    ReactApi::of_export(import.exported_name.as_str())
+                }
+                Some(_) => None,
+                None => ReactApi::of_export(id.name.as_str()),
+            },
+            Expression::StaticMemberExpression(member) => {
+                let Expression::Identifier(object) = component::peel_expr(&member.object) else { return None };
+                let api = ReactApi::of_export(member.property.name.as_str())?;
+                match import_of(object.name.as_str()) {
+                    Some(import)
+                        if is_react_module(&import.specifier)
+                            && matches!(import.exported_name.as_str(), "*" | "default") =>
+                    {
+                        Some(api)
+                    }
+                    Some(_) => None,
+                    None => (object.name == "React").then_some(api),
+                }
+            }
+            _ => None,
+        }
+    }
+
     pub(super) fn may_be_react(&self, name: &str) -> bool {
         self.data
             .imports
@@ -780,20 +841,18 @@ impl<'src> SourceDataCollector<'src> {
 
             // TSTypeOperatorType covers keyof, unique, readonly. `keyof` is kept
             // structured (its operand may itself need substitution or resolution —
-            // see `CollectedType::KeyOf`). `readonly`/`unique` are peeled
-            // transparently to their operand — docgen doesn't track mutability or
-            // symbol uniqueness, so there's nothing to preserve — rather than
-            // capturing the whole modified type as raw source text, which used to
-            // make `readonly string[]` (real @types/react's ButtonHTMLAttributes
-            // `defaultValue`/`value` shape) degrade to Opaque even though the
-            // element type is fully knowable.
+            // see `CollectedType::KeyOf`), and so does `readonly`. `unique` is peeled to its operand,
+            // since docgen doesn't track symbol uniqueness. Neither is captured as raw source text, which made
+            // `readonly string[]` (real @types/react's ButtonHTMLAttributes `defaultValue`/`value`
+            // shape) degrade to Opaque even though the element type is fully knowable.
             TSType::TSTypeOperatorType(op) => match op.operator {
                 TSTypeOperatorOperator::Keyof => {
                     CollectedType::KeyOf(Box::new(self.ts_type_to_collected_at_depth(&op.type_annotation, depth + 1)))
                 }
-                TSTypeOperatorOperator::Unique | TSTypeOperatorOperator::Readonly => {
-                    self.ts_type_to_collected_at_depth(&op.type_annotation, depth + 1)
-                }
+                TSTypeOperatorOperator::Readonly => CollectedType::Readonly(Box::new(
+                    self.ts_type_to_collected_at_depth(&op.type_annotation, depth + 1),
+                )),
+                TSTypeOperatorOperator::Unique => self.ts_type_to_collected_at_depth(&op.type_annotation, depth + 1),
             },
 
             TSType::TSInferType(i) => {
@@ -866,7 +925,25 @@ impl<'src> SourceDataCollector<'src> {
                     .map(|ta| self.ts_type_to_collected_at_depth(&ta.type_annotation, depth + 1))
                     .unwrap_or(CollectedType::Any);
                 let description = self.find_jsdoc(sig.span.start);
-                Some(CollectedObjectField { name, collected_type, required: !sig.optional, description })
+                Some(CollectedObjectField {
+                    name,
+                    collected_type,
+                    required: !sig.optional,
+                    description,
+                    readonly: sig.readonly,
+                    index_key: None,
+                })
+            }
+            TSSignature::TSIndexSignature(sig) => {
+                let key = self.ts_type_to_collected_at_depth(&sig.parameter.type_annotation.type_annotation, depth + 1);
+                Some(CollectedObjectField {
+                    name: sig.parameter.name.to_string(),
+                    collected_type: self.ts_type_to_collected_at_depth(&sig.type_annotation.type_annotation, depth + 1),
+                    required: true,
+                    description: self.find_jsdoc(sig.span.start),
+                    readonly: sig.readonly,
+                    index_key: Some(Box::new(key)),
+                })
             }
             TSSignature::TSMethodSignature(sig) => {
                 let name = js_text::property_name(&sig.key.static_name()?);
@@ -888,6 +965,8 @@ impl<'src> SourceDataCollector<'src> {
                     },
                     required: !sig.optional,
                     description: String::new(),
+                    readonly: false,
+                    index_key: None,
                 })
             }
             _ => None,
@@ -1135,5 +1214,9 @@ impl evidence::Scope for SourceDataCollector<'_> {
 
     fn is_element_helper(&self, name: &str) -> bool {
         self.element_helpers.contains(name)
+    }
+
+    fn is_react_wrapper(&self, call: &CallExpression<'_>) -> bool {
+        matches!(self.react_api(&call.callee), Some(ReactApi::Memo | ReactApi::ForwardRef))
     }
 }
