@@ -402,8 +402,8 @@ fn evaluate_lib_alias(
     Some(expanded)
 }
 
-/// `NonNullable<A | B | undefined>` as `A | B` when the members that stay are not literals (csstype's
-/// `Property.Border<TLength>`) and none of them can hold `null` or `undefined` itself. `None` leaves the call as written.
+/// `NonNullable<A | B | undefined>` as `A | B` (csstype's `Property.Border<TLength>`) when none of the members that stay
+/// can hold `null` or `undefined` itself. `None` leaves the call as written.
 fn without_nullish(
     name: &str,
     args: &[CollectedType],
@@ -467,8 +467,9 @@ fn can_hold_nullish(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext
         | CollectedType::TemplateLiteral(_) => false,
         CollectedType::Named { name, args } => match super::evaluate::alias_body(name, args, file, ctx) {
             Some((body, body_file)) => can_hold_nullish(&body, &body_file, ctx, depth + 1),
-            // Not a type alias the run knows: an interface or class is an object, an unknown name is not followed.
-            None => false,
+            // An alias with no single body (`Omit`, `Partial`, …) or an interface is an object. A name the run does not
+            // declare (a type parameter, an unresolvable import) may stand for anything, nullish included.
+            None => !super::evaluate::is_declared_type(name, file, ctx),
         },
         CollectedType::Intersection(members) => members.iter().all(|m| can_hold_nullish(m, file, ctx, depth + 1)),
         CollectedType::Mapped { .. } | CollectedType::KeyOf(_) => false,

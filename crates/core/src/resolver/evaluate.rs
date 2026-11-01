@@ -770,6 +770,15 @@ fn interface_prop(
     })
 }
 
+/// Whether `name` is a type alias or interface the run (or an ambient lib) declares. A type parameter or an
+/// unresolvable name is not.
+pub(super) fn is_declared_type(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> bool {
+    let (decl_file, decl_name) = canonical(name, file, ctx);
+    lookup_type_alias(ctx, decl_file.as_str(), &decl_name).is_some()
+        || lookup_interface_including_ambient(ctx, decl_file.as_str(), &decl_name).is_some()
+        || react_interface(ctx, &decl_file, &decl_name).is_some()
+}
+
 /// A type alias's definition with `args` bound to its parameters, as one type.
 pub(super) fn alias_body(
     name: &CompactString,
