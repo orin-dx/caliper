@@ -1,0 +1,81 @@
+{
+  "cli_version": "0.12.3-nightly.202610300619.cea1b3cee",
+  "checkpoint_id": "01M6A6HRM0CQB2PB6W1G2TPR00",
+  "session_id": "cd0b1cc5-b31e-40d5-8c38-bf89ad8b231e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-01T00:01:18.683228Z",
+  "branch": "feat/harden-on-demand-checker",
+  "checkpoints_count": 7,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "38f0942085e6",
+  "checkpoint_transcript_start": 3519,
+  "transcript_lines_at_start": 3519,
+  "compact_transcript_start": 273,
+  "token_usage": {
+    "input_tokens": 148,
+    "cache_creation_tokens": 1647161,
+    "cache_read_tokens": 36388381,
+    "output_tokens": 38761,
+    "api_call_count": 74,
+    "subagent_tokens": {
+      "input_tokens": 0,
+      "cache_creation_tokens": 0,
+      "cache_read_tokens": 0,
+      "output_tokens": 0,
+      "api_call_count": 0
+    }
+  },
+  "redaction": {
+    "replacements": 42,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 2,
+      "credentialed_uri": 0,
+      "entropy": 34,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01AR6A8cvLQdjZzhdSjkmYoa",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "entire-search"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "38f0942085e6",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 4234,
+        "end": 4235,
+        "entry_ids": [
+          "b06aa94e-a025-4dca-abdb-9c8c7b9934e8"
+        ],
+        "tool_use_id": "toolu_01AR6A8cvLQdjZzhdSjkmYoa"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01AR6A8cvLQdjZzhdSjkmYoa"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: entire-search",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 14
+  }
+}
