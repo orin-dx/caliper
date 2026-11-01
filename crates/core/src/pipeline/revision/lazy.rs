@@ -186,10 +186,13 @@ impl Revision {
         // The layer starts with the names the project takes from React. A batch run loads them for every component,
         // and loading them follows React's own imports (csstype), which any component's HTML attributes can reach
         // without its file naming them; a component's answer would otherwise depend on what was asked before it.
-        // It also reads the persisted dependency index, so names a batch run already resolved cost no walk.
+        // It also reads the persisted dependency index, so names a batch run already resolved cost no walk. The modules
+        // the project imports start loaded as well: what they merge into React's interfaces reaches every component.
         let react: Vec<Demand> = file_demands
             .iter()
-            .flat_map(|(_, demands)| demands.iter().filter(|demand| &*demand.specifier == "react").cloned())
+            .flat_map(|(_, demands)| {
+                demands.iter().filter(|demand| &*demand.specifier == "react" || demand.name.is_empty()).cloned()
+            })
             .collect();
         let layer = options.load_dependencies.then(|| Arc::new(dependency_types::load(react, options, None)));
         let engine = Engine::new(&global, options, &ambient_global_files, &named_types, layer, &react_types);
