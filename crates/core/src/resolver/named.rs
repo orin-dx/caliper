@@ -402,6 +402,79 @@ fn evaluate_lib_alias(
     Some(expanded)
 }
 
+/// `NonNullable<A | B | undefined>` as `A | B` when the members that stay are not literals (csstype's
+/// `Property.Border<TLength>`) and none of them can hold `null` or `undefined` itself. `None` leaves the call as written.
+fn without_nullish(
+    name: &str,
+    args: &[CollectedType],
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+) -> Option<CollectedType> {
+    if name != "NonNullable" || args.len() != 1 || !super::may_be_ts_lib_type(name, file, ctx) {
+        return None;
+    }
+    let mut kept = Vec::new();
+    let members = match &args[0] {
+        CollectedType::Union(members) => members.as_slice(),
+        single => std::slice::from_ref(single),
+    };
+    for member in members {
+        match member {
+            CollectedType::Null | CollectedType::Undefined => {}
+            other if can_hold_nullish(other, file, ctx, 0) => return None,
+            other => kept.push(other.clone()),
+        }
+    }
+    Some(match kept.len() {
+        0 => CollectedType::Never,
+        1 => kept.remove(0),
+        _ => CollectedType::Union(kept),
+    })
+}
+
+/// Whether `ty` may include `null` or `undefined`: it says so, or is an alias whose definition does. A form the
+/// reader cannot read counts as holding them, so a reduction never drops a member it was not sure of.
+fn can_hold_nullish(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> bool {
+    if depth > super::MAX_DEPTH {
+        return true;
+    }
+    match ty {
+        CollectedType::Null
+        | CollectedType::Undefined
+        | CollectedType::Any
+        | CollectedType::Unknown
+        | CollectedType::Void
+        | CollectedType::Raw(_)
+        | CollectedType::Conditional { .. }
+        | CollectedType::IndexedAccess { .. }
+        | CollectedType::TypeOf(_) => true,
+        CollectedType::AtFile { file, inner } => can_hold_nullish(inner, file, ctx, depth + 1),
+        CollectedType::Union(members) => members.iter().any(|m| can_hold_nullish(m, file, ctx, depth + 1)),
+        CollectedType::Array(_)
+        | CollectedType::Readonly(_)
+        | CollectedType::Tuple(_)
+        | CollectedType::Object(_)
+        | CollectedType::Function { .. }
+        | CollectedType::String
+        | CollectedType::Number
+        | CollectedType::Boolean
+        | CollectedType::BigInt
+        | CollectedType::Symbol
+        | CollectedType::Never
+        | CollectedType::StringLiteral(_)
+        | CollectedType::NumberLiteral(_)
+        | CollectedType::BoolLiteral(_)
+        | CollectedType::TemplateLiteral(_) => false,
+        CollectedType::Named { name, args } => match super::evaluate::alias_body(name, args, file, ctx) {
+            Some((body, body_file)) => can_hold_nullish(&body, &body_file, ctx, depth + 1),
+            // Not a type alias the run knows: an interface or class is an object, an unknown name is not followed.
+            None => false,
+        },
+        CollectedType::Intersection(members) => members.iter().all(|m| can_hold_nullish(m, file, ctx, depth + 1)),
+        CollectedType::Mapped { .. } | CollectedType::KeyOf(_) => false,
+    }
+}
+
 /// An alias argument as TypeScript prints it: a member read (`Variant["size"]`) shows as the member's type and a finite
 /// template literal as its strings, union members included; anything else as written.
 fn displayed_arg(
@@ -426,7 +499,10 @@ fn displayed_arg(
             let bare = name.strip_prefix("React.").unwrap_or(name.as_str());
             match evaluate_lib_alias(bare, &args, file, ctx, state, depth + 1).as_ref().and_then(literals_of) {
                 Some(literals) if !literals.is_empty() => CollectedType::Union(literals),
-                _ => CollectedType::Named { name: name.clone(), args },
+                _ => match without_nullish(bare, &args, file, ctx) {
+                    Some(stripped) => stripped,
+                    None => CollectedType::Named { name: name.clone(), args },
+                },
             }
         }
         CollectedType::Array(inner) => {
