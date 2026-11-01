@@ -190,7 +190,7 @@ impl<'src> SourceDataCollector<'src> {
             Expression::CallExpression(ce) => ce,
             _ => return None,
         };
-        if self.react_api(&call.callee) != Some(ReactApi::ForwardRef) {
+        if !self.is_forward_ref_call(call) {
             return None;
         }
 
@@ -276,31 +276,30 @@ impl<'src> SourceDataCollector<'src> {
 
         // `memo(forwardRef(…))`: the props come from forwardRef's type arguments, or from its render function.
         if let Argument::CallExpression(inner) = first_arg {
-            if self.react_api(&inner.callee) != Some(ReactApi::ForwardRef) {
+            if !self.is_forward_ref_call(inner) {
                 return None;
             }
-            let Some(render) = inner
-                .arguments
-                .first()
-                .filter(|_| inner.type_arguments.as_ref().is_none_or(|type_params| type_params.params.len() < 2))
-            else {
-                let type_params = inner.type_arguments.as_ref()?;
-                let (props_name, type_args) = self.extract_type_name_from_type(&type_params.params[1])?;
-                let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
-                return Some(
-                    ComponentMapping::new(
-                        name.to_owned(),
-                        props_name,
-                        self.file_path.clone(),
-                        decl.span.start,
-                        decl.span.end,
-                        DetectionRule::ForwardRef,
-                    )
-                    .with_props_type_args(type_args)
-                    .with_doc(description, tags),
-                );
+            // `forwardRef<Ref, Props>(…)` names the props in its second type argument; otherwise the render function's
+            // first parameter does. A call with one type argument and no function (`forwardRef<Ref>()`) names neither.
+            let props_type = inner.type_arguments.as_ref().and_then(|type_params| type_params.params.get(1));
+            let Some(props_type) = props_type else {
+                let render = inner.arguments.first()?;
+                return self.mapping_from_typed_function(decl, name, call, render, DetectionRule::ForwardRef);
             };
-            return self.mapping_from_typed_function(decl, name, call, render, DetectionRule::ForwardRef);
+            let (props_name, type_args) = self.extract_type_name_from_type(props_type)?;
+            let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
+            return Some(
+                ComponentMapping::new(
+                    name.to_owned(),
+                    props_name,
+                    self.file_path.clone(),
+                    decl.span.start,
+                    decl.span.end,
+                    DetectionRule::ForwardRef,
+                )
+                .with_props_type_args(type_args)
+                .with_doc(description, tags),
+            );
         }
         let rule = if self.is_forward_ref_call(call) { DetectionRule::ForwardRef } else { DetectionRule::HocWrapper };
         self.mapping_from_typed_function(decl, name, call, first_arg, rule)
