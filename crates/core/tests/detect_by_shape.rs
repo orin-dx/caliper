@@ -32,6 +32,17 @@ export const Foreign = forwardRef(function Foreign(props: OwnProps, ref: R.Ref<H
 export const RenamedMemo = m(function RenamedMemo(props: OwnProps) { return <div>{props.label}</div>; });
 export const Theme = ctx<OwnProps>(() => <div />);
 export const Plain = (props: OwnProps) => <div>{props.label}</div>;
+export const ForeignTyped = forwardRef<HTMLDivElement, OwnProps>((props, ref) => <div ref={ref}>{props.label}</div>);
+export const ForeignMemo = m(forwardRef<HTMLDivElement, OwnProps>((props, ref) => <div ref={ref}>{props.label}</div>));
+"#;
+
+const INCOMPLETE: &str = r#"
+import * as R from 'react';
+
+interface OwnProps { label?: string }
+export const NoRender = R.memo(R.forwardRef<HTMLDivElement>());
+export const NoArguments = R.memo(R.forwardRef());
+export const Good = R.memo(R.forwardRef((props: OwnProps, ref: R.Ref<HTMLDivElement>) => <div ref={ref} />));
 "#;
 
 const TAGGED: &str = r#"
@@ -56,6 +67,20 @@ const StyledGroup = chakra("ul", { base: {} });
 export const Group = R.memo(R.forwardRef<HTMLUListElement, GroupProps>(function Group(props, ref) {
     return <StyledGroup ref={ref} />;
 }));
+
+interface Base2<T> { id?: string; color?: string }
+type ButtonProps = Omit<Base2<"button">, "color">;
+export const Button = chakra("button", { base: {} });
+type LinkProps = Partial<Base2<"a">>;
+export const Link = chakra("a", { base: {} });
+type SectionProps = Pick<Base2<"section">, "id">;
+export const Section = chakra("section", { base: {} });
+type SpanProps = Required<Base2<"span">>;
+export const Span = chakra("span", { base: {} });
+
+interface PanelProps extends Base<"nav"> { open?: boolean }
+const StyledPanel = chakra("nav", { base: {} });
+export const Panel = withContext<HTMLElement, PanelProps>(StyledPanel);
 "#;
 
 fn run(file: &str, source: &str) -> ExtractionOutput {
@@ -109,6 +134,37 @@ fn tagged_factories_sharing_a_tag_take_the_props_type_named_for_them() {
     assert_eq!(listed(&output, "Row"), set(&["id", "dense"]));
     assert_eq!(listed(&output, "Column"), set(&["id", "wide"]));
     assert!(!output.components.contains_key("Cell"));
+}
+
+#[test]
+fn a_tagged_factory_finds_its_props_type_whatever_utility_type_wraps_the_tag() {
+    let output = run("Styled.tsx", TAGGED);
+    assert_eq!(listed(&output, "Button"), set(&["id"]));
+    assert_eq!(listed(&output, "Link"), set(&["id", "color"]));
+    assert_eq!(listed(&output, "Section"), set(&["id"]));
+    assert_eq!(listed(&output, "Span"), set(&["id", "color"]));
+}
+
+#[test]
+fn a_private_factory_does_not_take_the_props_of_a_component_promoted_after_it() {
+    let output = run("Styled.tsx", TAGGED);
+    assert!(!output.components.contains_key("StyledPanel"));
+    assert_eq!(listed(&output, "Panel"), set(&["id", "open"]));
+}
+
+#[test]
+fn a_forward_ref_call_with_no_function_is_skipped_and_the_rest_of_the_file_is_kept() {
+    let output = run("Incomplete.tsx", INCOMPLETE);
+    assert!(!output.components.contains_key("NoRender"));
+    assert!(!output.components.contains_key("NoArguments"));
+    assert_eq!(listed(&output, "Good"), set(&["label", "ref"]));
+}
+
+#[test]
+fn another_modules_forward_ref_keeps_its_ref_when_it_names_the_props_in_type_arguments() {
+    let output = run("Components.tsx", SOURCE);
+    assert_eq!(listed(&output, "ForeignTyped"), set(&["label", "ref"]));
+    assert_eq!(listed(&output, "ForeignMemo"), set(&["label", "ref"]));
 }
 
 #[test]
