@@ -22,7 +22,7 @@ pub enum TscClientError {
         source: Arc<std::io::Error>,
     },
 
-    #[error("tsc at {path} reports version {found:?}, not pinned (expected one of {expected:?})")]
+    #[error("tsc at {path} reports version {found:?}, not a supported version (expected one of {expected:?})")]
     UnsupportedVersion { path: Utf8PathBuf, found: String, expected: &'static [&'static str] },
 
     #[error("could not determine tsc's version at {path}: {reason}")]
