@@ -1,0 +1,175 @@
+{
+  "cli_version": "0.12.3-nightly.202610300619.cea1b3cee",
+  "checkpoint_id": "01M6A88JH4R4128YEFBTVAFCWD",
+  "session_id": "cd0b1cc5-b31e-40d5-8c38-bf89ad8b231e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-01T00:31:15.514591Z",
+  "branch": "fix/weekly-harness",
+  "checkpoints_count": 3,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "66249ac909a6",
+  "checkpoint_transcript_start": 4607,
+  "transcript_lines_at_start": 4607,
+  "compact_transcript_start": 363,
+  "token_usage": {
+    "input_tokens": 100,
+    "cache_creation_tokens": 76171,
+    "cache_read_tokens": 29676355,
+    "output_tokens": 40612,
+    "api_call_count": 50,
+    "subagent_tokens": {
+      "input_tokens": 69,
+      "cache_creation_tokens": 287726,
+      "cache_read_tokens": 1867920,
+      "output_tokens": 12221,
+      "api_call_count": 36
+    }
+  },
+  "redaction": {
+    "replacements": 60,
+    "layers": {
+      "betterleaks": 12,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 2,
+      "credentialed_uri": 0,
+      "entropy": 46,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01AR6A8cvLQdjZzhdSjkmYoa",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "entire-search"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "38f0942085e6",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 4234,
+        "end": 4235,
+        "entry_ids": [
+          "b06aa94e-a025-4dca-abdb-9c8c7b9934e8"
+        ],
+        "tool_use_id": "toolu_01AR6A8cvLQdjZzhdSjkmYoa"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01AR6A8cvLQdjZzhdSjkmYoa"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: entire-search",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01YZcnkXcvayagAd6mydwwXP",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "66249ac909a6",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 5181,
+        "end": 5182,
+        "entry_ids": [
+          "bc436c5f-3a29-4aab-8a3f-0bdfb2750b05"
+        ],
+        "tool_use_id": "toolu_01YZcnkXcvayagAd6mydwwXP"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01YZcnkXcvayagAd6mydwwXP"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 18
+  },
+  "summary": {
+    "intent": "Fix all four review findings on PR #267 and survey the codebase for the same patterns. Then resolve the open items (Chakra investigation, harness fixes, stacked PRs in Entire) using parallel agent teams and workflows.",
+    "outcome": "All four findings were fixed with tests that fail on old code and pass on new, and opened as draft PR #270 because #267 had already merged. The layer-members PR #271 was opened and linked to trail 125; linking trail 127 hit a 409, and the parallel workflow (wf_f39a3c3f-294) was still running.",
+    "learnings": {
+      "repo": [
+        "Component extractor and resolver code lives in crates/core/src/extractor and crates/core/src/resolver; the core and semantic suites run via cargo nextest on caliper-docgen-core and caliper-docgen-semantic (792 tests).",
+        "Regression check compares component sets, detection rules and prop counts on Chakra (618) and Mantine (356) before and after a change.",
+        "The gh shim runs `gh pr create` as the bot so a human can approve; `gh pr edit`/`ready` run as the user, and Entire opens PRs under its own identity.",
+        "`entire trail link` opens its own draft PR, so linking after `gh pr create` risks duplicate PRs. Linking a change already tied to another trail returns a 409.",
+        "Entire Gates requires a human approval per trail; the agent cannot approve trails.",
+        "A guard blocks shell commands whose text matches the bot's name, including history searches.",
+        "Alias handling in the resolver should use exhaustive matches over every alias variant so new variants fail to compile rather than being skipped.",
+        "Type-level matching (`try_fc_annotation`, `super_class_is_component_family`) matches names like FC and Component without checking the import source, the same flaw fixed for calls."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/resolver/html.rs",
+          "line": 83,
+          "end_line": 132,
+          "finding": "Reads React's own aliases and handles only Intersection and Passthrough (at 83-87 and 128-132); a candidate for the alias-variant gap, though it looks correct for React's declarations."
+        },
+        {
+          "path": "crates/core/src/resolver/callee.rs",
+          "line": 183,
+          "end_line": 214,
+          "finding": "Same alias-variant handling shape as html.rs; flagged as a candidate for the wildcard-match gap but left unchanged."
+        },
+        {
+          "path": "crates/core/src/extractor/component.rs",
+          "finding": "Fixed a panic where `memo(forwardRef<HTMLDivElement>())` indexed a missing second type argument, and made foreign-imported `forwardRef<Ref, Props>` keep detection and `ref`."
+        },
+        {
+          "path": "crates/core/src/extractor/wrapper.rs",
+          "finding": "Tagged factories are now promoted after all other candidates, so `Group = withContext<..., GroupProps>(StyledGroup)` claims GroupProps before the private factory; alias shape evidence now reads Omit, Pick, Partial, Required and unions."
+        }
+      ],
+      "workflow": [
+        "To confirm new tests catch the bugs, save the fix as a patch, restore the old code, run the tests (exactly the four new ones fail), then reapply the patch.",
+        "Long multi-command shell lines and inline edits were split into script files plus plain runs to keep them manageable.",
+        "Scout inline first, then run Workflow for parallel independent streams, with an independent review of each branch.",
+        "Confirm a PR's merge state before pushing fixes to it; a fresh branch and new PR is the fallback when it already merged."
+      ]
+    },
+    "friction": [
+      "PR #267 merged just before the review finished, so the fixes needed a new branch and PR #270.",
+      "Entire Gates approval cannot be done by the agent and blocks merging #268 and the other PRs.",
+      "The trail 127 link returned a 409 because the change already belongs to another trail.",
+      "The guard blocked a history search because the query contained the bot's name.",
+      "A combined shell command for adding tests failed and had to be split into a script file and a plain run.",
+      "An empty probe workflow finished and produced a misleading completion notification while the real workflow was still running."
+    ],
+    "open_items": [
+      "Resolve the 409 on linking trail 127 and decide whether #270 should be linked and marked ready.",
+      "Entire Gates approvals are still needed for #268, #270 and #271; planned merge order is #268, the layer branch, then a weekly re-run.",
+      "Possible small follow-up PRs for the alias-variant wildcard matches in resolver/html.rs and resolver/callee.rs, import-source checks for type-name matching, and source-order dependence in `try_rename_identifier_wrapped_component`.",
+      "Recall fixes, one PR each: terminal builtins (AriaAttributes, HTMLProps, RefAttributes), then the tw augmentation, then Pick/keyof and union props.",
+      "Investigate the Chakra `NonNullable<union>` issue with a dependency-loaded Chakra run.",
+      "Fix the harness defects: the identical 1,593 MiB RSS readings first, then exclusions for non-components (hooks, route handlers) and barrel pairings that distort antd recall.",
+      "Clean up worktrees and branches (agent scratch worktree with .corpora installs, schema-v4, tsc-hardening, detect-by-shape, layer-members), remote scratch/* branches, stale Entire trails and the TAP_APP_* secrets once PRs merge.",
+      "Wait for the pending parallel workflow (wf_f39a3c3f-294) results, then review the stacked-PR work and how Entire handles stacking.",
+      "Leave ADR 0022 unedited and keep current state in type-checker-integration.md."
+    ]
+  }
+}
