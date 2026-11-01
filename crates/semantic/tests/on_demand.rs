@@ -110,13 +110,24 @@ fn dropping_the_checker_stops_its_process_and_thread() {
     drop(checker);
 }
 
+/// The real `tsc` the tests below run against, or `None` to skip them. Skipping is for a machine without it: on CI
+/// (`CI` is set) a missing one fails the run.
+fn real_tsc() -> Option<std::ffi::OsString> {
+    let tsc = std::env::var_os("CALIPER_TEST_TSC");
+    if tsc.is_none() {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "CALIPER_TEST_TSC must name typescript@7.1's `bin/tsc` on CI, or the real checker is never tested"
+        );
+        eprintln!("skipped: CALIPER_TEST_TSC does not name a typescript@7.1 `tsc`");
+    }
+    tsc
+}
+
 /// Against the real `tsc` (`7.1.0-beta`): set `CALIPER_TEST_TSC` to its `bin/tsc`. Skipped, loudly, when it is not set.
 #[test]
 fn the_real_checker_answers_the_requested_component() {
-    let Some(tsc) = std::env::var_os("CALIPER_TEST_TSC") else {
-        eprintln!("skipped: CALIPER_TEST_TSC does not name a typescript@7.1 beta `tsc`");
-        return;
-    };
+    let Some(tsc) = real_tsc() else { return };
     let project = project(false);
     let output = structural(&project);
     let mut config = OnDemandConfig::new(project.root.clone());
@@ -138,10 +149,7 @@ fn the_real_checker_answers_the_requested_component() {
 /// improves types and optionality, and `htmlAttributes` means one thing in both engines.
 #[test]
 fn the_real_checker_lists_the_same_prop_names_as_the_structural_pass_in_every_html_attributes_mode() {
-    let Some(tsc) = std::env::var_os("CALIPER_TEST_TSC") else {
-        eprintln!("skipped: CALIPER_TEST_TSC does not name a typescript@7.1 beta `tsc`");
-        return;
-    };
+    let Some(tsc) = real_tsc() else { return };
     let react = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../node_modules/@types/react");
     if !react.exists() {
         eprintln!("skipped: {react} is not installed");
@@ -200,4 +208,59 @@ fn the_real_checker_lists_the_same_prop_names_as_the_structural_pass_in_every_ht
             }
         }
     }
+}
+
+#[test]
+fn a_checker_past_its_memory_bound_is_replaced_between_requests_and_keeps_answering() {
+    let project = project(true);
+    let output = structural(&project);
+    let mut config = OnDemandConfig::new(project.root.clone());
+    config.expected_versions = &[FAKE_VERSION];
+    config.request_timeout = Duration::from_secs(20);
+    // Any running process is past a bound of zero, so every fourth request replaces `tsc`.
+    config.max_rss_mib = 0;
+    config
+        .extra_env
+        .push(("REPLAY_FIXTURE".to_string(), format!("{}/tests/fixtures/recording.json", env!("CARGO_MANIFEST_DIR"))));
+    let checker = OnDemand::new(config);
+
+    for round in 0..9 {
+        let answered = ask(&checker, target(&output, "Button"));
+        assert_eq!(answered.diagnostics, [], "request {round}");
+        assert_eq!(answered.components.len(), 1, "request {round}");
+    }
+}
+
+#[test]
+fn dropping_a_checker_stuck_in_a_request_does_not_wait_for_it() {
+    let project = project(true);
+    let output = structural(&project);
+    let mut config = OnDemandConfig::new(project.root.clone());
+    config.expected_versions = &[FAKE_VERSION];
+    config.request_timeout = Duration::from_secs(60);
+    config.shutdown_wait = Duration::from_millis(300);
+    config.extra_env.push(("REPLAY_SCENARIO".to_string(), "hang".to_string()));
+    let checker = OnDemand::new(config);
+    // The process starts and never answers; the request is still in flight when the checker is dropped.
+    let _pending = checker.request(vec![target(&output, "Button")]);
+    std::thread::sleep(Duration::from_millis(300));
+
+    let started = std::time::Instant::now();
+    drop(checker);
+
+    assert!(started.elapsed() < Duration::from_secs(5), "dropping took {:?}", started.elapsed());
+}
+
+#[test]
+fn creating_a_checker_and_asking_for_a_missing_tsc_does_not_block() {
+    let project = project(false);
+    let output = structural(&project);
+    let started = std::time::Instant::now();
+    let checker = checker(&project);
+    checker.warm_up();
+    assert!(started.elapsed() < Duration::from_millis(500), "creating and warming took {:?}", started.elapsed());
+
+    let answered = ask(&checker, target(&output, "Button"));
+    assert!(answered.components.is_empty());
+    assert_eq!(answered.diagnostics.len(), 1);
 }

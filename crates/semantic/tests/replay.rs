@@ -72,11 +72,8 @@ fn function_components_get_the_checkers_props_merged_over_the_structural_ones() 
     let button = &output.components["Button"];
     let names: Vec<_> = button.props.keys().map(String::as_str).collect();
     assert_eq!(names, ["box", "disabled", "label", "onClick", "pair", "size", "tags"]);
-    let field = |name: &str, prop_type: PropType, required: bool| caliper_docgen_core::types::ObjectField {
-        name: name.to_string(),
-        prop_type,
-        required,
-        description: String::new(),
+    let field = |name: &str, prop_type: PropType, required: bool| {
+        caliper_docgen_core::types::ObjectField::new(name, prop_type, required, String::new())
     };
     assert_eq!(
         prop(&output, "Button", "box").prop_type,
@@ -164,13 +161,13 @@ fn no_typescript_installed_falls_back_with_one_diagnostic() {
 }
 
 #[test]
-fn an_unpinned_typescript_version_falls_back_with_one_diagnostic() {
+fn an_unsupported_typescript_version_falls_back_with_one_diagnostic() {
     let project = project(true);
     let output = structural(&project);
     let mut request = request(&project, &output, None);
     request.expected_versions = &["7.1.0-beta"];
 
-    assert_falls_back(&project, request, &output, "not pinned");
+    assert_falls_back(&project, request, &output, "not a supported version");
 }
 
 #[test]

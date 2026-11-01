@@ -2032,9 +2032,12 @@ expression: value
                 "kind": "number"
               },
               {
-                "kind": "array",
+                "kind": "readonly",
                 "element": {
-                  "kind": "string"
+                  "kind": "array",
+                  "element": {
+                    "kind": "string"
+                  }
                 }
               }
             ]
@@ -10647,6 +10650,7 @@ expression: value
           "name": "touchRippleRef",
           "type": {
             "kind": "ref",
+            "name": "Ref",
             "element": "unknown"
           },
           "required": false,
@@ -10787,9 +10791,12 @@ expression: value
                 "kind": "string"
               },
               {
-                "kind": "array",
+                "kind": "readonly",
                 "element": {
-                  "kind": "string"
+                  "kind": "array",
+                  "element": {
+                    "kind": "string"
+                  }
                 }
               },
               {
@@ -11293,6 +11300,7 @@ expression: value
           "name": "inputRef",
           "type": {
             "kind": "ref",
+            "name": "Ref",
             "element": "HTMLInputElement"
           },
           "required": false,

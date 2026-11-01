@@ -75,9 +75,9 @@ fn fixture_path(rel: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn test_readonly_array_type_operator_peeled_transparently() {
+fn test_readonly_array_type_operator_is_kept_over_a_known_element() {
     // `readonly string[]` (the type-operator form, not the `Readonly<T>` utility
-    // type — already handled separately) captured its entire span as raw source
+    // type — already handled separately) once captured its entire span as raw source
     // text unconditionally, found while investigating whether fully resolving
     // @types/react's real HTMLAttributes chain was tractable: ButtonHTMLAttributes'
     // real `defaultValue`/`value` fields use exactly this shape. Downstream
@@ -94,8 +94,9 @@ interface Props { items: readonly string[]; }
     let items = iface.props.iter().find(|p| p.name == "items").expect("'items' prop not found");
 
     assert!(
-        matches!(&items.collected_type, CollectedType::Array(inner) if matches!(**inner, CollectedType::String)),
-        "expected Array(String), got {:?}",
+        matches!(&items.collected_type, CollectedType::Readonly(array)
+            if matches!(&**array, CollectedType::Array(inner) if matches!(**inner, CollectedType::String))),
+        "expected Readonly(Array(String)), got {:?}",
         items.collected_type
     );
 }
@@ -1347,18 +1348,19 @@ fn a_function_component_annotation_inside_an_intersection_carries_the_props() {
 }
 
 #[test]
-fn a_call_given_a_tag_and_a_config_object_is_a_component_when_its_props_type_is_declared_beside_it() {
+fn a_call_given_a_tag_and_a_config_object_is_a_component_when_a_props_type_beside_it_gives_that_tag() {
     use crate::types::DetectionRule::TaggedFactory;
     let source = r#"
         import { chakra, styled } from "../styled-system";
         import { createElement, h } from "react";
-        import type { RemoteProps } from "./remote";
         export interface CenterProps extends HTMLChakraProps<"div"> {}
         export const Center = chakra("div", { base: { display: "flex" }, variants: { inline: { true: {} } } });
-        type PillProps = { tone: string };
+        type PillProps = HTMLStyledProps<"span"> & { tone: string };
         export const Pill = styled("span", { base: {} });
-        export const Remote = chakra("div", { base: {} });
-        export const Undeclared = chakra("div", { base: {} });
+        interface LinkProps extends HTMLChakraProps<"a"> {}
+        export const Anchor = chakra("a", { base: {} });
+        type UnrelatedProps = { tone: string };
+        export const Unrelated = chakra("section", { base: {} });
         export const Element = createElement("div", { className: "x" });
         export const Hyper = h("div", { className: "x" });
         export const Tagless = chakra(Center, { base: {} });
@@ -1372,7 +1374,14 @@ fn a_call_given_a_tag_and_a_config_object_is_a_component_when_its_props_type_is_
         .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule))
         .collect();
     found.sort_by_key(|(name, _, _)| *name);
-    assert_eq!(found, vec![("Center", "CenterProps", TaggedFactory), ("Pill", "PillProps", TaggedFactory)]);
+    assert_eq!(
+        found,
+        vec![
+            ("Anchor", "LinkProps", TaggedFactory),
+            ("Center", "CenterProps", TaggedFactory),
+            ("Pill", "PillProps", TaggedFactory)
+        ]
+    );
 }
 
 #[test]

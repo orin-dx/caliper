@@ -24,9 +24,10 @@ pub struct SupervisorConfig {
     pub tsc_path: Utf8PathBuf,
     /// Passed as `tsc --api --async --cwd <cwd>`.
     pub cwd: Utf8PathBuf,
-    /// `tsc_path`'s adjacent `package.json` "version" must be one of these, checked
-    /// before every spawn. The protocol has no version handshake (ADR 0006), so this
-    /// is the whole mechanism — the caller decides which exact build(s) are pinned.
+    /// `tsc_path`'s adjacent `package.json` "version" must match one of these, checked before every spawn. An entry
+    /// is an exact version (`7.1.0-beta`) or a `major.minor` series (`7.1`, which takes `7.1.0`, `7.1.0-rc.1` and
+    /// `7.1.4`, not `7.10.0`). The protocol has no version handshake (ADR 0006), so this and the initialize call
+    /// that follows the spawn are the whole check — the caller decides which builds it has traced the protocol on.
     pub expected_versions: &'static [&'static str],
     pub handshake_timeout: Duration,
     pub max_frame_bytes: usize,
@@ -65,11 +66,16 @@ fn check_version(tsc_path: &Utf8Path, expected: &'static [&'static str]) -> Resu
         return Err(reason_at(format!("{package_json} has no \"version\" string")));
     };
 
-    if expected.contains(&found) {
+    if expected.iter().any(|entry| version_matches(found, entry)) {
         Ok(())
     } else {
         Err(TscClientError::UnsupportedVersion { path: tsc_path.to_owned(), found: found.to_string(), expected })
     }
+}
+
+/// Whether `found` is `entry` or a release of the `entry` series: `7.1` takes `7.1.0-beta` and `7.1.3`, not `7.10.0`.
+fn version_matches(found: &str, entry: &str) -> bool {
+    found == entry || found.strip_prefix(entry).is_some_and(|rest| rest.starts_with(['.', '-']))
 }
 
 fn spawn_stderr_drain(stderr: tokio::process::ChildStderr) {
@@ -137,6 +143,11 @@ impl Supervisor {
     /// clone held across [`Supervisor::shutdown`] fails with `SessionClosed`.
     pub fn client(&self) -> Client {
         self.client.clone()
+    }
+
+    /// The operating system's id of the running `tsc` process, `None` once it has exited.
+    pub fn process_id(&self) -> Option<u32> {
+        self.child.id()
     }
 
     /// True while the current session is open and the supervisor hasn't permanently failed. A crash between calls
