@@ -3248,10 +3248,16 @@ export const Typed = factory<ButtonFactory>((props: ButtonProps) => <button>{pro
     };
     let output = extract(&options);
 
+    // `ref` comes from the result type's `RefAttributes`; the factory's payload names its element.
+    let ref_of = |component: &str| output.components[component].props.get("ref").map(|p| p.prop_type.raw_string());
+    assert!(ref_of("Button").is_some_and(|ty| ty.contains("ButtonFactory[\"ref\"]")), "{:?}", ref_of("Button"));
+    assert!(ref_of("Link").is_some_and(|ty| ty.contains("LinkFactory[\"ref\"]")), "{:?}", ref_of("Link"));
+    assert_eq!(ref_of("Plain"), None);
     let props = |component: &str| {
         output.components[component]
             .props
             .values()
+            .filter(|p| p.name != "ref")
             .map(|p| (p.name.clone(), p.prop_type.raw_string(), p.required, p.description.clone()))
             .collect::<Vec<_>>()
     };

@@ -241,6 +241,42 @@ impl NamedTypeIndex {
         per_file.get(qualified.as_str()).map(|alias| (CompactString::from(qualified), alias))
     }
 
+    /// The interfaces named `qualified` (`React.HTMLAttributes`) that files other than `react_file` declare into the
+    /// `React` namespace: `declare module "react" { interface HTMLAttributes<T> { tw?: string } }` merges with React's
+    /// own, as TypeScript merges it. Every layer is searched and the answer is in file order, so it does not depend
+    /// on hashing.
+    pub(crate) fn react_augmentations(&self, react_file: &Utf8Path, qualified: &str) -> Vec<&CollectedInterface> {
+        let mut found: Vec<&CollectedInterface> = Vec::new();
+        let react_key = PathKey::from(react_file);
+        let mut layer = Some(self);
+        while let Some(index) = layer {
+            for file in index.react_namespaced.iter().filter(|file| **file != react_key) {
+                found.extend(index.interfaces.get(file).and_then(|per_file| per_file.get(qualified)));
+            }
+            layer = index.fallback.as_deref();
+        }
+        found.sort_by(|a, b| a.file_path.cmp(&b.file_path));
+        found
+    }
+
+    /// The files other than `react_file` that declare into the `React` namespace in any layer, which is every file
+    /// `react_augmentations` can read from. A resolution that reads augmentations depends on each.
+    pub(crate) fn react_augmenting_files(&self, react_file: &Utf8Path) -> Vec<&PathKey> {
+        let react_key = PathKey::from(react_file);
+        let mut files = Vec::new();
+        let mut layer = Some(self);
+        while let Some(index) = layer {
+            files.extend(index.react_namespaced.iter().filter(|file| **file != react_key));
+            layer = index.fallback.as_deref();
+        }
+        files
+    }
+
+    /// Whether `file`, in this index itself and not its dependency fallback, declares into the `React` namespace.
+    pub(crate) fn declares_react_namespace(&self, file: &Utf8Path) -> bool {
+        self.react_namespaced.contains(file.as_str())
+    }
+
     /// The members of the array-typed const `name` declared at `file`, in this index or the dependency fallback.
     pub(crate) fn lookup_const_array(&self, file: &Utf8Path, name: &str) -> Option<&[EnumValue]> {
         self.const_arrays

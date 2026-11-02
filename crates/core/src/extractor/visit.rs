@@ -228,6 +228,20 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         self.namespace_stack.pop();
     }
 
+    /// `declare module "react" { interface HTMLAttributes<T> { ... } }` merges into React's `React` namespace, so its
+    /// declarations are keyed as `React.`-qualified ones (`NamedTypeIndex::react_augmentations` reads them). Any other
+    /// `declare module "x"` qualifies nothing.
+    fn visit_ts_external_module_declaration(&mut self, node: &TSExternalModuleDeclaration<'a>) {
+        if node.id.value != "react" {
+            walk::walk_ts_external_module_declaration(self, node);
+            return;
+        }
+        self.namespace_stack.push("React".into());
+        walk::walk_ts_external_module_declaration(self, node);
+        self.qualify_namespace_references();
+        self.namespace_stack.pop();
+    }
+
     fn visit_ts_enum_declaration(&mut self, node: &TSEnumDeclaration<'a>) {
         let enum_name = node.id.name.as_str();
         let key = self.scoped_key(enum_name);

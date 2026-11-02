@@ -158,7 +158,7 @@ fn component_props_reads_an_imported_callable_declaration() {
 
     assert_eq!(
         prop_types(&output, "TabsTrigger"),
-        [("disabled".into(), "boolean".into()), ("id".into(), "string".into())]
+        [("disabled".into(), "boolean".into()), ("id".into(), "string".into()), ("ref".into(), "Ref".into())]
     );
 }
 
@@ -258,7 +258,10 @@ fn component_props_reads_a_generic_callable_with_imported_react_element() {
 
     let output = extract(&options(&root, true));
 
-    assert_eq!(prop_types(&output, "Menu"), [("id".into(), "string".into()), ("value".into(), "unknown".into())]);
+    assert_eq!(
+        prop_types(&output, "Menu"),
+        [("id".into(), "string".into()), ("ref".into(), "Ref".into()), ("value".into(), "unknown".into())]
+    );
     assert!(output.diagnostics.iter().all(|d| !d.message.contains("Cannot resolve type 'T'")));
 }
 

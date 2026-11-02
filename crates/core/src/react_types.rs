@@ -48,6 +48,22 @@ pub fn html_element_from_collected(type_arg: &crate::types::CollectedType) -> Op
     }
 }
 
+/// The element a React attributes type is about, from its arguments: `DetailedHTMLProps<InputHTMLAttributes<T>, T>` names
+/// it in its second argument and in the attributes type of its first (`HTMLAttributes<T>` alone says only `div`).
+pub fn html_element_from_args(args: &[crate::types::CollectedType]) -> Option<&'static str> {
+    use crate::types::CollectedType;
+    if let Some(element) = args.iter().find_map(html_element_from_collected) {
+        return Some(element);
+    }
+    args.iter().find_map(|arg| match arg {
+        CollectedType::AtFile { inner, .. } => html_element_from_args(std::slice::from_ref(inner)),
+        CollectedType::Named { name, args } => {
+            html_element_from_args(args).or_else(|| html_element_for(name.rsplit('.').next().unwrap_or(name.as_str())))
+        }
+        _ => None,
+    })
+}
+
 pub fn html_element_from_type_arg(type_arg: &str) -> Option<&'static str> {
     match type_arg {
         "HTMLAnchorElement" => Some("a"),
@@ -75,6 +91,12 @@ pub fn html_element_from_type_arg(type_arg: &str) -> Option<&'static str> {
         "SVGGElement" => Some("g"),
         _ => None,
     }
+}
+
+/// React's attribute interfaces that carry props but name no element (`HTMLProps<T>` names one, in its argument): the
+/// resolver reads their members from React's own declaration under the HTML attribute mode.
+pub fn is_attribute_builtin(bare_name: &str) -> bool {
+    matches!(bare_name, "AriaAttributes" | "RefAttributes")
 }
 
 /// Types that are terminal — never need further resolution.
