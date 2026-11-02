@@ -148,6 +148,7 @@ impl<'src> SourceDataCollector<'src> {
             Ok(ArgumentEvidence::TagNeedsPayload) => true,
             Err(reason) => {
                 self.decline_reason = Some(format!("'{name}' is a generic call to '{callee}' that {reason}"));
+                self.argument_declined = !creates_context;
                 return false;
             }
         };
@@ -374,23 +375,152 @@ impl<'src> SourceDataCollector<'src> {
         })
     }
 
-    /// Record a generic function's annotated, asserted, or single returned local factory result. A wrapper call to
-    /// it then gets the props that result adds (`resolver::callee`).
+    /// Record a function's result when a call to it can build a component: a generic function's annotated, asserted,
+    /// or single returned local factory result, and any function's returned local asserted to a type
+    /// (`return Calendar` with `const Calendar = forwardRef(Inner) as ForwardRefExoticComponent<P>`) or returned
+    /// rendering function (`return function Loader(props: P) { return <svg /> }`). A wrapper or factory call to it then
+    /// gets the props that result adds (`resolver::callee`).
     pub(super) fn record_function_result<'a>(&mut self, func: &Function<'a>) {
-        let (Some(id), Some(type_parameters)) = (&func.id, func.type_parameters.as_deref()) else { return };
-        let (result, returned_call) = match &func.return_type {
-            Some(annotation) => (self.ts_type_to_collected(&annotation.type_annotation), None),
-            None => match asserted_return_type(func) {
-                Some(ty) => (self.ts_type_to_collected(ty), None),
-                None => (CollectedType::Unknown, returned_local_call(self, func)),
-            },
+        let Some(id) = &func.id else { return };
+        self.record_result_of(
+            id.name.as_str(),
+            func.type_parameters.as_deref(),
+            func.return_type.as_deref(),
+            func.body.as_deref(),
+        );
+    }
+
+    /// `const generateCalendar = <T,>(config: C<T>) => { ... }`: the same, for a function bound to a name.
+    pub(super) fn record_bound_function_result<'a>(&mut self, name: &str, init: &Expression<'a>) {
+        match init.without_parentheses() {
+            Expression::ArrowFunctionExpression(f) => {
+                // An expression body returns nothing a statement could name.
+                if let ArrowFunctionBody::FunctionBody(body) = &f.body {
+                    self.record_result_of(name, f.type_parameters.as_deref(), f.return_type.as_deref(), Some(body));
+                }
+            }
+            Expression::FunctionExpression(f) => {
+                self.record_result_of(name, f.type_parameters.as_deref(), f.return_type.as_deref(), f.body.as_deref());
+            }
+            _ => {}
+        }
+    }
+
+    fn record_result_of<'a>(
+        &mut self,
+        name: &str,
+        type_parameters: Option<&TSTypeParameterDeclaration<'a>>,
+        return_type: Option<&TSTypeAnnotation<'a>>,
+        body: Option<&FunctionBody<'a>>,
+    ) {
+        let generic = type_parameters.is_some();
+        let (result, returned_call) = if let Some(annotation) = return_type {
+            if !generic {
+                return;
+            }
+            (self.ts_type_to_collected(&annotation.type_annotation), None)
+        } else if let Some(ty) = asserted_return_type(body).filter(|_| generic) {
+            (self.ts_type_to_collected(ty), None)
+        } else if let Some(ty) = returned_local_asserted(body) {
+            (self.ts_type_to_collected(ty), None)
+        } else if let Some(function_type) = self.returned_rendering_function(body) {
+            (function_type, None)
+        } else if generic {
+            (CollectedType::Unknown, returned_local_call(self, body))
+        } else {
+            return;
         };
         if matches!(result, CollectedType::Unknown) && returned_call.is_none() {
             return;
         }
-        let type_params = super::type_param_names(Some(type_parameters));
-        let key = self.scoped_key(id.name.as_str());
+        let type_params = super::type_param_names(type_parameters);
+        let key = self.scoped_key(name);
         self.data.function_results.insert(key, FunctionResult { type_params, result, returned_call });
+    }
+
+    /// A single top-level `return function Loader(props: Props) { ... }` or `return (props: Props) => ...` that
+    /// renders: a component built by the function, with a function type whose first parameter is the props.
+    fn returned_rendering_function<'a>(&mut self, body: Option<&FunctionBody<'a>>) -> Option<CollectedType> {
+        let mut returns = body?.statements.iter().filter_map(|statement| match statement {
+            Statement::ReturnStatement(ret) => ret.argument.as_ref(),
+            _ => None,
+        });
+        let only = returns.next()?;
+        if returns.next().is_some() {
+            return None;
+        }
+        let (params, shape) = match only.without_parentheses() {
+            Expression::FunctionExpression(f) => (&f.params, FunctionShape::of_function(f)),
+            Expression::ArrowFunctionExpression(f) => (&f.params, FunctionShape::of_arrow(f)),
+            _ => return None,
+        };
+        let annotation = params.items.first()?.type_annotation.as_ref()?;
+        if renders(&shape, &*self).is_err() {
+            return None;
+        }
+        let props = self.ts_type_to_collected(&annotation.type_annotation);
+        Some(CollectedType::Function {
+            type_params: Vec::new(),
+            params: vec![props],
+            param_names: vec![None],
+            param_kinds: Vec::new(),
+            return_type: Box::new(CollectedType::Unknown),
+        })
+    }
+
+    /// Record `const Calendar = generateCalendar<Dayjs>(config)` and `const Loader = createLoader("x")` as a candidate:
+    /// a PascalCase binding initialized with a call to a plain function. Nothing here knows what the function returns,
+    /// which may be declared in another file; the candidate is a component only if the props can be read from the
+    /// callee's recorded result, and goes unpublished otherwise (`resolver`). Calls to React's own APIs are other
+    /// rules' business, and a constant name is never one.
+    pub(super) fn try_record_factory_call<'a>(&mut self, decl: &super::component::Binding<'_, 'a>, name: &str) -> bool {
+        let Some(init) = decl.init else { return false };
+        let Expression::CallExpression(call) = super::component::peel_expr(init) else { return false };
+        let Expression::Identifier(callee) = super::component::peel_expr(&call.callee) else { return false };
+        // A rule that gave its reason for declining the call has already said what it is not.
+        let explained = self.decline_reason.is_some() && !self.argument_declined;
+        let element_builder =
+            matches!(callee.name.as_str(), "createElement" | "cloneElement" | "jsx" | "jsxs" | "jsxDEV" | "h");
+        if super::is_constant_name(name) || explained || element_builder || self.react_api(&call.callee).is_some() {
+            return false;
+        }
+        let type_args = call
+            .type_arguments
+            .as_ref()
+            .map(|arguments| arguments.params.iter().map(|ty| self.ts_type_to_collected(ty)).collect())
+            .unwrap_or_default();
+        let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
+        // `const X = withX(Inner)` is also an alias of `Inner`, which may be declared further down the file.
+        self.try_defer_identifier_alias(name, decl.span);
+        self.pending_factory_calls.push(PendingFactoryCall {
+            name: name.to_owned(),
+            callee: WrapperCallee { name: callee.name.as_str().into(), type_args },
+            description,
+            tags,
+            span: decl.span,
+        });
+        true
+    }
+
+    /// Turn the recorded factory calls into mappings, now that every alias in the file has had its chance.
+    pub(super) fn promote_factory_calls(&mut self) {
+        for pending in std::mem::take(&mut self.pending_factory_calls) {
+            if self.data.component_mappings.iter().any(|m| m.component_name == pending.name) {
+                continue;
+            }
+            self.data.component_mappings.push(
+                ComponentMapping::new(
+                    pending.name,
+                    pending.callee.name.clone(),
+                    self.file_path.clone(),
+                    pending.span.start,
+                    pending.span.end,
+                    DetectionRule::FactoryResult,
+                )
+                .with_wrapper_callee(pending.callee)
+                .with_doc(pending.description, pending.tags),
+            );
+        }
     }
 
     /// Pick the props type from a wrapper call's type arguments, last first (the props usually follow the element).
@@ -482,8 +612,11 @@ fn extends_gives_tag(extends: &ExtendsRef, tag: &str) -> bool {
 }
 
 /// A single top-level `return Local` where `Local` is a const initialized by a generic call.
-fn returned_local_call<'a>(collector: &mut SourceDataCollector<'_>, func: &Function<'a>) -> Option<WrapperCallee> {
-    let body = func.body.as_ref()?;
+fn returned_local_call<'a>(
+    collector: &mut SourceDataCollector<'_>,
+    body: Option<&FunctionBody<'a>>,
+) -> Option<WrapperCallee> {
+    let body = body?;
     let mut returns = body.statements.iter().filter_map(|statement| match statement {
         Statement::ReturnStatement(ret) => ret.argument.as_ref(),
         _ => None,
@@ -527,8 +660,8 @@ enum PropsSelection {
 }
 
 /// The type the function's only top-level `return` asserts with `as` (the outermost one of `x as unknown as T`).
-fn asserted_return_type<'f, 'a>(func: &'f Function<'a>) -> Option<&'f TSType<'a>> {
-    let mut returns = func.body.as_ref()?.statements.iter().filter_map(|statement| match statement {
+fn asserted_return_type<'f, 'a>(body: Option<&'f FunctionBody<'a>>) -> Option<&'f TSType<'a>> {
+    let mut returns = body?.statements.iter().filter_map(|statement| match statement {
         Statement::ReturnStatement(ret) => Some(ret.argument.as_ref()),
         _ => None,
     });
@@ -541,4 +674,43 @@ fn asserted_return_type<'f, 'a>(func: &'f Function<'a>) -> Option<&'f TSType<'a>
         Expression::TSTypeAssertion(assertion) => Some(&assertion.type_annotation),
         _ => None,
     }
+}
+
+/// A single top-level `return Local` where `Local` is a const initialized `X as T`: the type `T` the function returns.
+fn returned_local_asserted<'f, 'a>(body: Option<&'f FunctionBody<'a>>) -> Option<&'f TSType<'a>> {
+    let body = body?;
+    let mut returns = body.statements.iter().filter_map(|statement| match statement {
+        Statement::ReturnStatement(ret) => ret.argument.as_ref(),
+        _ => None,
+    });
+    let Expression::Identifier(returned) = returns.next()?.without_parentheses() else { return None };
+    if returns.next().is_some() {
+        return None;
+    }
+    for statement in &body.statements {
+        let Statement::VariableDeclaration(declaration) = statement else { continue };
+        if !declaration.kind.is_const() {
+            continue;
+        }
+        for declarator in &declaration.declarations {
+            let BindingPattern::BindingIdentifier(name) = &declarator.id else { continue };
+            if name.name != returned.name {
+                continue;
+            }
+            return match declarator.init.as_ref()?.without_parentheses() {
+                Expression::TSAsExpression(assertion) => Some(&assertion.type_annotation),
+                _ => None,
+            };
+        }
+    }
+    None
+}
+
+/// A call waiting for the rest of the file to be seen: `const Calendar = generateCalendar<Dayjs>(config)`.
+pub(crate) struct PendingFactoryCall {
+    pub(super) name: String,
+    callee: WrapperCallee,
+    description: String,
+    tags: BTreeMap<String, String>,
+    span: Span,
 }

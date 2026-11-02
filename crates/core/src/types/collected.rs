@@ -1205,6 +1205,9 @@ pub enum DetectionRule {
     /// bound to a PascalCase name, with a `CenterProps` type declared in the same file. The call styles an element,
     /// and the neighbouring props type names its props.
     TaggedFactory,
+    /// `const Calendar = generateCalendar<Dayjs>(config)` or `const Loader = createLoader("x")`: a PascalCase binding
+    /// initialized with a call to a function whose result is a component. Its props are the props of that result.
+    FactoryResult,
 }
 
 /// A component → prop type mapping.

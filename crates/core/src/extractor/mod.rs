@@ -257,6 +257,8 @@ pub(super) struct SourceDataCollector<'src> {
     /// The alias shape `try_rename_identifier_wrapped_component` read for the current declarator when its component was
     /// not collected yet.
     pub(super) alias_candidate: Option<(String, Option<component::AliasCall>)>,
+    /// Calls to a plain function bound to a PascalCase name, resolved by what the callee returns.
+    pub(super) pending_factory_calls: Vec<wrapper::PendingFactoryCall>,
     /// Simple local aliases of generic functions, resolved after all declarations have been visited.
     pub(super) pending_function_aliases: Vec<(String, String)>,
     /// Local cast names and the base component and asserted props type they export.
@@ -264,6 +266,9 @@ pub(super) struct SourceDataCollector<'src> {
     /// `export { local as exported }` without a source: the index into `data.exports` and the `local` name, so
     /// `finish()` can recognize a re-exported import once every import has been seen.
     pub(super) pending_local_exports: Vec<(usize, String)>,
+    /// Whether that reason is that the call's first argument is no evidence of a component, which a factory call's
+    /// result may still make up for.
+    pub(super) argument_declined: bool,
     /// Why the current declarator's detector chain declined a candidate, used as the skip diagnostic's message.
     pub(super) decline_reason: Option<String>,
     /// How each name is used in the file (`uses.rs`).
@@ -306,11 +311,13 @@ impl<'src> SourceDataCollector<'src> {
             aliased_away: FxHashSet::default(),
             pending_wrappers: Vec::new(),
             pending_aliases: Vec::new(),
+            pending_factory_calls: Vec::new(),
             alias_candidate: None,
             pending_function_aliases: Vec::new(),
             cast_component_aliases: Default::default(),
             pending_local_exports: Vec::new(),
             decline_reason: None,
+            argument_declined: false,
             name_uses: Default::default(),
             takes_a_second_parameter: FxHashSet::default(),
             exported_locals: FxHashSet::default(),
@@ -510,6 +517,7 @@ impl<'src> SourceDataCollector<'src> {
         self.promote_function_aliases();
         self.promote_wrapper_calls();
         self.promote_identifier_aliases();
+        self.promote_factory_calls();
         self.promote_reexported_imports();
         // Filtered by original identifier first, before any displayName rename
         // below can change what identifier a mapping currently answers to.

@@ -876,6 +876,24 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
     (entry, diagnostics.flatten())
 }
 
+/// The entry of a candidate with nothing to document: no props and no layers, which the output leaves out.
+fn unpublished_entry(mapping: &ComponentMapping) -> ComponentEntry {
+    ComponentEntry {
+        display_name: mapping.component_name.clone(),
+        file_path: mapping.file_path.clone(),
+        description: mapping.description.clone(),
+        props: BTreeMap::new(),
+        inheritance: Vec::new(),
+        notable_inherited: BTreeMap::new(),
+        discriminant_prop: None,
+        composes: Vec::new(),
+        tags: mapping.tags.clone(),
+        methods: vec![],
+        detected_by: mapping.rule,
+        exported: mapping.exported,
+    }
+}
+
 /// Whether `mapping` re-binds a component the project itself declares under the same name: `const Alert =
 /// InternalAlert` where `InternalAlert` is the project's `Alert`, or `const { Option } = Select` where `Select` is a
 /// project component and a project component `Option` exists. An alias of a package's component is not one of these.
@@ -908,28 +926,19 @@ pub(crate) fn resolve_component_shared(
     // The component the project already declares under this name, not a second one: nothing to document here, so
     // the entry is left empty and goes unpublished like an alias whose package isn't loaded.
     if aliases_project_component(mapping, ctx) {
-        let entry = ComponentEntry {
-            display_name: mapping.component_name.clone(),
-            file_path: mapping.file_path.clone(),
-            description: mapping.description.clone(),
-            props: BTreeMap::new(),
-            inheritance: Vec::new(),
-            notable_inherited: BTreeMap::new(),
-            discriminant_prop: None,
-            composes: Vec::new(),
-            tags: mapping.tags.clone(),
-            methods: vec![],
-            detected_by: mapping.rule,
-            exported: mapping.exported,
-        };
-        return (entry, ResolvedDiagnostics { own: Vec::new(), shared: Vec::new() });
+        return (unpublished_entry(mapping), ResolvedDiagnostics { own: Vec::new(), shared: Vec::new() });
     }
     let mut state = ResolveState::default();
     state.add_type_params(mapping.type_params.iter());
 
     // A component a generic call builds has the props its callee's result type declares; the props type the extractor
     // selected is for a callee whose result isn't known.
-    let chain = callee::result_chain(mapping, ctx, &mut state).unwrap_or_else(|| {
+    let result = callee::result_chain(mapping, ctx, &mut state);
+    // A call to a function whose result is no component is no component: nothing to document, nothing to report.
+    if result.is_none() && mapping.rule == DetectionRule::FactoryResult {
+        return (unpublished_entry(mapping), ResolvedDiagnostics { own: Vec::new(), shared: Vec::new() });
+    }
+    let chain = result.unwrap_or_else(|| {
         chain::resolve_props_chain(
             mapping.props_type_name.as_str(),
             &mapping.props_type_args,

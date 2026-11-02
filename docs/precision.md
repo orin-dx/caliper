@@ -33,3 +33,9 @@ The miss: react-spectrum's `ListBoxDropIndicatorWrapper` is a `(props, ref)` ren
 ## `importedMemberAlias`, 2026-11-02
 
 A component re-bound from an import now also covers `const { Option } = Imported` and `const X = Imported`. On Ant Design and shadcn/ui with their dependencies installed the rule reports 14 components (antd 1, shadcn/ui 13), too few to draw a sample from, so all 14 were read: 14 are components (`Option`, 4 `ChartLegend`, 4 `ChartTooltip`, 3 `Combobox`, `Form`, `Select`). An alias of a component the project declares under the same name is not reported, which removed 18 antd duplicates (`Alert`, `Card`, `Form`, ...) that the new forms would otherwise have added. Labelled by one model agent reading the source; not checked by a human.
+
+## `factoryResult`, 2026-11-02
+
+A PascalCase binding initialized with a call to a plain function is a component when what the function returns is one: a generic factory that returns a local asserted to a component type (`return Calendar` with `const Calendar = forwardRef(Inner) as ForwardRefExoticComponent<P>`), or a function that returns a rendering function with typed props. The extractor keeps every such call as a candidate and the resolver publishes the ones whose callee's recorded result is a component, so the rule cannot fire on a call whose callee is unknown or returns anything else. On Ant Design, shadcn/ui, Chakra and Mantine it reports 6 components (antd `Calendar`; shadcn/ui `IconLucide`, `IconTabler`, `IconHugeicons`, `IconPhosphor`, `IconRemixicon`), too few to draw a sample from, so all 6 were read: 6 are components. Chakra and Mantine gain none and change none. Labelled by one model agent reading the source; not checked by a human.
+
+A call-bound candidate that does not resolve to a component is now left out silently: before, each one produced a skipped-candidate note (9 on antd, 18 on shadcn/ui).

@@ -1313,6 +1313,8 @@ fn wrapper_calls_carrying_props_in_a_type_argument_are_detected_by_shape() {
     let mut found: Vec<(&str, &str, crate::types::DetectionRule)> = data
         .component_mappings
         .iter()
+        // The calls no wrapper rule took are candidates until the resolver reads what their callee returns.
+        .filter(|m| m.rule != crate::types::DetectionRule::FactoryResult)
         .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule))
         .collect();
     found.sort_by_key(|(name, _, _)| *name);
@@ -1514,7 +1516,15 @@ fn a_call_that_is_not_a_component_wrapper_around_a_component_declared_later_is_d
         function InternalCard(props: CardProps) { return <div>{props.title}</div>; }
     "#;
     let data = parse_file(Utf8Path::new("/test/decline.tsx"), source);
-    assert_eq!(data.component_mappings.iter().map(|m| m.component_name.as_str()).collect::<Vec<_>>(), ["InternalCard"]);
+    // `Label` stays a candidate the resolver judges: `getDisplayName` may be a factory whose result is a component.
+    let mappings = data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.rule)).collect::<Vec<_>>();
+    assert_eq!(
+        mappings,
+        [
+            ("InternalCard", crate::types::DetectionRule::FunctionDeclaration),
+            ("Label", crate::types::DetectionRule::FactoryResult)
+        ]
+    );
     assert_eq!(
         data.diagnostics.iter().map(|d| d.message.as_str()).collect::<Vec<_>>(),
         vec!["'Label' passes component 'InternalCard' to a call that does not look like a component wrapper"]
@@ -1545,6 +1555,8 @@ fn a_call_given_a_tag_and_a_config_object_is_a_component_when_a_props_type_besid
     let mut found: Vec<(&str, &str, crate::types::DetectionRule)> = data
         .component_mappings
         .iter()
+        // A call to a plain function is a candidate until the resolver reads what the function returns.
+        .filter(|m| m.rule != crate::types::DetectionRule::FactoryResult)
         .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule))
         .collect();
     found.sort_by_key(|(name, _, _)| *name);
@@ -1573,6 +1585,7 @@ fn a_wrapped_render_function_may_be_parenthesized_or_asserted() {
     let mut found: Vec<(&str, &str, crate::types::DetectionRule)> = data
         .component_mappings
         .iter()
+        .filter(|m| m.rule != crate::types::DetectionRule::FactoryResult)
         .map(|m| (m.component_name.as_str(), m.props_type_name.as_str(), m.rule))
         .collect();
     found.sort_by_key(|(name, _, _)| *name);
@@ -1833,7 +1846,7 @@ fn record_skip_pushes_an_info_diagnostic_with_the_given_code() {
 
 #[test]
 fn skipped_candidates_carry_the_line_and_column_of_the_declaration() {
-    let source = "import x from \"y\";\n\n  const Opaque = makeThing();\n";
+    let source = "import x from \"y\";\n\n  const Opaque = { thing: 1 };\n";
     let data = parse_file(Utf8Path::new("/test/skip.tsx"), source);
     let skipped: Vec<(Option<u32>, Option<u32>)> = data
         .diagnostics
@@ -1899,13 +1912,13 @@ fn omit_with_a_literal_base_is_collected_structurally_for_the_resolver_to_report
 
 #[test]
 fn pascal_case_binding_with_no_matching_detector_records_skipped_candidate() {
-    // `const Button = something()` — PascalCase binding, .tsx file, but the
+    // `const Button = { ... }` — PascalCase binding, .tsx file, but the
     // init expression matches none of try_fc_annotation / try_forward_ref /
     // try_hoc_wrapped / try_rename_identifier_wrapped_component. Previously
     // the whole chain fell through silently with zero trace it was even
     // considered a component candidate.
     let source = r#"
-        const Button = someUnrecognizedFactory();
+        const Button = { unrecognized: true };
     "#;
     let path = Utf8Path::new("/test/unrecognized.tsx");
     let data = parse_file(path, source);
