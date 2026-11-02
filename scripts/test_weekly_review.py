@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Tests for the review fixes to the weekly record: pairing by name, order-free merging, wrapped default exports and
-the measuring helper's errors. Run: python3 scripts/test_weekly_review.py"""
+"""Tests for the review fixes to the weekly record: pairing by name, order-free merging, wrapped default exports, pairing
+inside one file, the reference version and the measuring helper's errors. Run: python3 scripts/test_weekly_review.py"""
 import os
 import subprocess
 import sys
@@ -88,6 +88,17 @@ class WrappedDefaultExport(Tree):
         self.assertIsNone(source('export default memo(() => null);\n'))
         self.assertIsNone(source('export default { x };\n'))
 
+    def test_unwraps_assignments_assertions_and_dotted_wrappers(self):
+        source = lambda text: weekly.export_source(text, 'default')
+        self.assertEqual(source('export default Object.assign(Foo, { Item });\n'), ('local', 'Foo'))
+        self.assertEqual(source('export default React.memo(React.forwardRef(Foo));\n'), ('local', 'Foo'))
+        self.assertEqual(source('export default Foo as typeof Foo & { Item: Item };\n'), ('local', 'Foo'))
+        self.assertEqual(source('export default Foo satisfies Component;\n'), ('local', 'Foo'))
+        self.assertEqual(source('export default Foo!;\n'), ('local', 'Foo'))
+        self.assertEqual(source('export default memo(Foo) as Bar;\n'), ('local', 'Foo'))
+        # A member of something is not the thing.
+        self.assertIsNone(source('export default Foo.Bar;\n'))
+
     FILES = {'src/index.tsx': 'import Foo from "./foo";\nexport default memo(Foo);\n',
              'src/foo.tsx': 'export default function Foo() {}\n'}
 
@@ -96,6 +107,96 @@ class WrappedDefaultExport(Tree):
         items, stats = weekly.reference([self.entry('index', 'src/index.tsx', {'x': prop()})], found, self.root)
         self.assertEqual(stats['paired'], {'default_export': 1})
         self.assertEqual(items[0]['keys'][-1], ('src/foo.tsx', 'foo'))
+
+
+class PairsInOneFile(Tree):
+    """RDT names a default export after the file or directory, and a component by its declaration; Caliper by its
+    `displayName` where there is one. A name RDT does not give a default export is never paired with the file's."""
+    FILES = {
+        'src/button/index.tsx': 'const InternalButton = () => null;\nexport default InternalButton;\n',
+        'src/form/Form.tsx': 'const Form = () => null;\nexport default Form;\n',
+        'src/image/Progress.tsx': "const Progress = () => null;\nProgress.displayName = 'ImageProgress';\nexport default Progress;\n",
+        'src/tabs/Pane.tsx': "const Pane = () => null;\nPane.displayName = 'TabPane';\nexport const Other = () => null;\nexport default Pane;\n",
+        'src/w/index.tsx': 'const Inner = () => null;\nconst Outer = memo(Inner);\nexport default Outer;\n',
+        'src/dd/index.tsx': "import Internal from './dropdown';\nconst Dropdown = Internal as typeof Internal & { x: 1 };\n"
+                            'export default Dropdown;\n',
+        'src/dd/dropdown.tsx': 'export default function Dropdown() {}\n',
+        'src/a/index.tsx': 'export const Foo = () => null;\nexport default Foo;\n',
+    }
+
+    def pairs(self, rdt, found):
+        items, stats = weekly.reference(rdt, found, self.root)
+        return items, stats['paired']
+
+    def test_default_export_under_another_name_pairs_with_the_directory_name(self):
+        found = {('src/button/index.tsx', 'internalbutton'): {'x'}}
+        items, paired = self.pairs([self.entry('button', 'src/button/index.tsx', {'x': prop()})], found)
+        self.assertEqual(paired, {'default_alias': 1})
+        self.assertEqual(items[0]['keys'], [('src/button/index.tsx', 'button'), ('src/button/index.tsx', 'internalbutton')])
+
+    def test_a_member_name_is_not_the_default_export(self):
+        found = {('src/form/Form.tsx', 'form'): {'x'}}
+        items, paired = self.pairs([self.entry('List', 'src/form/Form.tsx', {'x': prop()})], found)
+        self.assertEqual(paired, {})
+        self.assertEqual(weekly.recall(items, found)['components'], [0, 1])
+
+    def test_a_key_another_entry_matches_exactly_is_not_a_target(self):
+        found = {('src/a/index.tsx', 'foo'): {'x'}}
+        entries = [self.entry('Foo', 'src/a/index.tsx', {'x': prop()}), self.entry('a', 'src/a/index.tsx', {'x': prop()})]
+        items, paired = self.pairs(entries, found)
+        self.assertEqual(paired, {})
+        self.assertEqual([i['keys'][0] for i in items], [('src/a/index.tsx', 'foo'), ('src/a/index.tsx', 'a')])
+
+    def test_display_name_both_ways(self):
+        # Caliper names the component by its displayName, RDT by the declaration.
+        found = {('src/image/Progress.tsx', 'imageprogress'): {'x'}}
+        _, paired = self.pairs([self.entry('Progress', 'src/image/Progress.tsx', {'x': prop()})], found)
+        self.assertEqual(paired, {'default_alias': 1})
+        # RDT names it by the displayName, Caliper by the declaration.
+        found = {('src/tabs/Pane.tsx', 'pane'): {'x'}}
+        items, paired = self.pairs([self.entry('TabPane', 'src/tabs/Pane.tsx', {'x': prop()})], found)
+        self.assertEqual(paired, {'display_name': 1})
+        self.assertEqual(items[0]['keys'][-1], ('src/tabs/Pane.tsx', 'pane'))
+
+    def test_local_alias_chain_reaches_the_declaration(self):
+        found = {('src/w/index.tsx', 'inner'): {'x'}}
+        _, paired = self.pairs([self.entry('w', 'src/w/index.tsx', {'x': prop()})], found)
+        self.assertEqual(paired, {'default_alias': 1})
+
+    def test_alias_chain_follows_an_import(self):
+        self.assertEqual(weekly.local_chain('const A = B as T;\nconst B = memo(C);\n', 'A'), ['A', 'B', 'C'])
+        self.assertEqual(weekly.local_chain('const A = A;\n', 'A'), ['A'])
+        found = {('src/dd/dropdown.tsx', 'dropdown'): {'x'}}
+        _, paired = self.pairs([self.entry('Dropdown', 'src/dd/index.tsx', {'x': prop()})], found)
+        self.assertEqual(paired, {'default_export': 1})
+
+
+def record(reference_version=None, recall=0.9, ms=100):
+    r = {'corpora': {'antd': {'caliper': {'ms': ms, 'rss_mib': 100},
+                              'recall': {'caliper': {'components': [int(100 * recall), 100]}}}}}
+    if reference_version is not None:
+        r['reference_version'] = reference_version
+    return r
+
+
+class RecallIsNotComparedAcrossReferences(unittest.TestCase):
+    def test_same_reference_compares_recall(self):
+        self.assertEqual(weekly.findings(record(weekly.REFERENCE_VERSION, 0.5), record(weekly.REFERENCE_VERSION, 0.9)),
+                         ['antd: recall of components 90.0% -> 50.0%'])
+
+    def test_another_reference_skips_recall_but_not_time(self):
+        now, before = record(weekly.REFERENCE_VERSION, 0.5, ms=200), record(weekly.REFERENCE_VERSION - 1, 0.9)
+        self.assertEqual(weekly.findings(now, before), ['antd: time 100 -> 200'])
+        self.assertFalse(weekly.same_reference(now, before))
+
+    def test_a_record_without_a_version_is_version_one(self):
+        self.assertTrue(weekly.same_reference(record(1), record()))
+        self.assertFalse(weekly.same_reference(record(weekly.REFERENCE_VERSION), record()))
+
+    def test_the_table_says_when_recall_was_not_compared(self):
+        now = {'caliper': 'x', 'runs': 1, 'reference_version': 2, 'corpora': {}}
+        self.assertIn('version 1 of the rules, this one by version 2', weekly.markdown(now, [], 1))
+        self.assertNotIn('not compared', weekly.markdown(now, []))
 
 
 class MeasureHelperErrors(unittest.TestCase):

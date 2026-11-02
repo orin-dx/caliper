@@ -28,6 +28,9 @@ from corpora import ROOT, run_once, selected
 
 SLOWER = 1.10
 RECALL_DROP = 0.02
+# The rules that decide what the reference is: the exclusions and the pairing. Raise it when a change to them moves recall,
+# so that a record is never compared on recall with one made under other rules (a record without it is version 1).
+REFERENCE_VERSION = 2
 
 
 def norm_name(name):
@@ -108,6 +111,9 @@ def caliper_layer_members(binary, src, root):
 LIB_FILE = re.compile(r'/typescript/lib/lib\.[^/]*\.d\.ts$')
 REACT_DIR = 'node_modules/@types/react/'
 EXTENSIONS = ('', '.tsx', '.ts', '/index.tsx', '/index.ts')
+# An identifier inside any number of calls (`memo(forwardRef(Foo))`, `React.memo(Foo)`, `Object.assign(Foo, {...})`),
+# followed by what ends an argument or an expression: `, ) ; !`, a type assertion or the end of the line.
+WRAPPED = r'(?:[\w.]+\s*(?:<[^>]*>)?\s*\(\s*)*(\w+)(?=\s*[,);!]|\s+as\b|\s+satisfies\b|\s*$)'
 
 
 def declared_in_react(info):
@@ -131,9 +137,7 @@ def exclusion(comp):
         return 'hook'
     if 'value' in props and set(props) <= {'value', 'children'} and all(map(declared_in_react, props.values())):
         return 'context_value'
-    path = comp['file']
-    own_names = {norm_name(os.path.splitext(os.path.basename(path))[0]), norm_name(os.path.basename(os.path.dirname(path)))}
-    if name[:1].islower() and norm_name(name) not in own_names and not any(map(declared_in_react, props.values())):
+    if name[:1].islower() and norm_name(name) not in own_names(comp['file']) and not any(map(declared_in_react, props.values())):
         return 'not_jsx'
     if all(i.get('type', '').startswith('Promise<') for i in props.values()):
         return 'promise_props'
@@ -165,10 +169,11 @@ def import_binding(text, name):
 def export_source(text, name):
     """How `text` exports `name` (`default` or a name): ('local', local name), ('from', module, name) or None."""
     if name == 'default':
-        # The second pattern unwraps calls whose first argument is an identifier (`memo(Foo)`, `observer(forwardRef(Foo))`):
-        # the wrapper is whatever function the file calls, so the name that matters is the innermost identifier.
+        # The second pattern unwraps calls whose first argument is an identifier (`memo(Foo)`, `observer(forwardRef(Foo))`,
+        # `Object.assign(Foo, {...})`), and a trailing assertion (`Foo as T`, `Foo satisfies T`, `Foo!`): the wrapper is
+        # whatever function the file calls, so the name that matters is the innermost identifier.
         for pattern in (r'^export\s+default\s+(?:async\s+)?(?:function\*?|class)\s+(\w+)',
-                        r'^export\s+default\s+(?:\w+\s*(?:<[^>]*>)?\s*\(\s*)*(\w+)(?=\s*(?:[,);]|$))'):
+                        rf'^export\s+default\s+{WRAPPED}'):
             match = re.search(pattern, text, re.M)
             if match:
                 return 'local', match.group(1)
@@ -201,29 +206,78 @@ def export_target(file, read, exists, name='default', hops=6):
     if exported[0] == 'from':
         target = resolve_module(file, exported[1], exists)
         return export_target(target, read, exists, exported[2], hops - 1) if target else None
-    imported = import_binding(text, exported[1])
-    if imported:
-        target = resolve_module(file, imported[0], exists)
-        return export_target(target, read, exists, imported[1], hops - 1) if target else None
+    chain = local_chain(text, exported[1])
+    for local in chain:
+        imported = import_binding(text, local)
+        if imported:
+            target = resolve_module(file, imported[0], exists)
+            return export_target(target, read, exists, imported[1], hops - 1) if target else None
     return file, exported[1]
 
 
-def counterpart(file, name, found_by_file):
+def local_chain(text, name, hops=4):
+    """`name` and what a chain of `const name = Other` / `const name = memo(Other)` in `text` leads to, nearest first:
+    the component is declared under the last, and Caliper may report it under any of them."""
+    names = [name]
+    while text and len(names) <= hops:
+        match = re.search(rf'^(?:export\s+)?(?:const|let|var)\s+{re.escape(names[-1])}\b(?:\s*:[^=\n]+)?\s*=\s*{WRAPPED}',
+                          text, re.M)
+        if not match or match.group(1) in names:
+            break
+        names.append(match.group(1))
+    return names
+
+
+def display_assignments(text):
+    """The `Foo.displayName = 'Bar'` assignments in `text`, as (local name, shown name) pairs."""
+    return re.findall(r"^\s*(\w+)\.displayName\s*=\s*['\"]([^'\"]+)['\"]", text or '', re.M)
+
+
+def own_names(file):
+    """The names RDT gives a default export of `file`: the file's own, and its directory's."""
+    return {norm_name(os.path.splitext(os.path.basename(file))[0]), norm_name(os.path.basename(os.path.dirname(file)))}
+
+
+def counterpart(file, name, found_by_file, read=None, claimed=()):
     """Caliper's key in `file` for a component called `name`, or None: the names must agree, since a file's only
-    component says nothing about whether RDT's entry is that component."""
-    return (file, norm_name(name)) if norm_name(name) in found_by_file.get(file, {}) else None
+    component says nothing about whether RDT's entry is that component. With `read`, the names a local alias chain
+    leads to count too, and the `displayName` each is given; a key in `claimed` (one an RDT entry already matches
+    exactly) is never the answer."""
+    text = read(file) if read else None
+    names = local_chain(text, name) if read else [name]
+    # Caliper names a component by its `displayName` where there is one, RDT by the declaration.
+    shown = dict(display_assignments(text))
+    for candidate in [n for local in names for n in (local, shown.get(local)) if n]:
+        key = (file, norm_name(candidate))
+        if norm_name(candidate) in found_by_file.get(file, {}) and key not in claimed:
+            return key
+    return None
 
 
-def pair(comp, root, found_by_file, read, exists):
-    """Caliper's key and the evidence for RDT's entry that Caliper reports in another file: where the default export of
-    RDT's file is defined (RDT names a default export after the file or directory) or, for a named export, where that is,
-    else the file that declares its props, when Caliper reports a component of that name there. None if neither leads to one."""
+def pair(comp, root, found_by_file, read, exists, claimed=()):
+    """Caliper's key and the evidence for RDT's entry that Caliper does not report under its own key. In another file:
+    where the default export of RDT's file is defined (RDT names a default export after the file or directory) or, for a
+    named export, where that is. In the same file: the component that default export is, when the RDT name is the file's
+    or directory's own and no other entry already matches it, or the one whose `displayName` RDT reports. Else the file
+    that declares its props, when Caliper reports a component of that name there. A local alias chain
+    (`const A = memo(B); export default A`) leads to the declaration. None if no evidence leads to a component."""
     file = relative(comp['file'], root)
     for export in ('default', comp['name']):
         target = export_target(file, read, exists, export)
-        found = counterpart(target[0], target[1], found_by_file) if target and target[0] != file else None
-        if found:
-            return found, 'default_export' if export == 'default' else 'named_export'
+        if not target:
+            continue
+        if target[0] != file:
+            found = counterpart(target[0], target[1], found_by_file, read)
+            if found:
+                return found, 'default_export' if export == 'default' else 'named_export'
+        elif export == 'default' and norm_name(comp['name']) in own_names(file):
+            found = counterpart(file, target[1], found_by_file, read, claimed)
+            if found:
+                return found, 'default_alias'
+    local = next((l for l, shown in display_assignments(read(file)) if norm_name(shown) == norm_name(comp['name'])), None)
+    found = counterpart(file, local, found_by_file, read, claimed) if local else None
+    if found:
+        return found, 'display_name'
     name = norm_name(comp['name'])
     for info in comp['props'].values():
         parent = info.get('parent') or ''
@@ -245,7 +299,7 @@ def reference(rdt_components, found, root):
     exists = lambda rel: os.path.isfile(os.path.join(root, rel))
     read = lambda rel: read_text(os.path.join(root, rel))
     stats = {'rdt_with_props': 0, 'excluded': {}, 'exact': 0, 'paired': {}, 'merged': 0}
-    groups = {}
+    entries = []
     for comp in rdt_components:
         if not comp['props']:
             continue
@@ -254,12 +308,16 @@ def reference(rdt_components, found, root):
         if why:
             stats['excluded'][why] = stats['excluded'].get(why, 0) + 1
             continue
-        key = (relative(comp['file'], root), norm_name(comp['name']))
+        entries.append((comp, (relative(comp['file'], root), norm_name(comp['name']))))
+    # Caliper's keys that an RDT entry matches exactly: another entry in that file is never paired with them.
+    claimed = {key for _, key in entries if key in found}
+    groups = {}
+    for comp, key in entries:
         target = key if key in found else None
         if target:
             stats['exact'] += 1
         else:
-            paired = pair(comp, root, found_by_file, read, exists)
+            paired = pair(comp, root, found_by_file, read, exists, claimed)
             if paired:
                 target = paired[0]
                 stats['paired'][paired[1]] = stats['paired'].get(paired[1], 0) + 1
@@ -360,8 +418,14 @@ def measure(args, corpus, work):
     return entry
 
 
+def same_reference(record, previous):
+    """Whether `record` and `previous` were measured against references built by the same rules."""
+    return record.get('reference_version', 1) == previous.get('reference_version', 1)
+
+
 def findings(record, previous):
-    """What got worse since `previous`: Caliper's time and memory by more than 10%, its recall by more than 2 points."""
+    """What got worse since `previous`: Caliper's time and memory by more than 10%, its recall by more than 2 points,
+    which is not compared across references built by different rules."""
     out = []
     for name, entry in record['corpora'].items():
         old = previous.get('corpora', {}).get(name)
@@ -370,7 +434,7 @@ def findings(record, previous):
         for key, label in (('ms', 'time'), ('rss_mib', 'peak memory')):
             if entry['caliper'][key] > SLOWER * old['caliper'][key]:
                 out.append(f"{name}: {label} {old['caliper'][key]} -> {entry['caliper'][key]}")
-        for kind in ('components', 'own', 'react', 'own_layers', 'react_layers'):
+        for kind in ('components', 'own', 'react', 'own_layers', 'react_layers') if same_reference(record, previous) else ():
             if kind not in old['recall']['caliper']:
                 continue  # a record from before layers were counted
             now, before = rate(entry['recall']['caliper'][kind]), rate(old['recall']['caliper'][kind])
@@ -379,7 +443,7 @@ def findings(record, previous):
     return out
 
 
-def markdown(record, notes):
+def markdown(record, notes, reference_changed=None):
     lines = [f"Caliper {record['caliper']}, median of {record['runs']} runs; RDT and react-docgen one run each. Whole "
              'process, Node start included.', '', '### Time and memory', '',
              '| Corpus | Caliper | JSON | RDT | react-docgen |', '| --- | --: | --: | --: | --: |']
@@ -411,6 +475,9 @@ def markdown(record, notes):
         for name, o in oracle_rows:
             lines.append(f'| {name} | unavailable: {o["error"][:80]} | | |' if 'error' in o else
                          f"| {name} | {o['shared_props']:,} | {100 * o['agree']:.1f}% | {100 * o['wrong']:.2f}% |")
+    if reference_changed is not None:
+        lines += ['', f"Recall was not compared with last week's: its reference was built by version {reference_changed} of "
+                      f"the rules, this one by version {record['reference_version']}."]
     if notes:
         lines += ['', '### Worse than last week', ''] + [f'- {n}' for n in notes]
     return '\n'.join(lines) + '\n'
@@ -432,13 +499,17 @@ def main():
     work = os.path.abspath(args.work)
     os.makedirs(work, exist_ok=True)
     version = subprocess.run([args.bin, '--version'], capture_output=True, text=True).stdout.strip()
-    record = {'caliper': version, 'runs': args.runs,
+    record = {'caliper': version, 'runs': args.runs, 'reference_version': REFERENCE_VERSION,
               'corpora': {c['name']: measure(args, c, work) for c in selected(args.corpus)}}
     notes = []
+    reference_changed = None
     if args.previous and os.path.exists(args.previous):
         with open(args.previous) as f:
-            notes = findings(record, json.load(f))
-    table = markdown(record, notes)
+            previous = json.load(f)
+        notes = findings(record, previous)
+        if not same_reference(record, previous):
+            reference_changed = previous.get('reference_version', 1)
+    table = markdown(record, notes, reference_changed)
     print(table)
     for path, content in ((args.out, json.dumps(record, indent=2) + '\n'), (args.markdown, table),
                           (args.issue, 'The weekly record got worse:\n\n' + '\n'.join(f'- {n}' for n in notes) + '\n'
