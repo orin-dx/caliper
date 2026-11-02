@@ -11,7 +11,7 @@ use crate::types::semantic::SemanticProvider;
 use crate::types::*;
 
 use super::discover::{discover_dirs, discover_files};
-use super::revision::{empty_output, output_delta, ComponentAnswer, ComponentLocation, Revision};
+use super::revision::{empty_output, free_in_background, output_delta, ComponentAnswer, ComponentLocation, Revision};
 use super::{IncrementalUpdate, PipelineOptions};
 
 /// Canonicalize `path`, falling back to canonicalizing its parent directory
@@ -326,8 +326,16 @@ impl WatchSession {
             false => Revision::cold(&self.options, id),
         });
         self.forget_checker_answers();
-        self.current.store(Some(revision.clone()));
+        free_in_background(self.current.swap(Some(revision.clone())));
         revision
+    }
+
+    /// Publish `next` and free what it replaces on another thread. A large project's revision takes tens of
+    /// milliseconds to drop, and the caller only wants the new one out. `replaced` is the caller's own reference to
+    /// the revision `next` was built from: whichever reference goes last pays for the free, so it must not be this
+    /// thread's.
+    fn publish(&self, next: Arc<Revision>, replaced: Arc<Revision>) {
+        free_in_background((self.current.swap(Some(next)), replaced));
     }
 
     /// Drop what the checker said: a new revision may have changed a file the answers depend on. Called before the
@@ -512,7 +520,7 @@ impl WatchSession {
             None => self.cold(&mut writer, 1),
         };
         if rebuild {
-            return self.rebuilt(&mut writer, &current);
+            return self.rebuilt(&mut writer, current);
         }
         // Stamped before it is read, so an edit made while it is applied still looks changed to `ensure_fresh`.
         let before = stamp(&changed);
@@ -526,7 +534,7 @@ impl WatchSession {
                     }
                 }
                 self.forget_checker_answers();
-                self.current.store(Some(Arc::new(next)));
+                self.publish(Arc::new(next), current);
                 update
             }
             None => unchanged(current.id),
@@ -570,7 +578,7 @@ impl WatchSession {
         };
         let configs = self.config_stamps(&inner_configs, |path| stamp_like(path, recorded.configs.get(path)));
         if configs != recorded.configs {
-            return self.rebuilt(&mut writer, &current);
+            return self.rebuilt(&mut writer, current);
         }
 
         let mut files = recorded.files;
@@ -587,7 +595,8 @@ impl WatchSession {
         let mut steps = Vec::new();
         for (path, now) in changed {
             if let Some((revision, update)) = next.next(&self.options, &path) {
-                next = Arc::new(revision);
+                let previous = std::mem::replace(&mut next, Arc::new(revision));
+                free_in_background(previous);
                 steps.push(update);
             }
             if next.source_files().contains(&path) {
@@ -600,20 +609,21 @@ impl WatchSession {
         if next.id == current.id {
             return unchanged(current.id);
         }
-        self.forget_checker_answers();
-        self.current.store(Some(next.clone()));
-        match next.is_lazy() {
+        let update = match next.is_lazy() {
             true => merge_lazy_updates(steps, next.id, start),
             false => output_delta(&current.output, &next.output, next.id, start),
-        }
+        };
+        self.forget_checker_answers();
+        self.publish(next, current);
+        update
     }
 
     /// Rebuild from `current` after a resolution config changed. The caller holds the writer lock.
-    fn rebuilt(&self, writer: &mut Freshness, current: &Revision) -> IncrementalUpdate {
+    fn rebuilt(&self, writer: &mut Freshness, current: Arc<Revision>) -> IncrementalUpdate {
         *writer = Freshness::cold(SystemTime::now());
         let (next, update) = current.rebuilt(&self.options);
         self.forget_checker_answers();
-        self.current.store(Some(Arc::new(next)));
+        self.publish(Arc::new(next), current);
         update
     }
 

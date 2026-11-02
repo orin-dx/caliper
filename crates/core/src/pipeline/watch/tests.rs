@@ -1486,3 +1486,44 @@ fn editing_a_wrapper_callees_result_type_updates_the_components_it_builds() {
     assert_eq!(props, ["component", "label", "ref", "renderRoot", "unstyled"]);
     assert_eq!(visible(&session.snapshot()), visible(&crate::pipeline::extract(&options)));
 }
+
+/// Waits for the revision behind `weak` to be freed: the session frees a replaced revision on another thread.
+fn assert_freed_soon(weak: &std::sync::Weak<crate::pipeline::revision::Revision>, what: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while weak.upgrade().is_some() {
+        assert!(std::time::Instant::now() < deadline, "{what}: the replaced revision was never freed");
+        thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn a_revision_replaced_by_update_file_is_freed_once_nobody_holds_it() {
+    let (_tmp, widget, options) = widget_project("export function Widget(props: { a: string }) { return null; }\n");
+    let session = WatchSession::new(options);
+    let _ignored = session.initialize();
+    let replaced = Arc::downgrade(&session.current.load_full().unwrap());
+
+    std::fs::write(&widget, "export function Widget(props: { a: string; bb?: number }) { return null; }\n").unwrap();
+    let update = session.update_file(&widget);
+
+    assert_eq!(update.revision, 2);
+    assert_freed_soon(&replaced, "update_file");
+    assert_matches_cold(&session);
+}
+
+#[test]
+fn a_revision_replaced_by_ensure_fresh_is_freed_once_nobody_holds_it() {
+    let (_tmp, widget, options) = widget_project("export function Widget(props: { a: string }) { return null; }\n");
+    let other = widget.with_file_name("Other.tsx");
+    let session = fresh_session(&options);
+    let replaced = Arc::downgrade(&session.current.load_full().unwrap());
+
+    // Two changed files make `ensure_fresh` build an intermediate revision as well as the published one.
+    std::fs::write(&widget, "export function Widget(props: { a: string; bb?: number }) { return null; }\n").unwrap();
+    std::fs::write(&other, "export function Other(props: { c: boolean }) { return null; }\n").unwrap();
+    let update = session.ensure_fresh();
+
+    assert!(update.revision > 1);
+    assert_freed_soon(&replaced, "ensure_fresh");
+    assert_matches_cold(&session);
+}
