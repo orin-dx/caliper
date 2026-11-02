@@ -4,6 +4,10 @@
 //! attached, [`SemanticHook::refine`] asks the checker for exactly that component, waits a bounded time, and merges
 //! its props over the structural ones. A checker that is slower than the budget leaves the structural answer in
 //! place, and its late answer is kept for the next request of the same, unedited component.
+//!
+//! An answer describes the component's props as the checker read them, which depends on every file the component
+//! imports, not only its own. So the session drops every answer when any source file changes
+//! ([`SemanticHook::invalidate`]), and an answer that was still on its way then is not kept.
 
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,8 +25,15 @@ use crate::types::semantic::{
     merge_semantic_props, SemanticComponent, SemanticOutcome, SemanticProvider, SemanticTarget,
 };
 
-/// What the checker said about one component at one version of its file.
-type Answers = Mutex<FxHashMap<(String, u64), Option<Arc<SemanticComponent>>>>;
+/// What the checker said about one component at one version of its file, and the generation they belong to.
+#[derive(Default)]
+struct AnswerCache {
+    /// Raised by every [`SemanticHook::invalidate`]; an answer asked for under an earlier one is not stored.
+    generation: u64,
+    answers: FxHashMap<(String, u64), Option<Arc<SemanticComponent>>>,
+}
+
+type Answers = Mutex<AnswerCache>;
 
 pub(crate) struct SemanticHook {
     provider: Arc<dyn SemanticProvider>,
@@ -35,7 +46,15 @@ pub(crate) struct SemanticHook {
 
 impl SemanticHook {
     pub(crate) fn new(provider: Arc<dyn SemanticProvider>, wait: Duration) -> Self {
-        Self { provider, wait, answers: Arc::new(Mutex::new(FxHashMap::default())), warned: AtomicBool::new(false) }
+        Self { provider, wait, answers: Arc::new(Mutex::new(AnswerCache::default())), warned: AtomicBool::new(false) }
+    }
+
+    /// Forget every answer, and refuse the ones still being waited for: a source file changed, and the checker's
+    /// props for any component can depend on it. The next request of each component asks the checker again.
+    pub(crate) fn invalidate(&self) {
+        let mut cache = self.answers.lock().unwrap_or_else(PoisonError::into_inner);
+        cache.generation += 1;
+        cache.answers.clear();
     }
 
     /// `answer` with the checker's props, when it has them.
@@ -46,6 +65,7 @@ impl SemanticHook {
             hasher.finish()
         });
         let cache_key = stamp.ok().map(|stamp| (answer.key.clone(), stamp));
+        let generation = self.generation();
 
         if let Some(cached) = cache_key.as_ref().and_then(|key| self.cached(key)) {
             self.apply(&mut answer, cached.as_ref(), mode);
@@ -72,12 +92,12 @@ impl SemanticHook {
                 let component = self.take_component(&answer, outcome, &mut reported);
                 answer.diagnostics.extend(reported);
                 if let Some(key) = cache_key {
-                    self.store(key, component.clone());
+                    self.store(key, generation, component.clone());
                 }
                 self.apply(&mut answer, component.as_ref(), mode);
             }
             Err(RecvTimeoutError::Timeout) => {
-                self.keep_late_answer(receiver, cache_key);
+                self.keep_late_answer(receiver, cache_key, generation);
                 let mut pending = Diagnostic::new(
                     DiagnosticSeverity::Info,
                     DiagnosticCode::SemanticBackend,
@@ -92,16 +112,20 @@ impl SemanticHook {
         answer
     }
 
-    fn cached(&self, key: &(String, u64)) -> Option<Option<Arc<SemanticComponent>>> {
-        self.answers.lock().unwrap_or_else(PoisonError::into_inner).get(key).cloned()
+    fn generation(&self) -> u64 {
+        self.answers.lock().unwrap_or_else(PoisonError::into_inner).generation
     }
 
-    fn store(&self, key: (String, u64), component: Option<Arc<SemanticComponent>>) {
-        self.answers.lock().unwrap_or_else(PoisonError::into_inner).insert(key, component);
+    fn cached(&self, key: &(String, u64)) -> Option<Option<Arc<SemanticComponent>>> {
+        self.answers.lock().unwrap_or_else(PoisonError::into_inner).answers.get(key).cloned()
+    }
+
+    fn store(&self, key: (String, u64), generation: u64, component: Option<Arc<SemanticComponent>>) {
+        store(&self.answers, key, generation, component);
     }
 
     /// Waits for an answer that missed its budget on a thread of its own, so the next request finds it.
-    fn keep_late_answer(&self, receiver: Receiver<SemanticOutcome>, cache_key: Option<(String, u64)>) {
+    fn keep_late_answer(&self, receiver: Receiver<SemanticOutcome>, cache_key: Option<(String, u64)>, generation: u64) {
         let Some(key) = cache_key else { return };
         let answers = self.answers.clone();
         std::thread::Builder::new()
@@ -109,7 +133,7 @@ impl SemanticHook {
             .spawn(move || {
                 if let Ok(outcome) = receiver.recv() {
                     let component = outcome.components.into_iter().next().map(Arc::new);
-                    answers.lock().unwrap_or_else(PoisonError::into_inner).insert(key, component);
+                    store(&answers, key, generation, component);
                 }
             })
             .ok();
@@ -172,5 +196,13 @@ impl SemanticHook {
         );
         provenance.affects = vec![answer.key.clone()];
         answer.diagnostics.push(provenance);
+    }
+}
+
+/// Keeps `component` for `key` unless the cache was invalidated since the question was asked.
+fn store(answers: &Answers, key: (String, u64), generation: u64, component: Option<Arc<SemanticComponent>>) {
+    let mut cache = answers.lock().unwrap_or_else(PoisonError::into_inner);
+    if cache.generation == generation {
+        cache.answers.insert(key, component);
     }
 }
