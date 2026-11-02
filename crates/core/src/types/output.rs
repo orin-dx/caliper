@@ -1,5 +1,7 @@
 //! Semantic output types produced by the resolver (Phase 3).
 
+#![deny(missing_docs)]
+
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -332,32 +334,52 @@ pub struct PropParent {
 #[derive(Debug, Clone, PartialEq)]
 pub enum PropType {
     // ── Primitives
+    /// `string`.
     String,
+    /// `number`.
     Number,
+    /// `boolean`; a `true | false` union is collapsed into this.
     Boolean,
+    /// `null`.
     Null,
+    /// `undefined`.
     Undefined,
+    /// `any`.
     Any,
+    /// `never`.
     Never,
+    /// `unknown`.
     Unknown,
+    /// `void`.
     Void,
 
     // ── Literals
+    /// A string literal type such as `"primary"`, holding the value without its quotes.
     StringLiteral(std::string::String),
+    /// A number literal type such as `3`.
     NumberLiteral(f64),
+    /// `true` or `false` as a type.
     BoolLiteral(bool),
 
     // ── Composites
+    /// `A | B`: the members in declaration order.
     Union(Vec<PropType>),
+    /// `A & B`: the members in declaration order.
     Intersection(Vec<PropType>),
+    /// `T[]` or `Array<T>`: the element type.
     Array(Box<PropType>),
+    /// `[A, B]`: the element types in order.
     Tuple(Vec<PropType>),
     /// `readonly string[]` or `readonly [a, b]`: the array or tuple under the `readonly` operator.
     Readonly(Box<PropType>),
+    /// An object type `{ a: string; b?: number }`: its members and index signatures, in declaration order.
     Object(Vec<ObjectField>),
 
     // ── Named reference (post-resolution)
+    /// A reference to a type by name that the resolver kept rather than expanding (a type from a dependency that was
+    /// not loaded, or one that is better shown as a name), with its type arguments.
     Named {
+        /// The name of the referenced type.
         name: TypeName,
         /// Generic args, already resolved to PropType
         args: Vec<PropType>,
@@ -372,7 +394,9 @@ pub enum PropType {
     Function {
         /// The function's own type parameters: `T` in `<T>(item: T) => ReactNode`.
         type_params: Vec<std::string::String>,
+        /// The parameters in order.
         params: Vec<FunctionParam>,
+        /// What the function returns, as written.
         return_type: Box<PropType>,
     },
     /// `Ref<T>`, `RefObject<T>`, `ForwardedRef<T>` and the other ref types React declares.
@@ -390,7 +414,9 @@ pub enum PropType {
     /// All attributes of an HTML element, minus omitted keys.
     /// Produced when we see ComponentPropsWithoutRef<'button'> etc.
     HtmlAttributes {
+        /// The HTML element whose attributes are inherited: `button` in `ComponentPropsWithoutRef<'button'>`.
         element: std::string::String,
+        /// Attribute names left out of the element's set.
         omitted: Vec<std::string::String>,
     },
 
@@ -398,6 +424,7 @@ pub enum PropType {
     /// Result of CvaVariantPropsHandler — the wrapper is fully dissolved.
     /// Each member is a string literal value.
     LiteralUnion {
+        /// The string literal values, in declaration order.
         members: Vec<std::string::String>,
         /// true if this prop has a defaultVariant
         has_default: bool,
@@ -408,6 +435,8 @@ pub enum PropType {
     SxProps,
 
     // ── Unresolvable — graceful degradation
+    /// A type the resolver gave up on, kept as written with the reason. Every one comes with a diagnostic that
+    /// explains why (see [`OpaqueDetail`]).
     Opaque(OpaqueDetail),
 }
 
@@ -1108,17 +1137,29 @@ pub enum OpaqueReason {
     /// Module augmentation result — needs type checker
     ModuleAugmentation,
     /// Runtime-dependent: cva(), tv(), etc. where args not statically visible
-    RuntimeDependent { function_name: std::string::String },
+    RuntimeDependent {
+        /// The function whose call builds the type: `cva`, `tv`.
+        function_name: std::string::String,
+    },
     /// Import could not be resolved to a file
-    UnresolvableImport { specifier: std::string::String },
+    UnresolvableImport {
+        /// The module specifier as written in the import: `@acme/ui`, `./types`.
+        specifier: std::string::String,
+    },
     /// PandaCSS styled-system not generated yet
     PandaCodegenMissing,
     /// Maximum resolution depth exceeded (circular or too deep)
     DepthExceeded,
     /// Indexed access type (Type["key"]) the static resolver could not follow.
-    IndexedAccess { expression: std::string::String },
+    IndexedAccess {
+        /// The indexed access type as written: `Props["variant"]`.
+        expression: std::string::String,
+    },
     /// Template literal type — partially or fully unresolvable.
-    TemplateLiteral { expression: std::string::String },
+    TemplateLiteral {
+        /// The template literal type as written: `` `${Size}-${Tone}` ``.
+        expression: std::string::String,
+    },
     /// A raw type expression the extractor couldn't parse into any recognized
     /// structural shape (not a depth or circularity problem — see
     /// DepthExceeded for that).
@@ -1198,6 +1239,7 @@ impl PropType {
 pub struct FunctionParam {
     /// `None` for a destructured parameter, which has no single name.
     pub name: Option<std::string::String>,
+    /// The parameter's type; serialized as `type`.
     #[serde(rename = "type")]
     pub param_type: PropType,
     /// The parameter is written `name?: T`.
@@ -1231,8 +1273,11 @@ impl FunctionParam {
 pub struct ObjectField {
     /// The field's name; for an index signature, the key parameter's (`key` in `[key: string]: T`).
     pub name: std::string::String,
+    /// The field's type; for an index signature, the value type.
     pub prop_type: PropType,
+    /// The field is not written `name?: T`.
     pub required: bool,
+    /// The field's JSDoc description, empty when it has none.
     pub description: std::string::String,
     /// The field is written `readonly name: T`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -1268,17 +1313,31 @@ impl ObjectField {
 
 // ─── Statistics ────────────────────────────────────────────────────────────────
 
+/// Counters for one extraction run, written alongside the components.
+///
+/// Four of them (`components_skipped`, `tier1_count`, `tier3_count`, `opaque_count`) are part of the output shape but
+/// the pipeline does not set them: they are always `0` in a real run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtractionStats {
+    /// How many components the output holds.
     pub components_extracted: u32,
+    /// Not set by the pipeline: always `0`.
     pub components_skipped: u32,
+    /// How many source files were parsed.
     pub files_parsed: u32,
+    /// How many `.d.ts` files went through the parse cache, hits and misses together; a miss is parsed.
     pub dts_files_parsed: u32,
+    /// How many of those the cache answered without parsing.
     pub dts_cache_hits: u32,
+    /// How long the run took, in milliseconds. It differs between two runs over the same input, so compare outputs
+    /// without it.
     pub duration_ms: u64,
+    /// Not set by the pipeline: always `0`.
     pub tier1_count: u32,
+    /// Not set by the pipeline: always `0`.
     pub tier3_count: u32,
+    /// Not set by the pipeline: always `0`; the number of opaque types is the number of [`PropType::Opaque`] values.
     pub opaque_count: u32,
 }
 
