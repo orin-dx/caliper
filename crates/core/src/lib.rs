@@ -1,3 +1,5 @@
+#![deny(missing_debug_implementations)]
+
 pub(crate) mod cache;
 pub(crate) mod dependency_types;
 pub(crate) mod extractor;

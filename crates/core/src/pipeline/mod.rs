@@ -182,6 +182,7 @@ impl PipelineOptions {
 
 /// Result of processing a single file change in watch mode. Its JSON writes the updated components' props as ids, with
 /// a `props` table holding every prop they refer to (ADR 0009).
+#[derive(Debug)]
 pub struct IncrementalUpdate {
     /// The session revision this update produced; a consumer can drop an update older than one it already applied.
     pub revision: u64,
