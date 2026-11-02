@@ -304,6 +304,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             } else if self.is_tsx {
                 if let Some(name) = self.extract_pascal_name(declarator) {
                     self.decline_reason = None;
+                    self.alias_candidate = None;
                     let binding = Binding::of(declarator);
                     if let Some(mapping) = self.detect_component(&binding, &name) {
                         self.data.component_mappings.push(mapping);
@@ -322,6 +323,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                         && !self.try_record_wrapper_call(&binding, &name)
                         && !self.try_record_tagged_factory(&binding, &name)
                         && !self.try_record_imported_member_alias(&binding, &name)
+                        && !self.try_defer_identifier_alias(&name, declarator.span)
                     {
                         let message = self.decline_reason.take().unwrap_or_else(|| {
                             format!(

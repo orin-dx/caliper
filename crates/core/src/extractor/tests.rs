@@ -1411,6 +1411,59 @@ fn a_class_extending_a_react_component_type_is_matched_through_its_import_only()
 }
 
 #[test]
+fn an_alias_of_a_component_declared_further_down_the_file_is_that_component() {
+    use crate::types::DetectionRule::FunctionDeclaration;
+    let source = r#"
+        import { memo } from "react";
+        interface CardProps { title: string }
+        export const Card = InternalCard;
+        export const MemoCard = memo(InternalCard);
+        export const Outer = Card;
+        function InternalCard(props: CardProps) { return <div>{props.title}</div>; }
+    "#;
+    let data = parse_file(Utf8Path::new("/test/late.tsx"), source);
+    let found: Vec<(&str, &str)> =
+        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.props_type_name.as_str())).collect();
+    assert_eq!(found, vec![("Card", "CardProps"), ("MemoCard", "CardProps"), ("Outer", "CardProps")]);
+    assert!(data.component_mappings.iter().all(|m| m.rule == FunctionDeclaration));
+    assert_eq!(data.diagnostics.len(), 0);
+}
+
+#[test]
+fn an_alias_whose_component_is_never_declared_is_still_reported_as_a_skipped_candidate() {
+    let source = r#"
+        import { Thing } from "./thing";
+        export const Alias = Thing;
+        export const Later = Missing;
+    "#;
+    let data = parse_file(Utf8Path::new("/test/never.tsx"), source);
+    assert_eq!(data.component_mappings.len(), 0);
+    let messages: Vec<&str> = data.diagnostics.iter().map(|d| d.message.as_str()).collect();
+    assert_eq!(
+        messages,
+        vec![
+            "'Alias' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)",
+            "'Later' is a PascalCase binding but matched no known component pattern (FC annotation, forwardRef, HOC wrapper, or identifier alias)",
+        ]
+    );
+}
+
+#[test]
+fn a_call_that_is_not_a_component_wrapper_around_a_component_declared_later_is_declined() {
+    let source = r#"
+        interface CardProps { title: string }
+        export const Label = getDisplayName(InternalCard);
+        function InternalCard(props: CardProps) { return <div>{props.title}</div>; }
+    "#;
+    let data = parse_file(Utf8Path::new("/test/decline.tsx"), source);
+    assert_eq!(data.component_mappings.iter().map(|m| m.component_name.as_str()).collect::<Vec<_>>(), ["InternalCard"]);
+    assert_eq!(
+        data.diagnostics.iter().map(|d| d.message.as_str()).collect::<Vec<_>>(),
+        vec!["'Label' passes component 'InternalCard' to a call that does not look like a component wrapper"]
+    );
+}
+
+#[test]
 fn a_call_given_a_tag_and_a_config_object_is_a_component_when_a_props_type_beside_it_gives_that_tag() {
     use crate::types::DetectionRule::TaggedFactory;
     let source = r#"
@@ -1977,12 +2030,12 @@ fn file_extension_gating_matrix() {
     assert_eq!(names, vec!["C"], "expected ONLY the AC-004 no-init pattern to map in plain .ts, got {names:?}");
 }
 
-// ── SPEC-EXTRACTOR-001 AC-014: a forward reference (target declared
-// lexically LATER) must not match — the target isn't yet an
-// already-collected component when the wrapping binding is visited.
+// ── SPEC-EXTRACTOR-001 AC-014, reversed: a forward reference (target declared
+// lexically LATER) matches too — the alias is held until the whole file has
+// been seen. A target that is never declared is still a skipped candidate.
 
 #[test]
-fn forward_referenced_wrap_target_is_not_yet_collected_and_is_skipped() {
+fn forward_referenced_wrap_target_is_resolved_once_the_file_has_been_seen() {
     let source = r#"
         const Wrap = memo(Later);
         interface LaterProps { x: string; }
@@ -1991,16 +2044,14 @@ fn forward_referenced_wrap_target_is_not_yet_collected_and_is_skipped() {
     let path = Utf8Path::new("/test/forward-ref.tsx");
     let data = parse_file(path, source);
 
+    let wrap = data.component_mappings.iter().find(|m| m.component_name == "Wrap");
+    assert_eq!(wrap.map(|m| m.props_type_name.as_str()), Some("LaterProps"), "got {:?}", data.component_mappings);
     assert!(
-        !data.component_mappings.iter().any(|m| m.component_name == "Wrap"),
-        "no Wrap mapping should exist for a forward reference, got {:?}",
+        !data.component_mappings.iter().any(|m| m.component_name == "Later"),
+        "the aliased-away base is hidden, got {:?}",
         data.component_mappings
     );
-    assert!(
-        data.diagnostics.iter().any(|d| d.code == DiagnosticCode::SkippedCandidate && d.message.contains("Wrap")),
-        "expected a SkippedCandidate diagnostic identifying 'Wrap' by name, got {:?}",
-        data.diagnostics
-    );
+    assert!(data.diagnostics.is_empty(), "got {:?}", data.diagnostics);
 }
 
 // ── SPEC-EXTRACTOR-001 AC-015: a lowercase top-level binding matching an

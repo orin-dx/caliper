@@ -250,6 +250,11 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) aliased_away: FxHashSet<CompactString>,
     /// Wrapper-call candidates, promoted to mappings in `finish()` once the whole file has been seen.
     pub(super) pending_wrappers: Vec<wrapper::PendingWrapper>,
+    /// Aliases of a component declared further down the file, resolved in `finish()`.
+    pub(super) pending_aliases: Vec<component::PendingAlias>,
+    /// The alias shape `try_rename_identifier_wrapped_component` read for the current declarator when its component was
+    /// not collected yet.
+    pub(super) alias_candidate: Option<(String, Option<component::AliasCall>)>,
     /// Simple local aliases of generic functions, resolved after all declarations have been visited.
     pub(super) pending_function_aliases: Vec<(String, String)>,
     /// Local cast names and the base component and asserted props type they export.
@@ -298,6 +303,8 @@ impl<'src> SourceDataCollector<'src> {
             pending_display_name_renames: Vec::new(),
             aliased_away: FxHashSet::default(),
             pending_wrappers: Vec::new(),
+            pending_aliases: Vec::new(),
+            alias_candidate: None,
             pending_function_aliases: Vec::new(),
             cast_component_aliases: Default::default(),
             pending_local_exports: Vec::new(),
@@ -490,6 +497,7 @@ impl<'src> SourceDataCollector<'src> {
         }
         self.promote_function_aliases();
         self.promote_wrapper_calls();
+        self.promote_identifier_aliases();
         self.promote_reexported_imports();
         // Filtered by original identifier first, before any displayName rename
         // below can change what identifier a mapping currently answers to.

@@ -30,6 +30,29 @@ pub(super) fn peel_expr<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> 
     }
 }
 
+/// What a call wrapping an aliased component is, as read from the call before the component is known.
+#[derive(Clone, Copy)]
+pub(crate) struct AliasCall {
+    /// The call follows the component-wrapper conventions (`memo`, `withX(...)`, `forwardRef`, ...).
+    wrapper: bool,
+    forward_ref: bool,
+}
+
+/// An alias of a component that was not collected yet when the alias was read.
+pub(crate) struct PendingAlias {
+    name: String,
+    inner: String,
+    call: Option<AliasCall>,
+    span: oxc_span::Span,
+}
+
+enum AliasOutcome {
+    Done,
+    /// The aliased component is known but the call around it is not a component wrapper; the reason is the skip's message.
+    Declined(String),
+    NoBase,
+}
+
 /// What the component rules read from a binding: its initializer, span and type annotation. Built from a
 /// `const X = ...` declarator or from an `export default ...` expression, so both go through the same rules.
 #[derive(Clone, Copy)]
@@ -686,42 +709,108 @@ impl<'src> SourceDataCollector<'src> {
     /// own (implementation-only) name is filtered out of the final output in
     /// `finish()` via `aliased_away`.
     pub(super) fn try_rename_identifier_wrapped_component<'a>(&mut self, decl: &Binding<'_, 'a>, name: &str) -> bool {
-        let Some(init) = decl.init.as_ref() else { return false };
-        let (inner_name, call) = match peel_expr(init) {
-            Expression::CallExpression(call) => match call.arguments.first() {
-                Some(Argument::Identifier(id)) => (id.name.as_str(), Some(&**call)),
-                _ => return false,
-            },
-            Expression::Identifier(id) => (id.name.as_str(), None),
-            _ => return false,
-        };
-
-        // The component it receives is not the one it builds when a type argument names the props.
-        if call.is_some_and(|call| self.call_names_props_type(call)) {
-            return false;
-        }
-        let Some(base) = self.data.component_mappings.iter().find(|m| m.component_name == inner_name) else {
-            return false;
-        };
-        // `getDisplayName(Card)` has the same shape as `memo(Card)` but returns a string; only a call that follows the
-        // component-wrapper conventions produces a component.
-        if let Some(call) = call {
-            if !super::evidence::Scope::is_react_wrapper(&*self, call) && !is_component_wrapper_call(call) {
-                self.decline_reason = Some(format!(
-                    "'{name}' passes component '{inner_name}' to a call that does not look like a component wrapper"
-                ));
-                return false;
+        let Some((inner, call)) = self.alias_shape(decl) else { return false };
+        match self.alias_outcome(name, &inner, call) {
+            AliasOutcome::Done => true,
+            AliasOutcome::Declined(reason) => {
+                self.decline_reason = Some(reason);
+                false
+            }
+            AliasOutcome::NoBase => {
+                self.alias_candidate = Some((inner, call));
+                false
             }
         }
-        let mut alias = base.clone();
+    }
+
+    /// The component `decl` re-binds, `const Button = Inner` or `memo(Inner)`, and what the call is, read before `Inner`
+    /// needs to be known. `None` when the initializer is not that shape, or the call names the props it builds with.
+    fn alias_shape<'a>(&mut self, decl: &Binding<'_, 'a>) -> Option<(String, Option<AliasCall>)> {
+        let init = decl.init.as_ref()?;
+        let (inner, call) = match peel_expr(init) {
+            Expression::CallExpression(call) => match call.arguments.first() {
+                Some(Argument::Identifier(id)) => (id.name.as_str().to_owned(), Some(&**call)),
+                _ => return None,
+            },
+            Expression::Identifier(id) => (id.name.as_str().to_owned(), None),
+            _ => return None,
+        };
+        let Some(call) = call else { return Some((inner, None)) };
+        // The component it receives is not the one it builds when a type argument names the props.
+        if self.call_names_props_type(call) {
+            return None;
+        }
+        // `getDisplayName(Card)` has the same shape as `memo(Card)` but returns a string; only a call that follows the
+        // component-wrapper conventions produces a component.
+        let wrapper = super::evidence::Scope::is_react_wrapper(&*self, call) || is_component_wrapper_call(call);
         // `forwardRef(Inner)` makes a component that takes a `ref` even when `Inner` is a plain typed function.
-        if call.is_some_and(|call| self.is_forward_ref_call(call)) {
+        Some((inner, Some(AliasCall { wrapper, forward_ref: self.is_forward_ref_call(call) })))
+    }
+
+    /// Bind `name` to a clone of the component `inner` once that is collected.
+    fn alias_outcome(&mut self, name: &str, inner: &str, call: Option<AliasCall>) -> AliasOutcome {
+        let Some(base) = self.data.component_mappings.iter().find(|m| m.component_name == inner) else {
+            return AliasOutcome::NoBase;
+        };
+        if call.is_some_and(|call| !call.wrapper) {
+            return AliasOutcome::Declined(format!(
+                "'{name}' passes component '{inner}' to a call that does not look like a component wrapper"
+            ));
+        }
+        let mut alias = base.clone();
+        if call.is_some_and(|call| call.forward_ref) {
             alias.rule = DetectionRule::ForwardRef;
         }
         alias.component_name = name.to_owned();
         self.data.component_mappings.push(alias);
-        self.aliased_away.insert(inner_name.into());
+        self.aliased_away.insert(inner.into());
+        AliasOutcome::Done
+    }
+
+    /// Hold back `const Button = Inner` whose `Inner` is not collected yet: it may be declared further down the file.
+    /// Only the alias shape `try_rename_identifier_wrapped_component` just read, and only after every other rule
+    /// declined it.
+    pub(super) fn try_defer_identifier_alias(&mut self, name: &str, span: oxc_span::Span) -> bool {
+        let Some((inner, call)) = self.alias_candidate.take() else { return false };
+        self.pending_aliases.push(PendingAlias { name: name.to_owned(), inner, call, span });
         true
+    }
+
+    /// Resolve the held aliases now that every declaration in the file is known; an alias of an alias takes more than
+    /// one pass. What is still unresolved is reported as the skip it would have been.
+    pub(super) fn promote_identifier_aliases(&mut self) {
+        let mut pending = std::mem::take(&mut self.pending_aliases);
+        loop {
+            let before = pending.len();
+            let mut waiting = Vec::new();
+            for alias in pending {
+                if self.data.component_mappings.iter().any(|m| m.component_name == alias.name) {
+                    continue;
+                }
+                match self.alias_outcome(&alias.name, &alias.inner, alias.call) {
+                    AliasOutcome::Done => {}
+                    AliasOutcome::Declined(reason) => {
+                        self.record_skip(DiagnosticCode::SkippedCandidate, reason, alias.span);
+                    }
+                    AliasOutcome::NoBase => waiting.push(alias),
+                }
+            }
+            pending = waiting;
+            if pending.is_empty() || pending.len() == before {
+                break;
+            }
+        }
+        for alias in pending {
+            self.record_skip(
+                DiagnosticCode::SkippedCandidate,
+                format!(
+                    "'{}' is a PascalCase binding but matched no known component pattern \
+                     (FC annotation, forwardRef, HOC wrapper, or identifier alias)",
+                    alias.name
+                ),
+                alias.span,
+            );
+        }
     }
 
     /// Record `const X = Imported.Member` as a component whose props are the imported member's

@@ -206,7 +206,15 @@ fn value_member_props_at_depth(
                 _ => None,
             });
         }
-        _ => return None,
+        // Not a namespace-like object whose member could be the component; a new variant must say whether it is.
+        CollectedTypeAlias::Passthrough { .. }
+        | CollectedTypeAlias::Omit { .. }
+        | CollectedTypeAlias::Pick { .. }
+        | CollectedTypeAlias::Partial { .. }
+        | CollectedTypeAlias::Required { .. }
+        | CollectedTypeAlias::Union { .. }
+        | CollectedTypeAlias::Intersection { .. }
+        | CollectedTypeAlias::LiteralUnion { .. } => return None,
     };
     let (mapped_file, mapped_name) = resolve_to_canonical(name, &base_file, ctx, &mut ignored)
         .unwrap_or_else(|| (base_file.clone(), name.to_string()));
