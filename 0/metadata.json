@@ -1,0 +1,92 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6F9BQF2QBHZYZJ2B3S1EFMZ",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-02T23:26:36.943774Z",
+  "branch": "oracle/three-tools-report",
+  "checkpoints_count": 3,
+  "save_step_count": 4,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "8a68fd590150",
+  "checkpoint_transcript_start": 2011,
+  "transcript_lines_at_start": 2011,
+  "compact_transcript_start": 168,
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 7519,
+    "cache_read_tokens": 786791,
+    "output_tokens": 812,
+    "api_call_count": 2,
+    "subagent_tokens": {
+      "input_tokens": 24,
+      "cache_creation_tokens": 19916,
+      "cache_read_tokens": 6395062,
+      "output_tokens": 10867,
+      "api_call_count": 13
+    }
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 6,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 35
+  },
+  "summary": {
+    "intent": "Finish trail 157 by building a deterministic agent-eval for Caliper's output (scored against the TypeScript 7.1 checker), then verify, push and link the resulting branch.",
+    "outcome": "A subagent built and committed branch feat/agent-eval-weekly (1deff81e) in a worktree, with 26 passing tests and 18/20 correct locally on antd and shadcn. The follow-up push failed (the link reported the branch missing), and the session ended while rerunning the push to see the real error.",
+    "learnings": {
+      "repo": [
+        "Caliper's weekly job builds only the CLI, not NAPI, so the agent eval reads the whole-output `extract --format toon` table plus canonical JSON diagnostics instead of the sessionComponentToon slice.",
+        "The agent eval scores answers against the TypeScript checker (apps/oracle/src/agent-truth.ts), never against Caliper itself. Outcomes are correct, abstained or silent_wrong, and the reader is a fixed policy with no model involved.",
+        "The policy abstains on degradedBy, warnings or errors naming the component, cut-short, opaque or unreadable types, possible inheritance rows hiding a prop, and absent components whose file has a diagnostic.",
+        "TOON gives only the declaring type's name, so origin questions (own vs inherited from @types/react) can't be answered without guessing and were dropped. Defaults and descriptions aren't checker truth, so they aren't asked about.",
+        "scripts/agent_questions.json isn't in `just lint`'s list, so it had to be formatted manually with oxfmt.",
+        "The worktree branch is named worktree-agent-<id> while the committed feature branch is feat/agent-eval-weekly, which may explain the push/link mismatch."
+      ],
+      "code": [
+        {
+          "path": "scripts/weekly.py",
+          "finding": "Added --agent-eval (try/except-wrapped like the oracle); findings() now runs without a previous record so silent-wrong is reported on the first run; the summary table comes from agent_eval.markdown. May conflict with the three-tools-report worker's edits."
+        },
+        {
+          "path": ".github/workflows/weekly.yml",
+          "finding": "Passes --agent-eval and updates the header comment; zizmor is clean."
+        }
+      ],
+      "workflow": [
+        "Subagent results should be verified independently: the branch was reported committed and signed, but the push and link step failed afterwards.",
+        "When a push-and-link command fails, rerun the push alone with full output to see the real error rather than trusting the link tool's message.",
+        "Run lint tools (oxfmt, oxlint, typos, zizmor) on the specific changed files when `just lint` is skipped because no Rust changed."
+      ]
+    },
+    "friction": [
+      "Pushing the branch did not work: the link step said the branch doesn't exist on the remote, so the push output had to be rerun to diagnose.",
+      "The full weekly.py --agent-eval path couldn't be run end to end locally; only agent_eval.py standalone was run.",
+      "Mantine, Chakra and Spectrum aren't installed locally, so no questions could be written for them.",
+      "The antd negative control `Buttons` ends as abstained instead of a clean correct, because a diagnostic names that file."
+    ],
+    "open_items": [
+      "Resolve the failed push of feat/agent-eval-weekly and open the PR (nothing is pushed or merged yet).",
+      "Run a CI weekly run to confirm the tsx start, the issue.md text and the full --agent-eval path.",
+      "Write questions for Mantine, Chakra and Spectrum after reading their output.",
+      "The first weekly record after merge has no previous agent_eval, so the five-point drop rule only starts comparing the week after.",
+      "Merge origin/main into the branch if weekly.py conflicts with the three-tools-report worker's changes.",
+      "Consider a negative control on a file with no diagnostics so the nonexistent-component case scores correct.",
+      "Consider a way to ask origin questions (own vs inherited) if TOON can expose more than the declaring type's name."
+    ]
+  }
+}
