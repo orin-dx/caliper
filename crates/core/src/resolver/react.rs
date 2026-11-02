@@ -140,8 +140,8 @@ fn mangle_scoped_package_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::PipelineOptions;
     use crate::resolver::ModuleResolvers;
+    use crate::types::options::PipelineOptions;
 
     fn test_resolvers() -> ModuleResolvers {
         ModuleResolvers::new(&PipelineOptions::default())

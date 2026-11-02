@@ -46,6 +46,8 @@ export function Card(props: Alias) {
 
 const Opaque = makeThing();
 
+const Skipped = { unrecognized: true };
+
 export function make<P>(render: (props: P) => null) {
   return render as unknown as React.FC<P & { as?: string }>;
 }

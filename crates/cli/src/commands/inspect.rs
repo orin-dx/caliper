@@ -1,6 +1,6 @@
 use miette::Result;
 
-use crate::config::{build_options, BuildOptionsArgs};
+use crate::config::{build_options, warn_ignored_semantic_config, BuildOptionsArgs};
 use crate::output::print_component;
 
 pub fn cmd_inspect(args: crate::InspectArgs, config_path: Option<&str>) -> Result<i32> {
@@ -15,6 +15,7 @@ pub fn cmd_inspect(args: crate::InspectArgs, config_path: Option<&str>) -> Resul
         no_load_dependencies: args.no_load_dependencies,
         collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
+    warn_ignored_semantic_config("inspect", &options, false);
     let output = caliper_docgen_core::pipeline::extract(&options);
 
     let component = output.components.get(&args.component).ok_or_else(|| {

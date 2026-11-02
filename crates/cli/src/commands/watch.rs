@@ -10,7 +10,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use miette::{IntoDiagnostic, Result};
 use watchexec_signals::Signal;
 
-use crate::config::{build_options, BuildOptionsArgs};
+use crate::config::{build_options, warn_ignored_semantic_config, BuildOptionsArgs};
 use crate::output::{print_diagnostics, print_summary, write_atomic};
 
 /// Watch mode never runs `--strict` — there's no CLI flag for it — so this is always `exit_code(false)`.
@@ -40,6 +40,7 @@ fn start_session(
         no_load_dependencies: args.no_load_dependencies,
         collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
+    warn_ignored_semantic_config("watch", &options, quiet);
 
     if !quiet {
         println!();
@@ -160,7 +161,13 @@ fn spawn_keyboard_thread(session: Arc<WatchSession>, quiet: bool, out: Option<St
         match quit {
             // watchexec has no graceful-quit handle reachable from this thread, so this hard-exits, with the tracked
             // code so a session that quit on an unresolved error still fails the shell.
-            Ok(code) => std::process::exit(code),
+            Ok(code) => {
+                #[allow(
+                    clippy::exit,
+                    reason = "the keyboard quit runs off the main thread, which watchexec never returns to"
+                )]
+                std::process::exit(code);
+            }
             Err(error) => tracing::warn!("key shortcuts stopped: {error}; stop watching with Ctrl-C"),
         }
     });

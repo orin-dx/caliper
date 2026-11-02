@@ -2,6 +2,8 @@
 
 **Status:** Accepted **Date:** 2026-07-22 (retroactive)
 
+**Note (2026-11-02):** The forgotten-bump risk below now has two backstops. The cache header carries a source fingerprint (`CacheHeader::fingerprint`, set by `crates/core/build.rs`), so any change to the build discards the cache. `cache/golden.rs` snapshots the encoded `SourceData` bytes for the current `CACHE_SCHEMA_VERSION`, so a shape change without a bump fails a test. Field order is still the wire format and the bump rule stands.
+
 ## Context
 
 The DTS parse cache persists `SourceData` across runs so unchanged `.d.ts` files don't get re-parsed. `rmp_serde::to_vec`/`from_slice` — the default, and what this project uses — encode structs _positionally_: as an array of field values in declaration order, not a map of field names. A `_named` variant encodes as a map instead, at a size and speed cost we haven't needed to pay.

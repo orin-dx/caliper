@@ -3,6 +3,8 @@
 //! The backend (`caliper-docgen-semantic`) owns the process, the protocol and the checker walk; this module owns only
 //! the result shape and the merge rules of `docs/type-checker-integration.md`, so `crates/core` stays free of I/O.
 
+#![deny(missing_docs)]
+
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
@@ -16,9 +18,13 @@ use crate::types::output::{ComponentEntry, ExtractionOutput, ParsedProp, PropTyp
 /// One prop as the checker reports it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SemanticProp {
+    /// The prop's name as written in the props type.
     pub name: String,
+    /// The type the checker computed for it, in the same shape the structural resolver produces.
     pub prop_type: PropType,
+    /// Whether the checker found the prop non-optional.
     pub required: bool,
+    /// The prop's JSDoc description, empty when it has none; the merge then keeps the structural description.
     pub description: String,
     /// Declared by `@types/react` (`children`, `aria-*`, handlers, `className`): not the component's own prop.
     pub react_declared: bool,
@@ -44,6 +50,8 @@ pub struct PropInterner {
 }
 
 impl PropInterner {
+    /// The one shared copy of `prop`: an equal prop interned earlier, or `prop` itself the first time. If the internal
+    /// lock is poisoned it returns `prop` unshared rather than failing.
     pub fn share(&self, prop: SemanticProp) -> Arc<SemanticProp> {
         let hash = prop.structural_hash();
         let Ok(mut by_hash) = self.by_hash.lock() else { return Arc::new(prop) };
@@ -60,7 +68,9 @@ impl PropInterner {
 /// One component the checker answered for, found by the file and name the structural pass reported.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SemanticComponent {
+    /// The file that declares the component, as the structural pass reported it.
     pub file_path: Utf8PathBuf,
+    /// The component's name, as the structural pass reported it; with `file_path` it identifies the entry to merge into.
     pub display_name: String,
     /// Declared props in declaration order, with the `@types/react` ones the request asked for.
     pub props: Vec<Arc<SemanticProp>>,
@@ -69,8 +79,12 @@ pub struct SemanticComponent {
 /// A component the backend left to the structural result, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticFallback {
+    /// The file that declares the component.
     pub file_path: Utf8PathBuf,
+    /// The component's name, as the structural pass reported it.
     pub display_name: String,
+    /// Why the checker did not answer, for example that the component is not exported by its module. The merge groups
+    /// components by this text into one warning.
     pub reason: String,
 }
 
@@ -78,16 +92,23 @@ pub struct SemanticFallback {
 /// error: the structural result is always a complete answer on its own.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SemanticOutcome {
+    /// The components the checker answered for; each replaces the props of the structural entry it names.
     pub components: Vec<SemanticComponent>,
+    /// The requested components the checker left to the structural result, each with its reason.
     pub fallbacks: Vec<SemanticFallback>,
+    /// What the backend itself reports (it could not start, it timed out); merged into the output's diagnostics.
     pub diagnostics: Vec<Diagnostic>,
 }
 
 /// A component the checker may be asked about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticTarget {
+    /// The file that declares the component.
     pub file_path: Utf8PathBuf,
+    /// The component's name, as the structural pass reported it.
     pub display_name: String,
+    /// Whether the module exports the component, by name or as `default`. The checker answers only for exported
+    /// ones and reports the rest as fallbacks.
     pub exported: bool,
     /// Props the structural pass already has a description for. The checker is not asked for those: it is 65% of
     /// the requests on Mantine, and the merge keeps the structural description when the checker's is empty.
@@ -102,6 +123,8 @@ pub struct SemanticTarget {
 /// `request` never blocks: it queues the targets and returns the receiver that yields the outcome once the checker
 /// has it, so a caller can wait a bounded time and take the structural answer when the checker is slower.
 pub trait SemanticProvider: Send + Sync {
+    /// Queues `targets` for the checker and returns at once with the receiver that will yield their
+    /// [`SemanticOutcome`].
     fn request(&self, targets: Vec<SemanticTarget>) -> std::sync::mpsc::Receiver<SemanticOutcome>;
 }
 
@@ -127,7 +150,7 @@ pub fn apply_semantic_props(
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
 ) {
     // The whole-project merge replaces the props and leaves `@types/react`'s to the inheritance layers.
-    replace_props(entry, semantic.props.iter().filter(|prop| !prop.react_declared), false, shared);
+    replace_props(entry, semantic.props.iter().filter(|prop| !prop.react_declared), Unanswered::Drop, shared);
 }
 
 /// Merges the checker's `props` into `entry` by name: the checker's type, optionality and description win where both
@@ -138,13 +161,22 @@ pub fn merge_semantic_props<'a>(
     props: impl Iterator<Item = &'a Arc<SemanticProp>>,
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
 ) -> usize {
-    replace_props(entry, props, true, shared)
+    replace_props(entry, props, Unanswered::Keep, shared)
+}
+
+/// What a merge does with a structural prop the checker did not return.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unanswered {
+    /// The checker decides which props exist, as in the whole-project merge: the structural prop is dropped.
+    Drop,
+    /// The checker's props are merged by name, as in a session's merge: the structural prop stays as resolved.
+    Keep,
 }
 
 fn replace_props<'a>(
     entry: &mut ComponentEntry,
     props_in: impl Iterator<Item = &'a Arc<SemanticProp>>,
-    keep_unanswered: bool,
+    unanswered: Unanswered,
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
 ) -> usize {
     let mut props: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
@@ -179,7 +211,7 @@ fn replace_props<'a>(
         props.insert(prop.name.clone(), merged);
     }
     let mut kept = 0;
-    if keep_unanswered {
+    if unanswered == Unanswered::Keep {
         for (name, structural) in &entry.props {
             if !props.contains_key(name) {
                 props.insert(name.clone(), structural.clone());

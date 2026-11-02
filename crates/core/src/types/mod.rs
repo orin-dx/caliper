@@ -12,10 +12,12 @@
 //! - `output`    — semantic output types produced by the resolver
 //! - `diagnostic`— Diagnostic, DiagnosticSeverity, DiagnosticCode
 //! - `global`    — GlobalSourceData + ResolveState (the shared resolution context)
+//! - `options`   — PipelineOptions and the mode enums it carries (re-exported by `pipeline`)
 
 pub mod collected;
 pub mod diagnostic;
 pub mod global;
+pub mod options;
 pub mod output;
 pub mod semantic;
 
@@ -23,4 +25,5 @@ pub mod semantic;
 pub use collected::*;
 pub use diagnostic::*;
 pub use global::*;
+pub use options::*;
 pub use output::*;

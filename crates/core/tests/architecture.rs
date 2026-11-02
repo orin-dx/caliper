@@ -65,7 +65,50 @@ fn in_layer(rel: &str, layer: &str) -> bool {
 }
 
 fn mentions(file: &SourceFile, needle: &str) -> bool {
-    file.code.iter().any(|l| l.contains(needle))
+    file.code.iter().any(|l| l.contains(needle)) || grouped_import_of(file, needle)
+}
+
+/// Whether a grouped `use crate::{pipeline::X, types::Y}` (on one line or several) imports the top-level module a
+/// `crate::<module>` needle names. A plain substring search misses it.
+fn grouped_import_of(file: &SourceFile, needle: &str) -> bool {
+    let Some(module) = needle.strip_prefix("crate::") else {
+        return false;
+    };
+    let text = file.code.join(" ");
+    let mut rest = text.as_str();
+    while let Some(at) = rest.find("crate::{") {
+        let group = &rest[at + "crate::{".len()..];
+        let mut depth = 1usize;
+        let mut item_start = true;
+        for (i, c) in group.char_indices() {
+            match c {
+                '{' => {
+                    depth += 1;
+                    item_start = false;
+                }
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                ',' => item_start = depth == 1,
+                c if c.is_whitespace() => {}
+                _ => {
+                    if item_start && depth == 1 {
+                        let name: String =
+                            group[i..].chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+                        if name == module {
+                            return true;
+                        }
+                    }
+                    item_start = false;
+                }
+            }
+        }
+        rest = group;
+    }
+    false
 }
 
 /// Files in `layers` that mention any of `forbidden`, minus allowlisted `(file, reason)` entries. An allowlist entry
@@ -149,16 +192,50 @@ fn extractor_and_known_never_import_resolver_or_pipeline() {
 }
 
 #[test]
-fn resolver_never_imports_pipeline_beyond_the_allowlist() {
-    // Removing these is roadmap item 2.3 (ResolverOptions moves into types/).
+fn resolver_and_dependency_types_never_import_pipeline() {
+    // The options both read live in `types/options.rs`; `pipeline` re-exports them.
+    let violations = forbidden_imports(
+        &core_sources(),
+        &["resolver", "dependency_types"],
+        &["crate::pipeline", "super::pipeline"],
+        &[],
+    );
+    assert_eq!(violations, Vec::<String>::new());
+}
+
+#[test]
+fn types_never_import_resolver_or_pipeline() {
+    let violations = forbidden_imports(
+        &core_sources(),
+        &["types"],
+        &["crate::resolver", "crate::pipeline", "crate::dependency_types"],
+        &[],
+    );
+    assert_eq!(violations, Vec::<String>::new());
+}
+
+#[test]
+fn types_import_plugin_only_for_the_registry_in_pipeline_options() {
+    let violations = forbidden_imports(
+        &core_sources(),
+        &["types"],
+        &["crate::plugin"],
+        &[("types/options.rs", "PipelineOptions.plugins holds the PluginRegistry; plugin.rs in turn names SourceData")],
+    );
+    assert_eq!(violations, Vec::<String>::new());
+}
+
+#[test]
+fn the_resolver_names_dependency_types_only_for_the_layer_it_reads() {
+    // `dependency_types` sits above the resolver: it loads declarations through the resolver's module resolution.
+    // The one edge back is the `DependencyLayer` value the resolver reads. Moving that type (and its `chain`,
+    // `resolves_like` and size helpers) under `types/` would remove it; that is more than a move, so it is recorded
+    // here instead of hidden.
     let violations = forbidden_imports(
         &core_sources(),
         &["resolver"],
-        &["crate::pipeline"],
-        &[
-            ("resolver/extends.rs", "HtmlAttributeMode lives in pipeline until 2.3"),
-            ("resolver/mod.rs", "PipelineOptions and HtmlAttributeMode live in pipeline until 2.3"),
-        ],
+        &["crate::dependency_types"],
+        &[("resolver/mod.rs", "ResolutionContext holds the loaded Arc<DependencyLayer>")],
     );
     assert_eq!(violations, Vec::<String>::new());
 }
@@ -247,6 +324,14 @@ fn rules_fire_on_violations() {
     ];
     assert_eq!(forbidden_imports(&bad, &["extractor"], &["crate::resolver"], &[]).len(), 1);
     assert_eq!(forbidden_imports(&bad, &["resolver"], &["crate::pipeline"], &[]).len(), 1);
+    let grouped = [
+        file("resolver/a.rs", "use crate::{\n    types::Foo,\n    pipeline::PipelineOptions,\n};\n"),
+        file("resolver/b.rs", "use crate::{types::{Foo, Bar}, known};\n"),
+        file("resolver/c.rs", "use crate::{known, pipeline};\n"),
+    ];
+    let hits = forbidden_imports(&grouped, &["resolver"], &["crate::pipeline"], &[]);
+    assert_eq!(hits.len(), 2, "{hits:?}");
+    assert!(hits.iter().all(|h| !h.starts_with("resolver/b.rs")));
     assert_eq!(hash_maps_in(&bad, "types/output.rs").len(), 1);
     assert_eq!(oxc_in_public_signatures(&bad).len(), 1);
     assert_eq!(constructor_outside(&bad, "OpaqueDetail::new(", &[]).len(), 1);

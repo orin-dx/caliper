@@ -1,6 +1,6 @@
 use miette::{IntoDiagnostic, Result};
 
-use crate::config::{build_options, BuildOptionsArgs};
+use crate::config::{build_options, warn_ignored_semantic_config, BuildOptionsArgs};
 use crate::output::{print_diagnostics, print_summary};
 
 /// Returns the process exit code (0 = clean, 1 = --strict and warnings found,
@@ -18,6 +18,7 @@ pub fn cmd_check(args: crate::CheckArgs, quiet: bool, config_path: Option<&str>)
         no_load_dependencies: args.no_load_dependencies,
         collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
+    warn_ignored_semantic_config("check", &options, quiet);
     let output = caliper_docgen_core::pipeline::extract(&options);
 
     if args.json {

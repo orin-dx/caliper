@@ -944,7 +944,7 @@ fn test_html_attribute_mode_curated_does_not_expand_real_button_attrs() {
     );
 
     let options =
-        PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Curated, ..Default::default() };
+        PipelineOptions { html_attributes: crate::types::options::HtmlAttributeMode::Curated, ..Default::default() };
     let ctx = ResolutionContext::new(Arc::new(global), &options);
     let mapping = ComponentMapping::new(
         "Button".into(),
@@ -1012,7 +1012,8 @@ fn test_html_attribute_mode_full_expands_real_button_attrs() {
         },
     );
 
-    let options = PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::Full, ..Default::default() };
+    let options =
+        PipelineOptions { html_attributes: crate::types::options::HtmlAttributeMode::Full, ..Default::default() };
     let ctx = ResolutionContext::new(Arc::new(global), &options);
     let mapping = ComponentMapping::new(
         "Button".into(),
@@ -1056,7 +1057,8 @@ fn test_html_attribute_mode_none_suppresses_notable_inherited() {
         },
     );
 
-    let options = PipelineOptions { html_attributes: crate::pipeline::HtmlAttributeMode::None, ..Default::default() };
+    let options =
+        PipelineOptions { html_attributes: crate::types::options::HtmlAttributeMode::None, ..Default::default() };
     let ctx = ResolutionContext::new(Arc::new(global), &options);
     let mapping = ComponentMapping::new(
         "Button".into(),
@@ -2877,7 +2879,7 @@ fn an_interface_chain_expanded_for_a_pick_is_not_reused_where_it_collapses() {
          export function Q(props: QProps) {{ return null; }}\n"
     );
     let options = PipelineOptions {
-        collapse_inherited_props: crate::pipeline::CollapseInheritedProps::All,
+        collapse_inherited_props: crate::types::options::CollapseInheritedProps::All,
         ..Default::default()
     };
     let (shared, results) = resolve_shared_with(&dir, &[("Comp.tsx", &source)], &["P", "Q"], &options);
@@ -2995,13 +2997,15 @@ fn component_mapping_is_the_first_match_a_scan_finds() {
             crate::types::DetectionRule::FunctionDeclaration,
         )
     };
-    let mut global = GlobalSourceData::default();
-    global.component_mappings = vec![
-        mapping("Button", "FirstProps", "/a/button.tsx"),
-        mapping("Button", "SecondProps", "/b/button.tsx"),
-        mapping("Button", "ShadowedProps", "/a/button.tsx"),
-        mapping("Card", "CardProps", "/a/card.tsx"),
-    ];
+    let global = GlobalSourceData {
+        component_mappings: vec![
+            mapping("Button", "FirstProps", "/a/button.tsx"),
+            mapping("Button", "SecondProps", "/b/button.tsx"),
+            mapping("Button", "ShadowedProps", "/a/button.tsx"),
+            mapping("Card", "CardProps", "/a/card.tsx"),
+        ],
+        ..Default::default()
+    };
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
     let props_of = |file: &str, name: &str| {
         ctx.component_mapping(Utf8Path::new(file), name).map(|found| found.props_type_name.to_string())

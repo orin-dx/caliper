@@ -112,6 +112,7 @@ fn dropping_the_checker_stops_its_process_and_thread() {
 
 /// The real `tsc` the tests below run against, or `None` to skip them. Skipping is for a machine without it: on CI
 /// (`CI` is set) a missing one fails the run.
+#[allow(clippy::print_stderr, reason = "a skipped test says so, since a silent skip looks like a pass")]
 fn real_tsc() -> Option<std::ffi::OsString> {
     let tsc = std::env::var_os("CALIPER_TEST_TSC");
     if tsc.is_none() {
@@ -178,13 +179,13 @@ fn the_real_checker_lists_the_same_prop_names_as_the_structural_pass_in_every_ht
         let options =
             || PipelineOptions { src_dirs: vec![root.clone()], html_attributes: mode, ..PipelineOptions::default() };
         let structural = WatchSession::lazy(options());
-        let _ = structural.initialize();
+        drop(structural.initialize());
         let mut config = OnDemandConfig::new(root.clone());
         config.tsc_path = Some(Utf8PathBuf::from(tsc.to_str().unwrap()));
         config.request_timeout = Duration::from_secs(60);
         let checked = WatchSession::lazy(options())
             .with_semantic(std::sync::Arc::new(OnDemand::new(config)), Duration::from_secs(60));
-        let _ = checked.initialize();
+        drop(checked.initialize());
 
         for key in ["WithChildren", "OwnChildren", "Div"] {
             let before = structural.component(key).unwrap();

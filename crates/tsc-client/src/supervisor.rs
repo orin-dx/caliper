@@ -17,6 +17,8 @@ const BACKOFF_STEPS: [Duration; 3] =
     [Duration::from_millis(200), Duration::from_millis(400), Duration::from_millis(800)];
 const BACKOFF_MAX: Duration = Duration::from_secs(5);
 
+/// How a [`Supervisor`] starts `tsc`, how long it waits, and how large a frame it accepts. Build one with
+/// [`SupervisorConfig::new`] and adjust the public fields.
 #[derive(Debug, Clone)]
 pub struct SupervisorConfig {
     /// Path to the `tsc` binary, e.g. `node_modules/typescript/bin/tsc` — resolving
@@ -29,7 +31,9 @@ pub struct SupervisorConfig {
     /// `7.1.4`, not `7.10.0`). The protocol has no version handshake (ADR 0006), so this and the initialize call
     /// that follows the spawn are the whole check — the caller decides which builds it has traced the protocol on.
     pub expected_versions: &'static [&'static str],
+    /// How long a start-up handshake may take before it fails; 10 seconds by default.
     pub handshake_timeout: Duration,
+    /// The largest frame body the reader accepts; a larger declared length ends the session with `OversizedFrame`.
     pub max_frame_bytes: usize,
     /// Extra environment variables for the spawned process. Empty for real use; tests
     /// use this to pick a `fake-tsc` scenario via `FAKE_TSC_SCENARIO`.
@@ -37,6 +41,8 @@ pub struct SupervisorConfig {
 }
 
 impl SupervisorConfig {
+    /// A configuration for the `tsc` at `tsc_path`, run in `cwd`, that accepts the `expected_versions`, with a 10 second
+    /// handshake timeout, the default frame cap and no extra environment.
     pub fn new(tsc_path: Utf8PathBuf, cwd: Utf8PathBuf, expected_versions: &'static [&'static str]) -> Self {
         Self {
             tsc_path,
@@ -132,6 +138,13 @@ pub struct Supervisor {
 }
 
 impl Supervisor {
+    /// Starts `tsc --api` and returns once its session is up.
+    ///
+    /// # Errors
+    ///
+    /// [`TscClientError::SpawnFailed`] when the binary cannot be started, and
+    /// [`TscClientError::UnsupportedVersion`] or [`TscClientError::VersionCheckFailed`] when its `package.json` version
+    /// is not one of the configured `expected_versions`.
     pub async fn spawn(config: SupervisorConfig) -> Result<Self, TscClientError> {
         let (child, client) = spawn_process(&config).await?;
         Ok(Self { child, client, config, restart_attempts: Vec::new(), failed: false })

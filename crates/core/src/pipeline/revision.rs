@@ -23,10 +23,8 @@ use crate::types::*;
 use super::discover::{discover_files, is_source_file, should_skip};
 
 mod lazy;
-use super::{
-    canonicalize_first_src_dir, collect_public_enums, merge_parsed_dts_file, parse_cached_dts_file, resolve_guarded,
-    HtmlAttributeMode, IncrementalUpdate, PipelineOptions,
-};
+use super::{collect_public_enums, merge_parsed_dts_file, parse_cached_dts_file, resolve_guarded, IncrementalUpdate};
+use crate::types::options::canonicalize_first_src_dir;
 pub use lazy::{ComponentAnswer, ComponentLocation};
 
 /// `@types/react` indexed on its own, for curated mode's HTML-attribute lookups: a prop that an HTML layer's element
@@ -643,8 +641,9 @@ impl Revision {
         let mut seen_names: FxHashMap<String, u32> = FxHashMap::default();
         for (id, _) in component_ids(&self.global, options) {
             let Some((mut entry, resolved_diagnostics)) = take(&id) else { continue };
-            // An alias of an imported component whose package isn't loaded has nothing to document.
-            if entry.detected_by == DetectionRule::ImportedMemberAlias
+            // An alias of an imported component whose package isn't loaded, or a call whose result is no component,
+            // has nothing to document.
+            if matches!(entry.detected_by, DetectionRule::ImportedMemberAlias | DetectionRule::FactoryResult)
                 && entry.props.is_empty()
                 && entry.inheritance.is_empty()
             {

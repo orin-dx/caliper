@@ -4,6 +4,7 @@
 //! [`extract`] runs the pipeline once over a set of source directories and returns an [`ExtractionOutput`].
 //! [`pipeline::WatchSession`] keeps a revision of that output up to date as files change, or answers for one
 //! component at a time. Problems are reported as [`Diagnostic`]s in the output, not as errors.
+#![deny(missing_debug_implementations)]
 
 pub(crate) mod cache;
 pub(crate) mod dependency_types;

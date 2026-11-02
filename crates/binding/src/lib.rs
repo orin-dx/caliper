@@ -1,3 +1,9 @@
+//! The Node binding (NAPI) over `caliper-docgen-core`: one-shot extraction and long-lived sessions for hosts that run
+//! in-process, such as the Vite plugin and the Storybook addon. Every entry point contains a panic and reports it
+//! instead of crashing the host (ADR 0005).
+
+#![deny(missing_docs)]
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 
@@ -92,13 +98,19 @@ fn next_session_id() -> u32 {
 /// Options passed from TypeScript — flat struct for easy NAPI marshalling.
 #[napi(object)]
 pub struct JsExtractOptions {
+    /// Source directories to scan.
     pub src_dirs: Vec<String>,
+    /// Extra glob-like patterns to exclude (on top of built-in: stories, tests, snapshots).
     pub exclude: Option<Vec<String>>,
     /// `'full'` (the default) lists all of an element's attributes, `'curated'` a compact subset, `'none'` none.
     #[napi(ts_type = "'curated' | 'full' | 'none'")]
     pub html_attributes: Option<String>,
+    /// Path to the tsconfig that governs module resolution. When unset, each importing file uses the nearest
+    /// `tsconfig.json` above it.
     pub tsconfig_path: Option<String>,
+    /// Additional builtin type names beyond the React standard set.
     pub extra_builtins: Option<Vec<String>>,
+    /// Cache directory; by default one under `node_modules/.cache/caliper-docgen` above the first source directory.
     pub cache_dir: Option<String>,
     /// Read and write the on-disk caches (default `true`). `false` reads and writes nothing under `cacheDir`; the
     /// output is the same.
@@ -509,7 +521,9 @@ pub fn session_component_keys(session_id: u32) -> Vec<String> {
 /// What a lazy session has indexed and resolved so far. `None` for an eager, unknown or uninitialized session.
 #[napi(object)]
 pub struct JsLazyStats {
+    /// The number of the session's current revision, one higher for every change that produced a new one.
     pub revision: u32,
+    /// Source files the session holds.
     pub files: u32,
     /// Components found by parsing.
     pub components: u32,
@@ -519,6 +533,8 @@ pub struct JsLazyStats {
     pub dependency_files: u32,
 }
 
+/// What a lazy session has indexed and resolved so far, as [`JsLazyStats`]. `null` for an eager, unknown or
+/// uninitialized session.
 #[napi]
 pub fn session_stats(session_id: u32) -> Option<JsLazyStats> {
     caliper_docgen_core::panic_guard::contain_panic("session_stats", move || {

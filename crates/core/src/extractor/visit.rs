@@ -299,6 +299,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 self.record_object_assign_declarator(&name, declarator.init.as_ref());
                 if self.function_depth == 0 {
                     self.try_record_cast_component_alias(declarator, &name);
+                    if let Some(init) = declarator.init.as_ref() {
+                        self.record_bound_function_result(&name, init);
+                    }
                 }
                 if self.function_depth == 0 && node.kind.is_const() {
                     if let Some(Expression::Identifier(target)) =
@@ -320,6 +323,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             } else if self.is_tsx {
                 if let Some(name) = self.extract_pascal_name(declarator) {
                     self.decline_reason = None;
+                    self.argument_declined = false;
                     self.alias_candidate = None;
                     let binding = Binding::of(declarator);
                     if let Some(mapping) = self.detect_component(&binding, &name) {
@@ -339,6 +343,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                         && !self.try_record_wrapper_call(&binding, &name)
                         && !self.try_record_tagged_factory(&binding, &name)
                         && !self.try_record_imported_member_alias(&binding, &name)
+                        && !self.try_record_factory_call(&binding, &name)
                         && !self.try_defer_identifier_alias(&name, declarator.span)
                     {
                         // `MENU_OPTIONS` is a constant, not a component that failed to qualify; a rule that gave a
@@ -609,6 +614,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     {
                         let binding = Binding { init: Some(expr), span: node.span, annotation: None };
                         self.decline_reason = None;
+                        self.argument_declined = false;
                         if let Some(mapping) = self.detect_component(&binding, &name) {
                             self.data.component_mappings.push(mapping);
                         } else {
