@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_014mhBUSKsvxTKxpG3uWDZyt",
+  "agent_id": "aab89d4ec8820cc42",
+  "subagent_type": "fork",
+  "task_description": "Trail 154 dependency-loaded perf",
+  "token_usage": {
+    "input_tokens": 253,
+    "cache_creation_tokens": 212970,
+    "cache_read_tokens": 27103320,
+    "output_tokens": 108992,
+    "api_call_count": 136
+  },
+  "started_at": "2026-11-02T10:10:07.871864-08:00",
+  "completed_at": "2026-11-02T10:52:05.35204-08:00"
+}

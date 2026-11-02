@@ -1,0 +1,266 @@
+We're going to pickup more work to tackle getting to a v1 alpha of caliper
+
+---
+
+<pasted_content id="5929">
+The plan is saved at /Users/gabe/.claude/projects/-Users-gabe-Projects-caliper/plan/next-trails-2026-11-02.md. It lives outside the repo, so any session can read it without a branch. The file has the goal, current state, your decisions, all six trails with acceptance criteria and branch tables, the waves, the process rules, how to track with Entire, and the open unknowns.
+
+What the file doesn't settle:
+- Trail 6 decisions: the release-flow choices (product package, attached binaries, attestations) are marked as not yet answered by you.
+- Research outputs: the raw reports behind the plan live only in a temporary workflow output, so I put their key facts into the file.
+- Entire: its features come from its help text, and most are untried.
+
+Prompt for the coordinator session (it creates the trails, then waits):
+
+Read /Users/gabe/.claude/projects/-Users-gabe-Projects-caliper/plan/next-trails-2026-11-02.md in full, then the memory note plan-trails-before-branches.md. You are the coordinator. Do Wave 0 only: create the six trails intent-only with the acceptance criteria and branch tables from the plan, confirm the trail numbers back to me, and wait. Do not create branches or PRs.
+
+Prompt for each worker session, after the trails exist (replace N):
+
+Read /Users/gabe/.claude/projects/-Users-gabe-Projects-caliper/plan/next-trails-2026-11-02.md (the section for trail N and the Process section) and run `entire trail show N`. You own trail N only. Follow the plan's branch table, link-first flow and CI checklist. Fan out independent branches with a workflow in isolated worktrees; do stacked branches in order. Report numbers against the baselines in the plan. Update the trail body as branches land. Do not merge, and do not touch other trails' files.
+
+Start trails 1 and 2 in parallel first, as the plan says. Both prompts are also in the file's last section.
+</pasted_content id="5929">
+
+---
+
+Keep going on this work until completely implemented, research, etc
+
+---
+
+<task-notification>
+<task-id>ae0455876eca68c84</task-id>
+<tool-use-id>toolu_01L3fwo9n6dcD8dtK7dMY4gX</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/ad4b3461-bb6f-49f0-bb4d-997d9b8887ba/tasks/ae0455876eca68c84.output</output-file>
+<status>completed</status>
+<summary>Agent "Trail 153 oracle adapters stack" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Both oracle branches are done, committed and signed locally. Nothing is pushed and there are no PRs. Worktree: `/Users/gabe/Projects/caliper/.claude/worktrees/agent-ae0455876eca68c84`. I did not do `oracle/three-tools-report` or look at `weekly.py`.
+
+## Branches (stacked)
+
+| Branch | Base | Tip |
+|---|---|---|
+| `oracle/function-marker-rule` | main (`2daef927`) | `770d0826` |
+| `oracle/tool-adapters` | `oracle/function-marker-rule` | `1bc84dae` |
+
+- **function-marker-rule**
+  - Files: `apps/oracle/src/oracle-compare.ts` and `apps/oracle/tests/oracle-compare.test.ts`.
+  - Rule is now `(kp.optional &amp;&amp; !cp.optional) || (kp.rest &amp;&amp; !cp.rest)`.
+  - Added 4 tests.
+- **tool-adapters**
+  - New `apps/oracle/src/tool-norm.ts` with one TS-text mapper, `typeFromText`, plus `rdtNorm` and `rdgNorm`.
+  - New `apps/oracle/tests/tool-norm.test.ts` with 13 tests built from real Segmented output.
+  - `scripts/rdt.mjs` keeps `type` unchanged and adds `typeObject` for props not under `node_modules/@types/react/`. I did not filter to own props, because `weekly.py` counts the @types/react props.
+  - `scripts/rdg.mjs` keeps `tsType` without `signature` and adds `failedFiles` next to `failed`.
+  - `docs/measurement.md` line 52 only: one passage reworded.
+
+## Numbers
+- **Caliper's oracle numbers do not change.** On antd and shadcn the reports are identical before and after the rule change. antd: 3070 shared props, identical 1763, spelled 1095, less precise 211, wrong 0, checker any/error 1. shadcn: 6533 shared, identical 4237, spelled 1554, less precise 682, wrong 0, any/error 60. This used the Oct-30 binary in another worktree (`agent-a9b87f2da7f20385f`, read-only), not a fresh build of main.
+- **react-docgen import-following verified.** A props interface imported from a sibling file resolved, and the source shows its default importer is `fsImporter`. The old "reads each file alone" claim was wrong.
+- **react-docgen throws on 17% to 21% of files.** antd 51 of 295, shadcn 265 of 1240.
+- **Enum share.** Enums are 5.4% of antd's own props (320 of 5,966) and 4.0% of shadcn's (581 of 14,492).
+- **Dump size.** The RDT dump grows 11.8% (antd) and 1.1% (shadcn).
+- **Adapter output.** Unreadable text, such as a printer's `Foo&lt;...&gt;`, maps to opaque, which scores less precise, never wrong. Opaque share is 215 of 5,966 antd props and 21 of 14,492 shadcn props for RDT; react-docgen is 298 of 2,749 and 41 of 381.
+- **Checks passed.** The oracle suite (25 tests), `oxfmt --check`, `oxlint` and `typos` all pass. The Rust suite and the TS package tests were not run because no Rust or `packages/` code changed.
+
+## What `oracle/three-tools-report` needs
+- `oracle.ts` takes `--rdt` and `--rdg` dumps. Match them to the checker's exports by `(rel(file), normComponent(name))`. The dumps' `file` is absolute.
+- Per prop, compare `rdtNorm(p.typeObject)` or `rdgNorm(p.tsType)` with `checkerNorm(type)`, over the same universe the Caliper path uses. A prop absent from the tool's `props` counts as missing.
+- `scripts/weekly.py` already has `rdt_out` and `rdg_out` in `measure()` to pass through. Land the pairing branches first.
+- **`scripts/weekly.py` line 7** repeats the "reads each file alone" wording, and it belongs to the other worker.
+- **Running the oracle under the sandbox:** `tsx` fails on its IPC socket (EPERM). `node src/oracle.ts ...` works, since Node 26 strips types.
+
+## Unresolved
+- **Spectrum's 1.09% oracle wrong-rate:** not investigated. No installed spectrum corpus exists locally. To find the cause, run the weekly workflow on a branch with the oracle's `--dump` flag.
+- **Mantine, Chakra and Spectrum validation:** the function-marker rule and adapters are checked only on antd and shadcn. The other three need a CI weekly run on the branch.
+
+## Draft PR bodies
+
+**`oracle/function-marker-rule`** (base `main`)
+&gt; Hold a tool to the parameter markers it keeps. The oracle capped every function type at "less precise" when the checker's parameter was optional or rest, even if the tool kept the marker. It now caps only a marker the tool lost. Caliper records neither marker, so its verdicts do not change: antd and shadcn reports are identical before and after. 4 tests added. Risk: only matters once another tool's types are compared (next PR). Trail: https://entire.com/gh/orin-dx/-/trails/153
+&gt; https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ
+
+**`oracle/tool-adapters`** (base `oracle/function-marker-rule`; link with `--base oracle/function-marker-rule` before any PR exists)
+&gt; Read RDT and react-docgen prop types as the oracle's Norm, through one TypeScript-text mapper, so all three tools are held to the checker by the same rules. RDT's dump keeps the type object for own props (enums were the string "enum", 4–5% of own props); react-docgen's keeps `tsType` and names the files it throws on (17–21% of files). Fixes the docs claim that react-docgen reads files alone: its default importer follows imports (verified). Measured: RDT dump +1.1% (shadcn) to +11.8% (antd); unreadable types are opaque (less precise), never wrong. Risk: validated on antd and shadcn only. Trail: https://entire.com/gh/orin-dx/-/trails/153
+&gt; https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ</result>
+<usage><subagent_tokens>189487</subagent_tokens><tool_uses>87</tool_uses><duration_ms>458970</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-ae0455876eca68c84</worktreePath><worktreeBranch>worktree-agent-ae0455876eca68c84</worktreeBranch></worktree>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>af280d00b310005f9</task-id>
+<tool-use-id>toolu_01GnnuePKQu1yDKyRNrHNX9L</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/ad4b3461-bb6f-49f0-bb4d-997d9b8887ba/tasks/af280d00b310005f9.output</output-file>
+<status>completed</status>
+<summary>Agent "Trail 153 weekly pairing stack" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Two of three branches are done and committed locally, GPG-signed (`G`). Nothing is pushed, no PRs are open, and no Rust files changed. Antd component recall rose from 79.7% to 92.1%, short of the ~95% target. Shadcn is unchanged at 96.5%.
+
+The worktree is `/Users/gabe/Projects/caliper/.claude/worktrees/agent-af280d00b310005f9`.
+
+## Branches (stacked)
+
+| Branch | Base | Tip | Files |
+|---|---|---|---|
+| `fix/weekly-pairing` | `main` (2daef927) | `c67873b1` | `scripts/weekly.py`, `scripts/test_weekly_review.py`, `docs/measurement.md` |
+| `feat/weekly-unmatched-record` | `fix/weekly-pairing` | `f4ef7cf3` | `scripts/weekly.py`, `scripts/test_weekly.py`, `docs/measurement.md` |
+| `fix/weekly-caliper-key-collisions` | not made | — | — |
+
+## Numbers against the plan's baselines
+
+I replayed the weekly measurement locally on the pinned antd and shadcn corpora with the `main` binary. The baseline replay matches the plan's weekly run exactly (antd 165/207, shadcn 1518/1573).
+
+| Corpus | Components before | Components after |
+|---|---|---|
+| shadcn | 1518/1573 = 96.5% | 1518/1573 = 96.5% |
+| antd | 165/207 = 79.7% | 186/202 = 92.1% |
+
+- **Matches the plan:** the antd numerator of 186 is the plan's figure. Own props with layers moved 99.3% to 99.4%.
+- **Misses the plan:** the plan expected a denominator of about 195, and this change reaches 202. I could not reproduce the plan's 7 extra merges. The 16 antd items still unpaired are not pairing cases:
+  - 6 are `generate*` factory functions and helpers.
+  - 4 are `Parent.Member` entries that Caliper reports under the parent, such as `Form.List` and `Mentions.Option`.
+  - 2 are the calendar and date-picker components, built by a factory call.
+  - 3 are `confirm`, `RefIcon` and `InternalPanel`.
+  - 1 is `List`, and 1 is `QrcodeStatus`, which is trail 4's work.
+- **To reach about 95%:** you would have to drop compound members from the reference, which hides a gap that `docs/edge-cases.md` lists. I did not do that.
+- **Weekly job:** a full end-to-end run of `weekly.py` on antd and shadcn works. The unmatched record added about 3 KB for the two corpora.
+
+## What the branches do
+
+- **`fix/weekly-pairing`:**
+  - **Same-file pairing:** it now pairs a default export that has another name, and a `displayName` in either direction.
+  - **Wrappers:** it follows `Object.assign`, `as`, `satisfies`, `!`, dotted wrappers such as `React.memo`, and local alias chains, including through imports.
+  - **Guards:** the RDT name must be the file's or directory's own, and a Caliper key that another RDT entry already matches is never a target.
+  - **`reference_version`:** the record gains `reference_version` (2). `findings()` skips recall when the two records' versions differ, and the summary says so.
+  - **Tests:** 7 new tests plus the existing ones pass.
+- **`feat/weekly-unmatched-record`:**
+  - **Unmatched record:** `reference.unmatched` holds a count per cause and the first 15 of each as `file: name`.
+  - **Causes:** the causes are `compound_member`, `object_member`, `dependency`, `call_result`, `file_with_other_components` and `file_without_components`.
+  - **Job summary:** it gains a table of the same counts.
+  - **Shadcn:** its 55 unmatched split into 34 object members, 10 in files with other components, 6 dependency aliases and 5 call results. The 34 object members are 19 icons plus 15 mdx components.
+  - **Tests:** 4 new tests.
+- **Checks run:** the Python tests, `typos`, `oxfmt --check` on all markdown, and `cargo fmt --check`. I skipped `cargo nextest` and clippy because no Rust changed. I installed workspace dependencies with `pnpm install --frozen-lockfile` in the worktree.
+
+## Unresolved
+
+- **Key collisions branch:** I skipped it because it is not clean. Caliper emits two components in `splitter/Panel.tsx` under one normalized key (`Panel` and `Panel (path)`). A merge step for the dictionary would not make the second one a separate match: `InternalPanel` would merge into the same group, so recall stays at 186 and the denominator drops by one. Fixing it needs a distinct Caliper key per component, which touches the pairing design. It fits better as a follow-up.
+- **Rules unchecked on Mantine, Chakra and Spectrum:** those corpora are not installed locally at the pinned commits. Check them from a CI weekly run on the branch. Risks are wrong same-file pairs and misclassified causes.
+- **`Tooltip` vs `ChartTooltip` in shadcn:** the plan calls these pairing cases, but also requires shadcn to stay unchanged at 96.5%, and they are not covered here. `unmatched_cause` files them under `file_with_other_components`.
+- **Files not touched:** `scripts/rdt.mjs`, `scripts/rdg.mjs` and `apps/oracle`, which belong to the oracle worker. The docs line saying react-docgen reads each file alone is also left as is.
+
+## Draft PR bodies
+
+**`fix/weekly-pairing`** (base `main`)
+
+&gt; **What:** The weekly reference now pairs RDT entries that Caliper reports under another name in the same file, not just across files. It follows a default alias (`const InternalButton; export default InternalButton`), `displayName` either way, `Object.assign`/`as`/`satisfies`/`!`/dotted wrappers, and local alias chains including through imports. It also adds `reference_version` (2); recall is not compared with a record made under other rules.
+&gt;
+&gt; **Why:** The harness counted these as missing components, which made antd's recall look worse than detection is.
+&gt;
+&gt; **Numbers (pinned commits, local replay):** antd components 165/207 (79.7%) to 186/202 (92.1%); shadcn unchanged at 1518/1573 (96.5%).
+&gt;
+&gt; **Risks:** Same-file pairing is guarded (RDT name must be the file's or directory's own, and a key another entry matches exactly is never a target), but is only checked on antd and shadcn. Mantine, Chakra and Spectrum need a CI weekly run. The weekly job's first run after merge will not compare recall (version 1 to 2).
+&gt;
+&gt; Trail: https://entire.com/gh/orin-dx/-/trails/153
+&gt; https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ
+
+**`feat/weekly-unmatched-record`** (base `fix/weekly-pairing`)
+
+&gt; **What:** `weekly.json` records why reference items Caliper reports nowhere are missing: a count per cause and the first 15 of each as `file: name`. The job summary gains a table of the same counts.
+&gt;
+&gt; **Why:** shadcn's object-literal members, antd's `Parent.Member` entries and factory results were mixed with detection gaps; now they are counted apart.
+&gt;
+&gt; **Numbers:** shadcn: 34 object members, 10 in files with other components, 6 dependency aliases, 5 call results. antd: 6 file without components, 4 compound members, 3 file with other components, 2 call results, 1 dependency. About 3 KB for the two corpora.
+&gt;
+&gt; **Risks:** The cause is read from the item's file with regexes, so it says where to look, not what is wrong. Land after `fix/weekly-pairing`, and stack it as a child (`--base fix/weekly-pairing`) per the link-first flow.
+&gt;
+&gt; Trail: https://entire.com/gh/orin-dx/-/trails/153
+&gt; https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ</result>
+<usage><subagent_tokens>240802</subagent_tokens><tool_uses>85</tool_uses><duration_ms>609312</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-af280d00b310005f9</worktreePath><worktreeBranch>worktree-agent-af280d00b310005f9</worktreeBranch></worktree>
+</task-notification>
+
+---
+
+Looks like the last release failed. Why?
+
+---
+
+So the latest run release v0.9?
+
+---
+
+Can we updated to the latest Callisto and make sure we appropriately setup releases and leverage all features of Callisto that are useful?
+
+---
+
+<task-notification>
+<task-id>aab89d4ec8820cc42</task-id>
+<tool-use-id>toolu_014mhBUSKsvxTKxpG3uWDZyt</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/ad4b3461-bb6f-49f0-bb4d-997d9b8887ba/tasks/aab89d4ec8820cc42.output</output-file>
+<status>completed</status>
+<summary>Agent "Trail 154 dependency-loaded perf" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Trail 154: I built two of the three planned perf branches. They cut shadcn wall time by about 6% and peak memory by about 5% on this machine. They do not reach the 141 ms / 275 MiB baseline. Neither branch is pushed and no PRs are open. Both commits are GPG-signed (`%G?` prints `G`) and carry the session trailer. The work is in `/Users/gabe/Projects/caliper/.claude/worktrees/agent-aab89d4ec8820cc42`.
+
+## Branches
+| Branch | Base | Tip | Status |
+|---|---|---|---|
+| `perf/project-demands-sort` | main (`2daef927`) | `f2ff50c0` | done |
+| `perf/module-demands-lean` | `perf/project-demands-sort` | `b508d013` | done |
+| `perf/cache-react-augmentations` | main | none | built, measured, deleted |
+
+## Measurements
+These are shadcn `extract --json --no-cache` with dependencies loaded. I used the installed shadcn corpus in sibling worktree `agent-a9b87f2da7f20385f`, read-only. Each row is the median of interleaved runs. I could not measure uncontended: the machine's load average was 9–15 throughout, so only compare numbers measured side by side.
+
+| Build | Wall | Peak RSS | Internal `durationMs` |
+|---|---|---|---|
+| main | 171–177 ms | 329–333 MiB | 138–147 |
+| `sort` | 161–167 ms (-10 ms) | 332 MiB (unchanged) | 123–130 |
+| `lean` | 162–175 ms (within noise of `sort`) | 312–315 MiB (-17 to -20 MiB) | 128–130 |
+
+- **Extract output:** identical across all builds once the changing `durationMs` field is stripped. Without stripping, the hashes differ between runs of the same binary.
+- **`just bench`** (Mantine and Chakra, dependencies off, `lean` tip against `origin/main`): Mantine 73 → 75 ms (1.03×), Chakra 65 → 65 ms (1.00×). RSS ratios are 1.01 and 0.99, inside the script's 1.10 time / 1.20 memory thresholds.
+- **Baseline gap:** against the same-machine main numbers the two branches give about -6% time and -5% RSS. The 141 ms / 275 MiB baseline was measured uncontended, so the remaining gap is about +14% on memory and an unmeasurable amount on time.
+
+## What each branch does
+- **`sort`:** a file's demands all share the same `from` path, so the derived `Ord` compared a long path first on every comparison. They are now sorted by (specifier, name).
+- **`lean`:** two changes.
+  - **Resolve once per scope:** a module-only import is resolved once per resolution scope (nearest ancestor with `package.json`, `tsconfig.json`, `jsconfig.json` or `node_modules`). On shadcn, 2748 module-only demands become about 1316 resolutions.
+  - **Scan without keeping the parse:** the React-augmentation search no longer keeps a full parse of files it only passes through. The package entry is still parsed in full. A file that cannot declare into React is read for its re-exports only, or skipped if it has none. Any file mentioning `declare module "react"` or `namespace React` still gets a full parse.
+
+## Verification
+- **Tests and lint:** full nextest passes (1033, 1 skipped; run unsandboxed because the watch/pty tests need it). The lint suite (fmt, clippy, doc-check, typos, machete) is clean.
+- **Real-tree check:** I compared the new re-export scan against `parse_file` on 131,197 real `.d.ts` files from shadcn's `node_modules`, with 0 mismatches. That run found and fixed a missing `export default &lt;import&gt;` case. I also ran the two text prefilters over the same files; the first run found false negatives (`export default &lt;import&gt;`) and after the fix there are none. I then removed those throwaway tests.
+- **Changed test:** the existing assertion that a scan-only file is kept in the layer's parse map (`augmentation_tests.rs`) now asserts it is not kept.
+- **Changesets:** one per branch, both patch.
+
+## Decisions for you
+- **`cache-react-augmentations` dropped.** `merged_interfaces` costs about 14 ms thread-summed per 60k calls on main, roughly 0.25 µs per call, so under 2 ms of wall time. My cached version cost more (33 ms thread-summed, from lock contention). The earlier 5.5 ms estimate came from disabling the lookup entirely, not from making it cheaper.
+- **`lean` is a memory win, not a time win.** Time is within noise of `sort`. Keep it only if the memory saving and fewer resolutions are worth about 410 added lines. The scope key assumes directories with the same scope resolve a bare specifier alike. It could be wrong where a `tsconfig` `references` list picks a config by `include`.
+- **No dependency parse cache.** I measured instead of prototyping. A warm run with the persisted dependency index is 158 ms against 164 ms for `--no-cache`, only about 4% faster. The acceptance target is `--no-cache`, so a parse cache cannot help it, and it would touch ADRs 0003, 0008 and 0011.
+- **Remaining cost:** loading dependencies still costs about 70 ms and 175 MiB on shadcn (164 ms / 313 MiB with, 95 ms / 139 MiB without). Getting back to the baseline needs a bigger change than these two branches.
+
+## Draft PR bodies
+**`perf/project-demands-sort`** (base `main`)
+
+What: sorts a file's package demands by (specifier, name) instead of the derived `Ord`.
+Why: every demand of a file shares its `from` path, so the derived order compared a long path on each comparison.
+Measured on shadcn with dependencies loaded, `--no-cache`, same machine, interleaved: 171–177 → 161–167 ms wall, RSS unchanged, output identical.
+Risks: none expected; the order within a file is unchanged.
+Trail: https://entire.com/gh/orin-dx/-/trails/154
+https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ
+
+**`perf/module-demands-lean`** (base `perf/project-demands-sort`; retarget to `main` when the parent merges)
+
+What: resolves a module-only import once per resolution scope, and scans re-exports for the augmentation search with a light parse. The package entry is still parsed in full.
+Why: a project imports each package from many directories, and the search kept a full parse of every file it passed through.
+Measured on shadcn with dependencies loaded, `--no-cache`: peak RSS 332 → 315 MiB against the parent; time within noise. `just bench` ratios are 1.03 (Mantine) and 1.00 (Chakra); extract output is identical.
+Checked: 131,197 real `.d.ts` files, with 0 differences from `parse_file` and 0 prefilter false negatives.
+Risks: the scope key assumes directories with the same scope resolve a bare specifier alike; a `tsconfig` `references` list that picks a config by `include` could differ. The text prefilters err toward a full parse.
+Trail: https://entire.com/gh/orin-dx/-/trails/154
+https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ</result>
+<usage><subagent_tokens>314309</subagent_tokens><tool_uses>166</tool_uses><duration_ms>2517950</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-aab89d4ec8820cc42</worktreePath><worktreeBranch>worktree-agent-aab89d4ec8820cc42</worktreeBranch></worktree>
+</task-notification>
