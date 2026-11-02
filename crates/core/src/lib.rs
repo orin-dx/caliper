@@ -1,3 +1,10 @@
+//! The core of caliper-docgen: it reads the props of React components from TypeScript source with the OXC parser, and
+//! without the TypeScript compiler.
+//!
+//! [`extract`] runs the pipeline once over a set of source directories and returns an [`ExtractionOutput`].
+//! [`pipeline::WatchSession`] keeps a revision of that output up to date as files change, or answers for one
+//! component at a time. Problems are reported as [`Diagnostic`]s in the output, not as errors.
+
 pub(crate) mod cache;
 pub(crate) mod dependency_types;
 pub(crate) mod extractor;

@@ -1,6 +1,8 @@
 //! Baked-in knowledge of React and DOM types.
 //! No file I/O — these are compile-time constants derived from @types/react.
 
+#![deny(missing_docs)]
+
 /// HTML element names recognized as component-level inheritors.
 ///
 /// Maps `@types/react` HTML attribute type names to their corresponding DOM element names.
@@ -64,6 +66,8 @@ pub fn html_element_from_args(args: &[crate::types::CollectedType]) -> Option<&'
     })
 }
 
+/// The HTML tag name a DOM element type argument stands for: `HTMLButtonElement` is `button`, as in
+/// `ButtonHTMLAttributes<HTMLButtonElement>`. `None` for a type this table does not know.
 pub fn html_element_from_type_arg(type_arg: &str) -> Option<&'static str> {
     match type_arg {
         "HTMLAnchorElement" => Some("a"),

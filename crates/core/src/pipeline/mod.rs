@@ -3,6 +3,8 @@
 //! Orchestrates: file discovery → parallel parse → global merge → parallel resolve → output.
 //! Also manages DTS cache and incremental watch-mode state.
 
+#![deny(missing_docs)]
+
 use camino::{Utf8Path, Utf8PathBuf};
 use rayon::prelude::*;
 use rustc_hash::FxHashSet;
@@ -192,12 +194,14 @@ pub struct IncrementalUpdate {
     pub updated_keys: Vec<String>,
     /// Output keys that no longer exist: the component was renamed, deleted, or stopped being a component.
     pub removed_keys: Vec<String>,
+    /// The files of the components in `updated_components`, sorted and without duplicates.
     pub affected_files: Vec<Utf8PathBuf>,
     /// Diagnostics this revision added. A client holding the previous output applies `removed_keys`, then
     /// `updated_keys`, then drops `removed_diagnostics` and adds these, and holds the new output.
     pub diagnostics: Vec<Diagnostic>,
     /// Diagnostics the previous revision had and this one does not: fixed, or replaced by a changed one.
     pub removed_diagnostics: Vec<Diagnostic>,
+    /// How long building this revision took, in milliseconds.
     pub duration_ms: u64,
 }
 
