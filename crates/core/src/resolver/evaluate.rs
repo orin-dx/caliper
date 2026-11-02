@@ -456,12 +456,14 @@ fn lacks_member(obj: &CollectedType, key: &str, file: &Utf8Path, ctx: &Resolutio
 }
 
 /// The names `keyof target` produces: an interface's members (its ancestors' too), or an object type's fields.
-fn keys_of(target: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> Option<Vec<Key>> {
+pub(super) fn keys_of(target: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> Option<Vec<Key>> {
     if depth > MAX_DEPTH {
         return None;
     }
     match target {
         CollectedType::AtFile { file, inner } => keys_of(inner, file, ctx, depth + 1),
+        // `keyof typeof Icons`: the keys of a `const` object literal.
+        CollectedType::TypeOf(name) => keys_of(&value_type(name, file, ctx)?, file, ctx, depth + 1),
         CollectedType::Object(fields) => Some(
             fields
                 .iter()
@@ -484,6 +486,16 @@ fn keys_of(target: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, dep
             let (body, body_file) = alias_body(name, args, file, ctx)?;
             keys_of(&body, &body_file, ctx, depth + 1)
         }
+        _ => None,
+    }
+}
+
+/// What `typeof name` denotes where `name` is a `const` the extractor read the type of (`extractor/values.rs`): its
+/// literal type, or an object literal whose keys are known.
+pub(super) fn value_type(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> Option<CollectedType> {
+    let (value_file, value_name) = canonical(name, file, ctx);
+    match lookup_type_alias(ctx, value_file.as_str(), &format!("typeof {value_name}"))?.1 {
+        CollectedTypeAlias::Passthrough { target, .. } => Some(target.clone()),
         _ => None,
     }
 }

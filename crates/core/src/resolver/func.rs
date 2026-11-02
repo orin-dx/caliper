@@ -109,6 +109,14 @@ pub(super) fn resolve_typeof(
         return PropType::Named { name: name.clone(), args: vec![] };
     }
 
+    // `const SHOW_PARENT = 'SHOW_PARENT'`: the literal TypeScript gives a `const`.
+    match super::evaluate::value_type(name, consuming_file, ctx) {
+        Some(CollectedType::StringLiteral(value)) => return PropType::StringLiteral(value.to_string()),
+        Some(CollectedType::NumberLiteral(value)) => return PropType::NumberLiteral(value),
+        Some(CollectedType::BoolLiteral(value)) => return PropType::BoolLiteral(value),
+        _ => {}
+    }
+
     diagnostics.push(Diagnostic {
         severity: DiagnosticSeverity::Info,
         message: format!("typeof '{}' in '{}' — could not statically evaluate", name, consuming_file),

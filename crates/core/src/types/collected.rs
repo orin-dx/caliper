@@ -113,9 +113,10 @@ pub enum CollectedType {
     // ── `typeof X` — reference to the type of a value
     TypeOf(CompactString),
 
-    // ── `keyof X` — the union of X's own key names. Fully resolved only when
+    // ── `keyof X` — the union of X's own key names. Fully resolved when
     // consumed by `Omit`'s key argument (`CollectedTypeAlias::Omit::keys`
-    // resolves X as a props chain and reads its field names); standalone usage
+    // resolves X as a props chain and reads its field names), and standalone
+    // when X is `typeof` a `const` object literal; any other standalone use
     // degrades to `PropType::Opaque` since we don't (yet) have a general
     // type-to-key-names resolver outside the chain machinery.
     KeyOf(Box<CollectedType>),
