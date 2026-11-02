@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_011xGnA1ivTHSc5Qb2P5Cj31",
+  "agent_id": "a7c3b3b7bcc7ad15a",
+  "subagent_type": "fork",
+  "task_description": "Trails 155 then 156 detection stack",
+  "token_usage": {
+    "input_tokens": 428,
+    "cache_creation_tokens": 332696,
+    "cache_read_tokens": 84302524,
+    "output_tokens": 170936,
+    "api_call_count": 231
+  },
+  "started_at": "2026-11-02T12:49:36.13964-08:00",
+  "completed_at": "2026-11-02T13:30:27.031166-08:00"
+}

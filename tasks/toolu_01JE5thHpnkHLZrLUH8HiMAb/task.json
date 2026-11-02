@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01JE5thHpnkHLZrLUH8HiMAb",
+  "agent_id": "a2d2ddf143b144821",
+  "subagent_type": "general-purpose",
+  "task_description": "Adversarial review: architecture and semantic model",
+  "token_usage": {
+    "input_tokens": 104,
+    "cache_creation_tokens": 144636,
+    "cache_read_tokens": 5391156,
+    "output_tokens": 23737,
+    "api_call_count": 52
+  },
+  "started_at": "2026-11-02T13:36:30.517058-08:00",
+  "completed_at": "2026-11-02T13:44:02.738472-08:00"
+}
