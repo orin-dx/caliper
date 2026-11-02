@@ -22,7 +22,7 @@ use crate::pipeline::HtmlAttributeMode;
 use crate::react_types::{checker_prop_used, react_props_wanted};
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use crate::types::semantic::{
-    merge_semantic_props, SemanticComponent, SemanticOutcome, SemanticProvider, SemanticTarget,
+    merge_semantic_props, SemanticComponent, SemanticOutcome, SemanticProp, SemanticProvider, SemanticTarget,
 };
 
 /// What the checker said about one component at one version of its file, and the generation they belong to.
@@ -173,16 +173,26 @@ impl SemanticHook {
     fn apply(&self, answer: &mut ComponentAnswer, component: Option<&Arc<SemanticComponent>>, mode: HtmlAttributeMode) {
         let Some(component) = component else { return };
         let structural = answer.entry.props.clone();
-        let used =
-            component.props.iter().filter(|prop| checker_prop_used(mode, &prop.name, prop.react_declared, &structural));
-        let kept = merge_semantic_props(&mut answer.entry, used, &mut FxHashMap::default());
-        // A structural diagnostic about a prop the checker now answers for would be stale.
-        answer.diagnostics.retain(|diagnostic| {
-            !matches!(
-                diagnostic.code,
-                DiagnosticCode::OpaqueType | DiagnosticCode::MaxDepthExceeded | DiagnosticCode::CircularReference
-            )
-        });
+        let used: Vec<&Arc<SemanticProp>> = component
+            .props
+            .iter()
+            .filter(|prop| checker_prop_used(mode, &prop.name, prop.react_declared, &structural))
+            .collect();
+        // A degrade diagnostic names the component, not the prop, so it can only go once no structural prop is left
+        // that it could be about: one the checker did not return keeps its structural type, opaque or not.
+        let still_degraded = structural
+            .iter()
+            .any(|(name, prop)| prop.prop_type.holds_opaque() && !used.iter().any(|answered| answered.name == *name));
+        let kept = merge_semantic_props(&mut answer.entry, used.into_iter(), &mut FxHashMap::default());
+        if !still_degraded {
+            // A structural diagnostic about a prop the checker now answers for would be stale.
+            answer.diagnostics.retain(|diagnostic| {
+                !matches!(
+                    diagnostic.code,
+                    DiagnosticCode::OpaqueType | DiagnosticCode::MaxDepthExceeded | DiagnosticCode::CircularReference
+                )
+            });
+        }
         let mut provenance = Diagnostic::new(
             DiagnosticSeverity::Info,
             DiagnosticCode::SemanticBackend,

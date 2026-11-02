@@ -457,3 +457,118 @@ fn an_answer_that_arrives_after_an_edit_is_not_kept_for_the_edited_project() {
     let _ = session.component("Button");
     assert_eq!(gated.requests.load(Ordering::SeqCst), 2, "the stale answer must not satisfy the next request");
 }
+
+const STILL_OPAQUE: &str =
+    "export function Button<T>(props: { label: string; item: T extends string ? 1 : 2 }) { return null; }";
+
+fn opaque_type_diagnostics(answer: &caliper_docgen_core::pipeline::ComponentAnswer) -> Vec<Vec<String>> {
+    answer.diagnostics.iter().filter(|d| d.code == DiagnosticCode::OpaqueType).map(|d| d.affects.clone()).collect()
+}
+
+/// The checker answers for `label` and `item`: nothing the structural pass left opaque is left over.
+fn answers_every_prop(target: &SemanticTarget) -> SemanticOutcome {
+    let prop = |name: &str, prop_type: PropType| {
+        Arc::new(SemanticProp {
+            name: name.to_string(),
+            prop_type,
+            required: true,
+            description: String::new(),
+            react_declared: false,
+        })
+    };
+    SemanticOutcome {
+        components: vec![SemanticComponent {
+            file_path: target.file_path.clone(),
+            display_name: target.display_name.clone(),
+            props: vec![prop("label", PropType::String), prop("item", PropType::StringLiteral("a".into()))],
+        }],
+        ..SemanticOutcome::default()
+    }
+}
+
+#[test]
+fn a_degrade_diagnostic_stays_while_a_structural_prop_the_checker_did_not_return_is_still_opaque() {
+    let project = project(&[("Button.tsx", STILL_OPAQUE)]);
+    let structural = structural_session(&project, HtmlAttributeMode::Full).component("Button").unwrap();
+    assert_eq!(opaque_type_diagnostics(&structural), [["Button"]], "the structural pass reports the opaque prop");
+
+    // The checker returns `label` and `size`, not `item`: `item` keeps its structural, still opaque, type.
+    let checked = session_in(&project, HtmlAttributeMode::Full, finds_size).component("Button").unwrap();
+
+    assert!(matches!(checked.entry.props["item"].prop_type, PropType::Opaque(_)), "item keeps its structural type");
+    assert_eq!(opaque_type_diagnostics(&checked), [["Button"]], "the diagnostic that explains `item` must stay");
+}
+
+#[test]
+fn a_degrade_diagnostic_goes_once_the_checker_has_answered_for_every_prop() {
+    let project = project(&[("Button.tsx", STILL_OPAQUE)]);
+
+    let checked = session_in(&project, HtmlAttributeMode::Full, answers_every_prop).component("Button").unwrap();
+
+    assert!(!matches!(checked.entry.props["item"].prop_type, PropType::Opaque(_)));
+    assert_eq!(opaque_type_diagnostics(&checked), Vec::<Vec<String>>::new());
+}
+
+const DEFAULTED: &str =
+    "export function Button({ label = \"ok\" }: { label?: string; legacy?: boolean }) { return null; }";
+
+/// The checker returns `label` (a different type from the source's `string`), a prop of its own (`size`), and one of
+/// `@types/react`'s (`className`).
+fn label_size_and_class_name(target: &SemanticTarget) -> SemanticOutcome {
+    let prop = |name: &str, prop_type: PropType, react_declared: bool| {
+        Arc::new(SemanticProp {
+            name: name.to_string(),
+            prop_type,
+            required: false,
+            description: String::new(),
+            react_declared,
+        })
+    };
+    SemanticOutcome {
+        components: vec![SemanticComponent {
+            file_path: target.file_path.clone(),
+            display_name: target.display_name.clone(),
+            props: vec![
+                prop("label", PropType::StringLiteral("ok".into()), false),
+                prop("size", PropType::Number, false),
+                prop("className", PropType::String, true),
+            ],
+        }],
+        ..SemanticOutcome::default()
+    }
+}
+
+/// The CLI merges the checker over a whole extraction; a session merges it over one component. They are two paths to
+/// one answer, so what they agree on is pinned here and what they do not is pinned as the difference it is.
+#[test]
+fn the_whole_project_merge_and_the_session_merge_agree_on_every_prop_the_checker_answered() {
+    let project = project(&[("Button.tsx", DEFAULTED)]);
+    let options = PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() };
+
+    let mut batch = caliper_docgen_core::extract(&options);
+    let target = SemanticTarget {
+        file_path: batch.components["Button"].file_path.clone(),
+        display_name: "Button".to_string(),
+        exported: true,
+        described: Default::default(),
+        react_wanted: None,
+    };
+    caliper_docgen_core::types::semantic::merge_semantic(&mut batch, label_size_and_class_name(&target));
+    let batch = &batch.components["Button"];
+
+    let session = session_in(&project, HtmlAttributeMode::Full, label_size_and_class_name);
+    let on_demand = session.component("Button").unwrap().entry;
+
+    // What both agree on: the checker's type and optionality for a prop it answered, and the structural default.
+    for name in ["label", "size"] {
+        assert_eq!(batch.props[name], on_demand.props[name], "{name}");
+    }
+    assert_eq!(batch.props["label"].prop_type, PropType::StringLiteral("ok".into()));
+    assert!(batch.props["label"].default_value.is_some(), "the structural default stays");
+
+    // Where they differ, on purpose: the whole-project merge lets the checker decide which props exist and leaves
+    // `@types/react`'s to the inheritance layers; the session keeps a structural prop the checker did not return and
+    // takes the `@types/react` prop its `htmlAttributes` mode lists.
+    assert_eq!(batch.props.keys().cloned().collect::<Vec<_>>(), ["label", "size"]);
+    assert_eq!(on_demand.props.keys().cloned().collect::<Vec<_>>(), ["className", "label", "legacy", "size"]);
+}

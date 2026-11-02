@@ -127,7 +127,7 @@ pub fn apply_semantic_props(
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
 ) {
     // The whole-project merge replaces the props and leaves `@types/react`'s to the inheritance layers.
-    replace_props(entry, semantic.props.iter().filter(|prop| !prop.react_declared), false, shared);
+    replace_props(entry, semantic.props.iter().filter(|prop| !prop.react_declared), Unanswered::Drop, shared);
 }
 
 /// Merges the checker's `props` into `entry` by name: the checker's type, optionality and description win where both
@@ -138,13 +138,22 @@ pub fn merge_semantic_props<'a>(
     props: impl Iterator<Item = &'a Arc<SemanticProp>>,
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
 ) -> usize {
-    replace_props(entry, props, true, shared)
+    replace_props(entry, props, Unanswered::Keep, shared)
+}
+
+/// What a merge does with a structural prop the checker did not return.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unanswered {
+    /// The checker decides which props exist, as in the whole-project merge: the structural prop is dropped.
+    Drop,
+    /// The checker's props are merged by name, as in a session's merge: the structural prop stays as resolved.
+    Keep,
 }
 
 fn replace_props<'a>(
     entry: &mut ComponentEntry,
     props_in: impl Iterator<Item = &'a Arc<SemanticProp>>,
-    keep_unanswered: bool,
+    unanswered: Unanswered,
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
 ) -> usize {
     let mut props: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
@@ -179,7 +188,7 @@ fn replace_props<'a>(
         props.insert(prop.name.clone(), merged);
     }
     let mut kept = 0;
-    if keep_unanswered {
+    if unanswered == Unanswered::Keep {
         for (name, structural) in &entry.props {
             if !props.contains_key(name) {
                 props.insert(name.clone(), structural.clone());
