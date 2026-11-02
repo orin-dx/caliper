@@ -1,0 +1,126 @@
+<task-notification>
+<task-id>aaa2941583ec9c092</task-id>
+<tool-use-id>toolu_01GY5dL1H3YxgsWyZbDdndCD</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/ad4b3461-bb6f-49f0-bb4d-997d9b8887ba/tasks/aaa2941583ec9c092.output</output-file>
+<status>completed</status>
+<summary>Agent "Trail 157 trust and agents" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I built three signed local branches off `origin/main` (`a9dfed90`) for trail 157. Nothing is pushed, no PRs are open, and the worktree is clean except an untracked `.corpora` symlink I made for benchmarking, which must not be committed.
+
+All three tips show `%G? = G`, and the full gate passed on each.
+
+| Branch | Tip |
+|---|---|
+| `feat/parity-detail-report` | `78bd45e3` |
+| `fix/trust-defects-batch` | `0f2258bf` |
+| `feat/prop-level-confidence` | `800f4220` |
+
+## 1. `feat/parity-detail-report`
+
+**Files:** `packages/storybook/scripts/storybook-parity.mjs`, `docs/storybook-parity.md`. There is no changeset, since it only touches a script and docs.
+
+**What changed:** The report now sorts each disagreement into deliberate differences and ones for review. The review items are listed by story and prop in the Markdown, and in full in the JSON.
+
+**Checks:** The formatter and `typos` are clean. `oxlint` doesn't cover `scripts/`.
+
+**Degraded-rate discrepancy:** The docs are right for their commit. Building `e31ccb27` (main through #155) and running the same harness gives 42.1% (797/1892) for shadcn and 27.4% (68/248) for antd, matching the docs and its 13,244 props. On current main the same harness gives 4.8% (91/1895) and 4.0% (10/251). The rule is unchanged, so resolver work in between lowered the rate. Shadcn's "Cannot find the component…" went 382→75, "cannot be used as a component" 344→1, and unexpanded-reference warnings 197→15. I did not bisect which change did what. Props listed also grew from 13,244 to 392,427, so the rates measure different amounts of work.
+
+**Harness bug found:** The `Wrapper` story imported `notification/useNotification.tsx`'s default export, `useNotification`, under the name `Wrapper`. That made 13 of antd's 14 "missing" props. The generator now skips default imports that aren't the named component, so antd goes from 84 stories to 67.
+
+**Numbers on current main:**
+
+| | shadcn (110 stories) | antd (67 stories) |
+|---|---|---|
+| Props only Storybook lists | 0 | 1 (Masonry `children`) |
+| Extra props, of which DOM or ARIA attributes | 14,800, of which 14,559 | 3,928, of which 3,731 |
+| Type text differing beyond formatting | 79 | 257 |
+| Defaults only Storybook has | 17 | 1 |
+| `required` differs | 0 | 1 (`Segmented.options`) |
+
+Most of the remaining type differences are printing differences (`React.` qualifiers, `?: T | undefined`, `Array&lt;T&gt;` vs `T[]`).
+
+**Draft PR body:**
+&gt; Sort the parity report's disagreements with Storybook's docgen into deliberate differences (DOM/ARIA attributes the addon lists on purpose, formatting-only type text) and ones for review, listed by story and prop. Stop the story generator importing a file's default export under another component's name, which made antd's `Wrapper` look like 13 missing props. Re-measured on shadcn and antd: the docs' 42.1% / 27.4% degraded rates reproduce at the commit they came from and are 4.8% / 4.0% on current main; resolver fixes lowered them, the rule is unchanged. Risks: the deliberate/review classes are heuristics. Mantine, Chakra and Spectrum are not re-measured. Trail: https://entire.com/gh/orin-dx/-/trails/157
+&gt; https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ
+
+## 2. `fix/trust-defects-batch`
+
+**Files:**
+- New `extractor/values.rs` and `extractor/asserted.rs`.
+- Edits to `extractor/mod.rs` and `extractor/visit.rs`.
+- Edits to `resolver/{collected,evaluate,func,primitives}.rs` and `types/collected.rs`.
+- New tests `const_value_types.rs` (8) and `asserted_props.rs` (3), plus an edit to `union_props.rs`.
+- `docs/rdt-coverage.md` and a patch changeset.
+
+**What changed:**
+- `typeof X` over a literal const (`const SHOW_PARENT = 'SHOW_PARENT'`, imported or declared in a `.d.ts`) now resolves to the literal.
+- `keyof typeof X` over a const object literal is now the union of its keys. A spread or computed key stays opaque, and `keyof` of anything else stays opaque.
+- `true | false` and `boolean | true` become `boolean`. The existing `union_props.rs` expectation pinned `false | true`, so I changed it.
+- `export default X as &lt;function type&gt;` over a component the file declares takes the function's props parameter. This adds antd Masonry's `children`.
+
+**Checks:** 1038 Rust tests passed, and clippy, `cargo doc`, `typos` and `machete` are clean.
+
+**Performance and oracle:**
+- `just bench` is flat: Mantine 78→76 ms, Chakra 65→65 ms, memory unchanged.
+- Dependency-loaded shadcn is 183→181 ms and 333→331 MiB; antd is 63→61 ms and 121→120 MiB.
+- Oracle verdicts are identical to `origin/main` on both corpora. Shadcn is 7,632 shared props, 90.1% agree, 6 wrong. Antd is 3,070 shared, 93.1% agree, 0 wrong.
+
+**Parity effect on antd:** Masonry `children` is no longer missing, and Cascader's `typeof` and `false | true` differences are gone (type differences beyond formatting 257→254).
+
+**Not fixed, with reasons:**
+- **`Segmented.options` required:** This is deliberate. `ParsedProp::new` makes any prop with a default optional by the react-docgen-typescript convention, and Segmented's body declares `options = []`. Changing it affects every defaulted prop and needs its own decision or ADR.
+- **Indexed access on generic base-ui props:** `BaseUIComponentProps&lt;"div", S&gt;["onClick"]` is a mapped type with `infer` over an unbound generic, the documented type-checker gap.
+- **`Modal.width` default (520):** It doesn't reproduce in isolation. A fixture with the same `const { width = 520 } = props` shape extracts the default correctly.
+- **Non-literal defaults:** They are already flagged with `computed: true`, and the addon deliberately forces `computed: false` to mirror Storybook.
+
+**Draft PR body:**
+&gt; Read the value a `const` gives a prop's type. `typeof SHOW_PARENT` over `const SHOW_PARENT = 'SHOW_PARENT'` is `"SHOW_PARENT"` (antd Cascader), `keyof typeof Icons` over an object literal is its keys (antd Result), `true | false` is `boolean`, and `export default X as (&lt;T&gt;(props: PropsWithChildren&lt;P&lt;T&gt;&gt;) =&gt; Element)` takes that function's props, so Masonry gets `children`. Oracle verdicts on antd and shadcn are identical to main; `just bench` Mantine 78→76 ms, Chakra 65→65 ms; dependency-loaded shadcn 183→181 ms, 333→331 MiB. Not changed: `Segmented.options` reads optional because of the RDT convention that a default makes a prop optional (`ParsedProp::new`), and indexed access over mapped generic base-ui props is the known type-checker gap. Risks: object-literal consts are recorded as aliases (at most 128 keys, none measured as a cost); the `false | true` → `boolean` collapse changes visible output. Trail: https://entire.com/gh/orin-dx/-/trails/157
+&gt; https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ
+
+## 3. `feat/prop-level-confidence`
+
+**Files:**
+- `types/output.rs`, `toon.rs`, `lib.rs`, `crates/binding/src/lib.rs`, `crates/cli/tests/commands.rs`.
+- Seven snapshot files and the new `prop_degraded_by.rs` test.
+- `packages/napi/{binding.d.ts,index.d.ts,index.js}`.
+- Three docs and a minor changeset.
+
+**What changed:**
+- **`degradedBy` on a prop:** It is a new optional field, so there is no schema bump (ADR 0017). It is derived from the prop's type, so it can't disagree with it. The snapshot diffs are additions only (`indexedAccess` and `templateLiteral`).
+- **TOON:**
+  - Adds a `source` column.
+  - Adds a `degradedBy` column only when some prop has one.
+  - Quotes string literals in single quotes.
+  - Shows a collapsed layer's `members`, capped at 24.
+  - The module doc now states what it leaves out, so I removed the fixed entry from `docs/edge-cases.md`.
+- **NAPI slice view:** `sessionComponentToon(sessionId, key)` returns the component as TOON plus its warnings and errors, or `null`.
+
+**Checks:** All three of these pass.
+- **Rust:** 1036 tests, the 26 napi unit tests, the doctests, clippy for the workspace and the napi crate, `cargo doc`, `cargo fmt`, `typos` and `machete`.
+- **TS packages:** vite-plugin 58, storybook 62, and the oracle suite pass, with markdown and TS formatting clean.
+- **Not run:** The `test-integration` recipe, which runs the vite-plugin and storybook integration tests against the real native binding. I didn't regenerate the napi package files; I added the new function to `binding.d.ts` and `index.js` by hand.
+
+**Also fixed:** The napi test `ensure_fresh_errors_for_an_unknown_session…` was already failing on `main` because it hard-coded `schemaVersion: 2` while main is at 4. It now reads `SCHEMA_VERSION`.
+
+**Limits:** A name left as an unexpanded reference is not `opaque`, so `degradedBy` doesn't list it. Diagnostics name the component, not the prop. Fixing that would mean capturing diagnostics per prop, which would differ between lazy and batch runs.
+
+**Draft PR body:**
+&gt; A prop now says why its type is partly a guess: the canonical JSON gains `degradedBy` (reason kinds of its opaque members) on a prop that has any, a new optional field so `schemaVersion` stays (ADR 0017). TOON lists each prop's declaring type, quotes string literals, shows a collapsed layer's member names and adds a `degradedBy` column when a prop has one; its module doc now states what it leaves out. `sessionComponentToon(sessionId, key)` returns one component as TOON plus the warnings that say its props may be incomplete, for in-process hosts. Also makes the binding's `ensure_fresh` test read `SCHEMA_VERSION` (it hard-coded 2, main is 4). Risks: TOON's columns and quoting change, so anything parsing it will notice; a name left as an unexpanded reference is not flagged by `degradedBy` (its diagnostic still says so). Trail: https://entire.com/gh/orin-dx/-/trails/157
+&gt; https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ
+
+## Left for later
+
+**`feat/agent-eval-weekly` (not started):**
+- It must land after trail 153's weekly changes. #282 and #283 are already in `origin/main`.
+- It edits `scripts/weekly.py`, adds `scripts/agent_eval.py`, `scripts/agent_questions.json` and `scripts/test_agent_eval.py`, and needs a `weekly.yml` step.
+- It can run its 20 deterministic questions through `sessionComponentToon` and report silent-wrong answers.
+
+**Merge order and conflicts:**
+- Branch 3 changes snapshot files and `ParsedProp`, so it will conflict with anything that also touches those.
+- Branches 1 and 2 are independent of each other and of branch 3.
+- Branch 2 touches `extractor/mod.rs` and `visit.rs`, which trails 155 and 156 also edit. I kept my additions small and in new files, but expect to merge `origin/main` into it if they land first.
+
+**Worktree cleanup:** I left `/tmp/claude-501/oldbuild` and `/tmp/claude-501/mainbuild` (exported source trees from `git archive`, not git worktrees) and the `.corpora` symlink. Delete them if you want the space back.</result>
+<usage><subagent_tokens>483552</subagent_tokens><tool_uses>210</tool_uses><duration_ms>2022281</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-aaa2941583ec9c092</worktreePath><worktreeBranch>worktree-agent-aaa2941583ec9c092</worktreeBranch></worktree>
+</task-notification>
