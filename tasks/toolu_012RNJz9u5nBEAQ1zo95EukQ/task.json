@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_012RNJz9u5nBEAQ1zo95EukQ",
+  "agent_id": "a42895b461e8f2d79",
+  "subagent_type": "fork",
+  "task_description": "Trail 167 architecture drift",
+  "token_usage": {
+    "input_tokens": 101,
+    "cache_creation_tokens": 82200,
+    "cache_read_tokens": 21374191,
+    "output_tokens": 40057,
+    "api_call_count": 54
+  },
+  "started_at": "2026-11-02T14:57:28.872879-08:00",
+  "completed_at": "2026-11-02T15:04:55.0086-08:00"
+}

@@ -1,0 +1,102 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6F84GQ6SHGWEN74YADHTTEK",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-02T23:05:13.738011Z",
+  "branch": "docs/other-crates",
+  "checkpoints_count": 1,
+  "save_step_count": 4,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "c81c69624040",
+  "checkpoint_transcript_start": 1790,
+  "transcript_lines_at_start": 1790,
+  "compact_transcript_start": 150,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0,
+    "subagent_tokens": {
+      "input_tokens": 10,
+      "cache_creation_tokens": 5152,
+      "cache_read_tokens": 3044988,
+      "output_tokens": 5987,
+      "api_call_count": 6
+    }
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 6,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 31
+  },
+  "summary": {
+    "intent": "Execute trail 167 (architecture drift findings ARCH-3, 4, 5, 6 from the 2026-11-02 review): move PipelineOptions out of the pipeline module to break resolver/loader dependency on pipeline, and refresh ARCHITECTURE.md, type-checker docs and ADR statuses to match the code.",
+    "outcome": "Two signed, committed branches off main (refactor/options-out-of-pipeline and docs/refresh-architecture-and-adr-status) that merge cleanly together. The refactor passes 1067 tests, 13/13 architecture tests, lint and semver checks; the docs branch passes lint/doc-check/typos. Nothing is pushed or opened as a PR.",
+    "learnings": {
+      "repo": [
+        "Architecture is enforced by crates/core/tests/architecture.rs, which checks module import direction and uses an allowlist with a reason for each remaining edge; the rule now also catches grouped `use crate::{...}` imports, with a negative test.",
+        "The `pipeline` module re-exports PipelineOptions, HtmlAttributeMode and CollapseInheritedProps, so public paths stay stable after the move to types/options.rs.",
+        "Verification commands: `just lint doc-check typos machete`, `just semver` (196 checks), and workspace nextest (1067 passed, 1 skipped).",
+        "ADRs are not rewritten; per docs/adr/README.md they get dated status notes, and the README index lines must be kept in sync.",
+        "Core does file I/O (discovery, module resolution, caches, tsconfig) but never spawns a process; docs had wrongly said 'pure extraction, no I/O'.",
+        "No changeset is needed for pure moves or docs-only changes.",
+        "Docs referenced nonexistent symbols (WatchRevision, ScopedKey, resolve_complex_types); each claim was verified by grep against crates/ before editing.",
+        "The NAPI binding has 15 #[napi] functions and 15 contain_panic call sites; ExtractionOutput SCHEMA_VERSION is 4."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/pipeline/watch.rs",
+          "line": 209,
+          "finding": "The watch revision is held as ArcSwapOption<Revision>; the docs' 'WatchRevision' type does not exist."
+        },
+        {
+          "path": "crates/core/src/types/output.rs",
+          "line": 710,
+          "finding": "PropType streams on serialize; it uses serde_json::Value only on deserialize (line 896)."
+        },
+        {
+          "path": "crates/core/src/collected.rs",
+          "line": 668,
+          "finding": "CollectedType goes through serde_json::Value both ways via to_json_value."
+        },
+        {
+          "path": "crates/cli/src/main.rs",
+          "line": 1,
+          "finding": "The only recursion_limit (256) in the workspace; core's lib.rs sets none."
+        }
+      ],
+      "workflow": [
+        "Delegated work ran in a git worktree with separate signed commits per concern, and `git merge-tree` confirmed the branches merge without conflict.",
+        "Each doc claim was proved by grep or counting before editing, and the proofs were summarized in the PR body.",
+        "Draft PR bodies were prepared but nothing was pushed or opened, leaving that outward-facing step for the user."
+      ]
+    },
+    "friction": [
+      "Fully breaking the architecture edges was not possible with pure moves: types/options.rs still needs crate::plugin, and resolver/mod.rs still needs dependency_types::DependencyLayer.",
+      "Documentation overlaps with trail 164's unmerged PR #300, which risks conflicts on lines 3 and 7 of docs/type-checker-integration.md."
+    ],
+    "open_items": [
+      "Break the types/options.rs -> crate::plugin edge by moving PluginRegistry and DocgenPlugin under types/ or making the registry generic.",
+      "Break the resolver -> dependency_types::DependencyLayer edge by moving DependencyLayer and its helpers under types/.",
+      "If PR #300 (trail 164) merges first, add notes to ADR 0006 and 0007 about the session notifying the checker on dependency edits, and resolve possible conflicts in docs/type-checker-integration.md.",
+      "Push both branches and open the PRs (not yet done).",
+      "ADR 0007 discovery remains unimplemented."
+    ]
+  }
+}
