@@ -29,6 +29,8 @@ use crate::types::*;
 
 type FxDashMap<K, V> = DashMap<K, V, FxBuildHasher>;
 type FxDashSet<K> = DashSet<K, FxBuildHasher>;
+/// The module a `(scope, specifier)` resolved to, once the first demand of the scope has resolved it.
+type ModuleCell = Arc<OnceLock<Option<Utf8PathBuf>>>;
 
 /// `(directory of the importing file, specifier, exported name path)`.
 type DemandKey = (Box<str>, Box<str>, CompactString);
@@ -225,7 +227,8 @@ pub(crate) fn project_demands(file: &Utf8Path, data: &SourceData) -> Vec<Demand>
         specifier: Box::from(binding.specifier.as_str()),
         name: CompactString::default(),
     }));
-    demands.sort();
+    // Every demand is from `file`, so the derived order's first key, a path of a hundred bytes, only ever ties.
+    demands.sort_unstable_by(|a, b| (&a.specifier, &a.name).cmp(&(&b.specifier, &b.name)));
     demands.dedup();
     demands
 }
@@ -395,6 +398,12 @@ struct Loader<'a> {
     unresolved: FxDashMap<DemandKey, Unresolved>,
     /// Package directory of each directory asked about, for grouping the index.
     packages: FxDashMap<Box<str>, Option<Box<str>>>,
+    /// The resolution scope of each directory asked about (`resolution_scope`).
+    scopes: FxDashMap<Box<str>, Box<str>>,
+    /// What each `(scope, specifier)` of a module-only demand resolved to, when outside the project and not React's.
+    module_demands: FxDashMap<(Box<str>, Box<str>), ModuleCell>,
+    /// The re-exports of files that only an augmentation search passed through, which it did not parse in full.
+    re_exports: FxDashMap<PathKey, Arc<OnceLock<Arc<[String]>>>>,
     /// Something was resolved or answered that the index did not hold.
     learned: AtomicBool,
 }
@@ -572,6 +581,10 @@ impl Loader<'_> {
         if self.parent.is_some_and(|parent| parent.has_demand(&key)) || !self.demands.insert(key.clone()) {
             return;
         }
+        if demand.name.is_empty() {
+            self.module_demand(scope, &demand);
+            return;
+        }
         let module = match self.resolve(&demand.from, &demand.specifier) {
             Ok(module) => module,
             Err(reason) => {
@@ -582,13 +595,6 @@ impl Loader<'_> {
             }
         };
         if self.in_project(&module) {
-            return;
-        }
-        // A module imported for its own sake: only what it merges into React is read.
-        if demand.name.is_empty() {
-            if !Self::is_react(&module) {
-                self.load_augmentations(scope, &module);
-            }
             return;
         }
         if Self::is_react(&module) {
@@ -605,6 +611,42 @@ impl Loader<'_> {
                 self.unresolved.insert(key, Unresolved::NotExported);
             }
         }
+    }
+
+    /// A module imported for its own sake: only what it merges into React is read.
+    ///
+    /// Directories with the same resolution scope resolve a specifier to the same module, so the first of them to ask
+    /// resolves it and loads its augmentations, and the rest ask nothing.
+    fn module_demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: &Demand) {
+        let dir = demand.from.parent().map_or("", Utf8Path::as_str);
+        let key = (self.resolution_scope(dir), demand.specifier.clone());
+        let cell = self.module_demands.entry(key).or_default().clone();
+        let mut first = false;
+        let module = cell.get_or_init(|| {
+            first = true;
+            let module = self.resolve(&demand.from, &demand.specifier).ok()?;
+            (!self.in_project(&module) && !Self::is_react(&module)).then_some(module)
+        });
+        if let (true, Some(module)) = (first, module) {
+            self.load_augmentations(scope, module);
+        }
+    }
+
+    /// The nearest directory at or above `dir` where module resolution can start to differ: one with a `package.json`
+    /// (its `imports`), a `tsconfig.json` or `jsconfig.json` (its `paths`) or a `node_modules`. A bare specifier
+    /// resolves alike from every directory with the same scope. A directory with no such ancestor is its own.
+    fn resolution_scope(&self, dir: &str) -> Box<str> {
+        if let Some(found) = self.scopes.get(dir) {
+            return found.clone();
+        }
+        let marks = ["package.json", "tsconfig.json", "jsconfig.json", "node_modules"];
+        let scope = Utf8Path::new(dir)
+            .ancestors()
+            .find(|candidate| marks.iter().any(|mark| candidate.join(mark).exists()))
+            .map_or(dir, Utf8Path::as_str);
+        let scope = Box::from(scope);
+        self.scopes.insert(Box::from(dir), Box::clone(&scope));
+        scope
     }
 
     /// Load the files `module` leads to through its re-exports that merge declarations into React
@@ -637,6 +679,38 @@ impl Loader<'_> {
         }
     }
 
+    /// Whether `file` merges declarations into React, and the specifiers it re-exports, in order. A file that names
+    /// neither `React` nor the module `"react"` cannot declare into the React namespace, so one not already parsed is
+    /// only scanned for its re-exports and keeps nothing else: most files an augmentation search passes through
+    /// declare nothing the run needs.
+    fn augmentation_scan(&self, file: &Utf8Path, entry: bool) -> Option<(bool, Arc<[String]>)> {
+        let parsed = self.parent.and_then(|parent| parent.parsed_data(file.as_str())).cloned().or_else(|| {
+            let cell = self.parsed.get(file.as_str())?;
+            cell.get().cloned()
+        });
+        if let Some(parsed) = parsed {
+            return parsed.map(|data| scan_of(&data, file));
+        }
+        if let Some(cell) = self.re_exports.get(file.as_str()) {
+            if let Some(found) = cell.get() {
+                return Some((false, found.clone()));
+            }
+        }
+        let source = std::fs::read_to_string(file).ok()?;
+        if entry || may_declare_into_react(&source) {
+            return self.parse(file).map(|data| scan_of(&data, file));
+        }
+        let cell = self.re_exports.entry(PathKey::from(file)).or_default().clone();
+        let found = cell.get_or_init(|| {
+            if may_re_export(&source) {
+                Arc::from(crate::extractor::re_export_specifiers(file, &source))
+            } else {
+                Arc::from([])
+            }
+        });
+        Some((false, found.clone()))
+    }
+
     /// The files `module`'s re-exports lead to that augment React, and the stamps of the other packages the search read
     /// files from: the answer holds only while those packages do not change, as well as the module's own.
     fn find_augmenting_files(&self, module: &Utf8Path) -> (Vec<Utf8PathBuf>, Vec<PackageStampRow>) {
@@ -650,19 +724,12 @@ impl Loader<'_> {
             if !seen.insert(file.clone()) || self.in_project(&file) || Self::is_react(&file) {
                 continue;
             }
-            let Some(data) = self.parse(&file) else { continue };
-            let react_prefix = format!("{file}:React.");
-            if data.interfaces.keys().any(|key| key.starts_with(&react_prefix)) {
+            let Some((augments, re_exports)) = self.augmentation_scan(&file, file == module) else { continue };
+            if augments {
                 found.push(file.clone());
             }
-            for export in &data.exports {
-                let (LexedExport::ReExportNamed { source_specifier, .. }
-                | LexedExport::ReExportAll { source_specifier, .. }
-                | LexedExport::ReExportNamespace { source_specifier, .. }) = export
-                else {
-                    continue;
-                };
-                if let Ok(target) = self.resolve(&file, source_specifier) {
+            for specifier in re_exports.iter() {
+                if let Ok(target) = self.resolve(&file, specifier) {
                     queue.push_back(target);
                 }
             }
@@ -755,6 +822,45 @@ impl Loader<'_> {
     }
 }
 
+/// Whether `source` could declare into the React namespace: `declare module "react"` or `namespace React`, which are
+/// the only ways the extractor keys an interface as `React.`-qualified. A word that may be one of those, or follows a
+/// comment, counts; importing from "react" does not.
+fn may_declare_into_react(source: &str) -> bool {
+    ["React", "\"react\"", "'react'"].iter().any(|name| {
+        source.match_indices(name).any(|(at, _)| {
+            let before = source[..at].trim_end();
+            before.ends_with("module") || before.ends_with("namespace") || before.ends_with('/')
+        })
+    })
+}
+
+/// Whether `source` could re-export anything: every spelling puts `{`, `*` or `default` after `export` (`export type {`
+/// too), and a comment there counts. A file that does not has nothing to parse for.
+fn may_re_export(source: &str) -> bool {
+    source.match_indices("export").any(|(at, word)| {
+        let rest = source[at + word.len()..].trim_start();
+        let rest = rest.strip_prefix("type").map_or(rest, str::trim_start);
+        rest.starts_with(['{', '*', '/']) || rest.starts_with("default")
+    })
+}
+
+/// Whether `data`, the parse of `file`, declares into the React namespace, and the specifiers it re-exports, in order.
+fn scan_of(data: &SourceData, file: &Utf8Path) -> (bool, Arc<[String]>) {
+    let react_prefix = format!("{file}:React.");
+    let augments = data.interfaces.keys().any(|key| key.starts_with(&react_prefix));
+    let re_exports = data
+        .exports
+        .iter()
+        .filter_map(|export| match export {
+            LexedExport::ReExportNamed { source_specifier, .. }
+            | LexedExport::ReExportAll { source_specifier, .. }
+            | LexedExport::ReExportNamespace { source_specifier, .. } => Some(source_specifier.clone()),
+            LexedExport::LocalDeclaration { .. } => None,
+        })
+        .collect();
+    (augments, re_exports)
+}
+
 /// Whether `file` declares `name` (an interface, type alias, enum, const array or component, possibly
 /// namespace-qualified).
 fn declares(data: &SourceData, file: &Utf8Path, name: &str) -> bool {
@@ -825,6 +931,9 @@ pub(crate) fn load(
         demands: DashSet::default(),
         unresolved: DashMap::default(),
         packages: DashMap::default(),
+        scopes: DashMap::default(),
+        module_demands: DashMap::default(),
+        re_exports: DashMap::default(),
         learned: AtomicBool::new(false),
     };
     // With the cache off the index is neither read nor written, and the run learns everything again.
