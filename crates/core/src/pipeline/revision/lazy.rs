@@ -524,7 +524,7 @@ impl Revision {
         for (position, (id, index)) in group.iter().enumerate() {
             let Some(mapping) = self.global.component_mappings.get(*index) else { continue };
             let assumed = listing && options.load_dependencies;
-            if mapping.rule == DetectionRule::ImportedMemberAlias && !assumed {
+            if matches!(mapping.rule, DetectionRule::ImportedMemberAlias | DetectionRule::FactoryResult) && !assumed {
                 let empty = self
                     .lazy_resolved(options, id, *index)
                     .is_some_and(|resolved| resolved.entry.props.is_empty() && resolved.entry.inheritance.is_empty());

@@ -800,7 +800,14 @@ impl<'src> SourceDataCollector<'src> {
                 break;
             }
         }
-        for alias in pending.into_iter().filter(|alias| !super::is_constant_name(&alias.name)) {
+        let reported: Vec<PendingAlias> = pending
+            .into_iter()
+            .filter(|alias| {
+                !super::is_constant_name(&alias.name)
+                    && !self.pending_factory_calls.iter().any(|factory| factory.name == alias.name)
+            })
+            .collect();
+        for alias in reported {
             self.record_skip(
                 DiagnosticCode::SkippedCandidate,
                 format!(
