@@ -1,6 +1,8 @@
 //! Raw AST-level types produced by the extractor (Phase 0-2).
 //! These are the extractor's output and the resolver's input.
 
+#![deny(missing_docs)]
+
 use camino::{Utf8Path, Utf8PathBuf};
 use compact_str::CompactString;
 use rustc_hash::FxHashMap;
@@ -19,9 +21,12 @@ pub type TypeName = CompactString;
 /// How a function parameter is declared: `a`, `a?` or `...a`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ParamKind {
+    /// `a`: the caller must pass it.
     #[default]
     Required,
+    /// `a?`: the caller may leave it out.
     Optional,
+    /// `...a`: it collects the remaining arguments, so its type is an array.
     Rest,
 }
 
@@ -78,39 +83,63 @@ impl ParamKind {
 #[derive(Debug, Clone)]
 pub enum CollectedType {
     // ── Primitives
+    /// `string`.
     String,
+    /// `number`.
     Number,
+    /// `boolean`.
     Boolean,
+    /// `null`.
     Null,
+    /// `undefined`.
     Undefined,
+    /// `any`.
     Any,
+    /// `never`.
     Never,
+    /// `unknown`.
     Unknown,
+    /// `void`.
     Void,
+    /// `bigint`.
     BigInt,
+    /// `symbol`.
     Symbol,
 
     // ── Literals
+    /// A string literal type such as `"primary"`.
     StringLiteral(CompactString),
+    /// A number literal type such as `3`.
     NumberLiteral(f64),
+    /// `true` or `false` as a type.
     BoolLiteral(bool),
 
     // ── Structural
+    /// `A | B`: the members in declaration order.
     Union(Vec<CollectedType>),
+    /// `A & B`: the members in declaration order.
     Intersection(Vec<CollectedType>),
+    /// `T[]` or `Array<T>`: the element type.
     Array(Box<CollectedType>),
+    /// `[A, B]`: the element types in order.
     Tuple(Vec<CollectedType>),
     /// `readonly T[]` or `readonly [A, B]`: the operand under the `readonly` operator.
     Readonly(Box<CollectedType>),
+    /// An object type `{ a: string }`: its members and index signatures.
     Object(Vec<CollectedObjectField>),
 
     // ── Named type reference (possibly generic, possibly not yet resolved)
+    /// A reference to a type by name, with its type arguments. The resolver looks the name up; until then it is only
+    /// a name.
     Named {
+        /// The referenced type's name as written, possibly dotted (`React.ReactNode`).
         name: CompactString,
+        /// The type arguments in order, empty for a name with none.
         args: Vec<CollectedType>,
     },
 
     // ── `typeof X` — reference to the type of a value
+    /// `typeof X`: the type of the value `X`. `X` is a name, possibly dotted.
     TypeOf(CompactString),
 
     // ── `keyof X` — the union of X's own key names. Fully resolved when
@@ -119,6 +148,7 @@ pub enum CollectedType {
     // when X is `typeof` a `const` object literal; any other standalone use
     // degrades to `PropType::Opaque` since we don't (yet) have a general
     // type-to-key-names resolver outside the chain machinery.
+    /// `keyof X`: the union of `X`'s own key names.
     KeyOf(Box<CollectedType>),
 
     // ── Resolver-internal only (the extractor never produces this): pins `inner`
@@ -130,24 +160,35 @@ pub enum CollectedType {
     // lives in a different file. Every `CollectedType` the resolver's generic-alias
     // substitution (resolver/substitute.rs) splices into a callee's body gets
     // wrapped in this so later name lookups switch back to the correct file.
+    /// Resolver-internal; the extractor never produces it. A type argument pinned to the file it was written in, so a
+    /// name inside it resolves relative to that file after a generic alias substitutes it into another file's body.
     AtFile {
+        /// The file the wrapped type was written in.
         file: Utf8PathBuf,
+        /// The wrapped type.
         inner: Box<CollectedType>,
     },
 
     // ── Indexed access: Type["key"] or Type[K]
+    /// An indexed access type: `Type["key"]` or `Type[K]`.
     IndexedAccess {
+        /// The type being indexed (`Type`).
         obj: Box<CollectedType>,
+        /// The index (`"key"` or `K`).
         key: Box<CollectedType>,
     },
 
     // ── Template literal: `compact-${Size}` → parts = [Str("compact-"), Named("Size", [])]
+    /// A template literal type: the parts in order, string pieces as [`CollectedType::StringLiteral`] and the
+    /// `${...}` holes as the types they hold.
     TemplateLiteral(Vec<CollectedType>),
 
     // ── Function type: (props: P) => ReactNode
+    /// A function type: `(props: P) => ReactNode`.
     Function {
         /// The function's own type parameters (`<T>(item: T) => ReactNode`), in scope in its parameters and return type.
         type_params: Vec<CompactString>,
+        /// The parameter types in order.
         params: Vec<CollectedType>,
         /// Source parameter names, parallel to `params` (same length). `None` for
         /// a given index when that parameter has no simple identifier binding
@@ -156,28 +197,38 @@ pub enum CollectedType {
         /// Whether each parameter is required, optional (`a?`) or the rest parameter (`...a`), parallel to `params`.
         /// Shorter than `params` (or empty, as an old cache entry or a hand-built type is) means required.
         param_kinds: Vec<ParamKind>,
+        /// What the function returns.
         return_type: Box<CollectedType>,
     },
 
     // ── Conditional: T extends U ? X : Y — cannot resolve statically
+    /// A conditional type `T extends U ? X : Y`.
     Conditional {
+        /// The checked type (`T`).
         check: Box<CollectedType>,
+        /// The type it is tested against (`U`).
         extends_type: Box<CollectedType>,
+        /// The result when the test holds (`X`).
         true_type: Box<CollectedType>,
+        /// The result when it does not (`Y`).
         false_type: Box<CollectedType>,
     },
 
     // ── Mapped: { [K in Keys]: Value } — expanded as a props base when its keys are known (`resolver::evaluate`)
+    /// A mapped type `{ [K in Keys]: Value }`.
     Mapped {
         /// The key variable (`K`), which `value_type` refers to.
         param: CompactString,
+        /// The keys the variable ranges over (`Keys`).
         key_type: Box<CollectedType>,
+        /// The type each key maps to (`Value`).
         value_type: Box<CollectedType>,
         /// `?` or `+?` (`Some(true)`), `-?` (`Some(false)`), or no modifier, which keeps each key's own optionality.
         optional: Option<bool>,
     },
 
     // ── Fallback for syntax we don't recognise
+    /// A type the extractor has no structural form for, kept as its source text.
     Raw(std::string::String),
 }
 
@@ -688,9 +739,13 @@ impl<'de> serde::Deserialize<'de> for CollectedType {
 /// directly, outside a `CollectedType::Object`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectedObjectField {
+    /// The field's name; for an index signature, the key parameter's (`key` in `[key: string]: T`).
     pub name: std::string::String,
+    /// The field's type; for an index signature, the value type.
     pub collected_type: CollectedType,
+    /// The field is not written `name?: T`.
     pub required: bool,
+    /// The field's JSDoc description, empty when it has none.
     pub description: std::string::String,
     /// The field is written `readonly name: T`.
     #[serde(default)]
@@ -713,8 +768,13 @@ impl CollectedObjectField {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnumEntry {
+    /// For a TypeScript `enum`, the member's name (`Primary` in `enum Tone { Primary = "primary" }`); for an `as const`
+    /// object, its key; for a variant bag whose values are class strings, the variant group's name, with one entry
+    /// per value in it.
     pub name: std::string::String,
+    /// The member's value; for a variant bag, the name of one value in the group.
     pub value: EnumValue,
+    /// The member's JSDoc description, empty when it has none.
     pub description: std::string::String,
 }
 
@@ -724,12 +784,16 @@ pub struct EnumEntry {
 /// serde's `untagged` cannot read a struct variant back from the cache's positional MessagePack.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EnumValue {
+    /// A string value.
     String(std::string::String),
+    /// A number value.
     Number(f64),
+    /// A boolean value.
     Bool(bool),
     /// `...NAME` in a `const X = [...] as const` array: the elements of the array `NAME`, which the resolver looks up
     /// when `(typeof X)[number]` is read. Only `SourceData::const_arrays` holds one; an enum's values never do.
     Spread {
+        /// The name of the spread array (`NAME`).
         spread: std::string::String,
     },
 }
@@ -883,7 +947,9 @@ pub struct SourceData {
 /// The wrapper call's type arguments bind to `type_params` before its result is resolved.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionResult {
+    /// The function's type parameters, which the call's type arguments bind in order.
     pub type_params: Vec<TypeName>,
+    /// The declared or asserted result type, in terms of `type_params`.
     pub result: CollectedType,
     /// A generic call assigned to a local const and returned by name, when there is no explicit result type.
     pub returned_call: Option<WrapperCallee>,
@@ -892,7 +958,9 @@ pub struct FunctionResult {
 /// The generic function a wrapper call invokes, as the call names it, and the type arguments it passes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WrapperCallee {
+    /// The called function's name as the call writes it.
     pub name: TypeName,
+    /// The type arguments the call passes, in order.
     pub type_args: Vec<CollectedType>,
 }
 
@@ -901,25 +969,36 @@ pub struct WrapperCallee {
 pub struct CollectedInterface {
     /// Scoped key: "${file_path}:${name}"
     pub scoped_key: std::string::String,
+    /// The interface's name.
     pub name: TypeName,
+    /// The file that declares it.
     pub file_path: Utf8PathBuf,
+    /// The props it declares itself, in declaration order; the ones it inherits come through `extends`.
     pub props: Vec<RawProp>,
+    /// The interfaces and types it extends, in order.
     pub extends: Vec<ExtendsRef>,
+    /// Its JSDoc description, empty when it has none.
     pub description: std::string::String,
+    /// Its JSDoc tags: tag name (without the `@`) to the text after it; a `@param name` is keyed `param:name`.
     pub tags: BTreeMap<std::string::String, std::string::String>,
 }
 
 /// A raw prop — types not yet resolved to PropType.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RawProp {
+    /// The prop's name.
     pub name: std::string::String,
     /// Structured type collected from the AST — replaces raw string for reliable resolver access.
     pub collected_type: CollectedType,
+    /// The prop is not written `name?: T`.
     pub required: bool,
+    /// Its JSDoc description, empty when it has none.
     pub description: std::string::String,
+    /// Its JSDoc tags: tag name (without the `@`) to the text after it; a `@param name` is keyed `param:name`.
     pub tags: BTreeMap<std::string::String, std::string::String>,
     /// Byte span in source file — used for miette diagnostics
     pub span_start: u32,
+    /// The end of the span that starts at `span_start`, in bytes.
     pub span_end: u32,
 }
 
@@ -927,10 +1006,17 @@ pub struct RawProp {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ExtendsRef {
     /// interface Foo extends Bar — Bar defined in SAME file
-    SameFile { name: TypeName, type_args: Vec<CollectedType> },
+    SameFile {
+        /// The extended type's name.
+        name: TypeName,
+        /// The type arguments it is given, in order.
+        type_args: Vec<CollectedType>,
+    },
     /// interface Foo extends Bar — Bar came from an import
     Imported {
+        /// The name the extended type has in this file (after any `as` rename).
         local_name: TypeName,
+        /// The type arguments it is given, in order.
         type_args: Vec<CollectedType>,
         /// The import specifier this name came from, if determinable
         source_specifier: Option<std::string::String>,
@@ -938,9 +1024,11 @@ pub enum ExtendsRef {
     /// `interface Foo extends ButtonHTMLAttributes<HTMLButtonElement>`
     /// Recognized as baked-in React/DOM type — no file lookup needed
     Builtin {
+        /// The built-in type's name: `ButtonHTMLAttributes`.
         name: TypeName,
         /// Resolved HTML element: "button", "input", etc.
         element: Option<std::string::String>,
+        /// The type arguments it is given, in order.
         type_args: Vec<CollectedType>,
     },
 }
@@ -1090,39 +1178,62 @@ pub enum CollectedTypeAlias {
     /// `Omit<Base, Keys>`. `keys` is the key expression as written (`"a" | "b"`, `keyof Other`, a `Keys` alias,
     /// `Exclude<…>`); the resolver turns it into a key set, so an alias or a substituted parameter works too.
     Omit {
+        /// The type the keys are removed from.
         base: CollectedType,
+        /// The keys to remove, as written.
         keys: CollectedType,
+        /// The file that declares the alias.
         file_path: Utf8PathBuf,
     },
     /// `Pick<Base, Keys>`, with `keys` resolved the same way as `Omit`'s.
     Pick {
+        /// The type the keys are kept from.
         base: CollectedType,
+        /// The keys to keep, as written.
         keys: CollectedType,
+        /// The file that declares the alias.
         file_path: Utf8PathBuf,
     },
+    /// `Partial<Base>`: every prop of `base` made optional.
     Partial {
+        /// The type made partial.
         base: CollectedType,
+        /// The file that declares the alias.
         file_path: Utf8PathBuf,
     },
+    /// `Required<Base>`: every prop of `base` made required.
     Required {
+        /// The type made required.
         base: CollectedType,
+        /// The file that declares the alias.
         file_path: Utf8PathBuf,
     },
+    /// `type X = A | B` over types that are not all string literals.
     Union {
+        /// The members in declaration order.
         members: Vec<CollectedType>,
+        /// The file that declares the alias.
         file_path: Utf8PathBuf,
     },
+    /// `type X = A & B`.
     Intersection {
+        /// The members in declaration order.
         members: Vec<CollectedType>,
+        /// The file that declares the alias.
         file_path: Utf8PathBuf,
     },
+    /// `type X = 'a' | 'b'`: a union of string literals only.
     LiteralUnion {
+        /// The string literal values in declaration order.
         members: Vec<std::string::String>,
+        /// The file that declares the alias.
         file_path: Utf8PathBuf,
     },
     /// e.g. type Size = SomeOtherType — transparent alias
     Passthrough {
+        /// The type the alias stands for.
         target: CollectedType,
+        /// The file that declares the alias.
         file_path: Utf8PathBuf,
     },
 }
@@ -1210,14 +1321,22 @@ pub enum DetectionRule {
 /// A component → prop type mapping.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComponentMapping {
+    /// The component's name as the extractor found it.
     pub component_name: std::string::String,
+    /// The name of the type that holds its props, which the resolver looks up.
     pub props_type_name: TypeName,
+    /// The type arguments given to the props type, in order.
     pub props_type_args: Vec<CollectedType>,
+    /// The file that declares the component.
     pub file_path: Utf8PathBuf,
+    /// The component's JSDoc description, empty when it has none.
     pub description: std::string::String,
+    /// The component's JSDoc tags: tag name (without the `@`) to the text after it; a `@param name` is keyed
+    /// `param:name`.
     pub tags: BTreeMap<std::string::String, std::string::String>,
     /// Byte span for diagnostics
     pub span_start: u32,
+    /// The end of the span that starts at `span_start`, in bytes.
     pub span_end: u32,
     /// Default values extracted from parameter destructuring or defaultProps.
     /// Key = prop name. Populated only for implementation files (.tsx/.ts), not .d.ts.
@@ -1274,18 +1393,21 @@ impl ComponentMapping {
         )
     }
 
+    /// Records the generic call that built the component.
     #[must_use]
     pub fn with_wrapper_callee(mut self, callee: WrapperCallee) -> Self {
         self.wrapper_callee = Some(callee);
         self
     }
 
+    /// Sets the type arguments given to the props type.
     #[must_use]
     pub fn with_props_type_args(mut self, props_type_args: Vec<CollectedType>) -> Self {
         self.props_type_args = props_type_args;
         self
     }
 
+    /// Sets the component's JSDoc description and tags.
     #[must_use]
     pub fn with_doc(
         mut self,
@@ -1297,6 +1419,7 @@ impl ComponentMapping {
         self
     }
 
+    /// Sets the default values read from the component's parameter destructuring or `defaultProps`.
     #[must_use]
     pub fn with_param_defaults(mut self, param_defaults: FxHashMap<std::string::String, RawDefault>) -> Self {
         self.param_defaults = param_defaults;
@@ -1324,18 +1447,34 @@ pub struct ImportBinding {
 pub enum LexedExport {
     /// `export { Foo }` or `export { Foo as Bar }` from "./types"
     ReExportNamed {
+        /// The name this file exports it under (`Bar` in `export { Foo as Bar }`).
         local_name: std::string::String,
+        /// The name the source module exports it under (`Foo`).
         source_name: std::string::String,
+        /// The module it comes from: `"./types"`.
         source_specifier: std::string::String,
+        /// The export is `export type { ... }`.
         is_type_only: bool,
     },
     /// `export * from "./types"`
-    ReExportAll { source_specifier: std::string::String, is_type_only: bool },
+    ReExportAll {
+        /// The module whose exports are re-exported.
+        source_specifier: std::string::String,
+        /// The export is `export type * from ...`.
+        is_type_only: bool,
+    },
     /// `export * as Ns from "./types"`
-    ReExportNamespace { namespace: std::string::String, source_specifier: std::string::String },
+    ReExportNamespace {
+        /// The namespace name the module is exported as (`Ns`).
+        namespace: std::string::String,
+        /// The module re-exported as the namespace.
+        source_specifier: std::string::String,
+    },
     /// `export interface Foo { }` / `export type Bar = ...` / `export const X` / `export { Base as Foo }`
     LocalDeclaration {
+        /// The exported name.
         name: std::string::String,
+        /// The export is type-only: it names a type and has no runtime value.
         is_type_only: bool,
         /// The declaration's own name when it is exported under another (`Base` in `export { Base as Foo }`).
         declared_as: Option<std::string::String>,
