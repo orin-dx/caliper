@@ -236,7 +236,10 @@ fn handle_change(session: &WatchSession, path: &Path, quiet: bool, out: Option<&
     }
     // The cumulative snapshot, not this event's delta: a clean update to one file must not reset the exit code while
     // an earlier file in the session still has an unresolved error.
-    publish(&session.snapshot(), out, exit_code);
+    match session.current_output() {
+        Some(output) => publish(&output, out, exit_code),
+        None => publish(&session.snapshot(), out, exit_code),
+    }
 }
 
 /// The source directories, and the tsconfigs, `package.json` files and lockfiles above them: editing one rebuilds the
@@ -413,6 +416,20 @@ mod tests {
         let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
         assert_eq!(prop_names(&written, "Widget"), vec!["label", "size"]);
         assert_eq!(exit_code.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn publishing_the_shared_output_writes_the_bytes_of_a_snapshot_copy() {
+        let (src, scratch) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+        std::fs::write(src.path().join("Widget.tsx"), WIDGET).unwrap();
+        let session = session_over(&src, &scratch);
+        let _ignored = session.initialize();
+        let (shared, copied) = (scratch.path().join("shared.json"), scratch.path().join("copied.json"));
+
+        publish(&session.current_output().unwrap(), shared.to_str(), &AtomicI32::new(0));
+        publish(&session.snapshot(), copied.to_str(), &AtomicI32::new(0));
+
+        assert_eq!(std::fs::read(&shared).unwrap(), std::fs::read(&copied).unwrap());
     }
 
     #[test]
