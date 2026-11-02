@@ -1,0 +1,106 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6F0QP5398GKVTCATMPZ0TX6",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-02T20:55:55.505426Z",
+  "branch": "fix/react-type-import-source",
+  "checkpoints_count": 7,
+  "save_step_count": 4,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "098d67ea958c",
+  "checkpoint_transcript_start": 635,
+  "transcript_lines_at_start": 635,
+  "compact_transcript_start": 57,
+  "token_usage": {
+    "input_tokens": 68,
+    "cache_creation_tokens": 50304,
+    "cache_read_tokens": 6110349,
+    "output_tokens": 20110,
+    "api_call_count": 33,
+    "subagent_tokens": {
+      "input_tokens": 8,
+      "cache_creation_tokens": 9160,
+      "cache_read_tokens": 968231,
+      "output_tokens": 4262,
+      "api_call_count": 4
+    }
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 6,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 19
+  },
+  "summary": {
+    "intent": "Drive the caliper repo's remaining trails (153–158) to completion by delegating to sub-agents: publish the Callisto release flow (GitHub Releases, attested binaries, recovery), keep commits signed, and answer side questions about trail rendering and the macOS 14 runner retirement.",
+    "outcome": "Trail 158 was pushed as three stacked PRs (#286–#288) and merged by the user; stranded commits from #281/#283 were re-landed via #289/#290, and two workers were started on trails 155–156 (detection stack) and 157 (trust). Trail bodies were rewritten without tables and the macOS 14 question was resolved as no action needed.",
+    "learnings": {
+      "repo": [
+        "Callisto 0.16.0 hard-codes the attesting workflow path as .github/workflows/callisto-release.yml (RELEASE_COORDINATOR_WORKFLOW_PATH), so release.yml had to be renamed; verification fails with E140 otherwise.",
+        "The `[release]` section in callisto.toml requires `github-release` on the product package (E197), so GitHub Releases must land before binaries/attestations.",
+        "The Homebrew tap keys on tags (npm/caliper-docgen@x.y.z via livecheck), not Releases; tag names were left unchanged. The tap lives in another repo and was not inspected.",
+        "Enabling github-release makes 0.9.0 look unfinished to `callisto release pending`; without `--from` it stops with E166, so RELEASE_PENDING_FROM is pinned to 2daef927 (0.9.0 release commit). The first run after merge backfills 0.9.0 and has never been exercised.",
+        "Workflows only use macos-latest (two Darwin rows in the release build matrix); it resolves to macOS 26 arm64, and x86_64 is cross-compiled, so the macOS 14 retirement doesn't affect the repo.",
+        "CI for the stacked PRs: actionlint and zizmor --offline are the workflow checks; typos and oxfmt --check are used for changed files."
+      ],
+      "code": [
+        {
+          "path": "crates/callisto-model/src/release/github.rs",
+          "line": 148,
+          "end_line": 148,
+          "finding": "RELEASE_COORDINATOR_WORKFLOW_PATH = \".github/workflows/callisto-release.yml\" is hard-coded in Callisto 0.16.0 and determines the required attesting workflow filename."
+        },
+        {
+          "path": "CONTRIBUTING.md",
+          "line": 98,
+          "end_line": 98,
+          "finding": "Documents that the Homebrew tap's `brew bump` finds the npm/caliper-docgen@x.y.z tag via livecheck and builds from source."
+        }
+      ],
+      "workflow": [
+        "Stacked PRs merged top-down or into a parent branch after the parent already landed on main strand their commits; merge bottom-up, or retarget to main, and verify content reached main afterward.",
+        "Fix stranded commits by merging main into the stranded branches with signed merge commits and opening new PRs against main.",
+        "Verify every commit is signed locally (status G) and shows as verified on GitHub before reporting a branch done; the user added a signing key mid-session.",
+        "Entire trail descriptions may not render Markdown tables (unverified, docs silent); bullet lists are a safe fallback. Don't state an inferred cause as fact; check docs when challenged.",
+        "Sub-agent workers in isolated worktrees committing signed locally without pushing, with the lead pushing and linking via `entire trail link` after review, suits self-contained lineages; the cap is three live sessions.",
+        "Link trail branches with `entire trail link <n> --branch <b> --base <parent>` before any PR exists, pushing in stack order."
+      ]
+    },
+    "friction": [
+      "#281 and #283 merged into parent branches after the parents had already merged to main, stranding their commits and requiring re-landing via #289/#290.",
+      "`callisto release pending` failed with E166 on an older release decision that no longer decodes, requiring a pinned --from.",
+      "Could not produce an intent with slots locally (`release plan --package` failed with E160), so the artifact-manifest step is copied from Callisto's example and untested.",
+      "Entire trail table rendering was uncertain: first stated as unsupported from a screenshot, then docs turned out silent, requiring a corrected memory note.",
+      "#287 showed BLOCKED after being retargeted to main and was not diagnosed; its PR body omits the recovery changes merged in from #288.",
+      "Branch protection or rulesets referencing release.yml could not be checked from repo contents."
+    ],
+    "open_items": [
+      "Watch the in-progress Release & Publish run on main, likely the first 0.9.0 backfill (rebuild, attest, create GitHub Release); it has never run.",
+      "Check branch protection/rulesets for the old release.yml filename.",
+      "Check the Homebrew tap config for :github_latest, which would see the new Release.",
+      "Rehearse the release flow on a scratch repo per docs/releasing.md; the untested pieces are artifact-manifest, gh attestation verify, Windows tar.gz and the schedule trigger.",
+      "Decide whether to keep the daily 05:23 UTC schedule, since Callisto's own example has none.",
+      "Decide whether to pin macos-26 in the release matrix for deterministic builds.",
+      "Merge #289 and #290 so oracle/three-tools-report can start.",
+      "Wait for the weekly PRs before starting feat/agent-eval-weekly, which edits weekly.py.",
+      "Review, push and link the signed branches from the t155-156-detect and t157-trust workers.",
+      "Decide whether to keep #285 for its memory win, and whether to scope a follow-up for trail 154, which missed its 141 ms / 275 MiB goal (about -6% time, -5% memory; antd recall 92.1% vs ~95% target).",
+      "Optionally test a table in a trail body to settle Markdown rendering.",
+      "No retry added for the E148 race; OIDC trusted publishing deferred because Callisto 0.16.0 doesn't ship it."
+    ]
+  }
+}

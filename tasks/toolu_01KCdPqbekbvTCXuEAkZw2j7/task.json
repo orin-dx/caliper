@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01KCdPqbekbvTCXuEAkZw2j7",
+  "agent_id": "a146a303a3da7d99b",
+  "subagent_type": "fork",
+  "task_description": "Trail 158 release flow stack",
+  "token_usage": {
+    "input_tokens": 200,
+    "cache_creation_tokens": 140080,
+    "cache_read_tokens": 23329883,
+    "output_tokens": 73480,
+    "api_call_count": 107
+  },
+  "started_at": "2026-11-02T10:41:55.753356-08:00",
+  "completed_at": "2026-11-02T10:58:40.691129-08:00"
+}
