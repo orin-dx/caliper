@@ -182,6 +182,11 @@ pub struct ParsedProp {
     pub parent: Option<PropParent>,
     /// All declarations of this prop name (for overloads/merging)
     pub declarations: Vec<PropParent>,
+    /// Why this prop's type is partly a guess, when part of it is `opaque`: the reason kinds of its opaque members
+    /// (`conditionalType`, `mappedType`, `indexedAccess`, …), each once, in the order the type holds them. Empty for a
+    /// type the resolver evaluated in full. Derived from `prop_type`, so it never disagrees with it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub degraded_by: Vec<String>,
     /// Private, zero-sized, and unconstructible outside this module — its
     /// only purpose is to make a bare `ParsedProp { .. }` struct literal
     /// fail to compile anywhere else, including other modules in this same
@@ -245,7 +250,19 @@ impl ParsedProp {
         declarations: Vec<PropParent>,
     ) -> Self {
         let required = if default_value.is_some() { false } else { required };
-        ParsedProp { name, prop_type, required, default_value, description, tags, parent, declarations, _seal: Seal }
+        let degraded_by = prop_type.degraded_by().into_iter().map(str::to_owned).collect();
+        ParsedProp {
+            name,
+            prop_type,
+            required,
+            default_value,
+            description,
+            tags,
+            parent,
+            declarations,
+            degraded_by,
+            _seal: Seal,
+        }
     }
 }
 
@@ -1106,6 +1123,74 @@ pub enum OpaqueReason {
     /// structural shape (not a depth or circularity problem — see
     /// DepthExceeded for that).
     UnsupportedExpression,
+}
+
+impl OpaqueReason {
+    /// The reason's name in the canonical JSON (`"mappedType"`), without its payload.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            OpaqueReason::ConditionalType => "conditionalType",
+            OpaqueReason::MappedType => "mappedType",
+            OpaqueReason::ModuleAugmentation => "moduleAugmentation",
+            OpaqueReason::RuntimeDependent { .. } => "runtimeDependent",
+            OpaqueReason::UnresolvableImport { .. } => "unresolvableImport",
+            OpaqueReason::PandaCodegenMissing => "pandaCodegenMissing",
+            OpaqueReason::DepthExceeded => "depthExceeded",
+            OpaqueReason::IndexedAccess { .. } => "indexedAccess",
+            OpaqueReason::TemplateLiteral { .. } => "templateLiteral",
+            OpaqueReason::UnsupportedExpression => "unsupportedExpression",
+        }
+    }
+}
+
+impl PropType {
+    /// The kinds of reason behind the `opaque` members of this type, each once, in the order they occur: what the
+    /// resolver could not evaluate. Empty when nothing in the type is `opaque`. A name left as an unexpanded
+    /// reference is not `opaque` and is not listed; its diagnostic says so.
+    pub fn degraded_by(&self) -> Vec<&'static str> {
+        fn collect(ty: &PropType, kinds: &mut Vec<&'static str>) {
+            match ty {
+                PropType::Opaque(detail) => {
+                    let kind = detail.reason().kind();
+                    if !kinds.contains(&kind) {
+                        kinds.push(kind);
+                    }
+                }
+                PropType::Union(members) | PropType::Intersection(members) | PropType::Tuple(members) => {
+                    members.iter().for_each(|member| collect(member, kinds));
+                }
+                PropType::Array(inner) | PropType::Readonly(inner) => collect(inner, kinds),
+                PropType::Object(fields) => fields.iter().for_each(|field| collect(&field.prop_type, kinds)),
+                PropType::Named { args, .. } => args.iter().for_each(|arg| collect(arg, kinds)),
+                PropType::Function { params, return_type, .. } => {
+                    params.iter().for_each(|param| collect(&param.param_type, kinds));
+                    collect(return_type, kinds);
+                }
+                PropType::String
+                | PropType::Number
+                | PropType::Boolean
+                | PropType::Null
+                | PropType::Undefined
+                | PropType::Any
+                | PropType::Never
+                | PropType::Unknown
+                | PropType::Void
+                | PropType::StringLiteral(_)
+                | PropType::NumberLiteral(_)
+                | PropType::BoolLiteral(_)
+                | PropType::ReactNode
+                | PropType::CssProperties
+                | PropType::Ref { .. }
+                | PropType::ElementType
+                | PropType::HtmlAttributes { .. }
+                | PropType::LiteralUnion { .. }
+                | PropType::SxProps => {}
+            }
+        }
+        let mut kinds = Vec::new();
+        collect(self, &mut kinds);
+        kinds
+    }
 }
 
 /// One parameter of a [`PropType::Function`].

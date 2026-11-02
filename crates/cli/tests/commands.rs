@@ -107,7 +107,9 @@ fn extract_toon_format_lists_each_component_with_its_props() {
     let toon = extract_to_stdout("toon");
 
     assert!(toon.starts_with("docgenComponents[1]:\n  component:Widget:\n"), "{toon}");
-    assert!(toon.contains("      label,true,string,,\n"), "{toon}");
+    assert!(toon.contains("    props[1] {name,required,type,default,source,description}:\n"), "{toon}");
+    // An inline props type has no declaring type, so its `source` is empty as well as its default and description.
+    assert!(toon.contains("      label,true,string,,,\n"), "{toon}");
 }
 
 /// Kills the child on drop so a failing assertion never leaks a watcher.

@@ -128,6 +128,15 @@ export declare function resolutionConfigFiles(sessionId: number): Array<string>
 export declare function sessionComponentAnswers(sessionId: number, keys: Array<string>): string
 
 /**
+ * One component as TOON, the compact text an agent reads (`render_component_slice_toon` in the core crate): its prop table
+ * with each prop's declaring type, why a prop's type is partly a guess, its inherited layers, and the warnings and
+ * errors that say its props may be incomplete. For an in-process host that answers one question about one component
+ * and has no use for a project's whole output. `null` when the session has no component under `key`. A lazy session
+ * resolves the component now.
+ */
+export declare function sessionComponentToon(sessionId: number, key: string): string | null
+
+/**
  * Every component key `sessionDocgenInfo` answers, sorted. A lazy session resolves only imported-member aliases to
  * decide; the rest come from parsing alone. Empty for an unknown or uninitialized session.
  */

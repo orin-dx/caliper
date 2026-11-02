@@ -13,7 +13,3 @@ Add an entry when you find a gap you are not fixing now. Delete it when you fix 
 
 - Mapped types, conditional types and indexed access over an unbound generic, and `@emotion/styled`'s two-argument overload, need real type inference. They degrade to `Opaque` with a diagnostic and, where possible, a `composes` entry. See `type-checker-integration.md`.
 - Ambient globals (`lib.dom.d.ts` and the like) are looked up from `options.src_dirs.first()` only (`pipeline/mod.rs`, `pipeline/revision.rs`). If the first source directory can't resolve `typescript` but a later one could, ambient lookups return nothing for the whole run. Untested against a real multi-root config.
-
-## Output
-
-- TOON is lossy on purpose: unions and intersections print at most 4 members, literal unions at most 6, each followed by `...(+N)`. The module doc of `toon.rs` doesn't say so.
