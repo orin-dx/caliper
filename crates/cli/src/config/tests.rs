@@ -454,3 +454,29 @@ fn a_config_with_an_unrecognized_html_attributes_is_an_error_naming_the_file_and
         )
     );
 }
+
+#[test]
+fn a_config_that_leaves_the_checker_alone_has_nothing_to_say() {
+    assert_eq!(ignored_semantic_config_note("check", &PipelineOptions::default()), None);
+}
+
+#[test]
+fn the_note_names_each_checker_key_the_config_set() {
+    let on = PipelineOptions { experimental_semantic_types: true, ..Default::default() };
+    assert_eq!(
+        ignored_semantic_config_note("inspect", &on).as_deref(),
+        Some(
+            "warning: the config sets experimentalSemanticTypes, but `inspect` never runs the TypeScript checker, so \
+             its output is the structural result. Only `extract` runs the checker."
+        )
+    );
+
+    let path = PipelineOptions { semantic_tsc_path: Some("/opt/tsc".into()), ..Default::default() };
+    assert_eq!(
+        ignored_semantic_config_note("watch", &path).as_deref(),
+        Some(
+            "warning: the config sets tscPath, but `watch` never runs the TypeScript checker, so its output is the \
+             structural result. Only `extract` runs the checker."
+        )
+    );
+}

@@ -342,6 +342,88 @@ fn extract_finds_docgen_config_ts_in_the_working_directory_and_applies_it() {
     assert_eq!(components, ["Widget"], "only the configured srcDirs are scanned");
 }
 
+/// A project whose config switches the TypeScript checker on. tsx, which evaluates the config, is only installed under
+/// apps/oracle.
+fn project_with_checker_config() -> TempDir {
+    let project = TempDir::new_in(concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/oracle")).unwrap();
+    std::fs::create_dir(project.path().join("components")).unwrap();
+    std::fs::write(
+        project.path().join("components/Widget.tsx"),
+        "export function Widget(props: { label: string }) { return null; }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("docgen.config.ts"),
+        "export default { srcDirs: ['components'], experimentalSemanticTypes: true, tscPath: '/nonexistent/tsc' };\n",
+    )
+    .unwrap();
+    project
+}
+
+fn ignored_checker_note(command: &str) -> String {
+    format!(
+        "warning: the config sets experimentalSemanticTypes and tscPath, but `{command}` never runs the TypeScript \
+         checker, so its output is the structural result. Only `extract` runs the checker."
+    )
+}
+
+#[test]
+fn check_and_inspect_say_when_the_config_enables_a_checker_they_never_run() {
+    let project = project_with_checker_config();
+    let run_here = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_caliper-docgen"))
+            .current_dir(project.path())
+            .args(args)
+            .output()
+            .expect("failed to spawn the real binary")
+    };
+
+    for (command, args) in [("check", &["check"][..]), ("inspect", &["inspect", "Widget"][..])] {
+        let output = run_here(args);
+        assert_eq!(output.status.code(), Some(0), "{command}: {}", String::from_utf8_lossy(&output.stderr));
+        let stderr = strip_ansi(&String::from_utf8(output.stderr).unwrap());
+        assert_eq!(
+            stderr.lines().filter(|line| line.contains("never runs the TypeScript checker")).collect::<Vec<_>>(),
+            [ignored_checker_note(command)],
+            "{command}: {stderr}"
+        );
+    }
+
+    let quiet = run_here(&["--quiet", "check"]);
+    assert!(quiet.stderr.is_empty(), "--quiet prints nothing: {}", String::from_utf8_lossy(&quiet.stderr));
+
+    // `extract` runs the checker (here it is missing, which `extract` reports itself), so it has nothing to warn about.
+    let extract = run_here(&["extract", "--json"]);
+    let stderr = String::from_utf8(extract.stderr).unwrap();
+    assert!(!stderr.contains("never runs the TypeScript checker"), "{stderr}");
+}
+
+#[test]
+fn watch_says_when_the_config_enables_a_checker_it_never_runs() {
+    let project = project_with_checker_config();
+    let stderr_log = project.path().join("stderr.log");
+    let _watch = KillOnDrop(
+        Command::new(env!("CARGO_BIN_EXE_caliper-docgen"))
+            .current_dir(project.path())
+            .arg("watch")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(std::fs::File::create(&stderr_log).unwrap())
+            .spawn()
+            .expect("failed to spawn the real binary"),
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let logged = strip_ansi(&std::fs::read_to_string(&stderr_log).unwrap());
+        if logged.lines().any(|line| line == ignored_checker_note("watch")) {
+            return;
+        }
+        assert!(Instant::now() < deadline, "watch never said the checker is ignored: {logged}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 /// The names of a canonical component's props, sorted, through the prop sets of `written`.
 fn prop_names(written: &serde_json::Value, component: &str) -> Vec<String> {
     let sets = written["components"][component]["props"].as_array().unwrap();
