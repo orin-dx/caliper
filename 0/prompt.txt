@@ -1,0 +1,1 @@
+Can we do an adversarial analysis on our codease? Focus on architecture, semantic model, performance and maintainability. Point out where we're not follow establish Rust best practices and guidelines. How to addresses all our issues. Come with recommendations and verify everything
