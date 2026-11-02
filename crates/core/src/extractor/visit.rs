@@ -10,7 +10,7 @@ use crate::types::{
 };
 
 use super::component::Binding;
-use super::{declaration_name, is_pascal_case, js_text, SourceDataCollector};
+use super::{declaration_name, is_constant_name, is_pascal_case, js_text, SourceDataCollector};
 
 impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     fn visit_import_declaration(&mut self, node: &ImportDeclaration<'a>) {
@@ -325,13 +325,18 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                         && !self.try_record_imported_member_alias(&binding, &name)
                         && !self.try_defer_identifier_alias(&name, declarator.span)
                     {
-                        let message = self.decline_reason.take().unwrap_or_else(|| {
-                            format!(
-                                "'{name}' is a PascalCase binding but matched no known component pattern \
-                                 (FC annotation, forwardRef, HOC wrapper, or identifier alias)"
-                            )
-                        });
-                        self.record_skip(DiagnosticCode::SkippedCandidate, message, declarator.span);
+                        // `MENU_OPTIONS` is a constant, not a component that failed to qualify; a rule that gave a
+                        // reason for declining it still reports it.
+                        let declined = self.decline_reason.take();
+                        if declined.is_some() || !is_constant_name(&name) {
+                            let message = declined.unwrap_or_else(|| {
+                                format!(
+                                    "'{name}' is a PascalCase binding but matched no known component pattern \
+                                     (FC annotation, forwardRef, HOC wrapper, or identifier alias)"
+                                )
+                            });
+                            self.record_skip(DiagnosticCode::SkippedCandidate, message, declarator.span);
+                        }
                     }
                 }
             }

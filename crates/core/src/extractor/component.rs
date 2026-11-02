@@ -800,7 +800,7 @@ impl<'src> SourceDataCollector<'src> {
                 break;
             }
         }
-        for alias in pending {
+        for alias in pending.into_iter().filter(|alias| !super::is_constant_name(&alias.name)) {
             self.record_skip(
                 DiagnosticCode::SkippedCandidate,
                 format!(

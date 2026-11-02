@@ -1430,6 +1430,29 @@ fn an_alias_of_a_component_declared_further_down_the_file_is_that_component() {
 }
 
 #[test]
+fn a_constant_is_not_reported_as_a_component_candidate_that_failed_to_qualify() {
+    use crate::types::DetectionRule::FcAnnotation;
+    let source = r#"
+        import * as React from "react";
+        import { Thing } from "./thing";
+        interface IconProps { size: number }
+        export const MENU_OPTIONS = ["a", "b"];
+        export const ORIGIN = Thing;
+        export const IS_LOCAL_DEV = Missing;
+        export const SVG: React.FC<IconProps> = () => <svg />;
+        export const Menu = ["a", "b"];
+        export const Option = Missing;
+    "#;
+    let data = parse_file(Utf8Path::new("/test/constants.tsx"), source);
+    assert_eq!(
+        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.rule)).collect::<Vec<_>>(),
+        vec![("SVG", FcAnnotation)]
+    );
+    let reported: Vec<&str> = data.diagnostics.iter().filter_map(|d| d.message.split('\'').nth(1)).collect();
+    assert_eq!(reported, vec!["Menu", "Option"]);
+}
+
+#[test]
 fn an_alias_whose_component_is_never_declared_is_still_reported_as_a_skipped_candidate() {
     let source = r#"
         import { Thing } from "./thing";

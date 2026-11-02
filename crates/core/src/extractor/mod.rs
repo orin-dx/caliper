@@ -1172,6 +1172,12 @@ pub(super) fn is_pascal_case(s: &str) -> bool {
     chars.next().is_some_and(|c| c.is_uppercase())
 }
 
+/// Whether `name` is written as a constant, `MENU_OPTIONS` or `ORIGIN`: more than one letter and none lowercase. Such a
+/// binding is not reported as a component candidate that failed to qualify; a rule that does match it still maps it.
+pub(super) fn is_constant_name(name: &str) -> bool {
+    name.chars().count() > 1 && !name.chars().any(char::is_lowercase)
+}
+
 /// The names a function type declares as its own type parameters (`<T, U>`).
 fn type_param_names(declaration: Option<&TSTypeParameterDeclaration>) -> Vec<CompactString> {
     declaration
