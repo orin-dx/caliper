@@ -106,7 +106,15 @@ pub(crate) type NameLists<'a> = BTreeMap<ListId, &'a [String]>;
 
 /// Add `names` to `lists` and return its id. Fails if a different list already holds the id.
 fn add_list<'a, E: serde::ser::Error>(lists: &mut NameLists<'a>, names: &'a [String]) -> Result<ListId, E> {
-    let id = PropId::of_list(names);
+    insert_list(lists, PropId::of_list(names), names)
+}
+
+/// Add `names` under `id`, which is `PropId::of_list(names)`. Fails if a different list already holds the id.
+fn insert_list<'a, E: serde::ser::Error>(
+    lists: &mut NameLists<'a>,
+    id: ListId,
+    names: &'a [String],
+) -> Result<ListId, E> {
     match lists.get(&id) {
         Some(existing) if *existing != names => {
             Err(E::custom(format!("two different name lists have the same id {id}: {existing:?} and {names:?}")))
@@ -132,17 +140,18 @@ impl<'a> InternedDiagnostics<'a> {
         lists: &mut NameLists<'a>,
         diagnostics: &'a [Diagnostic],
     ) -> Result<Self, E> {
-        let affects =
-            diagnostics
-                .iter()
-                .map(|diagnostic| {
-                    if diagnostic.affects.is_empty() {
-                        Ok(None)
-                    } else {
-                        add_list(lists, &diagnostic.affects).map(Some)
-                    }
-                })
-                .collect::<Result<_, E>>()?;
+        // Hashing every name of every list is most of the work and is pure, so the ids come from all threads; the
+        // table is filled, and a collision looked for, in diagnostic order as before.
+        let ids: Vec<Option<ListId>> = diagnostics
+            .par_iter()
+            .with_min_len(16)
+            .map(|diagnostic| (!diagnostic.affects.is_empty()).then(|| PropId::of_list(&diagnostic.affects)))
+            .collect();
+        let affects = diagnostics
+            .iter()
+            .zip(ids)
+            .map(|(diagnostic, id)| id.map(|id| insert_list(lists, id, &diagnostic.affects)).transpose())
+            .collect::<Result<_, E>>()?;
         Ok(InternedDiagnostics { diagnostics, affects })
     }
 }
