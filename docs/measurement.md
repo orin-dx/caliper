@@ -84,6 +84,31 @@ RDT has mistakes of its own. With `--oracle` the run also asks TypeScript 7.1's 
 | Wrong             | Caliper's type describes something else, such as a literal union missing members |
 | Checker any/error | The checker has no type                                                          |
 
+### An independent reference
+
+The oracle above scores a tool against the TypeScript checker alone. That cannot judge a mode that uses the checker, which would agree with itself, and it cannot say which side is right when they differ. `scripts/reference_sample.py` (`apps/oracle/src/reference.ts`) judges a sample of props by two methods that fail differently:
+
+- **A, the checker's type.** The same normalized type the oracle compares (`oracle-checker.ts`).
+- **B, the declared type.** What the prop's declaration writes, read from source text with TypeScript's parser (`reference-declared.ts`), never from the checker's type printer. The checker is asked only where the declaration is. B abstains where the declaration leaves the type to be computed (an indexed access, `keyof`, a conditional type), has no annotation, has no declaration (a mapped type's synthesized member), or has several that differ.
+
+They are compared with the oracle's own rules (`oracle-compare.ts`), B standing in for the tool. Identical or spelled is agreement. B looser than A (a name or a type parameter A evaluated) is B saying less, so A stands alone. B contradicting A is **contested**: it is listed in the review file for a person, never counted for or against a tool. Where A has no type (`any`, an error) and B does, B stands alone.
+
+A tool's prop is then **correct** (agrees with the reference), **less precise**, **wrong**, **contested**, **no reference**, **missing**, or **layer**. A prop the tool does not list but a collapsed inheritance layer names (`inheritance[].members`, an interned name list in the canonical JSON) is a `layer`: surfaced, but with no type to judge, so it is neither credited as correct nor counted as missing. Each verdict keeps which methods stood behind it (`both`, `checker`, `declaration`), so a count of correct props says how many were corroborated by B and how many rest on A alone.
+
+The sample is every prop a `--list` file names (`[{ corpus, file, component, prop }]`, for example the props two modes differ on) plus a seeded control sample, 100 per corpus by default, stratified so it is not all `string` and `boolean`. A prop falls in the first of these it fits: listed, generic, mapped (`Pick`, `Omit`, `Partial`, …), intersection, function, union of literals, from a dependency, an `@types/react` attribute (at most three per component), from another project file, own. With a tool's output given, the control sample is drawn from the components the tool reports, because the checker takes any exported one-parameter function for a component; pass `allComponents` in the config to draw from all.
+
+```bash
+scripts/reference_sample.py --bin target/release/caliper-docgen --corpus antd --corpus shadcn [--per-corpus 300] [--list diff.json]
+```
+
+The report (`reference.json`) counts, per corpus, how the reference was reached (`agreed_both`, `checker_only`, `declaration_only`, `contested`, `none`), why B abstained, and the tool's outcomes in total, by stratum and by origin. `review.md` lists the contested props with both types and the declaration's path; `reference.json.rows.json` has every judged prop. Output goes to `--out-dir`, a temporary directory by default.
+
+What it does not establish:
+
+- A and B read the same declaration. They corroborate each other where B can read a type, and say nothing where it cannot (a computed type, which is where a checker-backed mode matters most). Count `checker_only` as props with no independent evidence; a labelled sample is the independent check for those.
+- `oracle-compare.ts` reads a widened primitive of another kind as `less precise`, not `wrong` (`number` against `'a' | 'b'`). Changing that would move every historical oracle number, so the reference inherits it.
+- The sample is the components Caliper reports, so it says nothing about components Caliper misses.
+
 ## `just bench`
 
 ```bash
