@@ -45,6 +45,16 @@ The 2026-11-02 pairing (same-file default aliases, `displayName`, wrappers, asse
 | shadcn |             1573 |  1573 |      1518 (96.5%) | 1518 (96.5%) |
 | antd   |              207 |   202 |       165 (79.7%) |  186 (92.1%) |
 
+Each corpus entry's `reference.unmatched` says why the items Caliper reports nowhere are missing: `by_cause` counts them and `listed` names the first 15 of each cause as `file: name`. The cause is what the item's file shows, so it says where to look, not what is wrong:
+
+| Cause | The file shows |
+| --- | --- |
+| `compound_member` | An assignment to a member of another component (`Form.List = List`). |
+| `object_member` | The name as a function-valued key of an object literal (`logo: () => ...`). |
+| `dependency` | An alias of something a package exports (`const Tooltip = Recharts.Tooltip`), or an export that ends in a package. |
+| `call_result` | A value a call builds (`createIcon(...)`, `generateCalendar(...)`). |
+| `file_with_other_components`, `file_without_components` | A declaration Caliper does not report, in a file where it reports others, or none. |
+
 The 16 antd items still unpaired are not pairing cases: the date picker and calendar families (built by factory functions), `Parent.Member` entries Caliper reports under the parent (`Form.List`, `Mentions.Option`, `TreeSelect.TreeNode`), and helpers RDT lists as components (`confirm`, `dropIndicator`). shadcn has no re-export of this kind in the pinned commit, so nothing pairs there; its unpaired items are `Icons.logo`-style object members, aliases such as `const ComboboxRoot = Primitive.Root` and factory results, which Caliper does not detect.
 
 Recall is measured against that reference, on the components both tools report (same file, same name, or paired):

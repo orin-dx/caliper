@@ -103,7 +103,9 @@ class Pairing(unittest.TestCase):
                self.entry('Row', 'src/grid/row.tsx'), self.entry('Lost', 'src/other/index.tsx')]
         items, stats = weekly.reference(rdt, found, self.root)
         self.assertEqual(stats, {'rdt_with_props': 6, 'excluded': {}, 'exact': 2, 'paired': {'default_export': 1, 'named_export': 2},
-                                 'merged': 3, 'reference': 3, 'unpaired': 1, 'excluded_total': 0})
+                                 'merged': 3, 'reference': 3, 'unpaired': 1, 'excluded_total': 0,
+                                 'unmatched': {'by_cause': {'file_without_components': 1},
+                                               'listed': {'file_without_components': ['src/other/index.tsx: Lost']}}})
         by_first = {item['keys'][0]: item for item in items}
         self.assertEqual(set(by_first[('src/grid/col.tsx', 'col')]['keys']),
                          {('src/grid/col.tsx', 'col'), ('src/col/index.tsx', 'col'), ('src/grid/index.tsx', 'col')})
@@ -126,6 +128,62 @@ class Pairing(unittest.TestCase):
         items, stats = weekly.reference([entry], found, self.root)
         self.assertEqual(stats['paired'], {'declaration': 1})
         self.assertEqual(items[0]['keys'], [('src/other/index.tsx', 'dropdown'), ('src/grid/col.tsx', 'dropdown')])
+
+
+class Unmatched(unittest.TestCase):
+    """What the file shows about an item no tool name matches."""
+    FILES = {
+        'src/icons.tsx': "export const Icons = {\n  logo: (props: P) => <svg {...props} />,\n  spin: memo(Spin),\n  size: number,\n};\n",
+        'src/form/Form.tsx': 'const Form = () => null;\nconst List = () => null;\nForm.List = List;\nexport default Form;\n',
+        'src/chart/index.tsx': "import * as Recharts from 'recharts';\nconst Tooltip = Recharts.Tooltip;\nconst Other = () => null;\n",
+        'src/icon/lucide.tsx': "export const IconLucide = createIcon<Props>('lucide');\n",
+        'src/calendar/index.tsx': "import config from 'pkg/dayjs';\nconst Calendar = generate<Dayjs>(config);\nexport default Calendar;\n",
+        'src/direction/index.tsx': "export { Provider as DirectionProvider } from 'pkg';\n",
+        'src/plain/Plain.tsx': 'const Plain = () => null;\nexport default Plain;\n',
+    }
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.root = os.path.realpath(self.dir.name)
+        for rel, text in self.FILES.items():
+            path = os.path.join(self.root, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w') as f:
+                f.write(text)
+
+    def cause(self, name, rel, found=()):
+        found_by_file = {}
+        for file, key in found:
+            found_by_file.setdefault(file, {})[key] = None
+        read = lambda r: weekly.read_text(os.path.join(self.root, r))
+        exists = lambda r: os.path.isfile(os.path.join(self.root, r))
+        return weekly.unmatched_cause(name, rel, found_by_file, read, exists)
+
+    def test_causes(self):
+        self.assertEqual(self.cause('logo', 'src/icons.tsx'), 'object_member')
+        self.assertEqual(self.cause('spin', 'src/icons.tsx'), 'object_member')
+        # A type annotation is not an object member.
+        self.assertEqual(self.cause('size', 'src/icons.tsx'), 'file_without_components')
+        self.assertEqual(self.cause('List', 'src/form/Form.tsx'), 'compound_member')
+        self.assertEqual(self.cause('Tooltip', 'src/chart/index.tsx', [('src/chart/index.tsx', 'other')]), 'dependency')
+        self.assertEqual(self.cause('IconLucide', 'src/icon/lucide.tsx'), 'call_result')
+        self.assertEqual(self.cause('DirectionProvider', 'src/direction/index.tsx'), 'dependency')
+
+    def test_default_export_is_named_by_the_file(self):
+        # RDT calls the default export `calendar`; it is declared `Calendar`, built by a call.
+        self.assertEqual(self.cause('calendar', 'src/calendar/index.tsx'), 'call_result')
+
+    def test_declared_but_not_reported(self):
+        self.assertEqual(self.cause('Plain', 'src/plain/Plain.tsx'), 'file_without_components')
+        self.assertEqual(self.cause('Plain', 'src/plain/Plain.tsx', [('src/plain/Plain.tsx', 'x')]),
+                         'file_with_other_components')
+
+    def test_the_record_counts_every_cause_and_caps_the_lists(self):
+        rdt = [comp(f'N{i}', {'a': prop()}, f'{self.root}/src/plain/Plain.tsx') for i in range(weekly.LIST_CAP + 3)]
+        _, stats = weekly.reference(rdt, {}, self.root)
+        self.assertEqual(stats['unmatched']['by_cause'], {'file_without_components': weekly.LIST_CAP + 3})
+        self.assertEqual(len(stats['unmatched']['listed']['file_without_components']), weekly.LIST_CAP)
 
 
 class Recall(unittest.TestCase):

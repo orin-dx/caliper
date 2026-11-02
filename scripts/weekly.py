@@ -287,12 +287,70 @@ def pair(comp, root, found_by_file, read, exists, claimed=()):
     return None
 
 
+LIST_CAP = 15
+
+
+def from_dependency(text, name):
+    """Whether `text` imports `name` from a package (any form of import), not from a relative path."""
+    for match in re.finditer(r"^import\s+(?:type\s+)?([^;'\"]*?)\s+from\s+['\"]([^'\"]+)['\"]", text, re.M):
+        if not match.group(2).startswith('.') and re.search(rf'\b{re.escape(name)}\b', match.group(1)):
+            return True
+    return False
+
+
+def reaches_dependency(file, read, exists, name, hops=6):
+    """Whether what `file` exports as `name` ends in a package: `export { X } from 'pkg'`, or an import from one."""
+    text = read(file)
+    exported = export_source(text, name) if text and hops else None
+    if not exported:
+        return False
+    if exported[0] == 'from':
+        target = resolve_module(file, exported[1], exists)
+        return reaches_dependency(target, read, exists, exported[2], hops - 1) if target else not exported[1].startswith('.')
+    for local in local_chain(text, exported[1]):
+        imported = import_binding(text, local)
+        if imported:
+            target = resolve_module(file, imported[0], exists)
+            return reaches_dependency(target, read, exists, imported[1], hops - 1) if target else not imported[0].startswith('.')
+    return False
+
+
+def unmatched_cause(name, file, found_by_file, read, exists):
+    """Why Caliper reports none of an item's names, from the item's file: a member of another component
+    (`Form.List = List`); a member of an object literal (`logo: () => ...`); an alias of something a package exports
+    (`const Tooltip = Recharts.Tooltip`); a value a call builds (`createIcon(...)`, `generateCalendar(...)`); a name the
+    file exports from a package; else a component the file declares that Caliper does not report, in a file where it
+    reports others or none. RDT names a default export after the file, so for that name the declaration is the one the
+    default export leads to. The causes are what the file shows, so a cause says where to look, not what is wrong."""
+    text = read(file) or ''
+    names = [name.split('.')[-1]]
+    default = norm_name(name) in own_names(file)
+    exported = export_source(text, 'default') if default else None
+    if exported and exported[0] == 'local':
+        names += local_chain(text, exported[1])
+    pattern = '(?:' + '|'.join(map(re.escape, dict.fromkeys(names))) + ')'
+    declaration = rf'^(?:export\s+)?(?:const|let|var)\s+{pattern}\b(?:\s*:[^=\n]+)?\s*=\s*'
+    if re.search(rf'\b\w+\.{pattern}\s*=[^=]', text):
+        return 'compound_member'
+    if re.search(rf'^\s+{pattern}\s*:\s*(?:\(|<|function\b|async\b|[\w$]+\s*=>|(?:React\.)?(?:memo|forwardRef)\b)', text, re.M):
+        return 'object_member'
+    alias = re.search(declaration + r'(\w+)(?:\.\w+)*\s*;?\s*$', text, re.M)
+    if alias and from_dependency(text, alias.group(1)):
+        return 'dependency'
+    if re.search(declaration + r'[\w.]+\s*(?:<[^>]*>)?\(', text, re.M):
+        return 'call_result'
+    if reaches_dependency(file, read, exists, name) or (default and reaches_dependency(file, read, exists, 'default')):
+        return 'dependency'
+    return 'file_with_other_components' if found_by_file.get(file) else 'file_without_components'
+
+
 def reference(rdt_components, found, root):
     """The components recall is measured on, from RDT's output: entries with props, minus those that are not components
     (`exclusion`), with every RDT entry for one component counted once. An entry that Caliper reports under another file
     pairs with it by evidence (`pair`) and joins the entry in that file; RDT's repeats of one key join too. Each item is
     {'keys': every (file, name) a tool may report it under, 'props': prop -> 'own' | 'react'}, so one list serves every
-    tool. Also the counts, so a change in the reference shows in weekly.json."""
+    tool. Also the counts, so a change in the reference shows in weekly.json, and the items Caliper reports nowhere, by
+    cause (`unmatched_cause`): a count per cause and the first `LIST_CAP` of each, as `file: name`."""
     found_by_file = {}
     for file, name in found:
         found_by_file.setdefault(file, {})[name] = None
@@ -324,7 +382,7 @@ def reference(rdt_components, found, root):
         keys = [key] + ([target] if target else [])
         group = groups.get(target or key)
         if group is None:
-            group = groups[target or key] = {'keys': [], 'exact': {}, 'other': {}}
+            group = groups[target or key] = {'keys': [], 'exact': {}, 'other': {}, 'file': key[0], 'name': comp['name']}
         else:
             stats['merged'] += 1
         group['keys'] += keys
@@ -335,7 +393,15 @@ def reference(rdt_components, found, root):
             into[prop] = 'react' if into.get(prop) == 'react' or declared_in_react(info) else 'own'
     items = [{'keys': list(dict.fromkeys(g['keys'])), 'props': g['exact'] or g['other']} for g in groups.values()]
     stats['reference'] = len(items)
-    stats['unpaired'] = sum(not any(k in found for k in item['keys']) for item in items)
+    missed = [g for g, item in zip(groups.values(), items) if not any(k in found for k in item['keys'])]
+    stats['unpaired'] = len(missed)
+    stats['unmatched'] = {'by_cause': {}, 'listed': {}}
+    for g in sorted(missed, key=lambda g: (g['file'], g['name'])):
+        cause = unmatched_cause(g['name'], g['file'], found_by_file, read, exists)
+        stats['unmatched']['by_cause'][cause] = stats['unmatched']['by_cause'].get(cause, 0) + 1
+        listed = stats['unmatched']['listed'].setdefault(cause, [])
+        if len(listed) < LIST_CAP:
+            listed.append(f"{g['file']}: {g['name']}")
     stats['excluded_total'] = sum(stats['excluded'].values())
     return items, stats
 
@@ -458,6 +524,10 @@ def markdown(record, notes, reference_changed=None):
         r = e['reference']
         lines.append(f"| {name} | {r['rdt_with_props']} | {r['excluded_total']} | {r['merged']} | {r['reference']} | "
                      f"{r['exact']} | {sum(r['paired'].values())} | {r['unpaired']} |")
+    lines += ['', '### Reference items Caliper reports nowhere, by cause', '', '| Corpus | Cause | Items |', '| --- | --- | --: |']
+    for name, e in record['corpora'].items():
+        for cause, count in sorted(e['reference'].get('unmatched', {}).get('by_cause', {}).items(), key=lambda c: -c[1]):
+            lines.append(f'| {name} | {cause} | {count} |')
     lines += ['', '### Recall against the reference', '',
               '| Corpus | Tool | Components | Own props | Own, with layers | `@types/react` props | `@types/react`, with layers |',
               '| --- | --- | --: | --: | --: | --: | --: |']
