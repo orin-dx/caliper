@@ -1,17 +1,35 @@
+//! The non-fatal issues extraction reports instead of failing: what a [`Diagnostic`] carries, how serious it is, and
+//! the codes a program can match on.
+
+#![deny(missing_docs)]
+
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
 /// A non-fatal issue discovered during extraction.
+///
+/// Extraction never fails on a bad file or type: it reports what it could not do as a diagnostic and carries on with
+/// the rest, so a consumer reads the `diagnostics` of the [`ExtractionOutput`](crate::types::output::ExtractionOutput)
+/// next to its components. The worst [`severity`](Self::severity) decides the CLI's exit code.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Diagnostic {
+    /// How serious the issue is; see [`DiagnosticSeverity`].
     pub severity: DiagnosticSeverity,
+    /// What happened, in a sentence a person can read without the code: it names the type, file or component involved.
     pub message: String,
+    /// The file the issue is about, as the path the pipeline discovered it under a source directory. `None` for an
+    /// issue about the run as a whole.
     pub file: Option<String>,
+    /// One-based line in [`file`](Self::file), when the issue has a position. Few diagnostics do: most are about a
+    /// type or component, not a span.
     pub line: Option<u32>,
+    /// One-based column on [`line`](Self::line); set together with it by [`Diagnostic::with_position`].
     pub column: Option<u32>,
+    /// A suggested next step for the person reading the diagnostic, when one exists.
     pub help: Option<String>,
+    /// A stable code a program can match on, where [`message`](Self::message) is for people and may be reworded.
     pub code: DiagnosticCode,
     /// Output keys of the components whose resolution reported this diagnostic, sorted. Empty for diagnostics about a
     /// file or the run as a whole. Identical diagnostics from many components are reported once, listing them all.
@@ -45,6 +63,7 @@ impl Diagnostic {
         }
     }
 
+    /// Names the file the diagnostic is about.
     #[must_use]
     pub fn with_file(mut self, file: impl Into<String>) -> Diagnostic {
         self.file = Some(file.into());
@@ -59,6 +78,7 @@ impl Diagnostic {
         self
     }
 
+    /// Adds a suggested next step for the reader.
     #[must_use]
     pub fn with_help(mut self, help: impl Into<String>) -> Diagnostic {
         self.help = Some(help.into());
@@ -80,12 +100,20 @@ impl Diagnostic {
     }
 }
 
+/// How serious a [`Diagnostic`] is. It sets the exit code of the CLI commands (see
+/// [`ExtractionOutput::exit_code`](crate::types::output::ExtractionOutput::exit_code)); the declaration order is not a
+/// ranking.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DiagnosticSeverity {
+    /// Something could not be read or extracted, so the output is missing or wrong for it. Exit code `2`.
     Error,
+    /// The output is complete but part of it is a guess, or an input looked wrong. Exit code `1` under `--strict`,
+    /// otherwise `0`.
     Warning,
+    /// Worth knowing, and no action is needed: a type that was left opaque by design, a cache that was discarded. Exit
+    /// code `0`.
     Info,
 }
 
@@ -94,12 +122,18 @@ pub enum DiagnosticSeverity {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DiagnosticCode {
+    /// A type named in a component's props could not be found: its import does not resolve to a file under the source
+    /// directories, or its package declaration was not loaded. The prop keeps the name as a reference.
     UnresolvableImport,
     /// A generic type alias/interface was referenced with fewer type arguments
     /// than it declares parameters — the trailing, unfilled parameters were
     /// left as bare unresolved names in the substituted body.
     GenericArgumentMismatch,
+    /// A type that cannot be expanded statically (an unbound generic, a type from a library the tool does not model)
+    /// appears in the output as opaque, with the reason on the type itself.
     OpaqueType,
+    /// A type nests deeper than the extractor or resolver follows, so the rest of it is left as written (extractor)
+    /// or opaque (resolver). Distinct from [`CircularReference`](Self::CircularReference), where the type loops.
     MaxDepthExceeded,
     /// Deliberately unconstructed within this crate — reserved headroom for
     /// external consumers synthesizing their own [`Diagnostic`] outside the
