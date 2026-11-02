@@ -162,7 +162,7 @@ mod tests {
 
     use camino::Utf8PathBuf;
 
-    use crate::pipeline::PipelineOptions;
+    use crate::types::options::PipelineOptions;
 
     fn empty_ctx() -> ResolutionContext {
         let global = Arc::new(GlobalSourceData::default());

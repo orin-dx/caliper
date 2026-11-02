@@ -19,7 +19,7 @@ use oxc_resolver::{ResolveOptions, Resolver, TsconfigDiscovery, TsconfigOptions,
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::import_map::ImportResolutionMap;
-use crate::pipeline::PipelineOptions;
+use crate::types::options::PipelineOptions;
 use crate::types::*;
 
 mod alias;
@@ -298,7 +298,7 @@ pub struct ResolutionContext {
     /// `(typeof X)[number]` on a flat `const X = [...] as const` array.
     pub const_array_bare_index: Arc<FxHashMap<CompactString, CompactString>>,
     /// How much of an inherited HTML element's attributes to expose.
-    pub html_attributes: crate::pipeline::HtmlAttributeMode,
+    pub html_attributes: crate::types::options::HtmlAttributeMode,
     /// Paths to TypeScript's own `lib.es5.d.ts`/`lib.dom.d.ts`, if resolvable
     /// from this project (empty otherwise — see `resolve_ts_lib_paths`).
     /// Checked as a last-resort fallback when a bare, never-imported name
@@ -319,7 +319,7 @@ pub struct ResolutionContext {
     pub(crate) dependencies: Option<Arc<crate::dependency_types::DependencyLayer>>,
     /// React's own declarations in curated mode, which only HTML-attribute lookups read (`react_index`).
     pub(crate) react_types: Option<Arc<crate::named_type_index::NamedTypeIndex>>,
-    pub(crate) collapse_inherited_props: crate::pipeline::CollapseInheritedProps,
+    pub(crate) collapse_inherited_props: crate::types::options::CollapseInheritedProps,
 }
 
 impl ResolutionContext {
@@ -504,9 +504,9 @@ impl ResolutionContext {
     /// whether `full` lists all of them (`curated` keeps the notable ones).
     pub(super) fn builtin_attribute_listing(&self) -> Option<bool> {
         match self.html_attributes {
-            crate::pipeline::HtmlAttributeMode::None => None,
-            crate::pipeline::HtmlAttributeMode::Full => Some(true),
-            crate::pipeline::HtmlAttributeMode::Curated => Some(false),
+            crate::types::options::HtmlAttributeMode::None => None,
+            crate::types::options::HtmlAttributeMode::Full => Some(true),
+            crate::types::options::HtmlAttributeMode::Curated => Some(false),
         }
     }
 
@@ -573,7 +573,7 @@ impl ResolutionContext {
 
     /// Whether this run can collapse any source; `expand_all` is set only then, since it splits shared chains.
     pub(crate) fn can_collapse(&self) -> bool {
-        use crate::pipeline::CollapseInheritedProps;
+        use crate::types::options::CollapseInheritedProps;
         match self.collapse_inherited_props {
             CollapseInheritedProps::Dependencies => self.dependencies.is_some(),
             CollapseInheritedProps::All => true,
@@ -585,7 +585,7 @@ impl ResolutionContext {
     /// expanded (collapse). Depth 0 is the component's own props type. React's and TypeScript's own declarations stay
     /// with `html_attributes` even under `All`.
     pub(crate) fn collapses(&self, file: &Utf8Path, declared: usize, depth: u8, state: &ResolveState) -> bool {
-        use crate::pipeline::CollapseInheritedProps;
+        use crate::types::options::CollapseInheritedProps;
         depth > 0
             && declared > COLLAPSE_THRESHOLD
             && !state.expand_all
@@ -957,8 +957,8 @@ pub(crate) fn resolve_component_shared(
             continue;
         }
         match ctx.html_attributes {
-            crate::pipeline::HtmlAttributeMode::None => {}
-            crate::pipeline::HtmlAttributeMode::Full => {
+            crate::types::options::HtmlAttributeMode::None => {}
+            crate::types::options::HtmlAttributeMode::Full => {
                 if layer.total_props == 0 {
                     let added =
                         html::layer_attributes(layer, true, |name| props.contains_key(name), ctx, &mut state, 0);
@@ -967,7 +967,7 @@ pub(crate) fn resolve_component_shared(
                     }
                 }
             }
-            crate::pipeline::HtmlAttributeMode::Curated => {
+            crate::types::options::HtmlAttributeMode::Curated => {
                 let added = html::layer_attributes(
                     layer,
                     false,
@@ -985,8 +985,8 @@ pub(crate) fn resolve_component_shared(
     // A `forwardRef` component takes `ref` whatever its props type declares. The element type isn't recorded, so it is
     // `Ref<unknown>` unless the props or an HTML layer gave the real declaration.
     let takes_ref = matches!(mapping.rule, DetectionRule::ForwardRef | DetectionRule::ForwardRefExoticDecl);
-    if takes_ref && ctx.html_attributes != crate::pipeline::HtmlAttributeMode::None {
-        let target = if ctx.html_attributes == crate::pipeline::HtmlAttributeMode::Full {
+    if takes_ref && ctx.html_attributes != crate::types::options::HtmlAttributeMode::None {
+        let target = if ctx.html_attributes == crate::types::options::HtmlAttributeMode::Full {
             &mut props
         } else {
             &mut notable_inherited

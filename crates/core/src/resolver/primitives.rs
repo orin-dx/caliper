@@ -409,7 +409,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::pipeline::PipelineOptions;
+    use crate::types::options::PipelineOptions;
 
     #[test]
     fn indexed_access_on_an_unresolvable_object_gives_up_with_a_diagnostic() {
