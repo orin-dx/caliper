@@ -1,0 +1,86 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6EQEF6MJ5RD9A1RFC62DVVD",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-02T18:13:29.364303Z",
+  "branch": "oracle/function-marker-rule",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "apps/oracle/src/oracle-compare.ts",
+    "apps/oracle/tests/oracle-compare.test.ts"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "a0b4e5782d04",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 28,
+    "cache_creation_tokens": 103481,
+    "cache_read_tokens": 1060001,
+    "output_tokens": 15329,
+    "api_call_count": 14,
+    "subagent_tokens": {
+      "input_tokens": 6,
+      "cache_creation_tokens": 12525,
+      "cache_read_tokens": 290109,
+      "output_tokens": 925,
+      "api_call_count": 3
+    }
+  },
+  "redaction": {
+    "replacements": 0,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 0,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Get caliper to a v1 alpha by planning and executing a set of work trails: the user supplied a saved plan, then told the assistant to keep going until it was completely implemented and researched.",
+    "outcome": "Six intent-only Entire trails (#153-#158) were created with acceptance criteria and branch tables. Wave 1 was then started as three parallel isolated-worktree workers (two for trail 153, one for trail 154), still running at the end of the session with only oracle-compare files modified so far.",
+    "learnings": {
+      "repo": [
+        "Nothing in the caliper repo defines 'v1 alpha'; the user's plan file at ~/.claude/projects/-Users-gabe-Projects-caliper/plan/next-trails-2026-11-02.md is the source of truth and lives outside the repo so any session can read it.",
+        "Packages and crates are at 0.8.0 (semantic 0.2.0, tsc-client 0.1.1). The TypeScript 7.1 backend is experimental and off by default.",
+        "Recall against react-docgen-typescript ranges 40-99.7% by library, with shadcn/ui lowest at 39.5%.",
+        "Known gaps in docs/edge-cases.md: wrapper-call detection, component naming mismatches with RDT, ambient globals looked up from the first source directory only, and lossy TOON output.",
+        "apps/validate/ is untracked.",
+        "Plan constraints: at most three live worker sessions, trail 156 must be stacked on trail 155's tip, and trail 158 depends on unanswered release-flow decisions (product package cargo/caliper-docgen, attached CLI binaries, build attestations).",
+        "A memory note, plan-trails-before-branches.md, requires trails to be created before branches."
+      ],
+      "code": [],
+      "workflow": [
+        "Entire trails can be created intent-only with a body file, and the body can be verified afterwards with `entire trail show`.",
+        "Workers run in isolated worktrees and commit locally without pushing; the coordinator pushes, links and opens PRs after reviewing their reports.",
+        "The sandbox denies writes to the job tmp dir and to ~/.local/share/entire/, so scratch files go in $TMPDIR instead.",
+        "A later user instruction (keep going until fully implemented) overrode the earlier 'Wave 0 only, then wait' instruction from the pasted coordinator prompt."
+      ]
+    },
+    "friction": [
+      "`entire brain brief` failed twice because the sandbox denied its write lock under ~/.local/share/entire/, and it was not retried outside the sandbox.",
+      "The job tmp dir was write-denied, so the trail body files had to be written to $TMPDIR instead.",
+      "The first orientation found no definition of 'v1 alpha', so the assistant had to ask the user to choose A, B or C before planning.",
+      "The pasted coordinator prompt said to wait, which conflicted with the user's later 'keep going' instruction."
+    ],
+    "open_items": [
+      "Wait for the three Wave 1 workers (t153-weekly, t153-oracle, t154-perf) to finish, review their reports, then push, link and open PRs.",
+      "Run oracle/three-tools-report (trail 153) after the oracle stack lands.",
+      "Run trails 155 and 156 as one stack, then trail 157's independent branches.",
+      "Get the user's answers on trail 158's release-flow choices (product package, attached binaries, attestations) before that worker starts; the assistant asked whether to ask now or later.",
+      "Retry `entire brain brief` outside the sandbox.",
+      "Open issues remain: #279 (weekly measurement run recorded a worsening) and #1 (preset system with named PipelineOptions bundles).",
+      "Most Entire features come from help text only and are untried.",
+      "The raw research reports behind the plan exist only in a temporary workflow output; only key facts were copied into the plan file."
+    ]
+  }
+}

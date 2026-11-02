@@ -1,0 +1,26 @@
+We're going to pickup more work to tackle getting to a v1 alpha of caliper
+
+---
+
+<pasted_content id="5929">
+The plan is saved at /Users/gabe/.claude/projects/-Users-gabe-Projects-caliper/plan/next-trails-2026-11-02.md. It lives outside the repo, so any session can read it without a branch. The file has the goal, current state, your decisions, all six trails with acceptance criteria and branch tables, the waves, the process rules, how to track with Entire, and the open unknowns.
+
+What the file doesn't settle:
+- Trail 6 decisions: the release-flow choices (product package, attached binaries, attestations) are marked as not yet answered by you.
+- Research outputs: the raw reports behind the plan live only in a temporary workflow output, so I put their key facts into the file.
+- Entire: its features come from its help text, and most are untried.
+
+Prompt for the coordinator session (it creates the trails, then waits):
+
+Read /Users/gabe/.claude/projects/-Users-gabe-Projects-caliper/plan/next-trails-2026-11-02.md in full, then the memory note plan-trails-before-branches.md. You are the coordinator. Do Wave 0 only: create the six trails intent-only with the acceptance criteria and branch tables from the plan, confirm the trail numbers back to me, and wait. Do not create branches or PRs.
+
+Prompt for each worker session, after the trails exist (replace N):
+
+Read /Users/gabe/.claude/projects/-Users-gabe-Projects-caliper/plan/next-trails-2026-11-02.md (the section for trail N and the Process section) and run `entire trail show N`. You own trail N only. Follow the plan's branch table, link-first flow and CI checklist. Fan out independent branches with a workflow in isolated worktrees; do stacked branches in order. Report numbers against the baselines in the plan. Update the trail body as branches land. Do not merge, and do not touch other trails' files.
+
+Start trails 1 and 2 in parallel first, as the plan says. Both prompts are also in the file's last section.
+</pasted_content id="5929">
+
+---
+
+Keep going on this work until completely implemented, research, etc
