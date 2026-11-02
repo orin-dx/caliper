@@ -23,18 +23,22 @@ const parser = withCustomConfig(tsconfig, {
 })
 const docs = parser.parse(files)
 const wallMs = performance.now() - start
+// `type` stays RDT's type name, which is the string "enum" for a literal union. The oracle (apps/oracle/src/tool-norm.ts)
+// needs the whole type object (`raw`, and the literal `value` list), kept for a component's own props: React's inherited
+// ones, about nine in ten of the total, are not compared.
+const REACT_DIR = 'node_modules/@types/react/'
 const components = docs.map((d) => ({
   file: d.filePath,
   name: d.displayName,
   props: Object.fromEntries(
-    Object.entries(d.props ?? {}).map(([k, p]) => [
-      k,
-      {
-        required: Boolean(p.required),
-        type: p.type?.name ?? '',
-        parent: p.parent?.fileName ?? p.declarations?.[0]?.fileName ?? '',
-      },
-    ]),
+    Object.entries(d.props ?? {}).map(([k, p]) => {
+      const parent = p.parent?.fileName ?? p.declarations?.[0]?.fileName ?? ''
+      const own = !parent.includes(REACT_DIR)
+      return [
+        k,
+        { required: Boolean(p.required), type: p.type?.name ?? '', parent, ...(own && { typeObject: p.type }) },
+      ]
+    }),
   ),
 }))
 // `maxRSS` is in kilobytes on every platform Node supports.

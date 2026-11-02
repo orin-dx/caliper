@@ -45,6 +45,16 @@ The 2026-11-02 pairing (same-file default aliases, `displayName`, wrappers, asse
 | shadcn |             1573 |  1573 |      1518 (96.5%) | 1518 (96.5%) |
 | antd   |              207 |   202 |       165 (79.7%) |  186 (92.1%) |
 
+Each corpus entry's `reference.unmatched` says why the items Caliper reports nowhere are missing: `by_cause` counts them and `listed` names the first 15 of each cause as `file: name`. The cause is what the item's file shows, so it says where to look, not what is wrong:
+
+| Cause | The file shows |
+| --- | --- |
+| `compound_member` | An assignment to a member of another component (`Form.List = List`). |
+| `object_member` | The name as a function-valued key of an object literal (`logo: () => ...`). |
+| `dependency` | An alias of something a package exports (`const Tooltip = Recharts.Tooltip`), or an export that ends in a package. |
+| `call_result` | A value a call builds (`createIcon(...)`, `generateCalendar(...)`). |
+| `file_with_other_components`, `file_without_components` | A declaration Caliper does not report, in a file where it reports others, or none. |
+
 The 16 antd items still unpaired are not pairing cases: the date picker and calendar families (built by factory functions), `Parent.Member` entries Caliper reports under the parent (`Form.List`, `Mentions.Option`, `TreeSelect.TreeNode`), and helpers RDT lists as components (`confirm`, `dropIndicator`). shadcn has no re-export of this kind in the pinned commit, so nothing pairs there; its unpaired items are `Icons.logo`-style object members, aliases such as `const ComboboxRoot = Primitive.Root` and factory results, which Caliper does not detect.
 
 Recall is measured against that reference, on the components both tools report (same file, same name, or paired):
@@ -58,7 +68,7 @@ Recall is measured against that reference, on the components both tools report (
 
 Caliper collapses an inherited dependency source of more than 30 props into a layer (ADR 0012) and lists only its notable members as props, as Storybook does. A prop in a layer is in the output, named by the layer's `members`, but is not in the flat list, so the table reports both: the plain columns say what the default output lists, "with layers" says what it holds. react-docgen writes no layers, so its two columns are equal.
 
-react-docgen reads each file alone with its default resolver and importer, as Storybook does, so it lists no types declared elsewhere. That is the point of the comparison.
+react-docgen parses each file with its default resolver and importer, as Storybook does. The importer follows relative and package imports to the file that declares a type, so a props interface imported from a sibling file is read. It does no type inference: it lists none of React's inherited attributes, and a generic, mapped or conditional type stays the source text. That is the point of the comparison. A file it throws on is counted (`failed`) and listed (`failedFiles`), not dropped silently.
 
 The run uploads `weekly.json` and a table to the job summary. It compares with the last successful run's `weekly.json` and opens, or comments on, one issue labelled `weekly-measurement` when Caliper's time or memory is more than 10% worse, or its recall is more than 2 points lower, on any corpus. There is no committed baseline: the previous run is the baseline.
 
