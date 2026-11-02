@@ -10,7 +10,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use miette::{IntoDiagnostic, Result};
 use watchexec_signals::Signal;
 
-use crate::config::{build_options, BuildOptionsArgs};
+use crate::config::{build_options, warn_ignored_semantic_config, BuildOptionsArgs};
 use crate::output::{print_diagnostics, print_summary, write_atomic};
 
 /// Watch mode never runs `--strict` — there's no CLI flag for it — so this is always `exit_code(false)`.
@@ -40,6 +40,7 @@ fn start_session(
         no_load_dependencies: args.no_load_dependencies,
         collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
+    warn_ignored_semantic_config("watch", &options, quiet);
 
     if !quiet {
         println!();

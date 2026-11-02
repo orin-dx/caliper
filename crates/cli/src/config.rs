@@ -242,5 +242,39 @@ pub fn build_options(args: BuildOptionsArgs) -> Result<PipelineOptions> {
     Ok(opts)
 }
 
+/// The note for a command that never runs the TypeScript checker (everything but `extract`) when the config switches
+/// it on anyway: the setting is read, and then has no effect, which a config the user wrote should not do quietly.
+/// `None` when the config leaves the checker alone.
+pub fn ignored_semantic_config_note(command: &str, options: &PipelineOptions) -> Option<String> {
+    let keys: Vec<&str> = [
+        (options.experimental_semantic_types, "experimentalSemanticTypes"),
+        (options.semantic_tsc_path.is_some(), "tscPath"),
+    ]
+    .into_iter()
+    .filter_map(|(set, key)| set.then_some(key))
+    .collect();
+    if keys.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "warning: the config sets {}, but `{command}` never runs the TypeScript checker, so its output is the \
+         structural result. Only `extract` runs the checker.",
+        keys.join(" and ")
+    ))
+}
+
+/// Writes [`ignored_semantic_config_note`] to stderr, unless `quiet`.
+pub fn warn_ignored_semantic_config(command: &str, options: &PipelineOptions, quiet: bool) {
+    use std::io::Write;
+
+    if quiet {
+        return;
+    }
+    if let Some(note) = ignored_semantic_config_note(command, options) {
+        // A closed stderr isn't worth failing a run over.
+        writeln!(std::io::stderr().lock(), "{note}").ok();
+    }
+}
+
 #[cfg(test)]
 mod tests;
