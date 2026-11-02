@@ -27,9 +27,11 @@ match = "cargo/caliper-docgen-semantic"
 publish-to = ["crates-io"]
 release-trigger = "changeset"
 
+# The CLI is the product: each version gets one GitHub Release, with the
+# `## <version>` section of crates/cli/CHANGELOG.md as its notes.
 [[package]]
 match = "cargo/caliper-docgen"
-publish-to = ["crates-io"]
+publish-to = ["crates-io", "github-release"]
 release-trigger = "changeset"
 
 [[package]]
