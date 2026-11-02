@@ -1483,6 +1483,6 @@ fn editing_a_wrapper_callees_result_type_updates_the_components_it_builds() {
     assert_eq!(update.updated_keys, vec!["Button".to_owned()]);
     let snapshot = session.snapshot();
     let props: Vec<&String> = snapshot.components["Button"].props.keys().collect();
-    assert_eq!(props, ["component", "label", "renderRoot", "unstyled"]);
+    assert_eq!(props, ["component", "label", "ref", "renderRoot", "unstyled"]);
     assert_eq!(visible(&session.snapshot()), visible(&crate::pipeline::extract(&options)));
 }

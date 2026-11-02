@@ -97,6 +97,26 @@ fn known_chain(
             };
             ResolvedChain { inheritance: vec![layer], ..ResolvedChain::empty() }
         }
+        // A union of tags: a layer for each distinct element.
+        KnownPatternResult::Type(PropType::Union(members))
+            if !members.is_empty() && members.iter().all(|m| matches!(m, PropType::HtmlAttributes { .. })) =>
+        {
+            let mut inheritance: Vec<InheritedLayer> = Vec::new();
+            for member in members {
+                let PropType::HtmlAttributes { element, omitted } = member else { continue };
+                if inheritance.iter().any(|layer| layer.html_element.as_deref() == Some(element.as_str())) {
+                    continue;
+                }
+                inheritance.push(InheritedLayer {
+                    type_name: type_name.to_owned(),
+                    file_name: resolve_react_types_file(consuming_file, ctx),
+                    omitted,
+                    html_element: Some(element),
+                    total_props: 0,
+                });
+            }
+            ResolvedChain { inheritance, ..ResolvedChain::empty() }
+        }
         KnownPatternResult::Type(pt) => {
             if let PropType::Opaque(detail) = &pt {
                 let bare = type_name.strip_prefix("React.").unwrap_or(type_name);
@@ -303,12 +323,30 @@ pub(super) fn resolve_props_chain(
         None => {}
     }
 
+    // ── Step 2.4: React's attribute interfaces that name no element ──────────
+    // `AriaAttributes` and `RefAttributes<T>` are props, read from React's own declaration under the mode: `full` lists
+    // them, `curated` keeps the notable ones, `none` leaves them out. `HTMLProps<T>` is the element's HTML layer below.
+    if react_types::is_attribute_builtin(type_name_bare) && super::may_be_react_builtin(type_name, consuming_file, ctx)
+    {
+        let mut chain = ResolvedChain::empty_with_compose(type_name.to_owned());
+        let attributes = |full: bool, state: &mut ResolveState| {
+            super::html::builtin_attributes(type_name_bare, type_args, full, consuming_file, ctx, state, depth)
+        };
+        match ctx.builtin_attribute_listing() {
+            None => {}
+            Some(true) => chain.props = attributes(true, state),
+            Some(false) => chain.notable = attributes(false, state),
+        }
+        return chain;
+    }
+
     // ── Step 2.5: React builtin check (after source and known patterns) ──────
     // Terminal React types (ReactNode, Ref, FC, etc.) that survived both are not
     // prop providers — add to composes and stop.
     // A builtin name bound elsewhere reaches here only when that binding didn't resolve (a re-export of React's type, a
     // package not installed); React's meaning is then a reported guess.
-    if react_types::is_react_builtin(type_name_bare, &ctx.extra_builtins) {
+    let element_props = type_name_bare == "HTMLProps" && super::may_be_react_builtin(type_name, consuming_file, ctx);
+    if react_types::is_react_builtin(type_name_bare, &ctx.extra_builtins) && !element_props {
         if !ctx.extra_builtins.contains(type_name_bare) && !super::may_be_react_builtin(type_name, consuming_file, ctx)
         {
             state.diagnostics.push(super::builtin_fallback_diagnostic(type_name, consuming_file, ctx));
@@ -326,17 +364,26 @@ pub(super) fn resolve_props_chain(
         let element = type_args
             .first()
             .and_then(react_types::html_element_from_collected)
-            .or_else(|| react_types::html_element_for(type_name_bare));
+            .or_else(|| react_types::html_element_for(type_name_bare))
+            .or_else(|| react_types::html_element_from_args(type_args));
         let mut chain = ResolvedChain::empty_with_compose(type_name.to_owned());
+        // `HTMLProps<T>` is `AllHTMLAttributes<T>` and `ClassAttributes<T>`: more than the element's own attributes, so
+        // `full` reads it whole, as the interface chain does for `extends HTMLProps<T>`, and the layer has nothing to add.
+        let all_props = if element_props && ctx.builtin_attribute_listing() == Some(true) {
+            super::html::builtin_attributes(type_name_bare, type_args, true, consuming_file, ctx, state, depth)
+        } else {
+            Vec::new()
+        };
         if let Some(element) = element {
             chain.inheritance.push(InheritedLayer {
                 type_name: type_name.to_owned(),
                 file_name: resolve_react_types_file(consuming_file, ctx),
                 omitted: vec![],
                 html_element: Some(element.to_owned()),
-                total_props: 0,
+                total_props: u32::try_from(all_props.len()).unwrap_or(u32::MAX),
             });
         }
+        chain.props = all_props;
         return chain;
     }
 

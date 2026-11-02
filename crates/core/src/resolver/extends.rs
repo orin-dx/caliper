@@ -209,5 +209,8 @@ fn real_html_attrs_chain(
         .named_types
         .lookup_interface_exact(react_file_path, &qualified_name)
         .or_else(|| ctx.named_types.lookup_interface_exact(react_file_path, bare_name))?;
-    Some(resolve_interface_chain(iface, type_args, args_file, mapping, ctx, state, depth + 1))
+    let mut chain = resolve_interface_chain(iface, type_args, args_file, mapping, ctx, state, depth + 1);
+    // React consumes `key` itself, so a props table does not list it (ADR 0022), though `Attributes` declares it.
+    chain.props.retain(|prop| prop.name != "key");
+    Some(chain)
 }

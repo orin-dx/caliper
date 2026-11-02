@@ -298,6 +298,26 @@ fn component_props(args: &[PropType]) -> Option<KnownPatternResult> {
                 omitted: vec![],
             }))
         }
+        // `ComponentPropsWithRef<"h1" | "h2">` (a generic alias bound to a union of tags): the attributes of each tag.
+        Some(PropType::Union(members)) if !members.is_empty() => {
+            let elements: Option<Vec<PropType>> = members
+                .iter()
+                .map(|member| match member {
+                    PropType::StringLiteral(element) => {
+                        Some(PropType::HtmlAttributes { element: element.to_lowercase(), omitted: vec![] })
+                    }
+                    _ => None,
+                })
+                .collect();
+            elements.map(|elements| KnownPatternResult::Type(PropType::Union(elements)))
+        }
+        Some(PropType::LiteralUnion { members, .. }) if !members.is_empty() => {
+            let elements = members
+                .iter()
+                .map(|element| PropType::HtmlAttributes { element: element.to_lowercase(), omitted: vec![] })
+                .collect();
+            Some(KnownPatternResult::Type(PropType::Union(elements)))
+        }
         Some(PropType::Named { name, .. }) => {
             // ComponentPropsWithoutRef<typeof X> — delegate to X's props
             Some(KnownPatternResult::Alias { name: name.to_string() })

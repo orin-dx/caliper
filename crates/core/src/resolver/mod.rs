@@ -500,6 +500,16 @@ impl ResolutionContext {
         self
     }
 
+    /// How React's attribute interfaces that name no element are listed under the run's mode: `None` for `none`, else
+    /// whether `full` lists all of them (`curated` keeps the notable ones).
+    pub(super) fn builtin_attribute_listing(&self) -> Option<bool> {
+        match self.html_attributes {
+            crate::pipeline::HtmlAttributeMode::None => None,
+            crate::pipeline::HtmlAttributeMode::Full => Some(true),
+            crate::pipeline::HtmlAttributeMode::Curated => Some(false),
+        }
+    }
+
     /// The index holding React's declarations, when this run has them.
     pub(super) fn react_index(&self) -> &crate::named_type_index::NamedTypeIndex {
         self.react_types.as_deref().unwrap_or(&self.named_types)
