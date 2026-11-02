@@ -1508,3 +1508,7 @@ I'm not too worried about some small slowdonw. We're still considerably faster t
 ---
 
 The initial load of storybook is the most important though. Even if we have no measurable improvement in the reload, as long as it's inperceptable it's fine
+
+---
+
+Accuracy is super important though
