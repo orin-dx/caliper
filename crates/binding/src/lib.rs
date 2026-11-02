@@ -453,6 +453,24 @@ pub fn session_component_answers(session_id: u32, keys: Vec<String>) -> napi::Re
     }
 }
 
+/// One component as TOON, the compact text an agent reads (`render_component_slice_toon` in the core crate): its prop table
+/// with each prop's declaring type, why a prop's type is partly a guess, its inherited layers, and the warnings and
+/// errors that say its props may be incomplete. For an in-process host that answers one question about one component
+/// and has no use for a project's whole output. `null` when the session has no component under `key`. A lazy session
+/// resolves the component now.
+#[napi]
+pub fn session_component_toon(session_id: u32, key: String) -> napi::Result<Option<String>> {
+    match caliper_docgen_core::panic_guard::contain_panic("session_component_toon", move || {
+        let session = SESSIONS.get(&session_id).map(|session| session.clone());
+        let answer = session.and_then(|session| session.components(&[key]).into_iter().next().flatten());
+        Ok(answer
+            .map(|answer| caliper_docgen_core::toon::render_component_slice_toon(&answer.entry, &answer.diagnostics)))
+    }) {
+        Ok(result) => result,
+        Err(diag) => Err(napi::Error::from_reason(diag.to_string())),
+    }
+}
+
 /// Resolves `count` components spread evenly over the session's keys, without returning them: a lazy session then
 /// holds the dependency declarations and resolver memos that components share, so the first request a host answers
 /// does not load them. Runs off the calling thread and returns how many components it resolved. An eager session, an
@@ -722,8 +740,11 @@ mod tests {
         let second = ensure_fresh(session_id).await.expect("a registered session");
         close_session(session_id);
         let without_duration = |update: &str| update.split_once(r#","durationMs""#).expect("durationMs").0.to_owned();
-        let empty = r#"{"schemaVersion":2,"revision":1,"updatedComponents":[],"props":{},"propSets":{},"nameLists":{},"updatedKeys":[],"removedKeys":[],"affectedFiles":[],"diagnostics":[],"removedDiagnostics":[]"#;
-        assert_eq!((without_duration(&first), without_duration(&second)), (empty.to_owned(), empty.to_owned()));
+        let empty = format!(
+            r#"{{"schemaVersion":{},"revision":1,"updatedComponents":[],"props":{{}},"propSets":{{}},"nameLists":{{}},"updatedKeys":[],"removedKeys":[],"affectedFiles":[],"diagnostics":[],"removedDiagnostics":[]"#,
+            caliper_docgen_core::types::SCHEMA_VERSION
+        );
+        assert_eq!((without_duration(&first), without_duration(&second)), (empty.clone(), empty));
     }
 
     // ── SPEC-BINDING-001 AC3: close_session's panic is caught, and the call
@@ -911,6 +932,32 @@ mod tests {
         let docs: serde_json::Value = serde_json::from_str(&docs).expect("docgen info is JSON");
         let props = docs["Button"]["props"].as_object().expect("props");
         assert_eq!(props.keys().cloned().collect::<Vec<_>>(), ["label", "size"]);
+    }
+
+    #[tokio::test]
+    async fn a_component_slice_is_the_one_component_as_toon() {
+        let project = Project::with_button();
+        let session_id = next_session_id();
+        initialize_session(session_id, project.options()).await.expect("initialize");
+
+        let toon = session_component_toon(session_id, "Button".into()).expect("slice").expect("a component");
+        assert!(toon.starts_with("component:Button:\n"), "{toon}");
+        assert!(toon.contains("  props[2] {name,required,type,default,source,description}:\n"), "{toon}");
+        assert!(toon.contains("\n    size,false,'sm'|'lg',,"), "a literal union is quoted: {toon}");
+        assert!(!toon.contains("docgenComponents"), "one component, not the project's output: {toon}");
+    }
+
+    #[test]
+    fn a_component_slice_of_an_unknown_session_or_key_is_none() {
+        assert_eq!(session_component_toon(next_session_id(), "Button".into()).expect("slice"), None);
+    }
+
+    #[tokio::test]
+    async fn a_component_slice_of_an_unknown_key_in_a_known_session_is_none() {
+        let project = Project::with_button();
+        let session_id = next_session_id();
+        initialize_session(session_id, project.options()).await.expect("initialize");
+        assert_eq!(session_component_toon(session_id, "Missing".into()).expect("slice"), None);
     }
 
     // ── SPEC-BINDING-001 AC11: close_session on an unrecognized or

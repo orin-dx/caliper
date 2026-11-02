@@ -105,6 +105,12 @@ export interface ParsedProp {
   tags: Record<string, string>
   parent: PropParent | null
   declarations: PropParent[]
+  /**
+   * Why part of this prop's type is `opaque`: the kinds of reason (`conditionalType`, `mappedType`, `indexedAccess`, …),
+   * each once, in the order the type holds them. Absent when the resolver evaluated the type in full. A name left as an
+   * unexpanded reference is not listed; its diagnostic says so.
+   */
+  degradedBy?: string[]
 }
 
 /**

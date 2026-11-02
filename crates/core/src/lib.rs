@@ -16,6 +16,6 @@ pub mod types;
 // Re-export the primary consumer API at the crate root.
 pub use pipeline::{extract, PipelineOptions};
 pub use plugin::{DocgenPlugin, PluginRegistry};
-pub use toon::{render_component_toon, render_output_toon};
+pub use toon::{render_component_slice_toon, render_component_toon, render_output_toon};
 pub use types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 pub use types::output::ExtractionOutput;

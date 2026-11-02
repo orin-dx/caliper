@@ -789,6 +789,7 @@ module.exports.isResolutionConfig = nativeBinding.isResolutionConfig
 module.exports.resolutionConfigFiles = nativeBinding.resolutionConfigFiles
 module.exports.sessionComponentAnswers = nativeBinding.sessionComponentAnswers
 module.exports.sessionComponentKeys = nativeBinding.sessionComponentKeys
+module.exports.sessionComponentToon = nativeBinding.sessionComponentToon
 module.exports.sessionDocgenInfo = nativeBinding.sessionDocgenInfo
 module.exports.sessionStats = nativeBinding.sessionStats
 module.exports.sessionWarmUp = nativeBinding.sessionWarmUp
