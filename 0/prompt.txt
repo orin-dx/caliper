@@ -1,0 +1,91 @@
+<task-notification>
+<task-id>af280d00b310005f9</task-id>
+<tool-use-id>toolu_01GnnuePKQu1yDKyRNrHNX9L</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/ad4b3461-bb6f-49f0-bb4d-997d9b8887ba/tasks/af280d00b310005f9.output</output-file>
+<status>completed</status>
+<summary>Agent "Trail 153 weekly pairing stack" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Two of three branches are done and committed locally, GPG-signed (`G`). Nothing is pushed, no PRs are open, and no Rust files changed. Antd component recall rose from 79.7% to 92.1%, short of the ~95% target. Shadcn is unchanged at 96.5%.
+
+The worktree is `/Users/gabe/Projects/caliper/.claude/worktrees/agent-af280d00b310005f9`.
+
+## Branches (stacked)
+
+| Branch | Base | Tip | Files |
+|---|---|---|---|
+| `fix/weekly-pairing` | `main` (2daef927) | `c67873b1` | `scripts/weekly.py`, `scripts/test_weekly_review.py`, `docs/measurement.md` |
+| `feat/weekly-unmatched-record` | `fix/weekly-pairing` | `f4ef7cf3` | `scripts/weekly.py`, `scripts/test_weekly.py`, `docs/measurement.md` |
+| `fix/weekly-caliper-key-collisions` | not made | — | — |
+
+## Numbers against the plan's baselines
+
+I replayed the weekly measurement locally on the pinned antd and shadcn corpora with the `main` binary. The baseline replay matches the plan's weekly run exactly (antd 165/207, shadcn 1518/1573).
+
+| Corpus | Components before | Components after |
+|---|---|---|
+| shadcn | 1518/1573 = 96.5% | 1518/1573 = 96.5% |
+| antd | 165/207 = 79.7% | 186/202 = 92.1% |
+
+- **Matches the plan:** the antd numerator of 186 is the plan's figure. Own props with layers moved 99.3% to 99.4%.
+- **Misses the plan:** the plan expected a denominator of about 195, and this change reaches 202. I could not reproduce the plan's 7 extra merges. The 16 antd items still unpaired are not pairing cases:
+  - 6 are `generate*` factory functions and helpers.
+  - 4 are `Parent.Member` entries that Caliper reports under the parent, such as `Form.List` and `Mentions.Option`.
+  - 2 are the calendar and date-picker components, built by a factory call.
+  - 3 are `confirm`, `RefIcon` and `InternalPanel`.
+  - 1 is `List`, and 1 is `QrcodeStatus`, which is trail 4's work.
+- **To reach about 95%:** you would have to drop compound members from the reference, which hides a gap that `docs/edge-cases.md` lists. I did not do that.
+- **Weekly job:** a full end-to-end run of `weekly.py` on antd and shadcn works. The unmatched record added about 3 KB for the two corpora.
+
+## What the branches do
+
+- **`fix/weekly-pairing`:**
+  - **Same-file pairing:** it now pairs a default export that has another name, and a `displayName` in either direction.
+  - **Wrappers:** it follows `Object.assign`, `as`, `satisfies`, `!`, dotted wrappers such as `React.memo`, and local alias chains, including through imports.
+  - **Guards:** the RDT name must be the file's or directory's own, and a Caliper key that another RDT entry already matches is never a target.
+  - **`reference_version`:** the record gains `reference_version` (2). `findings()` skips recall when the two records' versions differ, and the summary says so.
+  - **Tests:** 7 new tests plus the existing ones pass.
+- **`feat/weekly-unmatched-record`:**
+  - **Unmatched record:** `reference.unmatched` holds a count per cause and the first 15 of each as `file: name`.
+  - **Causes:** the causes are `compound_member`, `object_member`, `dependency`, `call_result`, `file_with_other_components` and `file_without_components`.
+  - **Job summary:** it gains a table of the same counts.
+  - **Shadcn:** its 55 unmatched split into 34 object members, 10 in files with other components, 6 dependency aliases and 5 call results. The 34 object members are 19 icons plus 15 mdx components.
+  - **Tests:** 4 new tests.
+- **Checks run:** the Python tests, `typos`, `oxfmt --check` on all markdown, and `cargo fmt --check`. I skipped `cargo nextest` and clippy because no Rust changed. I installed workspace dependencies with `pnpm install --frozen-lockfile` in the worktree.
+
+## Unresolved
+
+- **Key collisions branch:** I skipped it because it is not clean. Caliper emits two components in `splitter/Panel.tsx` under one normalized key (`Panel` and `Panel (path)`). A merge step for the dictionary would not make the second one a separate match: `InternalPanel` would merge into the same group, so recall stays at 186 and the denominator drops by one. Fixing it needs a distinct Caliper key per component, which touches the pairing design. It fits better as a follow-up.
+- **Rules unchecked on Mantine, Chakra and Spectrum:** those corpora are not installed locally at the pinned commits. Check them from a CI weekly run on the branch. Risks are wrong same-file pairs and misclassified causes.
+- **`Tooltip` vs `ChartTooltip` in shadcn:** the plan calls these pairing cases, but also requires shadcn to stay unchanged at 96.5%, and they are not covered here. `unmatched_cause` files them under `file_with_other_components`.
+- **Files not touched:** `scripts/rdt.mjs`, `scripts/rdg.mjs` and `apps/oracle`, which belong to the oracle worker. The docs line saying react-docgen reads each file alone is also left as is.
+
+## Draft PR bodies
+
+**`fix/weekly-pairing`** (base `main`)
+
+&gt; **What:** The weekly reference now pairs RDT entries that Caliper reports under another name in the same file, not just across files. It follows a default alias (`const InternalButton; export default InternalButton`), `displayName` either way, `Object.assign`/`as`/`satisfies`/`!`/dotted wrappers, and local alias chains including through imports. It also adds `reference_version` (2); recall is not compared with a record made under other rules.
+&gt;
+&gt; **Why:** The harness counted these as missing components, which made antd's recall look worse than detection is.
+&gt;
+&gt; **Numbers (pinned commits, local replay):** antd components 165/207 (79.7%) to 186/202 (92.1%); shadcn unchanged at 1518/1573 (96.5%).
+&gt;
+&gt; **Risks:** Same-file pairing is guarded (RDT name must be the file's or directory's own, and a key another entry matches exactly is never a target), but is only checked on antd and shadcn. Mantine, Chakra and Spectrum need a CI weekly run. The weekly job's first run after merge will not compare recall (version 1 to 2).
+&gt;
+&gt; Trail: https://entire.com/gh/orin-dx/-/trails/153
+&gt; https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ
+
+**`feat/weekly-unmatched-record`** (base `fix/weekly-pairing`)
+
+&gt; **What:** `weekly.json` records why reference items Caliper reports nowhere are missing: a count per cause and the first 15 of each as `file: name`. The job summary gains a table of the same counts.
+&gt;
+&gt; **Why:** shadcn's object-literal members, antd's `Parent.Member` entries and factory results were mixed with detection gaps; now they are counted apart.
+&gt;
+&gt; **Numbers:** shadcn: 34 object members, 10 in files with other components, 6 dependency aliases, 5 call results. antd: 6 file without components, 4 compound members, 3 file with other components, 2 call results, 1 dependency. About 3 KB for the two corpora.
+&gt;
+&gt; **Risks:** The cause is read from the item's file with regexes, so it says where to look, not what is wrong. Land after `fix/weekly-pairing`, and stack it as a child (`--base fix/weekly-pairing`) per the link-first flow.
+&gt;
+&gt; Trail: https://entire.com/gh/orin-dx/-/trails/153
+&gt; https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ</result>
+<usage><subagent_tokens>240802</subagent_tokens><tool_uses>85</tool_uses><duration_ms>609312</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-af280d00b310005f9</worktreePath><worktreeBranch>worktree-agent-af280d00b310005f9</worktreeBranch></worktree>
+</task-notification>
