@@ -1,0 +1,61 @@
+<task-notification>
+<task-id>a7c3b3b7bcc7ad15a</task-id>
+<tool-use-id>toolu_011xGnA1ivTHSc5Qb2P5Cj31</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/ad4b3461-bb6f-49f0-bb4d-997d9b8887ba/tasks/a7c3b3b7bcc7ad15a.output</output-file>
+<status>completed</status>
+<summary>Agent "Trails 155 then 156 detection stack" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Trails 155 and 156 are partly done. Four stacked branches are committed, signed and green, but the last two 156 branches are not started. Nothing is pushed, no PRs are open, and none is merged.
+
+**Stack:** all four are off `origin/main` (`a9dfed90`), in this order. All commits are signed (`G`).
+
+| Branch | Tip |
+|---|---|
+| `fix/react-type-import-source` | `ef3f5c5c` |
+| `fix/alias-resolution-order` | `0980f3f5` |
+| `fix/constant-names-not-candidates` | `c1001df8` |
+| `feat/imported-destructure-alias` | `b1a6368c` |
+
+Every branch ran the full set: 1033 to 1044 tests passing, then `just lint doc-check typos machete`, clean. Each has a changeset.
+
+**Not started: `feat/factory-results` and `feat/cross-file-render-evidence`.**
+- **Calendar (antd):** this needs three pieces:
+  - the arrow-bound generic factory `generateCalendar`;
+  - `return Local` where `Local = X as T`;
+  - a new deferred "call result" candidate, which needs a new `DetectionRule` and a `CACHE_SCHEMA_VERSION` bump to 28, because `generateCalendar` is imported and its result is only known at resolve time.
+- **IconLucide (shadcn):** the five-component family is `createIconLoader("lucide")`, a call with no type arguments, so it needs a further rule. These are new heuristic rules and need their own precision samples, so I didn't rush them.
+
+**Findings:**
+- **Plan error:** the 211 noise skip notes (48 antd, 163 shadcn) are `SCREAMING_CASE` constants like `MENU_OPTIONS`, not alias order or import source. Neither planned 155 branch touches them, so I added `fix/constant-names-not-candidates`. It suppresses only the skip note, and detection is unchanged. It removes exactly 211 notes (antd 146 → 98, shadcn 252 → 89). The alias-order branch plus the destructure branch take antd to 79 and shadcn to 88.
+- **Spec reversal:** `fix/alias-resolution-order` deliberately reverses SPEC-EXTRACTOR-001 AC-014, "a forward reference must not match". I rewrote its test.
+- **Recall target:** the ~95% antd recall target isn't reachable from this stack. Component counts on antd and shadcn are identical apart from diagnostics and the additions below.
+- **`feat/imported-destructure-alias` adds** antd `Option` (+1) and shadcn `ChartLegend` (+4) plus `Form` (+1, not in the plan). No existing component changed. The branch also fixes three resolver gaps behind this:
+  - `MemoExoticComponent&lt;…&gt;` is unwrapped;
+  - declared `const X: React.FC&lt;P&gt;` values are found;
+  - the re-export chain behind a default export is followed.
+- **Alias duplicates:** the new alias forms would add 18 duplicate antd components (`Alert`, `Card`, …). An alias of a component the project already declares under that name is now dropped.
+- **Precision:** the rule has only 14 detections on these corpora (antd 1, shadcn 13), so I read all 14: 14 are components. A model labelled them and no human has checked. This is recorded in `docs/precision.md`.
+- **Cost:** shadcn with dependencies loaded is 180 → 172 ms and 351 → 335 MiB. Chakra is 77 → 76 ms and 151 → 152 MiB. `just bench` ratios are 1.02 (Mantine) and 1.04 (Chakra) in time and 1.01 and 1.00 in memory.
+- **Test fix:** `a_constant_is_not…` aside, one existing test used an imported name as its "never resolved" case, which is now an alias by design, so I changed its fixture.
+- **No schema bump:** I made no `CACHE_SCHEMA_VERSION` change, since the shape is unchanged and the build fingerprint covers content changes. The golden cache snapshot was regenerated once, for the constants branch.
+
+**Draft PR bodies** (the trail 155 URL is https://entire.com/gh/orin-dx/-/trails/155 and trail 156's is `/156`; the session URL goes last):
+
+`fix/react-type-import-source` (base `main`):
+&gt; React's component types (`FC`, `FunctionComponent`, `ComponentType`, `Component`, `PureComponent`) are matched by where they were imported from, not by name: `import { FC as Fn }` and `R.FC` are found, and an `FC` imported from another module is not React's. 3 new tests. No change on the antd or shadcn corpora. Risk: a locally declared `type FC` with no import is still read as written. Trail: 155.
+
+`fix/alias-resolution-order` (base `fix/react-type-import-source`):
+&gt; `const Button = Inner` and `memo(Inner)` are held until the file has been read, so they resolve when `Inner` is declared further down. An alias whose component is never declared is still a skipped candidate. This reverses SPEC-EXTRACTOR-001 AC-014 (the old test is rewritten). The alias-variant matches in the resolver (`html.rs`, `callee.rs`) are now exhaustive. No change on the corpora; the effect shows up with the next branch. Trail: 155.
+
+`fix/constant-names-not-candidates` (base `fix/alias-resolution-order`):
+&gt; A binding written as a constant (`MENU_OPTIONS`, `ORIGIN`) is not reported as a skipped candidate when no rule matches it. Detection is untouched, so an all-caps component typed `FC&lt;P&gt;` is still found. Removes 211 of 398 skip notes (antd 48 of 146, shadcn 163 of 252); extracted components are identical. Golden cache snapshot regenerated (fixture notes only). Trail: 155.
+
+`feat/imported-destructure-alias` (base `fix/constant-names-not-candidates`):
+&gt; `const { Option } = Imported` and `const X = Imported` are imported-member aliases whose props are the imported component's, also behind a re-exported default or a `React.MemoExoticComponent`. Adds antd `Option` and shadcn `ChartLegend` ×4 and `Form`; an alias of a project component of the same name is not reported twice (18 antd duplicates avoided). Precision: 14 of 14 on the corpora. shadcn 180 → 172 ms, 351 → 335 MiB; `just bench` 1.02 and 1.04. Risk: the same-name drop for member aliases checks only that a project component of that name exists. Trail: 156.
+
+**Branch order:** link them to their trails as 155's three branches stacked, with `feat/imported-destructure-alias` under 156 on top of `fix/constant-names-not-candidates`.
+
+I removed my temporary baseline worktree. Probe files and scripts are in `/tmp/claude-501/t155/`.</result>
+<usage><subagent_tokens>459340</subagent_tokens><tool_uses>212</tool_uses><duration_ms>2451197</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-a7c3b3b7bcc7ad15a</worktreePath><worktreeBranch>worktree-agent-a7c3b3b7bcc7ad15a</worktreeBranch></worktree>
+</task-notification>
