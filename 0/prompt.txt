@@ -1,0 +1,52 @@
+<task-notification>
+<task-id>a7c3b3b7bcc7ad15a</task-id>
+<tool-use-id>toolu_01DMkpqeQqTCg8ht7ShGZPJW</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/ad4b3461-bb6f-49f0-bb4d-997d9b8887ba/tasks/a7c3b3b7bcc7ad15a.output</output-file>
+<status>completed</status>
+<summary>Agent "Trails 155 then 156 detection stack" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>`feat/factory-results` is committed and signed, but `feat/cross-file-render-evidence` is not started, because it needs an architecture decision first. Nothing is pushed, no PRs are open, and nothing is merged.
+
+**Stack:** this builds on your pushed `feat/imported-destructure-alias` (`b1a6368c`, which I left untouched).
+- **Merge:** `main` had moved (#289 and #290 landed). I merged `origin/main` into the stack as a signed merge commit, `92d64b4e`, with no rebase, and `feat/factory-results` is branched from that merged tip.
+- **Signatures:** `8b5e7653` and `92d64b4e` are signed (`G`). The two `E` entries in `git log` are GitHub's own PR-merge commits on `main` that this machine has no key to verify; they aren't mine.
+- **Tree:** clean.
+
+**`feat/factory-results` (`8b5e7653`)**
+- **Rule:** one shape-based rule, no library names. A PascalCase binding initialized with a call to a plain function is kept as a candidate, and the resolver publishes it only if the callee's recorded result is a component. The extractor now also records results for:
+  - a generic arrow factory (`const generateCalendar = &lt;T,&gt;(…) =&gt; …`);
+  - `return Local` where `Local = X as T`;
+  - a function that returns a typed rendering function (`return function Loader(props: P)`).
+- **Schema:** a new `factoryResult` detection rule. I bumped `CACHE_SCHEMA_VERSION` to 28 and regenerated the golden cache snapshot.
+- **Results:**
+  - antd gains `Calendar` (+1).
+  - shadcn gains `IconLucide`, `IconTabler`, `IconHugeicons`, `IconPhosphor` and `IconRemixicon` (+5).
+  - Chakra and Mantine gain 0 and change 0.
+  - No existing component changed.
+- **Precision:** all 6 detections are genuine, so 6 of 6. That is below the 25-sample size, so I read every one. A model labelled them; no human has checked. It is recorded in `docs/precision.md`.
+- **Cost:** shadcn with dependencies loaded is 181 → 180 ms and 329 → 335 MiB, and Chakra is 108 → 107 ms and 154 → 153 MiB. `just bench` against `origin/main` (so including the whole stack) gives time 1.00 (Mantine) and 1.01 (Chakra), memory 1.02 and 0.99.
+- **Checks:** 1047 tests pass and lint is clean. There is a changeset.
+
+**Behaviors changed on purpose:**
+- **Skip notes:** an unresolved call-bound binding no longer produces a skipped-candidate note. That is 9 fewer on antd and 18 fewer on shadcn.
+- **Tests I changed:** three tests that list extracted mappings now ignore unresolved `factoryResult` candidates. Two skip-note tests now use `const Button = { … }` instead of `makeThing()`, and I added a binding to the golden cache fixture so its diagnostics stay covered.
+- **Element builders:** these are excluded from the rule, as they are for the tagged-factory rule.
+
+**Not started: `feat/cross-file-render-evidence`.** I'm stopping because it can't be a local change.
+- **The case:** `QRcodeStatus` is declined because it returns `mergedStatusRender({…})`. `qr-code/index.tsx` imports it and renders `&lt;QRcodeStatus … /&gt;`. shadcn's `GET` would stay declined, since no project file imports and renders it.
+- **Why it's architectural:** today every mapping comes from one file's `SourceData`, and `GlobalSourceData::merge` and `remove_file` rely on that. Promotion would make file F's mappings depend on other files' imports and JSX uses.
+- **What it needs:**
+  - two new `SourceData` fields, the declined candidates and the rendered names, plus another cache bump;
+  - a global promotion step that runs after every merge and removal in batch, watch and lazy sessions;
+  - `Revision::affected_by` extended so F is re-resolved when a file that imports it changes;
+  - an ADR first.
+- **Decision for you:** whether to do that, since it changes how the revision engine tracks dependencies.
+
+**Draft PR body for `feat/factory-results`** (base `feat/imported-destructure-alias`, merge `main` into it once #298 lands):
+&gt; A component built by calling a function is found when that function returns one: `createIconLoader("lucide")` (a function returning a typed rendering function) and `generateCalendar&lt;Dayjs&gt;(config)` (a generic arrow returning a local asserted to a component type). Every PascalCase call binding is a candidate; the resolver publishes it only when the callee's recorded result is a component, so it cannot fire on an unknown callee. Adds antd `Calendar` and shadcn/ui's five icon loaders; Chakra and Mantine unchanged; precision 6 of 6 (all read, model-labelled, not human-checked). New `factoryResult` rule, `CACHE_SCHEMA_VERSION` 28. Cost: shadcn 181 → 180 ms, 329 → 335 MiB; `just bench` 1.00 and 1.01 in time. Risk: unresolved call-bound candidates no longer produce a skipped-candidate note (9 on antd, 18 on shadcn/ui), and three extractor tests that list mappings now ignore unresolved candidates. Trail: https://entire.com/gh/orin-dx/-/trails/156
+&gt; https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ
+
+I removed my temporary baseline worktree. My scripts and probe files are in `/tmp/claude-501/t155/`.</result>
+<usage><subagent_tokens>548541</subagent_tokens><tool_uses>61</tool_uses><duration_ms>991130</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-a7c3b3b7bcc7ad15a</worktreePath><worktreeBranch>worktree-agent-a7c3b3b7bcc7ad15a</worktreeBranch></worktree>
+</task-notification>
