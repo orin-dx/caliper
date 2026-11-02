@@ -13,11 +13,15 @@ export interface InheritedLayer {
   omitted: string[]
   htmlElement: string | null
   totalProps: number
+  /** For a collapsed source, the names of the props it declares. Absent when the layer's props are expanded. */
+  members?: string[]
 }
 
 /** An inheritance layer in the canonical JSON: `omitted` is the id of a list in the output's `nameLists`. */
-export interface InheritedLayerRef extends Omit<InheritedLayer, 'omitted'> {
+export interface InheritedLayerRef extends Omit<InheritedLayer, 'omitted' | 'members'> {
   omitted: NameListId
+  /** The id of a list in `nameLists`, for a collapsed source. */
+  members?: NameListId
 }
 
 export interface PropParent {

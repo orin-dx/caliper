@@ -71,7 +71,8 @@ fn schema_value() -> serde_json::Value {
                                     "fileName": { "type": "string" },
                                     "omitted": { "$ref": "#/definitions/nameListId" },
                                     "htmlElement": { "type": ["string", "null"] },
-                                    "totalProps": { "type": "integer" }
+                                    "totalProps": { "type": "integer" },
+                                    "members": { "$ref": "#/definitions/nameListId" }
                                 }
                             }
                         },
@@ -212,6 +213,7 @@ mod tests {
                     omitted: vec!["ref".into()],
                     html_element: Some("button".into()),
                     total_props: 3,
+                    members: vec![],
                 }],
                 notable_inherited: BTreeMap::from([(
                     "onClick".to_string(),
