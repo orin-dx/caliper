@@ -34,7 +34,7 @@ Between parse and resolve, the declarations of installed packages that project t
 
 ```mermaid
 graph TD
-    core["crates/core\ncaliper-docgen-core\nPure extraction — no I/O, no async"]
+    core["crates/core\ncaliper-docgen-core\nExtraction and resolution — file I/O, no async"]
     binding["crates/binding\ncaliper-docgen-napi\nNAPI + tokio runtime"]
     cli["crates/cli\ncaliper-docgen\nCLI binary"]
     semantic["crates/semantic\ncaliper-docgen-semantic\nExperimental TS 7.1 backend"]
@@ -57,7 +57,7 @@ graph TD
     napi -.->|"runtime dep"| oracle
 ```
 
-`crates/core` has no dependency on async runtimes, NAPI, or terminal libraries. It can be linked from any host. `crates/semantic` and `crates/tsc-client` are published crates, always compiled into the CLI and the binding and enabled at run time (ADR 0007); Callisto publishes them before the CLI.
+`crates/core` has no dependency on async runtimes, NAPI, or terminal libraries. It can be linked from any host. It does read and write files itself: source discovery, module resolution, the parse and dependency caches (`cache.rs`, `dependency_types.rs`) and tsconfig lookups. It never spawns a process; the checker backend that does lives in `crates/semantic`. `crates/semantic` and `crates/tsc-client` are published crates, always compiled into the CLI and the binding and enabled at run time (ADR 0007); Callisto publishes them before the CLI.
 
 ## Module layout
 
@@ -70,7 +70,7 @@ types/
   output.rs       — PropType, ComponentEntry, ExtractionOutput, InheritedLayer, ParsedProp, SCHEMA_VERSION
   output/interned.rs — the canonical JSON: props, prop sets and name lists written once (ADR 0009, 0018)
   diagnostic.rs   — Diagnostic, DiagnosticSeverity, DiagnosticCode
-  global.rs       — GlobalSourceData, ScopedKey
+  global.rs       — GlobalSourceData, and the crate-private ResolveState, StateReads and ResolvedDiagnostics a resolution threads through
   semantic.rs     — what the TS checker backend hands back, and how it merges over the structural result
 
 extractor/
@@ -181,7 +181,7 @@ Not shared between threads — rayon creates one per component.
 
 ### `GlobalSourceData`
 
-The merged view across all parsed files: component declarations, type aliases, interface definitions, import bindings. Today `WatchSession` publishes this map independently via `ArcSwap`. Under the target watch invariant above it becomes one member of the immutable aggregate `WatchRevision`, so readers load one coherent published revision.
+The merged view across all parsed files: component declarations, type aliases, interface definitions, import bindings. `WatchSession` publishes it as one member of the immutable `Revision` (see above) with a single `ArcSwap` store, so readers load one coherent published revision.
 
 ## Design decisions
 
@@ -199,7 +199,7 @@ Most names in the hot path (`string`, `boolean`, `ReactNode`, `MouseEvent`, `cla
 
 ### Manual `Serialize`/`Deserialize` for `CollectedType` and `PropType`
 
-Both are deeply recursive enums. `#[derive(Serialize, Deserialize)]` hit Rust's monomorphization recursion limit during macro expansion, producing 19-minute compile times. Both now implement serialization manually through `serde_json::Value` as an intermediate, which breaks the recursion chain at the cost of one heap allocation per serialized value. A `#![recursion_limit = "2048"]` attribute is still present in `lib.rs` for other traits but is no longer load-bearing for these types.
+Both are deeply recursive enums. `#[derive(Serialize, Deserialize)]` hit Rust's monomorphization recursion limit during macro expansion, producing 19-minute compile times. Both implement the traits by hand. `CollectedType` goes through `serde_json::Value` as an intermediate in both directions, which breaks the recursion chain at the cost of one heap allocation per value. `PropType` streams each variant as a map when serializing (building a `Value` per node made serialization the largest cost of a run at scale) and reads through a `Value` only when deserializing. `crates/core` sets no `recursion_limit`; the CLI crate sets 256.
 
 ### DTS cache location: `node_modules/.cache/`
 

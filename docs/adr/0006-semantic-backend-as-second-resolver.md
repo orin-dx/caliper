@@ -2,6 +2,8 @@
 
 **Status:** Accepted, feature-gating superseded by 0007 **Date:** 2026-09-26
 
+**Note (2026-11-02):** `ExtractionOutput` has had a `schemaVersion` since ADR 0017, so the last Consequences bullet no longer applies to it. "Stays free of I/O" means no compiler process: `crates/core` reads and writes files itself (discovery, module resolution, the caches) and spawns nothing.
+
 ## Context
 
 The structural resolver can't substitute generics through alias chains or evaluate conditional and mapped types. Ten components account for 2,696 of the 2,720 props missing against react-docgen-typescript (RDT) in the 2026-07-25 baseline (`docs/benchmarks.md`). ADR 0004 deferred a fix until TypeScript 7 offered a usable route.
