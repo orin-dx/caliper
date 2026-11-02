@@ -39,6 +39,7 @@ pub struct ContentLengthDecoder {
 }
 
 impl ContentLengthDecoder {
+    /// A decoder that rejects a frame whose declared body is longer than `cap` bytes.
     pub fn new(cap: usize) -> Self {
         Self { cap, pending_body_len: None }
     }
@@ -120,6 +121,11 @@ impl Decoder for ContentLengthDecoder {
     }
 }
 
+/// Writes `body` to `writer` as one frame, a `Content-Length` header and the body, and flushes it.
+///
+/// # Errors
+///
+/// Whatever `writer` returns when a write or the flush fails.
 pub async fn write_frame<W: AsyncWrite + Unpin>(writer: &mut W, body: &[u8]) -> std::io::Result<()> {
     let header = format!("Content-Length: {}\r\n\r\n", body.len());
     writer.write_all(header.as_bytes()).await?;

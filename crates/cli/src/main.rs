@@ -1,3 +1,8 @@
+//! The `caliper-docgen` command line: `extract`, `watch`, `check`, `inspect`, `schema` and `completions` over the
+//! `caliper-docgen-core` pipeline. The command handlers return their exit code and `main` is the only place that ends
+//! the process.
+
+#![deny(missing_docs)]
 #![recursion_limit = "256"]
 // stdout carries the command payload (JSON, tables); stderr and diagnostics still go through output.rs.
 #![allow(clippy::print_stdout)]
@@ -20,6 +25,7 @@ use commands::watch::cmd_watch;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+/// The command line: the flags every command shares, and the command to run.
 #[derive(Parser)]
 #[command(
     name = "caliper-docgen",
@@ -65,6 +71,7 @@ enum Command {
     Completions(CompletionsArgs),
 }
 
+/// The options of `extract`.
 #[derive(clap::Args)]
 pub struct ExtractArgs {
     /// Source directories to scan [default: ./src]
@@ -130,6 +137,7 @@ pub struct ExtractArgs {
     pub tsc_path: Option<String>,
 }
 
+/// The formats `extract` can write.
 #[derive(clap::ValueEnum, Clone)]
 pub enum OutputFormat {
     /// caliper-docgen canonical schema (richest)
@@ -140,6 +148,7 @@ pub enum OutputFormat {
     Toon,
 }
 
+/// The values of `--html-attributes`: how much of an inherited HTML element's attribute set a component lists.
 #[derive(clap::ValueEnum, Clone, Copy)]
 pub enum HtmlAttributeModeArg {
     /// A compact subset per element: handlers, aria-*, ref and the common attributes
@@ -150,6 +159,8 @@ pub enum HtmlAttributeModeArg {
     None,
 }
 
+/// The values of `--collapse-inherited-props`: which inherited sources of more than 30 props are listed as one
+/// inherited layer instead of prop by prop.
 #[derive(clap::ValueEnum, Clone, Copy)]
 pub enum CollapseInheritedPropsArg {
     /// Sources from loaded dependencies (default)
@@ -170,6 +181,7 @@ impl From<CollapseInheritedPropsArg> for caliper_docgen_core::pipeline::Collapse
     }
 }
 
+/// The options of `inspect`.
 #[derive(clap::Args)]
 pub struct InspectArgs {
     /// Component name to inspect
@@ -191,6 +203,7 @@ pub struct InspectArgs {
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 }
 
+/// The options of `watch`.
 #[derive(clap::Args)]
 pub struct WatchArgs {
     /// Source directories to watch [default: ./src]
@@ -213,6 +226,7 @@ pub struct WatchArgs {
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 }
 
+/// The options of `check`.
 #[derive(clap::Args)]
 pub struct CheckArgs {
     /// Source directories to scan [default: ./src]
@@ -239,8 +253,10 @@ pub struct CheckArgs {
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 }
 
+/// The options of `completions`.
 #[derive(clap::Args)]
 pub struct CompletionsArgs {
+    /// The shell to generate completions for
     pub shell: clap_complete::Shell,
 }
 

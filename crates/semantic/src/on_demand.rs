@@ -38,15 +38,19 @@ const RSS_CHECK_EVERY: u32 = 4;
 /// worker to finish on its own. Closing a session must not wait for a 60 s request.
 const DEFAULT_SHUTDOWN_WAIT: Duration = Duration::from_secs(5);
 
+/// How a warm [`OnDemand`] checker starts and is kept: where to find `tsc`, how long to wait on it, and when to replace
+/// its process.
 #[derive(Debug, Clone)]
 pub struct OnDemandConfig {
     /// Where `tsc` finds `node_modules`; its `--cwd`, and where the search for `typescript` starts.
     pub project_root: Utf8PathBuf,
+    /// A tsconfig whose compiler options the checker uses (read with `parseConfigFile`); with none, a default set.
     pub tsconfig: Option<Utf8PathBuf>,
     /// An explicit `tsc` binary, instead of `node_modules/typescript/bin/tsc` above `project_root`.
     pub tsc_path: Option<Utf8PathBuf>,
     /// Bound on each request to the checker, and on its start-up handshake.
     pub request_timeout: Duration,
+    /// The `typescript` versions the checker may report; one that is not among them is a start-up failure.
     pub expected_versions: &'static [&'static str],
     /// Resident memory of the `tsc` process, in MiB, past which it is replaced after a request. A request that needs
     /// more finishes first: the bound is between requests, not inside one.
@@ -58,6 +62,8 @@ pub struct OnDemandConfig {
 }
 
 impl OnDemandConfig {
+    /// A configuration for `project_root` with a 60 second request timeout, the supported versions, a 768 MiB memory
+    /// bound, a 5 second shutdown wait, and no explicit tsconfig or `tsc` path.
     pub fn new(project_root: Utf8PathBuf) -> Self {
         Self {
             project_root,

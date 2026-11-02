@@ -1,7 +1,7 @@
 //! Process supervisor and JSON-RPC transport client for TypeScript 7's `tsc --api`.
 //!
-//! Standalone: this crate has no dependency on `caliper-docgen-core` and nothing in
-//! the workspace consumes it yet. It exists to satisfy the Lifecycle gate in
+//! Standalone: this crate has no dependency on `caliper-docgen-core`; `caliper-docgen-semantic` is the crate that
+//! consumes it. It exists to satisfy the Lifecycle gate in
 //! `docs/type-checker-integration.md` ("Gates before it ships") — missing binary,
 //! unsupported version, timeout, crash, restart storm, malformed/oversized frame,
 //! partial project failure, shutdown reaping, stale notification — before any of the
@@ -24,6 +24,8 @@
 //! closures run on rayon/NAPI boundaries. Nothing here calls an arbitrary caller
 //! closure — the only untrusted input is bytes from a child process, handled through
 //! `Result`, never `.unwrap()`/`.expect()`.
+
+#![deny(missing_docs)]
 
 mod client;
 mod error;
