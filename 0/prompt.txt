@@ -1,0 +1,1 @@
+Do our trails descriptions not support MD (specially tables)? https://entire.com/gh/orin-dx/caliper/-/trails/154/description
