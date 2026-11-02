@@ -49,7 +49,7 @@ Recall is measured against that reference, on the components both tools report (
 
 Caliper collapses an inherited dependency source of more than 30 props into a layer (ADR 0012) and lists only its notable members as props, as Storybook does. A prop in a layer is in the output, named by the layer's `members`, but is not in the flat list, so the table reports both: the plain columns say what the default output lists, "with layers" says what it holds. react-docgen writes no layers, so its two columns are equal.
 
-react-docgen reads each file alone with its default resolver and importer, as Storybook does, so it lists no types declared elsewhere. That is the point of the comparison.
+react-docgen parses each file with its default resolver and importer, as Storybook does. The importer follows relative and package imports to the file that declares a type, so a props interface imported from a sibling file is read. It does no type inference: it lists none of React's inherited attributes, and a generic, mapped or conditional type stays the source text. That is the point of the comparison. A file it throws on is counted (`failed`) and listed (`failedFiles`), not dropped silently.
 
 The run uploads `weekly.json` and a table to the job summary. It compares with the last successful run's `weekly.json` and opens, or comments on, one issue labelled `weekly-measurement` when Caliper's time or memory is more than 10% worse, or its recall is more than 2 points lower, on any corpus. There is no committed baseline: the previous run is the baseline.
 
