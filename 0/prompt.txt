@@ -1,0 +1,102 @@
+<task-notification>
+<task-id>a146a303a3da7d99b</task-id>
+<tool-use-id>toolu_01KCdPqbekbvTCXuEAkZw2j7</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/ad4b3461-bb6f-49f0-bb4d-997d9b8887ba/tasks/a146a303a3da7d99b.output</output-file>
+<status>completed</status>
+<summary>Agent "Trail 158 release flow stack" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Trail 158's three stacked branches are done locally and signed; nothing is pushed, no PRs are open, and none of it has run against a real release.
+
+## Branches (stacked, each off the previous, tree clean)
+
+| Branch | Base | Tip |
+|---|---|---|
+| `feat/release-github-releases` | `main` (2daef927) | `d215c66e` |
+| `feat/release-binaries-attestations` | `feat/release-github-releases` | `88dfde0a` |
+| `feat/release-recovery` | `feat/release-binaries-attestations` | `bf34ca67` |
+
+Worktree: `/Users/gabe/Projects/caliper/.claude/worktrees/agent-a146a303a3da7d99b`. No release was running when I started.
+
+## Answers to the open facts
+
+- **The signer name is hard-coded.** `RELEASE_COORDINATOR_WORKFLOW_PATH = ".github/workflows/callisto-release.yml"` in Callisto 0.16.0, `crates/callisto-model/src/release/github.rs:148`. `release --dry-run --format json` shows all five slots with that path. I renamed `release.yml` with `git mv` and updated every reference (`callisto.toml`, `CONTRIBUTING.md`, `docs/adr/README.md`). The workflow's `name:` is unchanged.
+- **Homebrew tap keys on tags, not Releases.** `CONTRIBUTING.md:98` says the tap's `brew bump` finds the `npm/caliper-docgen@x.y.z` tag with `livecheck` and builds from source. Tag names are unchanged and both `cargo/` and `npm/` CLI tags exist for 0.8.0 and 0.9.0. The tap lives in another repo and I couldn't read its config. If it uses `:github_latest`, it would start seeing the new Release.
+- **`github-release` needs no slots.** `publish-to` on `cargo/caliper-docgen` alone creates and publishes a Release. Notes come from the `## x.y.z` section of `crates/cli/CHANGELOG.md`.
+- **`[release]` needs `github-release` on the product package** (E197), so branch 1 had to come first.
+
+## Surprises that shaped branch 3
+
+- **Enabling `github-release` makes 0.9.0 look unfinished.** `callisto release pending` lists it as missing its GitHub Release. Without `--from`, the command stops with E166 on an older release whose decision no longer decodes. I pinned `RELEASE_PENDING_FROM=2daef927` (the 0.9.0 release commit).
+- **The first run after branch 3 merges backfills 0.9.0.** It rebuilds the five binaries from 0.9.0's release commit, attests them, and creates its GitHub Release. Callisto's docs say it adopts the crates, npm packages and tags that already landed. This path has never run, so watch that run.
+- **No `schedule:` in Callisto's own example.** I added a daily run (05:23 UTC) anyway, because the same candidate job handles it. On a schedule with nothing unfinished it only refreshes the release PR.
+
+## What changed
+
+- **`callisto.toml`:** `publish-to = ["crates-io", "github-release"]` on the CLI. The `[release]` section sets `product-package = "cargo/caliper-docgen"` and `forge-repository = "orin-dx/caliper"`. Five `[[release.artifact]]` entries use `caliper-docgen-&lt;target&gt;.tar.gz`. Windows is also `.tar.gz`.
+- **`callisto-release.yml`:**
+  - `plan`: gains `--artifact-repository`, a relative-path intent hash and a `has_artifacts` output, replacing the zero-slot assertion.
+  - `build`: tars, attests (`actions/attest-build-provenance@4d101475…`) and uploads each asset.
+  - `assemble`: new job that writes the artifact manifest.
+  - `execute`: gets `attestations: read` and the manifest flags.
+  - `release-candidate`: now uses `release pending`.
+  - `drain`: new job that dispatches the next unfinished release.
+  - `version-pr`: gated on `drain`.
+  - Receipt artifacts are named per attempt.
+- **`ci.yml`:** the changesets dry-run gets a read-only `GH_TOKEN`.
+- **`docs/releasing.md`:** new; covers the flow, outputs, checks, recovery (`ArtifactAssetDiffers`, E180, E140, E148) and a rehearsal checklist.
+- **`CONTRIBUTING.md`:** the Releases text now covers the GitHub Release.
+
+No changeset was added; none of this is consumer-visible code.
+
+## Verified
+
+- `actionlint` and `zizmor --offline` are clean on all workflows.
+- `typos` and `oxfmt --check` pass on the changed files.
+- Callisto 0.16.0 (downloaded to a temp dir) accepts the config:
+  - `status --check` passes.
+  - `release --dry-run` shows five upload operations.
+  - `release pending --from …` lists 0.9.0.
+- I ran the candidate script locally as a push event. It selects `2daef927` and verifies it as a merged managed PR.
+- I did not run `just lint` or the Rust tests, because no Rust files changed.
+
+## Untested
+
+- A real release run, `artifact-manifest`, `gh attestation verify` and the backfill. I couldn't produce an intent with slots locally (`release plan --package` failed with E160), so the manifest step is copied from Callisto's worked example.
+- The Windows `tar.gz` step. It uses relative paths to avoid GNU tar reading `D:\` as a remote host.
+- The `schedule` trigger.
+- Whether branch protection or rulesets reference the `release.yml` filename. I only checked the repo contents.
+
+## Risks
+
+- **Rename:** the file rename is the biggest change, and it is forced by Callisto.
+- **E148 race:** I added no retry. Re-running the failed job, or the daily run, covers it.
+- **First attested release:** rehearse on a scratch repo first (`docs/releasing.md`).
+- **E180:** recovering a non-tip release with `GITHUB_TOKEN` can fail on a tag push. It shouldn't apply to the 0.9.0 backfill, since its tags already exist.
+- **OIDC trusted publishing:** deferred; Callisto 0.16.0 doesn't ship it.
+
+## Draft PR bodies
+
+Link with `entire trail link 158 --branch &lt;b&gt; --base &lt;parent&gt;` before any PR exists, pushing in stack order. Trail: https://entire.com/gh/orin-dx/-/trails/158
+
+**`feat/release-github-releases`** (base `main`)
+&gt; Publish one GitHub Release per CLI version. `cargo/caliper-docgen` now publishes to `github-release`, so Callisto creates the Release on the tag `cargo/caliper-docgen@x.y.z` with the `## x.y.z` section of `crates/cli/CHANGELOG.md` as notes. Tag names do not change, so the Homebrew tap keeps reading `npm/caliper-docgen@x.y.z`. Adds `docs/releasing.md`.
+&gt; Checked with Callisto 0.16.0: `status --check` passes and `release --dry-run` plans "create GitHub release draft" and "publish GitHub release". Risk: if the tap uses `:github_latest` instead of tags, it will see the new Release. Not run against a real release.
+&gt; Trail: https://entire.com/gh/orin-dx/-/trails/158
+&gt; https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ
+
+**`feat/release-binaries-attestations`** (base `feat/release-github-releases`)
+&gt; Attach the five CLI binaries to the GitHub Release, each with a build attestation. `callisto.toml` declares five `[release.artifact]` slots; the build matrix archives and attests each asset; a new `assemble` job writes Callisto's artifact manifest; `execute` verifies every attestation before it uploads.
+&gt; Renames `release.yml` to `callisto-release.yml`: Callisto 0.16.0 hard-codes that path as the attesting workflow, and verification fails (E140) without it. Workflow name, tags and the tap's tag are unchanged.
+&gt; Checked: `actionlint` and `zizmor` clean; `release --dry-run` plans five uploads. Untested: a real release, the manifest step, and Windows `tar`. Rehearse on a scratch repo first (`docs/releasing.md`). Check branch-protection rules for the old filename before merging.
+&gt; Stacked on the previous PR. Trail: https://entire.com/gh/orin-dx/-/trails/158
+&gt; https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ
+
+**`feat/release-recovery`** (base `feat/release-binaries-attestations`)
+&gt; Finish unfinished releases without a human. Every run asks `callisto release pending` for the oldest merged release commit missing its tags or GitHub Release and releases it first; `drain` dispatches the next one; the release PR refreshes only when none remains. A daily schedule recovers a stopped release without a push. Receipts are kept per attempt.
+&gt; `RELEASE_PENDING_FROM` pins the 0.9.0 release commit: without it `release pending` stops with E166 on an older decision. Effect: the first run after merge rebuilds and releases 0.9.0 with a GitHub Release and five attested assets. Callisto adopts the effects that already landed; this path has not run, so watch it.
+&gt; Checked: `actionlint` and `zizmor` clean; the candidate script, run locally as a push, selects `2daef927`. No retry for E148: re-run the job or wait for the daily run.
+&gt; Stacked on the previous PR. Trail: https://entire.com/gh/orin-dx/-/trails/158
+&gt; https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ</result>
+<usage><subagent_tokens>285544</subagent_tokens><tool_uses>126</tool_uses><duration_ms>1005143</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-a146a303a3da7d99b</worktreePath><worktreeBranch>worktree-agent-a146a303a3da7d99b</worktreeBranch></worktree>
+</task-notification>
