@@ -9,11 +9,13 @@ loading off.
 Usage: scripts/corpora.py setup [--corpora DIR] [--corpus NAME]... [--sparse] [--install-node-dir DIR]
 """
 import argparse
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -79,17 +81,47 @@ def selected(names):
     return [c for c in CORPORA if not names or c['name'] in names]
 
 
-def run_once(args, stdout=subprocess.DEVNULL):
-    """Wall seconds and peak RSS in MiB of one process."""
+def rss_mib(ru_maxrss, platform=sys.platform):
+    """`ru_maxrss` in MiB: bytes on macOS, kilobytes on Linux."""
+    return ru_maxrss / (2**20 if platform == 'darwin' else 1024)
+
+
+def measure_child(args):
+    """Fork and exec `args`, wait for it, and return (wall seconds, peak RSS MiB, exit code) of that one process. Meant
+    to run in a small, fresh process (`run_once`): on Linux a child's `ru_maxrss` starts from the largest RSS its parent
+    ever had (the kernel carries the parent's high-water mark across exec), so a parent that once held a large result
+    reports that number for every child after it. `os.fork` rather than `vfork` keeps the mark at this process's size."""
     start = time.perf_counter()
-    proc = subprocess.Popen(args, stdout=stdout, stderr=subprocess.DEVNULL)
-    _, status, usage = os.wait4(proc.pid, 0)
-    elapsed = time.perf_counter() - start
-    code = os.waitstatus_to_exitcode(status)
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.execvp(args[0], args)
+        except OSError as error:
+            os.write(2, f'cannot run {args[0]}: {error}\n'.encode())
+        finally:
+            os._exit(127)
+    _, status, usage = os.wait4(pid, 0)
+    return time.perf_counter() - start, rss_mib(usage.ru_maxrss), os.waitstatus_to_exitcode(status)
+
+
+def run_once(args, stdout=subprocess.DEVNULL):
+    """Wall seconds and peak RSS in MiB of one process, measured by a small helper process so that this process's own
+    memory never leaks into the number. A helper that fails, a result it did not write and a command that cannot run or
+    exits non-zero are each a RuntimeError saying what happened, with the end of the helper's stderr."""
+    command = ' '.join(args)
+    with tempfile.NamedTemporaryFile('r', suffix='.json') as result:
+        helper = [sys.executable, '-I', os.path.abspath(__file__), 'measure', result.name, '--'] + list(args)
+        done = subprocess.run(helper, stdout=stdout, stderr=subprocess.PIPE, text=True, errors='replace')
+        detail = done.stderr.strip()[-500:]
+        if done.returncode != 0:
+            raise RuntimeError(f'the measuring helper failed (exit {done.returncode}) running {command}: {detail}')
+        try:
+            seconds, rss, code = json.load(result)
+        except ValueError as error:
+            raise RuntimeError(f'the measuring helper wrote no result for {command}: {error}') from error
     if code != 0:
-        raise RuntimeError(f"{' '.join(args)} exited with {code}")
-    # ru_maxrss is bytes on macOS and kilobytes on Linux.
-    return elapsed, usage.ru_maxrss / (2**20 if sys.platform == 'darwin' else 1024)
+        raise RuntimeError(f'{command} exited with {code}' + (f': {detail}' if detail else ''))
+    return seconds, rss
 
 
 def package_manager_env(base):
@@ -267,7 +299,15 @@ def main():
     p.add_argument('--corpus', action='append', default=[])
     p.add_argument('--sparse', action='store_true', help='fetch the source directory only; install nothing')
     p.add_argument('--install-node-dir', help="a directory with the `node` the corpora's installs should use")
-    setup(parser.parse_args())
+    p = sub.add_parser('measure', help='(internal) run a command and write its wall time and peak RSS as JSON')
+    p.add_argument('result')
+    p.add_argument('argv', nargs='+')
+    args = parser.parse_args()
+    if args.command == 'measure':
+        with open(args.result, 'w') as f:
+            json.dump(measure_child(args.argv[1:] if args.argv[0] == '--' else args.argv), f)
+    else:
+        setup(args)
 
 
 if __name__ == '__main__':
