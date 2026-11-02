@@ -33,6 +33,8 @@ unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
 dbg_macro = "deny"
+# Only `main` ends the process, so a command's exit decision stays testable; the one other exit is allowed in place.
+exit = "deny"
 print_stdout = "deny"
 print_stderr = "deny"
 map_err_ignore = "deny"

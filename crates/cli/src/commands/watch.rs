@@ -161,7 +161,13 @@ fn spawn_keyboard_thread(session: Arc<WatchSession>, quiet: bool, out: Option<St
         match quit {
             // watchexec has no graceful-quit handle reachable from this thread, so this hard-exits, with the tracked
             // code so a session that quit on an unresolved error still fails the shell.
-            Ok(code) => std::process::exit(code),
+            Ok(code) => {
+                #[allow(
+                    clippy::exit,
+                    reason = "the keyboard quit runs off the main thread, which watchexec never returns to"
+                )]
+                std::process::exit(code);
+            }
             Err(error) => tracing::warn!("key shortcuts stopped: {error}; stop watching with Ctrl-C"),
         }
     });
