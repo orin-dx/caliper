@@ -10,7 +10,7 @@ use crate::types::{
 };
 
 use super::component::Binding;
-use super::{declaration_name, is_pascal_case, js_text, SourceDataCollector};
+use super::{declaration_name, is_constant_name, is_pascal_case, js_text, SourceDataCollector};
 
 impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     fn visit_import_declaration(&mut self, node: &ImportDeclaration<'a>) {
@@ -124,8 +124,21 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         match &node.declaration {
             Declaration::VariableDeclaration(vd) => {
                 for declarator in &vd.declarations {
-                    if let BindingPattern::BindingIdentifier(id) = &declarator.id {
-                        self.record_exported_local(id.name.as_str());
+                    match &declarator.id {
+                        BindingPattern::BindingIdentifier(id) => self.record_exported_local(id.name.as_str()),
+                        // `export const { Option, Item: Row } = Imported` exports `Option` and `Row`.
+                        BindingPattern::ObjectPattern(pattern) => {
+                            for property in &pattern.properties {
+                                let BindingPattern::BindingIdentifier(local) = &property.value else { continue };
+                                self.data.exports.push(LexedExport::LocalDeclaration {
+                                    name: local.name.as_str().to_owned(),
+                                    is_type_only: false,
+                                    declared_as: None,
+                                });
+                                self.record_exported_local(local.name.as_str());
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -295,6 +308,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     }
                 }
             }
+            if self.is_tsx && self.function_depth == 0 {
+                self.try_record_destructured_imports(declarator);
+            }
             if self.is_tsx && self.function_depth > 0 {
                 if let Some(name) = self.extract_pascal_name(declarator) {
                     if self.detect_component(&Binding::of(declarator), &name).is_some() {
@@ -304,6 +320,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             } else if self.is_tsx {
                 if let Some(name) = self.extract_pascal_name(declarator) {
                     self.decline_reason = None;
+                    self.alias_candidate = None;
                     let binding = Binding::of(declarator);
                     if let Some(mapping) = self.detect_component(&binding, &name) {
                         self.data.component_mappings.push(mapping);
@@ -322,14 +339,20 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                         && !self.try_record_wrapper_call(&binding, &name)
                         && !self.try_record_tagged_factory(&binding, &name)
                         && !self.try_record_imported_member_alias(&binding, &name)
+                        && !self.try_defer_identifier_alias(&name, declarator.span)
                     {
-                        let message = self.decline_reason.take().unwrap_or_else(|| {
-                            format!(
-                                "'{name}' is a PascalCase binding but matched no known component pattern \
-                                 (FC annotation, forwardRef, HOC wrapper, or identifier alias)"
-                            )
-                        });
-                        self.record_skip(DiagnosticCode::SkippedCandidate, message, declarator.span);
+                        // `MENU_OPTIONS` is a constant, not a component that failed to qualify; a rule that gave a
+                        // reason for declining it still reports it.
+                        let declined = self.decline_reason.take();
+                        if declined.is_some() || !is_constant_name(&name) {
+                            let message = declined.unwrap_or_else(|| {
+                                format!(
+                                    "'{name}' is a PascalCase binding but matched no known component pattern \
+                                     (FC annotation, forwardRef, HOC wrapper, or identifier alias)"
+                                )
+                            });
+                            self.record_skip(DiagnosticCode::SkippedCandidate, message, declarator.span);
+                        }
                     }
                 }
             }

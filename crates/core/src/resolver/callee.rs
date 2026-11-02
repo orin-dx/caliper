@@ -165,19 +165,24 @@ fn value_member_props_at_depth(
     let mut ignored = Vec::new();
     let (base_file, base_name) =
         resolve_to_canonical(base, file, ctx, &mut ignored).unwrap_or_else(|| (file.to_owned(), base.to_owned()));
-    let (base_file, base_name, member) =
+    // The value may sit behind a chain of re-exports (`index.d.ts`'s `export default Mentions`, itself imported from
+    // `Mentions.d.ts`): follow each module's local name for it until a declaration of the value is found.
+    let (mut base_file, mut base_name, mut member) = (base_file, base_name, member.to_owned());
+    for _ in 0..MAX_DEPTH {
         if lookup_type_alias(ctx, base_file.as_str(), &format!("typeof {base_name}")).is_some() {
-            (base_file, base_name, member.to_owned())
-        } else if let Some(Some((declaring_file, qualified))) =
+            break;
+        }
+        if let Some(Some((declaring_file, qualified))) =
             ctx.dependencies.as_ref().and_then(|layer| layer.export_of(&base_file, &format!("{base_name}.{member}")))
         {
             let (declaring_name, declared_member) = qualified.split_once('.')?;
-            (declaring_file.clone(), declaring_name.to_owned(), declared_member.to_owned())
-        } else {
-            let local = ctx.import_map.local_export(&base_file, &base_name)?;
-            let (file, name) = resolve_to_canonical(&local, &base_file, ctx, &mut ignored)?;
-            (file, name, member.to_owned())
-        };
+            (base_file, base_name, member) =
+                (declaring_file.clone(), declaring_name.to_owned(), declared_member.to_owned());
+            break;
+        }
+        let local = ctx.import_map.local_export(&base_file, &base_name)?;
+        (base_file, base_name) = resolve_to_canonical(&local, &base_file, ctx, &mut ignored)?;
+    }
     let (_, declared) = lookup_type_alias(ctx, base_file.as_str(), &format!("typeof {base_name}"))?;
     let name = match declared {
         CollectedTypeAlias::Passthrough { target: named @ CollectedType::Named { .. }, .. } => {
@@ -206,7 +211,15 @@ fn value_member_props_at_depth(
                 _ => None,
             });
         }
-        _ => return None,
+        // Not a namespace-like object whose member could be the component; a new variant must say whether it is.
+        CollectedTypeAlias::Passthrough { .. }
+        | CollectedTypeAlias::Omit { .. }
+        | CollectedTypeAlias::Pick { .. }
+        | CollectedTypeAlias::Partial { .. }
+        | CollectedTypeAlias::Required { .. }
+        | CollectedTypeAlias::Union { .. }
+        | CollectedTypeAlias::Intersection { .. }
+        | CollectedTypeAlias::LiteralUnion { .. } => return None,
     };
     let (mapped_file, mapped_name) = resolve_to_canonical(name, &base_file, ctx, &mut ignored)
         .unwrap_or_else(|| (base_file.clone(), name.to_string()));
@@ -246,6 +259,14 @@ fn component_props_type(
                 .component_mapping(&canonical_file, &canonical_name)
                 .or_else(|| ctx.dependencies.as_ref()?.component(&canonical_file, &canonical_name));
             let Some(mapping) = mapping else {
+                // A value declared with a React component type, `declare const Option: React.FC<OptionProps>`.
+                if let Some((_, CollectedTypeAlias::Passthrough { target, .. })) =
+                    lookup_type_alias(ctx, canonical_file.as_str(), &format!("typeof {canonical_name}"))
+                {
+                    if let Some(found) = component_props_type(target, &canonical_file, ctx, depth + 1) {
+                        return Some(found);
+                    }
+                }
                 let (base, member) = name.rsplit_once('.')?;
                 let (props, props_file) = value_member_props_at_depth(base, member, file, ctx, depth + 1)?;
                 return Some((props, props_file, Vec::new()));
@@ -268,6 +289,10 @@ fn component_props_type(
         CollectedType::Named { name, args } => {
             if COMPONENT_TYPES.contains(&name.strip_prefix("React.").unwrap_or(name)) {
                 return Some((args.first()?.clone(), file.to_owned(), Vec::new()));
+            }
+            // `MemoExoticComponent<typeof Impl>` wraps a component, whose props are the component's.
+            if name.strip_prefix("React.").unwrap_or(name) == "MemoExoticComponent" {
+                return component_props_type(args.first()?, file, ctx, depth + 1);
             }
             let mut ignored = Vec::new();
             let (alias_file, alias_name) = resolve_to_canonical(name, file, ctx, &mut ignored)

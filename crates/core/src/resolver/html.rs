@@ -135,7 +135,13 @@ fn attribute_from(
                     match alias {
                         CollectedTypeAlias::Intersection { members, .. } => pending.extend(members),
                         CollectedTypeAlias::Passthrough { target, .. } => pending.push_back(target),
-                        _ => {}
+                        // None of these names an attribute by itself; a new variant must say whether it does.
+                        CollectedTypeAlias::Omit { .. }
+                        | CollectedTypeAlias::Pick { .. }
+                        | CollectedTypeAlias::Partial { .. }
+                        | CollectedTypeAlias::Required { .. }
+                        | CollectedTypeAlias::Union { .. }
+                        | CollectedTypeAlias::LiteralUnion { .. } => {}
                     }
                 }
             }
@@ -188,7 +194,13 @@ fn attribute_names_from(root: CollectedType, react_file: &Utf8Path, ctx: &Resolu
                     match alias {
                         CollectedTypeAlias::Intersection { members, .. } => pending.extend(members),
                         CollectedTypeAlias::Passthrough { target, .. } => pending.push_back(target),
-                        _ => {}
+                        // None of these names an attribute by itself; a new variant must say whether it does.
+                        CollectedTypeAlias::Omit { .. }
+                        | CollectedTypeAlias::Pick { .. }
+                        | CollectedTypeAlias::Partial { .. }
+                        | CollectedTypeAlias::Required { .. }
+                        | CollectedTypeAlias::Union { .. }
+                        | CollectedTypeAlias::LiteralUnion { .. } => {}
                     }
                 }
             }

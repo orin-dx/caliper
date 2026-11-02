@@ -252,6 +252,11 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) aliased_away: FxHashSet<CompactString>,
     /// Wrapper-call candidates, promoted to mappings in `finish()` once the whole file has been seen.
     pub(super) pending_wrappers: Vec<wrapper::PendingWrapper>,
+    /// Aliases of a component declared further down the file, resolved in `finish()`.
+    pub(super) pending_aliases: Vec<component::PendingAlias>,
+    /// The alias shape `try_rename_identifier_wrapped_component` read for the current declarator when its component was
+    /// not collected yet.
+    pub(super) alias_candidate: Option<(String, Option<component::AliasCall>)>,
     /// Simple local aliases of generic functions, resolved after all declarations have been visited.
     pub(super) pending_function_aliases: Vec<(String, String)>,
     /// Local cast names and the base component and asserted props type they export.
@@ -300,6 +305,8 @@ impl<'src> SourceDataCollector<'src> {
             pending_display_name_renames: Vec::new(),
             aliased_away: FxHashSet::default(),
             pending_wrappers: Vec::new(),
+            pending_aliases: Vec::new(),
+            alias_candidate: None,
             pending_function_aliases: Vec::new(),
             cast_component_aliases: Default::default(),
             pending_local_exports: Vec::new(),
@@ -361,10 +368,13 @@ impl<'src> SourceDataCollector<'src> {
             other => other,
         };
         // Keep static component members on a callable value without indexing arbitrary object declarations.
+        // A member is one when it is typed as a component or as another value (`Option: typeof Option`), whose own
+        // declaration says whether that is a component.
         let has_component_member = |fields: &[crate::types::CollectedObjectField]| {
             fields.iter().any(|field| {
                 matches!(&field.collected_type, crate::types::CollectedType::Named { name, .. }
                     if name.ends_with("Component"))
+                    || matches!(&field.collected_type, crate::types::CollectedType::TypeOf(_))
             })
         };
         let static_components = match &target {
@@ -499,6 +509,7 @@ impl<'src> SourceDataCollector<'src> {
         }
         self.promote_function_aliases();
         self.promote_wrapper_calls();
+        self.promote_identifier_aliases();
         self.promote_reexported_imports();
         // Filtered by original identifier first, before any displayName rename
         // below can change what identifier a mapping currently answers to.
@@ -1171,6 +1182,12 @@ impl<'src> SourceDataCollector<'src> {
 pub(super) fn is_pascal_case(s: &str) -> bool {
     let mut chars = s.chars();
     chars.next().is_some_and(|c| c.is_uppercase())
+}
+
+/// Whether `name` is written as a constant, `MENU_OPTIONS` or `ORIGIN`: more than one letter and none lowercase. Such a
+/// binding is not reported as a component candidate that failed to qualify; a rule that does match it still maps it.
+pub(super) fn is_constant_name(name: &str) -> bool {
+    name.chars().count() > 1 && !name.chars().any(char::is_lowercase)
 }
 
 /// The names a function type declares as its own type parameters (`<T, U>`).
