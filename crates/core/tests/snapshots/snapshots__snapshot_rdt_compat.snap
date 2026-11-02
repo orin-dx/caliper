@@ -480,6 +480,9 @@ expression: value
               "name": "AllHTMLAttributes",
               "fileName": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts"
             }
+          ],
+          "degradedBy": [
+            "indexedAccess"
           ]
         },
         "allowFullScreen": {
@@ -3160,6 +3163,9 @@ expression: value
               "name": "AllHTMLAttributes",
               "fileName": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts"
             }
+          ],
+          "degradedBy": [
+            "indexedAccess"
           ]
         },
         "formEncType": {

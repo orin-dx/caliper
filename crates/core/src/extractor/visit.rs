@@ -362,6 +362,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 }
             }
             self.record_body_defaults(declarator);
+            if node.kind.is_const() {
+                self.record_const_value_type(declarator);
+            }
             // Pattern 5: declare const Button: React.ForwardRefExoticComponent<ButtonProps & RefAttributes<E>>
             // Common in .d.ts files — no initializer, just a type annotation
             if declarator.init.is_none() {
@@ -559,6 +562,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     }
 
     fn visit_export_default_declaration(&mut self, node: &ExportDefaultDeclaration<'a>) {
+        if let Some(expr) = node.declaration.as_expression() {
+            self.record_asserted_props(expr);
+        }
         // The default export's local name; an anonymous one is named after its file below.
         let local = match &node.declaration {
             ExportDefaultDeclarationKind::FunctionDeclaration(func) => func.id.as_ref().map(|id| id.name.as_str()),

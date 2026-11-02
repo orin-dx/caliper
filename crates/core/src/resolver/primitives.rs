@@ -62,12 +62,33 @@ pub(super) fn union_of(members: impl IntoIterator<Item = PropType>) -> PropType 
     }
     let mut flat = Flat::default();
     flat.push(members);
+    collapse_booleans(&mut flat.members);
     // A union of nothing is `never`.
     match flat.members.len() {
         0 => PropType::Never,
         1 => flat.members.remove(0),
         _ => PropType::Union(flat.members),
     }
+}
+
+/// `true | false` is `boolean`, and `boolean | true` is `boolean`: the literals go and `boolean` stands where the first
+/// of them or the first `boolean` was.
+fn collapse_booleans(members: &mut Vec<PropType>) {
+    let has = |members: &[PropType], literal: bool| members.contains(&PropType::BoolLiteral(literal));
+    let boolean = members.contains(&PropType::Boolean);
+    if !boolean && !(has(members, true) && has(members, false)) {
+        return;
+    }
+    let mut placed = false;
+    members.retain_mut(|member| match member {
+        PropType::Boolean | PropType::BoolLiteral(_) if placed => false,
+        PropType::Boolean | PropType::BoolLiteral(_) => {
+            placed = true;
+            *member = PropType::Boolean;
+            true
+        }
+        _ => true,
+    });
 }
 
 /// `ty` with `null` and `undefined` removed from it, as intersecting it with `{}` does.

@@ -3,10 +3,29 @@
 //! Inspired by `michi` (TOON lists and token-optimized agent formatting).
 //! Formats component props and metadata into a compact, low-token text format
 //! ideal for LLM prompts, agent context windows, and terminal summaries.
+//!
+//! # Lossy by design
+//!
+//! TOON is written for a reader that has a token budget, not for a program that reads it back, so it leaves out what
+//! costs tokens and says little. It carries no `schemaVersion` and has no parser. Compared with the canonical JSON:
+//!
+//! - A union or intersection prints at most 4 members, a literal union at most 6, a layer's `members` at most 24, each
+//!   followed by `...(+N)` for the rest. A string literal is written in single quotes (`'primary'`), so a member can
+//!   be told from a type name.
+//! - A function type prints its parameter types, not their names; an object or tuple type prints as its source text.
+//! - A prop's provenance is its `source` only: the name of the type that declared it, not the file or every
+//!   declaration. Descriptions lose their line breaks.
+//! - `degradedBy` (a column present only when some prop has it) names why a prop's type is partly `opaque`; a name left
+//!   as an unexpanded reference is not flagged there, and the diagnostics below say so.
+//! - The prop's `tags`, the component's `tags`, `composes`, `notableInherited` and the id tables of the canonical JSON
+//!   are not written.
 
 use std::fmt::Write;
 
-use crate::types::{ComponentEntry, ExtractionOutput, PropType};
+use crate::types::{ComponentEntry, Diagnostic, DiagnosticSeverity, ExtractionOutput, PropType};
+
+/// The most names of a collapsed layer's `members` one `inheritance` row lists.
+const LAYER_MEMBERS_LIMIT: usize = 24;
 
 /// Render a single component's prop table into TOON format.
 pub fn render_component_toon(entry: &ComponentEntry) -> String {
@@ -18,21 +37,34 @@ pub fn render_component_toon(entry: &ComponentEntry) -> String {
     }
 
     if !entry.props.is_empty() {
-        writeln!(out, "  props[{}] {{name,required,type,default,description}}:", entry.props.len()).ok();
+        // The column exists only when some prop has something to put in it.
+        let degraded = entry.props.values().any(|prop| !prop.degraded_by.is_empty());
+        let degraded_header = if degraded { "degradedBy," } else { "" };
+        writeln!(
+            out,
+            "  props[{}] {{name,required,type,default,source,{degraded_header}description}}:",
+            entry.props.len()
+        )
+        .ok();
         for (prop_name, prop) in &entry.props {
             let req_str = if prop.required { "true" } else { "false" };
             let type_str = format_type_compact(&prop.prop_type);
             let default_str = prop.default_value.as_ref().map(|d| d.value.as_str()).unwrap_or("");
+            let source_str = prop.parent.as_ref().map(|parent| parent.name.as_str()).unwrap_or("");
             let desc_str = prop.description.replace('\n', " ");
 
             // Format as CSV line: escape strings containing commas or quotes if needed
+            let degraded_cell =
+                if degraded { format!("{},", escape_toon_val(&prop.degraded_by.join("|"))) } else { String::new() };
             writeln!(
                 out,
-                "    {},{},{},{},{}",
+                "    {},{},{},{},{},{}{}",
                 escape_toon_val(prop_name),
                 req_str,
                 escape_toon_val(&type_str),
                 escape_toon_val(default_str),
+                escape_toon_val(source_str),
+                degraded_cell,
                 escape_toon_val(&desc_str)
             )
             .ok();
@@ -40,20 +72,53 @@ pub fn render_component_toon(entry: &ComponentEntry) -> String {
     }
 
     if !entry.inheritance.is_empty() {
-        writeln!(out, "  inheritance[{}] {{typeName,htmlElement,totalProps}}:", entry.inheritance.len()).ok();
+        // A collapsed layer lists the names of the props it declares; the column exists only when one does.
+        let members = entry.inheritance.iter().any(|layer| !layer.members.is_empty());
+        let members_header = if members { ",members" } else { "" };
+        writeln!(
+            out,
+            "  inheritance[{}] {{typeName,htmlElement,totalProps{members_header}}}:",
+            entry.inheritance.len()
+        )
+        .ok();
         for layer in &entry.inheritance {
             let elem_str = layer.html_element.as_deref().unwrap_or("none");
+            let members_cell = if members {
+                format!(",{}", escape_toon_val(&truncate_with_indicator(&layer.members, LAYER_MEMBERS_LIMIT, "|")))
+            } else {
+                String::new()
+            };
             writeln!(
                 out,
-                "    {},{},{}",
+                "    {},{},{}{}",
                 escape_toon_val(&layer.type_name),
                 escape_toon_val(elem_str),
-                layer.total_props
+                layer.total_props,
+                members_cell
             )
             .ok();
         }
     }
 
+    out
+}
+
+/// One component as an agent reads it: its [`render_component_toon`] table, then the diagnostics that say its props may
+/// be incomplete (warnings and errors; `info` says nothing about the props), each with its fix when it has one. This is
+/// the slice a host asks for when it needs one component and not the output of a whole project.
+pub fn render_component_slice_toon(entry: &ComponentEntry, diagnostics: &[Diagnostic]) -> String {
+    let mut out = render_component_toon(entry);
+    let incomplete: Vec<&Diagnostic> =
+        diagnostics.iter().filter(|diag| diag.severity != DiagnosticSeverity::Info).collect();
+    if !incomplete.is_empty() {
+        writeln!(out, "  diagnostics[{}]:", incomplete.len()).ok();
+        for diag in incomplete {
+            writeln!(out, "    [{:?}]: {}", diag.severity, diag.message.replace('\n', " ")).ok();
+            if let Some(help) = &diag.help {
+                writeln!(out, "      help: {}", help.replace('\n', " ")).ok();
+            }
+        }
+    }
     out
 }
 
@@ -121,10 +186,13 @@ fn format_type_compact(prop_type: &PropType) -> String {
         PropType::Never => "never".into(),
         PropType::Unknown => "unknown".into(),
         PropType::Void => "void".into(),
-        PropType::StringLiteral(s) => format!("\"{s}\""),
+        PropType::StringLiteral(s) => quote_literal(s),
         PropType::NumberLiteral(n) => n.to_string(),
         PropType::BoolLiteral(b) => b.to_string(),
-        PropType::LiteralUnion { members, .. } => truncate_with_indicator(members, 6, "|"),
+        PropType::LiteralUnion { members, .. } => {
+            let quoted: Vec<String> = members.iter().map(|member| quote_literal(member)).collect();
+            truncate_with_indicator(&quoted, 6, "|")
+        }
         // Parameter types only: the names cost tokens and say little an agent needs. An agent does need to know which
         // arguments it may leave out (`T?`) and which repeat (`...T[]`).
         PropType::Function { params, return_type, .. } => {
@@ -172,6 +240,11 @@ fn format_type_compact(prop_type: &PropType) -> String {
         PropType::SxProps => "SxProps".into(),
         PropType::Opaque(detail) => format!("opaque({})", detail.raw()),
     }
+}
+
+/// A string literal in single quotes, so `'primary'` is a value and `primary` a type name. A quote inside it is escaped.
+fn quote_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
 /// Escape a TOON field value if it contains commas, newlines, or quotes.
@@ -224,8 +297,8 @@ mod tests {
         let toon = render_component_toon(&entry);
         assert!(toon.contains("component:Button:"));
         assert!(toon.contains("filePath: src/Button.tsx"));
-        assert!(toon.contains("props[1] {name,required,type,default,description}:"));
-        assert!(toon.contains("variant,false,primary|secondary,"));
+        assert!(toon.contains("props[1] {name,required,type,default,source,description}:"));
+        assert!(toon.contains("variant,false,'primary'|'secondary',"));
         assert!(toon.contains("Visual variant"));
     }
 
@@ -321,7 +394,7 @@ mod tests {
             ],
             has_default: false,
         };
-        assert_eq!(format_type_compact(&large_union), "a|b|c|d|e|f|...(+2)");
+        assert_eq!(format_type_compact(&large_union), "'a'|'b'|'c'|'d'|'e'|'f'|...(+2)");
     }
 
     #[test]
@@ -396,5 +469,169 @@ mod tests {
         let literal_union = PropType::LiteralUnion { members, has_default: false };
         let out = format_type_compact(&literal_union);
         assert!(out.contains("...(+14)"), "expected a 2-digit truncation count (20 members, cap 6 -> +14), got: {out}");
+    }
+
+    fn prop(name: &str, prop_type: PropType, parent: Option<&str>) -> std::sync::Arc<ParsedProp> {
+        std::sync::Arc::new(ParsedProp::new(
+            name.into(),
+            prop_type,
+            false,
+            None,
+            String::new(),
+            Default::default(),
+            parent.map(|parent| crate::types::PropParent { name: parent.into(), file_name: "src/types.ts".into() }),
+            vec![],
+        ))
+    }
+
+    fn entry_with(
+        props: Vec<std::sync::Arc<ParsedProp>>,
+        inheritance: Vec<crate::types::InheritedLayer>,
+    ) -> ComponentEntry {
+        ComponentEntry {
+            display_name: "Widget".into(),
+            file_path: "src/Widget.tsx".into(),
+            props: props.into_iter().map(|prop| (prop.name.clone(), prop)).collect(),
+            description: String::new(),
+            inheritance,
+            notable_inherited: Default::default(),
+            discriminant_prop: None,
+            composes: vec![],
+            tags: Default::default(),
+            methods: vec![],
+            detected_by: crate::types::DetectionRule::FunctionDeclaration,
+            exported: true,
+        }
+    }
+
+    #[test]
+    fn a_prop_row_names_the_type_that_declared_it() {
+        let entry = entry_with(
+            vec![prop("size", PropType::String, Some("WidgetProps")), prop("id", PropType::String, None)],
+            vec![],
+        );
+        let toon = render_component_toon(&entry);
+        assert!(toon.contains("props[2] {name,required,type,default,source,description}:\n"), "{toon}");
+        assert!(toon.contains("\n    id,false,string,,,\n"), "no declaring type: an empty source\n{toon}");
+        assert!(toon.contains("\n    size,false,string,,WidgetProps,\n"), "{toon}");
+    }
+
+    #[test]
+    fn a_degraded_column_appears_only_when_a_prop_has_a_reason() {
+        let opaque =
+            crate::types::output::OpaqueDetail::new("keyof Foo", crate::types::output::OpaqueReason::MappedType);
+        let entry = entry_with(
+            vec![
+                prop("status", opaque.clone(), Some("P")),
+                prop("either", PropType::Union(vec![PropType::String, opaque]), Some("P")),
+                prop("size", PropType::String, Some("P")),
+            ],
+            vec![],
+        );
+        let toon = render_component_toon(&entry);
+        assert!(toon.contains("props[3] {name,required,type,default,source,degradedBy,description}:\n"), "{toon}");
+        assert!(toon.contains("\n    status,false,opaque(keyof Foo),,P,mappedType,\n"), "{toon}");
+        assert!(toon.contains("\n    either,false,string|opaque(keyof Foo),,P,mappedType,\n"), "{toon}");
+        assert!(toon.contains("\n    size,false,string,,P,,\n"), "a prop without one has an empty cell\n{toon}");
+    }
+
+    #[test]
+    fn literal_unions_and_literals_are_quoted_alike() {
+        assert_eq!(format_type_compact(&PropType::StringLiteral("sm".into())), "'sm'");
+        assert_eq!(
+            format_type_compact(&PropType::LiteralUnion {
+                members: vec!["sm".into(), "it's".into()],
+                has_default: false
+            }),
+            "'sm'|'it\\'s'"
+        );
+        assert_eq!(
+            format_type_compact(&PropType::Union(vec![
+                PropType::StringLiteral("a".into()),
+                PropType::Named { name: "a".into(), args: vec![] },
+            ])),
+            "'a'|a",
+            "a value and a type of the same spelling can be told apart"
+        );
+    }
+
+    #[test]
+    fn a_collapsed_layer_lists_its_members_up_to_a_limit() {
+        let layer = |name: &str, members: Vec<String>| crate::types::InheritedLayer {
+            type_name: name.into(),
+            file_name: "node_modules/x.d.ts".into(),
+            omitted: vec![],
+            html_element: None,
+            total_props: members.len() as u32,
+            members,
+        };
+        let many: Vec<String> = (0..30).map(|n| format!("p{n}")).collect();
+        let entry = entry_with(
+            vec![],
+            vec![
+                layer("HTMLAttributes", many),
+                layer("Small", vec!["a".into(), "b".into()]),
+                layer("Expanded", vec![]),
+            ],
+        );
+        let toon = render_component_toon(&entry);
+        assert!(toon.contains("inheritance[3] {typeName,htmlElement,totalProps,members}:\n"), "{toon}");
+        let first = (0..24).map(|n| format!("p{n}")).collect::<Vec<_>>().join("|");
+        assert!(toon.contains(&format!("\n    HTMLAttributes,none,30,{first}|...(+6)\n")), "{toon}");
+        assert!(toon.contains("\n    Small,none,2,a|b\n"), "{toon}");
+        assert!(toon.contains("\n    Expanded,none,0,\n"), "an expanded layer has an empty cell\n{toon}");
+    }
+
+    #[test]
+    fn the_members_column_is_left_out_when_no_layer_collapses() {
+        let layer = crate::types::InheritedLayer {
+            type_name: "Base".into(),
+            file_name: "src/base.ts".into(),
+            omitted: vec![],
+            html_element: Some("div".into()),
+            total_props: 3,
+            members: vec![],
+        };
+        let toon = render_component_toon(&entry_with(vec![], vec![layer]));
+        assert!(toon.contains("inheritance[1] {typeName,htmlElement,totalProps}:\n    Base,div,3\n"), "{toon}");
+    }
+
+    fn diagnostic(severity: crate::types::DiagnosticSeverity, message: &str, help: Option<&str>) -> Diagnostic {
+        Diagnostic {
+            severity,
+            message: message.into(),
+            file: None,
+            line: None,
+            column: None,
+            code: crate::types::DiagnosticCode::UnresolvableImport,
+            help: help.map(str::to_owned),
+            affects: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_slice_is_the_component_and_the_diagnostics_that_say_its_props_may_be_incomplete() {
+        let entry = entry_with(vec![prop("size", PropType::String, Some("P"))], vec![]);
+        let diagnostics = [
+            diagnostic(DiagnosticSeverity::Warning, "Cannot resolve type 'X'", Some("Install the package.")),
+            diagnostic(DiagnosticSeverity::Info, "typeof 'Y' could not be evaluated", None),
+            diagnostic(DiagnosticSeverity::Error, "no props\ntype", None),
+        ];
+        let toon = render_component_slice_toon(&entry, &diagnostics);
+        assert!(toon.starts_with(&render_component_toon(&entry)), "{toon}");
+        assert!(
+            toon.ends_with(
+                "  diagnostics[2]:\n    [Warning]: Cannot resolve type 'X'\n      help: Install the package.\n    [Error]: no props type\n"
+            ),
+            "{toon}"
+        );
+        assert!(!toon.contains("typeof 'Y'"), "info is left out: {toon}");
+    }
+
+    #[test]
+    fn a_slice_without_warnings_is_the_component_alone() {
+        let entry = entry_with(vec![prop("size", PropType::String, None)], vec![]);
+        let diagnostics = [diagnostic(DiagnosticSeverity::Info, "note", None)];
+        assert_eq!(render_component_slice_toon(&entry, &diagnostics), render_component_toon(&entry));
     }
 }

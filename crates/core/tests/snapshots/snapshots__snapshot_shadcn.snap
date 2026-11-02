@@ -12170,6 +12170,9 @@ expression: value
               "name": "ButtonHTMLAttributes",
               "fileName": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts"
             }
+          ],
+          "degradedBy": [
+            "indexedAccess"
           ]
         },
         "formEncType": {
@@ -22005,6 +22008,9 @@ expression: value
               "name": "InputHTMLAttributes",
               "fileName": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts"
             }
+          ],
+          "degradedBy": [
+            "templateLiteral"
           ]
         },
         "autoCorrect": {
@@ -22607,6 +22613,9 @@ expression: value
               "name": "InputHTMLAttributes",
               "fileName": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts"
             }
+          ],
+          "degradedBy": [
+            "indexedAccess"
           ]
         },
         "formEncType": {
