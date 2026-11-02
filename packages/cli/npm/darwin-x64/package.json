@@ -1,6 +1,6 @@
 {
   "name": "caliper-docgen-darwin-x64",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "caliper-docgen CLI binary for macOS x64 (Intel) — not meant to be installed directly, pulled in as an optionalDependency of caliper-docgen",
   "keywords": [
     "react",
