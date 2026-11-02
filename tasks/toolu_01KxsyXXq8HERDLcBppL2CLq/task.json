@@ -1,0 +1,21 @@
+{
+  "tool_use_id": "toolu_01KxsyXXq8HERDLcBppL2CLq",
+  "agent_id": "aaa2941583ec9c092",
+  "subagent_type": "fork",
+  "task_description": "Trail 157 trust and agents",
+  "files": [
+    "crates/core/src/extractor/asserted.rs",
+    "crates/core/src/extractor/values.rs",
+    "crates/core/tests/asserted_props.rs",
+    "crates/core/tests/const_value_types.rs"
+  ],
+  "token_usage": {
+    "input_tokens": 388,
+    "cache_creation_tokens": 275669,
+    "cache_read_tokens": 71690207,
+    "output_tokens": 131198,
+    "api_call_count": 207
+  },
+  "started_at": "2026-11-02T12:49:36.165418-08:00",
+  "completed_at": "2026-11-02T13:23:18.363684-08:00"
+}
