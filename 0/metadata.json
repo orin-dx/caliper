@@ -1,0 +1,97 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6F9M2T9F9WZK7F922GMA6W1",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-02T23:31:08.902098Z",
+  "branch": "perf/intern-affects-parallel",
+  "checkpoints_count": 3,
+  "save_step_count": 4,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "054beaef78ec",
+  "checkpoint_transcript_start": 2057,
+  "transcript_lines_at_start": 2057,
+  "compact_transcript_start": 171,
+  "token_usage": {
+    "input_tokens": 22,
+    "cache_creation_tokens": 13285,
+    "cache_read_tokens": 4058467,
+    "output_tokens": 7558,
+    "api_call_count": 10,
+    "subagent_tokens": {
+      "input_tokens": 33,
+      "cache_creation_tokens": 23838,
+      "cache_read_tokens": 8688865,
+      "output_tokens": 15146,
+      "api_call_count": 18
+    }
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 6,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 38
+  },
+  "summary": {
+    "intent": "Finish and publish the last Caliper trail branches (agent-eval weekly, three-tools report) as PRs, then understand what the accuracy and performance numbers mean, which opt-ins the weekly measurement uses, and whether those should become defaults.",
+    "outcome": "Opened PRs #313 (agent-eval) and #314 (three-tools oracle report), and summarized accuracy (recall vs RDT, checker oracle) and performance (time/memory vs RDT and react-docgen) from the latest weekly record. The check of which flags the weekly run uses and the option defaults was started but its result was not yet reported.",
+    "learnings": {
+      "repo": [
+        "The weekly CI job builds only the CLI, not the NAPI slice, so the agent-eval reads the whole-output TOON table plus JSON diagnostics.",
+        "`just lint` caps files at 300 lines; oracle.ts was kept at 292 by moving logic into tool-score.ts and tool-universe.ts.",
+        "The weekly record keeps `oracle.shared_props`, `agree` and `wrong` stable; new per-tool data goes under `oracle.tools`.",
+        "Caliper's whole-universe agreement (~40%) is mostly a definition effect: the checker-defined universe includes non-component exported functions and collapsed inheritance layers are counted separately.",
+        "RDT prints unnameable types as `{string}`; treating this as unreadable cut its wrong rate on shadcn from 8.9% to 0.6%.",
+        "Default now loads dependency types, costing roughly 70 ms and 175 MiB on shadcn and ~4.8x wall time on Chakra versus without them.",
+        "The justfile's stricter test invocation flags tool-norm.test.ts, as it already did on main."
+      ],
+      "code": [
+        {
+          "path": "scripts/weekly.py",
+          "line": 7,
+          "finding": "The comment claiming it 'reads each file alone' was inaccurate and was corrected in the three-tools branch."
+        },
+        {
+          "path": "apps/oracle/src/tool-norm.ts",
+          "finding": "RDT's `{string}` is now read as unreadable, scoring as less precise rather than wrong."
+        }
+      ],
+      "workflow": [
+        "After pushing a branch, the PR link can fail because the remote hasn't registered it yet; waiting a few seconds and retrying works.",
+        "Stating that CI checks were not read, and which paths were not validated end to end, keeps PR reports honest.",
+        "Pull the real weekly record before answering questions about numbers rather than answering from memory."
+      ]
+    },
+    "friction": [
+      "PR link step failed on first attempt because the remote had not registered the pushed branch yet.",
+      "The new oracle numbers (whole-universe vs of-listed shares) confused the user, who asked what the numbers mean.",
+      "Caliper's oracle numbers were produced from an Oct-30 binary, not a fresh build.",
+      "CI weekly timings are noisy on a shared machine; RDT and react-docgen were measured with only one run each."
+    ],
+    "open_items": [
+      "Read CI results for PRs #313 and #314 when the first weekly run happens.",
+      "The full `weekly.py --agent-eval` path has not run end to end.",
+      "Mantine, Chakra and Spectrum are not validated for the agent-eval questions or the three-tools report.",
+      "Spectrum's 1.09% wrong rate is untraced.",
+      "82 shadcn props remain RDT-wrong and untraced.",
+      "Possible merge conflict in weekly.py between #313 and #314; merge main into whichever lands second.",
+      "t166-perf is still running, and its PR still needs to be opened.",
+      "Slowdown since Monday on CI (shadcn +33%) has not been re-measured after the merged perf PRs.",
+      "Decide whether to trigger a fresh weekly run and add a 'how to read these' header to the weekly summary.",
+      "Determine which opt-in flags the weekly measurement uses and whether they should become defaults."
+    ]
+  }
+}
