@@ -1,4 +1,5 @@
-# Pinned to callisto 0.16.0 in .github/workflows/release.yml.
+# Pinned to callisto 0.16.0 in .github/workflows/callisto-release.yml.
+# Callisto checks build attestations against that exact workflow filename; do not rename it.
 
 # `match` is a package name ("<ecosystem>/<name>"), never a directory path.
 # Root package.json is `caliper-docgen-workspace` so bare `caliper-docgen` stays unambiguous.
@@ -11,6 +12,38 @@ mode = "out-of-range"
 bump-severity = "patch"
 peer-escalation = true
 preserve-npm-ranges = true
+
+# The CLI binaries ship as assets of the one GitHub Release for the product package.
+# The npm `bin` of `npm/caliper-docgen` cannot be a product, so the product is the Cargo crate.
+# `target` matches the build matrix in callisto-release.yml; `asset-name` is the exact file name.
+[release]
+product-package = "cargo/caliper-docgen"
+forge-repository = "orin-dx/caliper"
+
+[[release.artifact]]
+package = "cargo/caliper-docgen"
+target = "aarch64-apple-darwin"
+asset-name = "caliper-docgen-aarch64-apple-darwin.tar.gz"
+
+[[release.artifact]]
+package = "cargo/caliper-docgen"
+target = "x86_64-apple-darwin"
+asset-name = "caliper-docgen-x86_64-apple-darwin.tar.gz"
+
+[[release.artifact]]
+package = "cargo/caliper-docgen"
+target = "x86_64-unknown-linux-gnu"
+asset-name = "caliper-docgen-x86_64-unknown-linux-gnu.tar.gz"
+
+[[release.artifact]]
+package = "cargo/caliper-docgen"
+target = "aarch64-unknown-linux-gnu"
+asset-name = "caliper-docgen-aarch64-unknown-linux-gnu.tar.gz"
+
+[[release.artifact]]
+package = "cargo/caliper-docgen"
+target = "x86_64-pc-windows-msvc"
+asset-name = "caliper-docgen-x86_64-pc-windows-msvc.tar.gz"
 
 [[package]]
 match = "cargo/caliper-docgen-core"

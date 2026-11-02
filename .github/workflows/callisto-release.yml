@@ -112,6 +112,8 @@ jobs:
       CARGO_TERM_COLOR: never
     permissions:
       contents: read
+    outputs:
+      has_artifacts: ${{ steps.slots.outputs.has_artifacts }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -127,6 +129,7 @@ jobs:
           path: release-source
           fetch-depth: 0
           persist-credentials: false
+      # The orchestration revision is this run's own SHA: the build job's attestations are stamped with it.
       - name: Derive and hash intent
         env:
           RELEASE_SOURCE_SHA: ${{ needs.release-candidate.outputs.release_source_sha }}
@@ -137,18 +140,24 @@ jobs:
           callisto release plan \
             --source-root "$GITHUB_WORKSPACE/release-source" \
             --orchestration-revision "$GITHUB_SHA" \
+            --artifact-repository "$GITHUB_REPOSITORY" \
             --from-release-commit "$RELEASE_SOURCE_SHA" \
             --decision "$GITHUB_WORKSPACE/release-source/.callisto/release-decision.json" \
             --out "$handoff_dir/release-intent.json"
-          shasum -a 256 "$handoff_dir/release-intent.json" > "$handoff_dir/release-intent.json.sha256"
-      # No `[release]` section here, so callisto-managed artifact slots are unexpected.
-      - name: Reject unexpected artifact slots
+          # Relative name: the consumers verify from another job's RUNNER_TEMP.
+          (cd "$handoff_dir" && shasum -a 256 release-intent.json > release-intent.json.sha256)
+      # Slots exist only when the product package is in this release.
+      - name: Read declared artifact slot count
+        id: slots
         run: |
           set -euo pipefail
-          if [[ "$(jq '.artifactSlots | length' "${RUNNER_TEMP}/release-intent/release-intent.json")" != "0" ]]; then
-            echo "::error::intent declares artifact slots but this workflow has no build job"
-            exit 1
-          fi
+          # Own statement: set -e cannot see a substitution failing inside an echo argument.
+          has_artifacts=$(jq '.artifactSlots | length > 0' "${RUNNER_TEMP}/release-intent/release-intent.json")
+          case "$has_artifacts" in
+            true|false) ;;
+            *) echo "::error::artifact slot probe returned '$has_artifacts'"; exit 1 ;;
+          esac
+          echo "has_artifacts=$has_artifacts" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-intent
@@ -164,15 +173,19 @@ jobs:
     runs-on: ${{ matrix.host }}
     permissions:
       contents: read
+      # Build provenance for the GitHub Release assets.
+      attestations: write
+      id-token: write
     strategy:
       fail-fast: true
       matrix:
+        # `target` and `asset` must match `[[release.artifact]]` in callisto.toml.
         include:
-          - { host: macos-latest, target: aarch64-apple-darwin, platform: darwin-arm64, bin: caliper-docgen }
-          - { host: macos-latest, target: x86_64-apple-darwin, platform: darwin-x64, bin: caliper-docgen }
-          - { host: ubuntu-latest, target: x86_64-unknown-linux-gnu, platform: linux-x64-gnu, bin: caliper-docgen }
-          - { host: ubuntu-latest, target: aarch64-unknown-linux-gnu, platform: linux-arm64-gnu, bin: caliper-docgen, zig: true }
-          - { host: windows-latest, target: x86_64-pc-windows-msvc, platform: win32-x64-msvc, bin: caliper-docgen.exe }
+          - { host: macos-latest, target: aarch64-apple-darwin, platform: darwin-arm64, bin: caliper-docgen, asset: caliper-docgen-aarch64-apple-darwin.tar.gz }
+          - { host: macos-latest, target: x86_64-apple-darwin, platform: darwin-x64, bin: caliper-docgen, asset: caliper-docgen-x86_64-apple-darwin.tar.gz }
+          - { host: ubuntu-latest, target: x86_64-unknown-linux-gnu, platform: linux-x64-gnu, bin: caliper-docgen, asset: caliper-docgen-x86_64-unknown-linux-gnu.tar.gz }
+          - { host: ubuntu-latest, target: aarch64-unknown-linux-gnu, platform: linux-arm64-gnu, bin: caliper-docgen, asset: caliper-docgen-aarch64-unknown-linux-gnu.tar.gz, zig: true }
+          - { host: windows-latest, target: x86_64-pc-windows-msvc, platform: win32-x64-msvc, bin: caliper-docgen.exe, asset: caliper-docgen-x86_64-pc-windows-msvc.tar.gz }
     defaults:
       run:
         shell: bash
@@ -224,10 +237,85 @@ jobs:
           path: target/${{ matrix.target }}/release/${{ matrix.bin }}
           if-no-files-found: error
           retention-days: 7
+      # Relative paths throughout: GNU tar on the Windows runner reads `D:\` as a remote host.
+      - name: Archive the CLI release asset
+        if: needs.plan.outputs.has_artifacts == 'true'
+        env:
+          TARGET: ${{ matrix.target }}
+          BIN: ${{ matrix.bin }}
+          ASSET: ${{ matrix.asset }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          tar -C "target/${TARGET}/release" -czf "release-assets/${ASSET}" "$BIN"
+      - name: Attest the exact asset bytes
+        if: needs.plan.outputs.has_artifacts == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release-assets/${{ matrix.asset }}
+      - name: Upload the release asset
+        if: needs.plan.outputs.has_artifacts == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-asset-${{ matrix.platform }}
+          path: release-assets/${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    name: Assemble the attested release assets
+    needs: [release-candidate, plan, build]
+    if: needs.plan.outputs.has_artifacts == 'true'
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@dec5841b123bf933993b50cfcd5fc17c98530b99 # callisto@0.16.0
+        with:
+          version: callisto@0.16.0
+          verification: require
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-intent
+          path: ${{ runner.temp }}/release-intent
+      # Every matrix target's asset, so a target added to the matrix cannot be built and then left out of the manifest.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-asset-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/release-artifacts
+      - name: Create the exact artifact manifest
+        run: |
+          set -euo pipefail
+          (cd "${RUNNER_TEMP}/release-intent" && shasum -a 256 -c release-intent.json.sha256)
+          callisto release artifact-manifest \
+            --intent "${RUNNER_TEMP}/release-intent/release-intent.json" \
+            --artifact-dir "${RUNNER_TEMP}/release-artifacts" \
+            --out "${RUNNER_TEMP}/release-artifacts/manifest.json"
+      # One artifact holding both directories keeps the intent and the manifest from different runs from being mixed.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-build
+          path: |
+            ${{ runner.temp }}/release-intent
+            ${{ runner.temp }}/release-artifacts
+          if-no-files-found: error
+          retention-days: 7
 
   execute:
     name: Execute approved release
-    needs: [release-candidate, plan, build]
+    needs: [release-candidate, plan, build, assemble]
+    # A release without the product package has no assets, so `assemble` is skipped by design;
+    # a failed or cancelled `build` or `assemble` must still block. `!cancelled()`, not `always()`:
+    # cancelling the run must stop the one irreversible job.
+    if: >-
+      !cancelled() && needs.plan.result == 'success' && needs.build.result == 'success' &&
+      (needs.plan.outputs.has_artifacts == 'false' || needs.assemble.result == 'success')
     timeout-minutes: 60
     concurrency:
       group: release-execute
@@ -237,6 +325,8 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      # `gh attestation verify` of the release assets.
+      attestations: read
     env:
       NPM_CONFIG_PROVENANCE: "true"
       # Callisto parses `cargo info` stdout; forced color wraps its `version:` label in escapes (E176).
@@ -262,11 +352,23 @@ jobs:
         with:
           name: release-intent
           path: ${{ runner.temp }}/release-intent
+      # Outside the checkout too: execute needs a clean release-source worktree.
+      - if: needs.plan.outputs.has_artifacts == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-build
+          path: ${{ runner.temp }}/release-build
       - name: Verify same-run handoff before credentials
+        env:
+          HAS_ARTIFACTS: ${{ needs.plan.outputs.has_artifacts }}
         run: |
           set -euo pipefail
-          cd "${RUNNER_TEMP}/release-intent"
-          shasum -a 256 -c release-intent.json.sha256
+          intent_dir="${RUNNER_TEMP}/release-intent"
+          build_dir="${RUNNER_TEMP}/release-build"
+          (cd "$intent_dir" && shasum -a 256 -c release-intent.json.sha256)
+          if [[ "$HAS_ARTIFACTS" == true ]]; then
+            cmp "$intent_dir/release-intent.json" "$build_dir/release-intent/release-intent.json"
+          fi
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: napi-*
@@ -310,6 +412,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          build_dir="${RUNNER_TEMP}/release-build"
           receipt_dir="${RUNNER_TEMP}/callisto-release-receipt/${GITHUB_RUN_ID}"
           mkdir -p "$receipt_dir"
           args=(
@@ -318,6 +421,12 @@ jobs:
             --receipt "$receipt_dir/release-receipt.json"
             --orchestration-revision "$GITHUB_SHA"
           )
+          if [[ -f "$build_dir/release-artifacts/manifest.json" ]]; then
+            args+=(
+              --artifact-manifest "$build_dir/release-artifacts/manifest.json"
+              --artifact-dir "$build_dir/release-artifacts"
+            )
+          fi
           callisto release execute "${args[@]}"
       - name: Summarize receipt
         if: always()

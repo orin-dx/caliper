@@ -235,6 +235,9 @@ jobs:
       - run: callisto status --check
       - name: Preview the versioned release plan
         shell: bash
+        env:
+          # Read-only: the plan observes existing GitHub releases and tags.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           preview_dir="${RUNNER_TEMP}/caliper-release-preview"
