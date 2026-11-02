@@ -23,6 +23,39 @@ pub(super) fn intrinsic_element<'a>(
     Some(&elements.props.iter().find(|prop| prop.name == element)?.collected_type)
 }
 
+/// Record that this resolution reads React's augmentations: every file that declares into the `React` namespace, and
+/// that the set of such files matters. Called wherever augmentations are read, and on the path that reuses a cached
+/// attribute list, so every component that depends on them records it.
+fn note_augmentations(react_file: &Utf8Path, ctx: &ResolutionContext) {
+    use std::borrow::Borrow;
+    let files = ctx.named_types.react_augmenting_files(react_file);
+    super::deps::record_augmentations(files.into_iter().map(Borrow::<str>::borrow));
+}
+
+/// React's interface `key` (`React.HTMLAttributes`) followed by the augmentations other files merge into it
+/// (`NamedTypeIndex::react_augmentations`): the project's and the loaded dependencies' in every mode, since curated mode
+/// indexes only React's own file apart.
+fn merged_interfaces<'a>(key: &str, react_file: &Utf8Path, ctx: &'a ResolutionContext) -> Vec<&'a CollectedInterface> {
+    note_augmentations(react_file, ctx);
+    let mut layers: Vec<&CollectedInterface> =
+        ctx.react_index().lookup_interface_exact(react_file, key).into_iter().collect();
+    layers.extend(ctx.named_types.react_augmentations(react_file, key));
+    layers
+}
+
+/// The index holding `iface`: React's for its own interfaces, the project's and dependencies' for an augmentation.
+fn index_of<'a>(
+    iface: &CollectedInterface,
+    react_file: &Utf8Path,
+    ctx: &'a ResolutionContext,
+) -> &'a crate::named_type_index::NamedTypeIndex {
+    if iface.file_path == react_file {
+        ctx.react_index()
+    } else {
+        &ctx.named_types
+    }
+}
+
 /// The declaration of attribute `name` on intrinsic element `element`, read as TypeScript reads
 /// `JSX.IntrinsicElements[element]` (`intrinsic_element`). `None` without React's types, or when the element has no such
 /// attribute.
@@ -59,33 +92,39 @@ fn attribute_from(
                 let key = key(&type_name);
                 // Defaulted parameters (`T = Element`) are not supplied, and need no warning.
                 let mut ignored = Vec::new();
-                if let Some(iface) = ctx.react_index().lookup_interface_exact(react_file, &key) {
-                    let params = ctx.react_index().lookup_interface_type_params_for(iface);
-                    let subst = params.map(|params| build_substitution(params, &args, react_file, &mut ignored));
-                    let substituted =
-                        |ty: &CollectedType| subst.as_ref().map_or_else(|| ty.clone(), |s| substitute_type(ty, s));
-                    if let Some(raw) = iface.props.iter().find(|prop| prop.name == name) {
-                        let ty = substituted(&raw.collected_type);
-                        let prop_type = resolve_collected_type(&ty, &iface.file_path, ctx, state, depth);
-                        let parent =
-                            PropParent { name: iface.name.to_string(), file_name: iface.file_path.to_string() };
-                        return Some(ParsedProp::new(
-                            name.to_owned(),
-                            prop_type,
-                            raw.required,
-                            None,
-                            raw.description.clone(),
-                            raw.tags.clone(),
-                            Some(parent.clone()),
-                            vec![parent],
-                        ));
+                let layers = merged_interfaces(&key, react_file, ctx);
+                if !layers.is_empty() {
+                    for iface in layers {
+                        let params = index_of(iface, react_file, ctx).lookup_interface_type_params_for(iface);
+                        let subst = params.map(|params| build_substitution(params, &args, react_file, &mut ignored));
+                        let substituted =
+                            |ty: &CollectedType| subst.as_ref().map_or_else(|| ty.clone(), |s| substitute_type(ty, s));
+                        if let Some(raw) = iface.props.iter().find(|prop| prop.name == name) {
+                            let ty = substituted(&raw.collected_type);
+                            let prop_type = resolve_collected_type(&ty, &iface.file_path, ctx, state, depth);
+                            let parent =
+                                PropParent { name: iface.name.to_string(), file_name: iface.file_path.to_string() };
+                            return Some(ParsedProp::new(
+                                name.to_owned(),
+                                prop_type,
+                                raw.required,
+                                None,
+                                raw.description.clone(),
+                                raw.tags.clone(),
+                                Some(parent.clone()),
+                                vec![parent],
+                            ));
+                        }
+                        pending.extend(iface.extends.iter().map(|extends| {
+                            let (ExtendsRef::SameFile { name, type_args }
+                            | ExtendsRef::Imported { local_name: name, type_args, .. }
+                            | ExtendsRef::Builtin { name, type_args, .. }) = extends;
+                            CollectedType::Named {
+                                name: name.clone(),
+                                args: type_args.iter().map(substituted).collect(),
+                            }
+                        }));
                     }
-                    pending.extend(iface.extends.iter().map(|extends| {
-                        let (ExtendsRef::SameFile { name, type_args }
-                        | ExtendsRef::Imported { local_name: name, type_args, .. }
-                        | ExtendsRef::Builtin { name, type_args, .. }) = extends;
-                        CollectedType::Named { name: name.clone(), args: type_args.iter().map(substituted).collect() }
-                    }));
                 } else if let Some(alias) = ctx.react_index().lookup_type_alias_exact(react_file, &key) {
                     let alias = match ctx.react_index().lookup_type_alias_params(react_file, &key) {
                         Some(params) => {
@@ -128,14 +167,17 @@ fn attribute_names_from(root: CollectedType, react_file: &Utf8Path, ctx: &Resolu
             CollectedType::Intersection(members) => pending.extend(members),
             CollectedType::Named { name: type_name, args } => {
                 let key = format!("React.{}", type_name.strip_prefix("React.").unwrap_or(&type_name));
-                if let Some(iface) = ctx.react_index().lookup_interface_exact(react_file, &key) {
-                    names.extend(iface.props.iter().map(|prop| prop.name.clone()));
-                    pending.extend(iface.extends.iter().map(|extends| {
-                        let (ExtendsRef::SameFile { name, type_args }
-                        | ExtendsRef::Imported { local_name: name, type_args, .. }
-                        | ExtendsRef::Builtin { name, type_args, .. }) = extends;
-                        CollectedType::Named { name: name.clone(), args: type_args.clone() }
-                    }));
+                let layers = merged_interfaces(&key, react_file, ctx);
+                if !layers.is_empty() {
+                    for iface in layers {
+                        names.extend(iface.props.iter().map(|prop| prop.name.clone()));
+                        pending.extend(iface.extends.iter().map(|extends| {
+                            let (ExtendsRef::SameFile { name, type_args }
+                            | ExtendsRef::Imported { local_name: name, type_args, .. }
+                            | ExtendsRef::Builtin { name, type_args, .. }) = extends;
+                            CollectedType::Named { name: name.clone(), args: type_args.clone() }
+                        }));
+                    }
                 } else if let Some(alias) = ctx.react_index().lookup_type_alias_exact(react_file, &key) {
                     let alias = match ctx.react_index().lookup_type_alias_params(react_file, &key) {
                         Some(params) => {
@@ -178,6 +220,7 @@ pub(super) fn layer_attributes(
     let bare = layer.type_name.strip_prefix("React.").unwrap_or(&layer.type_name);
     let takes_ref = matches!(bare, "ComponentProps" | "ComponentPropsWithRef" | "HTMLProps");
     let key = format!("{}\0{element}\0{full}", layer.file_name);
+    note_augmentations(file, ctx);
     let cached = ctx.attribute_names.get(&key).map(|names| names.clone());
     let names: Arc<[String]> = match cached {
         Some(names) => names,

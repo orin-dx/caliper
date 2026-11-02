@@ -208,21 +208,32 @@ fn imported_demand(file: &Utf8Path, imports: &[ImportBinding], reference: &str) 
     Some(Demand { from: file.to_owned(), specifier: Box::from(binding.specifier.as_str()), name })
 }
 
-/// The names project file `file` imports from packages (bare specifiers) and uses in a type, sorted.
+/// What project file `file` takes from packages (bare specifiers), sorted: each name it imports and uses in a type, and
+/// each module it imports at all (a [`Demand`] with an empty name). TypeScript reads a module's React augmentations
+/// whenever the program reaches the module, whether or not the file uses a name from it.
 pub(crate) fn project_demands(file: &Utf8Path, data: &SourceData) -> Vec<Demand> {
     let mut refs = FxHashSet::default();
     referenced_names(data, &mut refs);
+    let bare = |specifier: &str| !specifier.starts_with('.') && !specifier.starts_with('/');
     let mut demands: Vec<Demand> = refs
         .iter()
         .filter_map(|reference| imported_demand(file, &data.imports, reference))
-        .filter(|demand| !demand.specifier.starts_with('.') && !demand.specifier.starts_with('/'))
+        .filter(|demand| bare(&demand.specifier))
         .collect();
+    demands.extend(data.imports.iter().filter(|binding| bare(&binding.specifier)).map(|binding| Demand {
+        from: file.to_owned(),
+        specifier: Box::from(binding.specifier.as_str()),
+        name: CompactString::default(),
+    }));
     demands.sort();
     demands.dedup();
     demands
 }
 
 // ─── The layer ────────────────────────────────────────────────────────────────
+
+/// How many files, the module included, a search for React augmentations reads through one module's re-exports.
+const AUGMENTATION_SCAN_FILES: usize = 64;
 
 /// How many layers a chain holds before the next extension flattens it into one.
 ///
@@ -266,6 +277,8 @@ pub(crate) struct DependencyLayer {
     files: FxHashSet<PathKey>,
     /// React's files whose declarations' imports were followed; their imports are in `import_map`.
     react_files: FxHashSet<PathKey>,
+    /// Each module a demand reached, with the files its re-exports lead to that augment React.
+    augmenters: FxHashMap<PathKey, Vec<Utf8PathBuf>>,
     demands: FxHashSet<DemandKey>,
     unresolved: FxHashMap<DemandKey, Unresolved>,
     /// The `(file, name)` declarations whose references were followed.
@@ -304,6 +317,10 @@ impl DependencyLayer {
 
     fn parsed_data(&self, file: &str) -> Option<&Option<Arc<SourceData>>> {
         self.chain().find_map(|layer| layer.parsed.get(file))
+    }
+
+    fn augmenters_of(&self, module: &PathKey) -> Option<&Vec<Utf8PathBuf>> {
+        self.chain().find_map(|layer| layer.augmenters.get(module))
     }
 
     fn has_react_file(&self, file: &str) -> bool {
@@ -371,6 +388,9 @@ struct Loader<'a> {
     claimed: FxDashSet<(PathKey, CompactString)>,
     declaring: FxDashSet<PathKey>,
     react_files: FxDashSet<PathKey>,
+    augmenters: FxDashMap<PathKey, Vec<Utf8PathBuf>>,
+    /// For each module in `augmenters`, the stamps of the other packages its search read files from.
+    augmenter_crossed: FxDashMap<PathKey, Vec<PackageStampRow>>,
     demands: FxDashSet<DemandKey>,
     unresolved: FxDashMap<DemandKey, Unresolved>,
     /// Package directory of each directory asked about, for grouping the index.
@@ -555,11 +575,20 @@ impl Loader<'_> {
         let module = match self.resolve(&demand.from, &demand.specifier) {
             Ok(module) => module,
             Err(reason) => {
-                self.unresolved.insert(key, reason);
+                if !demand.name.is_empty() {
+                    self.unresolved.insert(key, reason);
+                }
                 return;
             }
         };
         if self.in_project(&module) {
+            return;
+        }
+        // A module imported for its own sake: only what it merges into React is read.
+        if demand.name.is_empty() {
+            if !Self::is_react(&module) {
+                self.load_augmentations(scope, &module);
+            }
             return;
         }
         if Self::is_react(&module) {
@@ -576,6 +605,83 @@ impl Loader<'_> {
                 self.unresolved.insert(key, Unresolved::NotExported);
             }
         }
+    }
+
+    /// Load the files `module` leads to through its re-exports that merge declarations into React
+    /// (`declare module "react" { ... }`): TypeScript reads them whenever the program reaches the file, whether or not
+    /// a name from them is used. The search is bounded ([`AUGMENTATION_SCAN_FILES`]), breadth first in source order,
+    /// so the answer for a module is the same on any thread; it is kept, in the layer and in the index on disk.
+    fn load_augmentations<'s>(&'s self, scope: &rayon::Scope<'s>, module: &Utf8Path) {
+        let key = PathKey::from(module);
+        let known = self.augmenters.get(&key).map(|files| files.clone());
+        let known = known.or_else(|| self.parent.and_then(|parent| parent.augmenters_of(&key)).cloned());
+        let files = known.unwrap_or_else(|| {
+            let (files, crossed) = self.find_augmenting_files(module);
+            self.augmenters.insert(key.clone(), files.clone());
+            self.augmenter_crossed.insert(key, crossed);
+            // An empty answer is persisted too, or the next run would scan the module's re-exports again.
+            module.parent().inspect(|dir| self.learn(dir));
+            files
+        });
+        for file in files {
+            let Some(data) = self.parse(&file) else { continue };
+            let mut names: Vec<&String> = data.interfaces.keys().collect();
+            names.sort();
+            for key in names {
+                if let Some(name) = key.strip_prefix(file.as_str()).and_then(|rest| rest.strip_prefix(':')) {
+                    if name.starts_with("React.") {
+                        self.load_declaration(scope, file.clone(), CompactString::from(name));
+                    }
+                }
+            }
+        }
+    }
+
+    /// The files `module`'s re-exports lead to that augment React, and the stamps of the other packages the search read
+    /// files from: the answer holds only while those packages do not change, as well as the module's own.
+    fn find_augmenting_files(&self, module: &Utf8Path) -> (Vec<Utf8PathBuf>, Vec<PackageStampRow>) {
+        let mut found = Vec::new();
+        let mut seen: FxHashSet<Utf8PathBuf> = FxHashSet::default();
+        let mut queue = std::collections::VecDeque::from([module.to_owned()]);
+        while let Some(file) = queue.pop_front() {
+            if seen.len() >= AUGMENTATION_SCAN_FILES {
+                break;
+            }
+            if !seen.insert(file.clone()) || self.in_project(&file) || Self::is_react(&file) {
+                continue;
+            }
+            let Some(data) = self.parse(&file) else { continue };
+            let react_prefix = format!("{file}:React.");
+            if data.interfaces.keys().any(|key| key.starts_with(&react_prefix)) {
+                found.push(file.clone());
+            }
+            for export in &data.exports {
+                let (LexedExport::ReExportNamed { source_specifier, .. }
+                | LexedExport::ReExportAll { source_specifier, .. }
+                | LexedExport::ReExportNamespace { source_specifier, .. }) = export
+                else {
+                    continue;
+                };
+                if let Ok(target) = self.resolve(&file, source_specifier) {
+                    queue.push_back(target);
+                }
+            }
+        }
+        found.sort();
+        let own = module.parent().and_then(|dir| self.package_of(dir));
+        let mut crossed: Vec<PackageStampRow> = seen
+            .iter()
+            .filter_map(|file| self.package_of(file.parent()?))
+            .filter(|package| Some(package) != own.as_ref())
+            .collect::<FxHashSet<_>>()
+            .into_iter()
+            .filter_map(|package| {
+                let (mtime_ns, size) = package_stamp(&package)?;
+                Some((package.to_string(), mtime_ns, size))
+            })
+            .collect();
+        crossed.sort();
+        (found, crossed)
     }
 
     /// Mark `(file, name)` loaded and follow the names its declaration references: same-file ones in place, imported
@@ -714,6 +820,8 @@ pub(crate) fn load(
         claimed: DashSet::default(),
         declaring: DashSet::default(),
         react_files: DashSet::default(),
+        augmenters: DashMap::default(),
+        augmenter_crossed: DashMap::default(),
         demands: DashSet::default(),
         unresolved: DashMap::default(),
         packages: DashMap::default(),
@@ -755,6 +863,9 @@ pub(crate) fn load(
                 }
                 for file in &layer.react_files {
                     loader.react_files.insert(file.clone());
+                }
+                for (module, files) in &layer.augmenters {
+                    loader.augmenters.insert(module.clone(), files.clone());
                 }
             }
         }
@@ -836,6 +947,7 @@ pub(crate) fn load(
         resolutions,
         files,
         react_files,
+        augmenters: loader.augmenters.into_iter().collect(),
         demands: loader.demands.into_iter().collect(),
         unresolved,
         claimed: loader.claimed.into_iter().collect(),
@@ -849,6 +961,10 @@ pub(crate) fn load(
 type ResolutionRow = (String, String, Result<String, Unresolved>);
 /// `(module, name, declaring (file, name))`.
 type ExportRow = (String, String, Option<(String, String)>);
+/// `(module, the files its re-exports lead to that augment React)`.
+/// `(package directory, package.json modification time, size)`.
+type PackageStampRow = (String, u128, u64);
+type AugmenterRow = (String, Vec<String>, Vec<PackageStampRow>);
 
 /// One package's answers: module resolutions from its directories and export lookups on its modules. Valid while its
 /// `package.json` keeps its modification time and size.
@@ -859,6 +975,10 @@ struct PackageIndex {
     size: u64,
     resolutions: Vec<ResolutionRow>,
     exports: Vec<ExportRow>,
+    /// `(module, the files its re-exports lead to that augment React, the other packages that search read files from)`.
+    /// A row is dropped on read when any of those packages' `package.json` changed, as well as this package's.
+    #[serde(default)]
+    augmenters: Vec<AugmenterRow>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -899,6 +1019,15 @@ fn read_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
             let found = found.map(|(file, name)| (Utf8PathBuf::from(file), CompactString::from(name)));
             loader.exports.insert((PathKey::from(Utf8Path::new(&module)), CompactString::from(name)), found);
         }
+        for (module, files, crossed) in package.augmenters {
+            // The search read files of other packages too, so an upgrade of any of them voids the answer.
+            if crossed.iter().any(|(dir, mtime_ns, size)| package_stamp(dir) != Some((*mtime_ns, *size))) {
+                continue;
+            }
+            let key = PathKey::from(Utf8Path::new(&module));
+            loader.augmenters.insert(key.clone(), files.into_iter().map(Utf8PathBuf::from).collect());
+            loader.augmenter_crossed.insert(key, crossed);
+        }
     }
 }
 
@@ -912,7 +1041,14 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
             let (mtime_ns, size) = package_stamp(&package)?;
             packages.insert(
                 package.clone(),
-                PackageIndex { dir: package.to_string(), mtime_ns, size, resolutions: Vec::new(), exports: Vec::new() },
+                PackageIndex {
+                    dir: package.to_string(),
+                    mtime_ns,
+                    size,
+                    resolutions: Vec::new(),
+                    exports: Vec::new(),
+                    augmenters: Vec::new(),
+                },
             );
         }
         Some(package)
@@ -934,6 +1070,20 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
             exports.push((package, (module.to_owned(), name.to_string(), found)));
         }
     }
+    let mut augmenters: Vec<(Box<str>, AugmenterRow)> = Vec::new();
+    for item in loader.augmenters.iter() {
+        let (module, files): (&str, _) = (std::borrow::Borrow::borrow(item.key()), item.value());
+        let Some(dir) = Utf8Path::new(module).parent() else { continue };
+        if let Some(package) = entry(dir) {
+            let crossed = loader.augmenter_crossed.get(item.key()).map(|crossed| crossed.clone()).unwrap_or_default();
+            augmenters.push((package, (module.to_owned(), files.iter().map(ToString::to_string).collect(), crossed)));
+        }
+    }
+    for (package, row) in augmenters {
+        if let Some(index) = packages.get_mut(&package) {
+            index.augmenters.push(row);
+        }
+    }
     for (package, row) in resolutions {
         if let Some(index) = packages.get_mut(&package) {
             index.resolutions.push(row);
@@ -949,6 +1099,7 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
     for package in &mut packages {
         package.resolutions.sort();
         package.exports.sort();
+        package.augmenters.sort();
     }
     let Ok(bytes) = rmp_serde::to_vec(&IndexFile { fingerprint: *fingerprint, packages }) else { return };
     let Some(dir) = path.parent() else { return };
@@ -963,3 +1114,6 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod augmentation_tests;

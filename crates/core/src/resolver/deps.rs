@@ -21,6 +21,9 @@ pub(crate) struct Dependencies {
     /// Whether a module specifier was resolved. A new file can change what a specifier resolves to (or make an
     /// unresolvable one resolve); an edit or deletion cannot, beyond the resolved file already in `files`.
     pub(crate) resolves_modules: bool,
+    /// Whether React's augmentations were read (`html::note_augmentations`). A file that starts or stops declaring into
+    /// the `React` namespace can change them, and a new such file is in no recorded `files`.
+    pub(crate) reads_augmentations: bool,
 }
 
 thread_local! {
@@ -53,6 +56,18 @@ pub(super) fn record_bare_name(name: &str) {
     });
 }
 
+/// Note that the current resolution read React's augmentations, declared in `files`.
+pub(super) fn record_augmentations<'f>(files: impl IntoIterator<Item = &'f str>) {
+    with_recorder(|deps| {
+        deps.reads_augmentations = true;
+        for file in files {
+            if !deps.files.contains(file) {
+                deps.files.insert(PathKey::from(Utf8Path::new(file)));
+            }
+        }
+    });
+}
+
 /// Note that a module specifier was resolved.
 pub(super) fn record_module_resolution() {
     with_recorder(|deps| deps.resolves_modules = true);
@@ -63,6 +78,7 @@ impl Dependencies {
         self.files.extend(other.files.iter().cloned());
         self.bare_names.extend(other.bare_names.iter().cloned());
         self.resolves_modules |= other.resolves_modules;
+        self.reads_augmentations |= other.reads_augmentations;
     }
 }
 
