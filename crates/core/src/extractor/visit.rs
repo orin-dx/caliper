@@ -124,8 +124,21 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         match &node.declaration {
             Declaration::VariableDeclaration(vd) => {
                 for declarator in &vd.declarations {
-                    if let BindingPattern::BindingIdentifier(id) = &declarator.id {
-                        self.record_exported_local(id.name.as_str());
+                    match &declarator.id {
+                        BindingPattern::BindingIdentifier(id) => self.record_exported_local(id.name.as_str()),
+                        // `export const { Option, Item: Row } = Imported` exports `Option` and `Row`.
+                        BindingPattern::ObjectPattern(pattern) => {
+                            for property in &pattern.properties {
+                                let BindingPattern::BindingIdentifier(local) = &property.value else { continue };
+                                self.data.exports.push(LexedExport::LocalDeclaration {
+                                    name: local.name.as_str().to_owned(),
+                                    is_type_only: false,
+                                    declared_as: None,
+                                });
+                                self.record_exported_local(local.name.as_str());
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -294,6 +307,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                         self.pending_function_aliases.push((name, target.name.as_str().to_owned()));
                     }
                 }
+            }
+            if self.is_tsx && self.function_depth == 0 {
+                self.try_record_destructured_imports(declarator);
             }
             if self.is_tsx && self.function_depth > 0 {
                 if let Some(name) = self.extract_pascal_name(declarator) {

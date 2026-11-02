@@ -1453,10 +1453,45 @@ fn a_constant_is_not_reported_as_a_component_candidate_that_failed_to_qualify() 
 }
 
 #[test]
+fn a_member_destructured_from_an_import_and_an_imported_name_re_bound_are_aliases_of_that_component() {
+    use crate::types::DetectionRule::ImportedMemberAlias;
+    let source = r#"
+        import RcMentions from "@rc-component/mentions";
+        import * as RechartsPrimitive from "recharts";
+        import { FormProvider } from "react-hook-form";
+        export const { Option } = RcMentions;
+        const { Item: Row, DIVIDER, lower } = RcMentions;
+        export const ChartLegend = RechartsPrimitive.Legend;
+        export const Form = FormProvider;
+        export const ORIGIN = FormProvider;
+        const local = { Inner: 1 };
+        const { Inner } = local;
+        export { Row };
+    "#;
+    let data = parse_file(Utf8Path::new("/test/aliases.tsx"), source);
+    let found: Vec<(&str, String, bool)> = data
+        .component_mappings
+        .iter()
+        .map(|m| {
+            assert_eq!(m.rule, ImportedMemberAlias);
+            (m.component_name.as_str(), format!("{:?}", m.props_type_args), m.exported)
+        })
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            ("Option", r#"[TypeOf("RcMentions.Option")]"#.to_owned(), true),
+            ("Row", r#"[TypeOf("RcMentions.Item")]"#.to_owned(), true),
+            ("ChartLegend", r#"[TypeOf("RechartsPrimitive.Legend")]"#.to_owned(), true),
+            ("Form", r#"[TypeOf("FormProvider")]"#.to_owned(), true),
+        ]
+    );
+}
+
+#[test]
 fn an_alias_whose_component_is_never_declared_is_still_reported_as_a_skipped_candidate() {
     let source = r#"
-        import { Thing } from "./thing";
-        export const Alias = Thing;
+        export const Alias = Absent;
         export const Later = Missing;
     "#;
     let data = parse_file(Utf8Path::new("/test/never.tsx"), source);

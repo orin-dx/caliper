@@ -29,3 +29,7 @@ The miss: react-spectrum's `ListBoxDropIndicatorWrapper` is a `(props, ref)` ren
 - No rule shows a precision problem: 1 miss in 154.
 - 25 samples cannot establish the 95% gate. With no misses in 25, the 95% lower bound is about 88%; showing 95% needs about 60 clean samples per rule (rule of three). The two inferred rules, `typedFunctionExpression` and `wrapperTypeArgument`, are the ones to grow first.
 - Precision only: this says nothing about components Caliper misses (recall) or about whether their props are right.
+
+## `importedMemberAlias`, 2026-11-02
+
+A component re-bound from an import now also covers `const { Option } = Imported` and `const X = Imported`. On Ant Design and shadcn/ui with their dependencies installed the rule reports 14 components (antd 1, shadcn/ui 13), too few to draw a sample from, so all 14 were read: 14 are components (`Option`, 4 `ChartLegend`, 4 `ChartTooltip`, 3 `Combobox`, `Form`, `Select`). An alias of a component the project declares under the same name is not reported, which removed 18 antd duplicates (`Alert`, `Card`, `Form`, ...) that the new forms would otherwise have added. Labelled by one model agent reading the source; not checked by a human.

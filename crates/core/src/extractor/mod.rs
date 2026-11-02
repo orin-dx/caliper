@@ -366,10 +366,13 @@ impl<'src> SourceDataCollector<'src> {
             other => other,
         };
         // Keep static component members on a callable value without indexing arbitrary object declarations.
+        // A member is one when it is typed as a component or as another value (`Option: typeof Option`), whose own
+        // declaration says whether that is a component.
         let has_component_member = |fields: &[crate::types::CollectedObjectField]| {
             fields.iter().any(|field| {
                 matches!(&field.collected_type, crate::types::CollectedType::Named { name, .. }
                     if name.ends_with("Component"))
+                    || matches!(&field.collected_type, crate::types::CollectedType::TypeOf(_))
             })
         };
         let static_components = match &target {

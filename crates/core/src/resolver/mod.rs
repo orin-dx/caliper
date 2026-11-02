@@ -876,11 +876,54 @@ pub fn resolve_component(mapping: &ComponentMapping, ctx: &ResolutionContext) ->
     (entry, diagnostics.flatten())
 }
 
+/// Whether `mapping` re-binds a component the project itself declares under the same name: `const Alert =
+/// InternalAlert` where `InternalAlert` is the project's `Alert`, or `const { Option } = Select` where `Select` is a
+/// project component and a project component `Option` exists. An alias of a package's component is not one of these.
+fn aliases_project_component(mapping: &ComponentMapping, ctx: &ResolutionContext) -> bool {
+    if mapping.rule != DetectionRule::ImportedMemberAlias {
+        return false;
+    }
+    let Some(CollectedType::TypeOf(target)) = mapping.props_type_args.first() else { return false };
+    let mut ignored = Vec::new();
+    let mut project = |name: &str| {
+        let (file, canonical) = import::resolve_to_canonical(name, &mapping.file_path, ctx, &mut ignored)?;
+        ctx.component_mapping(&file, &canonical).map(|found| found.component_name.clone())
+    };
+    match target.split_once('.') {
+        None => project(target).is_some_and(|declared| declared == mapping.component_name),
+        Some((base, _)) => {
+            project(base).is_some()
+                && ctx.global.component_mappings.iter().any(|other| {
+                    other.rule != DetectionRule::ImportedMemberAlias && other.component_name == mapping.component_name
+                })
+        }
+    }
+}
+
 /// `resolve_component`, with the diagnostics of replayed interface chains shared rather than copied.
 pub(crate) fn resolve_component_shared(
     mapping: &ComponentMapping,
     ctx: &ResolutionContext,
 ) -> (ComponentEntry, ResolvedDiagnostics) {
+    // The component the project already declares under this name, not a second one: nothing to document here, so
+    // the entry is left empty and goes unpublished like an alias whose package isn't loaded.
+    if aliases_project_component(mapping, ctx) {
+        let entry = ComponentEntry {
+            display_name: mapping.component_name.clone(),
+            file_path: mapping.file_path.clone(),
+            description: mapping.description.clone(),
+            props: BTreeMap::new(),
+            inheritance: Vec::new(),
+            notable_inherited: BTreeMap::new(),
+            discriminant_prop: None,
+            composes: Vec::new(),
+            tags: mapping.tags.clone(),
+            methods: vec![],
+            detected_by: mapping.rule,
+            exported: mapping.exported,
+        };
+        return (entry, ResolvedDiagnostics { own: Vec::new(), shared: Vec::new() });
+    }
     let mut state = ResolveState::default();
     state.add_type_params(mapping.type_params.iter());
 

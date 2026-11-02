@@ -813,32 +813,67 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
-    /// Record `const X = Imported.Member` as a component whose props are the imported member's
-    /// (`ComponentProps<typeof Imported.Member>`), when `Imported` is an import binding and `Member` is PascalCase.
+    /// Record `const X = Imported.Member` and `const X = Imported` as a component whose props are the imported
+    /// component's (`ComponentProps<typeof Imported.Member>`), when `Imported` is an import binding and the component is
+    /// PascalCase.
     pub(super) fn try_record_imported_member_alias<'a>(&mut self, decl: &Binding<'_, 'a>, name: &str) -> bool {
         let Some(init) = decl.init.as_ref() else { return false };
-        let Expression::StaticMemberExpression(member) = peel_expr(init) else { return false };
-        let Expression::Identifier(object) = &member.object else { return false };
-        let property = member.property.name.as_str();
-        if !self.imported_names.contains(object.name.as_str()) || !is_pascal_case(property) {
-            return false;
+        let target = match peel_expr(init) {
+            Expression::StaticMemberExpression(member) => {
+                let Expression::Identifier(object) = &member.object else { return false };
+                let property = member.property.name.as_str();
+                if !self.imported_names.contains(object.name.as_str()) || !is_pascal_case(property) {
+                    return false;
+                }
+                format!("{}.{property}", object.name)
+            }
+            // A constant is not a component whatever it is bound to; `const ORIGIN = Thing` says nothing about `Thing`.
+            Expression::Identifier(id)
+                if self.imported_names.contains(id.name.as_str())
+                    && is_pascal_case(id.name.as_str())
+                    && !super::is_constant_name(name) =>
+            {
+                id.name.to_string()
+            }
+            _ => return false,
+        };
+        self.push_imported_alias(name, target, decl.span);
+        true
+    }
+
+    /// Record `const { Option } = Imported` and `const { Option: Opt } = Imported` as components named by the binding,
+    /// one per PascalCase member, when `Imported` is an import binding.
+    pub(super) fn try_record_destructured_imports<'a>(&mut self, declarator: &VariableDeclarator<'a>) {
+        let BindingPattern::ObjectPattern(pattern) = &declarator.id else { return };
+        let Some(Expression::Identifier(object)) = declarator.init.as_ref().map(peel_expr) else { return };
+        if !self.imported_names.contains(object.name.as_str()) {
+            return;
         }
-        let (description, tags) = self.find_jsdoc_with_tags(decl.span.start);
+        for property in &pattern.properties {
+            let PropertyKey::StaticIdentifier(key) = &property.key else { continue };
+            let BindingPattern::BindingIdentifier(local) = &property.value else { continue };
+            let (key, local) = (key.name.as_str(), local.name.as_str());
+            if !is_pascal_case(key) || !is_pascal_case(local) || super::is_constant_name(local) {
+                continue;
+            }
+            self.push_imported_alias(local, format!("{}.{key}", object.name), declarator.span);
+        }
+    }
+
+    fn push_imported_alias(&mut self, name: &str, target: String, span: oxc_span::Span) {
+        let (description, tags) = self.find_jsdoc_with_tags(span.start);
         self.data.component_mappings.push(
             ComponentMapping::new(
                 name.to_owned(),
                 "ComponentProps".into(),
                 self.file_path.clone(),
-                decl.span.start,
-                decl.span.end,
+                span.start,
+                span.end,
                 DetectionRule::ImportedMemberAlias,
             )
-            .with_props_type_args(vec![crate::types::CollectedType::TypeOf(
-                format!("{}.{property}", object.name).into(),
-            )])
+            .with_props_type_args(vec![crate::types::CollectedType::TypeOf(target.into())])
             .with_doc(description, tags),
         );
-        true
     }
 
     /// Whether `call` makes a component that takes a `ref` whatever its props type declares: React's `forwardRef` however

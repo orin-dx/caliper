@@ -154,6 +154,11 @@ pub(super) fn component_props_of(
         {
             super::alias::resolve_base_as_chain(&props, &props_file, mapping, ctx, state, depth + 1)
         }
+        // A value declared with a React component type and detected as no component: `declare const Memoed:
+        // React.MemoExoticComponent<React.FC<Props>>`.
+        None if let Some((props, props_file)) = super::callee::component_props_of_typeof(name, file, ctx) => {
+            super::alias::resolve_base_as_chain(&props, &props_file, mapping, ctx, state, depth + 1)
+        }
         None => {
             state.diagnostics.push(
                 Diagnostic::new(
