@@ -504,18 +504,28 @@ fn interface_keys(iface: &CollectedInterface, ctx: &ResolutionContext, depth: u8
         return;
     }
     for parent in &iface.extends {
-        let found = match parent {
-            ExtendsRef::SameFile { name, .. } => lookup_interface(ctx, iface.file_path.as_str(), name),
-            ExtendsRef::Imported { local_name, .. } => {
-                let (file, name) = canonical(local_name, &iface.file_path, ctx);
-                lookup_interface(ctx, file.as_str(), &name)
-            }
-            ExtendsRef::Builtin { .. } => None,
+        let name = match parent {
+            ExtendsRef::SameFile { name, .. } => name,
+            ExtendsRef::Imported { local_name, .. } => local_name,
+            // React's own interfaces name their parents by the spelling the extractor recognizes as React's.
+            ExtendsRef::Builtin { name, .. } => name,
         };
+        let (file, name) = canonical(name, &iface.file_path, ctx);
+        let found = lookup_interface(ctx, file.as_str(), &name).or_else(|| react_interface(ctx, &file, &name));
         if let Some(parent) = found {
             interface_keys(parent, ctx, depth + 1, keys);
         }
     }
+}
+
+/// The member names of React's interface `name` (`HTMLAttributes`, with the interfaces it extends), whether or not
+/// React's declarations were merged into the run. `None` when `name` is not one of React's interfaces.
+pub(super) fn react_interface_keys(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> Option<Vec<String>> {
+    let (canonical_file, canonical_name) = canonical(name, file, ctx);
+    let iface = react_interface(ctx, &canonical_file, &canonical_name)?;
+    let mut keys = Vec::new();
+    interface_keys(iface, ctx, 0, &mut keys);
+    Some(keys.into_iter().map(|key| key.name.to_string()).collect())
 }
 
 /// The type of member `key` of `obj`, read as `obj[key]` reads it.
@@ -820,6 +830,11 @@ fn canonical(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> (Utf8PathB
     // `@types/react`'s UMD global (`export as namespace React`): `React.CSSProperties` without an import.
     match name.strip_prefix("React.") {
         Some(member) => (super::react::resolve_react_types_file(file, ctx).into(), member.to_owned()),
+        // The global `JSX` namespace (`JSX.IntrinsicElements`, next/image's `ImageProps`) is React's `React.JSX` when
+        // nothing in scope binds the name `JSX`.
+        None if name.starts_with("JSX.") && super::may_be_react_builtin("JSX", file, ctx) => {
+            (super::react::resolve_react_types_file(file, ctx).into(), name.to_owned())
+        }
         None => (file.to_owned(), name.to_owned()),
     }
 }

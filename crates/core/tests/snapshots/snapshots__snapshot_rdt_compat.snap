@@ -3698,36 +3698,6 @@ expression: value
             }
           ]
         },
-        "key": {
-          "name": "key",
-          "type": {
-            "kind": "union",
-            "members": [
-              {
-                "kind": "named",
-                "name": "Key",
-                "args": []
-              },
-              {
-                "kind": "null"
-              }
-            ]
-          },
-          "required": false,
-          "defaultValue": null,
-          "description": "",
-          "tags": {},
-          "parent": {
-            "name": "Attributes",
-            "fileName": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts"
-          },
-          "declarations": [
-            {
-              "name": "Attributes",
-              "fileName": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts"
-            }
-          ]
-        },
         "keyParams": {
           "name": "keyParams",
           "type": {
@@ -12639,7 +12609,7 @@ expression: value
           "fileName": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts",
           "omitted": [],
           "htmlElement": "div",
-          "totalProps": 382
+          "totalProps": 381
         }
       ],
       "notableInherited": {},

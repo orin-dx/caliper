@@ -121,6 +121,7 @@ impl Resolved {
     fn affected_by(&self, change: &Change<'_>) -> bool {
         self.depends_on.files.contains(change.file.as_str())
             || (change.created && self.depends_on.resolves_modules)
+            || (change.react_namespace && self.depends_on.reads_augmentations)
             || change.bare_names.iter().any(|name| self.depends_on.bare_names.contains(name.as_str()))
     }
 }
@@ -132,6 +133,8 @@ struct Change<'c> {
     created: bool,
     /// Enum and const-array names the file declared before or after the change.
     bare_names: FxHashSet<String>,
+    /// The file declared into the `React` namespace before or after the change (a module augmentation of React).
+    react_namespace: bool,
 }
 
 /// The bare names `file` declares in an enum or const-array map keyed `file:name`.
@@ -359,6 +362,7 @@ impl Revision {
         let mut demands = Vec::new();
         let mut bare_names: FxHashSet<String> = bare_names_declared(changed, &self.global.enums).into_iter().collect();
         bare_names.extend(bare_names_declared(changed, &self.global.const_arrays));
+        let mut react_namespace = named_types.declares_react_namespace(changed);
         global.remove_file(changed);
         named_types.remove_file(changed);
         file_diagnostics.remove(changed);
@@ -398,6 +402,7 @@ impl Revision {
                     }
                 }
                 named_types.merge_file(&data);
+                react_namespace |= named_types.declares_react_namespace(changed);
                 global.merge(changed, data);
                 files.insert(changed.to_owned())
             }
@@ -408,7 +413,7 @@ impl Revision {
             file_diagnostics,
             files,
             dependencies,
-            change: Change { file: changed, created, bare_names },
+            change: Change { file: changed, created, bare_names, react_namespace },
             demands,
         }
     }

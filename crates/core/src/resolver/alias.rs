@@ -65,10 +65,13 @@ pub(super) fn resolve_type_alias_chain(
             };
             let picked_set: FxHashSet<&str> = picked.iter().map(String::as_str).collect();
             chain.props.retain(|p| picked_set.contains(p.name.as_str()));
+            chain.notable.retain(|p| picked_set.contains(p.name.as_str()));
             // The base was a `composes` entry with no picked props (React's declarations stay out of the run unless the
             // attributes are `full`, and then a base interface can still list none of them): read them from React.
-            if chain.props.is_empty() {
-                chain.props = react_picked_props(base, &picked, file_path, mapping, ctx, state, depth);
+            let missing: Vec<String> =
+                picked.iter().filter(|name| !chain.props.iter().any(|prop| &prop.name == *name)).cloned().collect();
+            if !missing.is_empty() {
+                chain.props.extend(react_picked_props(base, &missing, file_path, mapping, ctx, state, depth));
             }
             // Only the picked attributes remain: each is read from the element's layer, which then has nothing left to list.
             for name in &picked {
@@ -619,6 +622,9 @@ pub(super) fn resolve_union_alias(
 ) -> ResolvedChain {
     use super::chain::find_discriminant_prop;
 
+    // The layers and notable props the members inherit: the merged props type has them too (a union of props
+    // interfaces that each extend React's attributes).
+    let mut inherited = InheritedUnion::default();
     // Collect all member chains for named types (only Named can be discriminated).
     let named_members: Vec<(&str, Vec<Arc<ParsedProp>>)> = members
         .iter()
@@ -628,6 +634,7 @@ pub(super) fn resolve_union_alias(
                 let chain =
                     resolve_props_chain(name.as_str(), &[], file_path, mapping, ctx, &mut branch_state, depth + 1);
                 state.absorb(branch_state);
+                inherited.add(&chain);
                 Some((name.as_str(), chain.props))
             } else {
                 None
@@ -701,6 +708,7 @@ pub(super) fn resolve_union_alias(
     for member in members {
         if !matches!(member, CollectedType::Named { .. }) {
             let sub_chain = resolve_base_as_chain(member, file_path, mapping, ctx, state, depth);
+            inherited.add(&sub_chain);
             total_variants += 1;
             record_variant_props(
                 &sub_chain.props,
@@ -760,8 +768,39 @@ pub(super) fn resolve_union_alias(
 
     ResolvedChain {
         props: merged_props.into_values().map(Arc::new).collect(),
+        inheritance: inherited.layers,
+        notable: inherited.notable,
         discriminant_prop: discriminant,
         ..ResolvedChain::empty()
+    }
+}
+
+/// What the members of a union inherit, merged: a layer the members share is listed once, and an attribute is omitted
+/// only when every member that has the layer omits it, since a union has the attributes of any member.
+#[derive(Default)]
+struct InheritedUnion {
+    layers: Vec<InheritedLayer>,
+    notable: Vec<Arc<ParsedProp>>,
+}
+
+impl InheritedUnion {
+    fn add(&mut self, chain: &ResolvedChain) {
+        for layer in &chain.inheritance {
+            let same = |kept: &InheritedLayer| {
+                kept.type_name == layer.type_name
+                    && kept.file_name == layer.file_name
+                    && kept.html_element == layer.html_element
+            };
+            match self.layers.iter_mut().find(|kept| same(kept)) {
+                Some(kept) => kept.omitted.retain(|name| layer.omitted.contains(name)),
+                None => self.layers.push(layer.clone()),
+            }
+        }
+        for prop in &chain.notable {
+            if !self.notable.iter().any(|kept| kept.name == prop.name) {
+                self.notable.push(prop.clone());
+            }
+        }
     }
 }
 
@@ -855,6 +894,15 @@ fn resolve_key_set_or_warn(
     resolved
 }
 
+/// The name and file of the interface `target` references, through `AtFile`.
+fn react_interface_target<'a>(target: &'a CollectedType, file: &'a Utf8Path) -> Option<(&'a str, &'a Utf8Path)> {
+    match target {
+        CollectedType::AtFile { file, inner } => react_interface_target(inner, file),
+        CollectedType::Named { name, .. } => Some((name.as_str(), file)),
+        _ => None,
+    }
+}
+
 /// Literals, unions, `keyof X`, a key alias (`type Keys = "a" | "b"`), `Exclude`/`Extract` of key sets, and an
 /// argument substituted from another file. `None` for anything else, which only the checker could evaluate.
 fn resolve_key_set(
@@ -880,6 +928,16 @@ fn resolve_key_set(
             Some(all)
         }
         CollectedType::AtFile { file, inner } => resolve_key_set(inner, file, mapping, ctx, state, depth + 1),
+        // `keyof React.HTMLAttributes<T>`: the names React declares on it, which a props walk does not list (the HTML
+        // layer holds them).
+        CollectedType::KeyOf(target)
+            if react_interface_target(target, file).is_some_and(|(name, at)| {
+                super::may_be_react_builtin(name, at, ctx) && super::evaluate::is_react_interface(name, at, ctx)
+            }) =>
+        {
+            let (name, at) = react_interface_target(target, file)?;
+            super::evaluate::react_interface_keys(name, at, ctx)
+        }
         CollectedType::KeyOf(target) => {
             // A fresh cycle set: reading a type's keys is a separate question from the props walk that called it, which
             // has usually just visited the same type (`Omit<Base, keyof Base>` resolves `Base` first). Sharing the set
