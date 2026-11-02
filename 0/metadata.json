@@ -1,0 +1,200 @@
+{
+  "cli_version": "0.12.3-nightly.202610300619.cea1b3cee",
+  "checkpoint_id": "01M67W4D788H0CDQSES2NVPQ89",
+  "session_id": "ba6a68d6-c702-4382-ab2f-60cd0f6af675",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-02T18:06:13.083275Z",
+  "branch": "docs/refresh-and-adr-pass",
+  "checkpoints_count": 12,
+  "files_touched": [
+    ".agents/skills/adr/SKILL.md",
+    ".changeset/forward-ref-by-shape.md",
+    ".claude/skills/adr/SKILL.md",
+    ".github/workflows/weekly.yml",
+    ".gitignore",
+    ".trial.py",
+    "Cargo.toml",
+    "apps/validate/src/oracle.ts",
+    "crates/core/Cargo.toml",
+    "crates/core/src/extractor/component.rs",
+    "crates/core/src/extractor/interface.rs",
+    "crates/core/src/extractor/js_text.rs",
+    "crates/core/src/extractor/mod.rs",
+    "crates/core/src/extractor/visit.rs",
+    "crates/core/src/extractor/wrapper.rs",
+    "crates/core/src/pipeline/mod.rs",
+    "crates/core/src/pipeline/tests.rs",
+    "crates/core/tests/forward_ref_shapes.rs",
+    "docs/STATUS.md",
+    "docs/adr/0016-resolve-components-on-request.md",
+    "docs/adr/0019-load-dependencies-by-default.md",
+    "docs/adr/README.md",
+    "docs/architecture/README.md",
+    "docs/architecture/cli-commands.md",
+    "docs/architecture/extractor-ast-visiting.md",
+    "docs/architecture/napi-binding.md",
+    "docs/architecture/pipeline-orchestration.md",
+    "docs/architecture/resolver-type-resolution.md",
+    "docs/architecture/serialization-formats.md",
+    "docs/architecture/types-and-output-contract.md",
+    "docs/benchmarks.md",
+    "docs/edge-cases.md",
+    "docs/measurement.md",
+    "docs/performance.md",
+    "justfile",
+    "packages/storybook/scripts/storybook-parity.mjs",
+    "pr-body-forwardref.md",
+    "scripts/bench.py",
+    "scripts/corpora.py",
+    "scripts/equivalence-allow.json",
+    "scripts/equivalence.py",
+    "scripts/rdg.mjs",
+    "scripts/rdt.mjs",
+    "scripts/weekly.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "3e0fbf07084d",
+  "checkpoint_transcript_start": 70694,
+  "transcript_lines_at_start": 70694,
+  "compact_transcript_start": 4667,
+  "token_usage": {
+    "input_tokens": 56,
+    "cache_creation_tokens": 481488,
+    "cache_read_tokens": 12132714,
+    "output_tokens": 27959,
+    "api_call_count": 27,
+    "subagent_tokens": {
+      "input_tokens": 32,
+      "cache_creation_tokens": 450772,
+      "cache_read_tokens": 6956691,
+      "output_tokens": 3845,
+      "api_call_count": 16
+    }
+  },
+  "redaction": {
+    "replacements": 1356,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 1356,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01QchtZUzPN3PMVrg8Gy3ykV",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "vanguard:research"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "759066964e9a",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 6111,
+        "end": 6112,
+        "entry_ids": [
+          "255a129b-35bc-4cc3-9675-402f9d83f595"
+        ],
+        "tool_use_id": "toolu_01QchtZUzPN3PMVrg8Gy3ykV"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01QchtZUzPN3PMVrg8Gy3ykV"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: vanguard:research",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": ".claude/worktrees/release-0.2.0:adr"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "759066964e9a",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 40539,
+        "end": 40540,
+        "entry_ids": [
+          "0a2d086d-18f7-41f9-b6a6-3a37c42b1182"
+        ],
+        "tool_use_id": "toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01Gx6vW9qjJh9AP6LA3Y5Ch1"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: .claude/worktrees/release-0.2.0:adr",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 49
+  },
+  "summary": {
+    "intent": "Unblock and land the open caliper PR stack (red CI, approvals gate, stacked-PR retargeting), then plan the next caliper work and produce a handoff prompt for a new session focused on closing the v1 alpha gap (accuracy gaps + TS 7.1 on-demand).",
+    "outcome": "All stack PRs (#258, #259, #260, #261, #264) merged and main CI went green; only release PR #239 remained, with the user running the release. A full handoff prompt was produced with the schema v4 batch ordered first, but the weekly baseline and v4 work have not started.",
+    "learnings": {
+      "repo": [
+        "Entire Gates enforces an `approvals` gate that fails with 'No reviewers have approved this trail'; agents must not self-approve. Approve with `entire trail approve <n> --project gh/orin-dx` or in the Entire UI.",
+        "The main ruleset requires 1 approving review, signed commits, the merge queue and non-fast-forward protection. Only merge commits are allowed (squash and rebase are off).",
+        "A PR in an Entire stack cannot be retargeted after its parent merges (GitHub returns 'Cannot change the base branch because the pull request is part of a stack'). #262 was stuck on a dead base, so the same branch was re-homed onto #261 targeting main.",
+        "Entire auto-creates a draft PR when you run `entire trail link`; fill that PR in with gh pr edit/ready rather than opening a second one.",
+        "Lint and CI on #258, #260 and #264 were red only because main's lint was red. Merging the lint fix branch (adding `.oxfmtrc.json`) cleared them.",
+        "Bot-generated PRs like release PR #239 don't trigger CI on their head commit. The merge queue runs the checks, which is why #264 added the `merge_group` trigger.",
+        "Homebrew tap is pull-based: its daily `brew bump` follows `npm/caliper-docgen@*` tags and builds from source. The old `notify-homebrew-tap` push step with `TAP_APP_*` was obsolete and removed by #258.",
+        "Measurement is now a single weekly workflow (`scripts/weekly.py`) plus `just bench`; the PR gates were deleted and should not be rebuilt."
+      ],
+      "code": [],
+      "workflow": [
+        "Forks and parallel agents need `isolation: \"worktree\"`; two agents in one worktree clobber each other.",
+        "Run git with the sandbox off and keep commits GPG-signed; unsigned fork commits previously forced a re-sign force-push.",
+        "Don't pipe lint or test output through tail/head, since a pipe once hid a real failure; read exit codes directly.",
+        "Warn up front that 'GitHub retargets to main' does not hold for PRs in Entire stacks. Prefer independent PRs off main.",
+        "Verify an assumption like `weekly.yml` supporting `workflow_dispatch` before putting it in a handoff prompt."
+      ]
+    },
+    "friction": [
+      "Merge of #262 failed because of the stale stacked base. The exact error text was never captured, so the cause (base vs review vs ruleset) wasn't confirmed.",
+      "The one-person team hits its own approvals gate on every PR, leaving the agent unable to unblock merges.",
+      "Merge-queue checks never reported on `gh-readonly-queue/*` branches until #264, which likely stalled merges.",
+      "Nothing merged for days, and main's red lint cascaded into red CI on every dependent PR.",
+      "The 'final gap for v1 alpha' was undefined at first and needed clarification before the handoff was useful."
+    ],
+    "open_items": [
+      "Release #239 (0.7.0 to 0.8.0) is in progress; watch Release & Publish, tags, npm and crates.io, and the tap's brew bump. It is the first real run of Callisto 0.16.0.",
+      "Run the weekly workflow by hand for a fresh baseline; the quoted numbers are stale one-machine figures.",
+      "Ship the schema v4 batch (readonly, index signatures, RefObject) in one PR with a migration changeset.",
+      "Root-cause and fix the shadcn and antd recall gaps by shape; check whether antd PurePanel's 33 props are a harness pairing bug.",
+      "Detection by shape: memo(forwardRef(function...)) without type args, React APIs by import source, the {Name}Props rule, and Chakra NonNullable<union>.",
+      "Harden TS 7.1 on-demand: version range with self-check, memory cap, real-tsc CI test, and optionally a disk cache.",
+      "Create trails (a to d) with acceptance criteria before any branch.",
+      "User-owned housekeeping: delete remote scratch branches, remove `TAP_APP_*` secrets if set, close stale trails, and clean up local worktrees and branches (lf-258, lf-260, rc-*, cc-*).",
+      "Decide whether to keep the Human Review approvals gate or turn it off in Gates settings.",
+      "Confirm nobody has a bypass on main's force-push protection."
+    ]
+  }
+}
