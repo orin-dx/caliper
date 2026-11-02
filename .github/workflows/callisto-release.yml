@@ -3,10 +3,13 @@ name: Release & Publish
 on:
   push:
     branches: [main]
+  # Finishes a release that stopped, and refreshes the release PR, without waiting for a push.
+  schedule:
+    - cron: '23 5 * * *'
   workflow_dispatch:
     inputs:
       release_source_sha:
-        description: 'Merged Callisto release-PR commit to recover; leave empty for the triggering commit.'
+        description: 'Merged Callisto release-PR commit to recover; leave empty for the oldest unfinished release or the triggering commit.'
         required: false
         type: string
 
@@ -22,6 +25,9 @@ env:
   CARGO_TERM_COLOR: always
   # Keep in lockstep with .prototools.
   RUST_VERSION: "1.98.1"
+  # `callisto release pending` reads the committed decision of each of the 10 newest release commits,
+  # and fails with E166 on older ones whose decision no longer decodes. Count this release and newer.
+  RELEASE_PENDING_FROM: 2daef9276b234fcc04d8994d91210eeccd88d7e8
 
 jobs:
   release-candidate:
@@ -36,15 +42,38 @@ jobs:
       is_release_pr: ${{ steps.candidate.outputs.is_release_pr }}
       release_source_sha: ${{ steps.candidate.outputs.release_source_sha }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@dec5841b123bf933993b50cfcd5fc17c98530b99 # callisto@0.16.0
+        with:
+          version: callisto@0.16.0
+          verification: require
       - id: candidate
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_SOURCE_SHA_INPUT: ${{ inputs.release_source_sha }}
           TRIGGERING_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          release_source_sha="${RELEASE_SOURCE_SHA_INPUT:-$TRIGGERING_SHA}"
+          release_source_sha="$RELEASE_SOURCE_SHA_INPUT"
+          selected_pending=false
+          if [[ -z "$release_source_sha" ]]; then
+            # Oldest unfinished release first: a failed release is finished before a newer one starts.
+            release_source_sha=$(callisto --format json release pending --from "$RELEASE_PENDING_FROM" | jq -r '.pending[0].source // empty')
+            if [[ -n "$release_source_sha" ]]; then
+              selected_pending=true
+            elif [[ "$EVENT_NAME" == push ]]; then
+              release_source_sha="$TRIGGERING_SHA"
+            else
+              # A scheduled run with nothing unfinished only refreshes the release PR.
+              echo 'is_release_pr=false' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
           if [[ ! "$release_source_sha" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::release_source_sha must be exactly 40 lowercase hex characters"
             exit 1
@@ -54,25 +83,37 @@ jobs:
             echo "::error::release_source_sha does not resolve to that exact commit"
             exit 1
           fi
-          # Scheduling hint only; `callisto release plan` is the authority.
-          prs=$(gh api --paginate "/repos/${GITHUB_REPOSITORY}/commits/${release_source_sha}/pulls" \
-            --jq '[.[] | select(.merged_at != null and .base.ref == "main" and .head.repo.full_name == "'"${GITHUB_REPOSITORY}"'" and (.head.ref == "callisto/version-packages" or (.head.ref | test("^callisto/version-packages--[0-9a-f]{40}$"))))] | length')
+          if ! git merge-base --is-ancestor "$release_source_sha" "$TRIGGERING_SHA"; then
+            echo "::error::release_source_sha is not on main's history"
+            exit 1
+          fi
+          # Scheduling hint only; `callisto release plan` is the authority. A trusted release commit is
+          # the merge of the managed PR and a GitHub-verified signed commit, never a direct push.
+          prs=$(gh api --paginate "/repos/${GITHUB_REPOSITORY}/commits/${release_source_sha}/pulls" | jq -s --arg repo "$GITHUB_REPOSITORY" --arg sha "$release_source_sha" '[.[][] | select(.merged_at != null and .merge_commit_sha == $sha and .base.ref == "main" and .head.repo.full_name == $repo and (.head.ref == "callisto/version-packages" or (.head.ref | test("^callisto/version-packages--[0-9a-f]{40}$")))) | .number]')
           verified=$(gh api "/repos/${GITHUB_REPOSITORY}/commits/${release_source_sha}" --jq '.commit.verification.verified')
-          if [[ "$prs" == 1 && "$verified" == true ]]; then
+          if [[ "$(jq 'length' <<< "$prs")" == 1 && "$verified" == true ]]; then
             {
               echo 'is_release_pr=true'
               echo "release_source_sha=$release_source_sha"
             } >> "$GITHUB_OUTPUT"
+          elif [[ "$selected_pending" == true || -n "$RELEASE_SOURCE_SHA_INPUT" || "$(jq 'length' <<< "$prs")" != 0 ]]; then
+            echo "::error::release source is not one verified merged managed PR"
+            exit 1
           else
             echo 'is_release_pr=false' >> "$GITHUB_OUTPUT"
           fi
 
   version-pr:
     name: Create or update the Callisto release PR
-    needs: release-candidate
+    needs: [release-candidate, drain]
+    # `drain` is skipped unless a release just executed. Refresh the PR when this is not a release run,
+    # or when the release that just ran left nothing unfinished.
     if: >-
-      needs.release-candidate.outputs.is_release_pr != 'true' &&
-      inputs.release_source_sha == ''
+      always() && needs.release-candidate.result == 'success' &&
+      ((needs.release-candidate.outputs.is_release_pr != 'true' &&
+        needs.drain.result == 'skipped' && inputs.release_source_sha == '') ||
+       (needs.release-candidate.outputs.is_release_pr == 'true' &&
+        needs.drain.result == 'success' && needs.drain.outputs.has_pending == 'false'))
     timeout-minutes: 15
     concurrency:
       group: version-pr
@@ -444,7 +485,46 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-receipt
+          # Per attempt: a re-run keeps each attempt's receipt instead of replacing the last.
+          name: release-receipt-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/callisto-release-receipt/${{ github.run_id }}
           if-no-files-found: ignore
           retention-days: 7
+
+  drain:
+    name: Start the next unfinished release
+    needs: [execute, release-candidate]
+    if: >-
+      !cancelled() && needs.execute.result == 'success' &&
+      needs.release-candidate.outputs.is_release_pr == 'true'
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    outputs:
+      has_pending: ${{ steps.pending.outputs.has_pending }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@dec5841b123bf933993b50cfcd5fc17c98530b99 # callisto@0.16.0
+        with:
+          version: callisto@0.16.0
+          verification: require
+      - name: Dispatch the oldest unfinished release
+        id: pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SOURCE_SHA: ${{ needs.release-candidate.outputs.release_source_sha }}
+        run: |
+          set -euo pipefail
+          # The release that just ran is excluded: one that cannot be read back as finished must not start itself again.
+          next_sha=$(callisto --format json release pending --from "$RELEASE_PENDING_FROM" | jq -r --arg sha "$RELEASE_SOURCE_SHA" '[.pending[] | select(.source != $sha)][0].source // empty')
+          if [[ -n "$next_sha" ]]; then
+            gh workflow run callisto-release.yml --ref main -f release_source_sha="$next_sha"
+            echo 'has_pending=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'has_pending=false' >> "$GITHUB_OUTPUT"
+          fi
