@@ -104,7 +104,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::pipeline::PipelineOptions;
+    use crate::types::options::PipelineOptions;
 
     #[test]
     fn source_defined_interface_wins_over_a_known_pattern_shortcut() {

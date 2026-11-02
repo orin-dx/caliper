@@ -4,7 +4,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 
 use super::*;
-use crate::pipeline::PipelineOptions;
+use crate::types::options::PipelineOptions;
 
 fn project(files: &[(&str, &str)]) -> (tempfile::TempDir, Utf8PathBuf) {
     let tmp = tempfile::TempDir::new().unwrap();

@@ -23,10 +23,8 @@ use crate::types::*;
 use super::discover::{discover_files, is_source_file, should_skip};
 
 mod lazy;
-use super::{
-    canonicalize_first_src_dir, collect_public_enums, merge_parsed_dts_file, parse_cached_dts_file, resolve_guarded,
-    HtmlAttributeMode, IncrementalUpdate, PipelineOptions,
-};
+use super::{collect_public_enums, merge_parsed_dts_file, parse_cached_dts_file, resolve_guarded, IncrementalUpdate};
+use crate::types::options::canonicalize_first_src_dir;
 pub use lazy::{ComponentAnswer, ComponentLocation};
 
 /// `@types/react` indexed on its own, for curated mode's HTML-attribute lookups: a prop that an HTML layer's element

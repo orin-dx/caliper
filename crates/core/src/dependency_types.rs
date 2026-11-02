@@ -23,8 +23,8 @@ use serde::{Deserialize, Serialize};
 use crate::import_map::ImportResolutionMap;
 use crate::named_type_index::NamedTypeIndex;
 use crate::path_key::PathKey;
-use crate::pipeline::PipelineOptions;
 use crate::resolver::{ModuleResolution, ModuleResolvers};
+use crate::types::options::PipelineOptions;
 use crate::types::*;
 
 type FxDashMap<K, V> = DashMap<K, V, FxBuildHasher>;

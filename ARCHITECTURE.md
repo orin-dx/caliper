@@ -66,6 +66,7 @@ graph TD
 ```
 types/
   collected.rs    — CollectedType, SourceData, RawProp, ImportBinding, LexedExport
+  options.rs      — PipelineOptions, HtmlAttributeMode, CollapseInheritedProps (re-exported by pipeline, so the resolver reads them without importing it)
   output.rs       — PropType, ComponentEntry, ExtractionOutput, InheritedLayer, ParsedProp, SCHEMA_VERSION
   output/interned.rs — the canonical JSON: props, prop sets and name lists written once (ADR 0009, 0018)
   diagnostic.rs   — Diagnostic, DiagnosticSeverity, DiagnosticCode

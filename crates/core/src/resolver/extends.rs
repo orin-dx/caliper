@@ -4,7 +4,7 @@ use camino::Utf8Path;
 
 use crate::types::*;
 
-use crate::pipeline::HtmlAttributeMode;
+use crate::types::options::HtmlAttributeMode;
 
 use super::chain::{resolve_interface_chain, resolve_props_chain};
 use super::import::{resolve_import_specifier, resolve_to_canonical};
