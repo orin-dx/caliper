@@ -325,8 +325,17 @@ impl WatchSession {
             true => Revision::cold_lazy(&self.options, id),
             false => Revision::cold(&self.options, id),
         });
+        self.forget_checker_answers();
         self.current.store(Some(revision.clone()));
         revision
+    }
+
+    /// Drop what the checker said: a new revision may have changed a file the answers depend on. Called before the
+    /// revision is published, so no request sees the new files with an old answer.
+    fn forget_checker_answers(&self) {
+        if let Some(hook) = &self.semantic {
+            hook.invalidate();
+        }
     }
 
     /// The published revision's number: 0 before `initialize`, then one higher for every change that produced a new
@@ -516,6 +525,7 @@ impl WatchSession {
                         stamps.files.remove(&changed);
                     }
                 }
+                self.forget_checker_answers();
                 self.current.store(Some(Arc::new(next)));
                 update
             }
@@ -590,6 +600,7 @@ impl WatchSession {
         if next.id == current.id {
             return unchanged(current.id);
         }
+        self.forget_checker_answers();
         self.current.store(Some(next.clone()));
         match next.is_lazy() {
             true => merge_lazy_updates(steps, next.id, start),
@@ -601,6 +612,7 @@ impl WatchSession {
     fn rebuilt(&self, writer: &mut Freshness, current: &Revision) -> IncrementalUpdate {
         *writer = Freshness::cold(SystemTime::now());
         let (next, update) = current.rebuilt(&self.options);
+        self.forget_checker_answers();
         self.current.store(Some(Arc::new(next)));
         update
     }

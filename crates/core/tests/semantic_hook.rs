@@ -335,3 +335,125 @@ fn the_request_asks_only_for_the_react_props_the_mode_can_use() {
     assert!(curated.contains("children") && curated.contains("label"), "{curated:?}");
     assert!(!curated.contains("className"));
 }
+
+const BUTTON_FROM_TYPES: &str =
+    "import type { P } from \"./types\";\nexport function Button(props: P) { return null; }";
+const TYPES_ONE_PROP: &str = "export interface P { label: string }";
+const TYPES_TWO_PROPS: &str = "export interface P { label: string; tone: string }";
+
+/// Stands in for a checker that reads the component's dependency: every prop `types.ts` declares comes back typed
+/// `"v<N>"`, where N is how many props `types.ts` declares, so the answer says which version of the file it saw.
+fn reads_types_file(target: &SemanticTarget) -> SemanticOutcome {
+    let text = std::fs::read_to_string(target.file_path.parent().unwrap().join("types.ts")).unwrap();
+    types_file_outcome(target, &text)
+}
+
+fn types_file_outcome(target: &SemanticTarget, text: &str) -> SemanticOutcome {
+    let names: Vec<String> = text
+        .split(['{', '}', ';'])
+        .filter_map(|part| part.split_once(':').map(|(name, _)| name.trim().to_string()))
+        .collect();
+    let version = format!("v{}", names.len());
+    SemanticOutcome {
+        components: vec![SemanticComponent {
+            file_path: target.file_path.clone(),
+            display_name: target.display_name.clone(),
+            props: names
+                .into_iter()
+                .map(|name| {
+                    Arc::new(SemanticProp {
+                        name,
+                        prop_type: PropType::StringLiteral(version.clone()),
+                        required: false,
+                        description: String::new(),
+                        react_declared: false,
+                    })
+                })
+                .collect(),
+        }],
+        ..SemanticOutcome::default()
+    }
+}
+
+fn label_type(session: &WatchSession) -> PropType {
+    session.component("Button").unwrap().entry.props["label"].prop_type.clone()
+}
+
+fn edit_types_file(project: &Project) -> Utf8PathBuf {
+    let types = project.root.join("types.ts");
+    std::fs::write(&types, TYPES_TWO_PROPS).unwrap();
+    types
+}
+
+#[test]
+fn an_edit_to_a_file_the_component_imports_is_a_new_question_for_the_checker() {
+    let project = project(&[("Button.tsx", BUTTON_FROM_TYPES), ("types.ts", TYPES_ONE_PROP)]);
+    let checker = Fake::new(Duration::ZERO, reads_types_file);
+    let session = session(&project, checker.clone(), Duration::from_secs(5));
+    assert_eq!(label_type(&session), PropType::StringLiteral("v1".into()));
+    assert_eq!(checker.requests(), 1);
+
+    let types = edit_types_file(&project);
+    session.update_file(&types);
+
+    assert_eq!(label_type(&session), PropType::StringLiteral("v2".into()), "the checker's type is the old file's");
+    assert_eq!(checker.requests(), 2, "Button.tsx is unchanged but its props are not");
+    assert_eq!(prop_names(&session, "Button"), ["label", "tone"]);
+}
+
+#[test]
+fn ensure_fresh_asks_the_checker_again_after_an_imported_file_changed() {
+    let project = project(&[("Button.tsx", BUTTON_FROM_TYPES), ("types.ts", TYPES_ONE_PROP)]);
+    let checker = Fake::new(Duration::ZERO, reads_types_file);
+    let session = session(&project, checker.clone(), Duration::from_secs(5));
+    assert_eq!(label_type(&session), PropType::StringLiteral("v1".into()));
+
+    edit_types_file(&project);
+    session.ensure_fresh();
+
+    assert_eq!(label_type(&session), PropType::StringLiteral("v2".into()), "the checker's type is the old file's");
+    assert_eq!(checker.requests(), 2);
+}
+
+/// Holds every request until the test answers it.
+struct Gated {
+    requests: AtomicUsize,
+    held: std::sync::Mutex<Vec<std::sync::mpsc::Sender<SemanticOutcome>>>,
+}
+
+impl SemanticProvider for Gated {
+    fn request(&self, _: Vec<SemanticTarget>) -> Receiver<SemanticOutcome> {
+        self.requests.fetch_add(1, Ordering::SeqCst);
+        let (sender, receiver) = channel();
+        self.held.lock().unwrap().push(sender);
+        receiver
+    }
+}
+
+#[test]
+fn an_answer_that_arrives_after_an_edit_is_not_kept_for_the_edited_project() {
+    let project = project(&[("Button.tsx", BUTTON_FROM_TYPES), ("types.ts", TYPES_ONE_PROP)]);
+    let gated = Arc::new(Gated { requests: AtomicUsize::new(0), held: std::sync::Mutex::default() });
+    let session = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() })
+        .with_semantic(gated.clone(), Duration::from_millis(10));
+    drop(session.initialize());
+    let early = session.component("Button").unwrap();
+    assert_eq!(early.entry.props.keys().cloned().collect::<Vec<_>>(), ["label"], "the structural answer");
+
+    let types = edit_types_file(&project);
+    session.update_file(&types);
+    // The answer to the question asked before the edit: it describes `types.ts` as it was.
+    let target = SemanticTarget {
+        file_path: project.root.join("Button.tsx"),
+        display_name: "Button".to_string(),
+        exported: true,
+        described: Default::default(),
+        react_wanted: None,
+    };
+    let stale = types_file_outcome(&target, TYPES_ONE_PROP);
+    gated.held.lock().unwrap().pop().unwrap().send(stale).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+
+    let _ = session.component("Button");
+    assert_eq!(gated.requests.load(Ordering::SeqCst), 2, "the stale answer must not satisfy the next request");
+}
