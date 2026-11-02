@@ -1,0 +1,88 @@
+We're going to pickup more work to tackle getting to a v1 alpha of caliper
+
+---
+
+<pasted_content id="5929">
+The plan is saved at /Users/gabe/.claude/projects/-Users-gabe-Projects-caliper/plan/next-trails-2026-11-02.md. It lives outside the repo, so any session can read it without a branch. The file has the goal, current state, your decisions, all six trails with acceptance criteria and branch tables, the waves, the process rules, how to track with Entire, and the open unknowns.
+
+What the file doesn't settle:
+- Trail 6 decisions: the release-flow choices (product package, attached binaries, attestations) are marked as not yet answered by you.
+- Research outputs: the raw reports behind the plan live only in a temporary workflow output, so I put their key facts into the file.
+- Entire: its features come from its help text, and most are untried.
+
+Prompt for the coordinator session (it creates the trails, then waits):
+
+Read /Users/gabe/.claude/projects/-Users-gabe-Projects-caliper/plan/next-trails-2026-11-02.md in full, then the memory note plan-trails-before-branches.md. You are the coordinator. Do Wave 0 only: create the six trails intent-only with the acceptance criteria and branch tables from the plan, confirm the trail numbers back to me, and wait. Do not create branches or PRs.
+
+Prompt for each worker session, after the trails exist (replace N):
+
+Read /Users/gabe/.claude/projects/-Users-gabe-Projects-caliper/plan/next-trails-2026-11-02.md (the section for trail N and the Process section) and run `entire trail show N`. You own trail N only. Follow the plan's branch table, link-first flow and CI checklist. Fan out independent branches with a workflow in isolated worktrees; do stacked branches in order. Report numbers against the baselines in the plan. Update the trail body as branches land. Do not merge, and do not touch other trails' files.
+
+Start trails 1 and 2 in parallel first, as the plan says. Both prompts are also in the file's last section.
+</pasted_content id="5929">
+
+---
+
+Keep going on this work until completely implemented, research, etc
+
+---
+
+<task-notification>
+<task-id>ae0455876eca68c84</task-id>
+<tool-use-id>toolu_01L3fwo9n6dcD8dtK7dMY4gX</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/ad4b3461-bb6f-49f0-bb4d-997d9b8887ba/tasks/ae0455876eca68c84.output</output-file>
+<status>completed</status>
+<summary>Agent "Trail 153 oracle adapters stack" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Both oracle branches are done, committed and signed locally. Nothing is pushed and there are no PRs. Worktree: `/Users/gabe/Projects/caliper/.claude/worktrees/agent-ae0455876eca68c84`. I did not do `oracle/three-tools-report` or look at `weekly.py`.
+
+## Branches (stacked)
+
+| Branch | Base | Tip |
+|---|---|---|
+| `oracle/function-marker-rule` | main (`2daef927`) | `770d0826` |
+| `oracle/tool-adapters` | `oracle/function-marker-rule` | `1bc84dae` |
+
+- **function-marker-rule**
+  - Files: `apps/oracle/src/oracle-compare.ts` and `apps/oracle/tests/oracle-compare.test.ts`.
+  - Rule is now `(kp.optional &amp;&amp; !cp.optional) || (kp.rest &amp;&amp; !cp.rest)`.
+  - Added 4 tests.
+- **tool-adapters**
+  - New `apps/oracle/src/tool-norm.ts` with one TS-text mapper, `typeFromText`, plus `rdtNorm` and `rdgNorm`.
+  - New `apps/oracle/tests/tool-norm.test.ts` with 13 tests built from real Segmented output.
+  - `scripts/rdt.mjs` keeps `type` unchanged and adds `typeObject` for props not under `node_modules/@types/react/`. I did not filter to own props, because `weekly.py` counts the @types/react props.
+  - `scripts/rdg.mjs` keeps `tsType` without `signature` and adds `failedFiles` next to `failed`.
+  - `docs/measurement.md` line 52 only: one passage reworded.
+
+## Numbers
+- **Caliper's oracle numbers do not change.** On antd and shadcn the reports are identical before and after the rule change. antd: 3070 shared props, identical 1763, spelled 1095, less precise 211, wrong 0, checker any/error 1. shadcn: 6533 shared, identical 4237, spelled 1554, less precise 682, wrong 0, any/error 60. This used the Oct-30 binary in another worktree (`agent-a9b87f2da7f20385f`, read-only), not a fresh build of main.
+- **react-docgen import-following verified.** A props interface imported from a sibling file resolved, and the source shows its default importer is `fsImporter`. The old "reads each file alone" claim was wrong.
+- **react-docgen throws on 17% to 21% of files.** antd 51 of 295, shadcn 265 of 1240.
+- **Enum share.** Enums are 5.4% of antd's own props (320 of 5,966) and 4.0% of shadcn's (581 of 14,492).
+- **Dump size.** The RDT dump grows 11.8% (antd) and 1.1% (shadcn).
+- **Adapter output.** Unreadable text, such as a printer's `Foo&lt;...&gt;`, maps to opaque, which scores less precise, never wrong. Opaque share is 215 of 5,966 antd props and 21 of 14,492 shadcn props for RDT; react-docgen is 298 of 2,749 and 41 of 381.
+- **Checks passed.** The oracle suite (25 tests), `oxfmt --check`, `oxlint` and `typos` all pass. The Rust suite and the TS package tests were not run because no Rust or `packages/` code changed.
+
+## What `oracle/three-tools-report` needs
+- `oracle.ts` takes `--rdt` and `--rdg` dumps. Match them to the checker's exports by `(rel(file), normComponent(name))`. The dumps' `file` is absolute.
+- Per prop, compare `rdtNorm(p.typeObject)` or `rdgNorm(p.tsType)` with `checkerNorm(type)`, over the same universe the Caliper path uses. A prop absent from the tool's `props` counts as missing.
+- `scripts/weekly.py` already has `rdt_out` and `rdg_out` in `measure()` to pass through. Land the pairing branches first.
+- **`scripts/weekly.py` line 7** repeats the "reads each file alone" wording, and it belongs to the other worker.
+- **Running the oracle under the sandbox:** `tsx` fails on its IPC socket (EPERM). `node src/oracle.ts ...` works, since Node 26 strips types.
+
+## Unresolved
+- **Spectrum's 1.09% oracle wrong-rate:** not investigated. No installed spectrum corpus exists locally. To find the cause, run the weekly workflow on a branch with the oracle's `--dump` flag.
+- **Mantine, Chakra and Spectrum validation:** the function-marker rule and adapters are checked only on antd and shadcn. The other three need a CI weekly run on the branch.
+
+## Draft PR bodies
+
+**`oracle/function-marker-rule`** (base `main`)
+&gt; Hold a tool to the parameter markers it keeps. The oracle capped every function type at "less precise" when the checker's parameter was optional or rest, even if the tool kept the marker. It now caps only a marker the tool lost. Caliper records neither marker, so its verdicts do not change: antd and shadcn reports are identical before and after. 4 tests added. Risk: only matters once another tool's types are compared (next PR). Trail: https://entire.com/gh/orin-dx/-/trails/153
+&gt; https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ
+
+**`oracle/tool-adapters`** (base `oracle/function-marker-rule`; link with `--base oracle/function-marker-rule` before any PR exists)
+&gt; Read RDT and react-docgen prop types as the oracle's Norm, through one TypeScript-text mapper, so all three tools are held to the checker by the same rules. RDT's dump keeps the type object for own props (enums were the string "enum", 4–5% of own props); react-docgen's keeps `tsType` and names the files it throws on (17–21% of files). Fixes the docs claim that react-docgen reads files alone: its default importer follows imports (verified). Measured: RDT dump +1.1% (shadcn) to +11.8% (antd); unreadable types are opaque (less precise), never wrong. Risk: validated on antd and shadcn only. Trail: https://entire.com/gh/orin-dx/-/trails/153
+&gt; https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ</result>
+<usage><subagent_tokens>189487</subagent_tokens><tool_uses>87</tool_uses><duration_ms>458970</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-ae0455876eca68c84</worktreePath><worktreeBranch>worktree-agent-ae0455876eca68c84</worktreeBranch></worktree>
+</task-notification>

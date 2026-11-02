@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01L3fwo9n6dcD8dtK7dMY4gX",
+  "agent_id": "ae0455876eca68c84",
+  "subagent_type": "fork",
+  "task_description": "Trail 153 oracle adapters stack",
+  "token_usage": {
+    "input_tokens": 132,
+    "cache_creation_tokens": 89473,
+    "cache_read_tokens": 10484580,
+    "output_tokens": 48320,
+    "api_call_count": 71
+  },
+  "started_at": "2026-11-02T10:10:07.89718-08:00",
+  "completed_at": "2026-11-02T10:17:46.316113-08:00"
+}
