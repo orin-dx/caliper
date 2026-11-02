@@ -83,8 +83,8 @@ impl<'src> SourceDataCollector<'src> {
         }
         let TSType::TSTypeReference(reference) = &assertion.type_annotation else { return };
         let type_name = self.extract_type_ref_name(reference);
-        let bare = type_name.strip_prefix("React.").unwrap_or(&type_name);
-        if !matches!(bare, "ForwardRefExoticComponent" | "FunctionComponent" | "FC" | "ComponentType") {
+        let Some(bare) = self.react_type_export(&type_name) else { return };
+        if !matches!(bare.as_str(), "ForwardRefExoticComponent" | "FunctionComponent" | "FC" | "ComponentType") {
             return;
         }
         let Some(props) = reference.type_arguments.as_ref().and_then(|args| args.params.first()) else { return };
@@ -151,8 +151,8 @@ impl<'src> SourceDataCollector<'src> {
         match ty {
             TSType::TSTypeReference(tr) => {
                 let type_name = self.extract_type_ref_name(tr);
-                let bare_name = type_name.strip_prefix("React.").unwrap_or(&type_name);
-                if !FC_FAMILY_TYPE_NAMES.contains(&bare_name) {
+                if !self.react_type_export(&type_name).is_some_and(|bare| FC_FAMILY_TYPE_NAMES.contains(&bare.as_str()))
+                {
                     return None;
                 }
                 let (props_name, type_args) = self.extract_props_arg(&tr.type_arguments)?;
@@ -586,8 +586,7 @@ impl<'src> SourceDataCollector<'src> {
     /// diagnostic messages.
     pub(super) fn super_class_is_component_family<'a>(&self, class: &Class<'a>) -> Option<&'static str> {
         let super_name = self.expression_to_ident_name(&class.heritage.as_ref()?.expression);
-        let bare = super_name.strip_prefix("React.").unwrap_or(&super_name);
-        match bare {
+        match self.react_type_export(&super_name)?.as_str() {
             "Component" => Some("Component"),
             "PureComponent" => Some("PureComponent"),
             _ => None,
@@ -662,8 +661,7 @@ impl<'src> SourceDataCollector<'src> {
         let Some(type_ann) = decl.type_annotation.as_ref() else { return false };
         let TSType::TSTypeReference(tr) = peel_parens(&type_ann.type_annotation) else { return false };
         let type_name = self.extract_type_ref_name(tr);
-        let bare_name = type_name.strip_prefix("React.").unwrap_or(&type_name);
-        FC_FAMILY_TYPE_NAMES.contains(&bare_name)
+        self.react_type_export(&type_name).is_some_and(|bare| FC_FAMILY_TYPE_NAMES.contains(&bare.as_str()))
     }
 
     /// Rename an already-collected component mapping to its real public export name

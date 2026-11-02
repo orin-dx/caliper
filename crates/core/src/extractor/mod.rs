@@ -604,6 +604,32 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
+    /// The name React exports a type under, for a type or class name as written (`FC`, `React.FC`, `R.FC`), by where
+    /// it was imported from and not by what it is called: `import { FC as Fn } from "react"` names `FC`, while an `FC`
+    /// imported from another module is not React's. A name no import binds (the global `React` namespace) is read as
+    /// written, as in `react_api`.
+    pub(super) fn react_type_export(&self, written: &str) -> Option<String> {
+        let import_of = |local: &str| self.data.imports.iter().find(|import| import.local_name.as_str() == local);
+        match written.split_once('.') {
+            None => match import_of(written) {
+                Some(import) if is_react_module(&import.specifier) => Some(import.exported_name.to_string()),
+                Some(_) => None,
+                None => Some(written.to_owned()),
+            },
+            Some((object, member)) if !member.contains('.') => match import_of(object) {
+                Some(import)
+                    if is_react_module(&import.specifier)
+                        && matches!(import.exported_name.as_str(), "*" | "default") =>
+                {
+                    Some(member.to_owned())
+                }
+                Some(_) => None,
+                None => (object == "React").then(|| member.to_owned()),
+            },
+            Some(_) => None,
+        }
+    }
+
     pub(super) fn may_be_react(&self, name: &str) -> bool {
         self.data
             .imports

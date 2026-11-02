@@ -1347,6 +1347,69 @@ fn a_function_component_annotation_inside_an_intersection_carries_the_props() {
     assert_eq!(found, vec![("Drawer", "DrawerProps", FcAnnotation), ("Sheet", "DrawerProps", FcAnnotation)]);
 }
 
+fn found_mappings(source: &str) -> Vec<(String, String, crate::types::DetectionRule)> {
+    let data = parse_file(Utf8Path::new("/test/typed.tsx"), source);
+    data.component_mappings.iter().map(|m| (m.component_name.clone(), m.props_type_name.to_string(), m.rule)).collect()
+}
+
+#[test]
+fn a_react_function_component_type_is_matched_through_its_import_under_any_alias_or_namespace() {
+    use crate::types::DetectionRule::FcAnnotation;
+    let source = r#"
+        import type { FC as Fn, ComponentType } from "react";
+        import * as R from "react";
+        interface AProps { a: string }
+        interface BProps { b: string }
+        interface CProps { c: string }
+        export const Aliased: Fn<AProps> = () => <div />;
+        export const Namespaced: R.FunctionComponent<BProps> = () => <div />;
+        export const Plain: ComponentType<CProps> = () => <div />;
+    "#;
+    assert_eq!(
+        found_mappings(source),
+        vec![
+            ("Aliased".into(), "AProps".into(), FcAnnotation),
+            ("Namespaced".into(), "BProps".into(), FcAnnotation),
+            ("Plain".into(), "CProps".into(), FcAnnotation),
+        ]
+    );
+}
+
+#[test]
+fn a_function_component_type_named_like_reacts_but_imported_from_another_module_is_not_reacts() {
+    let source = r#"
+        import type { FC } from "./local-types";
+        import * as Other from "other-lib";
+        interface AProps { a: string }
+        export const Mine: FC<AProps> = () => <div />;
+        export const Theirs: Other.FC<AProps> = () => <div />;
+    "#;
+    assert_eq!(found_mappings(source), vec![]);
+}
+
+#[test]
+fn a_class_extending_a_react_component_type_is_matched_through_its_import_only() {
+    use crate::types::DetectionRule::ClassComponent;
+    let source = r#"
+        import { PureComponent as Pure } from "react";
+        import * as R from "react";
+        import { Component } from "./my-base";
+        interface AProps { a: string }
+        interface BProps { b: string }
+        interface CProps { c: string }
+        export class Aliased extends Pure<AProps> { render() { return <div />; } }
+        export class Namespaced extends R.Component<BProps> { render() { return <div />; } }
+        export class Foreign extends Component<CProps> { render() { return <div />; } }
+    "#;
+    assert_eq!(
+        found_mappings(source),
+        vec![
+            ("Aliased".into(), "AProps".into(), ClassComponent),
+            ("Namespaced".into(), "BProps".into(), ClassComponent),
+        ]
+    );
+}
+
 #[test]
 fn a_call_given_a_tag_and_a_config_object_is_a_component_when_a_props_type_beside_it_gives_that_tag() {
     use crate::types::DetectionRule::TaggedFactory;
