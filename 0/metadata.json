@@ -1,0 +1,94 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6F7SAJ34D1RHNPXBMZKYYFF",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-02T22:59:05.211311Z",
+  "branch": "docs/core-collected",
+  "checkpoints_count": 1,
+  "save_step_count": 4,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "01653d335d9f",
+  "checkpoint_transcript_start": 1717,
+  "transcript_lines_at_start": 1717,
+  "compact_transcript_start": 145,
+  "token_usage": {
+    "input_tokens": 10,
+    "cache_creation_tokens": 15408,
+    "cache_read_tokens": 1375300,
+    "output_tokens": 4682,
+    "api_call_count": 4,
+    "subagent_tokens": {
+      "input_tokens": 22,
+      "cache_creation_tokens": 31056,
+      "cache_read_tokens": 5220627,
+      "output_tokens": 14637,
+      "api_call_count": 12
+    }
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 6,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 31
+  },
+  "summary": {
+    "intent": "Complete trail 164 (semantic type checker correctness fixes) via a delegated agent, publish the resulting branches as PRs, and kick off follow-on trails 165-167 in parallel.",
+    "outcome": "Trail 164 produced three signed branches (stale-cache invalidation, merge parity, config-ignored warning) that were pushed as PRs #300-#302 with correct stacked bases and bodies; trail 167 workers were launched, and trail 166 was deferred.",
+    "learnings": {
+      "repo": [
+        "Repo is caliper (Rust workspace: crates/core, crates/cli) with changesets in .changeset/ and docs in docs/; each fix ships a changeset and docs update.",
+        "SemanticHook caches checker answers keyed by the component's own file, so edits to imported files (e.g. props interface) left stale types in 'on-demand' mode until the cache was invalidated.",
+        "Whole-project merge and session merge in semantic types differ on purpose: batch merge lets the checker decide which props exist (drops unreturned props like `legacy`), while session merge keeps them and takes @types/react className under htmlAttributes: full.",
+        "OpaqueType, MaxDepthExceeded and CircularReference diagnostics name the component rather than the prop, so they can only be cleared once no opaque props remain.",
+        "`check`, `inspect` and `watch` never run the TypeScript checker; only `extract` does, so experimentalSemanticTypes/tscPath config was silently ignored. The warning goes to stderr so --strict exit codes are unchanged.",
+        "Architecture test has an allowlist; trail 167 aims to move option enums to types/ with re-exports to keep public paths and the semver check intact.",
+        "Quality gates run per branch: full test suite, clippy, lint, doc-check, typos, machete; commits are signed."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/pipeline/semantic_hook.rs",
+          "finding": "Added SemanticHook::invalidate with a generation counter so in-flight answers are not stored after an edit; called from update_file, ensure_fresh, config-change rebuild and cold paths. Existing `let _ = session.initialize()` pattern trips clippy::let_underscore_must_use under --all-targets (trail 165)."
+        },
+        {
+          "path": "crates/core/src/types/semantic.rs",
+          "finding": "keep_unanswered bool replaced by private Unanswered::{Drop, Keep} enum controlling whether opaque diagnostics are retained during on-demand merge."
+        }
+      ],
+      "workflow": [
+        "Delegating each trail to a background agent in an isolated git worktree, with the agent forbidden to push or merge, lets the orchestrator verify signatures and then push/open PRs itself.",
+        "Proving tests fail before a fix and pass after (including temporarily disabling a feature to confirm e2e tests catch it) gives credible evidence for PR bodies.",
+        "Stacked PRs need explicit base branches; the dependent branch must merge after its base.",
+        "Performance trails (166) are deferred until the machine is quiet so measurements are reliable."
+      ]
+    },
+    "friction": [
+      "Branch 1 fell 10 commits behind origin/main by the time the agent finished, since an earlier draft status had noted it.",
+      "Existing test lint pattern (`let _ =` on must_use) conflicts with clippy --all-targets, forcing the agent to leave it alone and use drop(...) in new tests.",
+      "Trail 166 cannot run concurrently with others because benchmark numbers need a quiet machine."
+    ],
+    "open_items": [
+      "Merge branch 1 (PR #300) into main before branch 2 (PR #301), and consider merging origin/main into branch 1.",
+      "Narrow SemanticHook invalidation using the resolver's per-component Dependencies if measurement shows full invalidation is too costly.",
+      "Retained opaque diagnostic is conservative and may remain for a prop the checker answered; could be refined.",
+      "Fix `let _ = session.initialize()` clippy lint in semantic_hook tests under trail 165.",
+      "Start trail 166 (watch performance) after trail 165 finishes and the machine is quiet.",
+      "Review pending PRs #291 and #299-#302.",
+      "Decide whether feat/cross-file-render-evidence (trail 156) warrants an ADR.",
+      "Trail 167 workers must still produce branches for ARCH-4 option enum move and the architecture/ADR docs refresh."
+    ]
+  }
+}
