@@ -1,0 +1,69 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6F291GMYTWHKWD3WXFYRFGZ",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-02T21:22:43.815019Z",
+  "branch": "feat/prop-level-confidence",
+  "checkpoints_count": 1,
+  "save_step_count": 4,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "8a3d7d6688f9",
+  "checkpoint_transcript_start": 1107,
+  "transcript_lines_at_start": 1107,
+  "compact_transcript_start": 98,
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 4793,
+    "cache_read_tokens": 422880,
+    "output_tokens": 581,
+    "api_call_count": 2,
+    "subagent_tokens": {
+      "input_tokens": 142,
+      "cache_creation_tokens": 107359,
+      "cache_read_tokens": 32092161,
+      "output_tokens": 52618,
+      "api_call_count": 76
+    }
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 6,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 20
+  },
+  "summary": {
+    "intent": "Orchestrate parallel background agents working on multiple branches (trail 157 trust and agents, t155-156-detect, a release run on main) in the caliper project, and shepherd them to PRs.",
+    "outcome": "The trail 157 worker hit its 200-turn limit during the final gate on branch 3 (feat/prop-level-confidence), so it was resumed via SendMessage to finish the TypeScript package tests, confirm all three branches are committed and signed, and send a full report. No PRs were opened yet.",
+    "learnings": {
+      "repo": [
+        "Caliper uses per-agent git worktrees under .claude/worktrees/agent-<id> with branches named worktree-agent-<id>.",
+        "The final gate for a branch includes TypeScript package tests when files under packages/ changed.",
+        "Commits on the trail branches are expected to be signed.",
+        "PRs #289 and #290 must be merged by the user to unblock oracle/three-tools-report."
+      ],
+      "code": [],
+      "workflow": [
+        "Background agents have a 200-turn limit; when hit they return partial output and can be resumed with SendMessage to the same task-id.",
+        "A task-notification can fire multiple times for the same agent, each time it stops with no live background children.",
+        "Partial-result notices should be treated as incomplete; the orchestrator should resume rather than treat the work as done.",
+        "Push, link and open PRs only after the worker's full report is in."
+      ]
+    },
+    "friction": null,
+    "open_items": null
+  }
+}
