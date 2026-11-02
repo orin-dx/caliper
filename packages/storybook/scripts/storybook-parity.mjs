@@ -345,7 +345,8 @@ function syntheticStories(list, sample) {
     const module = `./${basename(file).replace(/\.tsx?$/, '')}`
     const header = named
       ? `import { ${root} } from '${module}'`
-      : /export\s+default\s/.test(source)
+      : // A default export under another name is another component: `Wrapper` in a file that exports `useNotification`.
+        new RegExp(`export\\s+default\\s+(?:async\\s+)?(?:function\\s+|class\\s+)?${escaped}\\b`).test(source)
         ? `import ${root} from '${module}'`
         : undefined
     if (!header) continue
@@ -359,11 +360,38 @@ function syntheticStories(list, sample) {
   return created
 }
 
+/** Attributes the DOM, React and the ARIA spec define: the addon lists them on purpose (`htmlAttributes: 'full'`). */
+const DOM_ATTRIBUTE =
+  /^(aria-|data-|on[A-Z]|class(Name)?$|style$|id$|role$|tabIndex$|title$|hidden$|lang$|dir$|slot$|key$|ref$|dangerouslySetInnerHTML$|suppress\w+Warning$|content(Editable)?$|draggable$|spellCheck$|translate$|inert$|popover|autoFocus$|accessKey$|nonce$|is$|part$|exportparts$|inputMode$|enterKeyHint$|itemProp$|itemScope$|itemType$|itemID$|itemRef$|about$|datatype$|inlist$|prefix$|property$|rel$|resource$|rev$|typeof$|vocab$|color$|radioGroup$|results$|security$|unselectable$|autoCapitalize$|autoCorrect$|autoSave$|defaultChecked$|defaultValue$)/
+
+/** A type's text with the differences that are only formatting removed: quotes, spacing, `undefined`, union order. */
+function normalizeType(text) {
+  if (!text) return ''
+  const members = []
+  let depth = 0
+  let current = ''
+  const source = text.replaceAll("'", '"').replaceAll(/\s+/g, ' ').replaceAll(/;\s*}/g, ' }').replaceAll('=>', '→')
+  for (const ch of source) {
+    if ('<({['.includes(ch)) depth++
+    else if ('>)}]'.includes(ch)) depth--
+    if (ch === '|' && depth === 0) {
+      members.push(current.trim())
+      current = ''
+    } else current += ch
+  }
+  members.push(current.trim())
+  return members
+    .filter((member) => member !== 'undefined' && member !== '')
+    .toSorted()
+    .join('|')
+}
+
 /** Compares the props both providers documented for one story, and counts what only the addon has. */
 function compareProps(ours, theirs, into, story) {
   for (const [name, a] of Object.entries(ours)) {
     const b = theirs[name]
     if (!b) {
+      into.extraByKind[DOM_ATTRIBUTE.test(name) ? 'domAttribute' : 'otherInherited']++
       into.extraProps++
       if (into.examples.length < 30 && into.extraProps % 37 === 0) into.examples.push(`${basename(story)}: ${name}`)
       if (a.described) into.extraDescribed++
@@ -387,7 +415,10 @@ function compareProps(ours, theirs, into, story) {
     else if (!a.options && b.options) into.optionsOnlyTheirs++
     else if (a.options && b.options && a.options.toSorted().join('|') !== b.options.toSorted().join('|'))
       into.optionsDiffer++
-    if (a.required !== b.required) into.requiredDiffers++
+    if (a.required !== b.required) {
+      into.requiredDiffers++
+      into.details.required.push({ story: where, prop: name, ours: a.required, theirs: b.required, type: a.type })
+    }
     if (a.default && !b.default) into.defaultOnlyOurs++
     else if (!a.default && b.default) {
       into.defaultOnlyTheirs++
@@ -397,10 +428,17 @@ function compareProps(ours, theirs, into, story) {
     if (a.described && !b.described) into.describedOnlyOurs++
     else if (!a.described && b.described) into.describedOnlyTheirs++
     if (a.type === b.type) into.sameTypeText++
+    else if (normalizeType(a.type) === normalizeType(b.type)) into.typeFormattingOnly++
+    else {
+      into.typeDiffers++
+      into.details.type.push({ story: where, prop: name, ours: a.type, theirs: b.type })
+    }
   }
   for (const name of Object.keys(theirs)) {
     if (name in ours) continue
     into.missingProps++
+    // A missing DOM attribute is what `htmlAttributes: 'none'` or a collapsed layer does; anything else is for review.
+    into.missingByKind[DOM_ATTRIBUTE.test(name) ? 'domAttribute' : 'review']++
     into.details.missing.push({ story: basename(story), prop: name, theirs: theirs[name].type })
   }
 }
@@ -428,10 +466,15 @@ function diff(ours, baseline) {
     describedOnlyOurs: 0,
     describedOnlyTheirs: 0,
     propsOnStoriesOnlyWeAnswer: 0,
+    // Deliberate differences: what the addon lists on purpose. For review: what may be a defect.
+    extraByKind: { domAttribute: 0, otherInherited: 0 },
+    missingByKind: { domAttribute: 0, review: 0 },
+    typeFormattingOnly: 0,
+    typeDiffers: 0,
     examples: [],
     storiesWithMissing: 0,
     // Every disagreement, by story and prop, in the JSON report.
-    details: { kind: [], defaults: [], missing: [] },
+    details: { kind: [], defaults: [], missing: [], required: [], type: [] },
   }
   for (const [path, a] of Object.entries(ours.stories)) {
     const b = baseline.stories[path]
@@ -567,6 +610,42 @@ function markdown(report) {
         ]),
         '',
       )
+      lines.push(
+        'Deliberate differences against candidate defects:',
+        '',
+        table([
+          ['class', 'kind', 'count'],
+          [
+            'deliberate',
+            'extra props that are DOM, React or ARIA attributes (`htmlAttributes`)',
+            d.extraByKind.domAttribute,
+          ],
+          ['deliberate', 'extra props inherited from a library or a hook', d.extraByKind.otherInherited],
+          ['deliberate', 'type text differs only in quotes, spacing, `undefined` or union order', d.typeFormattingOnly],
+          [
+            'deliberate',
+            'props Storybook lists that are DOM attributes (`htmlAttributes: none`, collapsed layers)',
+            d.missingByKind.domAttribute,
+          ],
+          ['review', 'props Storybook lists that are not DOM attributes', d.missingByKind.review],
+          ['review', 'type text differs beyond formatting', d.typeDiffers],
+          ['review', '`required` differs', d.requiredDiffers],
+          ['review', 'default only Storybook has', d.defaultOnlyTheirs],
+        ]),
+        '',
+      )
+      const review = [
+        ['missing', d.details.missing.filter((m) => !DOM_ATTRIBUTE.test(m.prop)).map((m) => `${m.story}: ${m.prop}`)],
+        ['type', d.details.type.map((t) => `${t.story}: ${t.prop} (ours \`${t.ours}\`, theirs \`${t.theirs}\`)`)],
+        ['required', d.details.required.map((r) => `${r.story}: ${r.prop} (ours ${r.ours}, theirs ${r.theirs})`)],
+        ['default', d.details.defaults.map((x) => `${x.story}: ${x.prop} (theirs \`${x.theirs}\`)`)],
+      ]
+      for (const [name, items] of review.filter(([, items]) => items.length > 0)) {
+        lines.push(
+          `For review, ${name}: ${items.slice(0, 12).join('; ')}${items.length > 12 ? `; and ${items.length - 12} more in the JSON` : ''}`,
+          '',
+        )
+      }
       if (d.examples.length > 0) lines.push(`Sample of extra props: ${d.examples.join(', ')}`, '')
     }
   }
