@@ -1,0 +1,69 @@
+<task-notification>
+<task-id>aab89d4ec8820cc42</task-id>
+<tool-use-id>toolu_014mhBUSKsvxTKxpG3uWDZyt</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/ad4b3461-bb6f-49f0-bb4d-997d9b8887ba/tasks/aab89d4ec8820cc42.output</output-file>
+<status>completed</status>
+<summary>Agent "Trail 154 dependency-loaded perf" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Trail 154: I built two of the three planned perf branches. They cut shadcn wall time by about 6% and peak memory by about 5% on this machine. They do not reach the 141 ms / 275 MiB baseline. Neither branch is pushed and no PRs are open. Both commits are GPG-signed (`%G?` prints `G`) and carry the session trailer. The work is in `/Users/gabe/Projects/caliper/.claude/worktrees/agent-aab89d4ec8820cc42`.
+
+## Branches
+| Branch | Base | Tip | Status |
+|---|---|---|---|
+| `perf/project-demands-sort` | main (`2daef927`) | `f2ff50c0` | done |
+| `perf/module-demands-lean` | `perf/project-demands-sort` | `b508d013` | done |
+| `perf/cache-react-augmentations` | main | none | built, measured, deleted |
+
+## Measurements
+These are shadcn `extract --json --no-cache` with dependencies loaded. I used the installed shadcn corpus in sibling worktree `agent-a9b87f2da7f20385f`, read-only. Each row is the median of interleaved runs. I could not measure uncontended: the machine's load average was 9–15 throughout, so only compare numbers measured side by side.
+
+| Build | Wall | Peak RSS | Internal `durationMs` |
+|---|---|---|---|
+| main | 171–177 ms | 329–333 MiB | 138–147 |
+| `sort` | 161–167 ms (-10 ms) | 332 MiB (unchanged) | 123–130 |
+| `lean` | 162–175 ms (within noise of `sort`) | 312–315 MiB (-17 to -20 MiB) | 128–130 |
+
+- **Extract output:** identical across all builds once the changing `durationMs` field is stripped. Without stripping, the hashes differ between runs of the same binary.
+- **`just bench`** (Mantine and Chakra, dependencies off, `lean` tip against `origin/main`): Mantine 73 → 75 ms (1.03×), Chakra 65 → 65 ms (1.00×). RSS ratios are 1.01 and 0.99, inside the script's 1.10 time / 1.20 memory thresholds.
+- **Baseline gap:** against the same-machine main numbers the two branches give about -6% time and -5% RSS. The 141 ms / 275 MiB baseline was measured uncontended, so the remaining gap is about +14% on memory and an unmeasurable amount on time.
+
+## What each branch does
+- **`sort`:** a file's demands all share the same `from` path, so the derived `Ord` compared a long path first on every comparison. They are now sorted by (specifier, name).
+- **`lean`:** two changes.
+  - **Resolve once per scope:** a module-only import is resolved once per resolution scope (nearest ancestor with `package.json`, `tsconfig.json`, `jsconfig.json` or `node_modules`). On shadcn, 2748 module-only demands become about 1316 resolutions.
+  - **Scan without keeping the parse:** the React-augmentation search no longer keeps a full parse of files it only passes through. The package entry is still parsed in full. A file that cannot declare into React is read for its re-exports only, or skipped if it has none. Any file mentioning `declare module "react"` or `namespace React` still gets a full parse.
+
+## Verification
+- **Tests and lint:** full nextest passes (1033, 1 skipped; run unsandboxed because the watch/pty tests need it). The lint suite (fmt, clippy, doc-check, typos, machete) is clean.
+- **Real-tree check:** I compared the new re-export scan against `parse_file` on 131,197 real `.d.ts` files from shadcn's `node_modules`, with 0 mismatches. That run found and fixed a missing `export default &lt;import&gt;` case. I also ran the two text prefilters over the same files; the first run found false negatives (`export default &lt;import&gt;`) and after the fix there are none. I then removed those throwaway tests.
+- **Changed test:** the existing assertion that a scan-only file is kept in the layer's parse map (`augmentation_tests.rs`) now asserts it is not kept.
+- **Changesets:** one per branch, both patch.
+
+## Decisions for you
+- **`cache-react-augmentations` dropped.** `merged_interfaces` costs about 14 ms thread-summed per 60k calls on main, roughly 0.25 µs per call, so under 2 ms of wall time. My cached version cost more (33 ms thread-summed, from lock contention). The earlier 5.5 ms estimate came from disabling the lookup entirely, not from making it cheaper.
+- **`lean` is a memory win, not a time win.** Time is within noise of `sort`. Keep it only if the memory saving and fewer resolutions are worth about 410 added lines. The scope key assumes directories with the same scope resolve a bare specifier alike. It could be wrong where a `tsconfig` `references` list picks a config by `include`.
+- **No dependency parse cache.** I measured instead of prototyping. A warm run with the persisted dependency index is 158 ms against 164 ms for `--no-cache`, only about 4% faster. The acceptance target is `--no-cache`, so a parse cache cannot help it, and it would touch ADRs 0003, 0008 and 0011.
+- **Remaining cost:** loading dependencies still costs about 70 ms and 175 MiB on shadcn (164 ms / 313 MiB with, 95 ms / 139 MiB without). Getting back to the baseline needs a bigger change than these two branches.
+
+## Draft PR bodies
+**`perf/project-demands-sort`** (base `main`)
+
+What: sorts a file's package demands by (specifier, name) instead of the derived `Ord`.
+Why: every demand of a file shares its `from` path, so the derived order compared a long path on each comparison.
+Measured on shadcn with dependencies loaded, `--no-cache`, same machine, interleaved: 171–177 → 161–167 ms wall, RSS unchanged, output identical.
+Risks: none expected; the order within a file is unchanged.
+Trail: https://entire.com/gh/orin-dx/-/trails/154
+https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ
+
+**`perf/module-demands-lean`** (base `perf/project-demands-sort`; retarget to `main` when the parent merges)
+
+What: resolves a module-only import once per resolution scope, and scans re-exports for the augmentation search with a light parse. The package entry is still parsed in full.
+Why: a project imports each package from many directories, and the search kept a full parse of every file it passed through.
+Measured on shadcn with dependencies loaded, `--no-cache`: peak RSS 332 → 315 MiB against the parent; time within noise. `just bench` ratios are 1.03 (Mantine) and 1.00 (Chakra); extract output is identical.
+Checked: 131,197 real `.d.ts` files, with 0 differences from `parse_file` and 0 prefilter false negatives.
+Risks: the scope key assumes directories with the same scope resolve a bare specifier alike; a `tsconfig` `references` list that picks a config by `include` could differ. The text prefilters err toward a full parse.
+Trail: https://entire.com/gh/orin-dx/-/trails/154
+https://claude.ai/code/session_013R2ytvK9B32ZaSUaSe6aAZ</result>
+<usage><subagent_tokens>314309</subagent_tokens><tool_uses>166</tool_uses><duration_ms>2517950</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-aab89d4ec8820cc42</worktreePath><worktreeBranch>worktree-agent-aab89d4ec8820cc42</worktreeBranch></worktree>
+</task-notification>
