@@ -1,0 +1,75 @@
+{
+  "cli_version": "0.12.3-nightly.202610300619.cea1b3cee",
+  "checkpoint_id": "01M6EDEF4MB12EK226S28Z0W31",
+  "strategy": "manual-commit",
+  "branch": "feat/collapsed-layer-members",
+  "checkpoints_count": 8,
+  "files_touched": [
+    ".changeset/list-react-aria-ref-html-props.md",
+    ".changeset/merge-react-module-augmentation.md",
+    ".changeset/pick-keyof-union-jsx.md",
+    "crates/core/src/dependency_types.rs",
+    "crates/core/src/dependency_types/augmentation_tests.rs",
+    "crates/core/src/dependency_types/tests.rs",
+    "crates/core/src/extractor/visit.rs",
+    "crates/core/src/known.rs",
+    "crates/core/src/named_type_index.rs",
+    "crates/core/src/pipeline/revision.rs",
+    "crates/core/src/pipeline/revision/lazy.rs",
+    "crates/core/src/pipeline/tests.rs",
+    "crates/core/src/pipeline/watch/tests.rs",
+    "crates/core/src/react_types.rs",
+    "crates/core/src/resolver/alias.rs",
+    "crates/core/src/resolver/chain.rs",
+    "crates/core/src/resolver/deps.rs",
+    "crates/core/src/resolver/evaluate.rs",
+    "crates/core/src/resolver/extends.rs",
+    "crates/core/src/resolver/html.rs",
+    "crates/core/src/resolver/mod.rs",
+    "crates/core/tests/pick_keyof_union.rs",
+    "crates/core/tests/react_augmentation_dependencies.rs",
+    "crates/core/tests/react_augmentation_watch.rs",
+    "crates/core/tests/react_module_augmentation.rs",
+    "crates/core/tests/snapshots/snapshots__snapshot_rdt_compat.snap",
+    "crates/core/tests/terminal_react_builtins.rs",
+    "docs/architecture/pipeline-orchestration.md",
+    "docs/architecture/resolver-type-resolution.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 118,
+    "cache_creation_tokens": 1491648,
+    "cache_read_tokens": 41135340,
+    "output_tokens": 38900,
+    "api_call_count": 58,
+    "subagent_tokens": {
+      "input_tokens": 9,
+      "cache_creation_tokens": 7432,
+      "cache_read_tokens": 481600,
+      "output_tokens": 1878,
+      "api_call_count": 5
+    }
+  },
+  "redaction": {
+    "replacements": 99,
+    "layers": {
+      "betterleaks": 26,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 2,
+      "credentialed_uri": 0,
+      "entropy": 71,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
