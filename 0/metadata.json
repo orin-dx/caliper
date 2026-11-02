@@ -1,0 +1,76 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6F79AFRSMXYYDMBJ69DQHYR",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-02T22:50:17.035141Z",
+  "branch": "ci/exit-and-debug-lints",
+  "checkpoints_count": 5,
+  "save_step_count": 4,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "5d421268e3bf",
+  "checkpoint_transcript_start": 1687,
+  "transcript_lines_at_start": 1687,
+  "compact_transcript_start": 143,
+  "token_usage": {
+    "input_tokens": 4,
+    "cache_creation_tokens": 1159,
+    "cache_read_tokens": 674804,
+    "output_tokens": 1141,
+    "api_call_count": 2,
+    "subagent_tokens": {
+      "input_tokens": 19,
+      "cache_creation_tokens": 11035,
+      "cache_read_tokens": 3678993,
+      "output_tokens": 7248,
+      "api_call_count": 10
+    }
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 6,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 29
+  },
+  "summary": {
+    "intent": "Resolve the merge conflict on PR #299 (branch feat/factory-results) against main so it can be merged, while keeping commits signed and checks clean.",
+    "outcome": "Merged main into the branch with no textual conflicts, regenerated the golden cache snapshot in a separate signed commit (56cbcf54), and pushed; GitHub now shows #299 as MERGEABLE with status BLOCKED, likely pending checks (not confirmed). All 1067 workspace tests pass and lint, doc-check, typos and machete are clean locally.",
+    "learnings": {
+      "repo": [
+        "GitHub can report a PR as conflicting even when `git merge main` has no textual conflicts, because of history from earlier stacked merges; pushing a merge commit of main resolved it.",
+        "The golden cache snapshot test is sensitive to schema and fixture changes: #293 added a `typeof` binding to the golden fixture while this branch bumped the schema to 28, so the snapshot bytes differed after merging and needed regeneration.",
+        "Pre-merge checks for this repo include lint, doc-check, typos and machete, and commits are expected to be signed.",
+        "CLI config tests fail in a fresh worktree until `pnpm install` is run."
+      ],
+      "code": [],
+      "workflow": [
+        "Regenerate snapshots in a separate signed commit from the merge commit to keep history clear.",
+        "Use a temporary git worktree for the merge and remove it afterward.",
+        "A MERGEABLE/BLOCKED status right after a push likely means checks are still running; verify before assuming a real problem."
+      ]
+    },
+    "friction": [
+      "GitHub reported a conflict that git could not reproduce locally.",
+      "Golden snapshot test failed on the merged tree because two independent changes (#293 fixture and the schema 28 bump) interacted.",
+      "CLI config tests failed initially because the fresh worktree lacked installed dependencies."
+    ],
+    "open_items": [
+      "Merge #299 once its checks are green; BLOCKED status was not confirmed to be only pending checks.",
+      "#291 (the release PR) is still open.",
+      "Wave 1 tasks `t164-correct` and `t165-lints` are still in progress."
+    ]
+  }
+}
