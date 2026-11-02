@@ -61,11 +61,20 @@ export declare function isResolutionConfig(sessionId: number, filePath: string):
 
 /** Options passed from TypeScript — flat struct for easy NAPI marshalling. */
 export interface JsExtractOptions {
+  /** Source directories to scan. */
   srcDirs: Array<string>
+  /** Extra glob-like patterns to exclude (on top of built-in: stories, tests, snapshots). */
   exclude?: Array<string>
+  /** `'full'` (the default) lists all of an element's attributes, `'curated'` a compact subset, `'none'` none. */
   htmlAttributes?: 'curated' | 'full' | 'none'
+  /**
+   * Path to the tsconfig that governs module resolution. When unset, each importing file uses the nearest
+   * `tsconfig.json` above it.
+   */
   tsconfigPath?: string
+  /** Additional builtin type names beyond the React standard set. */
   extraBuiltins?: Array<string>
+  /** Cache directory; by default one under `node_modules/.cache/caliper-docgen` above the first source directory. */
   cacheDir?: string
   /**
    * Read and write the on-disk caches (default `true`). `false` reads and writes nothing under `cacheDir`; the
@@ -102,7 +111,9 @@ export interface JsExtractOptions {
 
 /** What a lazy session has indexed and resolved so far. `None` for an eager, unknown or uninitialized session. */
 export interface JsLazyStats {
+  /** The number of the session's current revision, one higher for every change that produced a new one. */
   revision: number
+  /** Source files the session holds. */
   files: number
   /** Components found by parsing. */
   components: number
@@ -149,6 +160,10 @@ export declare function sessionComponentKeys(sessionId: number): Array<string>
  */
 export declare function sessionDocgenInfo(sessionId: number, keys: Array<string>): string
 
+/**
+ * What a lazy session has indexed and resolved so far, as [`JsLazyStats`]. `null` for an eager, unknown or
+ * uninitialized session.
+ */
 export declare function sessionStats(sessionId: number): JsLazyStats | null
 
 /**

@@ -39,7 +39,9 @@ pub struct NotificationMessage {
 /// A notification surfaced to a caller via [`crate::Client::take_notifications`].
 #[derive(Debug, Clone)]
 pub struct Notification {
+    /// The notification's method name, as `tsc` sent it.
     pub method: String,
+    /// The notification's parameters; `null` when it sent none.
     pub params: serde_json::Value,
 }
 
