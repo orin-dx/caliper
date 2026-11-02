@@ -93,7 +93,7 @@ treated as opaque when it should expand the HTML attributes.
 
 ## Releases
 
-Add a changeset for a consumer-visible change (`.changeset/`; see `AGENTS.md` for how to write one). Callisto 0.16 plans the versions from the changesets and opens a release pull request (`callisto/version-packages`); merging it runs `.github/workflows/release.yml`, which publishes the crates and npm packages and tags the CLI release `npm/caliper-docgen@x.y.z`.
+Add a changeset for a consumer-visible change (`.changeset/`; see `AGENTS.md` for how to write one). Callisto 0.16 plans the versions from the changesets and opens a release pull request (`callisto/version-packages`); merging it runs `.github/workflows/callisto-release.yml`, which publishes the crates and npm packages, tags each package, and publishes one GitHub Release for the CLI (`cargo/caliper-docgen@x.y.z`) with its changelog section as the notes and the five CLI binaries attached, each with a build attestation. The npm wrapper's tag `npm/caliper-docgen@x.y.z` is what the tap reads. `docs/releasing.md` has the release flow and how to recover a failed run.
 
 Homebrew pulls from us: the tap's daily `brew bump` finds that tag with `livecheck`, builds `crates/cli` from source and bottles it, and a maintainer merges the formula pull request. Nothing in this repository notifies the tap.
 

@@ -67,6 +67,48 @@ describe('the oracle comparison', () => {
     expect(compare({ k: 'array', element: prim('number') }, checker)).toBe('wrong')
   })
 
+  describe('function parameter markers', () => {
+    const param = (type: Norm, marks: { optional?: boolean; rest?: boolean } = {}) => ({
+      optional: false,
+      rest: false,
+      ...marks,
+      type,
+    })
+    const fn = (...params: ReturnType<typeof param>[]): Norm => ({ k: 'function', params, returns: prim('void') })
+
+    it('a side that records neither marker is less precise than a checker that has one', () => {
+      expect.hasAssertions()
+      // Caliper's own functions: `(value?: string) => void` and `(...args: string[]) => void` read without markers.
+      expect(compare(fn(param(prim('string'))), fn(param(prim('string'), { optional: true })))).toBe('less precise')
+      expect(compare(fn(param(prim('string'))), fn(param(prim('string'), { rest: true })))).toBe('less precise')
+    })
+
+    it('a side that keeps the markers is not capped by them', () => {
+      expect.hasAssertions()
+      const marked = fn(param(prim('string'), { optional: true }))
+      const spread = fn(param(prim('string'), { rest: true }))
+      expect(compare(marked, marked)).toBe('identical')
+      expect(compare(spread, spread)).toBe('identical')
+    })
+
+    it('a marker only the other side has does not lower the verdict, and a lost one still does', () => {
+      expect.hasAssertions()
+      const plain = fn(param(prim('string')))
+      const marked = fn(param(prim('string'), { optional: true }))
+      expect(compare(marked, plain)).toBe('identical')
+      // The optional marker is kept but the rest marker is lost.
+      const both = fn(param(prim('string'), { optional: true, rest: true }))
+      expect(compare(marked, both)).toBe('less precise')
+    })
+
+    it('a parameter the side lacks is less precise when the checker marks it and wrong when it does not', () => {
+      expect.hasAssertions()
+      const one = fn(param(prim('string')))
+      expect(compare(one, fn(param(prim('string')), param(prim('number'), { optional: true })))).toBe('less precise')
+      expect(compare(one, fn(param(prim('string')), param(prim('number'))))).toBe('wrong')
+    })
+  })
+
   it('an optional prop of type never is undefined in the checker', () => {
     expect.hasAssertions()
     // `classNames?: never` reads `undefined`, the optional marker the comparison drops.

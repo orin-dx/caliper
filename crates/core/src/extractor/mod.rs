@@ -29,9 +29,12 @@ mod evidence;
 mod interface;
 mod js_text;
 mod jsdoc;
+mod reexports;
 mod uses;
 mod visit;
 mod wrapper;
+
+pub(crate) use reexports::re_export_specifiers;
 
 /// A React API the extractor recognizes a call to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

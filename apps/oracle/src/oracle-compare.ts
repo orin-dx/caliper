@@ -137,8 +137,9 @@ function compareFunctions(c: Norm & { k: 'function' }, k: Norm & { k: 'function'
       verdicts.push(kp.optional || kp.rest ? 'less precise' : 'wrong')
     } else {
       verdicts.push(compare(cp.type, kp.type, depth + 1))
-      // Caliper's function types record neither marker.
-      if (kp.optional || kp.rest) verdicts.push('less precise')
+      // A marker the checker has and this side lost. Caliper's function types record neither, so every optional or rest
+      // parameter reads less precise there; a tool that keeps the markers is held to them, not capped by them.
+      if ((kp.optional && !cp.optional) || (kp.rest && !cp.rest)) verdicts.push('less precise')
     }
   }
   if (c.params.length > k.params.length) verdicts.push('wrong')
