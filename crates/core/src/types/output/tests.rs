@@ -40,11 +40,11 @@ fn to_tagged_value(pt: &PropType) -> serde_json::Value {
         PropType::BoolLiteral(b) => serde_json::json!({"kind": "boolLiteral", "value": b}),
         PropType::Union(members) => serde_json::json!({
             "kind": "union",
-            "members": members.iter().map(|m| to_tagged_value(m)).collect::<Vec<_>>()
+            "members": members.iter().map(to_tagged_value).collect::<Vec<_>>()
         }),
         PropType::Intersection(members) => serde_json::json!({
             "kind": "intersection",
-            "members": members.iter().map(|m| to_tagged_value(m)).collect::<Vec<_>>()
+            "members": members.iter().map(to_tagged_value).collect::<Vec<_>>()
         }),
         PropType::Array(inner) => serde_json::json!({
             "kind": "array",
@@ -52,7 +52,7 @@ fn to_tagged_value(pt: &PropType) -> serde_json::Value {
         }),
         PropType::Tuple(members) => serde_json::json!({
             "kind": "tuple",
-            "elements": members.iter().map(|m| to_tagged_value(m)).collect::<Vec<_>>()
+            "elements": members.iter().map(to_tagged_value).collect::<Vec<_>>()
         }),
         PropType::Readonly(inner) => serde_json::json!({
             "kind": "readonly",
@@ -81,7 +81,7 @@ fn to_tagged_value(pt: &PropType) -> serde_json::Value {
         PropType::Named { name, args } => serde_json::json!({
             "kind": "named",
             "name": name.as_str(),
-            "args": args.iter().map(|a| to_tagged_value(a)).collect::<Vec<_>>()
+            "args": args.iter().map(to_tagged_value).collect::<Vec<_>>()
         }),
         PropType::Function { type_params, params, return_type } => serde_json::json!({
             "kind": "function",

@@ -124,7 +124,7 @@ fn project(files: &[(&str, &str)]) -> Project {
 fn session(project: &Project, checker: Arc<Fake>, wait: Duration) -> WatchSession {
     let session = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() })
         .with_semantic(checker, wait);
-    let _ = session.initialize();
+    drop(session.initialize());
     session
 }
 
@@ -135,14 +135,14 @@ fn session_in(
 ) -> WatchSession {
     let options = PipelineOptions { src_dirs: vec![project.root.clone()], html_attributes: mode, ..Default::default() };
     let session = WatchSession::lazy(options).with_semantic(Fake::new(Duration::ZERO, reply), Duration::from_secs(5));
-    let _ = session.initialize();
+    drop(session.initialize());
     session
 }
 
 fn structural_session(project: &Project, mode: HtmlAttributeMode) -> WatchSession {
     let options = PipelineOptions { src_dirs: vec![project.root.clone()], html_attributes: mode, ..Default::default() };
     let session = WatchSession::lazy(options);
-    let _ = session.initialize();
+    drop(session.initialize());
     session
 }
 
@@ -246,7 +246,7 @@ fn a_structural_prop_the_checker_does_not_return_stays_with_its_structural_type(
 fn a_session_without_a_checker_answers_as_before() {
     let project = project(&[("Button.tsx", BUTTON)]);
     let plain = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() });
-    let _ = plain.initialize();
+    drop(plain.initialize());
 
     let answer = plain.component("Button").unwrap();
 
@@ -324,7 +324,7 @@ fn the_request_asks_only_for_the_react_props_the_mode_can_use() {
         let options =
             PipelineOptions { src_dirs: vec![project.root.clone()], html_attributes: mode, ..Default::default() };
         let session = WatchSession::lazy(options).with_semantic(Arc::new(Spy(seen.clone())), Duration::from_millis(1));
-        let _ = session.initialize();
+        drop(session.initialize());
         let _ = session.component("WithChildren");
         let target = seen.lock().unwrap().take().unwrap();
         target.react_wanted

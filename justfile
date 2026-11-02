@@ -119,7 +119,7 @@ md_src := "'**/*.md' '!node_modules/**' '!target/**' '!dist/**'"
 # Lint and format check
 lint:
     cargo fmt --check
-    cargo clippy --workspace --exclude caliper-docgen-napi --locked -- -D warnings
+    cargo clippy --workspace --all-targets --locked -- -D warnings
     pnpm exec oxfmt --check {{ts_src}}
     pnpm exec oxfmt --check {{md_src}}
     pnpm exec oxlint {{ts_src_only}}
@@ -150,7 +150,7 @@ zizmor:
 # `just ci` can't drift apart.
 pre-commit:
     cargo fmt --check
-    cargo clippy --workspace --exclude caliper-docgen-napi --locked -- -D warnings
+    cargo clippy --workspace --all-targets --locked -- -D warnings
     typos
     cargo deny check
 

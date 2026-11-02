@@ -114,8 +114,8 @@ fn a_prop_shared_by_components_is_written_once_and_a_different_default_is_its_ow
     let tone = prop("tone", None);
     let out = output(vec![
         component("Button", &[size.clone(), tone.clone()], &[]),
-        component("Input", &[size.clone()], &[size.clone()]),
-        component("Chip", &[small.clone()], &[]),
+        component("Input", std::slice::from_ref(&size), std::slice::from_ref(&size)),
+        component("Chip", std::slice::from_ref(&small), &[]),
     ]);
 
     let json = serde_json::to_value(&out).unwrap();
@@ -321,7 +321,7 @@ fn reading_an_id_missing_from_its_table_fails_naming_it() {
 #[test]
 fn a_prop_name_in_two_of_a_components_sets_fails_instead_of_one_replacing_the_other() {
     let size = prop("size", None);
-    let mut doc = serde_json::to_value(output(vec![component("Button", &[size.clone()], &[])])).unwrap();
+    let mut doc = serde_json::to_value(output(vec![component("Button", std::slice::from_ref(&size), &[])])).unwrap();
     let only_set = doc["components"]["Button"]["props"][0].clone();
     let other_set = json!("00000000000000dd");
     doc["propSets"][other_set.as_str().unwrap()] = set_json(&[&size]);

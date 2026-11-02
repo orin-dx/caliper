@@ -2995,13 +2995,15 @@ fn component_mapping_is_the_first_match_a_scan_finds() {
             crate::types::DetectionRule::FunctionDeclaration,
         )
     };
-    let mut global = GlobalSourceData::default();
-    global.component_mappings = vec![
-        mapping("Button", "FirstProps", "/a/button.tsx"),
-        mapping("Button", "SecondProps", "/b/button.tsx"),
-        mapping("Button", "ShadowedProps", "/a/button.tsx"),
-        mapping("Card", "CardProps", "/a/card.tsx"),
-    ];
+    let global = GlobalSourceData {
+        component_mappings: vec![
+            mapping("Button", "FirstProps", "/a/button.tsx"),
+            mapping("Button", "SecondProps", "/b/button.tsx"),
+            mapping("Button", "ShadowedProps", "/a/button.tsx"),
+            mapping("Card", "CardProps", "/a/card.tsx"),
+        ],
+        ..Default::default()
+    };
     let ctx = ResolutionContext::new(Arc::new(global), &PipelineOptions::default());
     let props_of = |file: &str, name: &str| {
         ctx.component_mapping(Utf8Path::new(file), name).map(|found| found.props_type_name.to_string())
