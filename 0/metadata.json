@@ -1,0 +1,201 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6F753H8EEQKF0G8JHDSPH7H",
+  "session_id": "cd0b1cc5-b31e-40d5-8c38-bf89ad8b231e",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-02T22:48:07.332397Z",
+  "branch": "main",
+  "checkpoints_count": 18,
+  "save_step_count": 1,
+  "files_touched": [
+    ".scratch_probe.py",
+    "apps/oracle/src/tri.scratch.ts",
+    "crates/core/tests/pick_keyof_missing_key.rs",
+    "crates/core/tests/scratch_aug.rs",
+    "crates/core/tests/scratch_nn.rs",
+    "packages/storybook/scripts/scratch-probe.mjs",
+    "scratch-bins/ana.py",
+    "scratch-bins/phase.py",
+    "scratch-bins/warm.sh",
+    "scratch/an.py",
+    "scratch/an2.py",
+    "scratch/an3.py",
+    "scratch/an4.py",
+    "scratch/base.py",
+    "scratch/cal.py",
+    "scratch/coll.py",
+    "scratch/diag.py",
+    "scratch/exl.py",
+    "scratch/exp.py",
+    "scratch/fx/Fix.tsx",
+    "scratch/fx/Imp.tsx",
+    "scratch/fx/Shapes.tsx",
+    "scratch/fx/base.ts",
+    "scratch/fx/codes.mjs",
+    "scratch/fx/dump.mjs",
+    "scratch/fx/rdg.mjs",
+    "scratch/fx/remote.ts",
+    "scratch/fx/run.cjs",
+    "scratch/fx/show.py",
+    "scratch/fx/survey.py",
+    "scratch/fx/tsconfig.json",
+    "scratch/m.py",
+    "scratch/ov.py",
+    "scratch/peek.py",
+    "scratch/pk.py",
+    "scratch/rep/a.tsx",
+    "scratch/rep/b.tsx",
+    "scratch/rep/c.tsx",
+    "scratch/run2.py",
+    "scratch/un.py",
+    "scratch/weekly2.py",
+    "scripts/scratch_antd.py",
+    "scripts/scratch_classify.py",
+    "scripts/scratch_gap.py",
+    "scripts/scratch_recall.py",
+    "scripts/scratch_run.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "33271c4d427b",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 148,
+    "cache_creation_tokens": 150341,
+    "cache_read_tokens": 57522126,
+    "output_tokens": 85632,
+    "api_call_count": 70,
+    "subagent_tokens": {
+      "input_tokens": 772,
+      "cache_creation_tokens": 1063255,
+      "cache_read_tokens": 51601871,
+      "output_tokens": 310566,
+      "api_call_count": 408
+    }
+  },
+  "redaction": {
+    "replacements": 100,
+    "layers": {
+      "betterleaks": 26,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 2,
+      "credentialed_uri": 0,
+      "entropy": 72,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01AR6A8cvLQdjZzhdSjkmYoa",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "entire-search"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "38f0942085e6",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 4234,
+        "end": 4235,
+        "entry_ids": [
+          "b06aa94e-a025-4dca-abdb-9c8c7b9934e8"
+        ],
+        "tool_use_id": "toolu_01AR6A8cvLQdjZzhdSjkmYoa"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01AR6A8cvLQdjZzhdSjkmYoa"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: entire-search",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01YZcnkXcvayagAd6mydwwXP",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "66249ac909a6",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 5181,
+        "end": 5182,
+        "entry_ids": [
+          "bc436c5f-3a29-4aab-8a3f-0bdfb2750b05"
+        ],
+        "tool_use_id": "toolu_01YZcnkXcvayagAd6mydwwXP"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01YZcnkXcvayagAd6mydwwXP"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 47
+  },
+  "summary": {
+    "intent": "Close the caliper-docgen v1 alpha gap: record a baseline, ship schema v4 (readonly, index signatures, RefObject), root-cause the shadcn/antd recall gap, add detection by shape, and harden on-demand TS 7.1. Later the user asked to plan the follow-up work properly with trails, sessions and workflows.",
+    "outcome": "Baseline recorded on trail #125; PRs #266 (schema v4), #267 (detection by shape) and #268 (on-demand hardening) were opened ready and signed. The shadcn/antd gap was reframed as mostly collapse/harness pairing, research was run, and a six-trail plan was saved to a plan file with coordinator and worker prompts; no further trails or branches were created.",
+    "learnings": {
+      "repo": [
+        "Collapsed inheritance layers (ADR 0012) store only type name, source, omitted list and total_props, so recall measured on flat props undercounts; shadcn own-props recall is 49.7% default vs 91.1% with --collapse-inherited-props none, antd 86.4% vs 99.3%.",
+        "An index signature [key: string]: T converted to an object field named `key` leaked into props-base consumers and produced a spurious `key` prop; consumers of object fields must skip index fields.",
+        "Snapshot tests resolve node_modules from the checkout, so a fresh worktree needs `npm install` or snapshots differ from CI.",
+        "Entire opens a draft PR on `entire trail link`; fill that PR in with gh pr edit/ready instead of gh pr create.",
+        "Weekly harness pairing errors (same-file default aliases, displayName, Object.assign/as barrels) account for ~27 antd misses; fixing pairing lifts antd component recall from 79.7% to ~95.4%.",
+        "Profiling with deps loaded showed the new-feature cost came from project_demands sorting (~10ms), module-only demands parsing ~580 extra files (~10ms, 50MiB), and per-read augmentation lookup (~5.5ms), not from members lists or JSON size.",
+        "scripts/rdt.mjs stores only the string 'enum' for enum props and the weekly react-docgen run loses 17-21% of files to thrown errors; vanilla react-docgen follows relative imports contrary to docs/measurement.md.",
+        "Callisto 0.16.0 is latest; callisto.toml publish-to lacks \"github-release\" and has no [release] section, so no GitHub Releases are created; release.yml asserts zero artifact slots and lacks release pending/drain recovery jobs."
+      ],
+      "code": [],
+      "workflow": [
+        "The user's environment has a GH shim whose credentials are in sandbox-denied paths; running gh unsandboxed bypassed it without the agent knowing.",
+        "Run the sandbox off for git/gh per repo rules but ask before bypassing controls; confirm any shim or wrapper exists before working around sandbox failures.",
+        "Per-trail sessions started from the trail body (`entire trail checkout N --worktree`, `entire trail resume N`) with a coordinator session is the recommended structure; cap about three concurrent sessions and profile alone.",
+        "Research subagents/workflows with read-only worktrees were effective for root-causing; their results live only in journals, so key facts must be copied into the plan file or trail bodies."
+      ]
+    },
+    "friction": [
+      "Local checkout was stale at start (docs/measurement.md and weekly.py missing) until origin was fetched.",
+      "Unsandboxed gh/git/entire calls bypassed the user's GH shim, which the user called a huge problem.",
+      "Sandbox blocked ps for the RSS test and required literal script paths, forcing reruns and workarounds.",
+      "Baseline harness reports 1,593 MiB peak RSS for every tool on shadcn/antd/spectrum, a measurement artifact left unfixed.",
+      "Worktrees lacked node_modules, producing misleading snapshot diffs that needed bisecting.",
+      "Typos lint tripped on scratch files and test names ('alikes'), requiring cleanup.",
+      "Parity run's degraded rate (4.8%/4.0%) disagrees with docs (42.1%/27.4%) for unknown reasons.",
+      "One release PR job on the #274 push failed with unknown cause."
+    ],
+    "open_items": [
+      "Step 3 structural recall fixes (terminal builtins, tw augmentation, Pick/keyof, unions) not built; Chakra NonNullable<union> item unreproduced and left open on trail #127.",
+      "Layer-members additive field and weekly harness change were in progress/not confirmed as PR'd at transcript end.",
+      "Six trails and their branches (measurement, perf, detection, missed components, Storybook/agent trust, release flow) not yet created; coordinator must do Wave 0 from the plan file.",
+      "Step 6 weekly re-run and STATUS.md/site number updates pending after #266-#268 merge.",
+      "User must decide whether #266-#268 should be redone through the GH shim and give the shim's name/location.",
+      "Release-flow decisions (product package, binaries, attestations) unanswered; wait for release run 41485334016 to finish before touching release.yml.",
+      "User-owned housekeeping: stale remote scratch branches, leftover agent worktrees with uncommitted files, stale Entire trails, TAP secrets cleanup.",
+      "Unprototyped ideas: dependency parse cache for warm runs, NAPI TOON slice view, deterministic agent evaluation; Entire features like `trail merge` untested."
+    ]
+  }
+}

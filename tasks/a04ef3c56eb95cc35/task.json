@@ -1,0 +1,21 @@
+{
+  "tool_use_id": "a04ef3c56eb95cc35",
+  "agent_id": "a04ef3c56eb95cc35",
+  "subagent_type": "workflow-subagent",
+  "files": [
+    "packages/storybook/scripts/scratch-probe.mjs",
+    "scratch/an.py",
+    "scratch/an2.py",
+    "scratch/an3.py",
+    "scratch/an4.py"
+  ],
+  "token_usage": {
+    "input_tokens": 125,
+    "cache_creation_tokens": 179939,
+    "cache_read_tokens": 7936532,
+    "output_tokens": 41888,
+    "api_call_count": 66
+  },
+  "started_at": "2026-11-02T08:48:39.369741-08:00",
+  "completed_at": "2026-11-02T09:02:26.468079-08:00"
+}

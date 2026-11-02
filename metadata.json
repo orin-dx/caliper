@@ -1,0 +1,92 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6F753H8EEQKF0G8JHDSPH7H",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 18,
+  "files_touched": [
+    ".scratch_probe.py",
+    "apps/oracle/src/tri.scratch.ts",
+    "crates/core/tests/pick_keyof_missing_key.rs",
+    "crates/core/tests/scratch_aug.rs",
+    "crates/core/tests/scratch_nn.rs",
+    "packages/storybook/scripts/scratch-probe.mjs",
+    "scratch-bins/ana.py",
+    "scratch-bins/phase.py",
+    "scratch-bins/warm.sh",
+    "scratch/an.py",
+    "scratch/an2.py",
+    "scratch/an3.py",
+    "scratch/an4.py",
+    "scratch/base.py",
+    "scratch/cal.py",
+    "scratch/coll.py",
+    "scratch/diag.py",
+    "scratch/exl.py",
+    "scratch/exp.py",
+    "scratch/fx/Fix.tsx",
+    "scratch/fx/Imp.tsx",
+    "scratch/fx/Shapes.tsx",
+    "scratch/fx/base.ts",
+    "scratch/fx/codes.mjs",
+    "scratch/fx/dump.mjs",
+    "scratch/fx/rdg.mjs",
+    "scratch/fx/remote.ts",
+    "scratch/fx/run.cjs",
+    "scratch/fx/show.py",
+    "scratch/fx/survey.py",
+    "scratch/fx/tsconfig.json",
+    "scratch/m.py",
+    "scratch/ov.py",
+    "scratch/peek.py",
+    "scratch/pk.py",
+    "scratch/rep/a.tsx",
+    "scratch/rep/b.tsx",
+    "scratch/rep/c.tsx",
+    "scratch/run2.py",
+    "scratch/un.py",
+    "scratch/weekly2.py",
+    "scripts/scratch_antd.py",
+    "scripts/scratch_classify.py",
+    "scripts/scratch_gap.py",
+    "scripts/scratch_recall.py",
+    "scripts/scratch_run.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 148,
+    "cache_creation_tokens": 150341,
+    "cache_read_tokens": 57522126,
+    "output_tokens": 85632,
+    "api_call_count": 70,
+    "subagent_tokens": {
+      "input_tokens": 772,
+      "cache_creation_tokens": 1063255,
+      "cache_read_tokens": 51601871,
+      "output_tokens": 310566,
+      "api_call_count": 408
+    }
+  },
+  "redaction": {
+    "replacements": 100,
+    "layers": {
+      "betterleaks": 26,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 2,
+      "credentialed_uri": 0,
+      "entropy": 72,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
