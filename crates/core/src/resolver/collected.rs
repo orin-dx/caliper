@@ -10,6 +10,14 @@ use super::primitives::{resolve_indexed_access, resolve_intersection, resolve_un
 use super::template::resolve_template_literal;
 use super::ResolutionContext;
 
+/// `ty` without the `AtFile` markers around it.
+fn unwrap_at_file(ty: &CollectedType) -> &CollectedType {
+    match ty {
+        CollectedType::AtFile { inner, .. } => unwrap_at_file(inner),
+        other => other,
+    }
+}
+
 /// Central dispatch: convert a `CollectedType` to a `PropType`.
 /// Never re-parses strings — everything is already structured.
 #[allow(clippy::too_many_arguments)]
@@ -83,7 +91,14 @@ pub fn resolve_collected_type(
         // ── keyof X — only meaningful as Omit's key argument (handled structurally
         // there, see resolver/alias.rs); standalone usage needs a general
         // type-to-key-names resolver we don't have, so degrade gracefully.
-        CollectedType::KeyOf(_) => {
+        CollectedType::KeyOf(target) => {
+            // `keyof typeof Icons` over a `const` object literal: its keys. Another operand would need the keys of an
+            // interface with its index signatures and every parent, which a partly loaded dependency can't give.
+            if let CollectedType::TypeOf(_) = unwrap_at_file(target) {
+                if let Some(keys) = super::evaluate::keys_of(target, consuming_file, ctx, 0) {
+                    return super::primitives::union_of(keys.into_iter().map(|key| PropType::StringLiteral(key.name)));
+                }
+            }
             let diag = opaque_diagnostic("a standalone 'keyof'", ct, consuming_file);
             OpaqueDetail::give_up(state, ct.to_raw_string(), OpaqueReason::MappedType, diag)
         }

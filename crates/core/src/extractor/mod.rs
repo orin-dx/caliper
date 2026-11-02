@@ -23,6 +23,7 @@ use crate::types::{
 };
 
 mod alias;
+mod asserted;
 mod component;
 mod defaults;
 mod evidence;
@@ -30,6 +31,7 @@ mod interface;
 mod js_text;
 mod jsdoc;
 mod uses;
+mod values;
 mod visit;
 mod wrapper;
 
@@ -370,8 +372,15 @@ impl<'src> SourceDataCollector<'src> {
             crate::types::CollectedType::Object(fields) => has_component_member(fields),
             _ => false,
         };
-        if !matches!(target, crate::types::CollectedType::Named { .. } | crate::types::CollectedType::Tuple(_))
-            && !static_components
+        // A literal is the type of `declare const SHOW_PARENT: "SHOW_PARENT"`, which `typeof SHOW_PARENT` names.
+        if !matches!(
+            target,
+            crate::types::CollectedType::Named { .. }
+                | crate::types::CollectedType::Tuple(_)
+                | crate::types::CollectedType::StringLiteral(_)
+                | crate::types::CollectedType::NumberLiteral(_)
+                | crate::types::CollectedType::BoolLiteral(_)
+        ) && !static_components
         {
             return;
         }

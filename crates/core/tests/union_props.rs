@@ -33,13 +33,6 @@ fn props_of(source: &str) -> BTreeMap<String, (bool, Value)> {
         .collect()
 }
 
-fn bool_literals() -> Value {
-    json!({ "kind": "union", "members": [
-        { "kind": "boolLiteral", "value": false },
-        { "kind": "boolLiteral", "value": true },
-    ] })
-}
-
 #[test]
 fn a_union_of_intersections_widens_a_prop_the_branches_type_differently() {
     let props = props_of(
@@ -49,7 +42,11 @@ fn a_union_of_intersections_widens_a_prop_the_branches_type_differently() {
         export function C(props: P) { return <b />; }
         "#,
     );
-    assert_eq!(props["multiple"], (false, bool_literals()), "optional in one branch, typed differently in each");
+    assert_eq!(
+        props["multiple"],
+        (false, json!({ "kind": "boolean" })),
+        "optional in one branch, typed differently in each: `false | true` is `boolean`"
+    );
     assert_eq!(props["label"], (false, json!({ "kind": "string" })), "the same in both branches stays as written");
     assert_eq!(props["extra"], (false, json!({ "kind": "string" })), "required in one branch only");
     assert_eq!(props["other"], (false, json!({ "kind": "number" })), "optional, and absent from the other branch");

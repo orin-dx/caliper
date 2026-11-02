@@ -383,6 +383,18 @@ No fixture ships a real static `defaultProps` assignment today — `fixtures/blu
 
 ---
 
+### Fixed: `typeof` a literal const, `keyof typeof` an object const, `true | false`, and a props type asserted on the export (2026-11-02)
+
+**Found by:** the Storybook parity report on antd (`packages/storybook/scripts/storybook-parity.mjs`, `docs/storybook-parity.md`), against Storybook's docgen.
+
+Previously: antd Cascader's `showCheckedStrategy?: typeof SHOW_PARENT | typeof SHOW_CHILD` (constants declared `const SHOW_PARENT = 'SHOW_PARENT'` or `declare const SHOW_PARENT: "SHOW_PARENT"`) stayed the named references `typeof SHOW_PARENT`; Result's `status?: keyof typeof IconMap` was opaque; a union of `true` and `false` read `false | true` where TypeScript prints `boolean`; and Masonry, declared with `forwardRef<Ref, MasonryProps>` and exported as `Masonry as (<T>(props: PropsWithChildren<MasonryProps<T>> & RefAttributes<Ref>) => ReactElement)`, lacked `children`.
+
+Fixed: a top-level `const` initialised with a literal (or an object literal with plain keys) is recorded as the alias `typeof NAME` (`extractor/values.rs`), so `typeof NAME` is the literal and `keyof typeof NAME` the union of the keys (`resolver/evaluate.rs`'s `value_type`, `keys_of`); `keyof` of anything else stays opaque, since an interface's keys need its index signatures and every parent. `union_of` folds `true | false` and `boolean | true` into `boolean`. `export default X as <function type>` over a component the file declares takes that function's one props parameter as the props type (`extractor/asserted.rs`). Tests: `crates/core/tests/const_value_types.rs`, `asserted_props.rs`.
+
+**Not fixed, and why.** `Segmented.options` reads optional because its body declares `options = []` and `ParsedProp::new` makes a prop with a default optional, the react-docgen-typescript convention (`types/output.rs`); Storybook's docgen reads the declared type and reports it required. Changing the convention changes every defaulted prop, so it needs its own decision. `BaseUIComponentProps<"div", S>["onClick"]` is an indexed access on a mapped type over an unbound generic with `infer`, which is the documented type-checker gap.
+
+---
+
 ## Note: React 19 `ref`-as-prop — investigated, not a real gap
 
 A `ReactVersion` option (since removed, because nothing in `crates/core` ever read it) was plumbed from the CLI down to `PipelineOptions`. That looked like a real gap — the original spec's worry was that `function Button({ ref, ...props }: ButtonProps)` (React 19's plain-prop `ref`, no `forwardRef`) wouldn't be recognized.
