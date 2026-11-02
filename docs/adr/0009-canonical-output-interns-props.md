@@ -1,6 +1,8 @@
 # 0009. Write each distinct prop once in the canonical output
 
-**Status:** Accepted **Date:** 2026-10-21
+**Status:** Accepted, extended by 0018 **Date:** 2026-10-21
+
+**Note (2026-11-02):** ADR 0018 changed how a component refers to its props: `components[key].props` is now an array of prop set ids, and each set maps prop names to the prop ids this ADR defines. The `props` table, the id scheme and the "props inline in Rust" rule below still hold. `notableInherited` is still a name-to-prop-id map.
 
 ## Context
 

@@ -2,6 +2,8 @@
 
 **Status:** Accepted **Date:** 2026-08-05
 
+**Note (2026-11-02):** "All five NAPI entry points" is the count at the time. `crates/binding/src/lib.rs` now has 15 `#[napi]` functions and 15 `contain_panic` call sites, one per function. A new entry point still goes through it.
+
 ## Context
 
 There was no `catch_unwind` anywhere in the repo. What safety existed was accidental:
