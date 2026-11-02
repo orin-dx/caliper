@@ -225,7 +225,8 @@ pub(crate) fn project_demands(file: &Utf8Path, data: &SourceData) -> Vec<Demand>
         specifier: Box::from(binding.specifier.as_str()),
         name: CompactString::default(),
     }));
-    demands.sort();
+    // Every demand is from `file`, so the derived order's first key, a path of a hundred bytes, only ever ties.
+    demands.sort_unstable_by(|a, b| (&a.specifier, &a.name).cmp(&(&b.specifier, &b.name)));
     demands.dedup();
     demands
 }
