@@ -1,0 +1,102 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6ESG3NM81GT8G1QA5BB422D",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-02T18:49:26.653822Z",
+  "branch": "feat/release-github-releases",
+  "checkpoints_count": 8,
+  "save_step_count": 3,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "afb1f440a956",
+  "checkpoint_transcript_start": 343,
+  "transcript_lines_at_start": 343,
+  "compact_transcript_start": 28,
+  "token_usage": {
+    "input_tokens": 46,
+    "cache_creation_tokens": 36734,
+    "cache_read_tokens": 2461957,
+    "output_tokens": 9367,
+    "api_call_count": 19,
+    "subagent_tokens": {
+      "input_tokens": 166,
+      "cache_creation_tokens": 275740,
+      "cache_read_tokens": 16729005,
+      "output_tokens": 94572,
+      "api_call_count": 88
+    }
+  },
+  "redaction": {
+    "replacements": 6,
+    "layers": {
+      "betterleaks": 4,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 2,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 11
+  },
+  "summary": {
+    "intent": "Coordinate several trails of Caliper work: ship the weekly pairing stack (trail 153), diagnose a failed release run, and update/adopt more Callisto features for releases (trail 158).",
+    "outcome": "Weekly pairing stack pushed as draft PRs #282/#283 (antd recall 79.7% to 92.1%, short of the ~95% target, shadcn unchanged at 96.5%). The failed release was diagnosed as an E148 snapshot race and v0.9.0 confirmed released. Callisto is already on latest 0.16.0, and trail 158 was handed to a worker after a gap analysis.",
+    "learnings": {
+      "repo": [
+        "Weekly measurement harness is scripts/weekly.py; the record now carries reference_version (2) and findings() skips recall comparison when versions differ, so the first run after merge won't compare recall.",
+        "The 16 antd items still unpaired are not pairing cases: generate* factories, Parent.Member compound entries, factory-built calendar/date-picker, confirm/RefIcon/InternalPanel, List, QrcodeStatus.",
+        "Caliper emits two components in splitter/Panel.tsx under one normalized key (Panel and Panel (path)), so a key-collisions fix needs a distinct Caliper key per component, which touches the pairing design.",
+        "Release workflow's version-pr job has a concurrency group (version-pr, cancel-in-progress: false), the same as Callisto's own workflow. A queued run can hit E148 (release PR snapshot changed) when a prior run updated the PR; the mitigation is to re-run or push again.",
+        "callisto.toml lacks github-release in publish-to, so releases create only tags and no GitHub Releases. release.yml (~line 144) asserts zero artifact slots.",
+        "Callisto 0.16.0 attestation verification expects signer workflow callisto-release.yml (per spec docs/specs/release.json:351), which would require renaming release.yml. This is unconfirmed in source.",
+        "Product package for Callisto artifact releases must be Cargo (npm bin is E304), so cargo/caliper-docgen is the only option. The Homebrew tap reads tag npm/caliper-docgen@x.y.z (CONTRIBUTING.md:98), so tag-template must stay unset.",
+        "Callisto has no schedule-based recovery; release pending/drain runs on main pushes and workflow_dispatch only.",
+        "OIDC trusted publishing is not shipped in Callisto (plan only, post-v1)."
+      ],
+      "code": [
+        {
+          "path": ".github/workflows/release.yml",
+          "line": 144,
+          "finding": "Step asserts zero artifact slots; it must be removed to adopt [release] artifact slots."
+        },
+        {
+          "path": "docs/specs/release.json",
+          "line": 351,
+          "finding": "Spec states the gh attestation verify criteria including the signer workflow callisto-release.yml, with --deny-self-hosted-runners."
+        }
+      ],
+      "workflow": [
+        "Peer-session messages (callisto-gap) can arrive truncated; request the remainder via SendMessage rather than acting on partial reports.",
+        "Stacked PRs need the child opened with --base set to the parent branch; the push-and-link flow does this first.",
+        "Delegating to workers in isolated worktrees that build branches locally, with the main session pushing drafts after review and the user merging, keeps push and merge decisions with the human."
+      ]
+    },
+    "friction": [
+      "callisto-gap's first report was truncated mid-section 2 and needed a resend.",
+      "The Mantine, Chakra and Spectrum corpora are not installed locally at the pinned commits, so the pairing rules could not be validated on them.",
+      "The antd recall target (~95%) was not reached; the plan's expected denominator of ~195 gave 202 instead, and the 7 extra merges could not be reproduced.",
+      "The E148 failure cause (a stale snapshot while queued) is inferred from the log, not directly shown.",
+      "Attestation signer-name hard-coding and Homebrew tap behavior could not be verified without a real release."
+    ],
+    "open_items": [
+      "Branch fix/weekly-caliper-key-collisions was skipped; it needs a distinct Caliper key per component (follow-up).",
+      "Run a CI weekly job on the pairing branch to check Mantine/Chakra/Spectrum for wrong same-file pairs or misclassified causes.",
+      "Tooltip vs ChartTooltip in shadcn is classified as file_with_other_components, not paired.",
+      "Trail 158: worker t158-release is building feat/release-github-releases, feat/release-binaries-attestations and feat/release-recovery; push as draft PRs after review.",
+      "User decision: whether to rename release.yml to callisto-release.yml (affects rulesets, status checks, references).",
+      "User decision: whether to add a retry on E148 in the version-pr step (not endorsed by Callisto).",
+      "Ask the Homebrew tap owner whether the tap uses tags or :github_latest before merging release changes.",
+      "Rehearse the first release with assets and attestations on a fork or scratch repo; docs/releasing.md will include a checklist.",
+      "Hold oracle/three-tools-report until PRs #280–#283 merge (user merges); trails 155/156 form a serial stack to start later.",
+      "t154-perf worker is still running.",
+      "Docs line saying react-docgen reads each file alone was left unchanged."
+    ]
+  }
+}
