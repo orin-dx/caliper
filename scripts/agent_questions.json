@@ -1,0 +1,161 @@
+{
+  "about": "Questions for scripts/agent_eval.py, about real components in the corpora scripts/corpora.py pins. `file` is relative to the corpus clone. The checker answers each one (apps/oracle/src/agent-truth.ts); a question it cannot answer is reported as not scored. Kinds: present (does the file export a component of this name), prop_exists, prop_required, literal_values (the string literals of a union, sorted) and type_kind (boolean, string, number, array, function, literal_union or other). Add a corpus's questions only after reading its output: a pinned corpus changes only when scripts/corpora.py does.",
+  "questions": [
+    {
+      "id": "antd-button-present",
+      "corpus": "antd",
+      "kind": "present",
+      "file": "components/button/Button.tsx",
+      "component": "Button"
+    },
+    {
+      "id": "antd-buttons-absent",
+      "corpus": "antd",
+      "kind": "present",
+      "file": "components/button/Button.tsx",
+      "component": "Buttons"
+    },
+    {
+      "id": "antd-button-danger-exists",
+      "corpus": "antd",
+      "kind": "prop_exists",
+      "file": "components/button/Button.tsx",
+      "component": "Button",
+      "prop": "danger"
+    },
+    {
+      "id": "antd-switch-toggled-absent",
+      "corpus": "antd",
+      "kind": "prop_exists",
+      "file": "components/switch/index.tsx",
+      "component": "Switch",
+      "prop": "toggled"
+    },
+    {
+      "id": "antd-anchorlink-href-required",
+      "corpus": "antd",
+      "kind": "prop_required",
+      "file": "components/anchor/AnchorLink.tsx",
+      "component": "AnchorLink",
+      "prop": "href"
+    },
+    {
+      "id": "antd-button-block-optional",
+      "corpus": "antd",
+      "kind": "prop_required",
+      "file": "components/button/Button.tsx",
+      "component": "Button",
+      "prop": "block"
+    },
+    {
+      "id": "antd-alert-type-values",
+      "corpus": "antd",
+      "kind": "literal_values",
+      "file": "components/alert/Alert.tsx",
+      "component": "Alert",
+      "prop": "type"
+    },
+    {
+      "id": "antd-progress-status-values",
+      "corpus": "antd",
+      "kind": "literal_values",
+      "file": "components/progress/progress.tsx",
+      "component": "Progress",
+      "prop": "status"
+    },
+    {
+      "id": "antd-pagination-total-kind",
+      "corpus": "antd",
+      "kind": "type_kind",
+      "file": "components/pagination/Pagination.tsx",
+      "component": "Pagination",
+      "prop": "total"
+    },
+    {
+      "id": "antd-button-onclick-kind",
+      "corpus": "antd",
+      "kind": "type_kind",
+      "file": "components/button/Button.tsx",
+      "component": "Button",
+      "prop": "onClick"
+    },
+    {
+      "id": "shadcn-button-present",
+      "corpus": "shadcn",
+      "kind": "present",
+      "file": "apps/v4/registry/new-york-v4/ui/button.tsx",
+      "component": "Button"
+    },
+    {
+      "id": "shadcn-accordion-present",
+      "corpus": "shadcn",
+      "kind": "present",
+      "file": "apps/v4/registry/new-york-v4/ui/accordion.tsx",
+      "component": "Accordion"
+    },
+    {
+      "id": "shadcn-button-aschild-exists",
+      "corpus": "shadcn",
+      "kind": "prop_exists",
+      "file": "apps/v4/registry/new-york-v4/ui/button.tsx",
+      "component": "Button",
+      "prop": "asChild"
+    },
+    {
+      "id": "shadcn-button-arialabel-exists",
+      "corpus": "shadcn",
+      "kind": "prop_exists",
+      "file": "apps/v4/registry/new-york-v4/ui/button.tsx",
+      "component": "Button",
+      "prop": "aria-label"
+    },
+    {
+      "id": "shadcn-accordion-type-required",
+      "corpus": "shadcn",
+      "kind": "prop_required",
+      "file": "apps/v4/registry/new-york-v4/ui/accordion.tsx",
+      "component": "Accordion",
+      "prop": "type"
+    },
+    {
+      "id": "shadcn-radiogroupitem-value-required",
+      "corpus": "shadcn",
+      "kind": "prop_required",
+      "file": "apps/v4/registry/new-york-v4/ui/radio-group.tsx",
+      "component": "RadioGroupItem",
+      "prop": "value"
+    },
+    {
+      "id": "shadcn-separator-orientation-values",
+      "corpus": "shadcn",
+      "kind": "literal_values",
+      "file": "apps/v4/registry/new-york-v4/ui/separator.tsx",
+      "component": "Separator",
+      "prop": "orientation"
+    },
+    {
+      "id": "shadcn-alert-variant-values",
+      "corpus": "shadcn",
+      "kind": "literal_values",
+      "file": "apps/v4/registry/new-york-v4/ui/alert.tsx",
+      "component": "Alert",
+      "prop": "variant"
+    },
+    {
+      "id": "shadcn-progress-max-kind",
+      "corpus": "shadcn",
+      "kind": "type_kind",
+      "file": "apps/v4/registry/new-york-v4/ui/progress.tsx",
+      "component": "Progress",
+      "prop": "max"
+    },
+    {
+      "id": "shadcn-checkbox-checked-kind",
+      "corpus": "shadcn",
+      "kind": "type_kind",
+      "file": "apps/v4/registry/new-york-v4/ui/checkbox.tsx",
+      "component": "Checkbox",
+      "prop": "checked"
+    }
+  ]
+}

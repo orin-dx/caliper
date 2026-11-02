@@ -3494,7 +3494,7 @@ export function Cancel({ variant = "outline", size = 'md', ...rest }: Pick<React
     };
     assert_eq!(default_of("Cancel", "variant"), Some(("\"outline\"".to_owned(), false)));
     assert_eq!(default_of("Cancel", "size"), Some(("'md'".to_owned(), false)));
-    assert_eq!(output.components["Cancel"].props["variant"].required, false);
+    assert!(!output.components["Cancel"].props["variant"].required, "a prop with a default is optional");
     assert_eq!(default_of("Button", "variant"), None);
     assert_eq!(default_of("Button", "size"), None);
 }
@@ -3527,8 +3527,8 @@ export function Rest(props: Pick<Base, "id"> & Omit<Base, "id">) { return null; 
     assert_eq!(names("Both"), ["disabled", "id"]);
     assert_eq!(names("Rest"), ["disabled", "id", "value"]);
     // `id` is required in `Base`, and `Optional` makes it optional.
-    assert_eq!(output.components["Field"].props["id"].required, false);
-    assert_eq!(output.components["Rest"].props["id"].required, true);
+    assert!(!output.components["Field"].props["id"].required, "`Optional` makes `id` optional");
+    assert!(output.components["Rest"].props["id"].required, "`Omit<Base, \"id\">` leaves `Pick`'s required `id`");
     let circular: Vec<&str> = output
         .diagnostics
         .iter()

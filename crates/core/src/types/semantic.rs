@@ -3,6 +3,8 @@
 //! The backend (`caliper-docgen-semantic`) owns the process, the protocol and the checker walk; this module owns only
 //! the result shape and the merge rules of `docs/type-checker-integration.md`, so `crates/core` stays free of I/O.
 
+#![deny(missing_docs)]
+
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
@@ -16,9 +18,13 @@ use crate::types::output::{ComponentEntry, ExtractionOutput, ParsedProp, PropTyp
 /// One prop as the checker reports it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SemanticProp {
+    /// The prop's name as written in the props type.
     pub name: String,
+    /// The type the checker computed for it, in the same shape the structural resolver produces.
     pub prop_type: PropType,
+    /// Whether the checker found the prop non-optional.
     pub required: bool,
+    /// The prop's JSDoc description, empty when it has none; the merge then keeps the structural description.
     pub description: String,
     /// Declared by `@types/react` (`children`, `aria-*`, handlers, `className`): not the component's own prop.
     pub react_declared: bool,
@@ -44,6 +50,8 @@ pub struct PropInterner {
 }
 
 impl PropInterner {
+    /// The one shared copy of `prop`: an equal prop interned earlier, or `prop` itself the first time. If the internal
+    /// lock is poisoned it returns `prop` unshared rather than failing.
     pub fn share(&self, prop: SemanticProp) -> Arc<SemanticProp> {
         let hash = prop.structural_hash();
         let Ok(mut by_hash) = self.by_hash.lock() else { return Arc::new(prop) };
@@ -60,7 +68,9 @@ impl PropInterner {
 /// One component the checker answered for, found by the file and name the structural pass reported.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SemanticComponent {
+    /// The file that declares the component, as the structural pass reported it.
     pub file_path: Utf8PathBuf,
+    /// The component's name, as the structural pass reported it; with `file_path` it identifies the entry to merge into.
     pub display_name: String,
     /// Declared props in declaration order, with the `@types/react` ones the request asked for.
     pub props: Vec<Arc<SemanticProp>>,
@@ -69,8 +79,12 @@ pub struct SemanticComponent {
 /// A component the backend left to the structural result, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticFallback {
+    /// The file that declares the component.
     pub file_path: Utf8PathBuf,
+    /// The component's name, as the structural pass reported it.
     pub display_name: String,
+    /// Why the checker did not answer, for example that the component is not exported by its module. The merge groups
+    /// components by this text into one warning.
     pub reason: String,
 }
 
@@ -78,16 +92,23 @@ pub struct SemanticFallback {
 /// error: the structural result is always a complete answer on its own.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SemanticOutcome {
+    /// The components the checker answered for; each replaces the props of the structural entry it names.
     pub components: Vec<SemanticComponent>,
+    /// The requested components the checker left to the structural result, each with its reason.
     pub fallbacks: Vec<SemanticFallback>,
+    /// What the backend itself reports (it could not start, it timed out); merged into the output's diagnostics.
     pub diagnostics: Vec<Diagnostic>,
 }
 
 /// A component the checker may be asked about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticTarget {
+    /// The file that declares the component.
     pub file_path: Utf8PathBuf,
+    /// The component's name, as the structural pass reported it.
     pub display_name: String,
+    /// Whether the module exports the component, by name or as `default`. The checker answers only for exported
+    /// ones and reports the rest as fallbacks.
     pub exported: bool,
     /// Props the structural pass already has a description for. The checker is not asked for those: it is 65% of
     /// the requests on Mantine, and the merge keeps the structural description when the checker's is empty.
@@ -102,6 +123,8 @@ pub struct SemanticTarget {
 /// `request` never blocks: it queues the targets and returns the receiver that yields the outcome once the checker
 /// has it, so a caller can wait a bounded time and take the structural answer when the checker is slower.
 pub trait SemanticProvider: Send + Sync {
+    /// Queues `targets` for the checker and returns at once with the receiver that will yield their
+    /// [`SemanticOutcome`].
     fn request(&self, targets: Vec<SemanticTarget>) -> std::sync::mpsc::Receiver<SemanticOutcome>;
 }
 

@@ -74,8 +74,8 @@ fn one_named_member_and_one_inline_member_are_merged_too() {
         export function C(props: P) { return <b />; }
         "#,
     );
-    assert_eq!(props["open"].0, false, "optional in the first branch");
-    assert_eq!(props["onOpenChange"].0, false, "absent from the first branch");
+    assert!(!props["open"].0, "optional in the first branch");
+    assert!(!props["onOpenChange"].0, "absent from the first branch");
 }
 
 #[test]

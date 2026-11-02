@@ -1308,7 +1308,7 @@ fn an_update_reports_the_keys_it_changed_and_removed() {
 }
 
 /// The strings in a JSON array.
-fn strings<'a>(array: &'a serde_json::Value) -> impl Iterator<Item = &'a str> {
+fn strings(array: &serde_json::Value) -> impl Iterator<Item = &str> {
     array.as_array().unwrap().iter().map(|id| id.as_str().unwrap())
 }
 

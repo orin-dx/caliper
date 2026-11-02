@@ -20,7 +20,7 @@ tasks:
       cache: false
 
   lint:
-    command: cargo clippy --workspace --exclude caliper-docgen-napi --locked -- -D warnings
+    command: cargo clippy --workspace --all-targets --locked -- -D warnings
     options:
       runFromWorkspaceRoot: true
       cache: false

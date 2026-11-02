@@ -3,9 +3,11 @@
 use caliper_docgen_core::pipeline::{extract, PipelineOptions};
 use camino::{Utf8Path, Utf8PathBuf};
 
-fn project() -> (tempfile::TempDir, Utf8PathBuf) {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
+fn project() -> TestResult<(tempfile::TempDir, Utf8PathBuf)> {
+    let tmp = tempfile::TempDir::new()?;
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize()?).map_err(|path| format!("not UTF-8: {path:?}"))?;
     for (path, body) in [
         ("node_modules/@types/react/package.json", r#"{ "name": "@types/react", "version": "19.0.0", "types": "index.d.ts" }"#),
         ("node_modules/@types/react/index.d.ts", "export = React;\nexport as namespace React;\ndeclare namespace React { type ReactNode = string | null; }\n"),
@@ -14,10 +16,10 @@ fn project() -> (tempfile::TempDir, Utf8PathBuf) {
         ("src/A.tsx", "import type { AProps } from 'pkg-a';\nexport function A(props: AProps) { return null; }\n"),
     ] {
         let path = root.join(path);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, body).unwrap();
+        std::fs::create_dir_all(path.parent().ok_or("a fixture path has a parent")?)?;
+        std::fs::write(path, body)?;
     }
-    (tmp, root)
+    Ok((tmp, root))
 }
 
 fn options(root: &Utf8Path, cache: &Utf8Path, use_cache: bool) -> PipelineOptions {
@@ -39,8 +41,8 @@ fn files_in(dir: &Utf8Path) -> Vec<String> {
 }
 
 #[test]
-fn a_run_with_the_cache_off_reads_and_writes_nothing_and_publishes_the_same() {
-    let (_tmp, root) = project();
+fn a_run_with_the_cache_off_reads_and_writes_nothing_and_publishes_the_same() -> TestResult {
+    let (_tmp, root) = project()?;
     let cache = root.join("cache");
 
     let off = extract(&options(&root, &cache, false));
@@ -61,4 +63,5 @@ fn a_run_with_the_cache_off_reads_and_writes_nothing_and_publishes_the_same() {
     assert_eq!(off.components, off_again.components);
     assert_eq!(off.components.keys().collect::<Vec<_>>(), ["A"]);
     assert_eq!(off.components["A"].props.keys().collect::<Vec<_>>(), ["a"]);
+    Ok(())
 }

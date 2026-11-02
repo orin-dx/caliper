@@ -1,6 +1,7 @@
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
+    clippy::exit,
     clippy::panic,
     clippy::print_stdout,
     clippy::print_stderr,

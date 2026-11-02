@@ -212,6 +212,19 @@ pub struct WatchSession {
     semantic: Option<super::semantic_hook::SemanticHook>,
 }
 
+/// The options and mode of a session, not its revision: a revision holds every parsed file and resolved component, so
+/// printing it would bury the question a `{:?}` asks, which session this is.
+impl std::fmt::Debug for WatchSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WatchSession")
+            .field("options", &self.options)
+            .field("lazy", &self.lazy)
+            .field("revision", &self.revision())
+            .field("with_semantic", &self.semantic.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 /// What a lazy session has indexed and answered so far.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LazyStats {

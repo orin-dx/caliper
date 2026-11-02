@@ -22,7 +22,9 @@ type PendingSender = oneshot::Sender<Result<TaggedResponse, TscClientError>>;
 /// an answer could reflect an update it already saw acknowledged (`answer.seq > update_ack.seq`).
 #[derive(Debug, Clone)]
 pub struct TaggedResponse {
+    /// The response's decoded `result`.
     pub value: serde_json::Value,
+    /// The wire-arrival order the response was read in, counted from the start of the session.
     pub seq: u64,
 }
 

@@ -9,6 +9,8 @@
 //! This slice answers function components exported by name or as `default`. Class components, overloaded or
 //! generic components and union props types keep their structural result and say why.
 
+#![deny(missing_docs)]
+
 mod component;
 mod convert;
 mod locate;
@@ -65,16 +67,21 @@ pub fn targets_of(output: &ExtractionOutput) -> Vec<Target> {
         .collect()
 }
 
+/// One whole-project request to the checker: the components to answer for, and how to reach `tsc`. Built with
+/// [`SemanticRequest::new`] and answered by [`resolve`].
 #[derive(Debug, Clone)]
 pub struct SemanticRequest {
     /// Where `tsc` finds `node_modules`; its `--cwd`, and where the search for `typescript` starts.
     pub project_root: Utf8PathBuf,
+    /// A tsconfig whose compiler options the checker uses (read with `parseConfigFile`); with none, a default set.
     pub tsconfig: Option<Utf8PathBuf>,
     /// An explicit `tsc` binary, instead of `node_modules/typescript/bin/tsc` above `project_root`.
     pub tsc_path: Option<Utf8PathBuf>,
+    /// The components to ask about.
     pub targets: Vec<Target>,
     /// Bound on each request, and on the `tsc` start-up handshake.
     pub request_timeout: Duration,
+    /// The `typescript` versions the checker may report; one that is not among them is a start-up failure.
     pub expected_versions: &'static [&'static str],
     /// Write every request and its answer here as JSON, to refresh the replay fixture the tests use.
     pub record_to: Option<Utf8PathBuf>,
@@ -86,6 +93,8 @@ pub struct SemanticRequest {
 }
 
 impl SemanticRequest {
+    /// A request for `targets` under `project_root`, with a 60 second timeout, the supported versions, and no
+    /// tsconfig or explicit `tsc` path.
     pub fn new(project_root: Utf8PathBuf, targets: Vec<Target>) -> Self {
         Self {
             project_root,

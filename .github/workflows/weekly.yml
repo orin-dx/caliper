@@ -1,8 +1,10 @@
 name: Weekly
 
 # Caliper, react-docgen-typescript and react-docgen on five public repos with their dependencies installed: time,
-# memory and recall (docs/measurement.md). It compares with last week's record and opens or updates one issue when
-# Caliper got slower, bigger or less complete. It never runs on a pull request and never fails one.
+# memory and recall (docs/measurement.md), and how often a reader of Caliper's output answers a fixed list of questions
+# wrong without a hint (scripts/agent_eval.py). It compares with last week's record and opens or updates one issue when
+# Caliper got slower, bigger or less complete, or when a silent-wrong answer appears. It never runs on a pull request and
+# never fails one.
 on:
   schedule:
     - cron: "0 6 * * 1"
@@ -72,8 +74,8 @@ jobs:
           if [ -n "$id" ]; then gh run download "$id" --name weekly --dir previous; fi
       - name: Measure
         run: >-
-          python3 scripts/weekly.py --bin target/release/caliper-docgen --oracle --previous previous/weekly.json
-          --out weekly.json --markdown weekly.md --issue issue.md
+          python3 scripts/weekly.py --bin target/release/caliper-docgen --oracle --agent-eval
+          --previous previous/weekly.json --out weekly.json --markdown weekly.md --issue issue.md
       - if: always()
         run: cat weekly.md >> "$GITHUB_STEP_SUMMARY" || true
       - if: always()

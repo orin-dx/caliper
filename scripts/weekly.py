@@ -6,13 +6,15 @@ Caliper the canonical JSON's size. Recall is measured against RDT: of the compon
 the tool also reports (same file, same name), and of their props, how many it lists, split into the props `@types/react`
 declares and the rest. react-docgen follows imports to the file that declares a type but infers nothing, and lists none
 of React's props. With --oracle it also records how often TypeScript 7.1's checker contradicts each tool's prop types,
-over every prop the checker finds. That is information, never a gate.
+over every prop the checker finds. That is information, never a gate. With --agent-eval it also asks a fixed list of
+questions about real components and scores what a reader of Caliper's output answers against the checker
+(scripts/agent_eval.py): silent-wrong answers open the issue below, like a worse recall does.
 
 --previous FILE compares with an earlier record (the last green run's artifact) and, when Caliper is more than 10%
 slower or uses more than 10% more memory, or its recall falls by more than 2 points, writes --issue FILE for the
 workflow to open or update one issue with. Nothing here fails a pull request.
 
-Usage: scripts/weekly.py --bin BIN [--corpus NAME]... [--corpora DIR] [--work DIR] [--runs N] [--oracle]
+Usage: scripts/weekly.py --bin BIN [--corpus NAME]... [--corpora DIR] [--work DIR] [--runs N] [--oracle] [--agent-eval]
                          [--previous FILE] [--out FILE] [--markdown FILE] [--issue FILE]
 """
 import argparse
@@ -24,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 
+import agent_eval
 import corpora
 from corpora import ROOT, run_once, selected
 
@@ -489,6 +492,13 @@ def measure(args, corpus, work):
             entry['oracle'] = oracle(args.bin, corpus['name'], src, root, work, rdt_out, rdg_out)
         except (subprocess.SubprocessError, OSError, KeyError) as error:
             entry['oracle'] = {'error': str(error)}
+    if args.agent_eval:
+        try:
+            result = agent_eval.evaluate(args.bin, corpus['name'], src, root, tsconfig, work)
+            if result:
+                entry['agent_eval'] = result
+        except (subprocess.SubprocessError, OSError, KeyError, ValueError) as error:
+            entry['agent_eval'] = {'error': str(error)}
     return entry
 
 
@@ -503,6 +513,7 @@ def findings(record, previous):
     out = []
     for name, entry in record['corpora'].items():
         old = previous.get('corpora', {}).get(name)
+        out += agent_eval.findings(name, entry, old)
         if not old:
             continue
         for key, label in (('ms', 'time'), ('rss_mib', 'peak memory')):
@@ -578,6 +589,7 @@ def markdown(record, notes, reference_changed=None):
                           '(a prop a tool omits counts against it; components include some functions that are not):', '']
             lines += [tool_line(name, tool, tools[tool]) for name, tools in tool_rows
                       for tool in ('caliper', 'rdt', 'react_docgen') if tool in tools]
+    lines += agent_eval.markdown(record)
     if reference_changed is not None:
         lines += ['', f"Recall was not compared with last week's: its reference was built by version {reference_changed} of "
                       f"the rules, this one by version {record['reference_version']}."]
@@ -594,6 +606,7 @@ def main():
     parser.add_argument('--work', default=os.path.join(ROOT, '.corpora', 'work'))
     parser.add_argument('--runs', type=int, default=5)
     parser.add_argument('--oracle', action='store_true')
+    parser.add_argument('--agent-eval', action='store_true')
     parser.add_argument('--previous')
     parser.add_argument('--out')
     parser.add_argument('--markdown')
@@ -604,14 +617,14 @@ def main():
     version = subprocess.run([args.bin, '--version'], capture_output=True, text=True).stdout.strip()
     record = {'caliper': version, 'runs': args.runs, 'reference_version': REFERENCE_VERSION,
               'corpora': {c['name']: measure(args, c, work) for c in selected(args.corpus)}}
-    notes = []
     reference_changed = None
+    previous = {}
     if args.previous and os.path.exists(args.previous):
         with open(args.previous) as f:
             previous = json.load(f)
-        notes = findings(record, previous)
         if not same_reference(record, previous):
             reference_changed = previous.get('reference_version', 1)
+    notes = findings(record, previous)
     table = markdown(record, notes, reference_changed)
     print(table)
     for path, content in ((args.out, json.dumps(record, indent=2) + '\n'), (args.markdown, table),

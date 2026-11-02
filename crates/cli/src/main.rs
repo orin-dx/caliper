@@ -1,3 +1,8 @@
+//! The `caliper-docgen` command line: `extract`, `watch`, `check`, `inspect`, `schema` and `completions` over the
+//! `caliper-docgen-core` pipeline. The command handlers return their exit code and `main` is the only place that ends
+//! the process.
+
+#![deny(missing_docs)]
 #![recursion_limit = "256"]
 // stdout carries the command payload (JSON, tables); stderr and diagnostics still go through output.rs.
 #![allow(clippy::print_stdout)]
@@ -20,6 +25,7 @@ use commands::watch::cmd_watch;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+/// The command line: the flags every command shares, and the command to run.
 #[derive(Parser)]
 #[command(
     name = "caliper-docgen",
@@ -65,6 +71,7 @@ enum Command {
     Completions(CompletionsArgs),
 }
 
+/// The options of `extract`.
 #[derive(clap::Args)]
 pub struct ExtractArgs {
     /// Source directories to scan [default: ./src]
@@ -130,6 +137,7 @@ pub struct ExtractArgs {
     pub tsc_path: Option<String>,
 }
 
+/// The formats `extract` can write.
 #[derive(clap::ValueEnum, Clone)]
 pub enum OutputFormat {
     /// caliper-docgen canonical schema (richest)
@@ -140,6 +148,7 @@ pub enum OutputFormat {
     Toon,
 }
 
+/// The values of `--html-attributes`: how much of an inherited HTML element's attribute set a component lists.
 #[derive(clap::ValueEnum, Clone, Copy)]
 pub enum HtmlAttributeModeArg {
     /// A compact subset per element: handlers, aria-*, ref and the common attributes
@@ -150,6 +159,8 @@ pub enum HtmlAttributeModeArg {
     None,
 }
 
+/// The values of `--collapse-inherited-props`: which inherited sources of more than 30 props are listed as one
+/// inherited layer instead of prop by prop.
 #[derive(clap::ValueEnum, Clone, Copy)]
 pub enum CollapseInheritedPropsArg {
     /// Sources from loaded dependencies (default)
@@ -170,6 +181,7 @@ impl From<CollapseInheritedPropsArg> for caliper_docgen_core::pipeline::Collapse
     }
 }
 
+/// The options of `inspect`.
 #[derive(clap::Args)]
 pub struct InspectArgs {
     /// Component name to inspect
@@ -191,6 +203,7 @@ pub struct InspectArgs {
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 }
 
+/// The options of `watch`.
 #[derive(clap::Args)]
 pub struct WatchArgs {
     /// Source directories to watch [default: ./src]
@@ -213,6 +226,7 @@ pub struct WatchArgs {
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 }
 
+/// The options of `check`.
 #[derive(clap::Args)]
 pub struct CheckArgs {
     /// Source directories to scan [default: ./src]
@@ -239,8 +253,10 @@ pub struct CheckArgs {
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 }
 
+/// The options of `completions`.
 #[derive(clap::Args)]
 pub struct CompletionsArgs {
+    /// The shell to generate completions for
     pub shell: clap_complete::Shell,
 }
 
@@ -297,53 +313,5 @@ mod tests {
     fn each_extra_v_raises_the_log_level_and_zero_installs_no_subscriber() {
         let filters: Vec<Option<&str>> = [0, 1, 2, 3, u8::MAX].into_iter().map(log_filter).collect();
         assert_eq!(filters, [None, Some("info"), Some("debug"), Some("trace"), Some("trace")]);
-    }
-
-    // ── SPEC-CLI-001a AC-017: command handlers return their exit code from
-    // cmd_extract/cmd_check/etc. rather than calling std::process::exit
-    // directly, so main() is the sole place that terminates the process —
-    // this makes the exit decision testable. Nothing previously enforced
-    // this beyond visual inspection; this test greps the actual committed
-    // source for every `std::process::exit(` call site and pins the
-    // allow-list to exactly the two known, documented exceptions.
-
-    #[test]
-    fn only_main_and_watchs_keyboard_quit_call_process_exit_directly() {
-        let src_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut offending = Vec::new();
-        for entry in walk(&src_dir) {
-            if entry.extension().and_then(|e| e.to_str()) != Some("rs") {
-                continue;
-            }
-            let content = std::fs::read_to_string(&entry).expect("read source file");
-            for (i, line) in content.lines().enumerate() {
-                if line.contains("std::process::exit(") || line.contains("process::exit(") {
-                    let rel = entry.strip_prefix(&src_dir).unwrap_or(&entry);
-                    let allowed = matches!(rel.to_str(), Some("main.rs") | Some("commands/watch.rs"));
-                    if !allowed {
-                        offending.push(format!("{}:{}", rel.display(), i + 1));
-                    }
-                }
-            }
-        }
-        assert!(
-            offending.is_empty(),
-            "found std::process::exit outside the allow-listed call sites (main.rs, commands/watch.rs's \
-             documented keyboard-quit exception): {offending:?}"
-        );
-    }
-
-    fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
-        let mut files = Vec::new();
-        let Ok(entries) = std::fs::read_dir(dir) else { return files };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                files.extend(walk(&path));
-            } else {
-                files.push(path);
-            }
-        }
-        files
     }
 }
