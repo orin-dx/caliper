@@ -192,34 +192,104 @@ class ProcessStats(unittest.TestCase):
         self.assertEqual(cm.process_stats('on-demand', [(5.0, 100.0)]), {})
 
 
-class TscSampler(unittest.TestCase):
-    PS = ('  1024 /usr/bin/python3 scripts/checker_modes.py\n'
-          ' 204800 node /r/typescript-beta/bin/tsc --api --cwd /p\n'
-          ' 307200 node /r/typescript-beta/bin/tsc --api --cwd /q\n'
-          ' 999999 node /other/typescript/bin/tsc --watch\n')
+class CheckerMemory(unittest.TestCase):
+    """The checker is found by what it is, not by a string in somebody's command line: the child of this run's session
+    driver whose executable is the `tsc` binary. Rows are `ps -ax -o pid=,ppid=,rss=,command=`."""
+    TSC = '/r/typescript-beta/bin/tsc'
+    SCRIPT = '/r/scripts/checker_modes_session.mjs'
+    MARKER = '/tmp/work/antd-on-demand-150.cache'
+    OPTIONS = '{"semanticTypes": "on-demand", "tscPath": "' + TSC + '", "cacheDir": "' + MARKER + '"}'
+    # The measuring helper and the Node driver both carry the options, and so the tsc path, in their command lines.
+    HELPER = ' 100 1 40960 /usr/bin/python3 -I /r/scripts/corpora.py measure /tmp/r.json -- node ' + SCRIPT + ' --options ' + OPTIONS
+    DRIVER = ' 200 100 4194304 node ' + SCRIPT + ' --options ' + OPTIONS + ' --count 50'
+    # What `ps` shows for the checker: the platform binary the `bin/tsc` launcher resolves to, run in `--api` mode.
+    NATIVE = '/r/node_modules/.pnpm/@typescript+typescript-darwin-arm64@7.1.0-beta/node_modules/@typescript/typescript-darwin-arm64/lib/tsc'
+    CHECKER = ' 300 200 204800 ' + NATIVE + ' --api --async --cwd /p'
 
-    def test_the_largest_checker_process_in_mib(self):
-        self.assertEqual(cm.max_tsc_rss_mib(self.PS, '/r/typescript-beta/bin/tsc'), 300)
+    def memory(self, *rows, tsc=None):
+        return cm.checker_rss_mib('\n'.join(rows) + '\n', tsc or self.TSC, self.SCRIPT, self.MARKER, 'node')
 
-    def test_no_matching_process_is_zero(self):
-        self.assertEqual(cm.max_tsc_rss_mib(self.PS, '/nowhere/tsc'), 0)
+    def test_the_checker_is_not_the_driver_that_names_its_path_and_uses_more_memory(self):
+        self.assertEqual(self.memory(self.HELPER, self.DRIVER, self.CHECKER), 200)
+
+    def test_the_largest_of_several_checker_processes_the_driver_spawned(self):
+        second = ' 301 200 307200 ' + self.NATIVE + ' --api --async --cwd /q'
+        self.assertEqual(self.memory(self.HELPER, self.DRIVER, self.CHECKER, second), 300)
+
+    def test_no_checker_process_is_none_not_the_driver_or_the_helper(self):
+        self.assertIsNone(self.memory(self.HELPER, self.DRIVER))
+
+    def test_a_child_that_is_not_named_like_the_configured_binary_is_not_the_checker(self):
+        self.assertIsNone(self.memory(self.HELPER, self.DRIVER, self.CHECKER, tsc='/nowhere/bin/tsgo'))
+
+    def test_a_tsc_child_that_does_not_run_in_api_mode_is_not_the_checker(self):
+        version = ' 302 200 999999 ' + self.NATIVE + ' --version'
+        self.assertIsNone(self.memory(self.DRIVER, version))
+        self.assertEqual(self.memory(self.DRIVER, version, self.CHECKER), 200)
+
+    def test_a_grandchild_is_not_the_drivers_checker(self):
+        grandchild = ' 303 300 999999 ' + self.NATIVE + ' --api --async --cwd /g'
+        self.assertEqual(self.memory(self.DRIVER, self.CHECKER, grandchild), 200)
+
+    def test_another_runs_driver_and_checker_are_not_this_ones(self):
+        other_options = self.OPTIONS.replace(self.MARKER, '/tmp/work/shadcn-on-demand-150.cache')
+        other = ' 400 1 4194304 node ' + self.SCRIPT + ' --options ' + other_options
+        other_checker = ' 401 400 999999 ' + self.NATIVE + ' --api --async --cwd /z'
+        self.assertEqual(self.memory(self.DRIVER, self.CHECKER, other, other_checker), 200)
+        self.assertIsNone(self.memory(self.DRIVER, other, other_checker))
+
+    def test_an_orphan_with_the_same_executable_and_a_process_that_only_mentions_the_path_do_not_count(self):
+        orphan = ' 500 1 999999 ' + self.NATIVE + ' --api --async --cwd /old'
+        viewer = ' 501 200 999999 less ' + self.TSC
+        self.assertEqual(self.memory(self.DRIVER, self.CHECKER, orphan, viewer), 200)
+        self.assertIsNone(self.memory(self.DRIVER, orphan, viewer))
+
+    def test_a_listing_that_does_not_parse_is_none(self):
+        self.assertIsNone(cm.checker_rss_mib('', self.TSC, self.SCRIPT, self.MARKER, 'node'))
+        self.assertIsNone(cm.checker_rss_mib('not a listing\n', self.TSC, self.SCRIPT, self.MARKER, 'node'))
 
     def sampler(self, answers):
         calls = iter(answers)
-        sampler = cm.TscSampler('/r/typescript-beta/bin/tsc', interval=0.01, ps=lambda: next(calls, (0, self.PS)))
+        sampler = cm.TscSampler(self.TSC, self.SCRIPT, self.MARKER, 'node', interval=0.01,
+                                ps=lambda: next(calls, (0, '')))
         sampler.start()
         while sampler.samples < len(answers):
             pass
         return sampler
 
-    def test_the_peak_is_the_largest_size_seen_across_samples(self):
-        small = ' 102400 node /r/typescript-beta/bin/tsc --api\\n'
-        sampler = self.sampler([(0, small), (0, self.PS)])
+    def listing(self, checker_kib):
+        return '\n'.join([self.HELPER, self.DRIVER, f' 300 200 {checker_kib} {self.NATIVE} --api']) + '\n'
+
+    def test_the_peak_is_the_largest_checker_size_seen_across_samples(self):
+        sampler = self.sampler([(0, self.listing(102400)), (0, self.listing(307200)), (0, self.listing(204800))])
         self.assertEqual(sampler.finish(), 300)
 
-    def test_a_ps_that_never_worked_is_none_not_zero(self):
-        sampler = self.sampler([(1, ''), (1, '')])
+    def test_a_sampler_that_never_saw_the_checker_reports_none_and_prints_na(self):
+        sampler = self.sampler([(0, self.HELPER + '\n' + self.DRIVER + '\n'), (1, '')])
         self.assertIsNone(sampler.finish())
+        self.assertEqual(cm.mib(None), 'n/a (no checker process seen)')
+        self.assertEqual(cm.mib(300), '300 MiB')
+
+
+class DiagnosticWording(unittest.TestCase):
+    """The outcome of an on-demand answer is read from the wording of the checker's diagnostics. If a message is reworded
+    the outcome would silently read `none`, so the phrases are pinned to the Rust that emits them."""
+    PHRASES = ('has not answered yet', 'kept their structural result', 'resolved by the TypeScript checker',
+               'backend unavailable')
+
+    def test_every_phrase_the_classifiers_match_is_emitted_by_the_checker_code(self):
+        rust = read(os.path.join(cm.ROOT, 'crates', 'core', 'src', 'pipeline', 'semantic_hook.rs')) + \
+            read(os.path.join(cm.ROOT, 'crates', 'core', 'src', 'types', 'semantic.rs'))
+        for phrase in self.PHRASES:
+            self.assertIn(phrase, rust)
+
+    def test_the_session_script_and_the_batch_parser_match_those_phrases(self):
+        script = read(cm.SESSION_SCRIPT)
+        for phrase in self.PHRASES:
+            self.assertIn(phrase, script)
+        parser = read(os.path.join(cm.ROOT, 'scripts', 'checker_modes.py'))
+        for phrase in ('resolved by the TypeScript checker', 'kept their structural result'):
+            self.assertIn(phrase, parser)
 
 
 class AddonOptions(unittest.TestCase):
@@ -266,6 +336,12 @@ class ByComponent(unittest.TestCase):
                                                           'defaultValue': None}}}}, '/r')
         self.assertEqual(list(out), [(os.path.join('src', 'Button.tsx'), 'Button')])
         self.assertEqual(out[(os.path.join('src', 'Button.tsx'), 'Button')]['a']['type'], 'string')
+
+
+class ComponentIdentity(unittest.TestCase):
+    def test_a_component_without_a_file_path_is_an_error_not_an_empty_path(self):
+        with self.assertRaises(KeyError):
+            cm.by_component({'A': {'displayName': 'A', 'props': {}}, 'B': {'displayName': 'A', 'props': {}}}, '/r')
 
 
 class BatchBackend(unittest.TestCase):

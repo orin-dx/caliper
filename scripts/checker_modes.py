@@ -121,9 +121,8 @@ def prop_facts(prop):
 
 def component_key(component, root):
     """A component's identity across runs: its file relative to the source root, and its name."""
-    path = component.get('filePath') or component.get('file') or ''
-    rel = os.path.relpath(os.path.realpath(path), os.path.realpath(root)) if path else ''
-    return rel, component.get('displayName') or ''
+    rel = os.path.relpath(os.path.realpath(component['filePath']), os.path.realpath(root))
+    return rel, component['displayName']
 
 
 def by_component(rdt, root):
@@ -352,15 +351,53 @@ def addon_session_options(src, mode, wait, tsc, cache_dir):
     return options
 
 
-def max_tsc_rss_mib(ps_output, tsc_path):
-    """The largest resident size, in MiB, of the processes in `ps -ax -o rss=,command=` output whose command line names
-    `tsc_path`: the checker, seen from outside the process that drives it."""
-    sizes = []
-    for line in ps_output.splitlines():
-        parts = line.strip().split(None, 1)
-        if len(parts) == 2 and parts[0].isdigit() and tsc_path in parts[1]:
-            sizes.append(int(parts[0]) / 1024)
-    return round(max(sizes)) if sizes else 0
+def parse_ps(listing):
+    """The rows of `ps -ax -o pid=,ppid=,rss=,command=` output as (pid, ppid, rss in KiB, command). A line that does not
+    have those four fields is skipped."""
+    rows = []
+    for line in listing.splitlines():
+        parts = line.strip().split(None, 3)
+        if len(parts) == 4 and all(part.isdigit() for part in parts[:3]):
+            rows.append((int(parts[0]), int(parts[1]), int(parts[2]), parts[3]))
+    return rows
+
+
+def executable_name(command):
+    """The file name of a process's executable, `argv[0]`: the part of the command line before the first space."""
+    return os.path.basename(command.split(None, 1)[0])
+
+
+def has_argument(command, argument):
+    """Whether `argument` is a whole element of the command line, as a script handed to `node` is."""
+    return f' {argument} ' in f' {command} '
+
+
+def is_checker(command, tsc_path):
+    """Whether a process is the TypeScript checker: its executable is named like the configured `tsc` binary and it runs in
+    `--api` mode. The path is not compared: the configured `bin/tsc` is a launcher, and what runs is the platform binary
+    it resolves to (`@typescript/typescript-<platform>/lib/tsc --api --async --cwd <dir>`, seen in `ps`)."""
+    return executable_name(command) == os.path.basename(tsc_path) and has_argument(command, '--api')
+
+
+def checker_rss_mib(listing, tsc_path, script, marker, node):
+    """The largest resident size, in MiB, of the checker processes a session spawned, or None when there is none.
+
+    The checker is found by what it is: a direct child of this run's session driver (the `node` process that runs
+    `script` and whose options carry `marker`, a path that is unique to the run) that `is_checker`. A substring of the
+    command line is not an identity: the driver and the measuring helper both carry the `tsc` path in their JSON
+    options, and either can use more memory than the checker. A checker from another run, an orphaned one and anything
+    else that merely mentions the path are not children of this driver."""
+    rows = parse_ps(listing)
+    drivers = {pid for pid, _, _, command in rows
+               if executable_name(command) == os.path.basename(node) and has_argument(command, script)
+               and marker in command}
+    sizes = [rss for _, ppid, rss, command in rows if ppid in drivers and is_checker(command, tsc_path)]
+    return round(max(sizes) / 1024) if sizes else None
+
+
+def mib(value):
+    """A memory figure for a line of text, or why there is none."""
+    return 'n/a (no checker process seen)' if value is None else f'{value} MiB'
 
 
 class TscSampler(threading.Thread):
@@ -368,32 +405,34 @@ class TscSampler(threading.Thread):
     not measure the checker itself: asking for its memory between requests would give a slow checker idle time that the
     timings do not count."""
 
-    def __init__(self, tsc_path, interval=0.25, ps=None):
+    def __init__(self, tsc_path, script, marker, node, interval=0.25, ps=None):
         super().__init__(daemon=True)
-        self.tsc_path, self.interval, self.ps = tsc_path, interval, ps or self.run_ps
-        self.peak_mib, self.samples, self.worked = 0, 0, False
+        self.tsc_path, self.script, self.marker, self.node = tsc_path, script, marker, node
+        self.interval, self.ps = interval, ps or self.run_ps
+        self.peak_mib, self.samples = None, 0
         self._stop_event = threading.Event()
 
     @staticmethod
     def run_ps():
-        out = subprocess.run(['ps', '-ax', '-o', 'rss=,command='], capture_output=True, text=True, errors='replace')
+        out = subprocess.run(['ps', '-ax', '-o', 'pid=,ppid=,rss=,command='], capture_output=True, text=True,
+                             errors='replace')
         return out.returncode, out.stdout
 
     def run(self):
         while not self._stop_event.is_set():
             code, listing = self.ps()
-            if code == 0 and listing.strip():
-                self.worked = True
-                self.peak_mib = max(self.peak_mib, max_tsc_rss_mib(listing, self.tsc_path))
+            size = checker_rss_mib(listing, self.tsc_path, self.script, self.marker, self.node) if code == 0 else None
+            if size is not None:
+                self.peak_mib = size if self.peak_mib is None else max(self.peak_mib, size)
             self.samples += 1
             self._stop_event.wait(self.interval)
 
     def finish(self):
-        """The largest checker size seen in MiB, or None when `ps` never gave a listing: a measurement that did not
-        happen is not a size of 0."""
+        """The largest checker size seen in MiB, or None when no poll found the checker (it was never spawned, or `ps`
+        gave no listing): a measurement that did not happen is not a size of 0."""
         self._stop_event.set()
         self.join()
-        return self.peak_mib if self.worked else None
+        return self.peak_mib
 
 
 def process_stats(mode, samples):
@@ -416,7 +455,7 @@ def session_run(node, src, mode, wait, tsc, count, work, label, runs):
     out = os.path.join(work, f'{label}.session.json')
     samples, results, peaks = [], [], []
     for _ in range(runs):
-        sampler = TscSampler(tsc) if mode == 'on-demand' else None
+        sampler = TscSampler(tsc, SESSION_SCRIPT, cache_dir, node) if mode == 'on-demand' else None
         if sampler:
             sampler.start()
         try:
@@ -622,7 +661,7 @@ def sentences(report):
                                f"{percent(f['first_pass']['checker_share'])} of first requests (timed out: "
                                f"{f['first_pass']['timed_out']}; the rest kept the structural result for the checker's "
                                f"own reasons) and {percent(f['second_pass']['checker_share'])} when asked again; tsc "
-                               f"peak {'n/a (ps gave no listing)' if f['tsc_rss_mib'] is None else str(f['tsc_rss_mib']) + ' MiB'}")
+                               f"peak {mib(f['tsc_rss_mib'])}")
                 out.append(f"  on-demand, wait {wait} ms: {e['diff_after_late_answers']['props_differing']} props differ "
                            f"from the checker-off session")
         if 'oracle' in c:
