@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01XZrSkE3JnUUMnyukdr59Tz",
+  "agent_id": "a5c45cc85f66a3316",
+  "subagent_type": "fork",
+  "task_description": "Trail 172 storybook accuracy headline",
+  "token_usage": {
+    "input_tokens": 66,
+    "cache_creation_tokens": 81856,
+    "cache_read_tokens": 19573551,
+    "output_tokens": 38380,
+    "api_call_count": 36
+  },
+  "started_at": "2026-11-02T16:08:13.905118-08:00",
+  "completed_at": "2026-11-02T16:13:28.216416-08:00"
+}

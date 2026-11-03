@@ -1,0 +1,98 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6FD3BDER9ENNBB4GGREK6V9",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-03T00:32:02.705871Z",
+  "branch": "fix/checker-underscore-names",
+  "checkpoints_count": 5,
+  "save_step_count": 7,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "3288c2b6c005",
+  "checkpoint_transcript_start": 2867,
+  "transcript_lines_at_start": 2867,
+  "compact_transcript_start": 245,
+  "token_usage": {
+    "input_tokens": 48,
+    "cache_creation_tokens": 49929,
+    "cache_read_tokens": 12010003,
+    "output_tokens": 21193,
+    "api_call_count": 22,
+    "subagent_tokens": {
+      "input_tokens": 239,
+      "cache_creation_tokens": 289730,
+      "cache_read_tokens": 71984131,
+      "output_tokens": 128241,
+      "api_call_count": 129
+    }
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 6,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 56
+  },
+  "summary": {
+    "intent": "Drive a multi-trail effort to improve the accuracy of Caliper's component prop output (collapse rules, checker backend bugs, release pipeline), and now investigate code-review and slop-review findings on trail 172 to understand patterns and reduce low-quality output.",
+    "outcome": "Opened PRs #321-#324 (crate-wide missing_docs, ADR notes, weekly headline, layer-only investigation), got approval for a collapse-by-relevance rule and launched workers for trails 192 and 164, and diagnosed why the 0.9.0 GitHub Release backfill cannot succeed. Started collecting agent-review findings across trails, but the analysis was not completed in this transcript.",
+    "learnings": {
+      "repo": [
+        "Collapsing inherited props by size (30-prop threshold) is the wrong rule: on antd 664 of 669 layer-only props are real API, on shadcn 6,507 of 6,774 are ambient (react-aria GlobalDOMEvents). 36% (antd) and 30% (shadcn) of API props sit in 31-40 prop layers and lose types.",
+        "Proposed relevance rule classifies a dependency source as ambient by DOM file, DOM type name, style type name, or global attribute name, regardless of size; measured net output +4.6% antd, -2.2% shadcn, vs +4.8%/+9.7% for expanding everything. The size rule exists for Chakra-scale corpora (560 to 398,910 props), unmeasured under the new rule.",
+        "The release backfill pinned via RELEASE_PENDING_FROM selects 2daef927 (the 0.9.0 merge of #269), which predates the [release] section in callisto.toml, so Callisto plans zero artifact slots, execute is a no-op (all outcomes alreadySatisfied), and the assemble job is skipped because has_artifacts is false.",
+        "0.9.0 stays pending forever, so every push to main re-selects it, re-runs a full build, and blocks real releases (like #291) from getting an immediate run; they would only run via the drain job or daily schedule. docs/releasing.md (~line 60) wrongly assumes the backfill creates the 0.9.0 Release.",
+        "Shared helpers normComponent and pathKey live in tool-universe.ts; duplicate copies in the oracle reference code were removed during the #318 merge fix.",
+        "The stray `tw` props in the corpus come from next's @vercel/og HTMLAttributes, a second HTMLAttributes interface.",
+        "The 'API props in 31-40 band' counter actually counts layers of 40 props or fewer; correct only because all collapsed layers exceed 30.",
+        "Local headline: shadcn is 54.4% correct, 0.06% wrong (0.096% of judged props, just under the 0.1% alert gate), with 39.6% named-only through a collapsed layer; antd is 83.7% correct, 0.00% wrong."
+      ],
+      "code": [
+        {
+          "path": "docs/releasing.md",
+          "line": 60,
+          "finding": "Assumes the backfill rebuilds 0.9.0 and creates its GitHub Release, which is false for a release commit that predates the [release] config."
+        },
+        {
+          "path": "apps/oracle/src/layer-only.ts",
+          "finding": "Classifier with ordered clauses (dom file, dom type, style type, global attribute => ambient; otherwise API), reading only the layer's file, type name and prop name."
+        },
+        {
+          "path": "docs/type-checker-integration.md",
+          "finding": "One paragraph remains stale after the ADR 0006/0007 change (sessions clear checker answers per revision instead of notifying tsc); deferred to a follow-up."
+        }
+      ],
+      "workflow": null
+    },
+    "friction": [
+      "The trail review page required a login, forcing a fallback to the CLI.",
+      "The CLI finding fields did not match the guessed names, requiring a raw JSON dump to discover the structure.",
+      "The local callisto binary rejects the `release` subcommand, so the fix for the pending check could not be verified.",
+      "Earlier assurance that the 0.9.0 backfill would work was wrong and baked into docs and the #288 recovery design.",
+      "Chakra, Mantine and Spectrum are not installed locally, so the relevance rule is unvalidated at scale.",
+      "The release-diagnose report was truncated mid-sentence."
+    ],
+    "open_items": [
+      "Analyze the agent-review/slop-review findings on trail 172 change 115 (#318) and across all trails for patterns, and look for similar issues elsewhere.",
+      "Fix the release backfill (move or remove the RELEASE_PENDING_FROM pin or hand-create the 0.9.0 release), correct docs/releasing.md, and do not merge #291 until settled.",
+      "Merge #318, then retarget #324 to main; merge the rest of #320-#323 and #291 after review.",
+      "Complete trail 192 (collapse by relevance, all five corpora, Chakra first-load budget gate) and trail 164 (checker lost optional/rest markers, extra underscore on __size).",
+      "Unstarted: less-precise type fixes (unexpanded names, Form.watch as empty object, optional function losing | undefined).",
+      "Fix the stale paragraph in docs/type-checker-integration.md; add per-component invalidation and a session-versus-extract() parity test.",
+      "Open decisions: trail 156 ADR (lean skip), trail 154 follow-up for dependency-loading cost, pinning macos-26 in the release matrix.",
+      "Watch the first CI weekly run on #323, where Spectrum's 1.09% wrong rate will likely trip the gate."
+    ]
+  }
+}
