@@ -1,0 +1,20 @@
+{
+  "tool_use_id": "toolu_01HUYZj5R9tYWiwj4waBaNCs",
+  "agent_id": "a941324571cbe067e",
+  "subagent_type": "general-purpose",
+  "task_description": "Trail 211 Rust follow-ups",
+  "files": [
+    ".changeset/compound-member-skip-note.md",
+    ".changeset/config-cache-dir-relative.md",
+    ".changeset/inline-prop-tags.md"
+  ],
+  "token_usage": {
+    "input_tokens": 210,
+    "cache_creation_tokens": 162041,
+    "cache_read_tokens": 13248672,
+    "output_tokens": 32466,
+    "api_call_count": 105
+  },
+  "started_at": "2026-11-02T18:52:06.787507-08:00",
+  "completed_at": "2026-11-02T19:05:33.325644-08:00"
+}
