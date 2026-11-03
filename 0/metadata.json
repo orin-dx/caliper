@@ -1,0 +1,48 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6FH3BYK28ZHFFTWCHFQQTEK",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-03T01:41:41.05513Z",
+  "branch": "fix/watch-dependency-edits",
+  "checkpoints_count": 2,
+  "save_step_count": 40,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "68b343966515",
+  "checkpoint_transcript_start": 5256,
+  "transcript_lines_at_start": 5256,
+  "compact_transcript_start": 458,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0,
+    "subagent_tokens": {
+      "input_tokens": 4,
+      "cache_creation_tokens": 1974,
+      "cache_read_tokens": 228050,
+      "output_tokens": 936,
+      "api_call_count": 2
+    }
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 6,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 111
+  }
+}
