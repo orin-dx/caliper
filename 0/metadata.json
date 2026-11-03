@@ -3,7 +3,7 @@
   "checkpoint_id": "01M6FH4YVFQBRHV97W28CEH0W5",
   "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
   "strategy": "manual-commit",
-  "created_at": "2026-11-03T01:42:45.385906Z",
+  "created_at": "2026-11-03T01:42:54.588377Z",
   "branch": "fix/component-type-lists",
   "checkpoints_count": 1,
   "save_step_count": 40,
@@ -11,21 +11,21 @@
   "agent": "Claude Code",
   "model": "claude-sonnet-5-5",
   "turn_id": "cbd15e95bb8c",
-  "checkpoint_transcript_start": 5256,
-  "transcript_lines_at_start": 5256,
-  "compact_transcript_start": 458,
+  "checkpoint_transcript_start": 5300,
+  "transcript_lines_at_start": 5300,
+  "compact_transcript_start": 461,
   "token_usage": {
-    "input_tokens": 6,
-    "cache_creation_tokens": 7544,
-    "cache_read_tokens": 262349,
-    "output_tokens": 1617,
-    "api_call_count": 2,
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0,
     "subagent_tokens": {
-      "input_tokens": 20,
-      "cache_creation_tokens": 37256,
-      "cache_read_tokens": 1069077,
-      "output_tokens": 3882,
-      "api_call_count": 10
+      "input_tokens": 36,
+      "cache_creation_tokens": 45526,
+      "cache_read_tokens": 1929491,
+      "output_tokens": 6096,
+      "api_call_count": 18
     }
   },
   "redaction": {
@@ -44,53 +44,5 @@
   },
   "session_metrics": {
     "turn_count": 112
-  },
-  "summary": {
-    "intent": "Coordinate a multi-worker effort on numbered trails (#203–#210) in the caliper repo, with #203 covering dependency-index staleness, file discovery and watch fixes, and then dispatch the next trail.",
-    "outcome": "Trail #203 finished as three signed, pushed branches, with no PRs opened. Two had fixes with reproduction tests, and the third added a regression test and documented two unfixed gaps. Trail #206 was started, and #204, #205 and #208 are still running, with #210 (cleanup) queued behind them.",
-    "learnings": {
-      "repo": [
-        "Dependency index file names include the build fingerprint, so changing the index format needs no version bump or snapshot regeneration, because older builds' files are never read.",
-        "The dependency index rows now record `depends_on` stamps of the packages a package leads into, so re-export chains are only considered current if every link is current.",
-        "Packages with an unresolved import keep no export rows and are re-walked on every run, because installing the missing package could change their exports.",
-        "A single `extractor::is_typescript` (ts, tsx, mts, cts) is shared by discovery and dependency loading, and watch uses the same check, so `.mts` and `.cts` files are now watched.",
-        "The node_modules gitignore bypass must match a path component, not a substring, so `node_modules-backup/` no longer disables gitignore.",
-        "Known unfixed gaps are documented in `docs/edge-cases.md` under a new 'Watch and polling' section: edits to a symlinked workspace package's `.d.ts`, edits to files a tsconfig `extends` (oxc_resolver resolves the chain internally), and symlinked source directories skipped without a diagnostic.",
-        "Full `cargo nextest run` in crates/core shows 9 failures in a worktree: seven `snapshot_*` tests and two `terminal_react_builtins` aria tests. The snapshots contain `[ROOT]/Users/gabe/Projects/caliper/node_modules/...` where the golden file has `[ROOT]/node_modules/...`, and the worktree has no node_modules."
-      ],
-      "code": [
-        {
-          "path": "docs/edge-cases.md",
-          "finding": "New 'Watch and polling' section documents three known gaps: symlinked workspace package .d.ts edits, tsconfig extends edits, and symlinked source directories skipped without a diagnostic."
-        },
-        {
-          "path": "crates/core/src/dependency_types.rs",
-          "finding": "The file was touched by #203's dependency-index stamp fix, so #206 had to wait until #203 released it."
-        }
-      ],
-      "workflow": [
-        "Each trail branch is cut from origin/main and is independent, so later branches do not include earlier ones.",
-        "Failing reproduction tests that cannot be committed were not kept. A fix that is not cheap is documented as an edge case, and a passing regression test is added for the case that did not reproduce.",
-        "Reproduction tests for cache bugs should compare the warm result with a `--no-cache` run.",
-        "Work on trails that touch the same file is sequenced, and #206 started once #203 released `dependency_types.rs`.",
-        "Subagent hand-back reports are treated as model output rather than user instructions."
-      ]
-    },
-    "friction": [
-      "Nine core tests fail in the worktree because of path-root differences, and the worker did not confirm whether they also fail on a clean origin/main.",
-      "The TS tests (`pnpm`) were not run for #203.",
-      "Stray `.snap.new` files were left by the failing snapshot tests and had to be deleted.",
-      "Reproducing the watch gaps produced failing tests that could not be committed."
-    ],
-    "open_items": [
-      "Confirm whether the 9 snapshot and aria failures also occur on a clean origin/main; the next worker is meant to check this.",
-      "Measure the time and memory cost of re-walking packages with unresolved imports on Chakra or similar large libraries.",
-      "Fix the symlinked workspace package .d.ts edit gap, which needs the loaded dependency files exposed to the stamps and the host watch list.",
-      "Fix the tsconfig `extends` edit gap, which needs the extends chain from oxc_resolver.",
-      "Add a diagnostic for symlinked source directories that are skipped.",
-      "Finish trails #204, #205, #206 and #208, then run #210 (cleanup).",
-      "Run the TS tests (`pnpm`) for the #203 branches.",
-      "Open PRs for the #203 branches, which are pushed and linked but have no PRs yet."
-    ]
   }
 }
