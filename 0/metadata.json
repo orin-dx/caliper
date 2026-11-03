@@ -1,0 +1,67 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6FDM3W8QD0V280AS8NGS5KW",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-03T00:41:04.918538Z",
+  "branch": "measure/reference-sample",
+  "checkpoints_count": 2,
+  "save_step_count": 8,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "e66d858e99db",
+  "checkpoint_transcript_start": 3373,
+  "transcript_lines_at_start": 3373,
+  "compact_transcript_start": 288,
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 11607,
+    "cache_read_tokens": 1799636,
+    "output_tokens": 5351,
+    "api_call_count": 3,
+    "subagent_tokens": {
+      "input_tokens": 80,
+      "cache_creation_tokens": 85643,
+      "cache_read_tokens": 24280118,
+      "output_tokens": 45205,
+      "api_call_count": 43
+    }
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 6,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 58
+  },
+  "summary": {
+    "intent": "Review findings from caliper/65 and related trail discussions and local review runs, then publish the finished checker-bug branches and begin fixing the review findings in shape detection.",
+    "outcome": "Pushed and linked the checker-bug branches and set bodies on PRs 325 and 326. Launched an agent to fix the review findings in shape detection, including a panic in merged product code. The fix is not yet confirmed complete.",
+    "learnings": {
+      "repo": [
+        "Review findings for caliper/65 were not all read initially. Three unread findings turned out to be real bugs in already-merged product code, one of them a panic.",
+        "Shape detection code has outstanding review findings that need fixing.",
+        "Checker-bug work is split across separate branches that map to PRs (including 325 and 326), which need to be pushed and linked."
+      ],
+      "code": [],
+      "workflow": [
+        "Read all review findings, trail discussions and local review runs before answering, since unread findings can hide real bugs.",
+        "Push finished branches and set PR bodies before starting new fix work, so completed work is not blocked by the new task.",
+        "Delegating the fix to a sub-agent allows the review-finding work to proceed separately from the branch publishing."
+      ]
+    },
+    "friction": null,
+    "open_items": null
+  }
+}
