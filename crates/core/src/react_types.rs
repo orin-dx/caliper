@@ -103,8 +103,7 @@ pub fn is_attribute_builtin(bare_name: &str) -> bool {
 
 /// The `@types/react` function-component types, whose first type argument is the props. The one list the extractor
 /// and the resolver both read, so a name added here is recognised by both.
-pub const FC_FAMILY_TYPE_NAMES: &[&str] =
-    &["FC", "FunctionComponent", "VFC", "VoidFunctionComponent", "ComponentType"];
+pub const FC_FAMILY_TYPE_NAMES: &[&str] = &["FC", "FunctionComponent", "VFC", "VoidFunctionComponent", "ComponentType"];
 
 /// Types that are terminal — never need further resolution.
 ///

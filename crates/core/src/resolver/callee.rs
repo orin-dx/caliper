@@ -19,12 +19,8 @@ use super::substitute::{build_substitution, substitute_alias, substitute_type};
 use super::ResolutionContext;
 
 /// React types whose first type argument is a component's props.
-const COMPONENT_TYPES: &[&str] = &[
-    "NamedExoticComponent",
-    "ForwardRefExoticComponent",
-    "ExoticComponent",
-    "JSXElementConstructor",
-];
+const COMPONENT_TYPES: &[&str] =
+    &["NamedExoticComponent", "ForwardRefExoticComponent", "ExoticComponent", "JSXElementConstructor"];
 
 /// Whether `name` (without any `React.` prefix) is a React type whose first type argument is a component's props.
 fn is_component_type(name: &str) -> bool {
