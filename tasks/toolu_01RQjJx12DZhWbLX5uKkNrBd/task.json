@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01RQjJx12DZhWbLX5uKkNrBd",
+  "agent_id": "ad2a1cf9b63cbf0af",
+  "subagent_type": "general-purpose",
+  "task_description": "Remove stray snapshots from 362",
+  "token_usage": {
+    "input_tokens": 14,
+    "cache_creation_tokens": 37077,
+    "cache_read_tokens": 342691,
+    "output_tokens": 1251,
+    "api_call_count": 7
+  },
+  "started_at": "2026-11-02T20:29:33.086085-08:00",
+  "completed_at": "2026-11-02T20:30:22.754683-08:00"
+}
