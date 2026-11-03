@@ -3980,3 +3980,27 @@ export function Row(props: { render: ({ id }: { id: string }, index?: number) =>
         "(__0: { id: string }, index?: number) => void"
     );
 }
+
+#[test]
+fn tuple_elements_resolve_whether_plain_labelled_or_optional() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "type Tone = 'a' | 'b';\n\
+         export function Box(props: { plain: [Tone, number]; labelled: [tone: Tone, count?: number] }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    let tone = PropType::LiteralUnion { members: vec!["a".into(), "b".into()], has_default: false };
+    assert_eq!(props["plain"].prop_type, PropType::Tuple(vec![tone.clone(), PropType::Number]));
+    assert_eq!(
+        props["labelled"].prop_type,
+        PropType::Tuple(vec![tone, PropType::Number])
+    );
+}
+
+#[test]
+fn a_css_property_that_takes_a_number_or_a_string_is_both_without_dependencies() {
+    let output = extract_one(&[("Box.tsx", "export function Box(props: { z?: React.CSSProperties['zoom'] }) { return null; }\n")]);
+
+    assert_eq!(output.components["Box"].props["z"].prop_type.raw_string(), "string | number");
+}

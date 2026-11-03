@@ -13827,7 +13827,15 @@ expression: value
         "leftSectionWidth": {
           "name": "leftSectionWidth",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": {
@@ -21238,7 +21246,15 @@ expression: value
         "rightSectionWidth": {
           "name": "rightSectionWidth",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": {

@@ -635,7 +635,7 @@ fn a_member_of_a_react_type_reads_what_react_imports_when_dependencies_load() {
     let (z_index, width) = (CSS_Z_INDEX, CSS_WIDTH);
     assert_eq!(prop_types(&on, "Box"), [("w".into(), width.into()), ("z".into(), z_index.into())]);
     assert_eq!(prop_types(&on, "Umd"), [("z".into(), z_index.into())]);
-    assert_eq!(prop_types(&off, "Box"), [("w".into(), "string".into()), ("z".into(), "number".into())]);
+    assert_eq!(prop_types(&off, "Box"), [("w".into(), "string | number".into()), ("z".into(), "number".into())]);
     assert_eq!(prop_types(&off, "Umd"), [("z".into(), "number".into())]);
 }
 

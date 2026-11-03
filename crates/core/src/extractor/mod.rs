@@ -941,22 +941,24 @@ impl<'src> SourceDataCollector<'src> {
                 // ...T[] in tuple → Array(T)
                 CollectedType::Array(Box::new(self.ts_type_to_collected_at_depth(&r.type_annotation, depth + 1)))
             }
-            // All TSType variants are inherited — we can safely transmute via span+raw fallback
-            // but the cleanest approach is to match the known shared variants.
-            // Since TSTupleElement inherits TSType, we cast via the span trick:
-            other => {
-                use oxc_span::GetSpan;
-                let span = other.span();
-                let raw = self.source[span.start as usize..span.end as usize].to_owned();
-                // Try to produce a real type from source-text parsing would require re-parsing,
-                // so instead we check common patterns via span-based raw parsing and use
-                // the raw fallback for anything we can't directly handle.
-                // For the common case of plain TSType variants (not TSOptionalType/TSRestType),
-                // we need to re-interpret the element as a TSType. We can't do this safely
-                // at runtime without unsafe, but all such variants produce valid CollectedType
-                // via raw text. Most real tuple usage is simple types.
-                CollectedType::Raw(raw)
+            // A labelled member `name: T` or `name?: T` is its type, optional when marked.
+            TSTupleElement::TSNamedTupleMember(named) => {
+                let inner = self.ts_tuple_element_to_collected(&named.element_type, depth + 1);
+                if named.optional {
+                    CollectedType::Union(vec![inner, CollectedType::Undefined])
+                } else {
+                    inner
+                }
             }
+            // The remaining variants are the plain `TSType`s the element inherits.
+            other => match other.as_ts_type() {
+                Some(ty) => self.ts_type_to_collected_at_depth(ty, depth + 1),
+                None => {
+                    use oxc_span::GetSpan;
+                    let span = other.span();
+                    CollectedType::Raw(self.source[span.start as usize..span.end as usize].to_owned())
+                }
+            },
         }
     }
 
