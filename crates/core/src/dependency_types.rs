@@ -1102,7 +1102,7 @@ fn index_path(options: &PipelineOptions) -> (Utf8PathBuf, u64) {
 
 /// Whether `path` lies inside a `node_modules` directory, spelled with either separator (a Windows path has
 /// backslashes once the verbatim prefix is gone).
-fn in_node_modules(path: &str) -> bool {
+pub(crate) fn in_node_modules(path: &str) -> bool {
     path.contains("/node_modules/") || path.contains(r"\node_modules\")
 }
 

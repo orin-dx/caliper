@@ -2892,6 +2892,22 @@ fn an_interface_chain_expanded_for_a_pick_is_not_reused_where_it_collapses() {
 }
 
 #[test]
+fn collapsing_all_leaves_a_node_modules_source_alone_whichever_separator_the_path_uses() {
+    let options = PipelineOptions {
+        collapse_inherited_props: crate::types::options::CollapseInheritedProps::All,
+        ..Default::default()
+    };
+    let ctx = ResolutionContext::new(Arc::new(GlobalSourceData::default()), &options);
+    let state = ResolveState::default();
+    let collapses = |file: &str| ctx.collapses(Utf8Path::new(file), 31, 1, &state);
+
+    assert!(!collapses("/proj/node_modules/pkg/index.d.ts"));
+    assert!(!collapses(r"C:\proj\node_modules\pkg\index.d.ts"));
+    assert!(collapses("/proj/src/Props.ts"));
+    assert!(collapses(r"C:\proj\src\Props.ts"));
+}
+
+#[test]
 fn an_interface_chain_cut_short_by_a_cycle_is_not_reused_where_the_cycle_is_not_open() {
     // P reaches Base through Loop, so Base's own `extends Loop` closes a cycle there; Q reaches Base at the same depth
     // through Z, where Loop has not been entered, so Base's chain takes Loop's props.

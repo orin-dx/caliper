@@ -592,7 +592,7 @@ impl ResolutionContext {
             && match self.collapse_inherited_props {
                 CollapseInheritedProps::Dependencies => self.is_dependency_file(file),
                 CollapseInheritedProps::All => {
-                    self.is_dependency_file(file) || !file.as_str().contains("/node_modules/")
+                    self.is_dependency_file(file) || !crate::dependency_types::in_node_modules(file.as_str())
                 }
                 CollapseInheritedProps::None => false,
             }

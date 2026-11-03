@@ -45,7 +45,13 @@ fn needs_verbatim(path: &str) -> bool {
                 .iter()
                 .any(|device| stem.strip_prefix(device).is_some_and(|n| matches!(n.as_bytes(), [b'1'..=b'9'])))
     };
-    path.len() >= MAX_PATH
+    // The limit is on the plain spelling, which is shorter than the verbatim one by its prefix.
+    let plain_len = match (path.strip_prefix(r"\\?\UNC\"), path.strip_prefix(r"\\?\")) {
+        (Some(unc), _) => unc.len() + 2,
+        (None, Some(drive)) => drive.len(),
+        (None, None) => path.len(),
+    };
+    plain_len >= MAX_PATH
         || path.split('\\').skip(3).any(|component| {
             component.ends_with(['.', ' ']) && component != "." && component != ".." || reserved(component)
         })
@@ -93,6 +99,21 @@ mod tests {
         ] {
             assert_eq!(strip_verbatim_prefix(path), Utf8PathBuf::from(path));
         }
+    }
+
+    #[test]
+    fn the_limit_applies_to_the_plain_spelling_not_the_verbatim_one() {
+        // A plain path of 259 characters still opens; the verbatim spelling of it is 263 long.
+        let plain = format!(r"C:\{}", "a".repeat(256));
+        assert_eq!(plain.len(), 259);
+        assert_eq!(strip_verbatim_prefix(&format!(r"\\?\{plain}")), Utf8PathBuf::from(&plain));
+
+        let too_long = format!(r"\\?\C:\{}", "a".repeat(257));
+        assert_eq!(strip_verbatim_prefix(&too_long), Utf8PathBuf::from(&too_long));
+
+        let unc = format!(r"\\srv\sh\{}", "a".repeat(250));
+        assert_eq!(unc.len(), 259);
+        assert_eq!(strip_verbatim_prefix(&format!(r"\\?\UNC\{}", &unc[2..])), Utf8PathBuf::from(&unc));
     }
 
     #[test]
