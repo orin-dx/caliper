@@ -4010,3 +4010,27 @@ export function Row(props: { render: ({ id }: { id: string }, index?: number) =>
         "(__0: { id: string }, index?: number) => void"
     );
 }
+
+#[test]
+fn a_plain_block_comment_is_not_a_description() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "export function Box(props: {\n  /* implementation note */\n  a: string;\n  /** The size. */\n  /* trailing note */\n  b: string;\n}) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    assert_eq!(props["a"].description, "");
+    assert_eq!(props["b"].description, "The size.");
+}
+
+#[test]
+fn a_tag_keeps_its_continuation_lines() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "export interface BoxProps {\n  /**\n   * The size.\n   * @deprecated Use `scale`\n   *   instead of this.\n   * @example\n   * <Box size=\"s\" />\n   * <Box size=\"m\" />\n   */\n  size: string;\n}\nexport function Box(props: BoxProps) { return null; }\n",
+    )]);
+
+    let tags = &output.components["Box"].props["size"].tags;
+    assert_eq!(tags["deprecated"], "Use `scale`\ninstead of this.");
+    assert_eq!(tags["example"], "<Box size=\"s\" />\n<Box size=\"m\" />");
+}
