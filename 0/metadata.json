@@ -1,0 +1,90 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6FBHF2TRE32EC841NTQJPBV",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-03T00:04:43.133779Z",
+  "branch": "chore/callisto-0.17",
+  "checkpoints_count": 3,
+  "save_step_count": 6,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "70565f38b156",
+  "checkpoint_transcript_start": 2558,
+  "transcript_lines_at_start": 2558,
+  "compact_transcript_start": 218,
+  "token_usage": {
+    "input_tokens": 22,
+    "cache_creation_tokens": 20839,
+    "cache_read_tokens": 4736094,
+    "output_tokens": 9567,
+    "api_call_count": 10,
+    "subagent_tokens": {
+      "input_tokens": 215,
+      "cache_creation_tokens": 203134,
+      "cache_read_tokens": 64673743,
+      "output_tokens": 121558,
+      "api_call_count": 119
+    }
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 6,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 48
+  },
+  "summary": {
+    "intent": "Land the independent reference-sample measurement for Caliper's type accuracy (trail 172), then decide whether to upgrade Callisto to 0.17 and whether collapsing inherited prop layers is the right choice for correct types in Storybook.",
+    "outcome": "Reference-sample branch was pushed as PR #318 with measured results (antd 87% / shadcn 76% correct, 1 wrong, none contested). A worker was started for the Callisto 0.17.0 upgrade (not pushed, pending in-flight release runs). Analysis concluded collapsing is sometimes right (ambient families) but loses type info for real dependency APIs; a follow-up measure/layer-only-props branch was proposed, awaiting approval.",
+    "learnings": {
+      "repo": [
+        "Reference oracle combines two methods: A (checker's normalized type from oracle-checker.ts) and B (type the declaration writes, read from source via the stable TypeScript parser, never the checker's printer). Disagreement is 'contested' and goes to a human review file.",
+        "The checker treats any one-parameter function as a component, so an unfiltered antd sample was 56% junk (style helpers, contexts); the sampler now draws only from components Caliper reports unless the `allComponents` config key is set.",
+        "Canonical JSON stores a collapsed layer's `members` as an id into `nameLists`; lookups must resolve the interned list, not search the id string.",
+        "Collapsing (docs/architecture/resolver-type-resolution.md): an inherited source with more than 30 props becomes one layer carrying member names, a count and a 'notable' typed subset. Modes are Dependencies (default), All and None. The component's own props type and Pick/keyof bases are never collapsed.",
+        "Collapsing exists for size: loading dependency types took Chakra from 560 to 398,910 props (~705 style props on each of 600 components).",
+        "The 30-prop cutoff is a size rule, not a relevance rule, so it can't distinguish ambient families (HTML attrs, Chakra style props) from primary dependency APIs such as shadcn's Radix wrappers.",
+        "In the reference sample, 7% of antd and 16% of shadcn props reach Storybook only as names via collapsed layers.",
+        "oracle-compare.ts treats a widened primitive of another kind (number vs 'a'|'b') as 'less precise' rather than wrong; fixing it would move all historical oracle numbers.",
+        "The release workflow and ci.yml pin Callisto by commit SHA plus a version comment; the repo publishes to both crates.io and npm and has two fixed groups, so Callisto 0.17.0's fixed-group notes and dual-registry --emit-decision fixes are relevant."
+      ],
+      "code": [],
+      "workflow": [
+        "Workers commit locally and signed but do not push, open PRs or merge; the lead verifies, pushes and links to trails, and the user owns merges.",
+        "Defer editing the release workflow (e.g. the Callisto pin bump) until in-flight release runs on main finish.",
+        "Verify a tool upgrade by running the new binary against the repo (status --check, release --dry-run, release pending) and diffing against the old version, plus actionlint and zizmor.",
+        "Where two methods read the same declaration, agreement is weak corroboration; a labelled human sample is still needed where the independent method abstains."
+      ]
+    },
+    "friction": [
+      "B abstains on about 14% of props (indexed, keyof, typeof, multiple or no declarations), so those rest on the checker alone and the reference adds nothing there.",
+      "The worker's first antd sample was 56% junk and its layer lookup initially made every layered prop look missing, requiring two fixes.",
+      "CI on PR #318 had not been read when it was reported as mergeable.",
+      "Chakra, Mantine and Spectrum were not run in the reference sample."
+    ],
+    "open_items": [
+      "Awaiting user's go-ahead on measure/layer-only-props, which classifies layer-only props as ambient vs real API and proposes a relevance-based collapse rule.",
+      "Consider on-demand layer expansion via the lazy session so Storybook can get a type when a prop is opened.",
+      "Callisto 0.17.0 upgrade branch chore/callisto-0.17 must be pushed, linked to trail 158 and merged after in-flight release runs finish; decide whether to enable --strict in CI.",
+      "Watch the first attested release run on main, which has never run before.",
+      "The t172-modes worker's list of structural vs checker differing props can be fed into the reference via --list.",
+      "Dedupe normComponent and path helpers copied from oracle.ts once #314 lands.",
+      "Fix Caliper's output for callable interfaces such as Form.watch (UseFormWatch<TFieldValues>), which currently emits an empty object.",
+      "Fix three missing `tw` props (shadcn SheetTitle, AlertDialogTitle, CommandItem) and unexpanded type names (ValueType, Multiple, BuildInPlacements) plus optional functions losing `| undefined`.",
+      "User still needs to merge #291, #312 and #314–#318.",
+      "Run the reference on Chakra, Mantine and Spectrum (Chakra install is in /tmp/claude-501/t166)."
+    ]
+  }
+}
