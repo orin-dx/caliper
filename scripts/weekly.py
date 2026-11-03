@@ -96,7 +96,7 @@ def caliper_components(binary, src, root):
 
 def caliper_layer_members(binary, src, root):
     """The props Caliper's collapsed inheritance layers hold, as (file, name) -> prop names: the output names them in a
-    layer instead of listing them as props (ADR 0012), and the canonical JSON is the one that carries the layers."""
+    layer instead of listing them as props, and the canonical JSON is the one that carries the layers."""
     command = [binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported', '--quiet',
                '--load-dependencies']
     out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
