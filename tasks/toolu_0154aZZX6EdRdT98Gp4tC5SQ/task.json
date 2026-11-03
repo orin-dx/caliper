@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_0154aZZX6EdRdT98Gp4tC5SQ",
+  "agent_id": "ad72da71b009ed5a8",
+  "subagent_type": "fork",
+  "task_description": "Upgrade Callisto to 0.17.0",
+  "token_usage": {
+    "input_tokens": 57,
+    "cache_creation_tokens": 33067,
+    "cache_read_tokens": 15300113,
+    "output_tokens": 15909,
+    "api_call_count": 31
+  },
+  "started_at": "2026-11-02T16:00:26.331689-08:00",
+  "completed_at": "2026-11-02T16:05:00.206819-08:00"
+}

@@ -1,0 +1,72 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6FBRZ5NQ4098QJP4B51J7EH",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-03T00:08:45.962479Z",
+  "branch": "measure/checker-modes",
+  "checkpoints_count": 2,
+  "save_step_count": 6,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "b7316ac8c3d3",
+  "checkpoint_transcript_start": 2700,
+  "transcript_lines_at_start": 2700,
+  "compact_transcript_start": 231,
+  "token_usage": {
+    "input_tokens": 14,
+    "cache_creation_tokens": 19737,
+    "cache_read_tokens": 2949982,
+    "output_tokens": 7765,
+    "api_call_count": 6,
+    "subagent_tokens": {
+      "input_tokens": 73,
+      "cache_creation_tokens": 672509,
+      "cache_read_tokens": 20629155,
+      "output_tokens": 27612,
+      "api_call_count": 39
+    }
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 6,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 50
+  },
+  "summary": {
+    "intent": "Upgrade the Callisto release tooling from 0.16.0 to 0.17.0 in the caliper repo, then keep progressing other parallel work (trail 172 measurements, crate-wide missing_docs lint, ADR notes) while PRs await review.",
+    "outcome": "A worker prepared and verified the Callisto 0.17.0 upgrade (commit 6568f816); it was pushed as PR #319 linked to trail 158 and left unmerged pending release runs. Several earlier PRs (#312, #314-#317) merged, and four new workers were started on #318 conflict fixing, layer-only-props measurement, deny-missing-docs/ADR, and the storybook accuracy headline.",
+    "learnings": {
+      "repo": [
+        "Callisto pins in workflows use the full commit SHA of the annotated tag's target (ff116694 for 0.17.0, dec5841b for 0.16.0), not the tag object SHA.",
+        "Callisto version appears in .github/workflows/callisto-release.yml (6 setup-callisto + 1 callisto-action pins), .github/workflows/ci.yml, callisto.toml header comment, and docs/releasing.md.",
+        "Fixed groups cli-and-npm-wrapper and napi-and-binding require each member to have its own changelog section per release (crates/cli, packages/cli, crates/binding, packages/napi).",
+        "Callisto 0.17.0 makes `status --check --strict` fail on the same warnings as `version --strict`; the repo has no warnings so ci.yml now uses --strict.",
+        "RELEASE_COORDINATOR_WORKFLOW_PATH remains .github/workflows/callisto-release.yml, which docs/releasing.md relies on for attestation signer verification.",
+        "CI/docs-only changes do not need a changeset in this repo.",
+        "Weekly alert policy for storybook accuracy: open issues on wrong >0.1% (or rising), silent-wrong agent answer, or budget breach (<2 s, 600 MiB per corpus); time/memory drift no longer opens issues."
+      ],
+      "code": [],
+      "workflow": [
+        "Verify a tool upgrade by downloading both old and new prebuilt binaries, attestation-verifying them (gh attestation verify --signer-workflow ... --deny-self-hosted-runners), and diffing outputs on the real repo state.",
+        "Don't merge CI tooling version changes while release runs or a backfill are in flight, to avoid swapping tool versions mid-release.",
+        "Workers run in isolated worktrees and are instructed not to push, open PRs, or merge; the coordinating agent pushes and links PRs to trails.",
+        "Stacked measurement branches (e.g. measure/layer-only-props on #318) can proceed without resolver changes since they only measure and propose."
+      ]
+    },
+    "friction": null,
+    "open_items": null
+  }
+}
