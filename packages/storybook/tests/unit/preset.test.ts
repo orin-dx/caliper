@@ -28,8 +28,8 @@ describe('preset', () => {
   })
 
   it('fails when Storybook starts for an option that is not a choice', () => {
-    expect(() => experimental_docgenProvider([], { fallback: 'nver' as never })).toThrow(
-      "[caliper-docgen] fallback is 'nver', expected 'degraded' or 'never'",
+    expect(() => experimental_docgenProvider([], { fallback: 'always' as never })).toThrow(
+      "[caliper-docgen] fallback is 'always', expected 'degraded' or 'never'",
     )
   })
 
