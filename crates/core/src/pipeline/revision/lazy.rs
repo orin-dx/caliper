@@ -647,6 +647,10 @@ impl Revision {
         for chunk in &resolved.diagnostics.shared {
             diagnostics.extend_shared(chunk, key);
         }
+        // A panic in the dependency loader may have left any component's types unexpanded, so every answer carries it.
+        if let Some(layer) = self.lazy.as_ref().and_then(|lazy| lazy.engine.load_full().layer.clone()) {
+            diagnostics.extend(layer.panic_diagnostics(), Some(key));
+        }
         Some(ComponentAnswer { key: key.to_owned(), entry, diagnostics: diagnostics.finish() })
     }
 }
