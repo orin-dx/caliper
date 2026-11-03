@@ -1,7 +1,6 @@
 import { existsSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { CaliperStorybookOptions } from '../../src/index.js'
-import { OPTION_KEYS } from '../../src/option-keys.js'
 import { experimental_docgenProvider, isDocgenProviderEnabled } from '../../src/preset.js'
 
 describe('preset', () => {
@@ -48,7 +47,6 @@ describe('preset', () => {
       fallback: 'never',
     } satisfies Record<keyof CaliperStorybookOptions, unknown>
     const [ours] = await experimental_docgenProvider([], options)
-    expect(Object.keys(ours!.options!).toSorted()).toEqual([...OPTION_KEYS].toSorted())
     expect(ours?.options).toEqual(options)
   })
 

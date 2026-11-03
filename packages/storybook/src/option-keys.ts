@@ -2,7 +2,9 @@ import type { CaliperStorybookOptions } from './index.js'
 
 /**
  * Every key of the addon's options. `satisfies` makes the compiler reject a key that is missing here or that the
- * options type lacks, so the list cannot drift from `CaliperStorybookOptions`.
+ * options type lacks, so the list cannot drift from `CaliperStorybookOptions`. Only `workerOptions` reads it; the
+ * session options in `provider.ts` and `options.ts` still name their keys by hand, since they resolve paths and
+ * apply defaults.
  */
 const OPTION_KEY_SET = {
   srcDirs: true,

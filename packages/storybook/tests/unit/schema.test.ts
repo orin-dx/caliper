@@ -53,6 +53,8 @@ describe('expandDiagnostics', () => {
   })
 })
 
+// Each package is published on its own and has no shared runtime package to import this module from, so the file is
+// copied and this test keeps the copies identical.
 describe('schema.ts in the vite plugin', () => {
   it('is the same file as this package has, apart from the package it names in its error', () => {
     const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
