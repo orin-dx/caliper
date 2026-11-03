@@ -1,0 +1,18 @@
+{
+  "tool_use_id": "toolu_01BkYN6u8iniTVCzZKStTjGN",
+  "agent_id": "ae0a76b67f54c9f00",
+  "subagent_type": "general-purpose",
+  "task_description": "Make release reach Storybook packages",
+  "files": [
+    ".changeset/scratch.md"
+  ],
+  "token_usage": {
+    "input_tokens": 32,
+    "cache_creation_tokens": 47828,
+    "cache_read_tokens": 926138,
+    "output_tokens": 4644,
+    "api_call_count": 16
+  },
+  "started_at": "2026-11-02T17:27:28.089087-08:00",
+  "completed_at": "2026-11-02T17:29:03.185502-08:00"
+}
