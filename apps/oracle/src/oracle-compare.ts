@@ -67,7 +67,11 @@ export function caliperNorm(t: any, depth = 0): Norm {
       return { k: 'object', fields: t.fields.map((field: any) => field.name).toSorted(), index: false }
     }
     case 'function': {
-      const params = (t.params ?? []).map((p: any) => ({ optional: p.optional === true, rest: p.rest === true, type: inner(p.type) }))
+      const params = (t.params ?? []).map((p: any) => ({
+        optional: p.optional === true,
+        rest: p.rest === true,
+        type: inner(p.type),
+      }))
       return { k: 'function', params, returns: inner(t.returnType) }
     }
     case 'named': {
