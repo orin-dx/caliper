@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01NLiymnMfQee4Vgj4kA1TVM",
+  "agent_id": "a81c98de8db49bcec",
+  "subagent_type": "fork",
+  "task_description": "Crate-wide deny missing_docs and ADR note",
+  "started_at": "2026-11-02T16:08:13.888673-08:00"
+}
