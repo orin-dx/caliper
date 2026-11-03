@@ -21,11 +21,11 @@
     "output_tokens": 0,
     "api_call_count": 0,
     "subagent_tokens": {
-      "input_tokens": 42,
-      "cache_creation_tokens": 48722,
-      "cache_read_tokens": 1704556,
-      "output_tokens": 7966,
-      "api_call_count": 21
+      "input_tokens": 6,
+      "cache_creation_tokens": 1703,
+      "cache_read_tokens": 324808,
+      "output_tokens": 789,
+      "api_call_count": 3
     }
   },
   "redaction": {
