@@ -1105,6 +1105,7 @@ fn test_component_props_without_ref_in_intersection_alias() {
                     description: String::new(),
                     readonly: false,
                     index_key: None,
+                    tags: Default::default(),
                 }]),
             ],
             file_path: file_path.clone(),
@@ -1890,6 +1891,7 @@ fn test_unhandled_intersection_member_gets_diagnostic_not_silent_drop() {
             description: String::new(),
             readonly: false,
             index_key: None,
+            tags: Default::default(),
         }]),
     ]);
 
