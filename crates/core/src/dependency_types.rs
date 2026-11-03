@@ -908,12 +908,8 @@ pub(crate) fn load(
     previous: Option<&Arc<DependencyLayer>>,
 ) -> DependencyLayer {
     let resolvers = ModuleResolvers::new(options);
-    let project_dirs: Vec<Utf8PathBuf> = options
-        .src_dirs
-        .iter()
-        .filter_map(|dir| std::fs::canonicalize(dir).ok())
-        .filter_map(|dir| Utf8PathBuf::from_path_buf(dir).ok())
-        .collect();
+    let project_dirs: Vec<Utf8PathBuf> =
+        options.src_dirs.iter().filter_map(|dir| crate::canonical_path::canonicalize(dir).ok()).collect();
     let parent: Option<Arc<DependencyLayer>> = previous.filter(|layer| layer.depth < MAX_CHAIN_DEPTH).cloned();
     let flatten = previous.filter(|_| parent.is_none());
     let loader = Loader {

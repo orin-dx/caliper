@@ -21,7 +21,7 @@ pub(super) fn discover_files(
 
         // Walking from the canonical root makes every entry's path canonical except a symlink itself (the walker
         // doesn't follow symlinked directories), so only those pay for `canonicalize` below.
-        let root = dir.canonicalize_utf8().unwrap_or_else(|_| dir.clone());
+        let root = crate::canonical_path::canonicalize(dir).unwrap_or_else(|_| dir.clone());
         let walker = ignore::WalkBuilder::new(root.as_std_path())
             .hidden(false)
             .git_ignore(!dir_is_in_node_modules)
@@ -62,7 +62,7 @@ pub(super) fn discover_dirs(
     let (mut dirs, mut configs) = (Vec::new(), Vec::new());
     for dir in src_dirs {
         let dir_is_in_node_modules = dir.as_str().contains("node_modules");
-        let root = dir.canonicalize_utf8().unwrap_or_else(|_| dir.clone());
+        let root = crate::canonical_path::canonicalize(dir).unwrap_or_else(|_| dir.clone());
         let walker =
             ignore::WalkBuilder::new(root.as_std_path()).hidden(false).git_ignore(!dir_is_in_node_modules).build();
         for entry in walker.flatten() {
@@ -117,7 +117,7 @@ fn visit(
         // Absolute and canonical, so parent.fileName in output is stable regardless of invocation context (relative
         // --src, absolute --src, cwd inside the src dir). A dangling symlink keeps its own path rather than being
         // dropped.
-        Ok(utf8) if entry.path_is_symlink() => Some(Ok(utf8.canonicalize_utf8().unwrap_or(utf8))),
+        Ok(utf8) if entry.path_is_symlink() => Some(Ok(crate::canonical_path::canonicalize(&utf8).unwrap_or(utf8))),
         Ok(utf8) => Some(Ok(utf8)),
         Err(_) => Some(Err(Diagnostic::new(
             DiagnosticSeverity::Warning,
@@ -154,7 +154,7 @@ pub(super) fn is_source_file(path: &Utf8Path, src_dirs: &[Utf8PathBuf], extra_ex
         return false;
     }
     src_dirs.iter().any(|dir| {
-        let dir = dir.canonicalize_utf8().unwrap_or_else(|_| dir.clone());
+        let dir = crate::canonical_path::canonicalize(dir).unwrap_or_else(|_| dir.clone());
         path.strip_prefix(&dir).is_ok_and(|relative| {
             !excluded(relative.as_std_path(), dir.as_str().contains("node_modules"), extra_excludes)
         })
