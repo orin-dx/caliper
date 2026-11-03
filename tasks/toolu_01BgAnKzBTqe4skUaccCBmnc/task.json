@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01BgAnKzBTqe4skUaccCBmnc",
+  "agent_id": "a58e075e5b64e4f5f",
+  "subagent_type": "general-purpose",
+  "task_description": "Trail 211 remaining docs",
+  "token_usage": {
+    "input_tokens": 40,
+    "cache_creation_tokens": 67294,
+    "cache_read_tokens": 1431860,
+    "output_tokens": 8089,
+    "api_call_count": 20
+  },
+  "started_at": "2026-11-02T18:52:06.744808-08:00",
+  "completed_at": "2026-11-02T18:54:10.806387-08:00"
+}
