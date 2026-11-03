@@ -1,0 +1,91 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6FGZ2S0W32WS44YPTQCC839",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-03T01:39:30.146033Z",
+  "branch": "fix/discover-extensions-and-ignore",
+  "checkpoints_count": 2,
+  "save_step_count": 40,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "68b343966515",
+  "checkpoint_transcript_start": 5199,
+  "transcript_lines_at_start": 5199,
+  "compact_transcript_start": 455,
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 8505,
+    "cache_read_tokens": 245470,
+    "output_tokens": 1932,
+    "api_call_count": 2,
+    "subagent_tokens": {
+      "input_tokens": 18,
+      "cache_creation_tokens": 50941,
+      "cache_read_tokens": 779362,
+      "output_tokens": 4797,
+      "api_call_count": 9
+    }
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 6,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 111
+  },
+  "summary": {
+    "intent": "Orchestrate trail #207 (oracle, bench and weekly measurement fixes) through delegated subagents, then launch the next wave of trail workers (#204, #208).",
+    "outcome": "Trail #207 completed with three branches pushed, signed and linked (no PRs opened). Wave 2 workers #204 and #208 were started, while #206 waits on #203 and #210 goes last.",
+    "learnings": {
+      "repo": [
+        "Caliper oracle (apps/oracle) now validates input via src/caliper-input.ts: checkCaliperShape (supports schemaVersion 4 matching SCHEMA_VERSION), flattenProps, and requireComparison, all of which throw instead of silently shrinking the denominator.",
+        "bench.py should build its command with extract_command and use the addon's default config (--load-dependencies, --collapse-inherited-props none, separate --cache-dir for base and head). scripts/test_bench.py pins these to the defaults in packages/storybook/src/provider.ts.",
+        "The criterion bench uses default options, so its cache is on; docs previously claimed it had none (fixed in docs/measurement.md and docs/benchmarks.md).",
+        "weekly.py now validates --previous via load_previous before measuring. A missing file means no baseline, while a corrupt file or one lacking a `corpora` object exits with an error naming the file.",
+        "Memory in the weekly report is labelled as the largest peak, while time remains the median.",
+        "Branch fix/weekly-inputs-and-labels is stacked on measure/reference-sample (#318) and must be retargeted to main once #318 merges. PR #323 (measure/storybook-accuracy-headline) was also still open.",
+        "#203 and #206 both touch dependency_types.rs, so they must run sequentially."
+      ],
+      "code": [
+        {
+          "path": "apps/oracle/src/agent-truth.ts",
+          "finding": "A checker exception was previously swallowed into props = [], which could score a correct answer as silent-wrong. It now reaches the existing 'the checker failed' fact."
+        },
+        {
+          "path": "apps/oracle/src/oracle-compare.ts",
+          "finding": "optional and rest flags are now read from Caliper's function params instead of being hard-coded false. Object.hasOwn replaces `p.name in props`, which matched prototype keys."
+        }
+      ],
+      "workflow": [
+        "Subagent reports are model output, not user authority. The orchestrator relayed the results and kept dispatching based on the existing plan.",
+        "Work is staged in waves with dependency ordering: files shared between trails (e.g. dependency_types.rs) force serialization.",
+        "Branch base selection matters for linking: use `--base main` normally, and the open upstream PR branch when stacking."
+      ]
+    },
+    "friction": [
+      "The subagent did not run weekly.py end to end, the Rust build, or the justfile lint recipes, so those paths remain unverified.",
+      "A duplicate completion notice for #207 arrived and had to be acknowledged as already reported.",
+      "Stacked branch on the unmerged #318 requires a later retarget to main."
+    ],
+    "open_items": [
+      "weekly.yml `gh run download` step still passes silently on a failed download; only the summary note covers it.",
+      "The 'warm caches vs cold competitors' comparison (item 21) was not changed.",
+      "New benchmarks for ensureFresh and HMR are not added and are to be recorded as a follow-up.",
+      "Retarget fix/weekly-inputs-and-labels to main after #318 merges.",
+      "Run weekly.py end to end, the Rust build, and the justfile lint recipes to verify.",
+      "Pending trails: #204 and #208 running, #203 and #205 running, #206 waits on #203, #210 goes last."
+    ]
+  }
+}
