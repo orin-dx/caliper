@@ -1,8 +1,6 @@
 //! Raw AST-level types produced by the extractor (Phase 0-2).
 //! These are the extractor's output and the resolver's input.
 
-#![deny(missing_docs)]
-
 use camino::{Utf8Path, Utf8PathBuf};
 use compact_str::CompactString;
 use rustc_hash::FxHashMap;

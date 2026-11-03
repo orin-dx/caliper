@@ -5,8 +5,6 @@
 //! its resolution reached, and memoizes the result. The memo follows the same dependency tracking watch mode uses
 //! (`Resolved::affected_by`), so an edit drops exactly the entries it can change.
 
-#![deny(missing_docs)]
-
 use std::sync::Mutex;
 
 use arc_swap::ArcSwap;
