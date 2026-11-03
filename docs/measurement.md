@@ -98,6 +98,31 @@ The **universe** is every own prop the checker finds on an exported function who
 
 `oracle.shared_props`, `agree` and `wrong` keep their meaning, so the weekly history does not move. A local run on antd and shadcn at the commit that added this reads, for the whole universe: Caliper 39.7% and 40.1% (its `collapsed` layers and any component it does not report count against it), RDT 44.8% and 84.8%, react-docgen 24.6% and 1.9%. The step is information, never a gate, and the rules are validated on antd and shadcn only: Mantine, Chakra and Spectrum need a weekly run.
 
+### An independent reference
+
+The oracle above scores a tool against the TypeScript checker alone. That cannot judge a mode that uses the checker, which would agree with itself, and it cannot say which side is right when they differ. `scripts/reference_sample.py` (`apps/oracle/src/reference.ts`) judges a sample of props by two methods that fail differently:
+
+- **A, the checker's type.** The same normalized type the oracle compares (`oracle-checker.ts`).
+- **B, the declared type.** What the prop's declaration writes, read from source text with TypeScript's parser (`reference-declared.ts`), never from the checker's type printer. The checker is asked only where the declaration is. B abstains where the declaration leaves the type to be computed (an indexed access, `keyof`, a conditional type), writes no type (an unannotated member, a method with no return type, or a value such as `count: 1` in an object literal that the checker infers the type of), has no declaration (a mapped type's synthesized member), or has several that differ.
+
+They are compared with the oracle's own rules (`oracle-compare.ts`), B standing in for the tool. Identical or spelled is agreement. B looser than A (a name or a type parameter A evaluated) is B saying less, so A stands alone. B contradicting A is **contested**: it is listed in the review file for a person, never counted for or against a tool. Where A has no type (`any`, an error) and B does, B stands alone.
+
+A tool's prop is then **correct** (agrees with the reference), **less precise**, **wrong**, **contested**, **no reference**, **missing**, or **layer**. A component lists a prop when it is in its `props` or its `notableInherited` (the curated props of a collapsed source, which a props table lists after the component's own; the component's own wins a clash). Where the declaration stands alone and only names a type (the checker could not resolve it), a tool that gives the same name is correct, and one that gives another type is at most less precise, because the name cannot be seen into. A prop the tool does not list but a collapsed inheritance layer names (`inheritance[].members`, an interned name list in the canonical JSON) is a `layer`: surfaced, but with no type to judge, so it is neither credited as correct nor counted as missing. Each verdict keeps which methods stood behind it (`both`, `checker`, `declaration`), so a count of correct props says how many were corroborated by B and how many rest on A alone.
+
+The sample is every prop a `--list` file names (`[{ corpus, file, component, prop }]`, for example the props two modes differ on) plus a seeded control sample, 100 per corpus by default, stratified so it is not all `string` and `boolean`. A prop falls in the first of these it fits: listed, generic, mapped (`Pick`, `Omit`, `Partial`, …), intersection, function, union of literals, from a dependency, an `@types/react` attribute (at most three per component), from another project file, own. With a tool's output given, the control sample is drawn from the components the tool reports, because the checker takes any exported one-parameter function for a component; pass `allComponents` in the config to draw from all. The candidates are capped at `universeCap` (8,000 by default), taken from the corpus's files in a seeded order, so a corpus larger than that is sampled from part of it; the number collected is printed. A listed prop the checker cannot find (a wrong component name, a file not in the list, a prop it does not see) is judged nowhere, so the report names it (`listed.missing`) beside how many were requested and found, and counts the entries that name a corpus the run does not have (`listed_for_other_corpora`).
+
+```bash
+scripts/reference_sample.py --bin target/release/caliper-docgen --corpus antd --corpus shadcn [--per-corpus 300] [--list diff.json]
+```
+
+The report (`reference.json`) counts, per corpus, how the reference was reached (`agreed_both`, `checker_only`, `declaration_only`, `contested`, `none`), why B abstained, and the tool's outcomes in total, by stratum and by origin. `review.md` lists the contested props with both types and the declaration's path; `reference.json.rows.json` has every judged prop. Output goes to `--out-dir`, a temporary directory by default.
+
+What it does not establish:
+
+- A and B read the same declaration. They corroborate each other where B can read a type, and say nothing where it cannot (a computed type, which is where a checker-backed mode matters most). Count `checker_only` as props with no independent evidence; a labelled sample is the independent check for those.
+- `oracle-compare.ts` reads a widened primitive of another kind as `less precise`, not `wrong` (`number` against `'a' | 'b'`). Changing that would move every historical oracle number, so the reference inherits it.
+- The sample is the components Caliper reports, so it says nothing about components Caliper misses.
+
 ## `just bench`
 
 ```bash
