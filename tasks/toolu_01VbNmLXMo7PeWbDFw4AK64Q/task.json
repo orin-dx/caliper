@@ -1,0 +1,23 @@
+{
+  "tool_use_id": "toolu_01VbNmLXMo7PeWbDFw4AK64Q",
+  "agent_id": "a4d546d8484ee0c41",
+  "subagent_type": "general-purpose",
+  "task_description": "Trail 206 loud failures",
+  "files": [
+    ".changeset/addon-and-plugin-failures-are-loud.md",
+    ".tmp_edit1.py",
+    ".tmp_edit2.py",
+    "packages/storybook/src/validate.ts",
+    "packages/storybook/tests/unit/validate.test.ts",
+    "packages/vite-plugin/src/validate.ts"
+  ],
+  "token_usage": {
+    "input_tokens": 360,
+    "cache_creation_tokens": 287918,
+    "cache_read_tokens": 32525346,
+    "output_tokens": 93809,
+    "api_call_count": 180
+  },
+  "started_at": "2026-11-02T17:42:14.303651-08:00",
+  "completed_at": "2026-11-02T18:08:35.596996-08:00"
+}
