@@ -1,6 +1,6 @@
 # RDT spec coverage matrix
 
-Maps each react-docgen-typescript (RDT) output field and component pattern to the fixtures that exercise it. Run `cargo test -p caliper-docgen-core --test snapshots` to validate the original 8 snapshot fixtures. The 8 real-world library fixtures added since (fluentui, base-ui, antd, ark-ui, zendesk-garden, day-picker, headlessui, blueprint) aren't snapshot-tested — validate them via `pnpm --filter caliper-docgen-validate compare:all`.
+Maps each react-docgen-typescript (RDT) output field and component pattern to the fixtures that exercise it. Run `cargo test -p caliper-docgen-core --test snapshots` to validate the original 8 snapshot fixtures. The 8 real-world library fixtures added since (fluentui, base-ui, antd, ark-ui, zendesk-garden, day-picker, headlessui, blueprint) aren't snapshot-tested. The harness that compared them with RDT (`apps/validate`) has been removed; `scripts/weekly.py` records the comparison on five pinned corpora.
 
 ---
 
@@ -419,7 +419,7 @@ Left the `ReactVersion` fields and CLI flag in place (real, tested, user-facing 
 
 **Fixture:** `fixtures/antd/Button.tsx`
 
-Found by a full-fixture validation sweep (`apps/validate`'s comparison across all 20 libraries at once, not a per-fixture check) — `antd/Button/Button` showed `ours found nothing` despite the component clearly being extracted correctly under a different name. antd's real `Button` export:
+Found by a full-fixture validation sweep (the removed `apps/validate` harness's comparison across all 20 libraries at once, not a per-fixture check) — `antd/Button/Button` showed `ours found nothing` despite the component clearly being extracted correctly under a different name. antd's real `Button` export:
 
 ```ts
 const InternalCompoundedButton = React.forwardRef<...>((props, ref) => { ... });

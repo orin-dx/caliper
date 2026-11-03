@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-28
+**Updated:** 2026-11-02
 
 Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are fully tested. Config file loading, watch mode (including rebuilds on config changes and polling with `ensure_fresh`), plugin architecture, TOON token-optimized output format, JSON schema export, and bounded atomic DTS caching are implemented and verified.
 
@@ -11,7 +11,7 @@ Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are f
 - Rust tests (`cargo nextest` across the workspace, plus the NAPI binding tests) and vitest (unit with a mocked binding, integration against the real native binding), all green in CI
 - `cargo clippy --workspace --all-targets -D warnings` clean with `unsafe_code = "deny"` enforced workspace-wide
 - 20 real-world fixture libraries validated against `react-docgen-typescript` (shadcn, Radix, MUI, Chakra, Mantine, React Aria, antd, ariakit, ark-ui, base-ui, blueprint, day-picker, fluentui, headlessui, panda, react-final-form, react-resizable-panels, storybook-emotion, tanstack-table, zendesk-garden — see `rdt-coverage.md`)
-- **Recall** against `react-docgen-typescript` with dependencies installed and loaded (`docs/measurement.md`, 2026-10-23): share of RDT's non-React props reported Mantine 99.7%, Chakra 98.6%, shadcn/ui 39.5%, Ant Design 80.3%, react-spectrum 99.7%.
+- **Recall** against `react-docgen-typescript` with dependencies installed and loaded: the weekly record and the current definition of the reference are in `docs/measurement.md`.
 - **Precision** per detection rule (`docs/precision.md`, 2026-10-21): 1 component that isn't one in 154 sampled, `functionDeclaration` 96% and every other rule 100%. 25 samples per rule can't yet establish the 95% gate.
 - **Speed** on five pinned public corpora (`docs/performance.md`, 2026-10-22): 34 to 81 ms wall time and 66 to 153 MB peak RSS for 41 to 490 kLOC, 17 to 39 times faster than `react-docgen-typescript` on the same files. No pull-request gate enforces it: a weekly workflow records speed, memory and recall against RDT and react-docgen and opens an issue on a worsening, and `just bench` compares a branch with `main` locally (`docs/measurement.md`).
 
@@ -25,7 +25,7 @@ Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are f
 - **Atomic & Bounded DTS cache** (`cache.rs`) — Atomic temp-file swap writes, dirty flag tracking, and 5,000 entry eviction cap. Keyed by content hash, and discarded whenever the build that wrote it differs.
 - **Lazy sessions** (ADR 0016) — `WatchSession::lazy` parses and indexes every file and resolves a component when a request names it; the Storybook addon uses it by default (NAPI `lazy`, off by default). Each answer equals the batch extraction's for the same key. Numbers in `docs/performance.md`.
 - **Dependency declarations loaded by default** (ADR 0010) — a prop typed by an installed package resolves; `--no-load-dependencies` turns it off.
-- **Strict Safe Rust** — `unsafe_code = "deny"` via `[workspace.lints]`, active across all three crates (`core`, `cli`, `binding`) — none currently use `unsafe`, including the NAPI FFI boundary (napi-rs's `#[napi]` macros generate the glue without user-visible `unsafe`).
+- **Strict Safe Rust** — `unsafe_code = "deny"` via `[workspace.lints]`, active across all five crates — none currently use `unsafe`, including the NAPI FFI boundary (napi-rs's `#[napi]` macros generate the glue without user-visible `unsafe`).
 
 ## Known gaps that won't get fixed without a type checker
 
@@ -42,6 +42,6 @@ An opt-in TypeScript 7 semantic backend is implemented as slice 1 (ADR 0006, ADR
 - **Open gaps** → `edge-cases.md` — the gaps still open. Add one when you find a gap you aren't fixing now; delete it when you fix it.
 - **What broke and why, historically** → `rdt-coverage.md` — every bug found during real-library validation, root cause, and the fix. Keep this updated; it's the project's memory.
 - **Why a hard-to-reverse decision was made** → `docs/adr/` — OXC over the TypeScript compiler, manual serde for `PropType`, positional msgpack encoding, panic containment, the TypeScript 7 semantic backend. Write a new one when you make a decision like these (see `docs/adr/README.md`).
-- **How the pipeline fits together** → `ARCHITECTURE.md`, and `docs/architecture/` for per-subsystem invariants and known gaps (moved from `.claude/semantic-model/` so every coding agent can read it, not just Claude Code — `AGENTS.md` is now this repo's shared instructions file, with per-tool mirrors under `.codex/`, `.cursor/`, `.gemini/`, `.github/`, `.opencode/`).
+- **How the pipeline fits together** → `ARCHITECTURE.md`, and `docs/architecture/` for per-subsystem invariants and known gaps (moved from `.claude/semantic-model/` so every coding agent can read it, not just Claude Code — `AGENTS.md` is now this repo's shared instructions file, with per-tool mirrors under `.codex/`, `.gemini/`, `.github/`).
 - **Setup, testing, code style, commit conventions** → `CONTRIBUTING.md`
 - **Migrating from react-docgen-typescript** → `MIGRATING.md`

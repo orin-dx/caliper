@@ -1,6 +1,6 @@
 # Storybook parity
 
-`packages/storybook/scripts/storybook-parity.mjs` measures the Storybook addon against Storybook's own docgen on real repositories: how often the addon hands a component on, what it documents that Storybook doesn't, where the two disagree, and what each costs. It is not run in CI; it needs the corpora `scripts/parity.py setup` fetches, installed, plus the native binding.
+`packages/storybook/scripts/storybook-parity.mjs` measures the Storybook addon against Storybook's own docgen on real repositories: how often the addon hands a component on, what it documents that Storybook doesn't, where the two disagree, and what each costs. It is not run in CI; it needs the corpora `scripts/corpora.py setup` fetches, installed, plus the native binding.
 
 ```bash
 pnpm --filter caliper-docgen-storybook build
@@ -48,7 +48,7 @@ Not measured: Storybook's control inference from argTypes (kind is `type.name`),
 
 ### 2026-11-02, main at `a9dfed90` (shadcn and antd)
 
-Apple silicon, the corpora of `scripts/parity.py setup`. Mantine, Chakra and Spectrum are not installed on this machine and are not re-measured: their rows below are from 2026-10-24.
+Apple silicon, the corpora of `scripts/corpora.py setup`. Mantine, Chakra and Spectrum are not installed on this machine and are not re-measured: their rows below are from 2026-10-24.
 
 Fallback rate, components the addon would hand on:
 
