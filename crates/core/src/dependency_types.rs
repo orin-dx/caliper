@@ -994,6 +994,12 @@ pub(crate) fn load(
                 for (module, files) in &layer.augmenters {
                     loader.augmenters.insert(module.clone(), files.clone());
                 }
+                // The demands a panic covered stay unanswered in the flattened layer, so its report stays too.
+                loader
+                    .panics
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .extend(layer.panics.iter().cloned());
             }
         }
         (Some(_), None) => {}

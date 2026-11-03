@@ -790,6 +790,21 @@ fn the_loader_is_deterministic_across_demand_order_and_threads() {
     }
 }
 
+/// Flattening a chain keeps the panics its layers contained, since the demands they covered stay unanswered.
+#[test]
+fn flattening_a_chain_keeps_the_panics_an_earlier_layer_contained() {
+    let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
+    let options = PipelineOptions { use_cache: false, ..options(&root, true) };
+    let mut chained = Arc::new(load(vec![demand(&root, "ui-kit", "__DEPENDENCY_PANIC_TEST__")], &options, None));
+    for index in 0..9 {
+        chained = Arc::new(load(vec![demand(&root, "ui-kit", &format!("Missing{index}"))], &options, Some(&chained)));
+    }
+
+    assert_eq!(chained.depth, 0, "the ninth extension flattened the chain");
+    let messages: Vec<_> = chained.panic_diagnostics().into_iter().map(|d| d.message).collect();
+    assert_eq!(messages, ["dependency demand ui-kit#__DEPENDENCY_PANIC_TEST__ panicked: injected panic"]);
+}
+
 #[test]
 fn chained_layer_and_flatten_resolve_like_one_cold_load() {
     let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
