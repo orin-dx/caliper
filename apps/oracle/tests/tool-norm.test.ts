@@ -64,6 +64,9 @@ describe('typeFromText', () => {
     expect(typeFromText("SegmentedSemanticAllType['classNamesAndFn']")).toStrictEqual(opaque)
     expect(typeFromText('keyof Foo')).toStrictEqual(opaque)
     expect(typeFromText('DeepClassNameType<...>')).toStrictEqual(opaque)
+    // RDT prints a type it could not name as `{string}`, a literal whose member has no type.
+    expect(typeFromText('{string}')).toStrictEqual(opaque)
+    expect(typeFromText('{ a: string }')).toStrictEqual({ k: 'object', fields: ['a'], index: false })
     expect(typeFromText('')).toStrictEqual(opaque)
   })
 })

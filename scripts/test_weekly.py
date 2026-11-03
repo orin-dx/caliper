@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Tests for the weekly record's helpers, on small fixtures. Run: python3 scripts/test_weekly.py"""
+import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import corpora
@@ -195,6 +198,62 @@ class Recall(unittest.TestCase):
                          ([1, 2], [2, 2], [1, 1], [1, 1]))
         self.assertEqual(weekly.recall(items, {}), {'components': [0, 1], 'own': [0, 0], 'react': [0, 0],
                                                     'own_layers': [0, 0], 'react_layers': [0, 0]})
+
+
+def score(listed=3, universe=10, agree=0.4, **more):
+    return {'universe': universe, 'listed': listed, 'agree_universe': agree, 'agree_listed': 0.8, 'wrong_listed': 0.05,
+            'missing_by_stratum': {'same_file': 4, 'other_project_file': 1, 'dependency': 2, 'unknown': 0},
+            'missing_by_reason': {'component': 5, 'failed_file': 0, 'prop': 2, 'collapsed': 0}, 'examples': {}, **more}
+
+
+class OracleTools(unittest.TestCase):
+    def test_the_oracle_gets_both_dumps_and_the_record_keeps_caliper_numbers_and_the_tool_scores(self):
+        with tempfile.TemporaryDirectory() as work:
+            calls = []
+
+            def fake_run(command, **kwargs):
+                calls.append(command)
+                if '--out' in command:
+                    with open(command[command.index('--out') + 1], 'w') as f:
+                        f.write(json.dumps({'props_shared': 10, 'verdicts': {'identical': 6, 'spelled': 2, 'wrong': 1},
+                                            'tools': {'caliper': score(), 'rdt': score(listed=9)}}))
+                return subprocess.CompletedProcess(command, 0)
+
+            with mock.patch.object(weekly.subprocess, 'run', side_effect=fake_run):
+                out = weekly.oracle('bin', 'antd', os.path.join(work, 'src'), work, work, '/w/rdt.json', '/w/rdg.json')
+        oracle_call = next(c for c in calls if '--out' in c)
+        self.assertEqual(oracle_call[oracle_call.index('--rdt') + 1], '/w/rdt.json')
+        self.assertEqual(oracle_call[oracle_call.index('--rdg') + 1], '/w/rdg.json')
+        self.assertEqual((out['shared_props'], out['agree'], out['wrong']), (10, 0.8, 0.1))
+        self.assertEqual(sorted(out['tools']), ['caliper', 'rdt'])
+        self.assertNotIn('examples', out['tools']['rdt'])
+        self.assertEqual(out['tools']['rdt']['listed'], 9)
+
+    def test_a_tool_line_says_what_it_agrees_on_and_what_it_omits(self):
+        self.assertEqual(
+            weekly.tool_line('antd', 'rdt', score(universe=7199, listed=3442, agree=0.4484)),
+            "- antd, RDT: agrees on 44.8% of the 7,199 props the checker finds (80.0% of the 3,442 it lists, 5.00% of those "
+            "wrong); omits 7 (4 declared in the component's file, 1 in other project files, 2 in dependencies, 0 unknown)")
+
+    def test_collapsed_layers_and_thrown_files_are_their_own_clauses(self):
+        line = weekly.tool_line('shadcn', 'react_docgen', score(failed_files=265, missing_by_reason={
+            'component': 0, 'failed_file': 13077, 'prop': 2, 'collapsed': 5510}))
+        self.assertTrue(line.endswith('; 5,510 more sit in collapsed layers; threw on 265 files, 13,077 of the omitted props'))
+        self.assertIn('- shadcn, react-docgen: ', line)
+
+    def test_the_summary_lists_each_tool_after_the_oracle_table(self):
+        corpus = {'caliper': {'ms': 1, 'rss_mib': 1, 'json_mb': 1}, 'rdt': {'ms': 1, 'rss_mib': 1},
+                  'react_docgen': {'ms': 1, 'rss_mib': 1},
+                  'reference': {'rdt_with_props': 1, 'excluded_total': 0, 'merged': 0, 'reference': 1, 'exact': 1,
+                                'paired': {}, 'unpaired': 0},
+                  'recall': {'caliper': {k: [1, 1] for k in ('components', 'own', 'react', 'own_layers', 'react_layers')},
+                             'react_docgen': {k: [1, 1] for k in ('components', 'own', 'react')}},
+                  'oracle': {'shared_props': 10, 'agree': 0.8, 'wrong': 0.0,
+                             'tools': {'caliper': score(), 'rdt': score(), 'react_docgen': score()}}}
+        text = weekly.markdown({'caliper': 'x', 'runs': 1, 'reference_version': 2, 'corpora': {'antd': corpus}}, [])
+        order = [text.index(f'- antd, {label}: ') for label in ('Caliper', 'RDT', 'react-docgen')]
+        self.assertEqual(order, sorted(order))
+        self.assertLess(text.index("### TypeScript 7.1's checker"), order[0])
 
 
 class PeakRss(unittest.TestCase):

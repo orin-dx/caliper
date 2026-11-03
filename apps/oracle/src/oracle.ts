@@ -15,19 +15,24 @@
 // Checker types are normalized once per type id and verdicts made once per (Caliper prop, checker type), so Chakra's
 // ~470,000 props cost a few thousand distinct comparisons.
 //
+// With `--rdt` and `--rdg` (the dumps scripts/rdt.mjs and scripts/rdg.mjs write) the report also scores react-docgen-
+// typescript and react-docgen over every own prop the checker finds (`tools`; src/tool-universe.ts).
 import { readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { API, SignatureKind, SymbolFlags } from 'typescript-beta/sync'
 import { checkerNormalizer } from './oracle-checker.ts'
 import { caliperNorm, compare, VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'
+import { collapsedLayerFiles, loadTool, normComponent, pathKey, universeRecorder } from './tool-universe.ts'
 
-const KEYS = ['root', 'src', 'tsconfig', 'caliper', 'out', 'files', 'dump', 'rows', 'missing'] as const
+const KEYS = ['root', 'src', 'tsconfig', 'caliper', 'out', 'files', 'dump', 'rows', 'missing', 'rdt', 'rdg'] as const
 const args: Partial<Record<(typeof KEYS)[number], string>> = {}
 for (let i = 2; i < process.argv.length; i += 2) {
   args[process.argv[i].replace(/^--/, '') as (typeof KEYS)[number]] = process.argv[i + 1]
 }
 if (!args.root || !args.src || !args.tsconfig || !args.caliper || !args.out) {
-  console.error('usage: tsx src/oracle.ts --root DIR --src DIR --tsconfig FILE --caliper FILE --out FILE')
+  console.error(
+    'usage: tsx src/oracle.ts --root DIR --src DIR --tsconfig FILE --caliper FILE --out FILE [--rdt F] [--rdg F]',
+  )
   process.exit(2)
 }
 const root = realpathSync(args.root)
@@ -62,19 +67,7 @@ const checkerNorm = checkerNormalizer(checker)
 
 // ─── Components ───────────────────────────────────────────────────────────────
 
-const normComponent = (name: string) =>
-  (
-    name
-      .replace(/ \(.*\)$/, '')
-      .split('/')
-      .at(-1) ?? ''
-  )
-    .split('.')
-    .at(-1)!
-    .replaceAll(/[^A-Za-z0-9]/g, '')
 const rel = (path: string) => relative(root, realpathSync(path))
-const pathKey = (path: string) =>
-  process.platform === 'darwin' || process.platform === 'win32' ? path.toLowerCase() : path
 
 const caliper = JSON.parse(readFileSync(args.caliper, 'utf8'))
 const caliperByFile = new Map<string, { name: string; key: string; component: any }[]>()
@@ -88,6 +81,9 @@ for (const [componentKey, component] of Object.entries<any>(caliper.components))
   list.push({ name: normComponent(component.displayName), key: componentKey, component })
   caliperByFile.set(key, list)
 }
+const rdt = loadTool(args.rdt, rel)
+const rdg = loadTool(args.rdg, rel)
+const universe = universeRecorder({ root, caliper, checker, checkerNorm, rdt, rdg })
 
 /** The props type of a component export, the way react-docgen-typescript finds it. */
 function propsTypeOf(exported: any): any | undefined {
@@ -199,6 +195,7 @@ function visitExport(exported: any, candidates: { name: string; key: string; com
   )
   totals.propsChecker += own.length
   const matches = candidates.filter((c) => c.name === normComponent(name))
+  universe.record({ own, name, file, matches })
   if (matches.length > 1) {
     totals.ambiguousExports++
     return
@@ -207,11 +204,7 @@ function visitExport(exported: any, candidates: { name: string; key: string; com
   if (!match) return
   totals.componentsMatched++
   const shared = own.filter((p: any) => p.name in match.component.props)
-  const layerFiles = new Set(
-    (match.component.inheritance ?? [])
-      .filter((layer: any) => layer.totalProps > 30)
-      .map((layer: any) => pathKey(String(layer.fileName))),
-  )
+  const layerFiles = collapsedLayerFiles(match.component)
   const absent = own.filter((p: any) => !(p.name in match.component.props))
   const collapsed: any[] = []
   const missing: any[] = []
@@ -283,6 +276,7 @@ const report = {
   ambiguous_exports: totals.ambiguousExports,
   program_ms: Math.round(programMs),
   compare_ms: Math.round(compareMs),
+  tools: universe.score(counts),
   examples,
 }
 writeFileSync(args.out, JSON.stringify(report, null, 2))

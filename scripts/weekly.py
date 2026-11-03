@@ -4,10 +4,11 @@
 For each corpus it records, per tool, the wall time and peak RSS of one whole run (process start included), and for
 Caliper the canonical JSON's size. Recall is measured against RDT: of the components RDT reports with props, how many
 the tool also reports (same file, same name), and of their props, how many it lists, split into the props `@types/react`
-declares and the rest. react-docgen reads each file alone, so it lists none of React's. With --oracle it also records
-how often TypeScript 7.1's checker contradicts Caliper's prop types. That is information, never a gate. With --agent-eval
-it also asks a fixed list of questions about real components and scores what a reader of Caliper's output answers
-against the checker (scripts/agent_eval.py): silent-wrong answers open the issue below, like a worse recall does.
+declares and the rest. react-docgen follows imports to the file that declares a type but infers nothing, and lists none
+of React's props. With --oracle it also records how often TypeScript 7.1's checker contradicts each tool's prop types,
+over every prop the checker finds. That is information, never a gate. With --agent-eval it also asks a fixed list of
+questions about real components and scores what a reader of Caliper's output answers against the checker
+(scripts/agent_eval.py): silent-wrong answers open the issue below, like a worse recall does.
 
 --previous FILE compares with an earlier record (the last green run's artifact) and, when Caliper is more than 10%
 slower or uses more than 10% more memory, or its recall falls by more than 2 points, writes --issue FILE for the
@@ -435,8 +436,15 @@ def rate(pair):
     return pair[0] / pair[1] if pair[1] else 0.0
 
 
-def oracle(binary, name, src, root, work):
-    """How often TypeScript 7.1's checker contradicts Caliper's prop types (apps/oracle/src/oracle.ts)."""
+def oracle_tools(tools):
+    """The oracle's score for each tool, without the examples that are there to review the adapters by."""
+    return {tool: {key: value for key, value in score.items() if key != 'examples'} for tool, score in tools.items()}
+
+
+def oracle(binary, name, src, root, work, rdt_out, rdg_out):
+    """How often TypeScript 7.1's checker contradicts Caliper's prop types (apps/oracle/src/oracle.ts), and how RDT and
+    react-docgen fare against it over the same props. `shared_props`, `agree` and `wrong` are Caliper's, over the props
+    both list, and keep their meaning from week to week; `tools` holds all three over every prop the checker finds."""
     caliper_json = os.path.join(work, f'{name}.caliper.json')
     with open(caliper_json, 'w') as f:
         subprocess.run([binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported',
@@ -445,12 +453,12 @@ def oracle(binary, name, src, root, work):
     verdicts = os.path.join(work, f'{name}.oracle.json')
     subprocess.run(['pnpm', '--dir', os.path.join(ROOT, 'apps', 'oracle'), 'exec', 'tsx', 'src/oracle.ts', '--root', root,
                     '--src', src, '--tsconfig', tsconfig, '--caliper', caliper_json, '--out', verdicts, '--files',
-                    list_file], check=True, timeout=3600)
+                    list_file, '--rdt', rdt_out, '--rdg', rdg_out], check=True, timeout=3600)
     with open(verdicts) as f:
         e = json.load(f)
     shared = e['props_shared']
     return {'shared_props': shared, 'agree': rate((e['verdicts']['identical'] + e['verdicts']['spelled'], shared)),
-            'wrong': rate((e['verdicts']['wrong'], shared))}
+            'wrong': rate((e['verdicts']['wrong'], shared)), 'tools': oracle_tools(e['tools'])}
 
 
 def measure(args, corpus, work):
@@ -481,7 +489,7 @@ def measure(args, corpus, work):
     }
     if args.oracle:
         try:
-            entry['oracle'] = oracle(args.bin, corpus['name'], src, root, work)
+            entry['oracle'] = oracle(args.bin, corpus['name'], src, root, work, rdt_out, rdg_out)
         except (subprocess.SubprocessError, OSError, KeyError) as error:
             entry['oracle'] = {'error': str(error)}
     if args.agent_eval:
@@ -520,6 +528,25 @@ def findings(record, previous):
     return out
 
 
+TOOL_LABELS = {'caliper': 'Caliper', 'rdt': 'RDT', 'react_docgen': 'react-docgen'}
+
+
+def tool_line(corpus, tool, score):
+    """One tool against the checker, in words: agreement of the whole universe first, then of what the tool lists, then
+    what it omits by where the checker says the prop is declared."""
+    s = score['missing_by_stratum']
+    parts = [f"agrees on {100 * score['agree_universe']:.1f}% of the {score['universe']:,} props the checker finds "
+             f"({100 * score['agree_listed']:.1f}% of the {score['listed']:,} it lists, "
+             f"{100 * score['wrong_listed']:.2f}% of those wrong)",
+             f"omits {sum(s.values()):,} ({s['same_file']:,} declared in the component's file, {s['other_project_file']:,} in "
+             f"other project files, {s['dependency']:,} in dependencies, {s['unknown']:,} unknown)"]
+    if score['missing_by_reason']['collapsed']:
+        parts.append(f"{score['missing_by_reason']['collapsed']:,} more sit in collapsed layers")
+    if score.get('failed_files'):
+        parts.append(f"threw on {score['failed_files']:,} files, {score['missing_by_reason']['failed_file']:,} of the omitted props")
+    return f"- {corpus}, {TOOL_LABELS[tool]}: " + '; '.join(parts)
+
+
 def markdown(record, notes, reference_changed=None):
     lines = [f"Caliper {record['caliper']}, median of {record['runs']} runs; RDT and react-docgen one run each. Whole "
              'process, Node start included.', '', '### Time and memory', '',
@@ -556,6 +583,12 @@ def markdown(record, notes, reference_changed=None):
         for name, o in oracle_rows:
             lines.append(f'| {name} | unavailable: {o["error"][:80]} | | |' if 'error' in o else
                          f"| {name} | {o['shared_props']:,} | {100 * o['agree']:.1f}% | {100 * o['wrong']:.2f}% |")
+        tool_rows = [(n, o['tools']) for n, o in oracle_rows if 'tools' in o]
+        if tool_rows:
+            lines += ['', "Each tool against the checker, over every own prop the checker finds on an exported component "
+                          '(a prop a tool omits counts against it; components include some functions that are not):', '']
+            lines += [tool_line(name, tool, tools[tool]) for name, tools in tool_rows
+                      for tool in ('caliper', 'rdt', 'react_docgen') if tool in tools]
     lines += agent_eval.markdown(record)
     if reference_changed is not None:
         lines += ['', f"Recall was not compared with last week's: its reference was built by version {reference_changed} of "
