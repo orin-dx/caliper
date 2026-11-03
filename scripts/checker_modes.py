@@ -23,10 +23,12 @@ import argparse
 import json
 import os
 import re
+import shutil
 import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 
 import corpora
 from corpora import CORPORA, ROOT, run_once
@@ -35,7 +37,12 @@ DEFAULT_TSC = os.path.join(ROOT, 'apps', 'oracle', 'node_modules', 'typescript-b
 SESSION_SCRIPT = os.path.join(ROOT, 'scripts', 'checker_modes_session.mjs')
 ORACLE = os.path.join(ROOT, 'apps', 'oracle', 'src', 'oracle.ts')
 WAITS = (150, 600)
-COMMON = ['--html-attributes', 'full', '--load-dependencies', '--quiet']
+# The options the Storybook addon passes (packages/storybook/src/provider.ts): dependency types loaded, inherited
+# dependency props never collapsed into a layer, a lazy session, the default attributes (`full`) and the default on-disk
+# cache. A CLI run uses the same props settings so that it compares like with like.
+COMMON = ['--html-attributes', 'full', '--load-dependencies', '--collapse-inherited-props', 'none', '--quiet']
+# The names the oracle gives its verdicts (`VERDICTS` in apps/oracle/src/oracle-compare.ts); a test keeps them in step.
+ORACLE_VERDICTS = ('identical', 'spelled', 'less precise', 'wrong', 'checker any/error')
 
 
 # --- comparing props -----------------------------------------------------------------------------------------------
@@ -168,7 +175,9 @@ def marked_parameters(text):
 def categorise(kinds, a, b):
     """A coarse name for a difference, to group the many alike: what was added or dropped, a changed requiredness or
     default, and for a type the kind of change (`parameter_marker_lost`: a rest or optional parameter the checker's text
-    does not carry; `alias_expanded` / `alias_collapsed`: one side names a type the other writes out, judged by length)."""
+    does not carry; `checker_longer` / `checker_shorter`: the checker's text is much longer or much shorter than the
+    structural one, more than 20 characters and more than 1.5 times. That is a length test and nothing more: it says
+    nothing about why, and a longer text may be an alias written out, an object type, or a function type)."""
     if kinds == ['only_checker'] or kinds == ['only_structural']:
         return kinds[0]
     if kinds != ['type']:
@@ -177,9 +186,9 @@ def categorise(kinds, a, b):
     if marked_parameters(s) and not marked_parameters(c):
         return 'parameter_marker_lost'
     if len(c) - len(s) > 20 and len(c) > 1.5 * len(s):
-        return 'alias_expanded'
+        return 'checker_longer'
     if len(s) - len(c) > 20 and len(s) > 1.5 * len(c):
-        return 'alias_collapsed'
+        return 'checker_shorter'
     return 'other_type'
 
 
@@ -241,10 +250,17 @@ def timed(command, runs):
     return {'ms': spread([s * 1000 for s, _ in samples]), 'rss_mib': spread([r for _, r in samples])}
 
 
-def run_json(command, **kwargs):
-    """The JSON a command prints to stdout (anything before the first brace, such as a banner, is skipped)."""
-    out = subprocess.run(command, capture_output=True, text=True, **kwargs)
-    return out.returncode, out.stdout[out.stdout.find('{'):] if '{' in out.stdout else '', out.stderr
+def run_json(command):
+    """The JSON a command prints to stdout (anything before the first brace, such as a banner, is skipped). A command that
+    fails, or prints no JSON, is a RuntimeError saying which command and what it wrote to stderr."""
+    out = subprocess.run(command, capture_output=True, text=True, errors='replace')
+    shown = ' '.join(command)
+    if out.returncode != 0:
+        raise RuntimeError(f'{shown} exited with {out.returncode}: {out.stderr.strip()[-500:]}')
+    start = out.stdout.find('{')
+    if start < 0:
+        raise RuntimeError(f'{shown} printed no JSON: {out.stdout.strip()[-200:]} {out.stderr.strip()[-300:]}'.strip())
+    return out.stdout[start:]
 
 
 def extract_command(binary, src, fmt, extra=()):
@@ -306,41 +322,130 @@ def oracle_verdicts(binary, corpus, src, root, work, label, extra):
     subprocess.run(['node', ORACLE, '--root', root, '--src', src, '--tsconfig', tsconfig, '--caliper', canonical, '--out',
                     verdicts, '--files', list_file], check=True, timeout=3600, cwd=os.path.join(ROOT, 'apps', 'oracle'))
     with open(verdicts) as f:
-        e = json.load(f)
-    shared = e['props_shared'] or 1
-    v = e['verdicts']
-    return {'shared_props': e['props_shared'], 'agree': round((v['identical'] + v['spelled']) / shared, 4),
-            'less_precise': round(v.get('less_precise', 0) / shared, 4), 'wrong': round(v['wrong'] / shared, 4)}
+        return oracle_summary(json.load(f))
+
+
+def oracle_summary(report):
+    """The shares of an oracle report's shared props by verdict. A verdict the oracle does not name is a KeyError: a
+    misspelt key must not read as zero."""
+    shared = report['props_shared']
+    verdicts = {name: report['verdicts'][name] for name in ORACLE_VERDICTS}
+
+    def share(count):
+        return round(count / shared, 4) if shared else None
+
+    return {'shared_props': shared, 'agree': share(verdicts['identical'] + verdicts['spelled']),
+            'less_precise': share(verdicts['less precise']), 'wrong': share(verdicts['wrong']),
+            'checker_any_error': share(verdicts['checker any/error'])}
+
+
+def addon_session_options(src, mode, wait, tsc, cache_dir):
+    """The options a session is created with: what the Storybook addon passes (`createDocgenProvider`) for its defaults,
+    which is dependency types loaded, inherited dependency props not collapsed, a lazy session, and the NAPI defaults for
+    everything else (`htmlAttributes: 'full'`, the on-disk cache on). `cache_dir` only places that cache, so a run can
+    start with an empty one."""
+    options = {'srcDirs': [src], 'loadDependencies': True, 'collapseInheritedProps': 'none', 'lazy': True,
+               'cacheDir': cache_dir, 'semanticTypes': mode}
+    if mode == 'on-demand':
+        options['semanticWaitMs'] = wait
+        options['tscPath'] = tsc
+    return options
+
+
+def max_tsc_rss_mib(ps_output, tsc_path):
+    """The largest resident size, in MiB, of the processes in `ps -ax -o rss=,command=` output whose command line names
+    `tsc_path`: the checker, seen from outside the process that drives it."""
+    sizes = []
+    for line in ps_output.splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit() and tsc_path in parts[1]:
+            sizes.append(int(parts[0]) / 1024)
+    return round(max(sizes)) if sizes else 0
+
+
+class TscSampler(threading.Thread):
+    """Polls `ps` from this process while a session runs and keeps the largest checker size seen. The session script does
+    not measure the checker itself: asking for its memory between requests would give a slow checker idle time that the
+    timings do not count."""
+
+    def __init__(self, tsc_path, interval=0.25, ps=None):
+        super().__init__(daemon=True)
+        self.tsc_path, self.interval, self.ps = tsc_path, interval, ps or self.run_ps
+        self.peak_mib, self.samples, self.worked = 0, 0, False
+        self._stop_event = threading.Event()
+
+    @staticmethod
+    def run_ps():
+        out = subprocess.run(['ps', '-ax', '-o', 'rss=,command='], capture_output=True, text=True, errors='replace')
+        return out.returncode, out.stdout
+
+    def run(self):
+        while not self._stop_event.is_set():
+            code, listing = self.ps()
+            if code == 0 and listing.strip():
+                self.worked = True
+                self.peak_mib = max(self.peak_mib, max_tsc_rss_mib(listing, self.tsc_path))
+            self.samples += 1
+            self._stop_event.wait(self.interval)
+
+    def finish(self):
+        """The largest checker size seen in MiB, or None when `ps` never gave a listing: a measurement that did not
+        happen is not a size of 0."""
+        self._stop_event.set()
+        self.join()
+        return self.peak_mib if self.worked else None
+
+
+def process_stats(mode, samples):
+    """Wall time and peak memory of the whole session script, from `(seconds, MiB)` samples, for the checker-off mode.
+    An on-demand run has none: the script sleeps before a second pass over the same components, and neither belongs in a
+    time that is compared with the checker-off run. Its own step timings are in the JSON it prints."""
+    if mode != 'off':
+        return {}
+    return {'wall_ms': spread([s * 1000 for s, _ in samples]), 'rss_mib': spread([r for _, r in samples])}
 
 
 def session_run(node, src, mode, wait, tsc, count, work, label, runs):
-    """One session mode: timings of its steps (from the first run), wall time and RSS over `runs` runs, and the parsed
-    result of the first run."""
-    command = [node, SESSION_SCRIPT, '--src', src, '--count', str(count), '--semantic', mode]
-    if mode == 'on-demand':
-        command += ['--wait', str(wait), '--tsc', tsc]
+    """One session mode over `runs` runs, the first with an empty on-disk cache and the others with the cache that run
+    left. Returns (stats, cold, warm): the whole-process figures (checker off only), the parsed result of the first run,
+    and of the last run when there was more than one (else None). On-demand also gets the checker's peak size."""
+    cache_dir = os.path.join(work, f'{label}.cache')
+    shutil.rmtree(cache_dir, ignore_errors=True)
+    options = addon_session_options(src, mode, wait, tsc, cache_dir)
+    command = [node, SESSION_SCRIPT, '--options', json.dumps(options), '--count', str(count)]
     out = os.path.join(work, f'{label}.session.json')
-    samples = []
-    first = None
-    for i in range(runs):
-        with open(out, 'w') as f:
-            seconds, rss = run_once(command, stdout=f)
-        samples.append((seconds, rss))
-        if i == 0:
-            with open(out) as f:
-                first = json.load(f)
-    return {'wall_ms': spread([s * 1000 for s, _ in samples]), 'rss_mib': spread([r for _, r in samples])}, first
+    samples, results, peaks = [], [], []
+    for _ in range(runs):
+        sampler = TscSampler(tsc) if mode == 'on-demand' else None
+        if sampler:
+            sampler.start()
+        try:
+            with open(out, 'w') as f:
+                samples.append(run_once(command, stdout=f))
+        finally:
+            if sampler:
+                peaks.append(sampler.finish())
+        with open(out) as f:
+            results.append(json.load(f))
+    measured = [p for p in peaks if p is not None]
+    for result in results:
+        result['tsc_rss_mib'] = max(measured) if measured else None
+    stats = process_stats(mode, samples)
+    stats['options'] = {k: v for k, v in options.items() if k not in ('srcDirs', 'cacheDir')}
+    return stats, results[0], results[-1] if len(results) > 1 else None
 
 
 def first_load(result):
-    """The first-load figures of a session run: start, the first component, and the first 10 and 50."""
+    """The first-load figures of a session run: start, the first component, and the first 10 and 50 asked. A figure for
+    more components than were asked is None, never the last one reached, and `asked` says how many there were."""
     results = result['results']
 
     def at(n):
-        return round(results[min(n, len(results)) - 1]['cumulative_ms']) if results else None
+        return round(results[n - 1]['cumulative_ms']) if len(results) >= n else None
 
     return {'session_start_ms': round(result['create_ms'] + result['index_ms']), 'components_listed':
-            result['components_listed'], 'first_component_ms': at(1), 'first_10_ms': at(10), 'first_50_ms': at(50),
+            result['components_listed'], 'asked': len(results), 'first_component_ms': at(1), 'first_10_ms': at(10),
+            'first_50_ms': at(50),
             'median_request_ms': round(statistics.median([r['ms'] for r in results]), 1) if results else None,
             'p90_request_ms': round(sorted(r['ms'] for r in results)[int(len(results) * 0.9) - 1], 1) if results else None}
 
@@ -352,7 +457,10 @@ def on_demand_summary(result):
         counts = {}
         for r in rows:
             counts[r['backend']['outcome']] = counts.get(r['backend']['outcome'], 0) + 1
-        total = sum(counts.values()) or 1
+        total = sum(counts.values())
+        if total == 0:
+            return {'counts': counts, 'checker_share': None, 'structural_share': None, 'timed_out': 0,
+                    'timed_out_share': None}
         return {'counts': counts, 'checker_share': round(counts.get('checker', 0) / total, 3),
                 'structural_share': round(1 - counts.get('checker', 0) / total, 3),
                 'timed_out': counts.get('timed_out', 0), 'timed_out_share': round(counts.get('timed_out', 0) / total, 3)}
@@ -375,7 +483,7 @@ def relative_session(props, root):
 # --- the fallbacks -------------------------------------------------------------------------------------------------
 
 
-def prove_fallbacks(binary, node, corpus, root, src, work):
+def prove_fallbacks(binary, node, root, src, work):
     """Run the checker modes against a tsc that is missing and one that exits at once, on a small corpus, and show that
     each gives the structural result plus a warning and never an error."""
     fake = os.path.join(work, 'fake-typescript')
@@ -387,24 +495,22 @@ def prove_fallbacks(binary, node, corpus, root, src, work):
         f.write('#!/bin/sh\nexit 1\n')
     os.chmod(crash, 0o755)
     missing = os.path.join(work, 'nonexistent', 'bin', 'tsc')
-    structural_code, structural_rdt, _ = run_json(extract_command(binary, src, 'rdt'))
+    structural_rdt = run_json(extract_command(binary, src, 'rdt'))
+    _, structural_result, _ = session_run(node, src, 'off', None, None, 8, work, 'fallback-structural', 1)
+    structural_props = relative_session(session_props(structural_result), root)
     proofs = {}
     for label, tsc in (('missing_tsc', missing), ('crashing_tsc', crash)):
-        code, rdt, _ = run_json(extract_command(binary, src, 'rdt', checker_args(tsc)))
-        code_json, canonical, _ = run_json(extract_command(binary, src, 'json', checker_args(tsc)))
-        warnings = []
-        if canonical:
-            warnings = [d.get('message', '')[:160] for d in json.loads(canonical).get('diagnostics', [])
-                        if d.get('code') == 'SEMANTIC_BACKEND']
-        proofs[label] = {'cli_exit_code': code, 'cli_output_equals_structural': rdt == structural_rdt,
-                         'cli_warnings': warnings}
-        _, result = session_run(node, src, 'on-demand', 150, tsc, 8, work, f'fallback-{label}', 1)
-        _, structural_result = session_run(node, src, 'off', None, None, 8, work, f'fallback-{label}-off', 1)
-        summary = on_demand_summary(result)
-        proofs[label].update({
-            'session_outcomes': summary['first_pass']['counts'],
-            'session_props_equal_structural': relative_session(session_props(result), root) ==
-            relative_session(session_props(structural_result), root)})
+        # A command that fails is an error, so reaching the next line is the proof that the exit code was 0.
+        rdt = run_json(extract_command(binary, src, 'rdt', checker_args(tsc)))
+        canonical = run_json(extract_command(binary, src, 'json', checker_args(tsc)))
+        warnings = [d.get('message', '')[:160] for d in json.loads(canonical).get('diagnostics', [])
+                    if d.get('code') == 'SEMANTIC_BACKEND']
+        _, result, _ = session_run(node, src, 'on-demand', 150, tsc, 8, work, f'fallback-{label}', 1)
+        proofs[label] = {'cli_exit_code': 0, 'cli_output_equals_structural': rdt == structural_rdt,
+                         'cli_warnings': warnings,
+                         'session_outcomes': on_demand_summary(result)['first_pass']['counts'],
+                         'session_props_equal_structural': relative_session(session_props(result), root) ==
+                         structural_props}
     return proofs
 
 
@@ -424,7 +530,7 @@ def corpus_report(args, corpus, work, diff_rows):
     say('structural')
     structural_cmd = extract_command(args.bin, src, 'rdt')
     report['structural'] = timed(structural_cmd, args.runs)
-    _, structural_text, _ = run_json(structural_cmd)
+    structural_text = run_json(structural_cmd)
     structural_props = by_component(json.loads(structural_text), root)
     report['structural']['components'] = len(structural_props)
 
@@ -432,25 +538,27 @@ def corpus_report(args, corpus, work, diff_rows):
         say('batch checker')
         batch_cmd = extract_command(args.bin, src, 'rdt', checker_args(args.tsc))
         report['batch'] = timed(batch_cmd, args.runs)
-        _, batch_text, _ = run_json(batch_cmd)
+        batch_text = run_json(batch_cmd)
         batch_props = by_component(json.loads(batch_text), root)
         rows, summary = diff_runs('batch', name, structural_props, batch_props)
         diff_rows += rows
         report['batch']['diff'] = summary
-        _, canonical, _ = run_json(extract_command(args.bin, src, 'json', checker_args(args.tsc)))
+        canonical = run_json(extract_command(args.bin, src, 'json', checker_args(args.tsc)))
         report['batch']['backend'] = batch_backend(json.loads(canonical))
 
     if not args.skip_session:
         say('session, checker off')
-        off_stats, off = session_run(args.node, src, 'off', None, None, args.count, work, f'{name}-off', args.runs)
-        report['session_off'] = {**off_stats, **first_load(off)}
-        off_props = relative_session(session_props(off), root)
+        off_stats, off_cold, off_warm = session_run(args.node, src, 'off', None, None, args.count, work, f'{name}-off',
+                                                    max(2, args.runs))
+        report['session_off'] = {**off_stats, 'cold': first_load(off_cold), 'warm': first_load(off_warm)}
+        off_props = relative_session(session_props(off_cold), root)
         for wait in WAITS:
             say(f'session, on-demand, wait {wait} ms')
-            stats, result = session_run(args.node, src, 'on-demand', wait, args.tsc, args.count, work,
-                                        f'{name}-on-demand-{wait}', args.runs if wait == WAITS[0] else 1)
-            entry = {**stats, **first_load(result), **on_demand_summary(result)}
-            late = relative_session(session_props(result, 'second_pass'), root)
+            stats, cold, warm = session_run(args.node, src, 'on-demand', wait, args.tsc, args.count, work,
+                                            f'{name}-on-demand-{wait}', 2)
+            entry = {**stats, 'cold': {**first_load(cold), **on_demand_summary(cold)},
+                     'warm': {**first_load(warm), **on_demand_summary(warm)}}
+            late = relative_session(session_props(cold, 'second_pass'), root)
             rows, summary = diff_runs(f'on-demand-{wait}', name, off_props, late)
             diff_rows += rows
             entry['diff_after_late_answers'] = summary
@@ -463,6 +571,18 @@ def corpus_report(args, corpus, work, diff_rows):
                                                      checker_args(args.tsc))}
     report['load_after'] = os.getloadavg()[0]
     return report
+
+
+def percent(share, decimals=0):
+    """A share as a percent for a line of text, or `n/a` when there was nothing to take a share of."""
+    return 'n/a' if share is None else f'{share * 100:.{decimals}f}%'
+
+
+def shown(ms, asked=None):
+    """A first-load figure for a line of text: milliseconds, or why there is none."""
+    if ms is not None:
+        return f'{ms} ms'
+    return f'n/a (only {asked} asked)' if asked is not None else 'n/a (too few asked)'
 
 
 def sentences(report):
@@ -485,24 +605,32 @@ def sentences(report):
                        f"only checker)")
         if 'session_off' in c:
             o = c['session_off']
-            out.append(f"  first load, checker off: session start {o['session_start_ms']} ms, first component "
-                       f"{o['first_component_ms']} ms, 10 components {o['first_10_ms']} ms, 50 components "
-                       f"{o['first_50_ms']} ms, whole process peak {o['rss_mib']['max']} MiB")
+            for state in ('cold', 'warm'):
+                f = o[state]
+                out.append(f"  first load, checker off, {state} cache: session start {f['session_start_ms']} ms, first "
+                           f"component {shown(f['first_component_ms'])}, 10 components {shown(f['first_10_ms'])}, 50 "
+                           f"components {shown(f['first_50_ms'], f['asked'])}")
+            out.append(f"  whole process, checker off: {o['wall_ms']['median']} ms, peak {o['rss_mib']['max']} MiB")
         for wait in WAITS:
             e = c.get(f'session_on_demand_{wait}')
             if e:
-                out.append(f"  on-demand, wait {wait} ms: first answer {e['first_answer_ms']} ms, 10 components "
-                           f"{e['first_10_ms']} ms, 50 components {e['first_50_ms']} ms; checker answered "
-                           f"{e['first_pass']['checker_share'] * 100:.0f}% of first requests (timed out: "
-                           f"{e['first_pass']['timed_out']}; the rest kept the structural result for the checker's own "
-                           f"reasons) and {e['second_pass']['checker_share'] * 100:.0f}% when asked again; tsc peak "
-                           f"{e['tsc_rss_mib']} MiB; {e['diff_after_late_answers']['props_differing']} props differ from "
-                           f"the structural session")
+                for state in ('cold', 'warm'):
+                    f = e[state]
+                    out.append(f"  on-demand, wait {wait} ms, {state} cache: first answer {f['first_answer_ms']} ms, 10 "
+                               f"components {shown(f['first_10_ms'])}, 50 components "
+                               f"{shown(f['first_50_ms'], f['asked'])}; checker answered "
+                               f"{percent(f['first_pass']['checker_share'])} of first requests (timed out: "
+                               f"{f['first_pass']['timed_out']}; the rest kept the structural result for the checker's "
+                               f"own reasons) and {percent(f['second_pass']['checker_share'])} when asked again; tsc "
+                               f"peak {'n/a (ps gave no listing)' if f['tsc_rss_mib'] is None else str(f['tsc_rss_mib']) + ' MiB'}")
+                out.append(f"  on-demand, wait {wait} ms: {e['diff_after_late_answers']['props_differing']} props differ "
+                           f"from the checker-off session")
         if 'oracle' in c:
             s, b = c['oracle']['structural'], c['oracle']['batch']
             out.append(f"  oracle (the checker judging itself, information only): structural agree "
-                       f"{s['agree'] * 100:.1f}% wrong {s['wrong'] * 100:.2f}%; batch checker agree {b['agree'] * 100:.1f}% "
-                       f"wrong {b['wrong'] * 100:.2f}%")
+                       f"{percent(s['agree'], 1)} less precise {percent(s['less_precise'], 1)} wrong "
+                       f"{percent(s['wrong'], 2)}; batch checker agree {percent(b['agree'], 1)} less precise "
+                       f"{percent(b['less_precise'], 1)} wrong {percent(b['wrong'], 2)}")
     return '\n'.join(out)
 
 
@@ -536,7 +664,7 @@ def main():
         if args.fallbacks:
             small = next((c for c in wanted if c['name'] == 'antd'), wanted[0])
             root = os.path.join(os.path.abspath(args.corpora), small['clone'])
-            proofs = prove_fallbacks(args.bin, args.node, small, root, os.path.join(root, small['src']), work)
+            proofs = prove_fallbacks(args.bin, args.node, root, os.path.join(root, small['src']), work)
     report = {'bin': args.bin, 'tsc': args.tsc, 'runs': args.runs, 'count': args.count, 'corpora': reports,
               'fallbacks': proofs}
     kept_rows = diff_rows if args.diff_all else [r for r in diff_rows if not r['react_declared'] and not r['cosmetic']]

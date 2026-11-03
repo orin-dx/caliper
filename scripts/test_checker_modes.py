@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for scripts/checker_modes.py's parsing and diff logic, on small fixtures. Run: python3 scripts/test_checker_modes.py"""
 import os
+import re
 import sys
 import unittest
 
@@ -8,6 +9,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import checker_modes as cm
 
 REACT = '/r/node_modules/@types/react/index.d.ts'
+
+
+def read(path):
+    with open(path) as f:
+        return f.read()
 
 
 def facts(type='string', required=False, default=None, react=False):
@@ -98,9 +104,9 @@ class Categorise(unittest.TestCase):
         self.assertEqual(cm.categorise(['type'], facts('(x?: boolean) => void'), facts('(x: undefined | boolean) => void')),
                          'parameter_marker_lost')
         self.assertEqual(cm.categorise(['type'], facts('StyleProp<Spacing>'), facts('"xs" | "sm" | "md" | "lg" | "xl" | number')),
-                         'alias_expanded')
+                         'checker_longer')
         self.assertEqual(cm.categorise(['type'], facts('"xs" | "sm" | "md" | "lg" | "xl" | number'), facts('Size')),
-                         'alias_collapsed')
+                         'checker_shorter')
         self.assertEqual(cm.categorise(['type'], facts('string'), facts('number')), 'other_type')
         # An object type's optional member is not an optional parameter.
         self.assertEqual(cm.categorise(['type'], facts('string | { base?: string; S?: string }'),
@@ -127,6 +133,130 @@ class DistinctPairs(unittest.TestCase):
         pairs = cm.distinct_pairs(rows)
         self.assertEqual([(p['count'], p['example']['component']) for p in pairs], [(2, 'A'), (1, 'C')])
         self.assertEqual(pairs[0]['corpora'], {'chakra': 2})
+
+
+class OracleVerdicts(unittest.TestCase):
+    # A real report: `node apps/oracle/src/oracle.ts` on antd, 2026-11-02 (its `verdicts` and `props_shared`).
+    REAL = {'props_shared': 3075, 'verdicts': {'identical': 1772, 'spelled': 1096, 'less precise': 206, 'wrong': 0,
+                                               'checker any/error': 1}}
+
+    def test_reads_every_verdict_of_a_real_report(self):
+        self.assertEqual(cm.oracle_summary(self.REAL), {
+            'shared_props': 3075, 'agree': round((1772 + 1096) / 3075, 4), 'less_precise': round(206 / 3075, 4),
+            'wrong': 0.0, 'checker_any_error': round(1 / 3075, 4)})
+
+    def test_no_shared_props_gives_no_shares_not_zeros(self):
+        summary = cm.oracle_summary({'props_shared': 0, 'verdicts': {name: 0 for name in cm.ORACLE_VERDICTS}})
+        self.assertEqual((summary['shared_props'], summary['agree'], summary['less_precise'], summary['wrong']),
+                         (0, None, None, None))
+
+    def test_the_less_precise_share_is_not_zero_when_the_oracle_reports_some(self):
+        self.assertGreater(cm.oracle_summary(self.REAL)['less_precise'], 0.06)
+
+    def test_a_verdict_key_the_oracle_does_not_emit_is_an_error_not_a_zero(self):
+        with self.assertRaises(KeyError):
+            cm.oracle_summary({'props_shared': 1, 'verdicts': {'identical': 1, 'spelled': 0, 'less_precise': 0,
+                                                               'wrong': 0, 'checker any/error': 0}})
+
+    def test_the_verdict_names_match_the_oracles_source(self):
+        source = read(os.path.join(cm.ROOT, 'apps', 'oracle', 'src', 'oracle-compare.ts'))
+        listed = re.search(r'export const VERDICTS: Verdict\[\] = \[(.*?)\]', source).group(1)
+        self.assertEqual(re.findall(r"'([^']+)'", listed), list(cm.ORACLE_VERDICTS))
+
+
+class RunJson(unittest.TestCase):
+    def test_returns_the_json_after_any_banner(self):
+        self.assertEqual(cm.run_json([sys.executable, '-c', 'print("banner"); print(\'{"a": 1}\')']), '{"a": 1}\n')
+
+    def test_a_failing_command_raises_with_the_command_and_its_stderr(self):
+        with self.assertRaises(RuntimeError) as raised:
+            cm.run_json([sys.executable, '-c', 'import sys; sys.stderr.write("boom happened"); sys.exit(3)'])
+        message = str(raised.exception)
+        self.assertIn('exited with 3', message)
+        self.assertIn('boom happened', message)
+        self.assertIn('-c', message)
+
+    def test_output_with_no_json_raises_instead_of_returning_an_empty_string(self):
+        with self.assertRaises(RuntimeError) as raised:
+            cm.run_json([sys.executable, '-c', 'print("no braces here")'])
+        self.assertIn('no JSON', str(raised.exception))
+
+
+class ProcessStats(unittest.TestCase):
+    def test_the_checker_off_session_reports_wall_time_and_memory(self):
+        stats = cm.process_stats('off', [(1.0, 100.0), (3.0, 120.0), (2.0, 110.0)])
+        self.assertEqual(stats['wall_ms']['median'], 2000)
+        self.assertEqual(stats['rss_mib'], {'median': 110, 'min': 100, 'max': 120})
+
+    def test_an_on_demand_session_reports_none_because_the_script_sleeps_and_asks_twice(self):
+        self.assertEqual(cm.process_stats('on-demand', [(5.0, 100.0)]), {})
+
+
+class TscSampler(unittest.TestCase):
+    PS = ('  1024 /usr/bin/python3 scripts/checker_modes.py\n'
+          ' 204800 node /r/typescript-beta/bin/tsc --api --cwd /p\n'
+          ' 307200 node /r/typescript-beta/bin/tsc --api --cwd /q\n'
+          ' 999999 node /other/typescript/bin/tsc --watch\n')
+
+    def test_the_largest_checker_process_in_mib(self):
+        self.assertEqual(cm.max_tsc_rss_mib(self.PS, '/r/typescript-beta/bin/tsc'), 300)
+
+    def test_no_matching_process_is_zero(self):
+        self.assertEqual(cm.max_tsc_rss_mib(self.PS, '/nowhere/tsc'), 0)
+
+    def sampler(self, answers):
+        calls = iter(answers)
+        sampler = cm.TscSampler('/r/typescript-beta/bin/tsc', interval=0.01, ps=lambda: next(calls, (0, self.PS)))
+        sampler.start()
+        while sampler.samples < len(answers):
+            pass
+        return sampler
+
+    def test_the_peak_is_the_largest_size_seen_across_samples(self):
+        small = ' 102400 node /r/typescript-beta/bin/tsc --api\\n'
+        sampler = self.sampler([(0, small), (0, self.PS)])
+        self.assertEqual(sampler.finish(), 300)
+
+    def test_a_ps_that_never_worked_is_none_not_zero(self):
+        sampler = self.sampler([(1, ''), (1, '')])
+        self.assertIsNone(sampler.finish())
+
+
+class AddonOptions(unittest.TestCase):
+    def test_a_session_is_created_with_the_options_the_addon_passes(self):
+        options = cm.addon_session_options('/src', 'on-demand', 150, '/t/tsc', '/cache')
+        self.assertEqual(options, {'srcDirs': ['/src'], 'loadDependencies': True, 'collapseInheritedProps': 'none',
+                                   'lazy': True, 'cacheDir': '/cache', 'semanticTypes': 'on-demand',
+                                   'semanticWaitMs': 150, 'tscPath': '/t/tsc'})
+
+    def test_the_checker_off_session_names_no_checker_options(self):
+        options = cm.addon_session_options('/src', 'off', None, None, '/cache')
+        self.assertNotIn('semanticWaitMs', options)
+        self.assertNotIn('tscPath', options)
+        self.assertEqual(options['semanticTypes'], 'off')
+
+    def test_the_defaults_match_the_addons_source(self):
+        source = read(os.path.join(cm.ROOT, 'packages', 'storybook', 'src', 'provider.ts'))
+        self.assertIn("collapseInheritedProps: options.collapseInheritedProps ?? 'none'", source)
+        self.assertIn('loadDependencies: options.loadDependencies ?? true', source)
+        self.assertNotIn('cache: options.cache ??', source)
+        self.assertNotIn('htmlAttributes: options.htmlAttributes ??', source)
+
+    def test_the_cli_runs_use_the_same_props_settings(self):
+        self.assertEqual(cm.COMMON[cm.COMMON.index('--collapse-inherited-props') + 1], 'none')
+        self.assertIn('--load-dependencies', cm.COMMON)
+
+
+class SessionScript(unittest.TestCase):
+    def test_nothing_measures_the_checker_between_two_requests(self):
+        source = read(cm.SESSION_SCRIPT)
+        for process_call in ('pgrep', 'execFile', 'child_process'):
+            self.assertNotIn(process_call, source)
+
+    def test_the_script_takes_its_options_from_the_parent(self):
+        source = read(cm.SESSION_SCRIPT)
+        self.assertIn("arg('--options')", source)
+        self.assertNotIn('cache: false', source)
 
 
 class ByComponent(unittest.TestCase):
@@ -161,10 +291,15 @@ class Sessions(unittest.TestCase):
                 'second_pass': [row(i, o) for i, o in enumerate(second or outcomes)]}
 
     def test_first_load_reads_the_cumulative_times(self):
-        load = cm.first_load(self.result(['none'] * 12))
+        load = cm.first_load(self.result(['none'] * 60))
         self.assertEqual((load['session_start_ms'], load['first_component_ms'], load['first_10_ms']), (25, 10, 100))
-        self.assertEqual(load['first_50_ms'], 120)
+        self.assertEqual((load['first_50_ms'], load['asked']), (500, 60))
         self.assertEqual(load['components_listed'], 99)
+
+    def test_first_load_does_not_report_50_components_when_fewer_were_asked(self):
+        load = cm.first_load(self.result(['none'] * 12))
+        self.assertEqual((load['asked'], load['first_10_ms'], load['first_50_ms']), (12, 100, None))
+        self.assertEqual(cm.first_load(self.result(['none'] * 5))['first_10_ms'], None)
 
     def test_on_demand_summary_separates_timeouts_from_the_checkers_own_fallbacks(self):
         summary = cm.on_demand_summary(self.result(['checker', 'timed_out', 'fallback', 'checker'],
@@ -173,6 +308,15 @@ class Sessions(unittest.TestCase):
         self.assertEqual((summary['first_pass']['checker_share'], summary['first_pass']['timed_out']), (0.5, 1))
         self.assertEqual(summary['second_pass']['checker_share'], 0.75)
         self.assertEqual(summary['tsc_rss_mib'], 200)
+
+    def test_no_answers_is_not_a_share_of_zero(self):
+        empty = self.result([])
+        empty['second_pass'] = []
+        summary = cm.on_demand_summary(empty)
+        self.assertEqual((summary['first_pass']['checker_share'], summary['first_pass']['timed_out_share']),
+                         (None, None))
+        self.assertEqual(cm.percent(None), 'n/a')
+        self.assertEqual(cm.percent(0.768), '77%')
 
     def test_session_props_skip_answers_without_a_file_or_props(self):
         result = self.result(['none', 'none'])

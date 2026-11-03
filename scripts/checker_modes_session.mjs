@@ -2,17 +2,18 @@
 // Drives one lazy session the way the Storybook addon does (createSession, initializeSessionIndex, then one
 // sessionComponentAnswers call per component) and prints one JSON document: the time of each step, each answer's props,
 // and whether the TypeScript checker answered or the structural result stood. scripts/checker_modes.py runs it once
-// per mode and corpus.
+// per mode and corpus and passes the session options (it builds them to match the addon's, and a test keeps them so).
 //
-// node scripts/checker_modes_session.mjs --src DIR [--count N] [--seed S] [--semantic off|on-demand] [--wait MS]
-//   [--tsc PATH] [--second-pass-wait MS]
-import { execFile } from 'node:child_process'
+// node scripts/checker_modes_session.mjs --options JSON [--count N] [--seed S] [--second-pass-wait MS]
+//
+// Nothing runs between two requests of the first pass except storing the parsed answer: building the records and any
+// measurement of the checker's memory happen after the loop or outside this process, so that the checker, which keeps
+// working in the background after a request that timed out, gets no idle time that the timings do not count.
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const napi = createRequire(import.meta.url)(join(here, '..', 'packages', 'napi'))
@@ -22,25 +23,13 @@ const arg = (name, fallback) => {
   const at = argv.indexOf(name)
   return at >= 0 ? argv[at + 1] : fallback
 }
-const src = arg('--src')
-if (!src) throw new Error('--src is required')
+const optionsText = arg('--options')
+if (!optionsText) throw new Error('--options is required')
+const options = JSON.parse(optionsText)
 const count = Number(arg('--count', '50'))
 const seed = Number(arg('--seed', '1'))
-const semantic = arg('--semantic', 'off')
-const wait = arg('--wait')
-const tsc = arg('--tsc')
 const secondPassWait = Number(arg('--second-pass-wait', '2000'))
-
-const options = {
-  srcDirs: [src],
-  lazy: true,
-  htmlAttributes: 'full',
-  cache: false,
-  loadDependencies: true,
-  semanticTypes: semantic,
-  ...(wait === undefined ? {} : { semanticWaitMs: Number(wait) }),
-  ...(tsc === undefined ? {} : { tscPath: tsc }),
-}
+const semantic = options.semanticTypes ?? 'off'
 
 /** A seeded shuffle, so every mode asks the same components in the same order. */
 function shuffled(keys, seedValue) {
@@ -78,33 +67,13 @@ function propsOf(doc) {
 /** What the checker did for one answer, from the `SEMANTIC_BACKEND` diagnostics it carries. */
 function backendOf(diagnostics) {
   const messages = (diagnostics ?? []).filter((d) => d.code === 'SEMANTIC_BACKEND').map((d) => d.message)
-  const waited = messages.some((m) => /has not answered yet/.test(m))
-  const kept = messages.some((m) => /kept their structural result/.test(m))
-  const resolved = messages.some((m) => /resolved by the TypeScript checker/.test(m))
-  const unavailable = messages.some((m) => /backend unavailable/.test(m))
-  return {
-    messages,
-    outcome: waited ? 'timed_out' : unavailable ? 'unavailable' : kept ? 'fallback' : resolved ? 'checker' : 'none',
-  }
-}
-
-const run = promisify(execFile)
-
-/** Resident memory of the child processes of this one (the `tsc` the checker spawned), in MiB. */
-async function childRssMiB() {
-  try {
-    const { stdout: children } = await run('pgrep', ['-P', String(process.pid)])
-    const pids = children.trim().split('\n').filter(Boolean)
-    if (pids.length === 0) return 0
-    const { stdout } = await run('ps', ['-o', 'rss=', '-p', pids.join(',')])
-    const sizes = stdout
-      .trim()
-      .split('\n')
-      .map((line) => Number(line.trim()) / 1024)
-    return Math.max(...sizes)
-  } catch {
-    return 0
-  }
+  const has = (pattern) => messages.some((m) => pattern.test(m))
+  let outcome = 'none'
+  if (has(/has not answered yet/)) outcome = 'timed_out'
+  else if (has(/backend unavailable/)) outcome = 'unavailable'
+  else if (has(/kept their structural result/)) outcome = 'fallback'
+  else if (has(/resolved by the TypeScript checker/)) outcome = 'checker'
+  return { messages, outcome }
 }
 
 const startedAt = performance.now()
@@ -122,57 +91,48 @@ const placed = (key) => ({
 const allKeys = napi.sessionComponentKeys(sessionId).toSorted()
 const keys = count > 0 ? shuffled(allKeys, seed).slice(0, count) : allKeys
 
-const results = []
-let cumulative = 0
-let tscRssMax = 0
-for (const key of keys) {
+/** One request, parsed as the addon parses it; the time is this call and that parse and nothing else. */
+function ask(key) {
   const t = performance.now()
-  const answers = JSON.parse(napi.sessionComponentAnswers(sessionId, [key]))
-  const ms = performance.now() - t
-  cumulative += ms
-  const answer = answers[key]
-  results.push({
-    key,
-    ms: Number(ms.toFixed(2)),
-    cumulative_ms: Number(cumulative.toFixed(2)),
-    present: Boolean(answer),
-    ...placed(key),
-    props: answer ? propsOf(answer.docgenInfo) : null,
-    backend: answer ? backendOf(answer.diagnostics) : { messages: [], outcome: 'none' },
-  })
-  tscRssMax = Math.max(tscRssMax, await childRssMiB())
+  const answer = JSON.parse(napi.sessionComponentAnswers(sessionId, [key]))[key]
+  return { key, ms: performance.now() - t, answer }
 }
 
-// The checker's late answer serves the next request of the same component while no file changed: ask again.
-let secondPass = []
+const asked = []
+for (const key of keys) asked.push(ask(key))
+
+// The checker's late answer serves the next request of the same component while no file changed: ask again. The wait
+// and this pass are for that question only; the parent does not time this script as a whole for an on-demand run.
+const askedAgain = []
 if (semantic === 'on-demand') {
   await sleep(secondPassWait)
-  secondPass = keys.map((key) => {
-    const t = performance.now()
-    const answers = JSON.parse(napi.sessionComponentAnswers(sessionId, [key]))
-    const answer = answers[key]
-    return {
-      key,
-      ms: Number((performance.now() - t).toFixed(2)),
-      ...placed(key),
-      props: answer ? propsOf(answer.docgenInfo) : null,
-      backend: answer ? backendOf(answer.diagnostics) : { messages: [], outcome: 'none' },
-    }
-  })
-  tscRssMax = Math.max(tscRssMax, await childRssMiB())
+  for (const key of keys) askedAgain.push(ask(key))
 }
 
 napi.closeSession(sessionId)
 
+let cumulative = 0
+const record = ({ key, ms, answer }) => ({
+  key,
+  ms: Number(ms.toFixed(2)),
+  present: Boolean(answer),
+  ...placed(key),
+  props: answer ? propsOf(answer.docgenInfo) : null,
+  backend: answer ? backendOf(answer.diagnostics) : { messages: [], outcome: 'none' },
+})
+const results = asked.map((one) => {
+  cumulative += one.ms
+  return Object.assign(record(one), { cumulative_ms: Number(cumulative.toFixed(2)) })
+})
+
 const report = {
-  options: { ...options, srcDirs: undefined },
+  options: { ...options, srcDirs: undefined, cacheDir: undefined },
   create_ms: Number(createMs.toFixed(2)),
   index_ms: Number(indexMs.toFixed(2)),
   components_listed: allKeys.length,
   asked: keys.length,
-  tsc_rss_mib: Math.round(tscRssMax),
   results,
-  second_pass: secondPass,
+  second_pass: askedAgain.map((one) => record(one)),
 }
 process.stdout.write(JSON.stringify(report))
 process.exit(0)
