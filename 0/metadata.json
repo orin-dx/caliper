@@ -1,0 +1,48 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6FJKPZ4P1RJR962W29J5AEW",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-03T02:08:04.344513Z",
+  "branch": "fix/addon-and-plugin-failures",
+  "checkpoints_count": 2,
+  "save_step_count": 40,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "6da4af48957e",
+  "checkpoint_transcript_start": 5409,
+  "transcript_lines_at_start": 5409,
+  "compact_transcript_start": 473,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0,
+    "subagent_tokens": {
+      "input_tokens": 88,
+      "cache_creation_tokens": 72211,
+      "cache_read_tokens": 12303814,
+      "output_tokens": 29734,
+      "api_call_count": 44
+    }
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 6,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 117
+  }
+}
