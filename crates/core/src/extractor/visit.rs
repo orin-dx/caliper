@@ -183,18 +183,33 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         let props: Vec<RawProp> =
             node.body.body.iter().filter_map(|sig| self.collect_property_signature(sig)).collect();
 
-        self.data.interfaces.insert(
-            key.clone(),
-            CollectedInterface {
-                scoped_key: key.clone(),
-                name: name.into(),
-                file_path: self.file_path.clone(),
-                props,
-                extends,
-                description,
-                tags,
-            },
-        );
+        // Declarations of one name in one scope merge: members and `extends` accumulate, and the first description
+        // stands.
+        if let Some(merged) = self.data.interfaces.get_mut(&key) {
+            for prop in props {
+                if !merged.props.iter().any(|existing| existing.name == prop.name) {
+                    merged.props.push(prop);
+                }
+            }
+            merged.extends.extend(extends);
+            if merged.description.is_empty() {
+                merged.description = description;
+                merged.tags = tags;
+            }
+        } else {
+            self.data.interfaces.insert(
+                key.clone(),
+                CollectedInterface {
+                    scoped_key: key.clone(),
+                    name: name.into(),
+                    file_path: self.file_path.clone(),
+                    props,
+                    extends,
+                    description,
+                    tags,
+                },
+            );
+        }
 
         // Record declared type parameter names (`interface Foo<TData, TValue>` →
         // ["TData", "TValue"]) so the resolver can recognize bare references to

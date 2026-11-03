@@ -2764,6 +2764,43 @@ fn a_component_declared_inside_a_function_body_is_reported_not_mapped() {
 }
 
 #[test]
+fn a_ts_file_that_imports_react_values_has_its_create_element_components_detected() {
+    let source = "import { createElement, forwardRef } from 'react';\n\
+        interface BoxProps { tone: string }\n\
+        export const Box = forwardRef<HTMLDivElement, BoxProps>((props, ref) => createElement('div', { ref }));\n\
+        export function Plain(props: BoxProps) { return createElement('span', null, props.tone); }";
+    let data = parse_file(Utf8Path::new("/test/box.ts"), source);
+    let found: Vec<(&str, &str)> =
+        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.props_type_name.as_str())).collect();
+    assert_eq!(found, [("Box", "BoxProps"), ("Plain", "BoxProps")]);
+}
+
+#[test]
+fn a_ts_file_without_a_react_value_import_has_no_components() {
+    let source = "import type { ReactNode } from 'react';\n\
+        interface Opts { a: string }\n\
+        export function Builder(opts: Opts): ReactNode { return null; }";
+    let data = parse_file(Utf8Path::new("/test/builder.ts"), source);
+    assert_eq!(data.component_mappings.len(), 0);
+    assert_eq!(data.diagnostics.len(), 0);
+}
+
+#[test]
+fn same_name_interface_declarations_in_one_file_merge_their_members() {
+    let source = "interface Props { a: string }\n\
+        interface Props { b: number }\n\
+        export function Box(props: Props) { return <div />; }";
+    let data = parse_file(Utf8Path::new("/test/merge.tsx"), source);
+    let members: Vec<Vec<&str>> = data
+        .interfaces
+        .iter()
+        .filter(|(key, _)| key.ends_with(":Props"))
+        .map(|(_, iface)| iface.props.iter().map(|p| p.name.as_str()).collect())
+        .collect();
+    assert_eq!(members, [["a", "b"]]);
+}
+
+#[test]
 fn unrelated_object_assign_call_is_not_treated_as_a_component_pattern() {
     let source = r#"
         const config = {};

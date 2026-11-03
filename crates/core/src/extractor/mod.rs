@@ -174,7 +174,13 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
     let ret = Parser::new(&allocator, source, source_type).with_options(options).parse();
 
     // .d.ts declaration files use the same React.FC / ForwardRefExoticComponent patterns as .tsx
-    let is_tsx = source_type.is_jsx() || source_type.is_typescript_definition();
+    // A plain `.ts` file cannot hold JSX but can build components with `createElement` and `forwardRef`, so it is read
+    // for components when it imports a value from React: that keeps the many `.ts` files with no React in them out.
+    let imports_react_value = ret.program.body.iter().any(|statement| {
+        matches!(statement, Statement::ImportDeclaration(import)
+            if import.import_kind.is_value() && is_react_module(&js_text::lossy(import.source.value)))
+    });
+    let is_tsx = source_type.is_jsx() || source_type.is_typescript_definition() || imports_react_value;
     let mut collector = SourceDataCollector::new(path, source, is_tsx);
 
     // oxc_parser recovers from errors: `ret.program` is usable even with diagnostics, so surface them rather than
