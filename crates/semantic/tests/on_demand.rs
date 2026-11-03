@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use caliper_docgen_core::pipeline::{extract, HtmlAttributeMode, PipelineOptions, WatchSession};
 use caliper_docgen_core::types::semantic::{SemanticOutcome, SemanticProvider, SemanticTarget};
-use caliper_docgen_core::types::{DiagnosticSeverity, ExtractionOutput};
+use caliper_docgen_core::types::{DiagnosticSeverity, ExtractionOutput, PropType};
 use caliper_docgen_semantic::{targets_of, OnDemand, OnDemandConfig};
 use camino::Utf8PathBuf;
 
@@ -167,6 +167,38 @@ fn the_real_checker_names_props_as_the_source_writes() {
     assert_eq!(answer.diagnostics, []);
     let names: Vec<_> = answer.components[0].props.iter().map(|prop| prop.name.as_str()).collect();
     assert_eq!(names, ["_single", "__size", "___triple", "plain"]);
+}
+
+/// The real checker prints `(percent?: number, ...rest: string[])` and says which signatures have a rest parameter; the
+/// answer keeps both markers, and a parameter typed `string | undefined` is not optional.
+#[test]
+fn the_real_checker_keeps_optional_and_rest_parameters() {
+    let Some(tsc) = real_tsc() else { return };
+    let dir = tempfile::Builder::new().prefix("Real").tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+    let fixtures = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/markers");
+    for name in ["Markers.tsx", "tsconfig.json"] {
+        std::fs::copy(fixtures.join(name), root.join(name)).unwrap();
+    }
+    let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
+    let mut config = OnDemandConfig::new(root.clone());
+    config.tsc_path = Some(Utf8PathBuf::from(tsc.to_str().unwrap()));
+    config.request_timeout = Duration::from_secs(60);
+    let checker = OnDemand::new(config);
+
+    let answer = ask(&checker, target(&output, "Callbacks"));
+
+    assert_eq!(answer.diagnostics, []);
+    let markers =
+        |name: &str| match &answer.components[0].props.iter().find(|prop| prop.name == name).unwrap().prop_type {
+            PropType::Function { params, .. } => params.iter().map(|p| (p.optional, p.rest)).collect::<Vec<_>>(),
+            other => panic!("{name} is not a function: {other:?}"),
+        };
+    assert_eq!(markers("format"), [(true, false), (false, true)]);
+    assert_eq!(markers("close"), [(false, true)]);
+    assert_eq!(markers("onClick"), [(true, false)]);
+    assert_eq!(markers("plain"), [(false, false), (true, false)]);
+    assert_eq!(markers("explicit"), [(false, false), (false, false)]);
 }
 
 /// With the real checker and the real `@types/react` (the repository's own, via `node_modules/@types/react`), a
