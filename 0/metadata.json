@@ -1,0 +1,89 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6FC1466DWMZQPR53XRS1AZF",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-03T00:13:13.831393Z",
+  "branch": "measure/storybook-accuracy-headline",
+  "checkpoints_count": 1,
+  "save_step_count": 6,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "3439222ef084",
+  "checkpoint_transcript_start": 2850,
+  "transcript_lines_at_start": 2850,
+  "compact_transcript_start": 243,
+  "token_usage": {
+    "input_tokens": 4,
+    "cache_creation_tokens": 3008,
+    "cache_read_tokens": 513939,
+    "output_tokens": 593,
+    "api_call_count": 1,
+    "subagent_tokens": {
+      "input_tokens": 17,
+      "cache_creation_tokens": 17661,
+      "cache_read_tokens": 5173545,
+      "output_tokens": 11632,
+      "api_call_count": 9
+    }
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 6,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 51
+  },
+  "summary": {
+    "intent": "Land two small independent follow-up branches in the caliper repo: crate-wide `#![deny(missing_docs)]` for the core crate, and ADR status notes documenting how sessions invalidate checker answers. A background worker built them and the main session was about to push and link them.",
+    "outcome": "The worker built and signed-committed both branches locally (lint/deny-missing-docs-crate-wide and docs/adr-session-notifies-checker) with clippy, tests, doc-check, typos, machete and semver all clean. The assistant then ran a Bash call to push and link them; the result is not in the transcript.",
+    "learnings": {
+      "repo": [
+        "Crates tsc-client, semantic, cli and binding already deny missing_docs at their crate roots; only core needed it, so `#![deny(missing_docs)]` was placed in core's lib.rs rather than `[workspace.lints.rust]`.",
+        "Nine core modules had per-module `deny(missing_docs)` that became redundant once the crate-level deny was added (pipeline/mod.rs, pipeline/watch.rs, pipeline/revision/lazy.rs, types/semantic.rs, types/collected.rs, types/output.rs, types/diagnostic.rs, react_types.rs, plugin.rs).",
+        "Validation suite for this repo: `cargo clippy --workspace --all-targets --locked -- -D warnings`, tests (1084 pass, 1 skipped), `just lint doc-check typos machete`, `just semver` (196/196), and `oxfmt --check` for docs.",
+        "Changesets are not needed for lint-only or docs-only changes.",
+        "PR bodies include a trail link (entire.com trails) and a claude.ai/code session link."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/on_demand.rs",
+          "finding": "The on-demand checker roots a small program at the requested files on each request, so no change notification is sent to tsc."
+        },
+        {
+          "path": "crates/core/tests/semantic_hook.rs",
+          "finding": "Three tests pin the SemanticHook invalidation behavior: invalidate clears all cached answers and refuses ones in flight via a generation counter."
+        },
+        {
+          "path": "docs/adr/0006-semantic-backend-as-second-resolver.md",
+          "finding": "The 'update_file must notify tsc' bullet is satisfied by cache invalidation on every published revision (update_file, ensure_fresh, rebuilt, cold), not by notifying tsc."
+        }
+      ],
+      "workflow": [
+        "Delegating small independent branches to a background worker in its own worktree, each based on origin/main, worked well and kept them independent so PR order doesn't matter.",
+        "The worker verified documentation claims against the code (call sites, generation counter, test names) before writing ADR notes.",
+        "ADR updates were done as dated status notes rather than rewrites, matching earlier notes."
+      ]
+    },
+    "friction": [
+      "No PR existed yet for the first branch when the worker finished, so link ordering had to be left to the main session."
+    ],
+    "open_items": [
+      "docs/type-checker-integration.md ('Freshness' paragraph) still says 'both incremental paths must notify it'; it's a September design note left outside this directive.",
+      "Per-component invalidation is not built; SemanticHook::invalidate clears all answers.",
+      "No parity test compares a session against `extract()` after an edit; the existing parity test covers only the two merge paths.",
+      "Branches were committed locally only; pushing and PR creation were pending at the end of the transcript."
+    ]
+  }
+}
