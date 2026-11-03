@@ -517,13 +517,14 @@ def findings(record, previous):
     out = []
     for name, entry in record['corpora'].items():
         old = previous.get('corpora', {}).get(name)
-        out += headline.findings(name, entry, old) + agent_eval.findings(name, entry, old)
+        out += headline.findings(name, entry, old) + agent_eval.findings(name, entry)
     return out
 
 
 def changes(record, previous):
     """What moved since `previous`, for the summary and not for an issue: Caliper's time and memory by more than 10%,
-    its recall against RDT by more than 2 points, which is not compared across references built by different rules."""
+    its recall against RDT by more than 2 points, which is not compared across references built by different rules, and the
+    agent correct rate by more than 5 points."""
     out = []
     for name, entry in record['corpora'].items():
         old = previous.get('corpora', {}).get(name)
@@ -538,6 +539,7 @@ def changes(record, previous):
             now, before = rate(entry['recall']['caliper'][kind]), rate(old['recall']['caliper'][kind])
             if now < before - RECALL_DROP:
                 out.append(f'{name}: recall of {kind} {100 * before:.1f}% -> {100 * now:.1f}%')
+        out += agent_eval.changes(name, entry, old)
     return out
 
 

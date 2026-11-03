@@ -66,13 +66,13 @@ class Findings(unittest.TestCase):
     def test_above_the_gate_and_rising_says_where_it_was(self):
         old = entry({**HEADLINE, 'wrong': 1})
         self.assertEqual(headline.findings('antd', entry(HEADLINE), old),
-                         ['antd: 2 of the 902 props whose type can be judged are wrong, 0.22%, up from 0.11% last week; '
+                         ['antd: 2 of the 902 props whose type can be judged are wrong, 0.22%, up from 1 of 901, 0.11% last week; '
                           'the gate is 0.1%'])
 
     def test_inside_the_gate_a_rise_still_opens_an_issue(self):
         h = {**HEADLINE, 'correct': 899, 'less_precise': 100, 'wrong': 1}
         self.assertEqual(headline.findings('antd', entry(h), entry({**h, 'wrong': 0})),
-                         ['antd: wrong types rose to 1 of 1,000, 0.10%, up from 0.00% last week'])
+                         ['antd: wrong types rose to 1 of 1,000, 0.10%, up from 0 of 999, 0.00% last week'])
 
     def test_inside_the_gate_and_not_rising_is_quiet(self):
         h = {**HEADLINE, 'correct': 899, 'less_precise': 100, 'wrong': 1}

@@ -175,21 +175,22 @@ class Findings(unittest.TestCase):
     def test_a_silent_wrong_answer_is_a_finding(self):
         wrong = entry(silent_wrong=1, correct=15, correct_rate=0.75,
                       silent_wrong_items=[{'id': 'q1', 'answer': False, 'checker': True}])
-        notes = ev.findings('antd', wrong, entry(correct_rate=0.75))
+        notes = ev.findings('antd', wrong)
         self.assertEqual(len(notes), 1)
         self.assertIn('antd: 1 silent-wrong answer(s) of 20', notes[0])
         self.assertIn("q1 (said False, checker True)", notes[0])
 
-    def test_five_points_lower_is_a_finding(self):
-        self.assertEqual(ev.findings('antd', entry(correct_rate=0.7), entry(correct_rate=0.8)),
+    def test_five_points_lower_is_a_change_and_not_a_finding(self):
+        self.assertEqual(ev.changes('antd', entry(correct_rate=0.7), entry(correct_rate=0.8)),
                          ['antd: agent questions answered correctly 80% -> 70%'])
-        self.assertEqual(ev.findings('antd', entry(correct_rate=0.76), entry(correct_rate=0.8)), [])
+        self.assertEqual(ev.changes('antd', entry(correct_rate=0.76), entry(correct_rate=0.8)), [])
+        self.assertEqual(ev.findings('antd', entry(correct_rate=0.7)), [])
 
     def test_nothing_to_compare(self):
-        self.assertEqual(ev.findings('antd', entry(), None), [])
-        self.assertEqual(ev.findings('antd', entry(), {'caliper': {}}), [])
-        self.assertEqual(ev.findings('antd', {'agent_eval': {'error': 'boom'}}, entry()), [])
-        self.assertEqual(ev.findings('antd', {}, entry()), [])
+        self.assertEqual(ev.changes('antd', entry(), None), [])
+        self.assertEqual(ev.changes('antd', entry(), {'caliper': {}}), [])
+        self.assertEqual(ev.findings('antd', {'agent_eval': {'error': 'boom'}}), [])
+        self.assertEqual(ev.findings('antd', {}), [])
 
     def test_the_summary(self):
         record = {'corpora': {'antd': entry(), 'shadcn': {'agent_eval': {'error': 'no checker'}}, 'mantine': {}}}
@@ -215,9 +216,10 @@ class InTheWeeklyRecord(unittest.TestCase):
     def test_a_clean_record_has_no_findings(self):
         self.assertEqual(weekly.findings(self.record(), self.record()), [])
 
-    def test_a_fall_in_the_correct_rate_is_reported_with_a_previous_record(self):
-        self.assertEqual(weekly.findings(self.record(correct_rate=0.7), self.record(correct_rate=0.8)),
-                         ['antd: agent questions answered correctly 80% -> 70%'])
+    def test_a_fall_in_the_correct_rate_is_a_change_and_opens_no_issue(self):
+        now, before = self.record(correct_rate=0.7), self.record(correct_rate=0.8)
+        self.assertEqual(weekly.findings(now, before), [])
+        self.assertEqual(weekly.changes(now, before), ['antd: agent questions answered correctly 80% -> 70%'])
 
     def test_a_record_without_the_evaluation_has_no_findings(self):
         record = self.record()

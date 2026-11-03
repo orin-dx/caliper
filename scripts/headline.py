@@ -72,7 +72,7 @@ def findings(name, entry, previous):
         rate = wrong_rate(h)
         old = (previous or {}).get('headline')
         rose = old is not None and rate > wrong_rate(old) + 1e-9
-        was = f', up from {100 * wrong_rate(old):.2f}% last week' if rose else ''
+        was = f", up from {old['wrong']:,} of {judged(old):,}, {100 * wrong_rate(old):.2f}% last week" if rose else ''
         if rate > WRONG_GATE:
             out.append(f"{name}: {h['wrong']:,} of the {judged(h):,} props whose type can be judged are wrong, "
                        f"{100 * rate:.2f}%{was}; the gate is {100 * WRONG_GATE:.1f}%")
