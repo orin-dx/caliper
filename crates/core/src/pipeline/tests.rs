@@ -3983,7 +3983,10 @@ export function Row(props: { render: ({ id }: { id: string }, index?: number) =>
 
 #[test]
 fn record_over_a_union_keeps_a_user_type_named_k_as_its_value() {
-    let output = extract_one(&[("Box.tsx", "type K = { x: number };\nexport function Box(props: Record<'a' | 'b', K>) { return null; }\n")]);
+    let output = extract_one(&[(
+        "Box.tsx",
+        "type K = { x: number };\nexport function Box(props: Record<'a' | 'b', K>) { return null; }\n",
+    )]);
     let props = &output.components["Box"].props;
     let mut names: Vec<&str> = props.keys().map(String::as_str).collect();
     names.sort_unstable();
