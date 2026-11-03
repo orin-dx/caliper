@@ -120,6 +120,7 @@ md_src := "'**/*.md' '!node_modules/**' '!target/**' '!dist/**'"
 lint:
     cargo fmt --check
     cargo clippy --workspace --all-targets --locked -- -D warnings
+    node scripts/check-packaging.mjs
     pnpm exec oxfmt --check {{ts_src}}
     pnpm exec oxfmt --check {{md_src}}
     pnpm exec oxlint {{ts_src_only}}

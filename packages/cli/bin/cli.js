@@ -7,7 +7,7 @@
 'use strict'
 
 const { existsSync } = require('node:fs')
-const { join } = require('node:path')
+const { join, sep } = require('node:path')
 const { spawnSync } = require('node:child_process')
 
 const BINARY_NAME = process.platform === 'win32' ? 'caliper-docgen.exe' : 'caliper-docgen'
@@ -27,15 +27,29 @@ function platformPackageName() {
   return null
 }
 
+// True only when this file runs from a checkout of this repository. An installed copy sits
+// under node_modules, where `../../../target` is the user's own project and may hold an
+// unrelated or stale build.
+function insideRepoCheckout() {
+  const repoRoot = join(__dirname, '../../..')
+  return (
+    !__dirname.split(sep).includes('node_modules') &&
+    existsSync(join(repoRoot, 'crates/cli/Cargo.toml')) &&
+    existsSync(join(repoRoot, 'packages/cli/bin/cli.js'))
+  )
+}
+
 function findBinary() {
   // Dev-local: this monorepo's own cargo build output, checked first so contributors
   // building from source don't need the platform package published at all.
-  const devCandidates = [
-    join(__dirname, '../../../target/release', BINARY_NAME),
-    join(__dirname, '../../../target/debug', BINARY_NAME),
-  ]
-  const devFound = devCandidates.find((p) => existsSync(p))
-  if (devFound) return devFound
+  if (insideRepoCheckout()) {
+    const devCandidates = [
+      join(__dirname, '../../../target/release', BINARY_NAME),
+      join(__dirname, '../../../target/debug', BINARY_NAME),
+    ]
+    const devFound = devCandidates.find((p) => existsSync(p))
+    if (devFound) return devFound
+  }
 
   const pkg = platformPackageName()
   if (!pkg) return null
