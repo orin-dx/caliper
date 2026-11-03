@@ -262,9 +262,7 @@ pub(super) fn resolve_props_chain(
         Some(super::precedence::SourceOrKnownMatch::TypeAlias { matched_key, alias }) => {
             // As for interfaces and for aliases in a prop position: parameters left unfilled by the call site are
             // placeholders in the body, not unresolvable types.
-            if let Some(params) = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key) {
-                state.add_type_params(params.iter().skip(type_args.len()));
-            }
+            let unfilled = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key);
             let alias = super::substitute::apply_generic_args(
                 alias,
                 (&canonical_file, &matched_key),
@@ -291,6 +289,9 @@ pub(super) fn resolve_props_chain(
                 }
             }
             let mut attempt = state.branch();
+            if let Some(params) = unfilled {
+                attempt.add_type_params(params.iter().skip(type_args.len()));
+            }
             let chain = resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, &mut attempt, depth);
             return known_fallback(
                 chain,

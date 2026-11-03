@@ -400,6 +400,8 @@ impl CollectedType {
                     Some(false) => "-?",
                     None => "",
                 };
+                // A key variable the resolver made up for `Record` is not an identifier; TypeScript prints it as `P`.
+                let param = if param.contains(' ') { "P" } else { param.as_str() };
                 format!("{{ [{param} in {}]{modifier}: {} }}", key_type.to_raw_string(), value_type.to_raw_string())
             }
             CollectedType::Tuple(members) => {
@@ -1716,5 +1718,17 @@ mod tests {
             CollectedType::NumberLiteral(n) => assert_eq!(n, 42.5),
             other => panic!("expected NumberLiteral, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_records_made_up_key_variable_prints_as_a_valid_identifier() {
+        let mapped = |param: &str| CollectedType::Mapped {
+            param: param.into(),
+            key_type: Box::new(CollectedType::Named { name: "Keys".into(), args: vec![] }),
+            value_type: Box::new(CollectedType::String),
+            optional: None,
+        };
+        assert_eq!(mapped("Record key").to_raw_string(), "{ [P in Keys]: string }");
+        assert_eq!(mapped("K").to_raw_string(), "{ [K in Keys]: string }");
     }
 }

@@ -4015,3 +4015,31 @@ fn a_function_type_parameter_shadows_an_outer_alias_of_the_same_name_in_every_us
     assert_eq!(props["value"].prop_type, PropType::Named { name: "Value".into(), args: vec![] });
     assert_eq!(props["onChange"].prop_type.raw_string(), "(v: Value) => void");
 }
+
+#[test]
+fn an_alias_argument_naming_an_outer_alias_is_resolved_in_the_callers_scope() {
+    let output = extract_one(&[(
+        "Field.tsx",
+        "type Value = number;\n\
+         type Id<Value> = Value;\n\
+         export function Field(p: { value: Id<Value>; later: Value }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Field"].props;
+    assert_eq!(props["value"].prop_type.raw_string(), "number");
+    assert_eq!(props["later"].prop_type.raw_string(), "number");
+}
+
+#[test]
+fn an_alias_parameter_shadows_an_outer_alias_only_inside_that_alias() {
+    let output = extract_one(&[(
+        "Field.tsx",
+        "type Value = number;\n\
+         type Wrap<Value> = { inner: Value };\n\
+         export function Field(p: { first: Wrap; second: Value; third: Value }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Field"].props;
+    assert_eq!(props["second"].prop_type.raw_string(), "number");
+    assert_eq!(props["third"].prop_type.raw_string(), "number");
+}
