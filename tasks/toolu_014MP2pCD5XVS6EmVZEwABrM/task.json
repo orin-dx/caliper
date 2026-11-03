@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_014MP2pCD5XVS6EmVZEwABrM",
+  "agent_id": "ae65b715936a1fd1c",
+  "subagent_type": "general-purpose",
+  "task_description": "Trail 211 scripts and schema follow-ups",
+  "token_usage": {
+    "input_tokens": 140,
+    "cache_creation_tokens": 110788,
+    "cache_read_tokens": 6405629,
+    "output_tokens": 26060,
+    "api_call_count": 70
+  },
+  "started_at": "2026-11-02T18:52:06.71117-08:00",
+  "completed_at": "2026-11-02T19:01:48.410804-08:00"
+}
