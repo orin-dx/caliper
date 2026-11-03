@@ -34,12 +34,11 @@ class CollapseRelevanceTests(unittest.TestCase):
             for path in (one, two, other):
                 os.unlink(path)
 
-    def test_a_bench_that_ignored_the_collapse_flag_fails_loudly(self):
-        c.check_mode({'collapse': 'none'}, 'none', 'new')
-        c.check_mode({}, None, 'old')
-        with self.assertRaises(SystemExit) as stopped:
-            c.check_mode({}, 'none', 'old')
-        self.assertIn("the old lazy_bench ran collapse None, not 'none'", str(stopped.exception))
+    def test_a_bench_that_ignored_the_collapse_flag_is_not_counted_as_having_run_the_mode(self):
+        self.assertTrue(c.ran_mode({'collapse': 'none'}, 'none'))
+        self.assertTrue(c.ran_mode({}, None))
+        self.assertFalse(c.ran_mode({}, 'none'))
+        self.assertFalse(c.ran_mode({'collapse': 'dependencies'}, 'none'))
 
     def test_only_non_html_inheritance_layers_are_collapsed_layers(self):
         path = write({'components': {

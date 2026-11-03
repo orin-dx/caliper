@@ -87,11 +87,9 @@ def run_extract(builds, src, work, name, runs):
     return result
 
 
-def check_mode(line, mode, build):
-    """Fail unless the bench says it ran `mode`: a build without `--collapse` ignores the flag and measures the default."""
-    if mode and line.get('collapse') != mode:
-        sys.exit(f"the {build} lazy_bench ran collapse {line.get('collapse')!r}, not {mode!r}: it lacks --collapse or "
-                 'does not report it; pass an --old-bench built with the flag')
+def ran_mode(line, mode):
+    """Whether the bench ran `mode`: a build without `--collapse` ignores the flag and measures the default."""
+    return not mode or line.get('collapse') == mode
 
 
 def run_lazy(benches, src, work, name, runs):
@@ -106,15 +104,25 @@ def run_lazy(benches, src, work, name, runs):
         collapse = ['--collapse', flags[1]] if flags else []
         for build, binary in benches.items():
             cell = {count: {'ms': [], 'rss': []} for count in LAZY_COUNTS}
+            skipped = False
             for _ in range(runs):
+                if skipped:
+                    break
                 for count in LAZY_COUNTS:
                     with tempfile.TemporaryFile('w+') as out:
                         _, rss = timed([binary, *base, *collapse, '--keys', keys, '--count', str(count)], out)
                         out.seek(0)
                         line = json.loads(out.read().strip().splitlines()[-1])
-                    check_mode(line, flags[1] if flags else None, build)
+                    if not ran_mode(line, flags[1] if flags else None):
+                        # A bench built before `--collapse` measures the default here, so this cell is left out and the rest still run.
+                        print(f"skipping lazy {mode} {build} for {name}: its lazy_bench ignores --collapse (reports "
+                              f"{line.get('collapse')!r}); pass a bench built with the flag", file=sys.stderr)
+                        skipped = True
+                        break
                     cell[count]['ms'].append(line['startMs'] + line['answerMs'])
                     cell[count]['rss'].append(rss)
+            if skipped:
+                continue
             result.setdefault(mode, {})[build] = {
                 count: {'ms': spread(c['ms']), 'rss_mib': spread(c['rss'])} for count, c in cell.items()
             }
@@ -177,7 +185,8 @@ def main():
     args = parser.parse_args()
     if args.lazy and not (args.old_bench and args.new_bench):
         parser.error('--lazy needs --old-bench and --new-bench (the lazy_bench example of each build)')
-    overrides = dict(item.split('=', 1) for item in args.src)
+    # Relative overrides would resolve from the oracle's directory after `pnpm --dir`, so they are made absolute here.
+    overrides = {name: os.path.abspath(path) for name, path in (item.split('=', 1) for item in args.src)}
     # The oracle runs from apps/oracle and reads the artifacts by the paths given, so they must not depend on this directory.
     work = os.path.abspath(args.work or tempfile.mkdtemp(prefix='collapse-relevance-'))
     os.makedirs(work, exist_ok=True)
