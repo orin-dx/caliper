@@ -22,8 +22,8 @@ cargo clippy -p caliper-docgen-core -- -D warnings
 cargo fmt --all
 
 # TypeScript
-pnpm --filter caliper-docgen-vite-plugin test      # 33 unit tests (mocked NAPI)
-pnpm --filter caliper-docgen-vite-plugin test:integration  # 3 integration tests (real native binding)
+pnpm --filter caliper-docgen-vite-plugin test      # unit tests (mocked NAPI)
+pnpm --filter caliper-docgen-vite-plugin test:integration  # integration tests (real native binding)
 
 # Speed and memory of your branch against origin/main (Mantine and Chakra)
 just bench

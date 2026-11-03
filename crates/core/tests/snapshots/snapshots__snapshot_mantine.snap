@@ -1777,7 +1777,7 @@ expression: value
           "defaultValue": null,
           "description": "A map of slot names to CSS class names. Applied in addition to Mantine's\nown generated classes, giving you a hook for per-slot styling.",
           "tags": {
-            "example": ""
+            "example": "classNames={{ root: 'my-btn', label: 'my-btn__label' }}"
           },
           "parent": {
             "name": "StylesApiProps",
@@ -1824,7 +1824,7 @@ expression: value
           "defaultValue": null,
           "description": "Allows rendering the button as any HTML element or React component,\npreserving all button props and styles.",
           "tags": {
-            "example": ""
+            "example": "[ROOT]/ Render as a Next.js Link\n<Button component={Link} href=\"/home\">Go Home</Button>"
           },
           "parent": {
             "name": "ButtonProps",
@@ -10407,7 +10407,7 @@ expression: value
           "defaultValue": null,
           "description": "A map of slot names to inline style objects. Applied alongside Mantine's\ngenerated styles so you can override specific slots without targeting a\nclass name.",
           "tags": {
-            "example": ""
+            "example": "styles={{ root: { borderRadius: 0 } }}"
           },
           "parent": {
             "name": "StylesApiProps",
@@ -12651,7 +12651,7 @@ expression: value
           "defaultValue": null,
           "description": "A map of slot names to CSS class names. Applied in addition to Mantine's\nown generated classes, giving you a hook for per-slot styling.",
           "tags": {
-            "example": ""
+            "example": "classNames={{ root: 'my-btn', label: 'my-btn__label' }}"
           },
           "parent": {
             "name": "StylesApiProps",
@@ -21766,7 +21766,7 @@ expression: value
           "defaultValue": null,
           "description": "A map of slot names to inline style objects. Applied alongside Mantine's\ngenerated styles so you can override specific slots without targeting a\nclass name.",
           "tags": {
-            "example": ""
+            "example": "styles={{ root: { borderRadius: 0 } }}"
           },
           "parent": {
             "name": "StylesApiProps",
