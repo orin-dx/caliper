@@ -95,6 +95,44 @@ just bench my-branch       # a branch
 
 With nothing changed, the ratio stays inside 1.04 for time (95th percentile, 100 trials per corpus on CI and a laptop) and inside 1.12 for memory on CI runners. More than 1.10× in time or 1.20× in memory is worth looking at. Nothing enforces that. Run it before a resolver change goes up for review, and say in the pull request when a cost is intended.
 
+## Checker modes
+
+`scripts/checker_modes.py` measures the experimental TypeScript 7.1 checker modes against the structural default on the corpora `scripts/corpora.py` sets up. It is run by hand for now and is not part of the weekly record.
+
+```bash
+cargo build --release -p caliper-docgen && pnpm --filter caliper-docgen-napi build:napi
+python3 scripts/checker_modes.py --bin target/release/caliper-docgen --runs 3 --count 50 --fallbacks \
+  --out report.json --diff-out diff.json --pairs-out pairs.json
+```
+
+What it runs, per corpus: the structural default (`extract --format rdt` with dependency loading), the same with `--experimental-semantic-types` (the CLI's whole-project checker pass), and one lazy session driven the way the Storybook addon drives it (`scripts/checker_modes_session.mjs`: `createSession`, `initializeSessionIndex`, then `sessionComponentAnswers` per component) with the checker off and with `semanticTypes: 'on-demand'` at a 150 ms and a 600 ms wait. `--fallbacks` also runs the CLI and a session against a missing `tsc` and one that exits at once.
+
+What it reports:
+
+- Wall time and peak RSS, median with min and max over `--runs` runs, and the machine's load average before and after. Peak RSS is the largest single process (`corpora.run_once`), so a checker run reports the larger of Caliper and `tsc`; the session script also reports `tsc`'s own peak.
+- First load for a session: start (create plus index), the first component, and the first 10 and 50 components, one request at a time, in a seeded order that is the same in every mode.
+- For the on-demand mode: the share of first requests the checker answered within the wait, how many timed out, how many kept the structural result for the checker's own reasons (not exported, a class component, generic props), and the share answered once the late answers had arrived.
+- The props that differ from the structural result: type, required, default and presence. `@types/react` props are counted apart (the whole-project checker pass leaves them out), and a type that differs only in spelling (spacing, `| undefined`, union order, `Array<T>`) is counted as cosmetic. A rest or optional parameter marker is a difference. `--diff-out` has one row per differing prop (without those two kinds, unless `--diff-all`), `--pairs-out` one entry per distinct pair of structural and checker facts with a count, a category and an example, most common first.
+- The checker oracle's verdict on each mode, for information only. The oracle is the same checker, so it agrees with a checker mode almost by construction, and it credits the structural result for keeping a type's alias name while it scores the checker's expanded union as less precise (`docs/type-checker-integration.md`). Do not read that agree figure as accuracy; judging the checker modes needs a reference that is not the checker.
+
+### Results, 2026-11-02
+
+Measured by hand on `main` at `c267c777`, on a laptop with a load average of 5 to 16 (other jobs were running), on local checkouts of the five repos that are not at the commits `scripts/corpora.py` pins, so absolute numbers and the Spectrum oracle figure do not compare with the weekly record. Use the shapes, not the digits; re-run on the pinned corpora before deciding anything. The time and memory figures use `--format rdt`, which does not intern props, so they are larger than the weekly record's `--json` figures.
+
+| Corpus | Structural | Whole-project checker | First 50, structural | First 50, on-demand (150 ms) | Checker answered in time |
+| --- | --- | --- | --- | --- | --- |
+| mantine | 208 ms | 1.5 s | 108 ms | 2.2 s | 96% |
+| chakra | 1.7 s | 12.7 s | 387 ms | 7.8 s | 0% (56% at 600 ms) |
+| shadcn | 763 ms | 1.7 s | 80 ms | 1.6 s | 92% |
+| antd | 79 ms | 573 ms | 30 ms | 1.4 s | 77% |
+| spectrum | 165 ms | 768 ms | 31 ms | 1.7 s | 96% |
+
+- **First load, checker off:** session start 39 to 77 ms, the first component 0 to 63 ms, 10 components 8 to 124 ms and 50 components 30 to 387 ms (Chakra is the high end), the process peaking at 173 to 366 MiB with Node and the binding. That is the same order as `docs/performance.md` "Lazy sessions" (2026-10-24), measured there on the Rust example and on the pinned corpora, so not a like-for-like check.
+- **On-demand checker:** the first answer takes 44 to 64 ms (218 ms on Chakra, where it timed out), and a request the checker has not answered waits the whole 150 ms before it takes the structural answer. 50 sequential requests cost 1.4 to 2.2 s against 30 to 108 ms without it, which is about 30 to 45 ms per component. Chakra's checker takes over 500 ms per component, so at the default 150 ms wait it answered none of the first requests and half of them on the second pass; at 600 ms the first answer took 681 ms and 50 components 26 s. `tsc` peaked at 197 to 300 MiB.
+- **The fallbacks work:** a missing `tsc` and a `tsc` that exits at once each give exit code 0, output byte-identical to the structural result, and one `TypeScript checker backend unavailable` warning, in the CLI and in a session. A hanging or slow `tsc` is covered by the tests in `crates/semantic`.
+- **What differs, whole-project checker, props that are not `@types/react` and not spelling only:** about 500,000 are an alias name written out (Chakra's `ConditionalValue<SpacingToken | ...>` becomes hundreds of literals, Mantine's `StyleProp<MantineSpacing>` becomes its union), 9,772 are props only the checker lists, 5,744 other type text, 2,452 an alias name where structural wrote the type out, 1,210 props only structural lists, and 65 are a rest or optional parameter marker the checker's text does not carry (`(...args: any[]) => void` becomes `(args: any[]) => void`, `(percent?: number) => ReactNode` becomes `(percent: undefined | number) => ReactNode`). Required and default never differ.
+- **Props only the checker lists** are mostly DOM event handlers (`onAuxClick`, `onGotPointerCapture`) on shadcn and Spectrum components that wrap a Radix or React Aria primitive, where the structural pass reaches fewer props. They are also Mantine's `__size`, `__vars` and `__clearable`, which the checker names `___size`, `___vars` and `___clearable`: TypeScript's internal escaping adds an underscore and the checker mode does not take it off.
+
 ## What this replaces
 
 Before the weekly record, four workflows (Equivalence, Parity, Scorecard and Allow-list empty) ran against every pull request or `main` push, backed by `scripts/equivalence.py`, a per-pull-request allow-list directory and two committed baselines. They caught one regression in speed and one in output that review would have missed. They also failed on runner noise, on bases that had moved and on their own allow-list, and a lot of one week of merge work went to keeping them green. Git history has them.
