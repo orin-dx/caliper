@@ -35,15 +35,16 @@ impl HtmlAttributeMode {
     }
 }
 
-/// Which inherited sources of more than 30 props are recorded as an `InheritedLayer` instead of expanded prop by prop
-/// (collapse). A component's own props type is always expanded.
+/// Which inherited sources are recorded as an `InheritedLayer` of names instead of expanded prop by prop (collapse).
+/// A component's own props type is always expanded. A dependency source collapses when it is ambient (DOM and ARIA
+/// attributes, style systems) and declares more than 30 props; a dependency's own API is always listed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CollapseInheritedProps {
-    /// Sources declared in a loaded dependency (`load_dependencies`), as Storybook's react-component-meta shows them.
+    /// Large ambient sources declared in a loaded dependency (`load_dependencies`).
     #[default]
     Dependencies,
-    /// Dependency sources and the project's own.
+    /// Those, and the project's own sources of more than 30 props.
     All,
     /// Expand every source.
     None,

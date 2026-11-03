@@ -72,12 +72,15 @@ Options:
           packages
 
       --collapse-inherited-props <COLLAPSE_INHERITED_PROPS>
-          Which inherited sources of more than 30 props to list as one inherited
-          layer instead of prop by prop
+          Which inherited sources to list as one inherited layer of names
+          instead of prop by prop: large ambient ones (DOM and ARIA attributes,
+          style systems) from loaded dependencies by default; a dependency's own
+          API is listed
 
           Possible values:
-          - dependencies: Sources from loaded dependencies (default)
-          - all:          Dependency and project sources
+          - dependencies: Large ambient sources (DOM and ARIA attributes, style
+            systems) from loaded dependencies (default)
+          - all:          Those, and project sources of more than 30 props
           - none:         List every prop
 
       --experimental-semantic-types

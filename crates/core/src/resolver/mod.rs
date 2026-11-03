@@ -23,6 +23,7 @@ use crate::types::options::PipelineOptions;
 use crate::types::*;
 
 mod alias;
+pub(crate) mod ambient;
 mod callee;
 mod chain;
 mod collected;
@@ -581,25 +582,45 @@ impl ResolutionContext {
         }
     }
 
-    /// Whether a source declaring `declared` props in `file`, reached at `depth`, is recorded as a layer instead of
-    /// expanded (collapse). Depth 0 is the component's own props type. React's and TypeScript's own declarations stay
-    /// with `html_attributes` even under `All`.
-    pub(crate) fn collapses(&self, file: &Utf8Path, declared: usize, depth: u8, state: &ResolveState) -> bool {
+    /// Whether a source of type `type_name` declaring `declared` props in `file`, reached at `depth`, is recorded as a
+    /// layer instead of expanded (collapse). Depth 0 is the component's own props type. React's and TypeScript's own
+    /// declarations stay with `html_attributes` even under `All`.
+    ///
+    /// A dependency source collapses when it is ambient (`ambient`: DOM and ARIA attributes, style systems) and large
+    /// (past `COLLAPSE_THRESHOLD` props), and is listed otherwise: what a dependency's component exposes is the API a
+    /// reader needs typed, however many props it declares, and a small ambient source costs more as a layer than as
+    /// props. A project source (`All` only) collapses past `COLLAPSE_THRESHOLD` props, as before.
+    pub(crate) fn collapses(
+        &self,
+        file: &Utf8Path,
+        type_name: &str,
+        declared: usize,
+        depth: u8,
+        state: &ResolveState,
+    ) -> bool {
         use crate::types::options::CollapseInheritedProps;
+        let large = declared > COLLAPSE_THRESHOLD;
+        let dependency =
+            || large && self.is_dependency_file(file) && ambient::is_ambient_source(file.as_str(), type_name);
         depth > 0
-            && declared > COLLAPSE_THRESHOLD
             && !state.expand_all
             && match self.collapse_inherited_props {
-                CollapseInheritedProps::Dependencies => self.is_dependency_file(file),
+                CollapseInheritedProps::Dependencies => dependency(),
                 CollapseInheritedProps::All => {
-                    self.is_dependency_file(file) || !file.as_str().contains("/node_modules/")
+                    if self.is_dependency_file(file) {
+                        dependency()
+                    } else {
+                        large && !file.as_str().contains("/node_modules/")
+                    }
                 }
                 CollapseInheritedProps::None => false,
             }
     }
 }
 
-/// Storybook's react-component-meta hides a dependency source contributing more than this many props.
+/// A source declaring more than this many props can collapse: an ambient dependency source (see `ambient`), or a
+/// project source under `CollapseInheritedProps::All`. Storybook's react-component-meta hides a dependency source
+/// contributing more than this many props, whatever it contains; here an API source is never hidden.
 pub(crate) const COLLAPSE_THRESHOLD: usize = 30;
 
 /// Changes whenever the options could change what a specifier resolves to: the resolver configuration, the governing
