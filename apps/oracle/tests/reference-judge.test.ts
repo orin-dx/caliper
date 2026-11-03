@@ -76,6 +76,35 @@ describe('reference', () => {
   })
 })
 
+describe('a reference the declaration stands behind alone', () => {
+  // The checker could not resolve `Mode` (an unresolved import), so the declaration's name is the whole reference.
+  const mode = reference({ k: 'error' }, name('Mode'))
+
+  it('scores a tool that gives the same name as correct, whatever it is called by namespace', () => {
+    expect.hasAssertions()
+    expect(score(name('Mode'), mode, false)).toStrictEqual({ outcome: 'correct', basis: 'declaration' })
+    expect(score(name('Mode'), reference({ k: 'error' }, name('Ns.Mode')), false)).toStrictEqual({
+      outcome: 'correct',
+      basis: 'declaration',
+    })
+  })
+
+  it('cannot call another type wrong, because it cannot see what the name stands for', () => {
+    expect.hasAssertions()
+    expect(score(prim('string'), mode, false)).toStrictEqual({ outcome: 'less precise', basis: 'declaration' })
+    expect(score(name('Other'), mode, false)).toStrictEqual({ outcome: 'less precise', basis: 'declaration' })
+  })
+
+  it('finds a name inside a written type too', () => {
+    expect.hasAssertions()
+    const modes = reference({ k: 'error' }, { k: 'array', element: name('Mode') })
+    expect(score({ k: 'array', element: name('Mode') }, modes, false)).toStrictEqual({
+      outcome: 'correct',
+      basis: 'declaration',
+    })
+  })
+})
+
 describe('score', () => {
   const agreed: Reference = { kind: 'agreed', basis: 'both', norm: sizes }
 

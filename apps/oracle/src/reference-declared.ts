@@ -53,8 +53,10 @@ export function annotationText(declaration: string): { text?: string; abstained?
     return member.type ? { text: member.type.getText(source) } : { abstained: 'no annotation' }
   }
   if (ts.isMethodSignature(member) || ts.isMethodDeclaration(member)) {
+    // With no return type a method is `any` (a signature) or inferred (a declaration with a body): never `void`.
+    if (!member.type) return { abstained: 'no annotation' }
     const params = member.parameters.map((p) => p.getText(source)).join(', ')
-    return { text: `(${params}) => ${member.type ? member.type.getText(source) : 'void'}` }
+    return { text: `(${params}) => ${member.type.getText(source)}` }
   }
   return { abstained: 'unsupported declaration' }
 }

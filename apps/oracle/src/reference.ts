@@ -8,12 +8,15 @@
 // The config is JSON: { corpora: [{ name, root, tsconfig, files, caliper? }], list?, perCorpus?, seed?, universeCap?,
 // out, review? }. `files` is a file of component file paths, one per line (the list src/oracle.ts takes); `caliper` is
 // that corpus's `extract --json`, when a tool is to be scored; `list` is a JSON array of { corpus, file, component, prop }
-// to judge besides the control sample (for example the props two modes differ on).
+// to judge besides the control sample (for example the props two modes differ on). `file` is relative to the corpus
+// root; `component` may be a display name (it is normalized the way the tool's components are). The report says, per
+// corpus, how many listed props the checker found and names the ones it did not (`listed`).
 import { readFileSync, writeFileSync } from 'node:fs'
 import { API } from 'typescript-beta/sync'
+import { SyntaxKind } from 'typescript-beta/ast'
 import { checkerNormalizer } from './oracle-checker.ts'
 import type { Norm } from './oracle-compare.ts'
-import { declaredTypeOfAll } from './reference-declared.ts'
+import { declaredTypeOfAll, type Declared } from './reference-declared.ts'
 import { reference, score, type Reference } from './reference-judge.ts'
 import { informative, reviewText, summarize, type Row } from './reference-report.ts'
 import { keyOf, stratified, stratumOf, type Candidate } from './reference-sample.ts'
@@ -60,17 +63,31 @@ function readConfig(): Config {
   return JSON.parse(readFileSync(process.argv[at + 1], 'utf8'))
 }
 
-/** The declaration of each of a prop's symbols as source text; a declaration the project cannot resolve is left out. */
-function declarationTexts(entry: Entry, project: any): string[] {
+/** The declaration kinds that can write a type: a property or a method, of an interface, a type literal or a class. Any
+ * other declaration of a prop (a property assignment in an object literal, a shorthand, a variable) writes a value, and
+ * the checker infers the type from it: `count: 1` is not the type `1`. */
+const ANNOTATABLE = new Set<number>([
+  SyntaxKind.PropertySignature,
+  SyntaxKind.PropertyDeclaration,
+  SyntaxKind.MethodSignature,
+  SyntaxKind.MethodDeclaration,
+])
+
+/** The declaration of each of a prop's symbols as source text, and whether every one is of a kind that can write a type.
+ * A declaration the project cannot resolve is left out. */
+function declarationTexts(entry: Entry, project: any): { texts: string[]; annotatable: boolean } {
   const texts: string[] = []
+  let annotatable = true
   for (const declaration of entry.symbol.declarations ?? []) {
     try {
-      texts.push(declaration.resolve(project).getText())
+      const node = declaration.resolve(project)
+      if (!ANNOTATABLE.has(node.kind)) annotatable = false
+      texts.push(node.getText())
     } catch {
       // A declaration in a file the program did not load: method B has nothing to read.
     }
   }
-  return texts
+  return { texts, annotatable }
 }
 
 /** What judging a prop needs besides the prop: the program, the tool's output, and the checker's normalizer. */
@@ -83,7 +100,8 @@ interface Context {
 function judge(entry: Entry, { universe, tool, norm }: Context): Row {
   const { candidate } = entry
   const checkerNorm = norm(entry.type)
-  const declared = declaredTypeOfAll(declarationTexts(entry, universe.project))
+  const { texts, annotatable } = declarationTexts(entry, universe.project)
+  const declared: Declared = annotatable ? declaredTypeOfAll(texts) : { abstained: 'unsupported declaration' }
   const ref: Reference = reference(checkerNorm, declared.norm)
   const row: Row = {
     corpus: candidate.corpus,
@@ -105,7 +123,8 @@ function judge(entry: Entry, { universe, tool, norm }: Context): Row {
   return row
 }
 
-/** The props to judge: every listed one the checker found, and the stratified control sample over the rest. */
+/** The props to judge: every listed one the checker found (the rest are reported by `listedReport`), and the stratified
+ * control sample over the other props. */
 function choose(universe: Universe, perCorpus: number, seed: string): Entry[] {
   const listed = universe.entries.filter((e) => e.listed)
   const pool = universe.entries.filter((e) => !e.listed)
@@ -118,7 +137,33 @@ function choose(universe: Universe, perCorpus: number, seed: string): Entry[] {
   return [...listed, ...sample.map((c: Candidate) => byKey.get(keyOf(c))!)]
 }
 
-function runCorpus(corpus: CorpusConfig, config: Config, listed: Listed[]): Row[] {
+/** How many of the listed props of one corpus the checker found, and which it did not: a wrong component name, a file
+ * that is not in `files`, a prop the checker does not see. They are judged nowhere, so they are named here. */
+interface ListedReport {
+  /** Distinct (file, component, prop) the list names for this corpus. */
+  requested: number
+  found: number
+  /** The ones not found, as `file: Component.prop`. */
+  missing: string[]
+}
+
+function listedReport(wanted: Set<string>, universe: Universe): ListedReport {
+  const found = new Set(
+    universe.entries
+      .filter((e) => e.listed)
+      .map((e) => keyOf({ ...e.candidate, component: normComponent(e.candidate.component) })),
+  )
+  const missing = [...wanted]
+    .filter((key) => !found.has(key))
+    .map((key) => {
+      const [file, component, prop] = key.split('\u0000')
+      return `${file}: ${component}.${prop}`
+    })
+    .toSorted()
+  return { requested: wanted.size, found: found.size, missing }
+}
+
+function runCorpus(corpus: CorpusConfig, config: Config, listed: Listed[]): { rows: Row[]; listed: ListedReport } {
   const api = new API({ cwd: corpus.root })
   const { options } = api.parseConfigFile(corpus.tsconfig)
   const files = readFileSync(corpus.files, 'utf8').split('\n').filter(Boolean)
@@ -143,12 +188,17 @@ function runCorpus(corpus: CorpusConfig, config: Config, listed: Listed[]): Row[
   const rows = choose(universe, config.perCorpus ?? DEFAULT_PER_CORPUS, `${seed}:${corpus.name}`).map((entry) =>
     judge(entry, context),
   )
+  const listing = listedReport(wanted, universe)
   console.error(
     `${corpus.name}: ${universe.components} components, ${universe.entries.length} candidate props, ${rows.length} judged`,
   )
+  if (listing.missing.length > 0) {
+    const shown = listing.missing.slice(0, 10).join('; ')
+    console.error(`${corpus.name}: ${listing.found} of ${listing.requested} listed props found; not found: ${shown}`)
+  }
   program.dispose()
   api.close()
-  return rows
+  return { rows, listed: listing }
 }
 
 const config = readConfig()
@@ -159,10 +209,17 @@ const report: Record<string, unknown> = {
 }
 const allRows: Row[] = []
 for (const corpus of config.corpora) {
-  const rows = runCorpus(corpus, config, listed)
+  const { rows, listed: listedFound } = runCorpus(corpus, config, listed)
   allRows.push(...rows)
-  report[corpus.name] = summarize(rows, Boolean(corpus.caliper))
+  report[corpus.name] = { ...summarize(rows, Boolean(corpus.caliper)), listed: listedFound }
 }
+// A listed prop for a corpus this run does not have is judged nowhere, so it is counted here and named on stderr.
+const unknown = listed.filter((l) => !config.corpora.some((c) => c.name === l.corpus))
+const unknownCorpora = [...new Set(unknown.map((l) => l.corpus))].toSorted()
+if (unknown.length > 0) {
+  console.error(`${unknown.length} listed props name a corpus this run does not have: ${unknownCorpora.join(', ')}`)
+}
+report.listed_for_other_corpora = { count: unknown.length, corpora: unknownCorpora }
 report.informative = informative(allRows)
 writeFileSync(config.out, JSON.stringify(report, null, 2))
 writeFileSync(config.review ?? `${config.out}.review.md`, reviewText(allRows))

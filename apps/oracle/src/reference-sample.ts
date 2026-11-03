@@ -20,20 +20,19 @@ export interface Candidate {
   kind: ValueKind
 }
 
-/** A prop falls in the first of these it fits, so the harder shapes are not swamped by the common ones. */
-export const STRATA = [
-  'listed',
-  'generic',
-  'mapped',
-  'intersection',
-  'function',
-  'union_literal',
-  'dependency',
-  'html',
-  'extends',
-  'own',
-] as const
-export type Stratum = (typeof STRATA)[number]
+/** The strata a prop falls in. `stratumOf` gives it the first it fits, in this order, so the harder shapes are not
+ * swamped by the common ones. */
+export type Stratum =
+  | 'listed'
+  | 'generic'
+  | 'mapped'
+  | 'intersection'
+  | 'function'
+  | 'union_literal'
+  | 'dependency'
+  | 'html'
+  | 'extends'
+  | 'own'
 
 export function stratumOf(c: Candidate, listed: boolean): Stratum {
   if (listed) return 'listed'

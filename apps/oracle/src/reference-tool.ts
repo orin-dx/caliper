@@ -2,6 +2,7 @@
 // or whether a collapsed inheritance layer names the prop, which surfaces it without a type to judge.
 import { readFileSync, realpathSync } from 'node:fs'
 import { relative } from 'node:path'
+import { layerMembers, listedProps } from './canonical.ts'
 import { caliperNorm, type Norm } from './oracle-compare.ts'
 import { normComponent } from './tool-universe.ts'
 
@@ -13,23 +14,10 @@ interface Located {
 export interface Tool {
   /** Whether the tool reports exactly one component of that name in that file. */
   has(file: string, component: string): boolean
-  /** The type the tool gives `prop` of `component` in `file`, and whether a collapsed layer names it. `component` is
-   * absent when the tool has no single component of that name in that file. */
+  /** What the tool says of `prop` of `component` in `file`. `found` is false when it has no single component of that name
+   * there. Otherwise `norm` is the prop's type when the component lists it, as its own prop or a curated inherited one
+   * (the own prop wins a clash), and `layered` says a collapsed layer names it, which surfaces it without a type. */
   lookup(file: string, component: string, prop: string): { found: boolean; norm?: Norm; layered: boolean }
-}
-
-/** A component's props as one map of name to prop id (schema 2 lists prop-set ids, each such a map). */
-function propIds(caliper: any, component: any): Record<string, string> {
-  const { props } = component
-  if (!Array.isArray(props)) return props ?? {}
-  return Object.assign({}, ...props.map((id: string) => caliper.propSets[id]))
-}
-
-/** The prop names a collapsed layer lists. The canonical JSON interns the list: `members` is an id into `nameLists`. */
-function layerMembers(caliper: any, layer: any): string[] {
-  const { members } = layer
-  if (typeof members === 'string') return caliper.nameLists?.[members] ?? []
-  return members ?? []
 }
 
 export function loadTool(path: string, root: string): Tool {
@@ -40,13 +28,16 @@ export function loadTool(path: string, root: string): Tool {
     const key = relative(base, realpathSync(component.filePath))
     byFile.set(key, [...(byFile.get(key) ?? []), { name: normComponent(component.displayName), component }])
   }
+  const single = (file: string, name: string) => {
+    const matches = (byFile.get(file) ?? []).filter((c) => c.name === normComponent(name))
+    return matches.length === 1 ? matches[0].component : undefined
+  }
   return {
-    has: (file, component) => (byFile.get(file) ?? []).filter((c) => c.name === normComponent(component)).length === 1,
+    has: (file, component) => single(file, component) !== undefined,
     lookup(file, componentName, prop) {
-      const matches = (byFile.get(file) ?? []).filter((c) => c.name === normComponent(componentName))
-      if (matches.length !== 1) return { found: false, layered: false }
-      const [{ component }] = matches
-      const id = propIds(caliper, component)[prop]
+      const component = single(file, componentName)
+      if (component === undefined) return { found: false, layered: false }
+      const id = listedProps(caliper, component)[prop]
       const layered = (component.inheritance ?? []).some((layer: any) => layerMembers(caliper, layer).includes(prop))
       const type = id === undefined ? undefined : caliper.props[id]?.type
       return { found: true, norm: type === undefined ? undefined : caliperNorm(type), layered }

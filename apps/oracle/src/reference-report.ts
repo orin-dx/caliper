@@ -25,7 +25,7 @@ export interface Row {
   /** Where the declaration is. */
   location?: string
   /** The tool's score; absent when no tool output was given or the tool has no single component of that name. */
-  tool?: { outcome: Outcome; basis?: Basis; leans?: 'checker' | 'declaration'; type?: unknown }
+  tool?: { outcome: Outcome; basis?: Basis; leans?: 'checker' | 'declaration' }
 }
 
 const count = <T extends string>(values: T[]) => {
@@ -72,7 +72,8 @@ export function summarize(rows: Row[], withTool: boolean) {
       none: rows.filter((r) => r.reference === 'none').length,
     },
     declaration_abstained: count(rows.flatMap((r) => (r.abstained ? [r.abstained] : []))),
-    checker_alone_because: count(rows.flatMap((r) => (r.why ? [r.why] : []))),
+    // Only a reference the checker stood behind alone; where the declaration did, `why` says the checker abstained.
+    checker_alone_because: count(rows.flatMap((r) => (r.why && r.basis === 'checker' ? [r.why] : []))),
     contested_kinds: count(rows.flatMap((r) => (r.pair ? [r.pair] : []))),
     scored: {
       props: scored.length,

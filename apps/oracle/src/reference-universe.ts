@@ -1,9 +1,10 @@
 // The checker side of the independent reference: the exported components of one corpus, found the way
-// src/oracle.ts finds them, and each own prop of each as a `Candidate` (src/reference-sample.ts) with what is cheap to
-// know about it. Nothing here judges a type.
+// src/oracle.ts finds them (src/checker-components.ts), and each own prop of each as a `Candidate`
+// (src/reference-sample.ts) with what is cheap to know about it. Nothing here judges a type.
 import { realpathSync } from 'node:fs'
 import { relative } from 'node:path'
-import { ObjectFlags, SignatureKind, SymbolFlags, TypeFlags } from 'typescript-beta/sync'
+import { ObjectFlags, SignatureKind, TypeFlags } from 'typescript-beta/sync'
+import { exportName, propsTypeOf } from './checker-components.ts'
 import {
   keyOf,
   seeded,
@@ -28,7 +29,8 @@ export interface Universe {
   checker: any
   project: any
   entries: Entry[]
-  /** Exported components with at least one prop, and how many props the collected entries cover. */
+  /** How many exported components with at least one prop the control sample is drawn from: those `accept` lets through,
+   * or every one when it is not given. A listed prop of another component is in `entries` but not counted here. */
   components: number
 }
 
@@ -53,29 +55,6 @@ const LITERAL = TypeFlags.StringLiteral | TypeFlags.NumberLiteral | TypeFlags.Bo
 const UTILITIES = new Set(['Pick', 'Omit', 'Partial', 'Required', 'Readonly', 'Record'])
 // Per component, so one component's hundreds of DOM attributes do not stand for the corpus.
 const HTML_PER_COMPONENT = 3
-
-/** The props type of a component export, the way react-docgen-typescript finds it (src/oracle.ts `propsTypeOf`). */
-function propsTypeOf(checker: any, exported: any): any | undefined {
-  const symbol = exported.flags & SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported
-  const type = checker.getTypeOfSymbol(symbol)
-  for (const sig of checker.getSignaturesOfType(type, SignatureKind.Call)) {
-    const params = sig.getParameters()
-    if (params.length === 1 || params[0]?.name === 'props') return checker.getTypeOfSymbol(params[0])
-  }
-  for (const sig of checker.getSignaturesOfType(type, SignatureKind.Construct)) {
-    if (sig.getParameters().length > 1) continue
-    const props = checker.getPropertyOfType(sig.getReturnType(), 'props')
-    if (props) return checker.getTypeOfSymbol(props)
-  }
-  return undefined
-}
-
-/** A default export is named by what it exports. */
-function exportName(checker: any, exported: any): string {
-  if (exported.name !== 'default') return exported.name
-  if (exported.flags & SymbolFlags.Alias) return checker.getAliasedSymbol(exported).name
-  return checker.getTypeOfSymbol(exported).getSymbol()?.name ?? 'default'
-}
 
 function shapeOf(propsType: any): PropsShape {
   if (propsType.flags & TypeFlags.Intersection) return 'intersection'
