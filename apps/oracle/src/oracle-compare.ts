@@ -67,7 +67,7 @@ export function caliperNorm(t: any, depth = 0): Norm {
       return { k: 'object', fields: t.fields.map((field: any) => field.name).toSorted(), index: false }
     }
     case 'function': {
-      const params = (t.params ?? []).map((p: any) => ({ optional: false, rest: false, type: inner(p.type) }))
+      const params = (t.params ?? []).map((p: any) => ({ optional: p.optional === true, rest: p.rest === true, type: inner(p.type) }))
       return { k: 'function', params, returns: inner(t.returnType) }
     }
     case 'named': {
@@ -137,8 +137,7 @@ function compareFunctions(c: Norm & { k: 'function' }, k: Norm & { k: 'function'
       verdicts.push(kp.optional || kp.rest ? 'less precise' : 'wrong')
     } else {
       verdicts.push(compare(cp.type, kp.type, depth + 1))
-      // A marker the checker has and this side lost. Caliper's function types record neither, so every optional or rest
-      // parameter reads less precise there; a tool that keeps the markers is held to them, not capped by them.
+      // A marker the checker has and this side lost.
       if ((kp.optional && !cp.optional) || (kp.rest && !cp.rest)) verdicts.push('less precise')
     }
   }

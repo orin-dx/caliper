@@ -104,12 +104,9 @@ function answer(q: Question): Truth {
     .find((e: any) => e.name === q.component || (e.name === 'default' && exportName(e) === q.component))
   let props: any[] = []
   if (exported) {
-    try {
-      const propsType = propsTypeOf(exported)
-      props = propsType ? checker.getPropertiesOfType(propsType) : []
-    } catch {
-      props = []
-    }
+    // A checker failure propagates to the caller's `the checker failed` fact instead of reading as no props.
+    const propsType = propsTypeOf(exported)
+    props = propsType ? checker.getPropertiesOfType(propsType) : []
   }
   if (q.kind === 'present') return { value: props.length > 0 }
   if (props.length === 0) return { invalid: `the checker finds no component ${q.component} in ${q.file}` }

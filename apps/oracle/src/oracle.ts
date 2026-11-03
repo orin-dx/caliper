@@ -20,6 +20,7 @@
 import { readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { API, SignatureKind, SymbolFlags } from 'typescript-beta/sync'
+import { checkCaliperShape, flattenProps, requireComparison } from './caliper-input.ts'
 import { checkerNormalizer } from './oracle-checker.ts'
 import { caliperNorm, compare, VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'
 import { collapsedLayerFiles, loadTool, normComponent, pathKey, universeRecorder } from './tool-universe.ts'
@@ -70,12 +71,11 @@ const checkerNorm = checkerNormalizer(checker)
 const rel = (path: string) => relative(root, realpathSync(path))
 
 const caliper = JSON.parse(readFileSync(args.caliper, 'utf8'))
+checkCaliperShape(caliper)
 const caliperByFile = new Map<string, { name: string; key: string; component: any }[]>()
 for (const [componentKey, component] of Object.entries<any>(caliper.components)) {
   // Schema 2 lists a component's prop set ids, each a map of prop name to prop id; this reads one map of both.
-  if (Array.isArray(component.props)) {
-    component.props = Object.assign({}, ...component.props.map((id: string) => caliper.propSets[id]))
-  }
+  component.props = flattenProps(caliper, componentKey, component)
   const key = rel(component.filePath)
   const list = caliperByFile.get(key) ?? []
   list.push({ name: normComponent(component.displayName), key: componentKey, component })
@@ -203,9 +203,9 @@ function visitExport(exported: any, candidates: { name: string; key: string; com
   const [match] = matches
   if (!match) return
   totals.componentsMatched++
-  const shared = own.filter((p: any) => p.name in match.component.props)
+  const shared = own.filter((p: any) => Object.hasOwn(match.component.props, p.name))
   const layerFiles = collapsedLayerFiles(match.component)
-  const absent = own.filter((p: any) => !(p.name in match.component.props))
+  const absent = own.filter((p: any) => !Object.hasOwn(match.component.props, p.name))
   const collapsed: any[] = []
   const missing: any[] = []
   for (const p of absent) {
@@ -262,6 +262,7 @@ for (const file of files) {
   for (const exported of checker.getExportsOfModule(moduleSymbol)) visitExport(exported, candidates, file)
 }
 const compareMs = performance.now() - start
+requireComparison(totals.propsShared, totals.componentsMatched)
 
 const report = {
   components_checker: totals.componentsChecker,
