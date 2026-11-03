@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01KFfjsEmcKNGujwFQhGk1br",
+  "agent_id": "ab4b9860ffeca6e54",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix findings: addon, scripts, TS",
+  "token_usage": {
+    "input_tokens": 110,
+    "cache_creation_tokens": 88392,
+    "cache_read_tokens": 4394068,
+    "output_tokens": 19494,
+    "api_call_count": 55
+  },
+  "started_at": "2026-11-02T20:19:30.675523-08:00",
+  "completed_at": "2026-11-02T20:25:33.115917-08:00"
+}
