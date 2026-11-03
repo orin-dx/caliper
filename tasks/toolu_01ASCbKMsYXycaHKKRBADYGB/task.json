@@ -1,0 +1,39 @@
+{
+  "tool_use_id": "toolu_01ASCbKMsYXycaHKKRBADYGB",
+  "agent_id": "a3034adc24fe77295",
+  "subagent_type": "general-purpose",
+  "task_description": "Write and tighten changesets on PR branches",
+  "files": [
+    ".changeset/addon-start-failure-warns-once-and-retries.md",
+    ".changeset/cli-ignores-a-stale-target-folder.md",
+    ".changeset/collapse-by-relevance.md",
+    ".changeset/config-default-export-can-be-a-function-or-promise.md",
+    ".changeset/config-loads-in-commonjs-packages.md",
+    ".changeset/config-paths-resolve-from-the-config-file.md",
+    ".changeset/destructured-defaults-recorded-correctly.md",
+    ".changeset/enum-props-become-literal-unions.md",
+    ".changeset/invalid-addon-and-plugin-options-fail-at-startup.md",
+    ".changeset/linux-x64-runs-on-glibc-2-28.md",
+    ".changeset/missing-config-file-error-names-the-path.md",
+    ".changeset/missing-typescript-and-re-export-hop-causes.md",
+    ".changeset/musl-installs-skip-the-glibc-cli.md",
+    ".changeset/object-assign-compound-components-found.md",
+    ".changeset/record-values-and-type-parameters-keep-their-types.md",
+    ".changeset/same-name-interfaces-merge.md",
+    ".changeset/schema-detected-by.md",
+    ".changeset/ts-files-importing-react-are-scanned.md",
+    ".changeset/tuple-elements-and-css-lengths-resolve.md",
+    ".changeset/vfc-casts-and-preact-components-found.md",
+    ".changeset/vite-plugin-reports-update-failures.md",
+    ".changeset/windows-paths-lose-the-verbatim-prefix.md"
+  ],
+  "token_usage": {
+    "input_tokens": 182,
+    "cache_creation_tokens": 127980,
+    "cache_read_tokens": 9528927,
+    "output_tokens": 35625,
+    "api_call_count": 91
+  },
+  "started_at": "2026-11-02T20:04:51.115301-08:00",
+  "completed_at": "2026-11-02T20:17:10.811809-08:00"
+}

@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_011Rpoj8Jj692uQbW25B9jge",
+  "agent_id": "a6213451b9717a57a",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix findings: release, snapshots, docs",
+  "started_at": "2026-11-02T20:19:30.642045-08:00"
+}
