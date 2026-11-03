@@ -124,7 +124,7 @@ pub struct ExtractArgs {
     pub no_load_dependencies: bool,
 
     /// Which inherited sources to list as one inherited layer of names instead of prop by prop: large ambient ones
-    /// (DOM and ARIA attributes, style systems) from loaded dependencies by default; a dependency's own API is listed
+    /// (DOM and ARIA attributes, style systems) from loaded dependencies by default; a dependency's own API is always listed
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 
@@ -200,7 +200,7 @@ pub struct InspectArgs {
     pub no_load_dependencies: bool,
 
     /// Which inherited sources to list as one inherited layer of names instead of prop by prop: large ambient ones
-    /// (DOM and ARIA attributes, style systems) from loaded dependencies by default; a dependency's own API is listed
+    /// (DOM and ARIA attributes, style systems) from loaded dependencies by default; a dependency's own API is always listed
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 }
@@ -224,7 +224,7 @@ pub struct WatchArgs {
     pub no_load_dependencies: bool,
 
     /// Which inherited sources to list as one inherited layer of names instead of prop by prop: large ambient ones
-    /// (DOM and ARIA attributes, style systems) from loaded dependencies by default; a dependency's own API is listed
+    /// (DOM and ARIA attributes, style systems) from loaded dependencies by default; a dependency's own API is always listed
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 }
@@ -252,7 +252,7 @@ pub struct CheckArgs {
     pub no_load_dependencies: bool,
 
     /// Which inherited sources to list as one inherited layer of names instead of prop by prop: large ambient ones
-    /// (DOM and ARIA attributes, style systems) from loaded dependencies by default; a dependency's own API is listed
+    /// (DOM and ARIA attributes, style systems) from loaded dependencies by default; a dependency's own API is always listed
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 }
