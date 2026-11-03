@@ -15,7 +15,7 @@ slower or uses more than 10% more memory, or its recall falls by more than 2 poi
 workflow to open or update one issue with. Nothing here fails a pull request.
 
 Usage: scripts/weekly.py --bin BIN [--corpus NAME]... [--corpora DIR] [--work DIR] [--runs N] [--oracle] [--agent-eval]
-                         [--previous FILE] [--out FILE] [--markdown FILE] [--issue FILE]
+                         [--previous FILE] [--baseline-failed] [--out FILE] [--markdown FILE] [--issue FILE]
 """
 import argparse
 import json
@@ -30,6 +30,7 @@ import agent_eval
 import corpora
 from corpora import ROOT, run_once, selected
 
+BASELINE_FAILED = "The baseline download failed, so this run was not compared with last week's record."
 SLOWER = 1.10
 RECALL_DROP = 0.02
 # The rules that decide what the reference is: the exclusions and the pairing. Raise it when a change to them moves recall,
@@ -548,7 +549,7 @@ def tool_line(corpus, tool, score):
     return f"- {corpus}, {TOOL_LABELS[tool]}: " + '; '.join(parts)
 
 
-def markdown(record, notes, reference_changed=None, baseline=True):
+def markdown(record, notes, reference_changed=None, baseline=True, baseline_failed=False):
     lines = [f"Caliper {record['caliper']}, time the median of {record['runs']} runs (after one warm-up run) and memory the largest peak of them; RDT "
              'and react-docgen one cold run each, so the comparison favours Caliper. Whole process, Node start included.', '','### Time and memory', '',
              '| Corpus | Caliper | JSON | RDT | react-docgen |', '| --- | --: | --: | --: | --: |']
@@ -591,7 +592,9 @@ def markdown(record, notes, reference_changed=None, baseline=True):
             lines += [tool_line(name, tool, tools[tool]) for name, tools in tool_rows
                       for tool in ('caliper', 'rdt', 'react_docgen') if tool in tools]
     lines += agent_eval.markdown(record)
-    if not baseline:
+    if baseline_failed:
+        lines += ['', BASELINE_FAILED + ' Nothing here was checked for getting worse.']
+    elif not baseline:
         lines += ['', 'No baseline: there was no earlier record to compare with, so nothing here was checked for getting worse.']
     if reference_changed is not None:
         lines += ['', f"Recall was not compared with last week's: its reference was built by version {reference_changed} of "
@@ -633,6 +636,7 @@ def main():
     parser.add_argument('--oracle', action='store_true')
     parser.add_argument('--agent-eval', action='store_true')
     parser.add_argument('--previous')
+    parser.add_argument('--baseline-failed', action='store_true', help='the download of --previous failed: say so and open the issue')
     parser.add_argument('--out')
     parser.add_argument('--markdown')
     parser.add_argument('--issue')
@@ -647,11 +651,12 @@ def main():
     if previous and not same_reference(record, previous):
         reference_changed = previous.get('reference_version', 1)
     notes = findings(record, previous) + errors(record)
-    table = markdown(record, notes, reference_changed, baseline=bool(previous))
+    table = markdown(record, notes, reference_changed, baseline=bool(previous), baseline_failed=args.baseline_failed)
+    issue_notes = notes + ([BASELINE_FAILED] if args.baseline_failed else [])
     print(table)
     for path, content in ((args.out, json.dumps(record, indent=2) + '\n'), (args.markdown, table),
-                          (args.issue, 'The weekly record got worse:\n\n' + '\n'.join(f'- {n}' for n in notes) + '\n'
-                           if notes else None)):
+                          (args.issue, 'The weekly record got worse:\n\n' + '\n'.join(f'- {n}' for n in issue_notes) + '\n'
+                           if issue_notes else None)):
         if path and content:
             with open(path, 'w') as f:
                 f.write(content)

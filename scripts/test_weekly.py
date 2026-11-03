@@ -283,6 +283,12 @@ class Baseline(unittest.TestCase):
         self.assertIn('No baseline: there was no earlier record', weekly.markdown(now, [], baseline=False))
         self.assertNotIn('No baseline', weekly.markdown(now, []))
 
+    def test_a_failed_baseline_download_is_not_called_a_missing_baseline(self):
+        now = {'caliper': 'x', 'runs': 1, 'reference_version': 2, 'corpora': {}}
+        table = weekly.markdown(now, [], baseline=False, baseline_failed=True)
+        self.assertIn("The baseline download failed, so this run was not compared with last week's record.", table)
+        self.assertNotIn('No baseline', table)
+
     def test_the_header_states_the_warm_versus_cold_measurement(self):
         now = {'caliper': 'x', 'runs': 5, 'reference_version': 2, 'corpora': {}}
         header = weekly.markdown(now, []).splitlines()[0]
