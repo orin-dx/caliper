@@ -524,6 +524,25 @@ fn relative_paths_in_a_config_resolve_against_the_config_files_directory() {
 }
 
 #[test]
+fn a_relative_cache_dir_in_a_config_resolves_against_the_config_files_directory() {
+    let (tmp, config_path) = config_in_oracle("export default { cacheDir: \".cache/docgen\" };\n", None);
+    let dir = canonical_dir(&tmp);
+
+    let opts = try_load_config(&config_path).expect("loads").expect("a config");
+
+    assert_eq!(opts.cache_dir, Some(dir.join(".cache/docgen")));
+}
+
+#[test]
+fn an_absolute_cache_dir_in_a_config_is_kept() {
+    let (_tmp, config_path) = config_in_oracle("export default { cacheDir: \"/abs/cache\" };\n", None);
+
+    let opts = try_load_config(&config_path).expect("loads").expect("a config");
+
+    assert_eq!(opts.cache_dir, Some(camino::Utf8PathBuf::from("/abs/cache")));
+}
+
+#[test]
 fn a_function_default_export_is_called_for_its_config() {
     let (tmp, config_path) = config_in_oracle("export default () => ({ srcDirs: [\"from-function\"] });\n", None);
     let dir = canonical_dir(&tmp);

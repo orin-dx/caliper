@@ -221,6 +221,9 @@ pub fn try_load_config(path: &std::path::Path) -> Result<Option<PipelineOptions>
         if let Some(tsconfig) = opts.tsconfig_path.as_mut().filter(|tsconfig| tsconfig.is_relative()) {
             *tsconfig = dir.join(&*tsconfig);
         }
+        if let Some(cache_dir) = opts.cache_dir.as_mut().filter(|cache_dir| cache_dir.is_relative()) {
+            *cache_dir = dir.join(&*cache_dir);
+        }
     }
     Ok(Some(opts))
 }
