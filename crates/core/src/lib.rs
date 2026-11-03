@@ -8,7 +8,7 @@
 #![deny(missing_debug_implementations)]
 
 pub(crate) mod cache;
-pub(crate) mod canonical_path;
+pub mod canonical_path;
 pub(crate) mod dependency_types;
 pub(crate) mod extractor;
 pub(crate) mod import_map;

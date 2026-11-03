@@ -628,8 +628,7 @@ pub fn compute_ambient_global_files(options: &PipelineOptions) -> Vec<Utf8PathBu
     options
         .src_dirs
         .first()
-        .and_then(|dir| std::fs::canonicalize(dir).ok())
-        .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
+        .and_then(|dir| crate::canonical_path::canonicalize(dir).ok())
         .map(|from_dir| resolve_ts_lib_paths(&from_dir).paths.into_iter().map(Utf8PathBuf::from).collect())
         .unwrap_or_default()
 }
@@ -707,7 +706,7 @@ fn governing_tsconfig(options: &PipelineOptions) -> Option<Utf8PathBuf> {
     if let Some(path) = &options.tsconfig_path {
         return Some(path.clone());
     }
-    let first = Utf8PathBuf::from_path_buf(std::fs::canonicalize(options.src_dirs.first()?).ok()?).ok()?;
+    let first = crate::canonical_path::canonicalize(options.src_dirs.first()?).ok()?;
     first.ancestors().map(|dir| dir.join("tsconfig.json")).find(|candidate| candidate.is_file())
 }
 

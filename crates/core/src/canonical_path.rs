@@ -10,13 +10,17 @@ use std::io;
 use camino::{Utf8Path, Utf8PathBuf};
 
 /// [`Utf8Path::canonicalize_utf8`] with the verbatim prefix removed.
-pub(crate) fn canonicalize(path: &Utf8Path) -> io::Result<Utf8PathBuf> {
+pub fn canonicalize(path: &Utf8Path) -> io::Result<Utf8PathBuf> {
     path.canonicalize_utf8().map(|canonical| strip_verbatim_prefix(canonical.as_str()))
 }
 
 /// Rewrites `\\?\C:\a\b` as `C:\a\b` and `\\?\UNC\srv\sh` as `\\srv\sh`. Any other path, including verbatim forms
-/// with no drive-letter or UNC equivalent (`\\?\Volume{..}`), is returned unchanged.
+/// with no drive-letter or UNC equivalent (`\\?\Volume{..}`) and those only the verbatim spelling can open (see
+/// [`needs_verbatim`]), is returned unchanged.
 fn strip_verbatim_prefix(path: &str) -> Utf8PathBuf {
+    if needs_verbatim(path) {
+        return Utf8PathBuf::from(path);
+    }
     if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
         return Utf8PathBuf::from(format!(r"\\{unc}"));
     }
@@ -27,6 +31,24 @@ fn strip_verbatim_prefix(path: &str) -> Utf8PathBuf {
         }
     }
     Utf8PathBuf::from(path)
+}
+
+/// Whether the plain spelling of a verbatim `path` would not open it: the plain form is limited to `MAX_PATH`, and
+/// Windows reads a trailing dot or space or a reserved device name in a component differently without the prefix.
+fn needs_verbatim(path: &str) -> bool {
+    const MAX_PATH: usize = 260;
+    const RESERVED: [&str; 4] = ["CON", "PRN", "AUX", "NUL"];
+    let reserved = |component: &str| {
+        let stem = component.split('.').next().unwrap_or(component).to_ascii_uppercase();
+        RESERVED.contains(&stem.as_str())
+            || ["COM", "LPT"]
+                .iter()
+                .any(|device| stem.strip_prefix(device).is_some_and(|n| matches!(n.as_bytes(), [b'1'..=b'9'])))
+    };
+    path.len() >= MAX_PATH
+        || path.split('\\').skip(3).any(|component| {
+            component.ends_with(['.', ' ']) && component != "." && component != ".." || reserved(component)
+        })
 }
 
 #[cfg(test)]
@@ -55,5 +77,29 @@ mod tests {
         for path in [r"\\?\Volume{0123}\a", r"\\?\GLOBALROOT\a", r"\\?\1:\a"] {
             assert_eq!(strip_verbatim_prefix(path), Utf8PathBuf::from(path));
         }
+    }
+
+    #[test]
+    fn paths_only_the_verbatim_spelling_can_open_keep_it() {
+        let long = format!(r"\\?\C:\{}", "a".repeat(260));
+        for path in [
+            long.as_str(),
+            r"\\?\C:\a\nul",
+            r"\\?\C:\a\CON.txt",
+            r"\\?\C:\a\com1",
+            r"\\?\C:\a\b.",
+            r"\\?\C:\a\b \c",
+            r"\\?\UNC\srv\sh\aux",
+        ] {
+            assert_eq!(strip_verbatim_prefix(path), Utf8PathBuf::from(path));
+        }
+    }
+
+    #[test]
+    fn names_that_only_resemble_reserved_ones_are_stripped() {
+        assert_eq!(
+            strip_verbatim_prefix(r"\\?\C:\a\console\com10\lpt0\.hidden"),
+            Utf8PathBuf::from(r"C:\a\console\com10\lpt0\.hidden")
+        );
     }
 }
