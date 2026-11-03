@@ -803,8 +803,9 @@ impl Loader<'_> {
         }
     }
 
-    /// Note that an answer about `dir` is new, when `write_index` would keep it. A project file's own imports are
-    /// resolved on every run and never reach the index, so they must not make a warm run rewrite it.
+    /// Note that an answer about `dir` is new. A project file's own imports are resolved on every run and never reach
+    /// the index, so they must not make a warm run rewrite it. Export answers of a package that `write_index` drops
+    /// still count here, since only the written bytes tell; `write_index` leaves the file alone when they are unchanged.
     fn learn(&self, dir: &Utf8Path) {
         if dir.as_str().contains("/node_modules/") && self.package_of(dir).is_some() {
             self.learned.store(true, Ordering::Relaxed);
@@ -1209,8 +1210,8 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
         loader.package_of(file.parent()?).filter(|package| &**package != from)
     };
     let mut depends_on: FxHashMap<Box<str>, FxHashSet<Box<str>>> = FxHashMap::default();
-    // A package with an unresolved import has export lookups that walked past it; installing the missing package
-    // changes them, and the index could not say so, so none of its exports are kept.
+    // A package with an unresolved import, or one leading into such a package, has export lookups that walked past
+    // it; installing the missing package changes them, and the index could not say so, so none of its exports are kept.
     let mut with_unresolved: FxHashSet<Box<str>> = FxHashSet::default();
     let mut resolutions: Vec<(Box<str>, ResolutionRow)> = Vec::new();
     for item in loader.resolutions.iter() {
@@ -1234,9 +1235,6 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
         let module: &str = std::borrow::Borrow::borrow(module);
         let Some(dir) = Utf8Path::new(module).parent() else { continue };
         if let Some(package) = entry(dir) {
-            if with_unresolved.contains(&package) {
-                continue;
-            }
             if let Some(other) = found.as_ref().and_then(|(file, _)| other_package(file, &package)) {
                 depends_on.entry(package.clone()).or_default().insert(other);
             }
@@ -1244,6 +1242,21 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
             exports.push((package, (module.to_owned(), name.to_string(), found)));
         }
     }
+    // A package that leads into one with an unresolved import has export lookups that walked past it too.
+    loop {
+        let reaching: Vec<Box<str>> = depends_on
+            .iter()
+            .filter(|(package, others)| {
+                !with_unresolved.contains(*package) && others.iter().any(|other| with_unresolved.contains(other))
+            })
+            .map(|(package, _)| package.clone())
+            .collect();
+        if reaching.is_empty() {
+            break;
+        }
+        with_unresolved.extend(reaching);
+    }
+    exports.retain(|(package, _)| !with_unresolved.contains(package));
     let mut augmenters: Vec<(Box<str>, AugmenterRow)> = Vec::new();
     for item in loader.augmenters.iter() {
         let (module, files): (&str, _) = (std::borrow::Borrow::borrow(item.key()), item.value());

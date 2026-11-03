@@ -985,6 +985,36 @@ fn installing_a_missing_package_changes_the_warm_answer() {
     assert_eq!((warm.components, warm.diagnostics), (cold.components, cold.diagnostics));
 }
 
+/// The missing package may be several re-export levels away from the package the project imports.
+#[test]
+fn installing_a_package_two_re_export_levels_away_changes_the_warm_answer() {
+    let source = "import type { LateProps } from 'a-kit';\nexport function Badge(props: LateProps) { return null; }\n";
+    let (_tmp, root) = project(&[
+        ("src/Badge.tsx", source),
+        ("node_modules/a-kit/package.json", r#"{ "name": "a-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/a-kit/index.d.ts", "export * from 'outer-kit';\n"),
+        (
+            "node_modules/outer-kit/package.json",
+            r#"{ "name": "outer-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        ("node_modules/outer-kit/index.d.ts", "export * from 'late-kit';\n"),
+    ]);
+    let first = extract(&options(&root, true));
+    assert!(!first.components["Badge"].props.contains_key("late"), "nothing resolves yet");
+
+    std::fs::create_dir_all(root.join("node_modules/late-kit")).unwrap();
+    std::fs::write(
+        root.join("node_modules/late-kit/package.json"),
+        r#"{ "name": "late-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("node_modules/late-kit/index.d.ts"), "export interface LateProps { late: boolean }\n")
+        .unwrap();
+
+    let warm = extract(&options(&root, true));
+    assert_eq!(prop_types(&warm, "Badge"), [("late".into(), "boolean".into())]);
+}
+
 #[test]
 fn an_unresolved_package_type_says_why_in_its_diagnostic() {
     let source = "import type { Missing } from 'ui-kit';\nimport type { Gone } from 'not-installed';\n\
