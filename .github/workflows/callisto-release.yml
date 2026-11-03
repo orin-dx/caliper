@@ -63,7 +63,11 @@ jobs:
           selected_pending=false
           if [[ -z "$release_source_sha" ]]; then
             # Oldest unfinished release first: a failed release is finished before a newer one starts.
-            release_source_sha=$(callisto --format json release pending --from "$RELEASE_PENDING_FROM" | jq -r '.pending[0].source // empty')
+            pending_json=$(callisto --format json release pending --from "$RELEASE_PENDING_FROM")
+            # A renamed or missing `pending` key would read as "nothing unfinished" and skip a stuck release.
+            jq -e '(.pending | type) == "array"' <<<"$pending_json" > /dev/null \
+              || { echo "::error::'release pending' output has no .pending array"; exit 1; }
+            release_source_sha=$(jq -r '.pending[0].source // empty' <<<"$pending_json")
             if [[ -n "$release_source_sha" ]]; then
               selected_pending=true
             elif [[ "$EVENT_NAME" == push ]]; then
@@ -193,7 +197,11 @@ jobs:
         run: |
           set -euo pipefail
           # Own statement: set -e cannot see a substitution failing inside an echo argument.
-          has_artifacts=$(jq '.artifactSlots | length > 0' "${RUNNER_TEMP}/release-intent/release-intent.json")
+          intent="${RUNNER_TEMP}/release-intent/release-intent.json"
+          # A renamed or missing key would read as "no slots" and publish a release without binaries.
+          jq -e 'has("artifactSlots") and (.artifactSlots | type) == "array"' "$intent" > /dev/null \
+            || { echo "::error::release intent has no .artifactSlots array"; exit 1; }
+          has_artifacts=$(jq '.artifactSlots | length > 0' "$intent")
           case "$has_artifacts" in
             true|false) ;;
             *) echo "::error::artifact slot probe returned '$has_artifacts'"; exit 1 ;;
@@ -463,6 +471,19 @@ jobs:
             done
           done
       # npm and pnpm both read the user-level .npmrc.
+      - name: Require registry credentials
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          missing=0
+          for name in NPM_TOKEN CARGO_REGISTRY_TOKEN; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::secret $name is empty; set it before the release can publish"
+              missing=1
+            fi
+          done
+          exit "$missing"
       - name: Authenticate with the npm registry
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
