@@ -234,10 +234,8 @@ mod tests {
             .nth(1)
             .and_then(|rest| rest.split("\n\n").next())
             .expect("index.d.ts declares OpaqueReason");
-        let ts_names: Vec<&str> = union
-            .lines()
-            .filter_map(|line| line.trim().strip_prefix("| { type: '")?.split('\'').next())
-            .collect();
+        let ts_names: Vec<&str> =
+            union.lines().filter_map(|line| line.trim().strip_prefix("| { type: '")?.split('\'').next()).collect();
         assert_eq!(ts_names, caliper_docgen_core::types::OpaqueReason::KINDS);
     }
 
