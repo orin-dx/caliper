@@ -3,6 +3,7 @@
 // root come in as arguments, so this file reads only the dumps the tools wrote. Scoring is src/tool-score.ts.
 import { readFileSync, realpathSync } from 'node:fs'
 import { relative } from 'node:path'
+import { layerMembers } from './canonical.ts'
 import { caliperNorm, VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'
 import { rdgNorm, rdtNorm } from './tool-norm.ts'
 import { scoreTool, type Reported, type Stratum, type ToolScore, type UniverseProp } from './tool-score.ts'
@@ -21,11 +22,13 @@ export const normComponent = (name: string) =>
 export const pathKey = (path: string) =>
   process.platform === 'darwin' || process.platform === 'win32' ? path.toLowerCase() : path
 
-/** The files of a component's collapsed inheritance layers: Caliper lists their props as members, not as props. */
-export const collapsedLayerFiles = (component: any): Set<string> =>
+/** The files of a component's collapsed inheritance layers: Caliper lists their props as members, not as props. A layer
+ * is collapsed when it lists members; `Omit` can leave one at 30 props or fewer, so its size does not tell. An output with
+ * no `members` is read by size. */
+export const collapsedLayerFiles = (caliper: any, component: any): Set<string> =>
   new Set(
     (component?.inheritance ?? [])
-      .filter((layer: any) => layer.totalProps > 30)
+      .filter((layer: any) => layerMembers(caliper, layer).length > 0 || layer.totalProps > 30)
       .map((layer: any) => pathKey(String(layer.fileName))),
   )
 
@@ -89,7 +92,7 @@ function caliperReported(match: Match | undefined, p: any, caliper: any): Report
   const id = match?.component.props[p.name]
   if (id !== undefined) return caliperNorm(caliper.props[id].type)
   if (!match) return 'component'
-  const layerFiles = collapsedLayerFiles(match.component)
+  const layerFiles = collapsedLayerFiles(caliper, match.component)
   return p.declarations?.some((d: any) => layerFiles.has(pathKey(String(d.path)))) ? 'collapsed' : 'prop'
 }
 

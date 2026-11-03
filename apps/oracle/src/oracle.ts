@@ -181,7 +181,7 @@ function visitExport(exported: any, candidates: { name: string; key: string; com
   if (!match) return
   totals.componentsMatched++
   const shared = own.filter((p: any) => p.name in match.component.props)
-  const layerFiles = collapsedLayerFiles(match.component)
+  const layerFiles = collapsedLayerFiles(caliper, match.component)
   const absent = own.filter((p: any) => !(p.name in match.component.props))
   const collapsed: any[] = []
   const missing: any[] = []

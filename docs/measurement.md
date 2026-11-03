@@ -141,7 +141,7 @@ The 20 API props that matter most are chosen by category first (state, then mode
 scripts/layer_only_props.py --bin target/release/caliper-docgen --corpus antd --corpus shadcn [--runs 3]
 ```
 
-Measured at the commit that added this, on antd and shadcn (Mantine, Chakra and Spectrum are not run):
+Measured on antd and shadcn (Mantine, Chakra and Spectrum are not run). These figures predate the last change to the count: an `Omit` now drops the omitted props from a collapsed layer's `members` (`resolver/alias.rs`), and `expandedDependencySources` skips collapsed sources that list a curated `className`. The layer-only, API and "listed in full" rows, and the "ambient by clause 1 to 3" figure of 13 the proposal below relies on, have not been re-measured since; re-run `scripts/layer_only_props.py` before quoting them.
 
 |                                                     |      antd |      shadcn |
 | --------------------------------------------------- | --------: | ----------: |
