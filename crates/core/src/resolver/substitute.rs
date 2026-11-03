@@ -373,7 +373,8 @@ pub(super) fn synthesize_utility_alias(
             let target = match &args[0] {
                 CollectedType::String | CollectedType::Number | CollectedType::Symbol => CollectedType::Object(vec![]),
                 keys => CollectedType::Mapped {
-                    param: "K".into(),
+                    // Not a valid identifier, so no type the user declares can be shadowed by the key variable.
+                    param: "Record key".into(),
                     key_type: Box::new(keys.clone()),
                     value_type: Box::new(args[1].clone()),
                     optional: None,

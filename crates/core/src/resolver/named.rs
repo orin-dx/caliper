@@ -80,6 +80,11 @@ fn resolve_named_uncycled(
         return OpaqueDetail::give_up(state, name.to_string(), OpaqueReason::DepthExceeded, diag);
     }
 
+    // ── 0. A type parameter in scope shadows any declaration of the same name ──
+    if args.is_empty() && state.has_type_param(name) {
+        return PropType::Named { name: name.clone(), args: Vec::new() };
+    }
+
     // ── 1. React builtin check ────────────────────────────────────────────────
     let lookup_name = name.strip_prefix("React.").unwrap_or(name.as_str());
     // React's meaning only for React's binding: a project's own `ReactNode` or `Ref` resolves as declared below.
@@ -117,14 +122,24 @@ fn resolve_named_uncycled(
             let params = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key);
             let defaults = ctx.named_types.lookup_type_param_defaults(&canonical_file, &matched_key);
             let outer_named_unevaluated = std::mem::take(&mut state.named_unevaluated);
+            // Only the parameters nothing replaces shadow outer names, and only inside this alias's expansion: the
+            // supplied arguments are the caller's names (`Id<Value>` over `type Value`), not the alias's parameters.
             let expanded = match params {
                 Some(params) if !args.is_empty() || defaults.is_some() => {
-                    state.add_type_params(params.iter());
-                    expand_alias(&alias, params, defaults, args, consuming_file, &canonical_file, ctx, state, 0)
+                    let unfilled = params.iter().enumerate().filter(|(index, _)| {
+                        *index >= args.len() && defaults.is_none_or(|d| d.get(*index).is_none_or(Option::is_none))
+                    });
+                    let entered = state.enter_type_params(unfilled.map(|(_, param)| param));
+                    let expanded =
+                        expand_alias(&alias, params, defaults, args, consuming_file, &canonical_file, ctx, state, 0);
+                    state.leave_type_params(entered);
+                    expanded
                 }
                 Some(params) => {
-                    state.add_type_params(params.iter());
-                    resolve_type_alias_type(&alias, ctx, state, depth)
+                    let entered = state.enter_type_params(params.iter());
+                    let expanded = resolve_type_alias_type(&alias, ctx, state, depth);
+                    state.leave_type_params(entered);
+                    expanded
                 }
                 None => resolve_type_alias_type(&alias, ctx, state, 0),
             };

@@ -178,7 +178,9 @@ pub(super) fn resolve_indexed_access(
             | "tabSize"
             | "animationIterationCount",
         ) => Some(PropType::Number),
-        // React instantiates csstype's lengths as `string | number`.
+        // React instantiates csstype's `TLength` properties as `string | number`. This is the common subset, not every
+        // such key (`inset`, `marginInline`, `outlineWidth`, `letterSpacing` and the logical and longhand radii are
+        // missing and stay `string`); `zoom` is listed for the same instantiation although it is not a length.
         (
             "CSSProperties" | "React.CSSProperties",
             "zoom" | "width" | "height" | "minWidth" | "minHeight" | "maxWidth" | "maxHeight" | "top" | "right"

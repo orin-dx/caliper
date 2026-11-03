@@ -3992,7 +3992,33 @@ fn tuple_elements_resolve_whether_plain_labelled_or_optional() {
     let props = &output.components["Box"].props;
     let tone = PropType::LiteralUnion { members: vec!["a".into(), "b".into()], has_default: false };
     assert_eq!(props["plain"].prop_type, PropType::Tuple(vec![tone.clone(), PropType::Number]));
-    assert_eq!(props["labelled"].prop_type, PropType::Tuple(vec![tone, PropType::Number]));
+    let optional_count = PropType::Union(vec![PropType::Number, PropType::Undefined]);
+    assert_eq!(props["labelled"].prop_type, PropType::Tuple(vec![tone, optional_count]));
+}
+
+#[test]
+fn an_optional_tuple_element_keeps_its_undefined() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "export function Box(props: { bare: [number?]; labelled: [count?: number] }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    assert_eq!(props["bare"].prop_type.raw_string(), "[number | undefined]");
+    assert_eq!(props["labelled"].prop_type.raw_string(), "[number | undefined]");
+}
+
+#[test]
+fn a_function_type_parameter_shadows_an_outer_alias_inside_a_tuple() {
+    let output = extract_one(&[(
+        "Field.tsx",
+        "type Value = 'outer';\n\
+         export function Field<Value>(p: { pair: [Value]; value: Value }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Field"].props;
+    assert_eq!(props["pair"].prop_type.raw_string(), "[Value]");
+    assert_eq!(props["value"].prop_type.raw_string(), "Value");
 }
 
 #[test]
@@ -4003,4 +4029,67 @@ fn a_css_property_that_takes_a_number_or_a_string_is_both_without_dependencies()
     )]);
 
     assert_eq!(output.components["Box"].props["z"].prop_type.raw_string(), "string | number");
+}
+
+#[test]
+fn record_over_a_union_keeps_a_user_type_named_k_as_its_value() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "type K = { x: number };\nexport function Box(props: Record<'a' | 'b', K>) { return null; }\n",
+    )]);
+    let props = &output.components["Box"].props;
+    let mut names: Vec<&str> = props.keys().map(String::as_str).collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["a", "b"]);
+    let k = PropType::Object(vec![ObjectField {
+        name: "x".into(),
+        prop_type: PropType::Number,
+        required: true,
+        description: String::new(),
+        readonly: false,
+        index_key: None,
+    }]);
+    assert_eq!(props["a"].prop_type, k);
+    assert_eq!(props["b"].prop_type, k);
+}
+
+#[test]
+fn a_function_type_parameter_shadows_an_outer_alias_of_the_same_name_in_every_use() {
+    let output = extract_one(&[(
+        "Field.tsx",
+        "type Value = { outer: true };\n\
+         export function Field<Value>(p: { value: Value; onChange(v: Value): void }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Field"].props;
+    assert_eq!(props["value"].prop_type, PropType::Named { name: "Value".into(), args: vec![] });
+    assert_eq!(props["onChange"].prop_type.raw_string(), "(v: Value) => void");
+}
+
+#[test]
+fn an_alias_argument_naming_an_outer_alias_is_resolved_in_the_callers_scope() {
+    let output = extract_one(&[(
+        "Field.tsx",
+        "type Value = number;\n\
+         type Id<Value> = Value;\n\
+         export function Field(p: { value: Id<Value>; later: Value }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Field"].props;
+    assert_eq!(props["value"].prop_type.raw_string(), "number");
+    assert_eq!(props["later"].prop_type.raw_string(), "number");
+}
+
+#[test]
+fn an_alias_parameter_shadows_an_outer_alias_only_inside_that_alias() {
+    let output = extract_one(&[(
+        "Field.tsx",
+        "type Value = number;\n\
+         type Wrap<Value> = { inner: Value };\n\
+         export function Field(p: { first: Wrap; second: Value; third: Value }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Field"].props;
+    assert_eq!(props["second"].prop_type.raw_string(), "number");
+    assert_eq!(props["third"].prop_type.raw_string(), "number");
 }

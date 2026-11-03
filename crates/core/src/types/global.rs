@@ -260,6 +260,35 @@ impl ResolveState {
         }
     }
 
+    /// Bring type parameters into scope for one declaration's body and return the ones that were not in scope
+    /// already, for `leave_type_params` to take out again when the body is done.
+    #[must_use]
+    pub(crate) fn enter_type_params<'p>(
+        &mut self,
+        names: impl IntoIterator<Item = &'p CompactString>,
+    ) -> Vec<CompactString> {
+        let mut entered = Vec::new();
+        for name in names {
+            if self.in_scope_type_params.insert(name.clone()) {
+                if let Some(reads) = self.reads.as_mut() {
+                    reads.in_scope_added.push(name.clone());
+                }
+                entered.push(name.clone());
+            }
+        }
+        entered
+    }
+
+    /// Take the parameters `enter_type_params` brought into scope back out, so they shadow only their own declaration.
+    pub(crate) fn leave_type_params(&mut self, entered: Vec<CompactString>) {
+        for name in entered {
+            self.in_scope_type_params.remove(&name);
+            if let Some(reads) = self.reads.as_mut() {
+                reads.in_scope_added.retain(|added| *added != name);
+            }
+        }
+    }
+
     /// The component's default for prop `name`.
     pub(crate) fn param_default<'m>(&mut self, mapping: &'m ComponentMapping, name: &str) -> Option<&'m RawDefault> {
         let found = mapping.param_defaults.get(name);
