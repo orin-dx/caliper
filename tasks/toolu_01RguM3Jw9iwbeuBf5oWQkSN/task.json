@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01RguM3Jw9iwbeuBf5oWQkSN",
+  "agent_id": "a947a848a43e35207",
+  "subagent_type": "general-purpose",
+  "task_description": "Slop pattern sweep: crates and packages",
+  "token_usage": {
+    "input_tokens": 120,
+    "cache_creation_tokens": 207149,
+    "cache_read_tokens": 8305587,
+    "output_tokens": 43915,
+    "api_call_count": 60
+  },
+  "started_at": "2026-11-02T16:33:34.119039-08:00",
+  "completed_at": "2026-11-02T16:41:19.173085-08:00"
+}
