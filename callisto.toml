@@ -1,4 +1,4 @@
-# Pinned to callisto 0.16.0 in .github/workflows/callisto-release.yml.
+# Pinned to callisto 0.17.0 in .github/workflows/callisto-release.yml.
 # Callisto checks build attestations against that exact workflow filename; do not rename it.
 
 # `match` is a package name ("<ecosystem>/<name>"), never a directory path.
