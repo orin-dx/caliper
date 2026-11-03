@@ -27,6 +27,12 @@ describe('preset', () => {
     expect(existsSync(ours!.moduleSpecifier.replace(/\.js$/, '.ts')) || existsSync(ours!.moduleSpecifier)).toBe(true)
   })
 
+  it('fails when Storybook starts for an option that is not a choice', () => {
+    expect(() => experimental_docgenProvider([], { fallback: 'nver' as never })).toThrow(
+      "[caliper-docgen] fallback is 'nver', expected 'degraded' or 'never'",
+    )
+  })
+
   it('turns on the docgen server', async () => {
     expect(await isDocgenProviderEnabled()).toBe(true)
   })

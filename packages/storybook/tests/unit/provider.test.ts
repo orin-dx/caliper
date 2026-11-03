@@ -181,6 +181,35 @@ describe('createDocgenProvider', () => {
     expect(seen[1]).toMatchObject({ loadDependencies: false, collapseInheritedProps: 'all', htmlAttributes: 'full' })
   })
 
+  it('warns once, at a level Storybook shows, when the session cannot start, and starts again on the next request', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const fake = binding()
+    const create = fake.createSession
+    fake.createSession = () => {
+      throw new Error('no binding for this platform')
+    }
+    const provider = createDocgenProvider({}, fake)(async () => NEXT)
+
+    expect(await provider({ entry: story('Button') })).toBe(NEXT)
+    expect(await provider({ entry: story('Button') })).toBe(NEXT)
+    expect(warn.mock.calls).toEqual([
+      ["[caliper-docgen] could not start: no binding for this platform; Storybook's own docgen answers instead"],
+    ])
+
+    fake.createSession = create
+    expect((await provider({ entry: story('Button') }))?.argTypes).toEqual({ label: labelArgType })
+    warn.mockRestore()
+  })
+
+  it('fails at startup for a fallback or semanticTypes that is not a choice', () => {
+    expect(() => createDocgenProvider({ fallback: 'Degraded' as never }, binding())).toThrow(
+      "[caliper-docgen] fallback is 'Degraded', expected 'degraded' or 'never'",
+    )
+    expect(() => createDocgenProvider({ semanticTypes: 'on_demand' as never }, binding())).toThrow(
+      "[caliper-docgen] semanticTypes is 'on_demand', expected 'off' or 'on-demand'",
+    )
+  })
+
   it('passes a docs-only entry straight on without starting a session', async () => {
     const fake = binding()
     const docs = { ...story('Intro', './src/Intro.mdx'), type: 'docs', storiesImports: [] } as unknown as IndexEntry

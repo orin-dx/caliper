@@ -382,3 +382,36 @@ describe('DocgenSession, lazy', () => {
     expect(binding.resolved).toEqual([])
   })
 })
+
+describe('DocgenSession start failures', () => {
+  it('starts again on the next request after the native session could not be created', async () => {
+    const binding = new FakeBinding({ components: { Card: entry('Card', join(src, 'Card.tsx')) } })
+    const create = binding.createSession
+    binding.createSession = () => {
+      throw new Error('no binding for this platform')
+    }
+    const session = new DocgenSession({ srcDirs: [src] }, binding)
+
+    await expect(session.fresh()).rejects.toThrow('no binding for this platform')
+    binding.createSession = create
+    await session.fresh()
+
+    expect(session.keyOf(join(src, 'Card.tsx'), 'default')).toBe('Card')
+  })
+
+  it('closes the native session of a start that failed after creating it, and starts a new one next time', async () => {
+    const binding = new FakeBinding({ components: { Card: entry('Card', join(src, 'Card.tsx')) } })
+    const index = binding.initializeSessionIndex
+    binding.initializeSessionIndex = async () => {
+      throw new Error('index failed')
+    }
+    const session = new DocgenSession({ srcDirs: [src] }, binding)
+
+    await expect(session.fresh()).rejects.toThrow('index failed')
+    expect(binding.closed).toBe(true)
+    binding.initializeSessionIndex = index
+    await session.fresh()
+
+    expect(session.keyOf(join(src, 'Card.tsx'), 'default')).toBe('Card')
+  })
+})
