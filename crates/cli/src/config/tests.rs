@@ -524,6 +524,17 @@ fn relative_paths_in_a_config_resolve_against_the_config_files_directory() {
 }
 
 #[test]
+fn a_relative_tsc_path_in_a_config_resolves_against_the_config_files_directory() {
+    let (tmp, config_path) =
+        config_in_oracle("export default { tscPath: \"node_modules/typescript/bin/tsc\" };\n", None);
+    let dir = canonical_dir(&tmp);
+
+    let opts = try_load_config(&config_path).expect("loads").expect("a config");
+
+    assert_eq!(opts.semantic_tsc_path, Some(dir.join("node_modules/typescript/bin/tsc")));
+}
+
+#[test]
 fn a_function_default_export_is_called_for_its_config() {
     let (tmp, config_path) = config_in_oracle("export default () => ({ srcDirs: [\"from-function\"] });\n", None);
     let dir = canonical_dir(&tmp);
