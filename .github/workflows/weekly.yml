@@ -69,9 +69,19 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+        # A first run has no earlier run to download; a download that fails is a different thing and has to show: it
+        # leaves a warning annotation and a line in the summary, and fails this step (the job goes on to measure).
         run: |
           id=$(gh run list --workflow weekly.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
-          if [ -n "$id" ]; then gh run download "$id" --name weekly --dir previous; fi
+          if [ -z "$id" ]; then
+            echo "::notice::No earlier successful run exists, so there is no baseline to compare with."
+            echo "No baseline: no earlier successful run exists." >> "$GITHUB_STEP_SUMMARY"
+          elif ! gh run download "$id" --name weekly --dir previous; then
+            rm -rf previous
+            echo "::error::Downloading the baseline from run $id failed, so this run is not compared with last week's."
+            echo "**Baseline download failed** (run $id): nothing below was compared with last week's record." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
       - name: Measure
         run: >-
           python3 scripts/weekly.py --bin target/release/caliper-docgen --oracle --agent-eval

@@ -549,8 +549,8 @@ def tool_line(corpus, tool, score):
 
 
 def markdown(record, notes, reference_changed=None, baseline=True):
-    lines = [f"Caliper {record['caliper']}, time the median of {record['runs']} runs and memory the largest peak of them; RDT and react-docgen one run each. Whole "
-             'process, Node start included.', '', '### Time and memory', '',
+    lines = [f"Caliper {record['caliper']}, time the median of {record['runs']} runs (after one warm-up run) and memory the largest peak of them; RDT "
+             'and react-docgen one cold run each, so the comparison favours Caliper. Whole process, Node start included.', '','### Time and memory', '',
              '| Corpus | Caliper | JSON | RDT | react-docgen |', '| --- | --: | --: | --: | --: |']
     for name, e in record['corpora'].items():
         cell = lambda t: f"{t['ms'] / 1000:.2f} s, {t['rss_mib']:,} MiB"
