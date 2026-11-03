@@ -31,6 +31,30 @@ $ caliper-docgen schema
       "type": "string",
       "pattern": "^[0-9a-f]{16}$"
     },
+    "opaqueReason": {
+      "description": "Why a prop type is `opaque`: `type` of the `reason` in an `{ kind: /"opaque/" }` type, with the named fields of its variant",
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "conditionalType",
+            "mappedType",
+            "moduleAugmentation",
+            "runtimeDependent",
+            "unresolvableImport",
+            "pandaCodegenMissing",
+            "depthExceeded",
+            "indexedAccess",
+            "templateLiteral",
+            "unsupportedExpression"
+          ]
+        }
+      }
+    },
     "prop": {
       "type": "object",
       "required": [

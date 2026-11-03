@@ -44,6 +44,7 @@ export type OpaqueReason =
   | { type: 'depthExceeded' }
   | { type: 'indexedAccess'; expression: string }
   | { type: 'templateLiteral'; expression: string }
+  | { type: 'unsupportedExpression' }
 
 export interface FunctionParam {
   /** `null` for a destructured parameter. */

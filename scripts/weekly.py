@@ -28,6 +28,7 @@ import tempfile
 
 import agent_eval
 import corpora
+import schema_version
 from corpora import ROOT, run_once, selected
 
 SLOWER = 1.10
@@ -100,7 +101,7 @@ def caliper_layer_members(binary, src, root):
     command = [binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported', '--quiet',
                '--load-dependencies']
     out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
-    document = json.loads(out[out.index('{'):])
+    document = schema_version.check(json.loads(out[out.index('{'):]), 'weekly')
     lists = document.get('nameLists', {})
     members = {}
     for c in document['components'].values():
