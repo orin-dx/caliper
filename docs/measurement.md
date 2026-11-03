@@ -105,7 +105,7 @@ just bench                 # this checkout, uncommitted work included, against o
 just bench my-branch       # a branch
 ```
 
-`scripts/bench.py` builds both in release mode, then times `extract --json` over Mantine and Chakra (source directory only, nothing installed, dependency loading off, no cache) with the two builds interleaved and alternating which goes first. It prints the median wall time and peak RSS of each and their ratio. The first run fetches the two source directories into `.corpora/`.
+`scripts/bench.py` builds both in release mode, then times `extract --json` over Mantine and Chakra in the Storybook addon's configuration (dependencies loaded, cache on after the warm-up run, inherited props not collapsed; source directory only, nothing installed) with the two builds interleaved and alternating which goes first. It prints the median wall time and peak RSS of each and their ratio. The first run fetches the two source directories into `.corpora/`.
 
 With nothing changed, the ratio stays inside 1.04 for time (95th percentile, 100 trials per corpus on CI and a laptop) and inside 1.12 for memory on CI runners. More than 1.10× in time or 1.20× in memory is worth looking at. Nothing enforces that. Run it before a resolver change goes up for review, and say in the pull request when a cost is intended.
 
