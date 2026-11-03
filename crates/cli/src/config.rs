@@ -129,9 +129,8 @@ pub fn try_load_config(path: &std::path::Path) -> Result<Option<PipelineOptions>
     // __DOCGEN_CONFIG_PATH would then resolve against that new cwd instead of
     // the cwd this path was originally relative to (e.g. `--config
     // plain/docgen.config.ts` would fail with ERR_MODULE_NOT_FOUND even though
-    // the file exists). Falls back to the original path if canonicalization
-    // fails (e.g. the file doesn't exist) so the resulting "file not found"
-    // error still names the path the user actually typed.
+    // the file exists). A path that does not exist is reported first, naming
+    // the path the user actually typed.
     if !path.exists() {
         return Err(ConfigNotFound { path: path.to_path_buf() }.into());
     }
@@ -223,6 +222,9 @@ pub fn try_load_config(path: &std::path::Path) -> Result<Option<PipelineOptions>
         }
         if let Some(cache_dir) = opts.cache_dir.as_mut().filter(|cache_dir| cache_dir.is_relative()) {
             *cache_dir = dir.join(&*cache_dir);
+        }
+        if let Some(tsc) = opts.semantic_tsc_path.as_mut().filter(|tsc| tsc.is_relative()) {
+            *tsc = dir.join(&*tsc);
         }
     }
     Ok(Some(opts))
