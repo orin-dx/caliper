@@ -118,6 +118,21 @@ fn an_unreadable_dts_file_is_reported_once_and_merges_nothing() {
     assert!(global.interfaces.is_empty());
 }
 
+/// An empty `typescript` install under `root`, so a temp project resolves TypeScript's lib files without the
+/// missing-package warning.
+pub(super) fn install_stub_typescript(root: &std::path::Path) {
+    let lib = root.join("node_modules/typescript/lib");
+    fs::create_dir_all(&lib).unwrap();
+    fs::write(root.join("node_modules/typescript/package.json"), r#"{"name":"typescript","version":"5.9.3"}"#).unwrap();
+    for file in ["lib.es5.d.ts", "lib.dom.d.ts"] {
+        fs::write(lib.join(file), "").unwrap();
+    }
+}
+
+fn stub_typescript(dir: &TempDir) {
+    install_stub_typescript(dir.path());
+}
+
 /// Write a file into a temp dir and return its Utf8PathBuf.
 fn write_file(dir: &TempDir, name: &str, content: &str) -> Utf8PathBuf {
     let path = dir.path().join(name);
@@ -332,6 +347,7 @@ fn test_discover_files_reports_diagnostic_for_non_utf8_filename() {
 #[test]
 fn test_extract_empty_src() {
     let tmp = TempDir::new().unwrap();
+    stub_typescript(&tmp);
     let dir = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
 
     let options = PipelineOptions {
@@ -2394,6 +2410,7 @@ fn a_src_dir_physically_under_node_modules_but_not_named_that_way_is_not_exempt(
 #[test]
 fn test_exclude_prefixes_filters_matching_components() {
     let tmp = TempDir::new().unwrap();
+    stub_typescript(&tmp);
     write_file(&tmp, "Button.tsx", "export function Button(props: { label: string }) { return null; }\n");
     write_file(&tmp, "InternalWidget.tsx", "export function InternalWidget(props: { x: string }) { return null; }\n");
 
@@ -2538,6 +2555,7 @@ fn test_exclude_patterns_empty_string_excludes_everything() {
 #[test]
 fn a_diagnostic_shared_by_many_components_is_reported_once_listing_them() {
     let tmp = TempDir::new().unwrap();
+    stub_typescript(&tmp);
     write_file(&tmp, "shared.ts", "import type { X } from './missing';\nexport interface Shared { x: X }\n");
     for name in ["Button", "Card"] {
         write_file(
@@ -2629,6 +2647,7 @@ fn a_generic_alias_in_prop_position_takes_the_call_sites_arguments() {
 
 fn extract_one(files: &[(&str, &str)]) -> ExtractionOutput {
     let tmp = TempDir::new().unwrap();
+    stub_typescript(&tmp);
     for (name, body) in files {
         write_file(&tmp, name, body);
     }
@@ -3544,6 +3563,7 @@ export function Rest(props: Pick<Base, "id"> & Omit<Base, "id">) { return null; 
 #[test]
 fn recipe_props_evaluate_through_conditional_indexed_and_mapped_types() {
     let tmp = TempDir::new().unwrap();
+    stub_typescript(&tmp);
     write_file(&tmp, "recipes.ts", RECIPES);
     write_file(
         &tmp,

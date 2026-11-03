@@ -66,6 +66,17 @@ struct Watch {
 
 fn watched_dir() -> tempfile::TempDir {
     let src = tempfile::TempDir::new().unwrap();
+    // An empty `typescript` install, so no missing-package warning joins the summary.
+    let lib = src.path().join("node_modules/typescript/lib");
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::write(
+        src.path().join("node_modules/typescript/package.json"),
+        r#"{"name":"typescript","version":"5.9.3"}"#,
+    )
+    .unwrap();
+    for file in ["lib.es5.d.ts", "lib.dom.d.ts"] {
+        std::fs::write(lib.join(file), "").unwrap();
+    }
     std::fs::write(src.path().join("Widget.tsx"), WIDGET).unwrap();
     src
 }

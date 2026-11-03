@@ -20,9 +20,24 @@ fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_caliper-docgen")).args(args).output().expect("failed to spawn the real binary")
 }
 
+/// An empty `typescript` install under `dir`, so no missing-package warning joins the output.
+fn install_typescript(dir: &TempDir) {
+    let lib = dir.path().join("node_modules/typescript/lib");
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::write(
+        dir.path().join("node_modules/typescript/package.json"),
+        r#"{"name":"typescript","version":"5.9.3"}"#,
+    )
+    .unwrap();
+    for file in ["lib.es5.d.ts", "lib.dom.d.ts"] {
+        std::fs::write(lib.join(file), "").unwrap();
+    }
+}
+
 /// A source directory holding one clean `Widget` component.
 fn widget_dir() -> TempDir {
     let dir = TempDir::new().unwrap();
+    install_typescript(&dir);
     std::fs::write(
         dir.path().join("Widget.tsx"),
         "export function Widget(props: { label: string }) { return null; }\n",
@@ -285,6 +300,7 @@ fn a_quiet_watch_still_writes_out_but_prints_nothing() {
 /// A tree whose component names a type that doesn't exist, so extraction reports a warning.
 fn dir_with_an_unresolved_type() -> TempDir {
     let dir = TempDir::new().unwrap();
+    install_typescript(&dir);
     std::fs::write(dir.path().join("Widget.tsx"), "export function Widget(props: Missing) { return null; }\n").unwrap();
     dir
 }

@@ -529,8 +529,12 @@ fn component_props_of_a_default_exported_package_component_resolve_through_its_b
         prop_types(&on, "Tip"),
         [("extra".into(), "number".into()), ("overlay".into(), "string".into()), ("visible".into(), "boolean".into())]
     );
-    // The test project has no `react`; nothing else is unresolved.
-    assert!(on.diagnostics.iter().all(|d| d.message.contains("'react'")), "{:?}", on.diagnostics);
+    // The test project has no `react` or `typescript`; nothing else is unresolved.
+    assert!(
+        on.diagnostics.iter().all(|d| d.message.contains("'react'") || d.message.contains("'typescript'")),
+        "{:?}",
+        on.diagnostics
+    );
 }
 
 /// `export const HiddenInput = Ark.HiddenInput` documents the imported component's props when its package is loaded,
@@ -692,6 +696,34 @@ fn custom_conditions_from_the_governing_tsconfig_pick_the_export_target() {
     let output = extract(&options(&root, true));
 
     assert_eq!(prop_types(&output, "Cond"), [("fromSource".into(), "string".into())]);
+}
+
+/// A re-export hop whose module cannot be resolved is why the name is missing; the package does export it.
+#[test]
+fn a_demand_blocked_by_an_unresolvable_re_export_hop_records_that_cause() {
+    let (_tmp, root) = project(&[
+        ("src/Badge.tsx", BADGE),
+        ("node_modules/hop-kit/package.json", r#"{ "name": "hop-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        (
+            "node_modules/hop-kit/index.d.ts",
+            "export { Named } from './gone';\nexport * as Ns from 'not-installed';\nexport * from './stars';\n",
+        ),
+        ("node_modules/hop-kit/stars.d.ts", "export * from './also-gone';\nexport type Present = string;\n"),
+    ]);
+    let demands = vec![
+        demand(&root, "hop-kit", "Named"),
+        demand(&root, "hop-kit", "Ns.X"),
+        demand(&root, "hop-kit", "Absent"),
+        demand(&root, "hop-kit", "Present"),
+    ];
+
+    let layer = load(demands, &options(&root, true), None);
+
+    let src = root.join("src");
+    assert_eq!(layer.unresolved_reason(&src, "hop-kit", "Named"), Some(Unresolved::Unresolvable));
+    assert_eq!(layer.unresolved_reason(&src, "hop-kit", "Ns.X"), Some(Unresolved::Unresolvable));
+    assert_eq!(layer.unresolved_reason(&src, "hop-kit", "Absent"), Some(Unresolved::Unresolvable));
+    assert_eq!(layer.unresolved_reason(&src, "hop-kit", "Present"), None);
 }
 
 /// The layer keeps one answer per `(module, name)` for names found through a star-export cycle, loads only declaring
