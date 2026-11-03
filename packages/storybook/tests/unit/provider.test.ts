@@ -201,6 +201,31 @@ describe('createDocgenProvider', () => {
     warn.mockRestore()
   })
 
+  it('words a refresh failure of a running session as one, and reports it again after a refresh succeeds', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const fake = binding()
+    const ensureFresh = fake.ensureFresh
+    const provider = createDocgenProvider({}, fake)(async () => NEXT)
+    expect((await provider({ entry: story('Button') }))?.argTypes).toEqual({ label: labelArgType })
+
+    fake.ensureFresh = async () => {
+      throw new Error('disk gone')
+    }
+    expect(await provider({ entry: story('Button') })).toBe(NEXT)
+    expect(await provider({ entry: story('Button') })).toBe(NEXT)
+    fake.ensureFresh = ensureFresh
+    expect((await provider({ entry: story('Button') }))?.argTypes).toEqual({ label: labelArgType })
+    fake.ensureFresh = async () => {
+      throw new Error('disk gone again')
+    }
+    expect(await provider({ entry: story('Button') })).toBe(NEXT)
+    expect(warn.mock.calls).toEqual([
+      ["[caliper-docgen] could not refresh: disk gone; Storybook's own docgen answers instead"],
+      ["[caliper-docgen] could not refresh: disk gone again; Storybook's own docgen answers instead"],
+    ])
+    warn.mockRestore()
+  })
+
   it('fails at startup for a fallback or semanticTypes that is not a choice', () => {
     expect(() => createDocgenProvider({ fallback: 'Degraded' as never }, binding())).toThrow(
       "[caliper-docgen] fallback is 'Degraded', expected 'degraded' or 'never'",

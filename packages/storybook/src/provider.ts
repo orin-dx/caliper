@@ -93,18 +93,30 @@ export function createDocgenProvider(
   // A session that cannot start is reported once at a level a developer sees, then every story falls back quietly.
   let startFailureReported = false
 
-  /** The session, up to date with the files; a failure to start is reported once and thrown for the fallback. */
+  let started = false
+  let refreshFailureReported = false
+
+  /**
+   * The session, up to date with the files. A failure before the first successful `fresh()` is a failure to start;
+   * after it, a failure is a refresh of a running session and is worded as one. Each is reported once until a
+   * `fresh()` succeeds again, and thrown for the fallback either way.
+   */
   async function freshSession(): Promise<DocgenSession> {
     try {
       const session = await getSession()
       await session.fresh()
+      started = true
+      startFailureReported = false
+      refreshFailureReported = false
       return session
     } catch (error) {
-      if (!startFailureReported) {
+      const { message } = error as Error
+      if (!started && !startFailureReported) {
         startFailureReported = true
-        logger.warn(
-          `[caliper-docgen] could not start: ${(error as Error).message}; Storybook's own docgen answers instead`,
-        )
+        logger.warn(`[caliper-docgen] could not start: ${message}; Storybook's own docgen answers instead`)
+      } else if (started && !refreshFailureReported) {
+        refreshFailureReported = true
+        logger.warn(`[caliper-docgen] could not refresh: ${message}; Storybook's own docgen answers instead`)
       }
       throw error
     }
