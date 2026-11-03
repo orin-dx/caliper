@@ -5,4 +5,4 @@ cargo/caliper-docgen-napi: minor
 npm/caliper-docgen: minor
 ---
 
-The default output of the CLI and the NAPI binding now lists a dependency's own API with its types, however many props it declares. Until now any dependency source over 30 props collapsed to a list of names, so a prop such as antd's `visible`, `onClose`, `value` or `onChange` (from `@rc-component` types) or Base UI's `open` and `items` (from `ComboboxRootProps`) arrived as a name with no type. Only ambient sources collapse now: DOM and ARIA attribute families (react-aria's `GlobalDOMEvents`, `*HTMLAttributes`) and style systems (`*StyleProps`, `SystemProps`), and only past 30 props. The Storybook addon is unaffected: it already lists every inherited prop (`collapseInheritedProps: 'none'`).
+The default CLI and NAPI output now keeps a dependency's own API with its types, such as antd's `onClose`, and only DOM and ARIA attribute families and style systems collapse to a list of names once they pass 30 props. The Storybook addon is unaffected because it already lists every inherited prop.
