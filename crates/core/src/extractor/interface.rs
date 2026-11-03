@@ -227,6 +227,33 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
+    /// The union of an enum's values as TypeScript reads a type that names the enum: a member with no initializer
+    /// counts up from the previous number, starting at 0. `None` when a member's value is not a literal.
+    pub(super) fn enum_value_union(&self, node: &TSEnumDeclaration<'_>) -> Option<crate::types::CollectedType> {
+        use crate::types::CollectedType;
+        let mut next = 0.0_f64;
+        let mut values = Vec::new();
+        for member in &node.body.members {
+            let value = match &member.initializer {
+                Some(init) => self.expression_to_enum_value(init)?,
+                None => EnumValue::Number(next),
+            };
+            values.push(match value {
+                EnumValue::String(s) => CollectedType::StringLiteral(s.into()),
+                EnumValue::Number(n) => {
+                    next = n + 1.0;
+                    CollectedType::NumberLiteral(n)
+                }
+                EnumValue::Bool(_) | EnumValue::Spread { .. } => return None,
+            });
+        }
+        match values.len() {
+            0 => None,
+            1 => values.pop(),
+            _ => Some(CollectedType::Union(values)),
+        }
+    }
+
     pub(super) fn expression_to_enum_value<'a>(&self, expr: &Expression<'a>) -> Option<EnumValue> {
         match expr {
             Expression::StringLiteral(s) => Some(EnumValue::String(js_text::lossy(s.value).into_owned())),

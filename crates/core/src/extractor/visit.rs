@@ -5,7 +5,7 @@ use oxc_ast_visit::{walk, Visit};
 use oxc_syntax::scope::ScopeFlags;
 
 use crate::types::{
-    CollectedInterface, ComponentMapping, DetectionRule, DiagnosticCode, EnumEntry, EnumValue, ExtendsRef,
+    CollectedInterface, CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode, EnumEntry, EnumValue, ExtendsRef,
     ImportBinding, LexedExport, RawProp, TypeName,
 };
 
@@ -283,6 +283,13 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             })
             .collect();
 
+        // A prop typed with the enum is the union of its values; an enum with a computed member has no such union.
+        if let Some(target) = self.enum_value_union(node) {
+            self.data
+                .type_aliases
+                .entry(key.clone())
+                .or_insert(CollectedTypeAlias::Passthrough { target, file_path: self.file_path.clone() });
+        }
         if !entries.is_empty() {
             self.data.enums.insert(key, entries);
         }
