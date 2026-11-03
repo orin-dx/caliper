@@ -19,8 +19,9 @@
 // typescript and react-docgen over every own prop the checker finds (`tools`; src/tool-universe.ts).
 import { readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { API, SignatureKind, SymbolFlags } from 'typescript-beta/sync'
+import { API } from 'typescript-beta/sync'
 import { checkCaliperShape, flattenProps, requireComparison } from './caliper-input.ts'
+import { exportName, propsTypeOf } from './checker-components.ts'
 import { checkerNormalizer } from './oracle-checker.ts'
 import { caliperNorm, compare, VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'
 import { collapsedLayerFiles, loadTool, normComponent, pathKey, universeRecorder } from './tool-universe.ts'
@@ -84,29 +85,6 @@ for (const [componentKey, component] of Object.entries<any>(caliper.components))
 const rdt = loadTool(args.rdt, rel)
 const rdg = loadTool(args.rdg, rel)
 const universe = universeRecorder({ root, caliper, checker, checkerNorm, rdt, rdg })
-
-/** The props type of a component export, the way react-docgen-typescript finds it. */
-function propsTypeOf(exported: any): any | undefined {
-  const symbol = exported.flags & SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported
-  const type = checker.getTypeOfSymbol(symbol)
-  for (const sig of checker.getSignaturesOfType(type, SignatureKind.Call)) {
-    const params = sig.getParameters()
-    if (params.length === 1 || params[0]?.name === 'props') return checker.getTypeOfSymbol(params[0])
-  }
-  for (const sig of checker.getSignaturesOfType(type, SignatureKind.Construct)) {
-    if (sig.getParameters().length > 1) continue
-    const props = checker.getPropertyOfType(sig.getReturnType(), 'props')
-    if (props) return checker.getTypeOfSymbol(props)
-  }
-  return undefined
-}
-
-/** A default export is named by what it exports: the aliased declaration, or the function or class itself. */
-function exportName(exported: any): string {
-  if (exported.name !== 'default') return exported.name
-  if (exported.flags & SymbolFlags.Alias) return checker.getAliasedSymbol(exported).name
-  return checker.getTypeOfSymbol(exported).getSymbol()?.name ?? 'default'
-}
 
 interface Example {
   component: string
@@ -176,7 +154,7 @@ function judge({
 function visitExport(exported: any, candidates: { name: string; key: string; component: any }[], file: string): void {
   let propsType
   try {
-    propsType = propsTypeOf(exported)
+    propsType = propsTypeOf(checker, exported)
   } catch {
     totals.failedExports++
     return
@@ -185,7 +163,7 @@ function visitExport(exported: any, candidates: { name: string; key: string; com
   const props = checker.getPropertiesOfType(propsType)
   if (props.length === 0) return
   totals.componentsChecker++
-  const name = exportName(exported)
+  const name = exportName(checker, exported)
   // React's DOM attributes are one inherited layer; ref and key are deliberately absent from Caliper's output.
   const own = props.filter(
     (p: any) =>

@@ -2292,6 +2292,36 @@ fn gitignore_has_no_effect_when_the_src_dir_string_contains_node_modules() {
 }
 
 #[test]
+fn gitignore_still_applies_when_a_directory_name_only_contains_node_modules_as_text() {
+    let tmp = TempDir::new().unwrap();
+    let project = tmp.path().join("node_modules-backup").join("project");
+    fs::create_dir_all(project.join(".git")).unwrap();
+    fs::write(project.join(".gitignore"), "Ignored.tsx\n").unwrap();
+    fs::write(project.join("Button.tsx"), "export const Button = () => null;").unwrap();
+    fs::write(project.join("Ignored.tsx"), "export const Skip = () => null;").unwrap();
+
+    let dir = Utf8PathBuf::from_path_buf(project).unwrap();
+    let (files, _diagnostics) = discover_files(&[dir], &[]);
+
+    let names: Vec<&str> = files.iter().map(|f| f.file_name().unwrap()).collect();
+    assert_eq!(names, ["Button.tsx"]);
+}
+
+#[test]
+fn module_typed_sources_are_discovered_like_ts_and_tsx() {
+    let tmp = TempDir::new().unwrap();
+    for name in ["a.ts", "b.tsx", "c.mts", "d.cts", "e.js", "f.d.mts"] {
+        write_file(&tmp, name, "export type T = string;");
+    }
+
+    let dir = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
+    let (files, _diagnostics) = discover_files(&[dir], &[]);
+
+    let names: Vec<&str> = files.iter().map(|f| f.file_name().unwrap()).collect();
+    assert_eq!(names, ["a.ts", "b.tsx", "c.mts", "d.cts", "f.d.mts"]);
+}
+
+#[test]
 fn ignore_file_excludes_a_matching_file_with_no_exception() {
     // Unlike .gitignore, .ignore excludes unconditionally — test it inside
     // a node_modules-string src_dir specifically, where .gitignore above
@@ -3979,4 +4009,28 @@ export function Row(props: { render: ({ id }: { id: string }, index?: number) =>
         output.components["Row"].props["render"].prop_type.raw_string(),
         "(__0: { id: string }, index?: number) => void"
     );
+}
+
+#[test]
+fn a_plain_block_comment_is_not_a_description() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "export function Box(props: {\n  /* implementation note */\n  a: string;\n  /** The size. */\n  /* trailing note */\n  b: string;\n}) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    assert_eq!(props["a"].description, "");
+    assert_eq!(props["b"].description, "The size.");
+}
+
+#[test]
+fn a_tag_keeps_its_continuation_lines() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "export interface BoxProps {\n  /**\n   * The size.\n   * @deprecated Use `scale`\n   *   instead of this.\n   * @example\n   * <Box size=\"s\" />\n   * <Box size=\"m\" />\n   */\n  size: string;\n}\nexport function Box(props: BoxProps) { return null; }\n",
+    )]);
+
+    let tags = &output.components["Box"].props["size"].tags;
+    assert_eq!(tags["deprecated"], "Use `scale`\ninstead of this.");
+    assert_eq!(tags["example"], "<Box size=\"s\" />\n<Box size=\"m\" />");
 }

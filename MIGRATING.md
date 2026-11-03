@@ -1,6 +1,6 @@
 # Migrating from react-docgen-typescript
 
-`caliper-docgen` targets output-shape compatibility with `react-docgen-typescript` (RDT) via the CLI's `--format rdt` flag. The NAPI binding and Vite plugin currently only expose this tool's own canonical format (`kind`-tagged `PropType`, shown in the main README) — no RDT-shape option at that layer yet.
+`caliper-docgen` targets output-shape compatibility with `react-docgen-typescript` (RDT) via the CLI's `--format rdt` flag. The NAPI binding and Vite plugin's virtual module expose this tool's own canonical format (`kind`-tagged `PropType`, shown in the main README). For RDT's shape at that layer, a NAPI session returns each component's `__docgenInfo`, and the Vite plugin's `injectDocgenInfo` option assigns it.
 
 This document covers what's compatible today, what's intentionally different, and what's a known gap rather than a design choice.
 
@@ -14,7 +14,7 @@ Output should match closely if your components use:
 - `VariantProps` (CVA / TV / PandaCSS)
 - Discriminated unions (including ones wrapped in an intersection)
 
-Scraping the full 250+ inherited HTML attributes per component? It's supported, but opt-in — see [HTML attribute inheritance](#html-attribute-inheritance) below.
+The full 250+ inherited HTML attributes per component are exposed by default; `--html-attributes curated` shortens that — see [HTML attribute inheritance](#html-attribute-inheritance) below.
 
 ## Field-by-field comparison
 
@@ -45,12 +45,11 @@ Scraping the full 250+ inherited HTML attributes per component? It's supported, 
 
 | Prop | Why |
 | --- | --- |
-| `ref` | Not a user-facing prop — a React internal. RDT includes it because it walks the full inherited type; we treat it as noise |
-| `key` | Same reasoning as `ref` |
+| `key` | A React internal, not a prop a component receives. RDT includes it because it walks the full inherited type; we treat it as noise |
 
 ### HTML attribute inheritance
 
-RDT inlines every inherited HTML attribute (e.g. all ~250-300 members of `ButtonHTMLAttributes`) directly into `props`. This tool doesn't, by default — set `--html-attributes` to control it:
+RDT inlines every inherited HTML attribute (e.g. all ~250-300 members of `ButtonHTMLAttributes`) directly into `props`. This tool does the same by default (`full`); set `--html-attributes` to shorten or remove them:
 
 | Mode | Behavior | Reaches `--format rdt` |
 | --- | --- | --- |
@@ -62,7 +61,7 @@ Flag by layer: `--html-attributes full` (CLI), `htmlAttributes: 'full'` (NAPI), 
 
 **`full` mode accuracy:** verified against a real button, 238 of ~250 real attributes resolve. The remainder is a narrow gap — a handful of `@types/react` fields reference a same-namespace sibling type without an explicit qualifier, which degrades to an `UNRESOLVABLE_IMPORT` diagnostic on that one field rather than a crash or missing component. Details in `docs/rdt-coverage.md`'s "HtmlAttributeMode" section.
 
-If you need the full attribute set and aren't ready to opt into `full` mode, this is the main compatibility gap to check for your specific components.
+If you set `curated` or `none`, the attribute set is smaller than RDT's; that is the main compatibility gap to check for your specific components.
 
 ## Getting the exact diff for your codebase
 
