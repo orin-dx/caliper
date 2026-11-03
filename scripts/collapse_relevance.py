@@ -53,8 +53,6 @@ def canonical_digest(path):
     with open(path) as f:
         data = json.load(f)
     data.pop('stats', None)
-    for key in ('durationMs', 'generatedAt'):
-        data.pop(key, None)
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:16]
 
 
@@ -89,12 +87,20 @@ def run_extract(builds, src, work, name, runs):
     return result
 
 
+def check_mode(line, mode, build):
+    """Fail unless the bench says it ran `mode`: a build without `--collapse` ignores the flag and measures the default."""
+    if mode and line.get('collapse') != mode:
+        sys.exit(f"the {build} lazy_bench ran collapse {line.get('collapse')!r}, not {mode!r}: it lacks --collapse or "
+                 'does not report it; pass an --old-bench built with the flag')
+
+
 def run_lazy(benches, src, work, name, runs):
     """A lazy session's start, time to the first component and to the first 50, and peak RSS, per mode and build."""
     keys = os.path.join(work, f'{name}.keys')
     base = ['--src', src, '--cache', os.path.join(work, f'{name}.cache'), '--dependencies', '--full']
     first = next(iter(benches.values()))
-    timed([first, *base, '--count', '0', '--write-keys', keys], subprocess.DEVNULL)
+    # An eager session lists the components a batch run publishes; a lazy one adds unchecked aliases and factory results.
+    timed([first, *base, '--eager', '--count', '0', '--write-keys', keys], subprocess.DEVNULL)
     result = {}
     for mode, flags in MODES.items():
         collapse = ['--collapse', flags[1]] if flags else []
@@ -106,6 +112,7 @@ def run_lazy(benches, src, work, name, runs):
                         _, rss = timed([binary, *base, *collapse, '--keys', keys, '--count', str(count)], out)
                         out.seek(0)
                         line = json.loads(out.read().strip().splitlines()[-1])
+                    check_mode(line, flags[1] if flags else None, build)
                     cell[count]['ms'].append(line['startMs'] + line['answerMs'])
                     cell[count]['rss'].append(rss)
             result.setdefault(mode, {})[build] = {
@@ -171,7 +178,8 @@ def main():
     if args.lazy and not (args.old_bench and args.new_bench):
         parser.error('--lazy needs --old-bench and --new-bench (the lazy_bench example of each build)')
     overrides = dict(item.split('=', 1) for item in args.src)
-    work = args.work or tempfile.mkdtemp(prefix='collapse-relevance-')
+    # The oracle runs from apps/oracle and reads the artifacts by the paths given, so they must not depend on this directory.
+    work = os.path.abspath(args.work or tempfile.mkdtemp(prefix='collapse-relevance-'))
     os.makedirs(work, exist_ok=True)
     print(f'load average {os.getloadavg()[0]:.1f}, {args.runs} runs, work {work}', file=sys.stderr)
     results = {}
