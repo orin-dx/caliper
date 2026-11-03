@@ -3877,3 +3877,18 @@ Let's fix this
   - The full `cargo test --workspace` on 359 has failures I attribute to the worktree, not the change. The cli tests that evaluate `docgen.config.ts` and the terminal-session tests fail, the fixture snapshot tests fail (the fixtures have no `node_modules` here), and `a_running_process_has_resident_memory` fails. I did not run these on the base commit to confirm they fail there too.
   - Those snapshot failures wrote `.snap.new` files, which I removed and kept out of the commit.
 </agent-message>
+
+---
+
+<task-notification>
+<task-id>a280986b353d41ce6</task-id>
+<tool-use-id>toolu_01337G1V2R7YaYxmUtQruJQV</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-gabe-Projects-caliper/ad4b3461-bb6f-49f0-bb4d-997d9b8887ba/tasks/a280986b353d41ce6.output</output-file>
+<status>completed</status>
+<summary>Agent "Fix review findings on sweep PRs" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>This agent's report was delivered to you as a message from "findings-sweep" (its SubagentHandback call). Read it there; it is not repeated here.
+</result>
+<usage><subagent_tokens>120982</subagent_tokens><tool_uses>69</tool_uses><duration_ms>636491</duration_ms></usage>
+<worktree><worktreePath>/Users/gabe/Projects/caliper/.claude/worktrees/agent-a280986b353d41ce6</worktreePath><worktreeBranch>worktree-agent-a280986b353d41ce6</worktreeBranch></worktree>
+</task-notification>
