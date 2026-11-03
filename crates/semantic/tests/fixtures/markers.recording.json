@@ -1,0 +1,653 @@
+[
+  {
+    "method": "initialize",
+    "params": null,
+    "result": {
+      "caseSensitivity": 0,
+      "currentDirectory": "<ROOT>"
+    }
+  },
+  {
+    "method": "createSnapshot",
+    "params": {
+      "createPrograms": [
+        {
+          "rootFiles": [
+            "<ROOT>/Markers.tsx"
+          ],
+          "compilerOptions": {
+            "jsx": 1,
+            "module": 99,
+            "moduleResolution": 100,
+            "target": 9,
+            "strict": true,
+            "skipLibCheck": true,
+            "noEmit": true
+          }
+        }
+      ]
+    },
+    "result": {
+      "snapshot": 1,
+      "projects": [
+        {
+          "id": "/dev/null/synthetic/1",
+          "currentDirectory": "<ROOT>",
+          "dirty": false,
+          "parsedCommandLine": {
+            "fileNames": [
+              "<ROOT>/Markers.tsx"
+            ],
+            "options": {
+              "jsx": 1,
+              "module": 99,
+              "moduleResolution": 100,
+              "noEmit": true,
+              "skipLibCheck": true,
+              "strict": true,
+              "target": 9
+            },
+            "errors": []
+          }
+        }
+      ],
+      "operation": {
+        "createdPrograms": [
+          "/dev/null/synthetic/1"
+        ]
+      }
+    }
+  },
+  {
+    "method": "getSymbolOfSourceFile",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "file": "<ROOT>/Markers.tsx"
+    },
+    "result": {
+      "reference": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Markers.tsx",
+          "path": "<root>/markers.tsx",
+          "contentHash": "768fe17e2c2d9187285b13eed158501f",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 1
+      },
+      "name": "\"<ROOT>/Markers\"",
+      "flags": 512,
+      "checkFlags": 0,
+      "declarations": [
+        "1.308.<root>/markers.tsx"
+      ],
+      "valueDeclaration": "1.308.<root>/markers.tsx"
+    }
+  },
+  {
+    "method": "getExportsOfModule",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Markers.tsx",
+          "path": "<root>/markers.tsx",
+          "contentHash": "768fe17e2c2d9187285b13eed158501f",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 1
+      }
+    },
+    "result": [
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Markers.tsx",
+            "path": "<root>/markers.tsx",
+            "contentHash": "768fe17e2c2d9187285b13eed158501f",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 2
+        },
+        "name": "Markers",
+        "flags": 16,
+        "checkFlags": 0,
+        "declarations": [
+          "30.264.<root>/markers.tsx"
+        ],
+        "valueDeclaration": "30.264.<root>/markers.tsx",
+        "parent": {
+          "id": 1,
+          "file": "77"
+        }
+      }
+    ]
+  },
+  {
+    "method": "getTypeOfSymbol",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Markers.tsx",
+          "path": "<root>/markers.tsx",
+          "contentHash": "768fe17e2c2d9187285b13eed158501f",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 2
+      }
+    },
+    "result": {
+      "id": 86,
+      "flags": 1048576,
+      "objectFlags": 16,
+      "isTupleType": false,
+      "value": null,
+      "isThisType": false,
+      "symbol": {
+        "id": 2,
+        "file": "77"
+      }
+    }
+  },
+  {
+    "method": "getSignaturesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 86,
+      "kind": 0
+    },
+    "result": [
+      {
+        "id": 5,
+        "flags": 0,
+        "declaration": "30.264.<root>/markers.tsx",
+        "parameters": [
+          {
+            "id": 9,
+            "file": "77"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "method": "getParametersOfSignature",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 5
+    },
+    "result": [
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Markers.tsx",
+            "path": "<root>/markers.tsx",
+            "contentHash": "768fe17e2c2d9187285b13eed158501f",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 9
+        },
+        "name": "props",
+        "flags": 1,
+        "checkFlags": 0,
+        "declarations": [
+          "35.171.<root>/markers.tsx"
+        ],
+        "valueDeclaration": "35.171.<root>/markers.tsx"
+      }
+    ]
+  },
+  {
+    "method": "getTypeOfSymbol",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Markers.tsx",
+          "path": "<root>/markers.tsx",
+          "contentHash": "768fe17e2c2d9187285b13eed158501f",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 9
+      }
+    },
+    "result": {
+      "id": 87,
+      "flags": 1048576,
+      "objectFlags": 2,
+      "isTupleType": false,
+      "value": null,
+      "isThisType": false,
+      "symbol": {
+        "id": 4,
+        "file": "77"
+      }
+    }
+  },
+  {
+    "method": "getPropertiesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 87
+    },
+    "result": [
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Markers.tsx",
+            "path": "<root>/markers.tsx",
+            "contentHash": "768fe17e2c2d9187285b13eed158501f",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 5
+        },
+        "name": "_single",
+        "flags": 16777220,
+        "checkFlags": 0,
+        "declarations": [
+          "6.173.<root>/markers.tsx"
+        ],
+        "valueDeclaration": "6.173.<root>/markers.tsx",
+        "parent": {
+          "id": 4,
+          "file": "77"
+        }
+      },
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Markers.tsx",
+            "path": "<root>/markers.tsx",
+            "contentHash": "768fe17e2c2d9187285b13eed158501f",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 6
+        },
+        "name": "___size",
+        "flags": 16777220,
+        "checkFlags": 0,
+        "declarations": [
+          "13.173.<root>/markers.tsx"
+        ],
+        "valueDeclaration": "13.173.<root>/markers.tsx",
+        "parent": {
+          "id": 4,
+          "file": "77"
+        }
+      },
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Markers.tsx",
+            "path": "<root>/markers.tsx",
+            "contentHash": "768fe17e2c2d9187285b13eed158501f",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 7
+        },
+        "name": "____triple",
+        "flags": 16777220,
+        "checkFlags": 0,
+        "declarations": [
+          "20.173.<root>/markers.tsx"
+        ],
+        "valueDeclaration": "20.173.<root>/markers.tsx",
+        "parent": {
+          "id": 4,
+          "file": "77"
+        }
+      },
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Markers.tsx",
+            "path": "<root>/markers.tsx",
+            "contentHash": "768fe17e2c2d9187285b13eed158501f",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 8
+        },
+        "name": "plain",
+        "flags": 4,
+        "checkFlags": 0,
+        "declarations": [
+          "27.173.<root>/markers.tsx"
+        ],
+        "valueDeclaration": "27.173.<root>/markers.tsx",
+        "parent": {
+          "id": 4,
+          "file": "77"
+        }
+      }
+    ]
+  },
+  {
+    "method": "getTypesOfSymbols",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbols": [
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Markers.tsx",
+            "path": "<root>/markers.tsx",
+            "contentHash": "768fe17e2c2d9187285b13eed158501f",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 5
+        },
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Markers.tsx",
+            "path": "<root>/markers.tsx",
+            "contentHash": "768fe17e2c2d9187285b13eed158501f",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 6
+        },
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Markers.tsx",
+            "path": "<root>/markers.tsx",
+            "contentHash": "768fe17e2c2d9187285b13eed158501f",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 7
+        },
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Markers.tsx",
+            "path": "<root>/markers.tsx",
+            "contentHash": "768fe17e2c2d9187285b13eed158501f",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 8
+        }
+      ]
+    },
+    "result": [
+      {
+        "id": 88,
+        "flags": 134217728,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false
+      },
+      {
+        "id": 89,
+        "flags": 134217728,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false
+      },
+      {
+        "id": 90,
+        "flags": 134217728,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false
+      },
+      {
+        "id": 14,
+        "flags": 32,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "string"
+      }
+    ]
+  },
+  {
+    "method": "getAliasSymbolOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 88
+    },
+    "result": null
+  },
+  {
+    "method": "getTypesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 88
+    },
+    "result": [
+      {
+        "id": 10,
+        "flags": 4,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "undefined"
+      },
+      {
+        "id": 15,
+        "flags": 64,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "number"
+      }
+    ]
+  },
+  {
+    "method": "getAliasSymbolOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 89
+    },
+    "result": null
+  },
+  {
+    "method": "getTypesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 89
+    },
+    "result": [
+      {
+        "id": 10,
+        "flags": 4,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "undefined"
+      },
+      {
+        "id": 14,
+        "flags": 32,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "string"
+      }
+    ]
+  },
+  {
+    "method": "getDocumentationComment",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Markers.tsx",
+          "path": "<root>/markers.tsx",
+          "contentHash": "768fe17e2c2d9187285b13eed158501f",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 6
+      }
+    },
+    "result": "Two leading underscores: the checker's escaped name has a third."
+  },
+  {
+    "method": "getAliasSymbolOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 90
+    },
+    "result": null
+  },
+  {
+    "method": "getTypesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 90
+    },
+    "result": [
+      {
+        "id": 10,
+        "flags": 4,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "undefined"
+      },
+      {
+        "id": 17,
+        "flags": 8192,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": false,
+        "freshType": 18,
+        "regularType": 17,
+        "isThisType": false
+      },
+      {
+        "id": 19,
+        "flags": 8192,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": true,
+        "freshType": 20,
+        "regularType": 19,
+        "isThisType": false
+      }
+    ]
+  },
+  {
+    "method": "typeToString",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 17
+    },
+    "result": "false"
+  },
+  {
+    "method": "typeToString",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 19
+    },
+    "result": "true"
+  },
+  {
+    "method": "getDocumentationComment",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Markers.tsx",
+          "path": "<root>/markers.tsx",
+          "contentHash": "768fe17e2c2d9187285b13eed158501f",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 7
+      }
+    },
+    "result": "Three leading underscores."
+  },
+  {
+    "method": "getDocumentationComment",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Markers.tsx",
+          "path": "<root>/markers.tsx",
+          "contentHash": "768fe17e2c2d9187285b13eed158501f",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 8
+      }
+    },
+    "result": ""
+  }
+]

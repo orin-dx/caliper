@@ -39,10 +39,30 @@ fn classify(error: TscClientError) -> CallError {
 pub(crate) struct SymbolInfo {
     /// The full reference the checker wants back to name this symbol; opaque to us.
     pub reference: Value,
+    /// The name the source writes: the checker's escaped name with the escaping removed (see
+    /// [`unescape_leading_underscores`]).
+    #[serde(deserialize_with = "unescaped_name")]
     pub name: String,
     pub flags: u64,
     #[serde(default)]
     pub declarations: Vec<String>,
+}
+
+/// The checker keeps a symbol's name in an escaped form: a name that starts with two underscores gets a third
+/// (`escapeLeadingUnderscores`), so that it cannot collide with its own internal names such as `__call`. The source
+/// writes `__size`, the checker answers `___size`. A name with fewer than three leading underscores is unchanged, and
+/// so are the internal names, which start with exactly two.
+pub(crate) fn unescape_leading_underscores(name: &str) -> &str {
+    if name.starts_with("___") {
+        name.strip_prefix('_').unwrap_or(name)
+    } else {
+        name
+    }
+}
+
+fn unescaped_name<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let name = String::deserialize(deserializer)?;
+    Ok(unescape_leading_underscores(&name).to_string())
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -287,4 +307,31 @@ fn default_options() -> Value {
 
 fn decode<T: DeserializeOwned>(value: Value) -> Result<T, CallError> {
     serde_json::from_value(value).map_err(|error| CallError::Rejected(format!("unexpected response shape: {error}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_name_with_three_or_more_leading_underscores_loses_the_one_the_checker_added() {
+        assert_eq!(unescape_leading_underscores("___size"), "__size");
+        assert_eq!(unescape_leading_underscores("____triple"), "___triple");
+        assert_eq!(unescape_leading_underscores("___0"), "__0");
+    }
+
+    #[test]
+    fn other_names_are_unchanged() {
+        for name in ["size", "_single", "__call", "__type", "default", "", "a___b"] {
+            assert_eq!(unescape_leading_underscores(name), name);
+        }
+    }
+
+    #[test]
+    fn a_symbol_arrives_with_the_name_the_source_writes() {
+        let symbol: SymbolInfo =
+            serde_json::from_value(json!({ "reference": {}, "name": "___size", "flags": 0 })).unwrap();
+
+        assert_eq!(symbol.name, "__size");
+    }
 }

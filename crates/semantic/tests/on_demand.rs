@@ -145,6 +145,30 @@ fn the_real_checker_answers_the_requested_component() {
     assert_eq!(second.components[0].props.len(), 7, "the same warm process answers again");
 }
 
+/// The real checker escapes a name that starts with two underscores (`__size` is `___size` inside it); the answer
+/// carries the name the source writes.
+#[test]
+fn the_real_checker_names_props_as_the_source_writes() {
+    let Some(tsc) = real_tsc() else { return };
+    let dir = tempfile::Builder::new().prefix("Real").tempdir().unwrap();
+    let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+    let fixtures = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/markers");
+    for name in ["Markers.tsx", "tsconfig.json"] {
+        std::fs::copy(fixtures.join(name), root.join(name)).unwrap();
+    }
+    let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
+    let mut config = OnDemandConfig::new(root.clone());
+    config.tsc_path = Some(Utf8PathBuf::from(tsc.to_str().unwrap()));
+    config.request_timeout = Duration::from_secs(60);
+    let checker = OnDemand::new(config);
+
+    let answer = ask(&checker, target(&output, "Markers"));
+
+    assert_eq!(answer.diagnostics, []);
+    let names: Vec<_> = answer.components[0].props.iter().map(|prop| prop.name.as_str()).collect();
+    assert_eq!(names, ["_single", "__size", "___triple", "plain"]);
+}
+
 /// With the real checker and the real `@types/react` (the repository's own, via `node_modules/@types/react`), a
 /// component's prop names are the same with the checker as without it, in every `htmlAttributes` mode: the checker
 /// improves types and optionality, and `htmlAttributes` means one thing in both engines.
