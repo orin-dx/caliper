@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01337G1V2R7YaYxmUtQruJQV",
+  "agent_id": "a280986b353d41ce6",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix review findings on sweep PRs",
+  "token_usage": {
+    "input_tokens": 130,
+    "cache_creation_tokens": 97720,
+    "cache_read_tokens": 5766095,
+    "output_tokens": 20102,
+    "api_call_count": 65
+  },
+  "started_at": "2026-11-02T19:57:38.323478-08:00",
+  "completed_at": "2026-11-02T20:08:14.383092-08:00"
+}
