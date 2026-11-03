@@ -5,7 +5,14 @@ import { readFileSync, realpathSync } from 'node:fs'
 import { relative } from 'node:path'
 import { caliperNorm, VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'
 import { rdgNorm, rdtNorm } from './tool-norm.ts'
-import { scoreTool, type Reported, type Stratum, type ToolScore, type UniverseProp } from './tool-score.ts'
+import {
+  scoreReported,
+  scoreTool,
+  type Reported,
+  type Stratum,
+  type ToolScore,
+  type UniverseProp,
+} from './tool-score.ts'
 
 export const normComponent = (name: string) =>
   (
@@ -139,6 +146,8 @@ export function universeRecorder(env: Environment) {
       }
       return {
         caliper,
+        // Caliper over the components it reports only (src/tool-score.ts `scoreReported`): the weekly headline.
+        caliper_reported: scoreReported(entries, (u) => u.caliper),
         ...(env.rdt && { rdt: scoreTool(entries, (u) => u.rdt!) }),
         ...(env.rdg && {
           react_docgen: { ...scoreTool(entries, (u) => u.rdg!), failed_files: env.rdg.failed.size },
