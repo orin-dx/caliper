@@ -1,0 +1,97 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6FDB6VRGZJ6SFR4SKSN1XRJ",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-03T00:36:16.631422Z",
+  "branch": "fix/checker-keeps-parameter-markers",
+  "checkpoints_count": 2,
+  "save_step_count": 8,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "3288c2b6c005",
+  "checkpoint_transcript_start": 3210,
+  "transcript_lines_at_start": 3210,
+  "compact_transcript_start": 276,
+  "token_usage": {
+    "input_tokens": 10,
+    "cache_creation_tokens": 18866,
+    "cache_read_tokens": 2299706,
+    "output_tokens": 11465,
+    "api_call_count": 4,
+    "subagent_tokens": {
+      "input_tokens": 128,
+      "cache_creation_tokens": 1510832,
+      "cache_read_tokens": 30434816,
+      "output_tokens": 48490,
+      "api_call_count": 68
+    }
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 6,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 58
+  },
+  "summary": {
+    "intent": "Coordinate parallel worker sessions on the caliper repo: fix agent-review findings in measurement work (#318, #320), sweep the repo for the same quality patterns, and diagnose why the 0.9.0 release stays pending ahead of merging #291.",
+    "outcome": "Review findings were categorized into six patterns, which invalidated or weakened some earlier measurement conclusions. Fix and sweep workers were launched, and a memory note was saved. The release diagnosis completed, but the 0.9.0 GitHub Release has not been created because it needs the user's approval.",
+    "learnings": {
+      "repo": [
+        "The Storybook addon defaults to collapseInheritedProps: 'none', while the CLI/NAPI default differs. Measurements must use the config the real consumer uses.",
+        "The oracle emits the key 'less precise', but a script read 'less_precise', so that metric was always zero. String keys repeated across files cause silent mismatches.",
+        "The 'alias_expanded' label is set purely by text length, but the docs state it as fact.",
+        "The callisto-release workflow pins RELEASE_PENDING_FROM to 2daef927, the newest release commit on main. The pin is still needed to avoid scanning older releases that would count as 'missing' under the current [release] config (E166 risk).",
+        "Callisto's `release pending` judges the forge gap against today's callisto.toml, while `release execute` plans from the release commit's own config, which has no [release] section. The workflow therefore can never create the 0.9.0 Release, and 0.9.0 stays pending.",
+        "Callisto's `--from` is inclusive and must name a release commit, meaning a first-parent commit touching .callisto/release-decision.json. A tip SHA makes `release pending` error on every run.",
+        "Callisto's release_is_published counts any non-draft GitHub release on the tag and does not check attached assets.",
+        "PR #291 is the first release with a [release] config. Its five-artifact assemble/attest/upload path has never run, so watch for ArtifactAssetDiffers, attestation verification, and all five targets. Its merge commit must be GitHub-verified and signed or release-candidate errors."
+      ],
+      "code": [
+        {
+          "path": "packages/storybook/src/provider.ts",
+          "line": 69,
+          "finding": "The Storybook addon defaults collapseInheritedProps to 'none', unlike the CLI/NAPI default used in earlier measurements."
+        },
+        {
+          "path": "docs/releasing.md",
+          "line": 60,
+          "finding": "This line wrongly says the backfill will build and attest 0.9.0. It should be rewritten to say 0.9.0 was published by hand without binaries, and the 'this path has not been run' sentence deleted."
+        },
+        {
+          "path": "crates/callisto-graph/src/commands/release/pending.rs",
+          "finding": "In ~/Projects/callisto, this file implements the `--from` truncation (inclusive) and the release_is_published logic behind the 0.9.0 pending behavior."
+        }
+      ],
+      "workflow": null
+    },
+    "friction": [
+      "Earlier measurement work had timing and config bugs: an awaited pgrep inside the timed loop, a fixed 2s sleep plus a second pass counted in wall time, and a run under 50 components reported as the first 50.",
+      "Checker-mode first-load figures and the claim that Storybook can't show a type for layer-only props were wrong or unverified and had to be retracted.",
+      "The release backfill for 0.9.0 can never finish through the workflow because of the config mismatch, so it needs a manual fix.",
+      "The release path for #291 could not be tested ahead of time."
+    ],
+    "open_items": [
+      "User decision needed: create the 0.9.0 GitHub Release by hand with `gh release create cargo/caliper-docgen@0.9.0 --verify-tag --title 0.9.0 --notes-file <0.9.0 section of crates/cli/CHANGELOG.md>`, with no assets, before merging #291.",
+      "Prepare a docs-only PR fixing docs/releasing.md around line 60.",
+      "After #291 finishes its release, move RELEASE_PENDING_FROM to #291's merge commit in a later PR.",
+      "Wait for the t172-sample (#318 fixes plus #324 text), t172-modes (#320 fixes and re-run under real Storybook config), sweep-scripts and sweep-code results.",
+      "Wait for t192-collapse and t164-checker-bugs; t192-collapse will also measure 'none' as the baseline.",
+      "Re-run the checker-mode measurements under the right config. Treat the first-load numbers as unverified until then. The '2-8x slower whole-project' figure likely holds.",
+      "Turn the review patterns into guardrails: shared constants, a self-review step in worker briefs, and agent review on measurement code.",
+      "Check that collapseInheritedProps, htmlAttributes, loadDependencies, semanticTypes and tscPath are spelled and defaulted consistently across the CLI, config, NAPI and addon."
+    ]
+  }
+}
