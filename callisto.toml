@@ -93,10 +93,17 @@ match = "npm/caliper-docgen-storybook"
 publish-to = ["npm"]
 release-trigger = "changeset"
 
-# The npm wrapper is meaningless without a matching binding build.
+# The npm wrapper is meaningless without a matching binding build. The Vite plugin and the
+# Storybook addon depend on the binding at an exact version (`workspace:*` publishes as an
+# exact pin), so a binding release must republish them or their users never receive it.
 [[fixed-group]]
 name = "napi-and-binding"
-members = ["cargo/caliper-docgen-napi", "npm/caliper-docgen-napi"]
+members = [
+  "cargo/caliper-docgen-napi",
+  "npm/caliper-docgen-napi",
+  "npm/caliper-docgen-vite-plugin",
+  "npm/caliper-docgen-storybook",
+]
 
 # The npm wrapper redistributes this crate's binaries.
 [[fixed-group]]
