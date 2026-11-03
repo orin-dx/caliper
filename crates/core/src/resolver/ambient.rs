@@ -3,9 +3,9 @@
 //! which is the API a dependency's component exposes (its modes, state and composition).
 //!
 //! Which clause fits reads only the source's file, its type name and a prop's name; the resolver adds its size (below). It
-//! is the rule measured in `docs/measurement.md` ("Layer-only props"); `apps/oracle/src/layer-only.ts` is the
-//! classifier the measurement ran, and the test `the_rule_gives_the_clause_the_oracles_classifier_gives` keeps this
-//! module equal to it. The first clause that fits decides:
+//! is the rule measured on the `measure/layer-only-props` branch (`apps/oracle/src/layer-only.ts` and the "Layer-only
+//! props" section of `docs/measurement.md`, neither on this branch yet); the test
+//! `the_rule_gives_the_clause_the_oracles_classifier_gives` keeps this module equal to that classifier. The first clause that fits decides:
 //!
 //! 1. **dom file**: the source's file is `@types/react`, or react-aria's `@react-types/shared/src/dom.d.ts`
 //! 2. **dom type**: the source's type is a DOM family: `GlobalDOMEvents`, `DOMAttributes`, `AriaAttributes`,
@@ -19,6 +19,10 @@
 //! large (`ResolutionContext::collapses`: a layer record costs more than a handful of props, and listing a small
 //! ambient source gives `aria-label` and `id` their types). Clause 4 decides a prop of a source the first three did not
 //! match; it never collapses a source on its own. A source that is API (clause 5) is never collapsed, however large.
+//!
+//! Clause 4 is not part of the production rule: the resolver decides per source (`is_ambient_source`, clauses 1 to 3)
+//! and never reads a prop's name. It is kept under `#[cfg(test)]` so the parity test can compare the whole classifier,
+//! not only the source verdicts, with the oracle's.
 
 /// The attributes every element has, which no component's API is about. `defaultValue`, `value`, `type`, `name` and
 /// the like are not here: they are element-specific, and a dependency's component often uses them as its own API.
@@ -183,12 +187,13 @@ mod tests {
         assert_eq!(classify(file, type_name, prop), expected);
     }
 
-    /// `ambient_parity.json` holds the verdict of the oracle's TypeScript classifier (`apps/oracle/src/layer-only.ts`
-    /// `classify`) for every distinct (file, type, prop) a collapsed layer names on the five pinned corpora, plus
-    /// edge cases that cover every clause (the verdicts are the classifier's, not written by hand). This module must
-    /// give the same clause for each. To regenerate: run the classifier over `extract --json` outputs of the five corpora
-    /// (see `docs/measurement.md`, "Layer-only props") and over the edge-case list, and write rows of `file`, `type`,
-    /// `prop`, `kind` and `why`.
+    /// `ambient_parity.json` holds the verdict of the oracle's TypeScript classifier (`classify` in
+    /// `apps/oracle/src/layer-only.ts` on the `measure/layer-only-props` branch) for every distinct (file, type, prop) a
+    /// collapsed layer names on antd and shadcn, plus synthetic edge cases (`/p/node_modules/x/index.d.ts`) for the
+    /// style-system and DOM-type clauses, which those two corpora do not exercise (the verdicts are the classifier's,
+    /// not written by hand). Chakra, Mantine and Spectrum are not in the data. This module must give the same clause
+    /// for each. To regenerate: run that classifier over `extract --json` outputs of antd and shadcn and over the
+    /// edge-case list, and write rows of `file`, `type`, `prop`, `kind` and `why`.
     #[test]
     fn the_rule_gives_the_clause_the_oracles_classifier_gives() {
         let rows: Vec<serde_json::Value> = serde_json::from_str(include_str!("ambient_parity.json")).unwrap();

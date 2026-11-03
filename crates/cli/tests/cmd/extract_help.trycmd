@@ -75,7 +75,7 @@ Options:
           Which inherited sources to list as one inherited layer of names
           instead of prop by prop: large ambient ones (DOM and ARIA attributes,
           style systems) from loaded dependencies by default; a dependency's own
-          API is listed
+          API is always listed
 
           Possible values:
           - dependencies: Large ambient sources (DOM and ARIA attributes, style
