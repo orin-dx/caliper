@@ -48,7 +48,7 @@ describe('preset', () => {
       fallback: 'never',
     } satisfies Record<keyof CaliperStorybookOptions, unknown>
     const [ours] = await experimental_docgenProvider([], options)
-    expect(Object.keys(ours!.options!).sort()).toEqual([...OPTION_KEYS].sort())
+    expect(Object.keys(ours!.options!).toSorted()).toEqual([...OPTION_KEYS].toSorted())
     expect(ours?.options).toEqual(options)
   })
 
