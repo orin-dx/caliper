@@ -694,6 +694,24 @@ fn custom_conditions_from_the_governing_tsconfig_pick_the_export_target() {
     assert_eq!(prop_types(&output, "Cond"), [("fromSource".into(), "string".into())]);
 }
 
+/// A demand that panics is contained, and its diagnostic reaches the output with the panic text and the demand named.
+#[test]
+fn a_panic_in_the_dependency_loader_reaches_the_output_as_a_diagnostic() {
+    let (_tmp, root) = project(&[(
+        "src/Badge.tsx",
+        "import type { __DEPENDENCY_PANIC_TEST__ } from 'ui-kit';\n\
+         export function Badge(props: { tone?: __DEPENDENCY_PANIC_TEST__ }) { return null; }\n",
+    )]);
+
+    let output = extract(&options(&root, true));
+
+    let panics: Vec<_> =
+        output.diagnostics.iter().filter(|d| d.code == crate::types::DiagnosticCode::InternalPanic).collect();
+    assert_eq!(panics.len(), 1, "{:?}", output.diagnostics);
+    assert_eq!(panics[0].message, "dependency demand ui-kit#__DEPENDENCY_PANIC_TEST__ panicked: injected panic");
+    assert_eq!(panics[0].severity, crate::types::DiagnosticSeverity::Error);
+}
+
 /// The layer keeps one answer per `(module, name)` for names found through a star-export cycle, loads only declaring
 /// files, and records why each demand it could not satisfy failed.
 #[test]
@@ -770,6 +788,21 @@ fn the_loader_is_deterministic_across_demand_order_and_threads() {
     for (reverse, threads) in [(true, 1), (false, 4), (true, 18)] {
         assert_eq!(snapshot(reverse, threads), first, "reverse {reverse}, {threads} threads");
     }
+}
+
+/// Flattening a chain keeps the panics its layers contained, since the demands they covered stay unanswered.
+#[test]
+fn flattening_a_chain_keeps_the_panics_an_earlier_layer_contained() {
+    let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
+    let options = PipelineOptions { use_cache: false, ..options(&root, true) };
+    let mut chained = Arc::new(load(vec![demand(&root, "ui-kit", "__DEPENDENCY_PANIC_TEST__")], &options, None));
+    for index in 0..9 {
+        chained = Arc::new(load(vec![demand(&root, "ui-kit", &format!("Missing{index}"))], &options, Some(&chained)));
+    }
+
+    assert_eq!(chained.depth, 0, "the ninth extension flattened the chain");
+    let messages: Vec<_> = chained.panic_diagnostics().into_iter().map(|d| d.message).collect();
+    assert_eq!(messages, ["dependency demand ui-kit#__DEPENDENCY_PANIC_TEST__ panicked: injected panic"]);
 }
 
 #[test]

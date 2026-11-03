@@ -11,7 +11,7 @@
 //! emitted.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -71,6 +71,10 @@ impl Unresolved {
         }
     }
 }
+
+/// A demanded name that panics the loader under `#[cfg(test)]`, to drive the containment path.
+#[cfg(test)]
+const DEMAND_PANIC_TEST_NAME: &str = "__DEPENDENCY_PANIC_TEST__";
 
 fn is_typescript(path: &Utf8Path) -> bool {
     crate::extractor::is_typescript(path.as_std_path())
@@ -288,9 +292,18 @@ pub(crate) struct DependencyLayer {
     claimed: FxHashSet<(PathKey, CompactString)>,
     /// Every parsed file's data (stubs included), so an extension reuses them.
     parsed: FxHashMap<PathKey, Option<Arc<SourceData>>>,
+    /// The panics this layer's own demands hit, contained; the demands they covered stay unanswered.
+    panics: Vec<Diagnostic>,
 }
 
 impl DependencyLayer {
+    /// The contained panics of this layer and the ones it extends, in message order.
+    pub(crate) fn panic_diagnostics(&self) -> Vec<Diagnostic> {
+        let mut all: Vec<Diagnostic> = self.chain().flat_map(|layer| layer.panics.iter().cloned()).collect();
+        all.sort_by(|a, b| a.message.cmp(&b.message));
+        all
+    }
+
     /// This layer and then each one it extends.
     fn chain(&self) -> impl Iterator<Item = &DependencyLayer> {
         std::iter::successors(Some(self), |layer| layer.parent.as_deref())
@@ -406,6 +419,8 @@ struct Loader<'a> {
     re_exports: FxDashMap<PathKey, Arc<OnceLock<Arc<[String]>>>>,
     /// Something was resolved or answered that the index did not hold.
     learned: AtomicBool,
+    /// The diagnostics of demands that panicked.
+    panics: Mutex<Vec<Diagnostic>>,
 }
 
 impl Loader<'_> {
@@ -580,6 +595,8 @@ impl Loader<'_> {
     }
 
     fn demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand) {
+        #[cfg(test)]
+        assert!(&*demand.name != DEMAND_PANIC_TEST_NAME, "injected panic");
         let key = demand.key();
         if self.parent.is_some_and(|parent| parent.has_demand(&key)) || !self.demands.insert(key.clone()) {
             return;
@@ -939,6 +956,7 @@ pub(crate) fn load(
         module_demands: DashMap::default(),
         re_exports: DashMap::default(),
         learned: AtomicBool::new(false),
+        panics: Mutex::new(Vec::new()),
     };
     // With the cache off the index is neither read nor written, and the run learns everything again.
     let index_path = options.use_cache.then(|| index_path(options));
@@ -980,6 +998,12 @@ pub(crate) fn load(
                 for (module, files) in &layer.augmenters {
                     loader.augmenters.insert(module.clone(), files.clone());
                 }
+                // The demands a panic covered stay unanswered in the flattened layer, so its report stays too.
+                loader
+                    .panics
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .extend(layer.panics.iter().cloned());
             }
         }
         (Some(_), None) => {}
@@ -989,7 +1013,9 @@ pub(crate) fn load(
             let loader = &loader;
             scope.spawn(move |scope| {
                 let label = format!("dependency demand {}#{}", demand.specifier, demand.name);
-                let _contained = crate::panic_guard::contain_panic(&label, || loader.demand(scope, demand));
+                if let Err(panic) = crate::panic_guard::contain_panic(&label, || loader.demand(scope, demand)) {
+                    loader.panics.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(panic);
+                }
             });
         }
     });
@@ -1065,6 +1091,7 @@ pub(crate) fn load(
         unresolved,
         claimed: loader.claimed.into_iter().collect(),
         parsed: loader.parsed.into_iter().map(|(key, cell)| (key, cell.get().cloned().flatten())).collect(),
+        panics: loader.panics.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner),
     }
 }
 
