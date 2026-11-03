@@ -345,6 +345,26 @@ fn test_discover_files_reports_diagnostic_for_non_utf8_filename() {
 // ── test_extract_empty_src ────────────────────────────────────────────────
 
 #[test]
+fn an_unresolved_global_type_blames_the_missing_typescript_not_a_package_install() {
+    let tmp = TempDir::new().unwrap();
+    write_file(&tmp, "Box.tsx", "export function Box(props: { when: Date }) { return null; }\n");
+    let dir = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+
+    let output = extract(&PipelineOptions { src_dirs: vec![dir], ..Default::default() });
+
+    let help: Vec<_> = output
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::UnresolvableImport)
+        .map(|d| d.help.clone().unwrap_or_default())
+        .collect();
+    assert_eq!(
+        help,
+        ["'Date' is a global type, and TypeScript's lib files were not found; install typescript as a dependency of the project."]
+    );
+}
+
+#[test]
 fn test_extract_empty_src() {
     let tmp = TempDir::new().unwrap();
     stub_typescript(&tmp);

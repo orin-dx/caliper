@@ -522,8 +522,9 @@ impl Loader<'_> {
         for export in &data.exports {
             match export {
                 LexedExport::ReExportNamed { local_name, source_name, source_specifier, .. } if local_name == head => {
-                    // A hop that cannot be resolved leaves the later exports to answer; `unresolved_cause` names it.
-                    let Ok(target) = self.resolve(module, source_specifier) else { continue };
+                    // An explicit export shadows a wildcard one, so a hop that cannot be resolved leaves the name unanswered
+                    // rather than to a later `export *`; `unresolved_cause` names the hop.
+                    let Ok(target) = self.resolve(module, source_specifier) else { return None };
                     let next = match rest {
                         Some(rest) => format!("{source_name}.{rest}"),
                         None => source_name.clone(),
@@ -531,7 +532,7 @@ impl Loader<'_> {
                     return self.find_export_in(&target, &next, visited, cut);
                 }
                 LexedExport::ReExportNamespace { namespace, source_specifier } if namespace == head => {
-                    let Ok(target) = self.resolve(module, source_specifier) else { continue };
+                    let Ok(target) = self.resolve(module, source_specifier) else { return None };
                     return self.find_export_in(&target, rest?, visited, cut);
                 }
                 // `export { DialogContent as Content }`, the way bundled typings (Radix's) name their parts.

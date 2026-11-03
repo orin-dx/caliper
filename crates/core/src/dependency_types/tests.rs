@@ -726,6 +726,36 @@ fn a_demand_blocked_by_an_unresolvable_re_export_hop_records_that_cause() {
     assert_eq!(layer.unresolved_reason(&src, "hop-kit", "Present"), None);
 }
 
+/// An explicit export shadows a wildcard one, so a failed explicit hop must not fall through to the wildcard's name.
+#[test]
+fn a_wildcard_export_does_not_answer_for_a_failed_explicit_re_export_of_the_same_name() {
+    let (_tmp, root) = project(&[
+        ("src/Badge.tsx", BADGE),
+        (
+            "node_modules/shadow-kit/package.json",
+            r#"{ "name": "shadow-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/shadow-kit/index.d.ts",
+            "export { Props } from './gone';\nexport * as Ns from 'not-installed';\nexport * from './legacy';\n",
+        ),
+        (
+            "node_modules/shadow-kit/legacy.d.ts",
+            "export interface Props { legacy: string }\nexport interface Ns { x: number }\n",
+        ),
+    ]);
+    let demands = vec![demand(&root, "shadow-kit", "Props"), demand(&root, "shadow-kit", "Ns.x")];
+
+    let layer = load(demands, &options(&root, true), None);
+
+    let index = root.join("node_modules/shadow-kit/index.d.ts");
+    assert_eq!(layer.export_of(&index, "Props"), Some(&None));
+    assert_eq!(layer.export_of(&index, "Ns.x"), Some(&None));
+    let src = root.join("src");
+    assert_eq!(layer.unresolved_reason(&src, "shadow-kit", "Props"), Some(Unresolved::Unresolvable));
+    assert_eq!(layer.unresolved_reason(&src, "shadow-kit", "Ns.x"), Some(Unresolved::Unresolvable));
+}
+
 /// The layer keeps one answer per `(module, name)` for names found through a star-export cycle, loads only declaring
 /// files, and records why each demand it could not satisfy failed.
 #[test]

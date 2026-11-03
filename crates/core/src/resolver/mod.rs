@@ -123,6 +123,13 @@ pub(super) fn unresolved_type_help(
     });
     match reason {
         Some(reason) => format!("Dependency types are loaded, but for '{type_name}' {}.", reason.describe()),
+        // A global is declared by TypeScript's lib files; with none found, installing a package would not help.
+        None if ctx.ambient_global_files.is_empty() && name_binding(type_name, file, ctx) == NameBinding::Unbound => {
+            format!(
+                "'{type_name}' is a global type, and TypeScript's lib files were not found; install typescript as a \
+                 dependency of the project."
+            )
+        }
         None => otherwise.to_owned(),
     }
 }
@@ -757,7 +764,8 @@ fn read_tsconfig_json(path: &Utf8Path) -> Option<serde_json::Value> {
 #[derive(Debug, Default, PartialEq)]
 pub struct TsLibs {
     pub paths: Vec<String>,
-    /// Set when `typescript` is not installed, or is installed but lacks a lib file. Only the pipeline reports it, not the other callers.
+    /// Set when `typescript` is not installed, or is installed but lacks a lib file. Only the pipeline reports it,
+    /// not the other callers.
     pub diagnostic: Option<Diagnostic>,
 }
 
@@ -771,7 +779,7 @@ const TS_OPTIONAL_LIB_FILES: [&str; 3] =
 /// Locate `lib.es5.d.ts`/`lib.dom.d.ts`, which declare the ambient globals (`Date`, `Element`, ...). TS ≤6 keeps them
 /// in `typescript/lib`; TS 7 moves them into an optional `@typescript/typescript-<platform>` package whose `exports`
 /// hide `lib/`, so they're read off disk. They're identical across platforms, so the first installed package (by name)
-/// with a file serves. No `typescript` sets `diagnostic`, as does one lacking a lib file sets `diagnostic`.
+/// with a file serves. Both a missing `typescript` and one lacking a lib file set `diagnostic`.
 pub fn resolve_ts_lib_paths(from_dir: &camino::Utf8Path) -> TsLibs {
     let resolver = Resolver::new(ResolveOptions::default());
     let Ok(manifest) = resolver.resolve(from_dir.as_std_path(), "typescript/package.json") else {
