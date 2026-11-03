@@ -1706,8 +1706,8 @@ fn a_component_is_exported_when_its_module_exports_it_or_attaches_it_to_an_expor
             ("Header".to_string(), true),
             ("Internal".to_string(), false),
             ("Item".to_string(), true),
+            ("Menu".to_string(), true),
             ("MenuItem".to_string(), true),
-            ("MenuRoot".to_string(), true),
             ("Orphan".to_string(), false),
             ("Renamed".to_string(), true),
         ]
@@ -2761,6 +2761,54 @@ fn a_component_declared_inside_a_function_body_is_reported_not_mapped() {
             "'Local' is declared inside a function body, so no module can import it",
         ]
     );
+}
+
+#[test]
+fn an_object_assign_compound_is_emitted_under_the_exported_root_name() {
+    let source = "interface P { a: string }\n\
+        function RootImpl(props: P) { return <div />; }\n\
+        function Item(props: P) { return <div />; }\n\
+        function Label(props: P) { return <div />; }\n\
+        export const Root = Object.assign(RootImpl, { Item, Label });";
+    let data = parse_file(Utf8Path::new("/test/compound.tsx"), source);
+    let mut found: Vec<(&str, &str)> =
+        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.props_type_name.as_str())).collect();
+    found.sort_unstable();
+    assert_eq!(found, [("Item", "P"), ("Label", "P"), ("Root", "P")]);
+    let diagnostics: Vec<&str> = data.diagnostics.iter().map(|d| d.message.as_str()).collect();
+    assert_eq!(diagnostics, Vec::<&str>::new());
+}
+
+#[test]
+fn inline_sub_components_in_an_object_assign_declaration_are_emitted() {
+    let source = "interface P { a: string }\n\
+        interface ItemProps { b: string }\n\
+        interface LabelProps { c: string }\n\
+        function RootImpl(props: P) { return <div />; }\n\
+        export const Root = Object.assign(RootImpl, {\n\
+            Item: (props: ItemProps) => <i />,\n\
+            Label: function (props: LabelProps) { return <b />; },\n\
+        });";
+    let data = parse_file(Utf8Path::new("/test/compound.tsx"), source);
+    let mut found: Vec<(&str, &str)> =
+        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.props_type_name.as_str())).collect();
+    found.sort_unstable();
+    assert_eq!(found, [("Item", "ItemProps"), ("Label", "LabelProps"), ("Root", "P")]);
+}
+
+#[test]
+fn a_property_assigned_inline_sub_component_is_emitted() {
+    let source = "interface P { a: string }\n\
+        interface ItemProps { b: string }\n\
+        interface LabelProps { c: string }\n\
+        export const Root = (props: P) => <div />;\n\
+        Root.Item = (props: ItemProps) => <i />;\n\
+        Root.Label = function (props: LabelProps) { return <b />; };";
+    let data = parse_file(Utf8Path::new("/test/compound.tsx"), source);
+    let mut found: Vec<(&str, &str)> =
+        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.props_type_name.as_str())).collect();
+    found.sort_unstable();
+    assert_eq!(found, [("Item", "ItemProps"), ("Label", "LabelProps"), ("Root", "P")]);
 }
 
 #[test]

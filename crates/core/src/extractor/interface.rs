@@ -315,6 +315,18 @@ impl<'src> SourceDataCollector<'src> {
     /// declined there as speculative.
     pub(super) fn try_scan_object_assign_sub_components<'a>(&mut self, stmt: &ExpressionStatement<'a>) {
         let Expression::CallExpression(call) = &stmt.expression else { return };
+        self.scan_object_assign_call(call);
+    }
+
+    /// The same scan for `const Root = Object.assign(RootImpl, { Item: (props: P) => … })`, whose call is a
+    /// declaration's initializer and not a statement.
+    pub(super) fn try_scan_object_assign_declarator<'a>(&mut self, init: Option<&Expression<'a>>) {
+        if let Some(Expression::CallExpression(call)) = init.map(super::component::peel_expr) {
+            self.scan_object_assign_call(call);
+        }
+    }
+
+    fn scan_object_assign_call<'a>(&mut self, call: &CallExpression<'a>) {
         let Expression::StaticMemberExpression(callee) = &call.callee else { return };
         if !matches!(&callee.object, Expression::Identifier(id) if id.name.as_str() == "Object") {
             return;
@@ -349,43 +361,74 @@ impl<'src> SourceDataCollector<'src> {
                 _ => continue,
             };
             self.record_attached(&key_name, parent_id.name.as_str());
-
-            let Some(first_param) = params.items.first() else { continue };
-            let Some(type_ann) = &first_param.type_annotation else {
-                self.record_skip(
-                    DiagnosticCode::SkippedCandidate,
-                    format!("'{key_name}' is an Object.assign-attached sub-component with an untyped first param"),
-                    first_param.span,
-                );
-                continue;
-            };
-            let Some((props_name, type_args)) = self.extract_type_name_from_type(&type_ann.type_annotation) else {
-                self.record_skip(
-                    DiagnosticCode::SkippedCandidate,
-                    format!(
-                        "'{key_name}' is an Object.assign-attached sub-component whose first param's type \
-                         annotation isn't a recognizable props type reference"
-                    ),
-                    type_ann.span,
-                );
-                continue;
-            };
-
-            let (description, tags) = self.find_jsdoc_with_tags(span_start);
-            let param_defaults = self.extract_param_defaults(params);
-            self.data.component_mappings.push(
-                ComponentMapping::new(
-                    key_name,
-                    props_name,
-                    self.file_path.clone(),
-                    span_start,
-                    span_end,
-                    DetectionRule::AttachedSubComponent,
-                )
-                .with_props_type_args(type_args)
-                .with_doc(description, tags)
-                .with_param_defaults(param_defaults),
-            );
+            self.record_inline_sub_component(key_name, "an Object.assign-attached", params, span_start, span_end);
         }
+    }
+
+    /// `Root.Item = (props: ItemProps) => …` at statement level: a sub-component that exists only on the assignment.
+    /// An assigned identifier is already detected under its own name and attached by `record_member_assignment`.
+    pub(super) fn try_scan_member_assigned_sub_component<'a>(&mut self, stmt: &ExpressionStatement<'a>) {
+        let Expression::AssignmentExpression(assignment) = &stmt.expression else { return };
+        let AssignmentTarget::StaticMemberExpression(target) = &assignment.left else { return };
+        let Expression::Identifier(parent) = &target.object else { return };
+        let key_name = target.property.name.as_str();
+        if !is_pascal_case(parent.name.as_str()) || !is_pascal_case(key_name) {
+            return;
+        }
+        let (params, span_start, span_end) = match super::component::peel_expr(&assignment.right) {
+            Expression::FunctionExpression(fe) => (&fe.params, fe.span.start, fe.span.end),
+            Expression::ArrowFunctionExpression(afe) => (&afe.params, afe.span.start, afe.span.end),
+            _ => return,
+        };
+        self.record_attached(key_name, parent.name.as_str());
+        self.record_inline_sub_component(key_name.to_owned(), "a property-assigned", params, span_start, span_end);
+    }
+
+    /// Map an inline function that carries a sub-component, or say why its props cannot be read. `how` completes
+    /// "'Item' is …  sub-component".
+    fn record_inline_sub_component(
+        &mut self,
+        key_name: String,
+        how: &str,
+        params: &FormalParameters<'_>,
+        span_start: u32,
+        span_end: u32,
+    ) {
+        let Some(first_param) = params.items.first() else { return };
+        let Some(type_ann) = &first_param.type_annotation else {
+            self.record_skip(
+                DiagnosticCode::SkippedCandidate,
+                format!("'{key_name}' is {how} sub-component with an untyped first param"),
+                first_param.span,
+            );
+            return;
+        };
+        let Some((props_name, type_args)) = self.extract_type_name_from_type(&type_ann.type_annotation) else {
+            self.record_skip(
+                DiagnosticCode::SkippedCandidate,
+                format!(
+                    "'{key_name}' is {how} sub-component whose first param's type \
+                     annotation isn't a recognizable props type reference"
+                ),
+                type_ann.span,
+            );
+            return;
+        };
+
+        let (description, tags) = self.find_jsdoc_with_tags(span_start);
+        let param_defaults = self.extract_param_defaults(params);
+        self.data.component_mappings.push(
+            ComponentMapping::new(
+                key_name,
+                props_name,
+                self.file_path.clone(),
+                span_start,
+                span_end,
+                DetectionRule::AttachedSubComponent,
+            )
+            .with_props_type_args(type_args)
+            .with_doc(description, tags)
+            .with_param_defaults(param_defaults),
+        );
     }
 }

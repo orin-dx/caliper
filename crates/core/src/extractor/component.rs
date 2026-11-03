@@ -742,7 +742,10 @@ impl<'src> SourceDataCollector<'src> {
         }
         // `getDisplayName(Card)` has the same shape as `memo(Card)` but returns a string; only a call that follows the
         // component-wrapper conventions produces a component.
-        let wrapper = super::evidence::Scope::is_react_wrapper(&*self, call) || is_component_wrapper_call(call);
+        // `Object.assign(Impl, { Item })` returns `Impl` itself with the statics attached.
+        let wrapper = super::evidence::Scope::is_react_wrapper(&*self, call)
+            || is_component_wrapper_call(call)
+            || super::uses::is_object_assign_call(call);
         // `forwardRef(Inner)` makes a component that takes a `ref` even when `Inner` is a plain typed function.
         Some((inner, Some(AliasCall { wrapper, forward_ref: self.is_forward_ref_call(call) })))
     }
