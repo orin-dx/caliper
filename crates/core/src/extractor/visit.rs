@@ -5,8 +5,8 @@ use oxc_ast_visit::{walk, Visit};
 use oxc_syntax::scope::ScopeFlags;
 
 use crate::types::{
-    CollectedInterface, CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode, EnumEntry, EnumValue, ExtendsRef,
-    ImportBinding, LexedExport, RawProp, TypeName,
+    CollectedInterface, CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode, EnumEntry, EnumValue,
+    ExtendsRef, ImportBinding, LexedExport, RawProp, TypeName,
 };
 
 use super::component::Binding;
