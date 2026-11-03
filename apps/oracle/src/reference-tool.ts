@@ -19,14 +19,14 @@ export interface Tool {
 }
 
 /** A component's props as one map of name to prop id (schema 2 lists prop-set ids, each such a map). */
-function propIds(caliper: any, component: any): Record<string, string> {
+export function propIds(caliper: any, component: any): Record<string, string> {
   const { props } = component
   if (!Array.isArray(props)) return props ?? {}
   return Object.assign({}, ...props.map((id: string) => caliper.propSets[id]))
 }
 
 /** The prop names a collapsed layer lists. The canonical JSON interns the list: `members` is an id into `nameLists`. */
-function layerMembers(caliper: any, layer: any): string[] {
+export function layerMembers(caliper: any, layer: any): string[] {
   const { members } = layer
   if (typeof members === 'string') return caliper.nameLists?.[members] ?? []
   return members ?? []
