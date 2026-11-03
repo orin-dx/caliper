@@ -264,13 +264,24 @@ jobs:
           tool: cargo-zigbuild
       - run: pnpm install --frozen-lockfile --filter caliper-docgen-napi
       - name: Build napi addon
+        if: "!matrix.zig"
         working-directory: packages/napi
         env:
           TARGET: ${{ matrix.target }}
-          ZIG: ${{ matrix.zig }}
+        run: pnpm napi build --platform --release --target "$TARGET" --manifest-path ../../crates/binding/Cargo.toml --output-dir .
+      # napi-rs reads a `.<version>` suffix on `--target` as part of the ABI and
+      # names the file `...linux-x64-gnu.2.28.node`, so the glibc floor is set by
+      # cargo-zigbuild directly and the library is placed at napi's own name.
+      - name: Build napi addon (glibc floor)
+        if: matrix.zig
+        env:
+          TARGET: ${{ matrix.target }}
+          PLATFORM: ${{ matrix.platform }}
           GLIBC: ${{ matrix.glibc }}
-        # A `.<version>` suffix on the target pins the glibc floor under zig.
-        run: pnpm napi build --platform --release --target "${TARGET}${GLIBC:+.$GLIBC}" ${ZIG:+--cross-compile} --manifest-path ../../crates/binding/Cargo.toml --output-dir .
+        run: |
+          set -euo pipefail
+          cargo zigbuild --release --locked -p caliper-docgen-napi --target "${TARGET}.${GLIBC}"
+          cp "target/${TARGET}/release/libcaliper_docgen_napi.so" "packages/napi/caliper_docgen_napi.${PLATFORM}.node"
       - name: Build CLI binary
         env:
           TARGET: ${{ matrix.target }}
@@ -470,7 +481,6 @@ jobs:
               [[ -f "$dir/$f" ]] || { echo "::error::missing $dir/$f"; exit 1; }
             done
           done
-      # npm and pnpm both read the user-level .npmrc.
       - name: Require registry credentials
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -484,6 +494,7 @@ jobs:
             fi
           done
           exit "$missing"
+      # npm and pnpm both read the user-level .npmrc.
       - name: Authenticate with the npm registry
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

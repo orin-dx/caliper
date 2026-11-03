@@ -1,4 +1,6 @@
 ---
+cargo/caliper-docgen: patch
+cargo/caliper-docgen-napi: patch
 npm/caliper-docgen: patch
 npm/caliper-docgen-napi: patch
 ---
