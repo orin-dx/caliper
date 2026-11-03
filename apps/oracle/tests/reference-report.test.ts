@@ -46,6 +46,9 @@ const rows: Row[] = [
     location: '/r/Mode.d.ts',
   }),
   row('f', { stratum: 'html', origin: 'html', tool: { outcome: 'missing' } }),
+  // The checker had no type and the declaration stood alone: `why` says the checker abstained, which is not the
+  // checker standing alone.
+  row('g', { basis: 'declaration', why: 'abstained', declared: 'number' }),
 ]
 
 describe('summarize', () => {
@@ -53,9 +56,10 @@ describe('summarize', () => {
 
   it('counts the reference by the methods that stood behind it', () => {
     expect.hasAssertions()
-    expect(s.sampled).toBe(6)
-    expect(s.reference).toStrictEqual({ agreed_both: 3, checker_only: 1, declaration_only: 0, contested: 2, none: 0 })
+    expect(s.sampled).toBe(7)
+    expect(s.reference).toStrictEqual({ agreed_both: 3, checker_only: 1, declaration_only: 1, contested: 2, none: 0 })
     expect(s.declaration_abstained).toStrictEqual({ 'no declaration': 1 })
+    // Only a row the checker stood behind alone: `g`, where the declaration did, is not one.
     expect(s.checker_alone_because).toStrictEqual({ abstained: 1 })
     expect(s.contested_kinds).toStrictEqual({ 'prim->prim': 1, 'name->union': 1 })
   })
@@ -63,7 +67,7 @@ describe('summarize', () => {
   it('counts a tool by outcome, the methods behind each, and the stratum', () => {
     expect.hasAssertions()
     expect(s.scored.props).toBe(5)
-    expect(s.scored.tool_unmatched).toBe(1)
+    expect(s.scored.tool_unmatched).toBe(2)
     expect(s.scored.outcomes).toStrictEqual({
       correct: 2,
       'less precise': 0,

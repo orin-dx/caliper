@@ -1,13 +1,12 @@
 // What the layer-only props of one corpus are (src/layer-only.ts), how the collapse threshold sorts them, and what a rule
 // by relevance would list that the size rule does not. Pure apart from the `read` it is given.
 import { classify, layerOnly, topApi, type Kind, type LayerOnly, type TopApi, type Why } from './layer-only.ts'
-import { layerMembers, propIds } from './reference-tool.ts'
+import { layerMembers, listedProps } from './canonical.ts'
 
 /** The collapse threshold: a dependency source declaring more props than this is one layer, not a list of props. */
 export const THRESHOLD = 30
 
 export interface Input {
-  name: string
   /** The canonical JSON at the default collapse (`dependencies`). */
   caliper: any
   /** The same run with `--collapse-inherited-props none`, for what listing the props would add. */
@@ -87,6 +86,22 @@ export function layerCounts(caliper: any) {
   }
 }
 
+/** How many component props a document lists: each component's own and curated inherited ones. */
+const listedCount = (caliper: any) =>
+  Object.values<any>(caliper.components).reduce((n, c) => n + Object.keys(listedProps(caliper, c)).length, 0)
+
+/** The configuration with nothing collapsed (`--collapse-inherited-props none`), which is the Storybook addon's default
+ * (`packages/storybook/src/provider.ts`), next to the default one. Nothing is collapsed there, so no prop is layer-only:
+ * what the layer-only measurement describes is the default configuration of the CLI, the NAPI binding and the Vite
+ * plugin, and an addon user already has every inherited prop listed. */
+function expandedConfig(caliper: any, expanded: any) {
+  return {
+    collapsed_layers: layerCounts(expanded).collapsed.layers,
+    layer_only_props: layerOnly(expanded).length,
+    listed_props: { default: listedCount(caliper), expanded: listedCount(expanded) },
+  }
+}
+
 /** What listing a set of layer-only props would add to the canonical JSON, from the fully expanded run: how many of
  * them it lists, and the bytes of their distinct prop entries plus one `name: id` per component. */
 function listing(items: LayerOnly[], expanded: any) {
@@ -95,7 +110,7 @@ function listing(items: LayerOnly[], expanded: any) {
   let nameBytes = 0
   for (const item of items) {
     const component = expanded.components[item.key]
-    const id = component ? propIds(expanded, component)[item.prop] : undefined
+    const id = component ? listedProps(expanded, component)[item.prop] : undefined
     if (id === undefined) continue
     listed++
     ids.add(id)
@@ -113,7 +128,7 @@ export function ambientListedToday(caliper: any) {
   let props = 0
   let nameBytes = 0
   for (const component of Object.values<any>(caliper.components)) {
-    for (const [name, id] of Object.entries(propIds(caliper, component))) {
+    for (const [name, id] of Object.entries(listedProps(caliper, component))) {
       const parent = caliper.props[id]?.parent
       const file = parent ? String(parent.fileName) : ''
       if (!file.includes('/node_modules/') || file.includes('/@types/react/')) continue
@@ -140,7 +155,7 @@ export function analyse(input: Input, read: (file: string) => string | undefined
     byLayer.set(key, (byLayer.get(key) ?? new Set()).add(c.kind))
   }
   const api = of('api').map((c) => c.item)
-  const near = api.filter((i) => i.layerSize <= 40)
+  const near = api.filter((i) => i.layerSize > THRESHOLD && i.layerSize <= 40)
   const effect = input.expanded
     ? {
         api: listing(api, input.expanded),
@@ -171,6 +186,7 @@ export function analyse(input: Input, read: (file: string) => string | undefined
       api_props_in_layers_of_31_to_40: near.length,
     },
     effect,
+    expanded_config: input.expanded ? expandedConfig(input.caliper, input.expanded) : undefined,
     ambient_listed_today: ambientListedToday(input.caliper),
     top_api: top,
   }

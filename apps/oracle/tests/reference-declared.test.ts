@@ -20,12 +20,18 @@ describe('annotationText', () => {
     expect(annotationText('onChange(value: string, event?: Event): void;')).toStrictEqual({
       text: '(value: string, event?: Event) => void',
     })
-    expect(annotationText('close();')).toStrictEqual({ text: '() => void' })
+    expect(annotationText('close(): void;')).toStrictEqual({ text: '() => void' })
   })
 
   it('reads a class property and ignores its initializer', () => {
     expect.hasAssertions()
     expect(annotationText("label: string = 'x'")).toStrictEqual({ text: 'string' })
+  })
+
+  it('abstains on a method with no return type, which is `any` or inferred, never `void`', () => {
+    expect.hasAssertions()
+    expect(annotationText('close();')).toStrictEqual({ abstained: 'no annotation' })
+    expect(annotationText('tick() { return 1 }')).toStrictEqual({ abstained: 'no annotation' })
   })
 
   it('abstains when nothing is annotated or the text is not a member', () => {

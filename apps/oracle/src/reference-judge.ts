@@ -29,6 +29,62 @@ export interface Scored {
   leans?: 'checker' | 'declaration'
 }
 
+/** A declared type with every name it mentions given itself as its alias, which is how `compare` takes a name for the
+ * type it stands for. Where the declaration stands alone the checker could not resolve the name (an unresolved import),
+ * so a tool that gives the same name matches it exactly; `compare` would read it as less precise. */
+function named(n: Norm): Norm {
+  switch (n.k) {
+    case 'name': {
+      return { ...n, alias: n.name }
+    }
+    case 'union':
+    case 'intersection': {
+      return { ...n, members: n.members.map((m) => named(m)) }
+    }
+    case 'array': {
+      return { ...n, element: named(n.element) }
+    }
+    case 'tuple': {
+      return { ...n, elements: n.elements.map((e) => named(e)) }
+    }
+    case 'function': {
+      return {
+        ...n,
+        params: n.params.map((p) => ({ ...p, type: named(p.type) })),
+        returns: named(n.returns),
+      }
+    }
+    default: {
+      return n
+    }
+  }
+}
+
+/** Whether a type mentions a name, which is a type this side cannot see into. */
+function mentionsName(n: Norm): boolean {
+  switch (n.k) {
+    case 'name': {
+      return true
+    }
+    case 'union':
+    case 'intersection': {
+      return n.members.some((m) => mentionsName(m))
+    }
+    case 'array': {
+      return mentionsName(n.element)
+    }
+    case 'tuple': {
+      return n.elements.some((e) => mentionsName(e))
+    }
+    case 'function': {
+      return n.params.some((p) => mentionsName(p.type)) || mentionsName(n.returns)
+    }
+    default: {
+      return false
+    }
+  }
+}
+
 /** A type the checker has nothing to say with: an error, `any`, or a top-level `unknown`. */
 const uninformative = (n: Norm) => n.k === 'error' || (n.k === 'prim' && (n.name === 'any' || n.name === 'unknown'))
 
@@ -41,7 +97,7 @@ export function reference(checker: Norm, declared: Norm | undefined): Reference 
   if (declared === undefined) {
     return hasA ? { kind: 'agreed', basis: 'checker', norm: checker, why: 'abstained' } : { kind: 'none' }
   }
-  if (!hasA) return { kind: 'agreed', basis: 'declaration', norm: declared, why: 'abstained' }
+  if (!hasA) return { kind: 'agreed', basis: 'declaration', norm: named(declared), why: 'abstained' }
   const verdict = compare(declared, checker)
   if (agrees(verdict)) return { kind: 'agreed', basis: 'both', norm: checker }
   // The declaration is looser than the checker's type (a name or an unbound parameter the checker evaluated): B said less.
@@ -63,5 +119,7 @@ export function score(tool: Norm | undefined, ref: Reference, layered: boolean):
   const verdict = compare(tool, ref.norm)
   if (verdict === 'checker any/error') return { outcome: 'no reference' }
   if (agrees(verdict)) return { outcome: 'correct', basis: ref.basis }
-  return { outcome: verdict === 'less precise' ? 'less precise' : 'wrong', basis: ref.basis }
+  // A declaration standing alone names types it cannot see into, so a mismatch with one is not proof of a wrong type.
+  const blind = ref.basis === 'declaration' && mentionsName(ref.norm)
+  return { outcome: verdict === 'less precise' || blind ? 'less precise' : 'wrong', basis: ref.basis }
 }

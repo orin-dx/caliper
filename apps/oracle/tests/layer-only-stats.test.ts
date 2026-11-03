@@ -105,7 +105,7 @@ describe('layerCounts', () => {
 })
 
 describe('analyse', () => {
-  const report = analyse({ name: 'x', caliper, expanded, bytes: { default: 1000, expanded: 1400 } }, () => undefined)
+  const report = analyse({ caliper, expanded, bytes: { default: 1000, expanded: 1400 } }, () => undefined)
 
   it('sorts the layer-only props, per component, into API and ambient with the clause that decided', () => {
     expect.hasAssertions()
@@ -144,8 +144,21 @@ describe('analyse', () => {
     expect(ambientListedToday(caliper)).toMatchObject({ props: 1, distinct_entries: 1 })
   })
 
-  it('has no effect without the expanded run', () => {
+  it('reports the fully expanded configuration beside the default one: nothing collapsed, so nothing layer-only', () => {
     expect.hasAssertions()
-    expect(analyse({ name: 'x', caliper }, () => undefined).effect).toBeUndefined()
+    // The Storybook addon runs at `none`, which lists every inherited prop. The default config lists 4 component props
+    // (A: own; B: own, size, onFocus) and holds 10 more as names; the expanded one lists all 14.
+    expect(report.expanded_config).toStrictEqual({
+      collapsed_layers: 0,
+      layer_only_props: 0,
+      listed_props: { default: 4, expanded: 14 },
+    })
+  })
+
+  it('has no effect and no expanded configuration without the expanded run', () => {
+    expect.hasAssertions()
+    const without = analyse({ caliper }, () => undefined)
+    expect(without.effect).toBeUndefined()
+    expect(without.expanded_config).toBeUndefined()
   })
 })

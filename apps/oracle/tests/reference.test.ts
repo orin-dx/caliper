@@ -19,6 +19,11 @@ export function Button(props: ButtonProps) { return null }
 export function Merged(props: ButtonProps & { id: string }) { return null }
 export function Picked(props: Pick<ButtonProps, 'count'>) { return null }
 export function Generic<T>(props: { value: T; render: (item: T) => string }) { return null }
+// Props the checker infers: no declaration of theirs writes a type, so the declaration can say nothing.
+const defaults = { count: 1 }
+export function Counter(props: typeof defaults) { return null }
+const handlers = { tick() { return 1 } }
+export function Ticker(props: typeof handlers) { return null }
 `
 
 const TSCONFIG = {
@@ -38,12 +43,16 @@ let rows: Row[]
 let report: any
 let again: string
 let reported: Row[]
+let listedReport: any
+let listedRows: Row[]
 
 function run(out: string, extra: Record<string, unknown> = {}): void {
   const config = join(dir, 'config.json')
   writeFileSync(
     config,
     JSON.stringify({
+      perCorpus: 100,
+      seed: 'test',
       ...extra,
       corpora: [
         {
@@ -54,8 +63,6 @@ function run(out: string, extra: Record<string, unknown> = {}): void {
           caliper: join(dir, 'caliper.json'),
         },
       ],
-      perCorpus: 100,
-      seed: 'test',
       out,
     }),
   )
@@ -102,6 +109,28 @@ beforeAll(() => {
   again = readFileSync(join(dir, 'again.json.rows.json'), 'utf8')
   run(join(dir, 'reported.json'))
   reported = JSON.parse(readFileSync(join(dir, 'reported.json.rows.json'), 'utf8'))
+  // A list: two props the checker finds (one under its display name), three it cannot, and one for another corpus.
+  const at = (name: string, prop: string, over: Record<string, string> = {}) => ({
+    corpus: 'fixture',
+    file: 'src/Button.tsx',
+    component: name,
+    prop,
+    ...over,
+  })
+  writeFileSync(
+    join(dir, 'list.json'),
+    JSON.stringify([
+      at('Button', 'count'),
+      at('Button (src/Button.tsx)', 'size'),
+      at('Missing', 'x'),
+      at('Button', 'count', { file: 'src/Other.tsx' }),
+      at('Button', 'nope'),
+      at('Button', 'count', { corpus: 'elsewhere' }),
+    ]),
+  )
+  run(join(dir, 'listed.json'), { allComponents: true, perCorpus: 0, list: join(dir, 'list.json') })
+  listedReport = JSON.parse(readFileSync(join(dir, 'listed.json'), 'utf8'))
+  listedRows = JSON.parse(readFileSync(join(dir, 'listed.json.rows.json'), 'utf8'))
 }, 120_000)
 
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
@@ -109,7 +138,7 @@ afterAll(() => rmSync(dir, { recursive: true, force: true }))
 describe('the reference on a fixture corpus', () => {
   it('judges every prop of every exported component, and is the same on a second run', () => {
     expect.hasAssertions()
-    expect(rows).toHaveLength(14)
+    expect(rows).toHaveLength(16)
     expect(again).toBe(JSON.stringify(rows, null, 1))
   })
 
@@ -145,8 +174,52 @@ describe('the reference on a fixture corpus', () => {
   it('leaves a prop of a component Caliper does not report unscored, and says how many', () => {
     expect.hasAssertions()
     expect(find('Generic', 'value').tool).toBeUndefined()
-    expect(report.fixture.scored.tool_unmatched).toBe(2)
+    expect(report.fixture.scored.tool_unmatched).toBe(4)
     expect(report.fixture.scored.props).toBe(12)
+  })
+
+  it('has the declaration abstain for a prop the checker infers, and never contests the checker over it', () => {
+    expect.hasAssertions()
+    // `const defaults = { count: 1 }`: the declaration `count: 1` is a value, not a literal type annotation.
+    expect(find('Counter', 'count')).toMatchObject({
+      reference: 'agreed',
+      basis: 'checker',
+      why: 'abstained',
+      abstained: 'unsupported declaration',
+      checker: 'number',
+    })
+    // `tick() { return 1 }` has no return type to read; it is not `() => void`.
+    expect(find('Ticker', 'tick')).toMatchObject({
+      reference: 'agreed',
+      basis: 'checker',
+      abstained: 'no annotation',
+      checker: '() => number',
+    })
+  })
+
+  it('judges the listed props the checker finds, normalizing a display name, and reports the ones it cannot find', () => {
+    expect.hasAssertions()
+    expect(listedRows.map((r) => `${r.component}.${r.prop}:${r.stratum}`).toSorted()).toStrictEqual([
+      'Button.count:listed',
+      'Button.size:listed',
+    ])
+    // Six entries, one for another corpus: five are this corpus's, two found.
+    expect(listedReport.fixture.listed).toStrictEqual({
+      requested: 5,
+      found: 2,
+      missing: ['src/Button.tsx: Button.nope', 'src/Button.tsx: Missing.x', 'src/Other.tsx: Button.count'],
+    })
+  })
+
+  it('counts the listed props that name a corpus the run does not have, instead of dropping them', () => {
+    expect.hasAssertions()
+    expect(listedReport.listed_for_other_corpora).toStrictEqual({ count: 1, corpora: ['elsewhere'] })
+    expect(report.listed_for_other_corpora).toStrictEqual({ count: 0, corpora: [] })
+  })
+
+  it('reports no list when none was given', () => {
+    expect.hasAssertions()
+    expect(report.fixture.listed).toStrictEqual({ requested: 0, found: 0, missing: [] })
   })
 
   it('draws the control sample only from the components the tool reports, unless told to take them all', () => {

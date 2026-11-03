@@ -2,13 +2,23 @@
 """The independent type reference on the pinned corpora (apps/oracle/src/reference.ts).
 
 For each installed corpus it builds the checker's inputs, runs Caliper once, and judges a seeded, stratified control sample
-of props (plus any props a --list file names) by two independent methods: the type the TypeScript checker reports and the
-type each declaration writes. A prop is scored against them: correct when Caliper agrees with both, contested when they
-disagree with each other (the contested props go to a review file for a person), wrong when it contradicts a method the
-other backs. Output goes to --out-dir, outside tracked files by default.
+of props (plus any props a --list file names) by two methods that fail differently: the type the TypeScript checker reports
+(A) and the type each declaration writes (B). Each prop gets a reference from them, and Caliper's type is scored against
+that reference as correct, less precise or wrong:
+
+- Both methods agree: the reference rests on both. A and B agree on structure for some props and only on a bare alias name
+  for others, so even this is not always strong evidence.
+- B abstains or says less (a computed, named, mapped or inferred type): the reference rests on the checker alone. That is a
+  minority of props, but a real one, and it is exactly where a checker-backed mode would agree with the checker by
+  construction. The report counts scores by which method stood behind them (`correct_by_basis`, `wrong_by_basis`), so read
+  a score together with its basis.
+- The checker has no type and B does: the reference rests on the declaration alone, and a mismatch is never called wrong
+  where the declaration only names a type.
+- A and B contradict each other: the prop is contested, listed in review.md for a person and counted for no tool.
 
 --list FILE is a JSON array of {corpus, file, component, prop} to judge besides the control sample, for example the props
-two Caliper modes differ on. --no-tool judges the reference only, without scoring Caliper.
+two Caliper modes differ on; the report says how many listed props the checker found and names the rest. --no-tool judges
+the reference only, without scoring Caliper. Output goes to --out-dir, outside tracked files by default.
 
 Usage: scripts/reference_sample.py --bin BIN [--corpus NAME]... [--corpora DIR] [--per-corpus N] [--seed S]
                                    [--list FILE] [--out-dir DIR] [--no-tool]

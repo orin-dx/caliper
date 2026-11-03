@@ -27,7 +27,7 @@ for (const corpus of config.corpora) {
   const bytes = corpus.expanded
     ? { default: statSync(corpus.default).size, expanded: statSync(corpus.expanded).size }
     : undefined
-  const input = { name: corpus.name, caliper: JSON.parse(readFileSync(corpus.default, 'utf8')), expanded, bytes }
+  const input = { caliper: JSON.parse(readFileSync(corpus.default, 'utf8')), expanded, bytes }
   report[corpus.name] = analyse(input, readFile, config.top ?? 20)
 }
 writeFileSync(config.out, JSON.stringify(report, null, 2))

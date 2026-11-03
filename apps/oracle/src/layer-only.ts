@@ -1,12 +1,13 @@
 // Props that reach a reader only as a name: a collapsed inheritance layer lists the names it declares (`members`, an
 // interned name list in the canonical JSON) and the component's `props` does not hold them. This sorts those props into
-// AMBIENT (what every element has, or a style system: a Storybook controls table would not lead with them) and API (what
-// a dependency's component exposes: its modes, state and composition), by a rule that reads only the layer's type name,
-// its file and the prop's name. It measures; it does not change the resolver. Pure apart from `declaredMemberType`,
-// which reads one declaration file.
+// AMBIENT (what every element has, or a style system: a props table would not lead with them) and API (what a
+// dependency's component exposes: its modes, state and composition), by a rule that reads only the layer's type name,
+// its file and the prop's name. It describes the default collapse (`dependencies`) of the CLI, the NAPI binding and the
+// Vite plugin; the Storybook addon runs at `none` and collapses nothing. It measures; it does not change the resolver.
+// Pure apart from `declaredMemberType`, which reads one declaration file.
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
-import { layerMembers, propIds } from './reference-tool.ts'
+import { layerMembers, listedProps } from './canonical.ts'
 
 /** One prop a collapsed layer names and the component does not list. */
 export interface LayerOnly {
@@ -21,7 +22,8 @@ export interface LayerOnly {
 }
 
 export type Kind = 'api' | 'ambient'
-/** Which clause of the rule decided: the layer's file, the layer's type, a style system, a global attribute, or none. */
+/** Which clause of the rule decided: the layer's file, the layer's type, a style system, a global attribute, or, when none
+ * of those fits, the prop is a dependency's API. */
 export type Why = 'dom file' | 'dom type' | 'style type' | 'global attribute' | 'dependency api'
 
 /** The attributes every element has, which no component's API is about. `defaultValue`, `value`, `type`, `name` and the
@@ -56,7 +58,7 @@ const STYLE_TYPE =
 export function layerOnly(caliper: any): LayerOnly[] {
   const out: LayerOnly[] = []
   for (const [key, component] of Object.entries<any>(caliper.components)) {
-    const listed = { ...propIds(caliper, component), ...propIds(caliper, { props: component.notableInherited }) }
+    const listed = listedProps(caliper, component)
     const seen = new Set<string>()
     for (const layer of component.inheritance ?? []) {
       for (const prop of layerMembers(caliper, layer)) {
@@ -100,7 +102,7 @@ export const CATEGORIES: { name: string; match: RegExp; matters: string }[] = [
     name: 'state',
     match:
       /^(value|defaultValue|checked|defaultChecked|open|defaultOpen|visible|selected\w*|expanded\w*|on(Value|Open|Checked|Selected|Expanded)?Change|onClose|onOpen|afterOpenChange)$/,
-    matters: 'what the component holds or reports, so the controls that drive it',
+    matters: 'what the component holds or reports, so what a reader sets to drive it',
   },
   {
     name: 'mode',

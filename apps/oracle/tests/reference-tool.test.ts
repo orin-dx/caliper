@@ -22,18 +22,27 @@ beforeAll(() => {
           filePath: file,
           // Schema 2: a component lists prop-set ids, each a map of prop name to prop id.
           props: ['set1'],
+          // The curated props of a collapsed source, which a props table lists after the component's own. A prop named
+          // in both is the component's own.
+          notableInherited: { notable: 'p2', count: 'p9' },
           // The members are interned: an id into `nameLists`. An older output lists them inline.
           inheritance: [
             { typeName: 'DOMEvents', members: 'list1' },
             { typeName: 'Legacy', members: ['legacyProp'] },
           ],
         },
+        // The same two lists in schema 2's form: arrays of prop-set ids.
+        Packed: { displayName: 'Packed', filePath: file, props: ['set1'], notableInherited: ['setN'] },
         'Twin (a)': { displayName: 'Twin', filePath: file, props: {} },
         'Twin (b)': { displayName: 'Twin', filePath: file, props: {} },
       },
-      propSets: { set1: { count: 'p1' } },
+      propSets: { set1: { count: 'p1' }, setN: { notable: 'p2' } },
       nameLists: { list1: ['onCopy', 'onCut'] },
-      props: { p1: { type: { kind: 'number' } } },
+      props: {
+        p1: { type: { kind: 'number' } },
+        p2: { type: { kind: 'string' } },
+        p9: { type: { kind: 'boolean' } },
+      },
     }),
   )
   tool = loadTool(join(dir, 'caliper.json'), dir)
@@ -49,6 +58,19 @@ describe('loadTool', () => {
       norm: prim('number'),
       layered: false,
     })
+  })
+
+  it('gives the type of a curated prop the component inherits, and the component’s own prop wins a clash', () => {
+    expect.hasAssertions()
+    expect(tool.lookup('Button.tsx', 'Button', 'notable')).toStrictEqual({
+      found: true,
+      norm: prim('string'),
+      layered: false,
+    })
+    // `count` is in both: the own `number`, not the notable `boolean`.
+    expect(tool.lookup('Button.tsx', 'Button', 'count').norm).toStrictEqual(prim('number'))
+    // The same, in schema 2's array form.
+    expect(tool.lookup('Button.tsx', 'Packed', 'notable').norm).toStrictEqual(prim('string'))
   })
 
   it('reads a collapsed layer’s interned member list, and an inline one, as surfacing the prop', () => {
