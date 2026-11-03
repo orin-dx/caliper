@@ -1,3 +1,7 @@
+//! The watch session: an eager or lazy view of the extraction output that follows the files as they change.
+
+#![deny(missing_docs)]
+
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -205,6 +209,7 @@ fn merge_lazy_updates(steps: Vec<IncrementalUpdate>, revision: u64, start: Insta
 /// A lazy session ([`WatchSession::lazy`], ADR 0016) parses and indexes every file and resolves a component only when
 /// [`WatchSession::component`] asks for it; the rest of this API behaves as for an eager one.
 pub struct WatchSession {
+    /// The options the session was created with.
     pub options: PipelineOptions,
     current: ArcSwapOption<Revision>,
     writer: Mutex<Freshness>,
@@ -228,7 +233,9 @@ impl std::fmt::Debug for WatchSession {
 /// What a lazy session has indexed and answered so far.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LazyStats {
+    /// The number of the session's current revision.
     pub revision: u64,
+    /// Source files the session holds.
     pub files: usize,
     /// Components found by parsing.
     pub components: usize,
