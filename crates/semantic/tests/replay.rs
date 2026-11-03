@@ -24,11 +24,16 @@ struct Project {
 /// The fixture project in a scratch directory whose name has an upper-case letter (see `replay_tsc.rs`), with
 /// `replay-tsc` installed as `node_modules/typescript/bin/tsc` when `with_tsc`.
 fn project(with_tsc: bool) -> Project {
+    project_of("project", &["Button.tsx", "tsconfig.json"], with_tsc)
+}
+
+/// The same, for the fixture project `tests/fixtures/<fixture>` with the files named.
+fn project_of(fixture: &str, files: &[&str], with_tsc: bool) -> Project {
     let dir = tempfile::Builder::new().prefix("Replay").tempdir().unwrap();
     let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
     let fixtures = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    for name in ["Button.tsx", "tsconfig.json"] {
-        std::fs::copy(fixtures.join("project").join(name), root.join(name)).unwrap();
+    for name in files {
+        std::fs::copy(fixtures.join(fixture).join(name), root.join(name)).unwrap();
     }
     if with_tsc {
         let package = root.join("node_modules/typescript");
@@ -44,12 +49,22 @@ fn structural(project: &Project) -> ExtractionOutput {
 }
 
 fn request(project: &Project, output: &ExtractionOutput, scenario: Option<&str>) -> SemanticRequest {
+    request_replaying(project, output, scenario, "recording.json")
+}
+
+/// The same, answered from `tests/fixtures/<recording>`.
+fn request_replaying(
+    project: &Project,
+    output: &ExtractionOutput,
+    scenario: Option<&str>,
+    recording: &str,
+) -> SemanticRequest {
     let mut request = SemanticRequest::new(project.root.clone(), targets_of(output));
     request.expected_versions = &[FAKE_VERSION];
     request.request_timeout = Duration::from_secs(20);
     request
         .extra_env
-        .push(("REPLAY_FIXTURE".to_string(), format!("{}/tests/fixtures/recording.json", env!("CARGO_MANIFEST_DIR"))));
+        .push(("REPLAY_FIXTURE".to_string(), format!("{}/tests/fixtures/{recording}", env!("CARGO_MANIFEST_DIR"))));
     if let Some(scenario) = scenario {
         request.extra_env.push(("REPLAY_SCENARIO".to_string(), scenario.to_string()));
     }
@@ -105,6 +120,87 @@ fn function_components_get_the_checkers_props_merged_over_the_structural_ones() 
     assert_eq!(size.default_value, structural_size.default_value, "the default value stays structural");
 
     assert_eq!(prop(&output, "Other", "a").prop_type, PropType::Number);
+}
+
+/// The checker keeps a name that starts with two underscores in its escaped form, with a third added; the name a
+/// reader sees is the one the source writes.
+#[test]
+fn a_prop_name_that_starts_with_underscores_is_the_name_the_source_writes() {
+    let project = project_of("markers", &["Markers.tsx", "tsconfig.json"], true);
+    let mut output = structural(&project);
+    let structural_names: Vec<_> = output.components["Markers"].props.keys().cloned().collect();
+    assert_eq!(structural_names, ["___triple", "__size", "_single", "plain"]);
+
+    let outcome = resolve(request_replaying(&project, &output, None, "markers.recording.json"));
+    assert!(outcome.diagnostics.is_empty(), "{:?} / {:?}", outcome.diagnostics, outcome.fallbacks);
+
+    let answered = &outcome.components.iter().find(|component| component.display_name == "Markers").unwrap().props;
+    let mut answered_names: Vec<_> = answered.iter().map(|prop| prop.name.as_str()).collect();
+    answered_names.sort_unstable();
+    assert_eq!(answered_names, ["___triple", "__size", "_single", "plain"], "the checker's `___size` is not a prop");
+
+    merge_semantic(&mut output, outcome);
+    let names: Vec<_> = output.components["Markers"].props.keys().cloned().collect();
+    assert_eq!(names, ["___triple", "__size", "_single", "plain"]);
+    assert_eq!(prop(&output, "Markers", "__size").prop_type, PropType::String);
+    assert_eq!(prop(&output, "Markers", "___triple").prop_type, PropType::Boolean);
+    assert_eq!(prop(&output, "Markers", "_single").prop_type, PropType::Number);
+}
+
+/// A parameter written `name?: T` or `...name: T[]` keeps its marker, so the type reads as the source writes it, and a
+/// parameter whose type merely includes `undefined` does not become optional.
+#[test]
+fn function_parameters_keep_their_optional_and_rest_markers() {
+    let project = project_of("markers", &["Markers.tsx", "tsconfig.json"], true);
+    let output = structural(&project);
+
+    let outcome = resolve(request_replaying(&project, &output, None, "markers.recording.json"));
+    assert!(outcome.diagnostics.is_empty(), "{:?} / {:?}", outcome.diagnostics, outcome.fallbacks);
+
+    let callbacks = &outcome.components.iter().find(|component| component.display_name == "Callbacks").unwrap().props;
+    let params = |name: &str| match &callbacks.iter().find(|prop| prop.name == name).unwrap().prop_type {
+        PropType::Function { params, return_type, .. } => (params.clone(), (**return_type).clone()),
+        other => panic!("{name} is not a function: {other:?}"),
+    };
+    let param = |name: &str, param_type: PropType, optional: bool, rest: bool| FunctionParam {
+        name: Some(name.to_string()),
+        param_type,
+        optional,
+        rest,
+    };
+
+    assert_eq!(
+        params("format"),
+        (
+            vec![
+                param("percent", PropType::Number, true, false),
+                param("rest", PropType::Array(Box::new(PropType::String)), false, true),
+            ],
+            PropType::String
+        )
+    );
+    assert_eq!(
+        params("close"),
+        (vec![param("args", PropType::Array(Box::new(PropType::Any)), false, true)], PropType::Void)
+    );
+    assert_eq!(
+        params("onClick"),
+        (vec![param("e", PropType::Named { name: "Event".into(), args: vec![] }, true, false)], PropType::Void)
+    );
+    assert_eq!(
+        params("plain"),
+        (vec![param("a", PropType::Number, false, false), param("b", PropType::String, true, false)], PropType::Void)
+    );
+    assert_eq!(
+        params("explicit"),
+        (
+            vec![
+                param("a", PropType::Number, false, false),
+                param("b", PropType::Union(vec![PropType::Undefined, PropType::String]), false, false),
+            ],
+            PropType::Void
+        )
+    );
 }
 
 #[test]

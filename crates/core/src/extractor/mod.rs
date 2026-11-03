@@ -140,6 +140,11 @@ fn max_bracket_nesting_depth(source: &str) -> usize {
     max_depth
 }
 
+/// Whether `path` names a TypeScript source: the one list that source discovery and dependency loading both use.
+pub(crate) fn is_typescript(path: &std::path::Path) -> bool {
+    matches!(path.extension().and_then(|extension| extension.to_str()), Some("ts" | "tsx" | "mts" | "cts"))
+}
+
 /// Parse a single file and collect all extractable data.
 ///
 /// Completely pure — no I/O, no side effects, no cross-file dependencies.
