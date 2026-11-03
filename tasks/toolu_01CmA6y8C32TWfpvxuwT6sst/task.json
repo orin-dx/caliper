@@ -1,0 +1,18 @@
+{
+  "tool_use_id": "toolu_01CmA6y8C32TWfpvxuwT6sst",
+  "agent_id": "a38446f204db70024",
+  "subagent_type": "general-purpose",
+  "task_description": "Trail 208 schema drift guards",
+  "files": [
+    ".changeset/schema-detected-by.md"
+  ],
+  "token_usage": {
+    "input_tokens": 102,
+    "cache_creation_tokens": 91609,
+    "cache_read_tokens": 4310048,
+    "output_tokens": 18923,
+    "api_call_count": 51
+  },
+  "started_at": "2026-11-02T17:36:52.676295-08:00",
+  "completed_at": "2026-11-02T17:44:10.966342-08:00"
+}

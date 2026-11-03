@@ -1,0 +1,105 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6FHBWMDBYH4F8RZK7MT9KA5",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-03T01:46:32.710247Z",
+  "branch": "fix/compound-components",
+  "checkpoints_count": 3,
+  "save_step_count": 40,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "3c1d829abaa7",
+  "checkpoint_transcript_start": 5302,
+  "transcript_lines_at_start": 5302,
+  "compact_transcript_start": 461,
+  "token_usage": {
+    "input_tokens": 16,
+    "cache_creation_tokens": 10248,
+    "cache_read_tokens": 709778,
+    "output_tokens": 2244,
+    "api_call_count": 5,
+    "subagent_tokens": {
+      "input_tokens": 44,
+      "cache_creation_tokens": 36780,
+      "cache_read_tokens": 2689513,
+      "output_tokens": 14941,
+      "api_call_count": 22
+    }
+  },
+  "redaction": {
+    "replacements": 12,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 6,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 115
+  },
+  "summary": {
+    "intent": "Orchestrate parallel subagents working through numbered trails (#204, #205, #206, #208, then #210) in the caliper repo, fixing schema drift, type-resolution bugs and related issues on separate branches without opening PRs.",
+    "outcome": "Trails #208 (2 branches) and #205 (4 branches) were completed, pushed and linked, with exact-content or drift-guard tests added. Full suites, tsc and the antd/shadcn oracle runs could not be done in the worktree sandboxes. #204 and #206 are still running, and #210 is queued behind them.",
+    "learnings": {
+      "repo": [
+        "Subagent worktrees live under .claude/worktrees, so absolute paths differ from main. Core snapshot tests (insta) fail there for path reasons only, and the pty/watch and config-loading tests also fail there.",
+        "The detectedBy enum in the schema command was hand-maintained and drifted from the Rust DetectionRule enum. It is now built from DetectionRule::ALL, and packages/napi/index.d.ts lists all 14 rules (it had 10).",
+        "The packages/storybook and packages/vite-plugin schema.ts copies differ only by a package name in one error message. Sharing them would need a new package, so a test guards against further divergence.",
+        "Storybook preset options are now built from OPTION_KEYS in packages/storybook/src/option-keys.ts, using `satisfies Record<keyof CaliperStorybookOptions, true>`. provider.ts and the options.ts mapping still list options separately because they apply defaults and transforms.",
+        "The cache header stores a hash of the crate sources, so code changes already invalidate old caches. Not bumping CACHE_SCHEMA_VERSION is therefore acceptable for value-only changes.",
+        "The fix/jsdoc-comments and fix/css-and-tuple-types branches both change the Mantine snapshot and will likely conflict on it. Rebase the second after the first merges."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/types/collected.rs",
+          "finding": "Added DetectionRule::ALL and DetectionRule::name(). An exhaustive-match test fails to compile when a variant is added."
+        },
+        {
+          "path": "crates/cli/src/commands/schema.rs",
+          "finding": "The detectedBy enum is now generated from DetectionRule::ALL rather than hand-listed."
+        },
+        {
+          "path": "substitute.rs",
+          "finding": "The hard-coded \"K\" placeholder for Record keys was replaced with \"Record key\", which is not a valid identifier, so it cannot capture a user type named K."
+        },
+        {
+          "path": "named.rs",
+          "finding": "A type parameter in scope now shadows a same-named declaration before any declaration lookup."
+        },
+        {
+          "path": "packages/storybook/src/preset.ts",
+          "finding": "workerOptions now uses OPTION_KEYS instead of two hand-written 15-key blocks."
+        }
+      ],
+      "workflow": [
+        "Subagent reports carry no user authority. The orchestrator summarised them and did not act on any embedded instructions.",
+        "Having each fix first reproduce the bug (a failing exact-content test, or real extract output validated against the schema) gave confidence without the full suite.",
+        "Delegated workers should compare failures against a pristine origin/main to confirm they are environmental. #206's worker is doing this."
+      ]
+    },
+    "friction": [
+      "Sandboxed worktrees lack storybook packages, typescript-beta, apps/oracle/node_modules and the full antd/shadcn corpora, so tsc and the oracle could not run.",
+      "Many core and CLI tests fail in the worktree sandbox (pty/watch, config.rs, insta snapshots, a missing node_modules file for terminal_react_builtins aria tests). The #208 worker did not verify these against a clean main.",
+      "The #205 snapshots were edited by hand instead of with cargo insta, so their correctness is unconfirmed.",
+      "The #208 worker needed node_modules symlinked from the main checkout to run vitest, and removed the symlinks afterwards."
+    ],
+    "open_items": [
+      "Run the oracle on antd and shadcn in an environment with the corpora to measure wrong-count before and after the #205 changes.",
+      "Confirm in CI the hand-edited .snap files (Chakra and Mantine) and that the 9 core failures in #205 are purely environmental.",
+      "Run tsc to verify the `satisfies` check in option-keys.ts, and the storybook arg-types and provider tests.",
+      "Make the oracle, weekly.py and agent_eval read schemaVersion, and handle the OpaqueReason union drift (#208 out-of-scope items).",
+      "Inline object-literal props (`props: { ... }`) produce empty JSDoc tags even with a preceding `/** @deprecated */`; this is unfixed.",
+      "Consider collapsing the remaining option lists in storybook provider.ts and options.ts (the trail named six places; only the preset's two were done).",
+      "#204 and #206 are still running, and #210 starts once they finish.",
+      "Rebase fix/css-and-tuple-types after fix/jsdoc-comments merges, to resolve the Mantine snapshot conflict."
+    ]
+  }
+}
