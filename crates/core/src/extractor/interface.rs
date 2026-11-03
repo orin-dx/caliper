@@ -378,6 +378,26 @@ impl<'src> SourceDataCollector<'src> {
         let (params, span_start, span_end) = match super::component::peel_expr(&assignment.right) {
             Expression::FunctionExpression(fe) => (&fe.params, fe.span.start, fe.span.end),
             Expression::ArrowFunctionExpression(afe) => (&afe.params, afe.span.start, afe.span.end),
+            Expression::CallExpression(call) => {
+                // `Root.Item = memo(...)` is a component this scan cannot read; any other call (`createContext`)
+                // is not a component, so it is not reported.
+                let wrapper = match super::component::peel_expr(&call.callee) {
+                    Expression::Identifier(id) => id.name.as_str(),
+                    Expression::StaticMemberExpression(member) => member.property.name.as_str(),
+                    _ => return,
+                };
+                if matches!(wrapper, "memo" | "forwardRef") {
+                    self.record_skip(
+                        DiagnosticCode::SkippedCandidate,
+                        format!(
+                            "'{key_name}' is a property-assigned sub-component wrapped in {wrapper}(), which is not \
+                             read; only an inline function or a named component is"
+                        ),
+                        call.span,
+                    );
+                }
+                return;
+            }
             _ => return,
         };
         self.record_attached(key_name, parent.name.as_str());

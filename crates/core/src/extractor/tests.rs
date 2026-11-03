@@ -2812,6 +2812,46 @@ fn a_property_assigned_inline_sub_component_is_emitted() {
 }
 
 #[test]
+fn a_property_assigned_memo_or_forward_ref_sub_component_is_reported_as_skipped() {
+    let source = "interface P { a: string }\n\
+        export const Root = (props: P) => <div />;\n\
+        Root.Item = memo((props: P) => <i />);\n\
+        Root.Label = forwardRef<HTMLElement, P>((props, ref) => <b />);";
+    let data = parse_file(Utf8Path::new("/test/compound.tsx"), source);
+    let skipped: Vec<&str> = data
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::SkippedCandidate)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(
+        skipped,
+        [
+            "'Item' is a property-assigned sub-component wrapped in memo(), which is not read; only an inline \
+             function or a named component is",
+            "'Label' is a property-assigned sub-component wrapped in forwardRef(), which is not read; only an \
+             inline function or a named component is",
+        ]
+    );
+}
+
+#[test]
+fn a_property_assigned_value_that_is_not_a_component_wrapper_gets_no_skip_note() {
+    let source = "interface P { a: string }\n\
+        export const Root = (props: P) => <div />;\n\
+        Root.Context = createContext(null);\n\
+        Root.Version = 1;";
+    let data = parse_file(Utf8Path::new("/test/compound.tsx"), source);
+    let skipped: Vec<&str> = data
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::SkippedCandidate)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(skipped, Vec::<&str>::new());
+}
+
+#[test]
 fn unrelated_object_assign_call_is_not_treated_as_a_component_pattern() {
     let source = r#"
         const config = {};
