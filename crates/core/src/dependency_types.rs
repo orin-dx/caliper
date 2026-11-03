@@ -73,7 +73,7 @@ impl Unresolved {
 }
 
 fn is_typescript(path: &Utf8Path) -> bool {
-    matches!(path.extension(), Some("ts" | "tsx" | "mts" | "cts"))
+    crate::extractor::is_typescript(path.as_std_path())
 }
 
 // ─── Demands ──────────────────────────────────────────────────────────────────

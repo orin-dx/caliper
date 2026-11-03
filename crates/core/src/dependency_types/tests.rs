@@ -967,6 +967,20 @@ fn watch_revisions_with_dependencies_match_a_cold_extract() {
     }
 }
 
+#[test]
+fn a_save_made_just_after_initialize_is_seen_by_the_first_ensure_fresh() {
+    let first = "export function Badge(props: { one: string }) { return null; }\n";
+    let (_tmp, root) = project(&[("src/Badge.tsx", first)]);
+    let session = crate::pipeline::WatchSession::new(options(&root, true));
+    let _initial = session.initialize();
+    std::fs::write(root.join("src/Badge.tsx"), "export function Badge(props: { two: string }) { return null; }\n")
+        .unwrap();
+
+    let _update = session.ensure_fresh();
+
+    assert_eq!(prop_types(&session.snapshot(), "Badge"), [("two".into(), "string".into())]);
+}
+
 /// A revision whose edit first reaches React's `CSSProperties` extends the layer with csstype as a cold run loads it.
 #[test]
 fn a_watch_revision_that_first_reads_a_react_member_matches_a_cold_extract() {
