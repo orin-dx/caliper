@@ -13,6 +13,7 @@ import {
   type PropsShape,
   type ValueKind,
 } from './reference-sample.ts'
+import { normComponent, pathKey } from './tool-universe.ts'
 
 /** A prop the checker found, with what judging it needs. */
 export interface Entry {
@@ -47,19 +48,6 @@ export interface CollectOptions {
   accept?: (file: string, component: string) => boolean
 }
 
-/** Names the checker finds for a component, matching src/oracle.ts's `normComponent`. */
-export const normComponent = (name: string) =>
-  (
-    name
-      .replace(/ \(.*\)$/, '')
-      .split('/')
-      .at(-1) ?? ''
-  )
-    .split('.')
-    .at(-1)!
-    .replaceAll(/[^A-Za-z0-9]/g, '')
-
-const lower = (path: string) => path.toLowerCase()
 const GENERIC = TypeFlags.TypeParameter | TypeFlags.IndexedAccess | TypeFlags.Conditional | TypeFlags.Substitution
 const LITERAL = TypeFlags.StringLiteral | TypeFlags.NumberLiteral | TypeFlags.BooleanLiteral | TypeFlags.EnumLiteral
 const UTILITIES = new Set(['Pick', 'Omit', 'Partial', 'Required', 'Readonly', 'Record'])
@@ -98,10 +86,10 @@ function shapeOf(propsType: any): PropsShape {
 
 function originOf(declaration: string | undefined, file: string): Origin {
   if (declaration === undefined) return 'own'
-  const path = lower(declaration)
+  const path = pathKey(declaration)
   if (path.includes('/@types/react/')) return 'html'
   if (path.includes('/node_modules/')) return 'dependency'
-  return path === lower(file) ? 'own' : 'extends'
+  return path === pathKey(file) ? 'own' : 'extends'
 }
 
 /** What a prop's type is, from the checker's flags and, for a union or object, its members' call signatures. */

@@ -3,6 +3,8 @@
 //! Inspired by `michi`'s zero-dep trait architecture and `callisto`'s modular design.
 //! Plugins can hook into extraction events to transform AST data or enrich component entries.
 
+#![deny(missing_docs)]
+
 use std::sync::Arc;
 
 use crate::types::{ComponentEntry, SourceData};
@@ -32,18 +34,23 @@ pub struct PluginRegistry {
 }
 
 impl PluginRegistry {
+    /// An empty registry: no plugin runs.
     pub fn new() -> Self {
         Self { plugins: Vec::new() }
     }
 
+    /// Adds `plugin`; plugins run in the order they were added.
     pub fn register<P: DocgenPlugin + 'static>(&mut self, plugin: P) {
         self.plugins.push(Arc::new(plugin));
     }
 
+    /// Adds a plugin that is already shared.
     pub fn register_arc(&mut self, plugin: Arc<dyn DocgenPlugin>) {
         self.plugins.push(plugin);
     }
 
+    /// Runs every plugin's `on_file_extracted` over `data`. A plugin that panics is contained and reported as an
+    /// `InternalPanic` diagnostic naming it; the others still run.
     pub fn run_on_file_extracted(
         &self,
         file_path: &camino::Utf8Path,
@@ -59,6 +66,8 @@ impl PluginRegistry {
         diagnostics
     }
 
+    /// Runs every plugin's `on_component_resolved` over `entry`, with the same panic containment as
+    /// [`run_on_file_extracted`](Self::run_on_file_extracted).
     pub fn run_on_component_resolved(&self, entry: &mut ComponentEntry) -> Vec<crate::types::Diagnostic> {
         let mut diagnostics = Vec::new();
         for plugin in &self.plugins {

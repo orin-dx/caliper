@@ -18,7 +18,8 @@ import { reference, score, type Reference } from './reference-judge.ts'
 import { informative, reviewText, summarize, type Row } from './reference-report.ts'
 import { keyOf, stratified, stratumOf, type Candidate } from './reference-sample.ts'
 import { loadTool, type Tool } from './reference-tool.ts'
-import { collect, normComponent, type Entry, type Universe } from './reference-universe.ts'
+import { collect, type Entry, type Universe } from './reference-universe.ts'
+import { normComponent } from './tool-universe.ts'
 
 interface CorpusConfig {
   name: string

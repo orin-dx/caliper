@@ -102,6 +102,8 @@ function convert(node: ts.TypeNode, depth: number): Norm {
       }))
       return { k: 'function', params, returns: only.type ? inner(only.type) : OPAQUE }
     }
+    // A member with no type (`{string}`) is not something either tool states: RDT prints a type it could not name that way.
+    if (node.members.some((m) => ts.isPropertySignature(m) && !m.type)) return OPAQUE
     const fields = node.members.flatMap((m) => {
       const name = ts.isPropertySignature(m) || ts.isMethodSignature(m) ? memberName(m.name) : undefined
       return name === undefined ? [] : [name]

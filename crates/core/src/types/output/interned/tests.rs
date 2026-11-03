@@ -411,3 +411,53 @@ fn reading_an_affects_id_missing_from_the_name_lists_fails_naming_it() {
         format!("name list id {} is not in the `nameLists` table", PropId::of_list(&["Button".to_string()]))
     );
 }
+
+fn diagnostic_affecting(names: &[&str]) -> Diagnostic {
+    Diagnostic {
+        severity: DiagnosticSeverity::Warning,
+        message: "a diagnostic".to_string(),
+        file: None,
+        line: None,
+        column: None,
+        help: None,
+        code: DiagnosticCode::UnresolvableImport,
+        affects: names.iter().map(|name| name.to_string()).collect(),
+    }
+}
+
+#[test]
+fn affects_lists_interned_on_many_threads_match_a_serial_pass() {
+    // Enough diagnostics to be split across threads, with empty lists, repeated lists and lists that share a prefix.
+    let pools: [&[&str]; 6] = [&[], &["A"], &["A", "B"], &["A", "B", "C"], &["B"], &["Button", "Card", "Modal"]];
+    let diagnostics: Vec<Diagnostic> =
+        (0..500).map(|at| diagnostic_affecting(pools[(at * 7 + at / 3) % pools.len()])).collect();
+
+    let mut lists = NameLists::new();
+    let interned = InternedDiagnostics::new::<serde_json::Error>(&mut lists, &diagnostics).unwrap();
+
+    let mut serial_lists = NameLists::new();
+    let serial: Vec<Option<ListId>> = diagnostics
+        .iter()
+        .map(|diagnostic| match diagnostic.affects.is_empty() {
+            true => None,
+            false => Some(add_list::<serde_json::Error>(&mut serial_lists, &diagnostic.affects).unwrap()),
+        })
+        .collect();
+
+    assert_eq!(interned.affects, serial);
+    assert_eq!(lists, serial_lists);
+    assert_eq!(lists.len(), 5, "the five distinct non-empty lists, each once");
+}
+
+#[test]
+fn two_different_name_lists_with_one_id_fail_instead_of_sharing_an_entry() {
+    let (first, second) = (vec!["A".to_string()], vec!["B".to_string()]);
+    let mut lists = NameLists::new();
+
+    insert_list::<serde_json::Error>(&mut lists, PropId(7), &first).unwrap();
+    insert_list::<serde_json::Error>(&mut lists, PropId(7), &first).unwrap();
+    let clash = insert_list::<serde_json::Error>(&mut lists, PropId(7), &second).unwrap_err().to_string();
+
+    assert!(clash.starts_with("two different name lists have the same id 0000000000000007: "), "{clash}");
+    assert_eq!(lists.len(), 1);
+}

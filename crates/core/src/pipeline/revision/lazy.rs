@@ -5,6 +5,8 @@
 //! its resolution reached, and memoizes the result. The memo follows the same dependency tracking watch mode uses
 //! (`Resolved::affected_by`), so an edit drops exactly the entries it can change.
 
+#![deny(missing_docs)]
+
 use std::sync::Mutex;
 
 use arc_swap::ArcSwap;
@@ -79,7 +81,9 @@ mod off_pool_tests {
 /// to that key.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ComponentAnswer {
+    /// The component's output key: its bare name, or `Name (file)` when two components share the name.
     pub key: String,
+    /// The component's entry, the same one a batch run publishes under `key`.
     pub entry: ComponentEntry,
     /// This component's diagnostics only, each with `affects` set to `[key]`.
     pub diagnostics: Vec<Diagnostic>,
@@ -88,8 +92,11 @@ pub struct ComponentAnswer {
 /// Where a component is declared, for a host that finds one by file and name before it asks for the props.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComponentLocation {
+    /// The component's output key.
     pub key: String,
+    /// The file that declares the component.
     pub file_path: Utf8PathBuf,
+    /// The component's name as the extractor found it.
     pub display_name: String,
 }
 

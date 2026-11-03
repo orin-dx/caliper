@@ -174,7 +174,7 @@ pub(crate) struct Revision {
 
 /// Frees `value` on another thread. Freeing a large project's parsed data or memos one allocation at a time takes tens
 /// of milliseconds, and the caller only wants what it already took out.
-fn free_in_background<T: Send + 'static>(value: T) {
+pub(super) fn free_in_background<T: Send + 'static>(value: T) {
     let spawned = std::thread::Builder::new().name("caliper-drop".into()).spawn(move || drop(value));
     // A failed spawn drops the closure, and the value with it, right here.
     drop(spawned);

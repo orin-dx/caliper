@@ -3,7 +3,7 @@
 import { readFileSync, realpathSync } from 'node:fs'
 import { relative } from 'node:path'
 import { caliperNorm, type Norm } from './oracle-compare.ts'
-import { normComponent } from './reference-universe.ts'
+import { normComponent } from './tool-universe.ts'
 
 interface Located {
   name: string
