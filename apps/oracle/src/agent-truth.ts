@@ -10,6 +10,7 @@
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { API, SignatureKind, SymbolFlags, TypeFlags } from 'typescript-beta/sync'
+import { exportName, propsTypeOf } from './checker-components.ts'
 
 const KEYS = ['root', 'tsconfig', 'questions', 'corpus', 'out'] as const
 const args: Partial<Record<(typeof KEYS)[number], string>> = {}
@@ -43,29 +44,6 @@ const api = new API({ cwd: root })
 const { options } = api.parseConfigFile(args.tsconfig)
 const program = api.createProgram(files, options)
 const { checker } = program.getProject()
-
-/** The props type of a component export, the way src/oracle.ts finds it (the same rule as react-docgen-typescript). */
-function propsTypeOf(exported: any): any | undefined {
-  const symbol = exported.flags & SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported
-  const type = checker.getTypeOfSymbol(symbol)
-  for (const sig of checker.getSignaturesOfType(type, SignatureKind.Call)) {
-    const params = sig.getParameters()
-    if (params.length === 1 || params[0]?.name === 'props') return checker.getTypeOfSymbol(params[0])
-  }
-  for (const sig of checker.getSignaturesOfType(type, SignatureKind.Construct)) {
-    if (sig.getParameters().length > 1) continue
-    const props = checker.getPropertyOfType(sig.getReturnType(), 'props')
-    if (props) return checker.getTypeOfSymbol(props)
-  }
-  return undefined
-}
-
-/** A default export is named by what it exports: the aliased declaration, or the function or class itself. */
-function exportName(exported: any): string {
-  if (exported.name !== 'default') return exported.name
-  if (exported.flags & SymbolFlags.Alias) return checker.getAliasedSymbol(exported).name
-  return checker.getTypeOfSymbol(exported).getSymbol()?.name ?? 'default'
-}
 
 const without = (type: any) => checker.getNonNullableType(type)
 
@@ -101,11 +79,11 @@ function answer(q: Question): Truth {
   if (!moduleSymbol) return { invalid: `the checker has no module for ${q.file}` }
   const exported = checker
     .getExportsOfModule(moduleSymbol)
-    .find((e: any) => e.name === q.component || (e.name === 'default' && exportName(e) === q.component))
+    .find((e: any) => e.name === q.component || (e.name === 'default' && exportName(checker, e) === q.component))
   let props: any[] = []
   if (exported) {
     try {
-      const propsType = propsTypeOf(exported)
+      const propsType = propsTypeOf(checker, exported)
       props = propsType ? checker.getPropertiesOfType(propsType) : []
     } catch {
       props = []

@@ -47,14 +47,22 @@ build:
     moon run napi:build vite-plugin:build
     cargo build --release
 
-# Run all tests (Rust + TypeScript)
-test: test-rust test-ts
+# Run all tests (Rust, the native binding crate, TypeScript, Python)
+test: test-rust test-napi test-ts test-py
 
 # Run Rust tests (via nextest, which doesn't run doctests — paired
 # with `cargo test --doc` to cover those too)
 test-rust:
     cargo nextest run --workspace --exclude caliper-docgen-napi --locked
     cargo test --doc --workspace --exclude caliper-docgen-napi
+
+# The binding crate is excluded from the workspace recipes, so its own unit tests run here.
+test-napi:
+    cargo nextest run -p caliper-docgen-napi --locked
+
+# Run the Python tests for the weekly and agent-eval scripts (standard library only, no dependencies)
+test-py:
+    python3 -m unittest discover -s scripts -p 'test_*.py'
 
 # Run TypeScript tests
 test-ts:
