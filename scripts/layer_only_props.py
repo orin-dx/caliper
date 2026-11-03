@@ -6,8 +6,7 @@ sorts every prop a collapsed layer names and the component does not list into AM
 system) and API (what a dependency's component exposes), by a rule that reads only the layer's type, its file and the
 prop's name (docs/measurement.md, "Layer-only props"). It reports how many of each, the API props that matter most, how
 the layers fall either side of the 30-prop collapse threshold, and what listing the API props would add to the output.
-This describes the default collapse of the CLI, the NAPI binding and the Vite plugin (`dependencies`). The Storybook addon
-defaults to `none`, which collapses nothing, so it has no layer-only props; the expanded run is that configuration.
+Which configuration this describes is in docs/measurement.md, "Which configuration this describes".
 Measurement only: it does not change the resolver.
 
 --runs N times each mode N times, interleaved, and reports the fastest wall time and the largest peak RSS. Output goes to

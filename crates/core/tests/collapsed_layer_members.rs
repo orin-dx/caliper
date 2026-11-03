@@ -24,7 +24,8 @@ fn source() -> String {
          interface FromSmall extends Small {{ own?: boolean }}\n\
          export function WithInterface(props: FromInterface) {{ return null; }}\n\
          export function WithAlias(props: FromAlias) {{ return null; }}\n\
-         export function WithSmall(props: FromSmall) {{ return null; }}\n"
+         export function WithSmall(props: FromSmall) {{ return null; }}\n\
+         export function WithOmit(props: Omit<Big, 'p0'> & {{ own?: boolean }}) {{ return null; }}\n"
     )
 }
 
@@ -82,6 +83,19 @@ fn with_collapse_off_every_prop_is_listed_and_no_layer_has_members() {
     let output = run(CollapseInheritedProps::None);
     assert_eq!(props(&output, "WithInterface").len(), 32);
     assert!(output.components["WithInterface"].inheritance.iter().all(|layer| layer.members.is_empty()));
+}
+
+#[test]
+fn an_omitted_prop_is_not_a_member_of_the_layer_it_was_omitted_from() {
+    let output = run(CollapseInheritedProps::All);
+    let layer = &output.components["WithOmit"].inheritance[0];
+    assert_eq!(layer.type_name, "Big");
+    let mut expected: Vec<String> = names("p").into_iter().filter(|name| name != "p0").collect();
+    expected.sort();
+    let mut members = layer.members.clone();
+    members.sort();
+    assert_eq!(members, expected);
+    assert_eq!(layer.total_props, 30);
 }
 
 #[test]

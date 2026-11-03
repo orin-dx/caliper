@@ -104,6 +104,17 @@ describe('layerCounts', () => {
   })
 })
 
+describe('a collapsed source that lists a curated prop', () => {
+  it('is not counted as an expanded dependency source', () => {
+    expect.hasAssertions()
+    const withCurated = {
+      ...caliper,
+      props: { ...caliper.props, cls: prop('className', { name: 'DepProps', fileName: DEP }) },
+    }
+    expect(expandedDependencySources(withCurated)).toStrictEqual(expandedDependencySources(caliper))
+  })
+})
+
 describe('analyse', () => {
   const report = analyse({ caliper, expanded, bytes: { default: 1000, expanded: 1400 } }, () => undefined)
 

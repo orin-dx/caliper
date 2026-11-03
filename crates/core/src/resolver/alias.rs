@@ -45,6 +45,13 @@ pub(super) fn resolve_type_alias_chain(
             chain.notable.retain(|p| !omitted_set.contains(p.name.as_str()));
             // Record omitted keys in the relevant inheritance layer.
             for layer in &mut chain.inheritance {
+                // A collapsed layer names the props it holds, so an omitted one is no longer held.
+                if !layer.members.is_empty() {
+                    let held = layer.members.len();
+                    layer.members.retain(|name| !omitted_set.contains(name.as_str()));
+                    layer.total_props =
+                        layer.total_props.saturating_sub(u32::try_from(held - layer.members.len()).unwrap_or(0));
+                }
                 for key in &omitted {
                     if !layer.omitted.contains(key) {
                         layer.omitted.push(key.clone());

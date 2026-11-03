@@ -2,8 +2,8 @@
 // interned name list in the canonical JSON) and the component's `props` does not hold them. This sorts those props into
 // AMBIENT (what every element has, or a style system: a props table would not lead with them) and API (what a
 // dependency's component exposes: its modes, state and composition), by a rule that reads only the layer's type name,
-// its file and the prop's name. It describes the default collapse (`dependencies`) of the CLI, the NAPI binding and the
-// Vite plugin; the Storybook addon runs at `none` and collapses nothing. It measures; it does not change the resolver.
+// its file and the prop's name. Which configuration it describes is in docs/measurement.md ("Which configuration this
+// describes"). It measures; it does not change the resolver.
 // Pure apart from `declaredMemberType`, which reads one declaration file.
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'

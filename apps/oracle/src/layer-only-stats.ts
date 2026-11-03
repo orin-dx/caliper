@@ -32,14 +32,22 @@ const layerKind = (l: { layer: string; file: string }): Kind =>
   classify({ layer: l.layer, layerFile: l.file, prop: '' }).kind
 
 /** The dependency sources whose props the output lists one by one: each prop records the type that declares it (`parent`),
- * so a source is a distinct type and file, and its size the number of its props listed. Not `@types/react`'s. */
+ * so a source is a distinct type and file, and its size the number of its props listed. Not `@types/react`'s. A collapsed
+ * source is not one: it still lists its curated props (`className`) with itself as their parent. */
 export function expandedDependencySources(caliper: any): { layer: string; file: string; size: number }[] {
+  const collapsed = new Set<string>()
+  for (const component of Object.values<any>(caliper.components)) {
+    for (const layer of component.inheritance ?? []) {
+      if (layerMembers(caliper, layer).length > 0) collapsed.add(`${layer.typeName}\u0000${layer.fileName}`)
+    }
+  }
   const sources = new Map<string, { layer: string; file: string; names: Set<string> }>()
   for (const prop of Object.values<any>(caliper.props)) {
     const { parent } = prop
     const file = parent ? String(parent.fileName) : ''
     if (!file.includes('/node_modules/') || file.includes('/@types/react/')) continue
     const key = `${parent.name}\u0000${file}`
+    if (collapsed.has(key)) continue
     const source = sources.get(key) ?? { layer: parent.name, file, names: new Set() }
     source.names.add(prop.name)
     sources.set(key, source)
@@ -90,10 +98,8 @@ export function layerCounts(caliper: any) {
 const listedCount = (caliper: any) =>
   Object.values<any>(caliper.components).reduce((n, c) => n + Object.keys(listedProps(caliper, c)).length, 0)
 
-/** The configuration with nothing collapsed (`--collapse-inherited-props none`), which is the Storybook addon's default
- * (`packages/storybook/src/provider.ts`), next to the default one. Nothing is collapsed there, so no prop is layer-only:
- * what the layer-only measurement describes is the default configuration of the CLI, the NAPI binding and the Vite
- * plugin, and an addon user already has every inherited prop listed. */
+/** The configuration with nothing collapsed (`--collapse-inherited-props none`), which is the Storybook addon's, next to
+ * the default one (docs/measurement.md, "Which configuration this describes"). Nothing is collapsed there. */
 function expandedConfig(caliper: any, expanded: any) {
   return {
     collapsed_layers: layerCounts(expanded).collapsed.layers,
