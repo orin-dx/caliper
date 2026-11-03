@@ -80,6 +80,11 @@ fn resolve_named_uncycled(
         return OpaqueDetail::give_up(state, name.to_string(), OpaqueReason::DepthExceeded, diag);
     }
 
+    // ── 0. A type parameter in scope shadows any declaration of the same name ──
+    if args.is_empty() && state.has_type_param(name) {
+        return PropType::Named { name: name.clone(), args: Vec::new() };
+    }
+
     // ── 1. React builtin check ────────────────────────────────────────────────
     let lookup_name = name.strip_prefix("React.").unwrap_or(name.as_str());
     // React's meaning only for React's binding: a project's own `ReactNode` or `Ref` resolves as declared below.

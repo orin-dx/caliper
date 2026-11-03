@@ -3980,3 +3980,35 @@ export function Row(props: { render: ({ id }: { id: string }, index?: number) =>
         "(__0: { id: string }, index?: number) => void"
     );
 }
+
+#[test]
+fn record_over_a_union_keeps_a_user_type_named_k_as_its_value() {
+    let output = extract_one(&[("Box.tsx", "type K = { x: number };\nexport function Box(props: Record<'a' | 'b', K>) { return null; }\n")]);
+    let props = &output.components["Box"].props;
+    let mut names: Vec<&str> = props.keys().map(String::as_str).collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["a", "b"]);
+    let k = PropType::Object(vec![ObjectField {
+        name: "x".into(),
+        prop_type: PropType::Number,
+        required: true,
+        description: String::new(),
+        readonly: false,
+        index_key: None,
+    }]);
+    assert_eq!(props["a"].prop_type, k);
+    assert_eq!(props["b"].prop_type, k);
+}
+
+#[test]
+fn a_function_type_parameter_shadows_an_outer_alias_of_the_same_name_in_every_use() {
+    let output = extract_one(&[(
+        "Field.tsx",
+        "type Value = { outer: true };\n\
+         export function Field<Value>(p: { value: Value; onChange(v: Value): void }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Field"].props;
+    assert_eq!(props["value"].prop_type, PropType::Named { name: "Value".into(), args: vec![] });
+    assert_eq!(props["onChange"].prop_type.raw_string(), "(v: Value) => void");
+}
