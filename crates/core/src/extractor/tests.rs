@@ -2764,6 +2764,38 @@ fn a_component_declared_inside_a_function_body_is_reported_not_mapped() {
 }
 
 #[test]
+fn a_component_cast_to_vfc_or_void_function_component_keeps_its_props() {
+    let source = "import type { VFC, VoidFunctionComponent } from 'react';\n\
+        import { forwardRef } from 'react';\n\
+        interface Props { label: string }\n\
+        const InnerA = forwardRef<HTMLDivElement, Props>((props, ref) => <div ref={ref} />);\n\
+        const InnerB = forwardRef<HTMLDivElement, Props>((props, ref) => <div ref={ref} />);\n\
+        const A = InnerA as VFC<{ a: string }>;\n\
+        const B = InnerB as VoidFunctionComponent<{ b: string }>;\n\
+        export { A, B };";
+    let data = parse_file(Utf8Path::new("/fixtures/cast.tsx"), source);
+    let props: Vec<(&str, &str)> =
+        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.props_type_name.as_str())).collect();
+    let cast: Vec<&str> = props.iter().filter(|(_, p)| p.contains("CastProps")).map(|(n, _)| *n).collect();
+    assert_eq!(cast, ["A", "B"], "props types were {props:?}");
+}
+
+#[test]
+fn preact_compat_element_type_is_react_everywhere() {
+    let source = "import type { ReactElement } from 'preact/compat';\n\
+        function build(): ReactElement { throw new Error(); }\n\
+        export function Name(props: { id: string }) { return build(); }";
+    assert_eq!(components_in(source), ["Name"]);
+}
+
+#[test]
+fn a_call_to_h_is_render_evidence() {
+    let source = "import { h } from 'preact';\n\
+        export function Name(props: { id: string }) { return h('div', null, props.id); }";
+    assert_eq!(components_in(source), ["Name"]);
+}
+
+#[test]
 fn unrelated_object_assign_call_is_not_treated_as_a_component_pattern() {
     let source = r#"
         const config = {};

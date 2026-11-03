@@ -23,13 +23,13 @@ const COMPONENT_TYPES: &[&str] = &[
     "NamedExoticComponent",
     "ForwardRefExoticComponent",
     "ExoticComponent",
-    "FC",
-    "FunctionComponent",
-    "VFC",
-    "VoidFunctionComponent",
-    "ComponentType",
     "JSXElementConstructor",
 ];
+
+/// Whether `name` (without any `React.` prefix) is a React type whose first type argument is a component's props.
+fn is_component_type(name: &str) -> bool {
+    COMPONENT_TYPES.contains(&name) || crate::react_types::FC_FAMILY_TYPE_NAMES.contains(&name)
+}
 
 /// Aliases followed from the result type to the component type; the bound only guards against a cycle.
 const MAX_DEPTH: u8 = 8;
@@ -287,7 +287,7 @@ fn component_props_type(
             Some((params.first()?.clone(), file.to_owned(), type_params.clone()))
         }
         CollectedType::Named { name, args } => {
-            if COMPONENT_TYPES.contains(&name.strip_prefix("React.").unwrap_or(name)) {
+            if is_component_type(name.strip_prefix("React.").unwrap_or(name)) {
                 return Some((args.first()?.clone(), file.to_owned(), Vec::new()));
             }
             // `MemoExoticComponent<typeof Impl>` wraps a component, whose props are the component's.
@@ -307,7 +307,7 @@ fn component_props_type(
                     let (ExtendsRef::SameFile { name: base, type_args }
                     | ExtendsRef::Imported { local_name: base, type_args, .. }
                     | ExtendsRef::Builtin { name: base, type_args, .. }) = extends;
-                    if !COMPONENT_TYPES.contains(&base.strip_prefix("React.").unwrap_or(base)) {
+                    if !is_component_type(base.strip_prefix("React.").unwrap_or(base)) {
                         return None;
                     }
                     let props = type_args.first()?;

@@ -101,7 +101,7 @@ impl<'src> SourceDataCollector<'src> {
             || super::component::is_component_wrapper_call(call)
             || matches!(
                 super::component::peel_expr(&call.callee),
-                Expression::Identifier(id) if id.name == "createElement"
+                Expression::Identifier(id) if id.name == "createElement" || id.name == "h"
             )
             || matches!(
                 super::component::peel_expr(&call.callee),

@@ -101,6 +101,11 @@ pub fn is_attribute_builtin(bare_name: &str) -> bool {
     matches!(bare_name, "AriaAttributes" | "RefAttributes")
 }
 
+/// The `@types/react` function-component types, whose first type argument is the props. The one list the extractor
+/// and the resolver both read, so a name added here is recognised by both.
+pub const FC_FAMILY_TYPE_NAMES: &[&str] =
+    &["FC", "FunctionComponent", "VFC", "VoidFunctionComponent", "ComponentType"];
+
 /// Types that are terminal — never need further resolution.
 ///
 /// These are React-specific type names that we recognize as builtins and don't
@@ -110,6 +115,7 @@ pub fn is_attribute_builtin(bare_name: &str) -> bool {
 /// from `PipelineOptions.extra_builtins` without needing to change this file.
 pub fn is_react_builtin(name: &str, extra: &rustc_hash::FxHashSet<compact_str::CompactString>) -> bool {
     extra.contains(name)
+        || FC_FAMILY_TYPE_NAMES.contains(&name)
         || matches!(
             name,
             "ReactNode"
@@ -147,11 +153,6 @@ pub fn is_react_builtin(name: &str, extra: &rustc_hash::FxHashSet<compact_str::C
                 | "SubmitEventHandler"
                 | "InputEventHandler"
                 | "ToggleEventHandler"
-                | "FC"
-                | "FunctionComponent"
-                | "VFC"
-                | "VoidFunctionComponent"
-                | "ComponentType"
                 | "PropsWithChildren"
                 | "PropsWithRef"
                 | "RefObject"

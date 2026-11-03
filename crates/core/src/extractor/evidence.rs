@@ -17,7 +17,7 @@ pub(super) type NoRender = &'static str;
 const ELEMENT_TYPE_NAMES: &[&str] = &["Element", "ReactElement", "ReactNode", "ReactPortal", "JSX"];
 
 /// Callees that produce an element.
-const ELEMENT_FACTORIES: &[&str] = &["createElement", "cloneElement", "jsx", "jsxs", "jsxDEV", "createPortal"];
+const ELEMENT_FACTORIES: &[&str] = &["createElement", "cloneElement", "jsx", "jsxs", "jsxDEV", "createPortal", "h"];
 
 /// Whether a type name, as written in this file, can be React's or the global `JSX` namespace's. Given the name's
 /// leftmost segment (`React` for `React.ReactNode`), so an element-like name imported from another module does not
@@ -281,7 +281,7 @@ pub(super) fn element_helpers(program: &Program<'_>) -> FxHashSet<String> {
     let mut foreign = FxHashSet::default();
     for stmt in &program.body {
         if let Statement::ImportDeclaration(import) = stmt {
-            if import.source.value != "react" && !import.source.value.starts_with("react/") {
+            if !super::is_react_module(&super::js_text::lossy(import.source.value)) {
                 for spec in import.specifiers.iter().flatten() {
                     foreign.insert(spec.local().name.to_string());
                 }

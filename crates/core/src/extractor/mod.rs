@@ -663,7 +663,7 @@ impl<'src> SourceDataCollector<'src> {
             .imports
             .iter()
             .find(|imp| imp.local_name.as_str() == name)
-            .is_none_or(|imp| imp.specifier == "react" || imp.specifier.starts_with("react/"))
+            .is_none_or(|imp| is_react_module(&imp.specifier))
     }
 
     // ─── ExtendsRef classification ────────────────────────────────────────────
