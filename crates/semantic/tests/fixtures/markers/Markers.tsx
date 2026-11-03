@@ -11,3 +11,18 @@ interface Props {
 export function Markers(props: Props) {
   return null;
 }
+
+interface CallbackProps {
+  /** An optional parameter, then a rest parameter. */
+  format?: (percent?: number, ...rest: string[]) => string;
+  close?: (...args: any[]) => void;
+  onClick?: (e?: Event) => void;
+  /** A required parameter, then an optional one. */
+  plain: (a: number, b?: string) => void;
+  /** `undefined` written in the type, which is not the same as optional. */
+  explicit: (a: number, b: string | undefined) => void;
+}
+
+export function Callbacks(props: CallbackProps) {
+  return null;
+}

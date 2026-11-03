@@ -147,6 +147,62 @@ fn a_prop_name_that_starts_with_underscores_is_the_name_the_source_writes() {
     assert_eq!(prop(&output, "Markers", "_single").prop_type, PropType::Number);
 }
 
+/// A parameter written `name?: T` or `...name: T[]` keeps its marker, so the type reads as the source writes it, and a
+/// parameter whose type merely includes `undefined` does not become optional.
+#[test]
+fn function_parameters_keep_their_optional_and_rest_markers() {
+    let project = project_of("markers", &["Markers.tsx", "tsconfig.json"], true);
+    let output = structural(&project);
+
+    let outcome = resolve(request_replaying(&project, &output, None, "markers.recording.json"));
+    assert!(outcome.diagnostics.is_empty(), "{:?} / {:?}", outcome.diagnostics, outcome.fallbacks);
+
+    let callbacks = &outcome.components.iter().find(|component| component.display_name == "Callbacks").unwrap().props;
+    let params = |name: &str| match &callbacks.iter().find(|prop| prop.name == name).unwrap().prop_type {
+        PropType::Function { params, return_type, .. } => (params.clone(), (**return_type).clone()),
+        other => panic!("{name} is not a function: {other:?}"),
+    };
+    let param = |name: &str, param_type: PropType, optional: bool, rest: bool| FunctionParam {
+        name: Some(name.to_string()),
+        param_type,
+        optional,
+        rest,
+    };
+
+    assert_eq!(
+        params("format"),
+        (
+            vec![
+                param("percent", PropType::Number, true, false),
+                param("rest", PropType::Array(Box::new(PropType::String)), false, true),
+            ],
+            PropType::String
+        )
+    );
+    assert_eq!(
+        params("close"),
+        (vec![param("args", PropType::Array(Box::new(PropType::Any)), false, true)], PropType::Void)
+    );
+    assert_eq!(
+        params("onClick"),
+        (vec![param("e", PropType::Named { name: "Event".into(), args: vec![] }, true, false)], PropType::Void)
+    );
+    assert_eq!(
+        params("plain"),
+        (vec![param("a", PropType::Number, false, false), param("b", PropType::String, true, false)], PropType::Void)
+    );
+    assert_eq!(
+        params("explicit"),
+        (
+            vec![
+                param("a", PropType::Number, false, false),
+                param("b", PropType::Union(vec![PropType::Undefined, PropType::String]), false, false),
+            ],
+            PropType::Void
+        )
+    );
+}
+
 #[test]
 fn provenance_lists_the_resolved_components_and_the_one_the_module_does_not_export() {
     let project = project(true);

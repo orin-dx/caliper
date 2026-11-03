@@ -81,6 +81,9 @@ pub(crate) struct TypeInfo {
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct SignatureInfo {
     pub id: u64,
+    /// `SignatureFlags`; see [`flag::SIGNATURE_HAS_REST_PARAMETER`].
+    #[serde(default)]
+    pub flags: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -117,6 +120,9 @@ pub(crate) mod flag {
     pub(crate) const INTERSECTION: u64 = 268435456;
     pub(crate) const SYMBOL_ALIAS: u64 = 2097152;
     pub(crate) const SYMBOL_OPTIONAL: u64 = 16777216;
+    /// `SignatureFlags.HasRestParameter`: the signature's last parameter is a rest parameter. The beta sets it for
+    /// `(...args: T[]) => R` and for `(a?: A, ...rest: B[]) => R`, and leaves every other signature at 0.
+    pub(crate) const SIGNATURE_HAS_REST_PARAMETER: u64 = 1;
     pub(crate) const OBJECT_REFERENCE: u64 = 4;
 }
 
