@@ -18,7 +18,8 @@
 //! Clauses 1 to 3 decide a whole source: an ambient source is one the resolver may collapse, and only when it is also
 //! large (`ResolutionContext::collapses`: a layer record costs more than a handful of props, and listing a small
 //! ambient source gives `aria-label` and `id` their types). Clause 4 decides a prop of a source the first three did not
-//! match; it never collapses a source on its own. A source that is API (clause 5) is never collapsed, however large.
+//! match; it never collapses a source on its own. A source that is API (clause 5) collapses only past
+//! `LARGE_API_SOURCE` props, which no API measured on the pinned corpora and on apps reaches.
 
 /// The attributes every element has, which no component's API is about. `defaultValue`, `value`, `type`, `name` and
 /// the like are not here: they are element-specific, and a dependency's component often uses them as its own API.

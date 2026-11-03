@@ -37,7 +37,7 @@ impl HtmlAttributeMode {
 
 /// Which inherited sources are recorded as an `InheritedLayer` of names instead of expanded prop by prop (collapse).
 /// A component's own props type is always expanded. A dependency source collapses when it is ambient (DOM and ARIA
-/// attributes, style systems) and declares more than 30 props; a dependency's own API is always listed.
+/// attributes, style systems) and declares more than 30 props; a dependency's own API is listed unless it declares more than 200 props.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CollapseInheritedProps {
