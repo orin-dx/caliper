@@ -4,6 +4,8 @@
 
 **Note (2026-11-02):** `ExtractionOutput` has had a `schemaVersion` since ADR 0017, so the last Consequences bullet no longer applies to it. "Stays free of I/O" means no compiler process: `crates/core` reads and writes files itself (discovery, module resolution, the caches) and spawns nothing.
 
+**Note (2026-11-02):** The "must notify" Consequences bullet is met by dropping answers, not by notifying tsc. The on-demand checker roots a small program at the requested files on each request (`crates/semantic/src/on_demand.rs`) and is sent no change notification. Instead `SemanticHook::invalidate` clears every cached checker answer, and refuses one still on its way, whenever the session publishes a revision (`WatchSession::update_file`, `ensure_fresh`, `rebuilt` and `cold`; #300), so the next request of each component asks the checker again. Three tests in `crates/core/tests/semantic_hook.rs` pin it: an edit to an imported file, the same through `ensure_fresh`, and a late answer that arrives after an edit. Not built: invalidating only the components that depend on the changed file (it clears all answers today), and the parity test against `extract()`. The one parity test that exists compares the whole-project merge with the session merge on a single component, not a session after an edit with a cold extraction.
+
 ## Context
 
 The structural resolver can't substitute generics through alias chains or evaluate conditional and mapped types. Ten components account for 2,696 of the 2,720 props missing against react-docgen-typescript (RDT) in the 2026-07-25 baseline (`docs/benchmarks.md`). ADR 0004 deferred a fix until TypeScript 7 offered a usable route.

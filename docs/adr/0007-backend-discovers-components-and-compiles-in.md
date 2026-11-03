@@ -4,6 +4,8 @@
 
 **Note (2026-11-02):** The first Decision bullet (discovery) is not built. `merge_semantic` (`crates/core/src/types/semantic.rs`) skips a checker component that has no structural match, and `ComponentEntry` records no origin. The only provenance is the `SemanticBackend` `Info` diagnostic and its `affects` keys. The rest shipped: a runtime opt-in, always compiled in, structural as default and fallback, and `schemaVersion` (ADR 0017).
 
+**Note (2026-11-02):** The Consequences bullet "`WatchSession::update_file` must notify it" is met by clearing the session's cached checker answers on every published revision, not by notifying tsc; see the note on ADR 0006. `ensure_fresh`, the rebuild and the cold path do the same. Per-component invalidation and the parity test against `extract()` are not built.
+
 ## Context
 
 ADR 0006 made the TypeScript backend a second resolver that finishes components the structural resolver already found. Detection by shape now covers 92 to 99% of the components react-docgen-typescript (RDT) reports on five large libraries (`docs/edge-cases.md`), and what is left is a call with no type argument (`lazy()`, `createIconLoader("x")`) or a prop a callee adds (Mantine's `component` and `renderRoot` on 220 components). Only the checker can answer those: it knows what the call returns. Separately, callisto's rule is no cargo features in shipped crates, which ADR 0006's "feature-gated crate" contradicts.
