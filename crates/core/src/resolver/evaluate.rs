@@ -222,10 +222,35 @@ fn extends(
             let keys = keys_of(target, target_file.unwrap_or(file), ctx, depth + 1)?;
             Some(values.iter().all(|value| matches!(value, Atom::Str(s) if keys.iter().any(|key| &key.name == s))))
         }
+        // An enum is not the union of its values to assign to: `"primary" extends Tone` is false for a string enum, which
+        // atoms would read as true.
+        _ if names_an_enum(extends_type, file, ctx, depth + 1) => None,
         _ => {
             let targets = atoms(extends_type, file, ctx, depth + 1)?;
             Some(values.iter().all(|value| value.assignable_to(&targets)))
         }
+    }
+}
+
+/// Whether `ty` is, or has among its union members, an enum, here or through an alias.
+fn names_an_enum(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> bool {
+    if depth > MAX_DEPTH {
+        return false;
+    }
+    match ty {
+        CollectedType::AtFile { file, inner } => names_an_enum(inner, file, ctx, depth + 1),
+        CollectedType::Union(members) => members.iter().any(|member| names_an_enum(member, file, ctx, depth + 1)),
+        CollectedType::Named { name, args } => {
+            let (alias_file, alias_name) = canonical(name, file, ctx);
+            if lookup_type_alias(ctx, alias_file.as_str(), &alias_name)
+                .is_some_and(|(matched, _)| ctx.global.enums.contains_key(&format!("{alias_file}:{matched}")))
+            {
+                return true;
+            }
+            alias_body(name, args, file, ctx)
+                .is_some_and(|(body, body_file)| names_an_enum(&body, &body_file, ctx, depth + 1))
+        }
+        _ => false,
     }
 }
 

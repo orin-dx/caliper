@@ -5,8 +5,8 @@ use oxc_ast_visit::{walk, Visit};
 use oxc_syntax::scope::ScopeFlags;
 
 use crate::types::{
-    CollectedInterface, CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode, EnumEntry, EnumValue,
-    ExtendsRef, ImportBinding, LexedExport, RawProp, TypeName,
+    CollectedInterface, CollectedType, CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode, EnumEntry,
+    EnumValue, ExtendsRef, ImportBinding, LexedExport, RawProp, TypeName,
 };
 
 use super::component::Binding;
@@ -236,7 +236,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     /// nodes and qualify nothing.
     fn visit_ts_namespace_declaration(&mut self, node: &TSNamespaceDeclaration<'a>) {
         self.namespace_stack.push(node.id.name.as_str().into());
+        self.ambient_depth += u32::from(node.declare);
         walk::walk_ts_namespace_declaration(self, node);
+        self.ambient_depth -= u32::from(node.declare);
         self.qualify_namespace_references();
         self.namespace_stack.pop();
     }
@@ -245,12 +247,15 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     /// declarations are keyed as `React.`-qualified ones (`NamedTypeIndex::react_augmentations` reads them). Any other
     /// `declare module "x"` qualifies nothing.
     fn visit_ts_external_module_declaration(&mut self, node: &TSExternalModuleDeclaration<'a>) {
+        self.ambient_depth += 1;
         if node.id.value != "react" {
             walk::walk_ts_external_module_declaration(self, node);
+            self.ambient_depth -= 1;
             return;
         }
         self.namespace_stack.push("React".into());
         walk::walk_ts_external_module_declaration(self, node);
+        self.ambient_depth -= 1;
         self.qualify_namespace_references();
         self.namespace_stack.pop();
     }
@@ -259,39 +264,63 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         let enum_name = node.id.name.as_str();
         let key = self.scoped_key(enum_name);
 
+        let values = self.enum_member_values(node);
         let entries: Vec<EnumEntry> = node
             .body
             .members
             .iter()
-            .filter_map(|member| {
+            .zip(&values)
+            .filter_map(|(member, value)| {
                 let name = match &member.id {
                     TSEnumMemberName::Identifier(id) => id.name.as_str().to_owned(),
                     TSEnumMemberName::String(s) => js_text::lossy(s.value).into_owned(),
                     TSEnumMemberName::ComputedString(s) => js_text::lossy(s.value).into_owned(),
                     TSEnumMemberName::ComputedTemplateString(_) => return None,
                 };
-
-                let value = match &member.initializer {
-                    Some(init) => {
-                        self.expression_to_enum_value(init).unwrap_or_else(|| EnumValue::String(name.clone()))
-                    }
-                    None => EnumValue::String(name.clone()),
-                };
-
+                let value = value.clone().unwrap_or_else(|| EnumValue::String(name.clone()));
                 let description = self.find_jsdoc(member.span.start);
                 Some(EnumEntry { name, value, description })
             })
             .collect();
 
-        // A prop typed with the enum is the union of its values; an enum with a computed member has no such union.
-        if let Some(target) = self.enum_value_union(node) {
-            self.data
-                .type_aliases
-                .entry(key.clone())
-                .or_insert(CollectedTypeAlias::Passthrough { target, file_path: self.file_path.clone() });
+        // A prop typed with the enum is the union of its values, over every declaration that merges into it. One
+        // declaration with a value that is not known leaves the enum without a union, never a partial one.
+        let previous = self.enum_unions.remove(&key);
+        let contribution: Option<Vec<CollectedType>> = values
+            .iter()
+            .map(|value| match value {
+                Some(EnumValue::String(s)) => Some(CollectedType::StringLiteral(s.as_str().into())),
+                Some(EnumValue::Number(n)) => Some(CollectedType::NumberLiteral(*n)),
+                _ => None,
+            })
+            .collect();
+        let merged = match (&previous, contribution) {
+            (None, contribution) => contribution,
+            (Some(Some(earlier)), Some(more)) => Some(earlier.iter().cloned().chain(more).collect()),
+            (Some(_), _) => None,
+        };
+        let target = merged.as_ref().and_then(|members| match members.as_slice() {
+            [] => None,
+            [only] => Some(only.clone()),
+            _ => Some(CollectedType::Union(members.clone())),
+        });
+        match target {
+            Some(target) => {
+                let alias = CollectedTypeAlias::Passthrough { target, file_path: self.file_path.clone() };
+                if previous.is_some() {
+                    self.data.type_aliases.insert(key.clone(), alias);
+                } else {
+                    self.data.type_aliases.entry(key.clone()).or_insert(alias);
+                }
+            }
+            None if previous.is_some() => {
+                self.data.type_aliases.remove(&key);
+            }
+            None => {}
         }
+        self.enum_unions.insert(key.clone(), merged);
         if !entries.is_empty() {
-            self.data.enums.insert(key, entries);
+            self.data.enums.entry(key).or_default().extend(entries);
         }
     }
 

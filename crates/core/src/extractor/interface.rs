@@ -227,31 +227,34 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
-    /// The union of an enum's values as TypeScript reads a type that names the enum: a member with no initializer
-    /// counts up from the previous number, starting at 0. `None` when a member's value is not a literal.
-    pub(super) fn enum_value_union(&self, node: &TSEnumDeclaration<'_>) -> Option<crate::types::CollectedType> {
-        use crate::types::CollectedType;
-        let mut next = 0.0_f64;
-        let mut values = Vec::new();
-        for member in &node.body.members {
-            let value = match &member.initializer {
-                Some(init) => self.expression_to_enum_value(init)?,
-                None => EnumValue::Number(next),
-            };
-            values.push(match value {
-                EnumValue::String(s) => CollectedType::StringLiteral(s.into()),
-                EnumValue::Number(n) => {
-                    next = n + 1.0;
-                    CollectedType::NumberLiteral(n)
-                }
-                EnumValue::Bool(_) | EnumValue::Spread { .. } => return None,
-            });
-        }
-        match values.len() {
-            0 => None,
-            1 => values.pop(),
-            _ => Some(CollectedType::Union(values)),
-        }
+    /// Whether the node being visited is in an ambient context: a declaration file, or a `declare` namespace or module.
+    fn in_ambient_context(&self) -> bool {
+        let path = self.file_path.as_str();
+        self.ambient_depth > 0 || [".d.ts", ".d.mts", ".d.cts"].iter().any(|suffix| path.ends_with(suffix))
+    }
+
+    /// The value of each member of `node` as TypeScript reads it: an initializer that is a literal is that literal, and a
+    /// member with none counts up from the previous number, starting at 0. `None` where the value is not known: an
+    /// initializer that is not a literal, a member after one that is not a number, and a member with no initializer of
+    /// a non-const ambient enum, whose values only the declaration's implementation knows.
+    pub(super) fn enum_member_values(&self, node: &TSEnumDeclaration<'_>) -> Vec<Option<EnumValue>> {
+        let counts_up = !(node.declare || self.in_ambient_context()) || node.r#const;
+        let mut next = Some(0.0_f64);
+        node.body
+            .members
+            .iter()
+            .map(|member| {
+                let value = match &member.initializer {
+                    Some(init) => self.expression_to_enum_value(init),
+                    None => next.filter(|_| counts_up).map(EnumValue::Number),
+                };
+                next = match value {
+                    Some(EnumValue::Number(n)) => Some(n + 1.0),
+                    _ => None,
+                };
+                value
+            })
+            .collect()
     }
 
     pub(super) fn expression_to_enum_value<'a>(&self, expr: &Expression<'a>) -> Option<EnumValue> {

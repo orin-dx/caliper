@@ -1756,6 +1756,32 @@ fn test_enum_collected() {
 }
 
 #[test]
+fn an_enum_member_has_one_value_for_its_entry_and_its_union() {
+    let data = parse_file(
+        Utf8Path::new("/test/level.ts"),
+        "enum Level { Low, Mid = 5, High }\nenum Tone { Primary = \"primary\" }\nenum Tone { Secondary = \"secondary\" }",
+    );
+    let values = |key: &str| -> Vec<(String, EnumValue)> {
+        data.enums[key].iter().map(|entry| (entry.name.clone(), entry.value.clone())).collect()
+    };
+    assert_eq!(
+        values("/test/level.ts:Level"),
+        vec![
+            ("Low".to_string(), EnumValue::Number(0.0)),
+            ("Mid".to_string(), EnumValue::Number(5.0)),
+            ("High".to_string(), EnumValue::Number(6.0)),
+        ]
+    );
+    assert_eq!(
+        values("/test/level.ts:Tone"),
+        vec![
+            ("Primary".to_string(), EnumValue::String("primary".to_string())),
+            ("Secondary".to_string(), EnumValue::String("secondary".to_string())),
+        ]
+    );
+}
+
+#[test]
 fn test_const_array_as_const_collected() {
     // antd's `type ButtonType = (typeof _ButtonTypes)[number]` pattern —
     // a flat array literal, not an object (test_enum_collected above) or a
