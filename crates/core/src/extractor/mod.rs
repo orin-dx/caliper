@@ -1170,7 +1170,7 @@ impl<'src> SourceDataCollector<'src> {
             TSType::TSParenthesizedType(p) => self.extract_type_name_from_type(&p.type_annotation),
             TSType::TSUnionType(u) => {
                 let members: Vec<CollectedType> = u.types.iter().map(|t| self.ts_type_to_collected(t)).collect();
-                let bare = format!("__anon_{}", self.data.type_aliases.len());
+                let bare = crate::types::synthesized_alias_name(self.data.type_aliases.len());
                 let scoped = self.scoped_key(&bare);
                 self.data
                     .type_aliases
@@ -1179,7 +1179,7 @@ impl<'src> SourceDataCollector<'src> {
             }
             TSType::TSIntersectionType(i) => {
                 let members: Vec<CollectedType> = i.types.iter().map(|t| self.ts_type_to_collected(t)).collect();
-                let bare = format!("__anon_{}", self.data.type_aliases.len());
+                let bare = crate::types::synthesized_alias_name(self.data.type_aliases.len());
                 let scoped = self.scoped_key(&bare);
                 self.data
                     .type_aliases
@@ -1192,7 +1192,7 @@ impl<'src> SourceDataCollector<'src> {
                 // alias so the resolver's existing alias machinery can resolve it, instead
                 // of silently dropping the whole component (the `_ => None` fallback below).
                 let collected = self.ts_type_to_collected(ty);
-                let bare = format!("__anon_{}", self.data.type_aliases.len());
+                let bare = crate::types::synthesized_alias_name(self.data.type_aliases.len());
                 let scoped = self.scoped_key(&bare);
                 self.data.type_aliases.insert(
                     scoped,

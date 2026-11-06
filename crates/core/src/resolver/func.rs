@@ -73,7 +73,7 @@ pub(super) fn as_written(ct: &CollectedType) -> PropType {
                 .collect(),
         ),
         CollectedType::Named { name, args } => {
-            PropType::Named { name: name.clone(), args: args.iter().map(as_written).collect() }
+            PropType::Named { name: unmarked(name).into(), args: args.iter().map(as_written).collect() }
         }
         CollectedType::Function { type_params, params, param_names, param_kinds, return_type } => {
             resolve_function_type(type_params, params, param_names, param_kinds, return_type)

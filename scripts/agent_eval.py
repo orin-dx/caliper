@@ -18,8 +18,8 @@ table, its inheritance rows and the diagnostics that say its props may be incomp
   - the prop it is asked about is not in the table and an inheritance row could be hiding it, or
   - the component is not in the output and a diagnostic names its file.
 
-Nothing here fails a build: weekly.py reports the numbers and opens its issue when silent-wrong is above zero or the
-correct rate falls by more than five points.
+Nothing here fails a build: weekly.py reports the numbers and opens its issue when silent-wrong is above zero. A correct
+rate that falls by more than five points is listed under the summary's changes and opens nothing.
 
 Usage: scripts/agent_eval.py --bin BIN [--corpus NAME]... [--corpora DIR] [--work DIR]
 """
@@ -318,20 +318,23 @@ def score(questions, found, file_diagnostics, truth, ms=0):
 # ─── What weekly.py reports ──────────────────────────────────────────────────
 
 
-def findings(name, entry, previous):
-    """What got worse since `previous` (a corpus entry of the last record): any silent-wrong answer, or a correct rate more
-    than five points lower."""
+def findings(name, entry):
+    """What opens the issue: any silent-wrong answer. A fall in the correct rate is `changes`, which opens nothing."""
     now = entry.get('agent_eval')
-    if not now or 'error' in now:
+    if not now or 'error' in now or not now['silent_wrong']:
         return []
-    out = []
-    if now['silent_wrong']:
-        shown = ', '.join(f"{w['id']} (said {w['answer']!r}, checker {w['checker']!r})" for w in now['silent_wrong_items'][:5])
-        out.append(f"{name}: {now['silent_wrong']} silent-wrong answer(s) of {now['questions']}: {shown}")
-    old = (previous or {}).get('agent_eval')
-    if old and 'error' not in old and now['correct_rate'] < old['correct_rate'] - CORRECT_DROP:
-        out.append(f"{name}: agent questions answered correctly {100 * old['correct_rate']:.0f}% -> {100 * now['correct_rate']:.0f}%")
-    return out
+    shown = ', '.join(f"{w['id']} (said {w['answer']!r}, checker {w['checker']!r})" for w in now['silent_wrong_items'][:5])
+    return [f"{name}: {now['silent_wrong']} silent-wrong answer(s) of {now['questions']}: {shown}"]
+
+
+def changes(name, entry, previous):
+    """What moved since `previous` (a corpus entry of the last record): a correct rate more than five points lower."""
+    now, old = entry.get('agent_eval'), (previous or {}).get('agent_eval')
+    if not now or 'error' in now or not old or 'error' in old:
+        return []
+    if now['correct_rate'] < old['correct_rate'] - CORRECT_DROP:
+        return [f"{name}: agent questions answered correctly {100 * old['correct_rate']:.0f}% -> {100 * now['correct_rate']:.0f}%"]
+    return []
 
 
 def markdown(record):
