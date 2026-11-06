@@ -1425,3 +1425,42 @@ fn node_modules_is_found_with_either_separator() {
     assert!(!in_node_modules("/p/node_modules-backup/index.d.ts"));
     assert!(!in_node_modules(r"C:\p\src\Badge.tsx"));
 }
+
+/// A dependency file that exists but cannot be read is reported, not dropped, and its declarations stay absent.
+#[test]
+fn an_unreadable_dependency_file_is_reported() {
+    let (_tmp, root) = project(&[]);
+    let button = root.join("node_modules/ui-kit/dist/button.d.ts");
+    std::fs::write(&button, [0xff_u8, 0xfe, 0xfd]).unwrap();
+    let options = PipelineOptions { use_cache: false, ..options(&root, true) };
+
+    let layer = load(vec![demand(&root, "ui-kit", "ButtonProps")], &options, None);
+
+    let diagnostics = layer.panic_diagnostics();
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, crate::types::DiagnosticCode::IoError);
+    assert_eq!(diagnostics[0].severity, crate::types::DiagnosticSeverity::Warning);
+    assert_eq!(diagnostics[0].file.as_deref(), Some(button.as_str()));
+    assert!(diagnostics[0].message.starts_with(&format!("Failed to read '{button}'")), "{}", diagnostics[0].message);
+}
+
+/// A dependency file that is gone stays a quiet skip.
+#[test]
+fn a_missing_dependency_file_is_skipped_quietly() {
+    let (_tmp, root) = project(&[]);
+    let options = PipelineOptions { use_cache: false, ..options(&root, true) };
+    std::fs::remove_file(root.join("node_modules/ui-kit/dist/tokens.d.ts")).unwrap();
+
+    let layer = load(vec![demand(&root, "ui-kit", "ButtonProps")], &options, None);
+
+    assert_eq!(layer.panic_diagnostics(), []);
+}
+
+/// Two writes of one index never share a temporary file, so neither can rename the other's.
+#[test]
+fn index_temp_files_are_unique_per_write() {
+    let path = Utf8Path::new("cache/dependency-types.bin");
+    let names: std::collections::HashSet<_> = (0..100).map(|_| temp_path(path)).collect();
+    assert_eq!(names.len(), 100);
+    assert!(names.iter().all(|name| name.parent() == path.parent() && name != path));
+}
