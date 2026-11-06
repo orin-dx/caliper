@@ -1,0 +1,53 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6Q8K42VXXTJHDNMPGNQV2PA",
+  "strategy": "manual-commit",
+  "branch": "l335",
+  "checkpoints_count": 7,
+  "files_touched": [
+    ".changeset/cli-ignores-a-stale-target-folder.md",
+    ".changeset/destructured-defaults-recorded-correctly.md",
+    ".changeset/linux-x64-runs-on-glibc-2-28.md",
+    ".changeset/musl-installs-skip-the-glibc-cli.md",
+    ".changeset/schema-detected-by.md",
+    "apps/oracle/src/caliper-input.ts",
+    "apps/oracle/tests/caliper-input.test.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 64,
+    "cache_creation_tokens": 385473,
+    "cache_read_tokens": 9223376,
+    "output_tokens": 19257,
+    "api_call_count": 27,
+    "subagent_tokens": {
+      "input_tokens": 248,
+      "cache_creation_tokens": 304511,
+      "cache_read_tokens": 10055146,
+      "output_tokens": 30726,
+      "api_call_count": 124
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}

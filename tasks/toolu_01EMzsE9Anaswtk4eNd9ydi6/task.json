@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01EMzsE9Anaswtk4eNd9ydi6",
+  "agent_id": "ac4668849b6629044",
+  "subagent_type": "general-purpose",
+  "task_description": "Resolve conflicts on seven PR branches",
+  "token_usage": {
+    "input_tokens": 184,
+    "cache_creation_tokens": 119823,
+    "cache_read_tokens": 8025000,
+    "output_tokens": 21715,
+    "api_call_count": 92
+  },
+  "started_at": "2026-11-02T20:50:25.021481-08:00",
+  "completed_at": "2026-11-02T21:03:45.60162-08:00"
+}
