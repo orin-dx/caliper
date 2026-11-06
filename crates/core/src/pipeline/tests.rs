@@ -4124,6 +4124,154 @@ fn an_alias_parameter_shadows_an_outer_alias_only_inside_that_alias() {
     assert_eq!(props["third"].prop_type.raw_string(), "number");
 }
 
+/// The props of `Field` from `source`, each as the text of its resolved type.
+fn field_prop_texts(source: &str) -> Vec<(String, String)> {
+    let output = extract_one(&[("Field.tsx", source)]);
+    let mut props: Vec<(String, String)> = output.components["Field"]
+        .props
+        .iter()
+        .map(|(name, prop)| (name.clone(), prop.prop_type.raw_string()))
+        .collect();
+    props.sort();
+    props
+}
+
+fn pair(name: &str, ty: &str) -> (String, String) {
+    (name.to_owned(), ty.to_owned())
+}
+
+#[test]
+fn an_interface_parameter_does_not_capture_the_callers_argument_of_the_same_name() {
+    let props = field_prop_texts(
+        "type Value = number;\n\
+         interface Props<Value> { value: Value }\n\
+         export function Field(p: Props<Value>) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("value", "number")]);
+}
+
+#[test]
+fn an_interface_parameter_the_caller_leaves_unfilled_stays_a_placeholder() {
+    let props = field_prop_texts(
+        "type Value = number;\n\
+         interface Props<Value> { value: Value }\n\
+         export function Field(p: Props) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("value", "Value")]);
+}
+
+#[test]
+fn a_component_parameter_passed_to_an_interface_stays_a_placeholder() {
+    let props = field_prop_texts(
+        "type Value = number;\n\
+         interface Props<Value> { value: Value }\n\
+         export function Field<Value>(p: Props<Value>) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("value", "Value")]);
+}
+
+#[test]
+fn an_alias_declared_outside_the_component_resolves_its_names_in_module_scope() {
+    let props = field_prop_texts(
+        "type Value = number;\n\
+         type Saved = Value;\n\
+         export function Field<Value>(p: { value: Saved }) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("value", "number")]);
+}
+
+#[test]
+fn an_object_alias_declared_outside_the_component_resolves_its_names_in_module_scope() {
+    let output = extract_one(&[(
+        "Field.tsx",
+        "type Value = 'outer';\n\
+         type Fixed = { value: Value };\n\
+         export function Field<Value>(p: { fixed: Fixed }) { return null; }\n",
+    )]);
+    let expected = PropType::Object(vec![ObjectField {
+        name: "value".into(),
+        prop_type: PropType::StringLiteral("outer".into()),
+        required: true,
+        description: String::new(),
+        readonly: false,
+        index_key: None,
+    }]);
+    assert_eq!(output.components["Field"].props["fixed"].prop_type, expected);
+}
+
+#[test]
+fn a_component_parameter_passed_to_an_alias_stays_a_placeholder() {
+    let props = field_prop_texts(
+        "type Value = number;\n\
+         type Id<Value> = Value;\n\
+         export function Field<Value>(p: { value: Id<Value> }) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("value", "Value")]);
+}
+
+#[test]
+fn an_alias_parameter_named_like_the_argument_does_not_capture_it() {
+    let props = field_prop_texts(
+        "type B = string;\n\
+         type Pair<A, B> = { first: A; second: B };\n\
+         export function Field(p: { pair: Pair<B> }) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("pair", "{ first: string; second: B }")]);
+}
+
+#[test]
+fn a_component_parameter_shadows_an_alias_in_a_nested_use_but_not_inside_the_alias() {
+    let props = field_prop_texts(
+        "type Value = number;\n\
+         type Box = { inner: Value };\n\
+         export function Field<Value>(p: { own: Value; boxed: Box; list: Value[] }) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("boxed", "{ inner: number }"), pair("list", "Value[]"), pair("own", "Value")]);
+}
+
+#[test]
+fn a_record_over_a_type_parameter_keys_keeps_the_values_name_out_of_the_printed_binder() {
+    let output = extract_one(&[("Box.tsx", "export function Box<T, P>(props: Record<keyof T, P>) { return null; }\n")]);
+    assert_eq!(output.components["Box"].composes, ["{ [K in keyof T]: P }"]);
+}
+
+#[test]
+fn a_record_over_a_type_parameter_with_a_module_alias_value_keeps_its_name_out_of_the_printed_binder() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "type P = number;\n\
+         export function Box<Keys extends string>(props: Record<Keys, P>) { return null; }\n",
+    )]);
+    assert_eq!(output.components["Box"].composes, ["{ [K in Keys]: P }"]);
+}
+
+#[test]
+fn a_destructured_default_is_recorded_under_the_prop_not_the_local_name() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "export function Box({ 'aria-label': label = 'x' }: { 'aria-label'?: string }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    let default = props["aria-label"].default_value.as_ref().map(|d| (d.value.as_str(), d.computed));
+    assert_eq!(default, Some(("'x'", false)));
+}
+
+#[test]
+fn negative_and_unary_literal_defaults_are_not_computed() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "export function Box({ a = -1, b = +2, c = !0, d = !1 }: { a?: number; b?: number; c?: boolean; d?: boolean }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    let default = |name: &str| props[name].default_value.as_ref().map(|d| (d.value.clone(), d.computed));
+    assert_eq!(default("a"), Some(("-1".to_owned(), false)));
+    assert_eq!(default("b"), Some(("2".to_owned(), false)));
+    assert_eq!(default("c"), Some(("true".to_owned(), false)));
+    assert_eq!(default("d"), Some(("false".to_owned(), false)));
+}
+
 #[test]
 fn a_plain_block_comment_is_not_a_description() {
     let output = extract_one(&[(
@@ -4134,6 +4282,19 @@ fn a_plain_block_comment_is_not_a_description() {
     let props = &output.components["Box"].props;
     assert_eq!(props["a"].description, "");
     assert_eq!(props["b"].description, "The size.");
+}
+
+#[test]
+fn an_inline_object_prop_keeps_its_tags() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "export function Box(props: {\n  /**\n   * The size.\n   * @deprecated Use `scale`\n   */\n  size: string;\n  /** The tone. */\n  tone: string;\n}) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    assert_eq!(props["size"].description, "The size.");
+    assert_eq!(props["size"].tags.get("deprecated").map(String::as_str), Some("Use `scale`"));
+    assert!(props["tone"].tags.is_empty(), "{:?}", props["tone"].tags);
 }
 
 #[test]

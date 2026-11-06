@@ -154,7 +154,7 @@ fn react_picked_props(
     depth: u8,
 ) -> Vec<Arc<ParsedProp>> {
     let (mut base, mut file) = (base, file_path);
-    while let CollectedType::AtFile { file: inner_file, inner } = base {
+    while let CollectedType::AtFile { file: inner_file, inner, .. } = base {
         (base, file) = (inner, inner_file.as_path());
     }
     let CollectedType::Named { name, args } = base else { return Vec::new() };
@@ -221,7 +221,7 @@ fn shared_inline_keys(
                     collect(member, file, ctx, depth + 1, keys);
                 }
             }
-            CollectedType::AtFile { file, inner } => collect(inner, file, ctx, depth + 1, keys),
+            CollectedType::AtFile { file, inner, .. } => collect(inner, file, ctx, depth + 1, keys),
             CollectedType::Named { name, args } => {
                 if let Some((body, body_file)) = super::evaluate::alias_body(name, args, file, ctx) {
                     collect(&body, &body_file, ctx, depth + 1, keys);
@@ -274,10 +274,12 @@ pub(super) fn resolve_base_as_chain(
             // Substituted and resolved directly here so the nested generic survives,
             // rather than falling through to the string-based path below (which would
             // flatten it to a single opaque display string before substitution ever ran).
+            let args_scope = super::substitute::pin_scope(state, args);
             if let Some(alias) = super::substitute::generic_alias_with_structured_args(
                 name.as_str(),
                 args,
                 file_path,
+                &args_scope,
                 ctx,
                 &mut state.diagnostics,
             ) {
@@ -303,7 +305,12 @@ pub(super) fn resolve_base_as_chain(
         // whatever file this call chain has been resolving relative to — e.g. a
         // type argument substituted from the caller's scope into a callee alias
         // declared in a different file. Switch file context and continue.
-        CollectedType::AtFile { file, inner } => resolve_base_as_chain(inner, file, mapping, ctx, state, depth),
+        CollectedType::AtFile { file, scope, inner } => {
+            let writer = state.enter_scope(scope.clone());
+            let chain = resolve_base_as_chain(inner, file, mapping, ctx, state, depth);
+            state.leave_scope(writer);
+            chain
+        }
         CollectedType::Intersection(members) => {
             resolve_intersection_chain(members, file_path, mapping, ctx, state, depth)
         }
@@ -328,7 +335,7 @@ pub(super) fn resolve_base_as_chain(
                     field.required,
                     default_value,
                     field.description.clone(),
-                    Default::default(),
+                    field.tags.clone(),
                     None,
                     vec![],
                 )));
@@ -897,7 +904,7 @@ fn resolve_key_set_or_warn(
 /// The name and file of the interface `target` references, through `AtFile`.
 fn react_interface_target<'a>(target: &'a CollectedType, file: &'a Utf8Path) -> Option<(&'a str, &'a Utf8Path)> {
     match target {
-        CollectedType::AtFile { file, inner } => react_interface_target(inner, file),
+        CollectedType::AtFile { file, inner, .. } => react_interface_target(inner, file),
         CollectedType::Named { name, .. } => Some((name.as_str(), file)),
         _ => None,
     }
@@ -927,7 +934,12 @@ fn resolve_key_set(
             }
             Some(all)
         }
-        CollectedType::AtFile { file, inner } => resolve_key_set(inner, file, mapping, ctx, state, depth + 1),
+        CollectedType::AtFile { file, scope, inner } => {
+            let writer = state.enter_scope(scope.clone());
+            let keys = resolve_key_set(inner, file, mapping, ctx, state, depth + 1);
+            state.leave_scope(writer);
+            keys
+        }
         // `keyof React.HTMLAttributes<T>`: the names React declares on it, which a props walk does not list (the HTML
         // layer holds them).
         CollectedType::KeyOf(target)
@@ -968,15 +980,24 @@ fn resolve_key_set(
             let Some(super::precedence::SourceOrKnownMatch::TypeAlias { matched_key, alias }) = matched else {
                 return None;
             };
+            let args_scope = super::substitute::pin_scope(state, args);
             let alias = super::substitute::apply_generic_args(
                 alias,
                 (&canonical_file, &matched_key),
                 args,
                 file,
+                &args_scope,
                 ctx,
                 &mut state.diagnostics,
             );
-            match &alias {
+            // The alias's body is read under its own parameters that the arguments leave unfilled.
+            let unfilled = ctx
+                .named_types
+                .lookup_type_alias_params(&canonical_file, &matched_key)
+                .map(|params| TypeScope::new(params.iter().skip(args.len())))
+                .unwrap_or_default();
+            let writer = state.enter_scope(unfilled);
+            let keys = match &alias {
                 CollectedTypeAlias::LiteralUnion { members, .. } => Some(members.clone()),
                 CollectedTypeAlias::Union { members, file_path } => {
                     let union = CollectedType::Union(members.clone());
@@ -986,7 +1007,9 @@ fn resolve_key_set(
                     resolve_key_set(target, file_path, mapping, ctx, state, depth + 1)
                 }
                 _ => None,
-            }
+            };
+            state.leave_scope(writer);
+            keys
         }
         _ => None,
     }

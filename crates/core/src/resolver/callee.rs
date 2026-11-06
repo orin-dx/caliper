@@ -54,8 +54,9 @@ pub(super) fn result_chain(
     let callee = mapping.wrapper_callee.as_ref()?;
     let (props, props_file, type_params, factory_params) = result_props(callee, &mapping.file_path, ctx, 0)?;
     let mut attempt = state.branch();
-    attempt.add_type_params(type_params.iter());
-    attempt.add_type_params(factory_params.iter());
+    // The callee's own parameters join the component's: the result's props are read under both.
+    let scope = TypeScope::new(attempt.scope.names().iter().chain(&type_params).chain(&factory_params));
+    attempt.bind_scope(scope);
     let mut chain = resolve_base_as_chain(&props, &props_file, mapping, ctx, &mut attempt, 0);
     if chain
         .composes
@@ -250,7 +251,7 @@ fn component_props_type(
         return None;
     }
     match ty {
-        CollectedType::AtFile { file, inner } => component_props_type(inner, file, ctx, depth + 1),
+        CollectedType::AtFile { file, inner, .. } => component_props_type(inner, file, ctx, depth + 1),
         CollectedType::TypeOf(name) => {
             let mut ignored = Vec::new();
             let (canonical_file, canonical_name) = resolve_to_canonical(name, file, ctx, &mut ignored)

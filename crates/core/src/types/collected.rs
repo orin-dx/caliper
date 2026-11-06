@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use super::diagnostic::Diagnostic;
+use super::scope::TypeScope;
 
 // ─── Type Aliases ─────────────────────────────────────────────────────────────
 
@@ -159,10 +160,14 @@ pub enum CollectedType {
     // substitution (resolver/substitute.rs) splices into a callee's body gets
     // wrapped in this so later name lookups switch back to the correct file.
     /// Resolver-internal; the extractor never produces it. A type argument pinned to the file it was written in, so a
-    /// name inside it resolves relative to that file after a generic alias substitutes it into another file's body.
+    /// name inside it resolves relative to that file, and under those type parameters, after a generic alias
+    /// substitutes it into another declaration's body.
     AtFile {
         /// The file the wrapped type was written in.
         file: Utf8PathBuf,
+        /// The type parameters in scope where the wrapped type was written, which are the only ones that shadow its
+        /// names: the declaration it is substituted into has parameters of its own that must not capture them.
+        scope: TypeScope,
         /// The wrapped type.
         inner: Box<CollectedType>,
     },
@@ -278,8 +283,9 @@ impl CollectedType {
                 name.hash(hasher);
                 all(hasher, args);
             }
-            CollectedType::AtFile { file, inner } => {
+            CollectedType::AtFile { file, scope, inner } => {
                 file.hash(hasher);
+                scope.hash(hasher);
                 inner.structural_hash(hasher);
             }
             CollectedType::IndexedAccess { obj, key } => {
@@ -400,8 +406,13 @@ impl CollectedType {
                     Some(false) => "-?",
                     None => "",
                 };
-                // A key variable the resolver made up for `Record` is not an identifier; TypeScript prints it as `P`.
-                let param = if param.contains(' ') { "P" } else { param.as_str() };
+                // A key variable the resolver made up for `Record` is not an identifier; TypeScript prints it as `P`,
+                // unless the value names a `P` of its own, which the printed variable would then capture.
+                let param = if param.contains(' ') {
+                    ["P", "K", "Key"].into_iter().find(|candidate| !value_type.mentions(candidate)).unwrap_or("P")
+                } else {
+                    param.as_str()
+                };
                 format!("{{ [{param} in {}]{modifier}: {} }}", key_type.to_raw_string(), value_type.to_raw_string())
             }
             CollectedType::Tuple(members) => {
@@ -482,6 +493,9 @@ impl CollectedType {
                         }
                         if let Some(key) = &f.index_key {
                             map.insert("ik".into(), key.to_json_value());
+                        }
+                        if !f.tags.is_empty() {
+                            map.insert("tags".into(), serde_json::json!(f.tags));
                         }
                     }
                     field
@@ -632,6 +646,15 @@ impl CollectedType {
                                 description: o.get("desc").and_then(|v| v.as_str()).unwrap_or("").to_owned(),
                                 readonly: o.get("ro").and_then(|v| v.as_bool()).unwrap_or(false),
                                 index_key: o.get("ik").map(Self::from_json_value).transpose()?.map(Box::new),
+                                tags: o
+                                    .get("tags")
+                                    .and_then(|v| v.as_object())
+                                    .map(|tags| {
+                                        tags.iter()
+                                            .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
                             })
                         })
                         .collect::<Result<_, std::string::String>>()?;
@@ -753,6 +776,9 @@ pub struct CollectedObjectField {
     /// Set for an index signature `[name: K]: T`: the key type `K`, with `collected_type` the value type `T`.
     #[serde(default)]
     pub index_key: Option<Box<CollectedType>>,
+    /// The field's JSDoc tags (`deprecated`, `example`, …), empty when it has none.
+    #[serde(default)]
+    pub tags: BTreeMap<std::string::String, std::string::String>,
 }
 
 impl CollectedObjectField {
@@ -1034,6 +1060,21 @@ pub enum ExtendsRef {
 }
 
 impl CollectedType {
+    /// The names of the type references in this type, in the order met and with repeats.
+    pub(crate) fn referenced_names(&self) -> Vec<TypeName> {
+        let names = std::cell::RefCell::new(Vec::new());
+        drop(self.rename_named(&|name| {
+            names.borrow_mut().push(TypeName::from(name));
+            None
+        }));
+        names.into_inner()
+    }
+
+    /// Whether a type reference named `name` appears anywhere in this type.
+    fn mentions(&self, name: &str) -> bool {
+        self.referenced_names().iter().any(|referenced| referenced == name)
+    }
+
     /// This type with each reference `rename` maps (a name with no type arguments of its own, or with them) replaced by
     /// the name it returns. A type parameter or mapped key variable that shadows a name is left alone inside its scope.
     #[must_use]
@@ -1050,9 +1091,11 @@ impl CollectedType {
             CollectedType::Array(inner) => CollectedType::Array(Box::new(inner.rename_named(rename))),
             CollectedType::Readonly(inner) => CollectedType::Readonly(Box::new(inner.rename_named(rename))),
             CollectedType::KeyOf(inner) => CollectedType::KeyOf(Box::new(inner.rename_named(rename))),
-            CollectedType::AtFile { file, inner } => {
-                CollectedType::AtFile { file: file.clone(), inner: Box::new(inner.rename_named(rename)) }
-            }
+            CollectedType::AtFile { file, scope, inner } => CollectedType::AtFile {
+                file: file.clone(),
+                scope: scope.clone(),
+                inner: Box::new(inner.rename_named(rename)),
+            },
             CollectedType::Object(fields) => CollectedType::Object(
                 fields
                     .iter()
@@ -1063,6 +1106,7 @@ impl CollectedType {
                         description: f.description.clone(),
                         readonly: f.readonly,
                         index_key: f.index_key.as_ref().map(|key| Box::new(key.rename_named(rename))),
+                        tags: f.tags.clone(),
                     })
                     .collect(),
             ),
@@ -1321,6 +1365,34 @@ pub enum DetectionRule {
     FactoryResult,
 }
 
+impl DetectionRule {
+    /// Every rule, so a consumer such as the `schema` command can list them without a copy of its own.
+    pub const ALL: [DetectionRule; 14] = [
+        Self::FcAnnotation,
+        Self::ForwardRef,
+        Self::ForwardRefExoticDecl,
+        Self::HocWrapper,
+        Self::ClassComponent,
+        Self::FunctionDeclaration,
+        Self::AnonymousDefaultExport,
+        Self::AttachedSubComponent,
+        Self::TypedFunctionExpression,
+        Self::WrapperTypeArgument,
+        Self::ImportedMemberAlias,
+        Self::MemoExoticDecl,
+        Self::TaggedFactory,
+        Self::FactoryResult,
+    ];
+
+    /// The name this rule has in serialized output (`detectedBy`).
+    pub fn name(self) -> std::string::String {
+        match serde_json::to_value(self) {
+            Ok(serde_json::Value::String(name)) => name,
+            _ => unreachable!("a unit variant serializes as a string"),
+        }
+    }
+}
+
 /// A component → prop type mapping.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComponentMapping {
@@ -1488,6 +1560,32 @@ pub enum LexedExport {
 mod tests {
     use super::*;
 
+    // The exhaustive match stops compiling when a variant is added, which points at `ALL`.
+    #[test]
+    fn detection_rule_all_lists_every_variant_once() {
+        fn index(rule: DetectionRule) -> usize {
+            match rule {
+                DetectionRule::FcAnnotation => 0,
+                DetectionRule::ForwardRef => 1,
+                DetectionRule::ForwardRefExoticDecl => 2,
+                DetectionRule::HocWrapper => 3,
+                DetectionRule::ClassComponent => 4,
+                DetectionRule::FunctionDeclaration => 5,
+                DetectionRule::AnonymousDefaultExport => 6,
+                DetectionRule::AttachedSubComponent => 7,
+                DetectionRule::TypedFunctionExpression => 8,
+                DetectionRule::WrapperTypeArgument => 9,
+                DetectionRule::ImportedMemberAlias => 10,
+                DetectionRule::MemoExoticDecl => 11,
+                DetectionRule::TaggedFactory => 12,
+                DetectionRule::FactoryResult => 13,
+            }
+        }
+        let indexes: Vec<usize> = DetectionRule::ALL.iter().map(|rule| index(*rule)).collect();
+        assert_eq!(indexes, (0..14).collect::<Vec<_>>());
+        assert_eq!(DetectionRule::FactoryResult.name(), "factoryResult");
+    }
+
     // CollectedType's own Serialize/Deserialize never actually calls into
     // CollectedObjectField's impl (to_json_value/from_json_value build fields
     // manually), so this exercises CollectedObjectField's own impl directly —
@@ -1504,6 +1602,7 @@ mod tests {
             description: "the label".to_owned(),
             readonly: false,
             index_key: None,
+            tags: Default::default(),
         };
 
         let bytes = rmp_serde::to_vec(&field).expect("serialization should succeed");
@@ -1532,6 +1631,7 @@ mod tests {
                 description: String::new(),
                 readonly: false,
                 index_key: None,
+                tags: Default::default(),
             }]),
         ]);
         let json = original.to_json_value();
@@ -1730,5 +1830,17 @@ mod tests {
         };
         assert_eq!(mapped("Record key").to_raw_string(), "{ [P in Keys]: string }");
         assert_eq!(mapped("K").to_raw_string(), "{ [K in Keys]: string }");
+    }
+
+    #[test]
+    fn a_made_up_key_variable_avoids_the_names_its_value_uses() {
+        let mapped = |value: &str| CollectedType::Mapped {
+            param: "Record key".into(),
+            key_type: Box::new(CollectedType::Named { name: "Keys".into(), args: vec![] }),
+            value_type: Box::new(CollectedType::Named { name: value.into(), args: vec![] }),
+            optional: None,
+        };
+        assert_eq!(mapped("P").to_raw_string(), "{ [K in Keys]: P }");
+        assert_eq!(mapped("K").to_raw_string(), "{ [P in Keys]: K }");
     }
 }

@@ -5,7 +5,7 @@
 //! defaults, and on the depth it is reached at. So a recording keeps every read the resolution made of those
 //! (`StateReads`), and another component reuses it only when its own state gives the same answer to each one. Then
 //! the resolution would take exactly the same steps, so the recording replays its effects instead: the chain itself,
-//! with its props shared rather than copied, its diagnostics, the cycle-set and in-scope additions, whether it showed
+//! with its props shared rather than copied, its diagnostics, the cycle-set additions, whether it showed
 //! an unevaluated alias by name, and the files watch mode must re-resolve the component for.
 //!
 //! Only the first read of a key says what the state held on entry: a later one may see what the resolution itself
@@ -154,7 +154,8 @@ impl<T: Clone> Recording<T> {
             && self.keys_only == state.keys_only
             && reads.visited.iter().all(|(key, present)| state.visited.contains(key) == *present)
             && reads.named.iter().all(|(key, present)| state.named_in_progress.contains(key) == *present)
-            && reads.in_scope.iter().all(|(name, present)| state.in_scope_type_params.contains(name) == *present)
+            && (!reads.needs_empty_scope || state.scope.is_empty())
+            && reads.in_scope.iter().all(|(name, present)| state.scope.contains(name) == *present)
             && reads.defaults.iter().all(|(name, found)| {
                 mapping.is_some_and(|mapping| {
                     mapping.param_defaults.get(name.as_str()).map(|d| (d.value.as_str(), d.computed))
@@ -171,7 +172,6 @@ impl<T: Clone> Recording<T> {
             reads.append(&self.reads, true, true);
         }
         state.visited.extend(self.reads.visited_added.iter().copied());
-        state.in_scope_type_params.extend(self.reads.in_scope_added.iter().cloned());
         state.shared_diagnostics.extend(self.shared.iter().cloned());
         state.named_unevaluated |= self.named_unevaluated;
         super::deps::replay(&self.deps);
@@ -278,8 +278,7 @@ impl<T: Clone> Memo<T> {
             + reads.named.len()
             + reads.in_scope.len()
             + reads.defaults.len()
-            + reads.visited_added.len()
-            + reads.in_scope_added.len();
+            + reads.visited_added.len();
         let recording = Recording {
             value: value.clone(),
             reach: high.saturating_sub(entry_nesting),
@@ -301,6 +300,7 @@ impl<T: Clone> Memo<T> {
                 && r.reads.visited == recording.reads.visited
                 && r.reads.named == recording.reads.named
                 && r.reads.in_scope == recording.reads.in_scope
+                && r.reads.needs_empty_scope == recording.reads.needs_empty_scope
                 && r.reads.defaults == recording.reads.defaults
         };
         // Components resolving the same chain concurrently record it several times; one copy is enough.
