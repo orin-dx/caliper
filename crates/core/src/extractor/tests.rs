@@ -693,7 +693,14 @@ fn test_type_alias_omit() {
     match alias.unwrap() {
         CollectedTypeAlias::Omit { base, keys, .. } => {
             assert_eq!(base.to_raw_string(), "FullProps");
-            assert_eq!(keys.as_string_union_keys(), vec!["b".to_owned(), "c".to_owned()]);
+            assert!(
+                matches!(keys, CollectedType::Union(members) if matches!(
+                    members.as_slice(),
+                    [CollectedType::StringLiteral(first), CollectedType::StringLiteral(second)]
+                        if first == "b" && second == "c"
+                )),
+                "expected keys to be the union of \"b\" and \"c\", got {keys:?}"
+            );
         }
         other => panic!("Expected Omit, got {:?}", other),
     }
@@ -1942,7 +1949,14 @@ fn omit_with_a_literal_base_is_collected_structurally_for_the_resolver_to_report
     match data.type_aliases.get(&format!("{}:BadOmit2", path)) {
         Some(CollectedTypeAlias::Omit { base, keys, .. }) => {
             assert!(matches!(base, CollectedType::StringLiteral(s) if s == "not a type reference"));
-            assert_eq!(keys.as_string_union_keys(), vec!["a".to_owned(), "b".to_owned()]);
+            assert!(
+                matches!(keys, CollectedType::Union(members) if matches!(
+                    members.as_slice(),
+                    [CollectedType::StringLiteral(first), CollectedType::StringLiteral(second)]
+                        if first == "a" && second == "b"
+                )),
+                "expected keys to be the union of \"a\" and \"b\", got {keys:?}"
+            );
         }
         other => panic!("expected an Omit alias, got {other:?}"),
     }

@@ -324,24 +324,6 @@ impl CollectedType {
         }
     }
 
-    /// True if this type requires the TypeScript type checker to resolve.
-    pub fn needs_type_checker(&self) -> bool {
-        matches!(self, CollectedType::Conditional { .. } | CollectedType::Mapped { .. })
-    }
-
-    /// Extract literal string keys from a type shaped like `'a' | 'b'` or a bare
-    /// `'a'`. Used for `Pick`/`Omit`'s key argument. Returns an empty vec for
-    /// anything else — notably `keyof T`, which can't be read as a string list
-    /// (see `CollectedTypeAlias::Omit::keys`, which resolves the
-    /// operand as a props chain instead).
-    pub fn as_string_union_keys(&self) -> Vec<std::string::String> {
-        match self {
-            CollectedType::StringLiteral(s) => vec![s.to_string()],
-            CollectedType::Union(members) => members.iter().flat_map(CollectedType::as_string_union_keys).collect(),
-            _ => vec![],
-        }
-    }
-
     /// Produce a raw string representation for diagnostics and fallback display.
     pub fn to_raw_string(&self) -> std::string::String {
         match self {
