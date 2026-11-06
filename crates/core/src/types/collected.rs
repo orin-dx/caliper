@@ -1045,22 +1045,24 @@ pub enum ExtendsRef {
 }
 
 impl CollectedType {
+    /// The names of the type references in this type, in the order met and with repeats.
+    pub(crate) fn referenced_names(&self) -> Vec<TypeName> {
+        let names = std::cell::RefCell::new(Vec::new());
+        drop(self.rename_named(&|name| {
+            names.borrow_mut().push(TypeName::from(name));
+            None
+        }));
+        names.into_inner()
+    }
+
     /// Whether a type reference named `name` appears anywhere in this type.
     fn mentions(&self, name: &str) -> bool {
-        let found = std::cell::Cell::new(false);
-        let _ = self.rename_named(&|referenced| {
-            if referenced == name {
-                found.set(true);
-            }
-            None
-        });
-        found.get()
+        self.referenced_names().iter().any(|referenced| referenced == name)
     }
 
     /// This type with each reference `rename` maps (a name with no type arguments of its own, or with them) replaced by
     /// the name it returns. A type parameter or mapped key variable that shadows a name is left alone inside its scope.
     #[must_use]
-
     pub(crate) fn rename_named(&self, rename: &dyn Fn(&str) -> Option<TypeName>) -> CollectedType {
         let all = |members: &[CollectedType]| members.iter().map(|m| m.rename_named(rename)).collect::<Vec<_>>();
         match self {

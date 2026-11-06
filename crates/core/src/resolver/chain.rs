@@ -296,7 +296,7 @@ pub(super) fn resolve_props_chain(
             }
             let mut attempt = state.branch();
             if let Some(params) = unfilled {
-                let _ = attempt.enter_scope(TypeScope::new(params.iter().skip(type_args.len())));
+                attempt.bind_scope(TypeScope::new(params.iter().skip(type_args.len())));
             }
             let chain = resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, &mut attempt, depth);
             return known_fallback(

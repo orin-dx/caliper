@@ -56,7 +56,7 @@ pub(super) fn result_chain(
     let mut attempt = state.branch();
     // The callee's own parameters join the component's: the result's props are read under both.
     let scope = TypeScope::new(attempt.scope.names().iter().chain(&type_params).chain(&factory_params));
-    let _ = attempt.enter_scope(scope);
+    attempt.bind_scope(scope);
     let mut chain = resolve_base_as_chain(&props, &props_file, mapping, ctx, &mut attempt, 0);
     if chain
         .composes

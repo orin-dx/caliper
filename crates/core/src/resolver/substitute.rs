@@ -15,7 +15,7 @@
 
 use camino::Utf8Path;
 use compact_str::CompactString;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::types::{
     CollectedObjectField, CollectedType, CollectedTypeAlias, Diagnostic, DiagnosticCode, DiagnosticSeverity,
@@ -60,15 +60,9 @@ pub(super) fn pin_scope(state: &mut ResolveState, args: &[CollectedType]) -> Typ
         }
         return TypeScope::default();
     }
-    let referenced = std::cell::RefCell::new(FxHashSet::<CompactString>::default());
-    for arg in args {
-        let _ = arg.rename_named(&|name| {
-            referenced.borrow_mut().insert(CompactString::from(name));
-            None
-        });
-    }
-    let mut names: Vec<CompactString> = referenced.into_inner().into_iter().collect();
+    let mut names: Vec<CompactString> = args.iter().flat_map(CollectedType::referenced_names).collect();
     names.sort_unstable();
+    names.dedup();
     let bound: Vec<CompactString> = names.into_iter().filter(|name| state.has_type_param(name)).collect();
     TypeScope::new(&bound)
 }
@@ -87,6 +81,7 @@ fn pinned_to(file: &Utf8Path, scope: &TypeScope, ty: CollectedType) -> Collected
 /// (`defaults`, written in `declared_file`), as TypeScript's `fillMissingTypeArguments` does. A default may name an
 /// earlier parameter (`<T, U = T[]>`), so it is bound with the parameters before it. A parameter with neither stays
 /// unbound, with a warning when the reference supplied some arguments but not that one.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn bind_args<'a>(
     params: &'a [compact_str::CompactString],
     defaults: Option<&[Option<CollectedType>]>,
@@ -146,6 +141,7 @@ pub(super) fn bind_args<'a>(
 /// When a call site's own argument is itself structured (e.g. a `Named` type's
 /// `args: Vec<CollectedType>`), prefer `generic_alias_with_structured_args`
 /// instead — it skips this string round-trip entirely.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn apply_generic_args(
     alias: CollectedTypeAlias,
     declared_at: (&Utf8Path, &str),

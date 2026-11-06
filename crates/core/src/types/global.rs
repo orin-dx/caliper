@@ -272,6 +272,11 @@ impl ResolveState {
         std::mem::replace(&mut self.scope, scope)
     }
 
+    /// `enter_scope` for a state nothing returns to the old scope of: a branch made for one resolution and dropped.
+    pub(crate) fn bind_scope(&mut self, scope: TypeScope) {
+        drop(self.enter_scope(scope));
+    }
+
     /// Read under `previous` again, the scope `enter_scope` returned.
     pub(crate) fn leave_scope(&mut self, previous: TypeScope) {
         if let Some(reads) = self.reads.as_mut() {
