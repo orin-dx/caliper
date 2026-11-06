@@ -124,6 +124,15 @@ pub(super) fn unresolved_type_help(
     });
     match reason {
         Some(reason) => format!("Dependency types are loaded, but for '{type_name}' {}.", reason.describe()),
+        // A global is declared by TypeScript's lib files; with none found, installing a package would not help. An unbound
+        // name is not known to be a global, and the lib files are missing for more than one reason, so the run's own
+        // warning about TypeScript says which.
+        None if ctx.ambient_global_files.is_empty() && name_binding(type_name, file, ctx) == NameBinding::Unbound => {
+            format!(
+                "'{type_name}' is not declared or imported in this file. If it is a TypeScript global type, TypeScript's \
+                 lib files were not found; the warning about TypeScript for this run says what to install."
+            )
+        }
         None => otherwise.to_owned(),
     }
 }
@@ -790,7 +799,8 @@ fn read_tsconfig_json(path: &Utf8Path) -> Option<serde_json::Value> {
 #[derive(Debug, Default, PartialEq)]
 pub struct TsLibs {
     pub paths: Vec<String>,
-    /// Set when `typescript` is installed but lacks a lib file. Only the pipeline reports it, not the other callers.
+    /// Set when `typescript` is not installed, or is installed but lacks a lib file. Only the pipeline reports it,
+    /// not the other callers.
     pub diagnostic: Option<Diagnostic>,
 }
 
@@ -804,11 +814,11 @@ const TS_OPTIONAL_LIB_FILES: [&str; 3] =
 /// Locate `lib.es5.d.ts`/`lib.dom.d.ts`, which declare the ambient globals (`Date`, `Element`, ...). TS ≤6 keeps them
 /// in `typescript/lib`; TS 7 moves them into an optional `@typescript/typescript-<platform>` package whose `exports`
 /// hide `lib/`, so they're read off disk. They're identical across platforms, so the first installed package (by name)
-/// with a file serves. No `typescript` is silent; one lacking a lib file sets `diagnostic`.
+/// with a file serves. Both a missing `typescript` and one lacking a lib file set `diagnostic`.
 pub fn resolve_ts_lib_paths(from_dir: &camino::Utf8Path) -> TsLibs {
     let resolver = Resolver::new(ResolveOptions::default());
     let Ok(manifest) = resolver.resolve(from_dir.as_std_path(), "typescript/package.json") else {
-        return TsLibs::default();
+        return TsLibs { paths: Vec::new(), diagnostic: Some(missing_typescript_diagnostic(from_dir)) };
     };
     let Some(ts_dir) = manifest.path().parent() else {
         return TsLibs::default();
@@ -863,6 +873,24 @@ fn installed_platform_package_dirs(resolver: &Resolver, ts_dir: &std::path::Path
             })
             .collect(),
     )
+}
+
+fn missing_typescript_diagnostic(from_dir: &Utf8Path) -> Diagnostic {
+    Diagnostic {
+        severity: DiagnosticSeverity::Warning,
+        message: format!(
+            "The 'typescript' package is not installed in or above '{from_dir}' — native and DOM globals (Date, \
+             HTMLElement, Promise, …) will appear as unexpanded named references"
+        ),
+        file: None,
+        line: None,
+        column: None,
+        help: Some(
+            "Install typescript as a dependency of the project (for example `npm install -D typescript`).".into(),
+        ),
+        code: DiagnosticCode::MissingTypeLibrary,
+        affects: Vec::new(),
+    }
 }
 
 fn missing_lib_diagnostic(missing: &[&str], ts_dir: &std::path::Path) -> Diagnostic {

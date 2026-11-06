@@ -12,6 +12,7 @@ use crate::pipeline::PipelineOptions;
 // from "a configured directory that happens to contain no files".
 fn empty_options() -> PipelineOptions {
     let dir = tempfile::TempDir::new().unwrap().keep();
+    crate::pipeline::tests::install_stub_typescript(&dir);
     PipelineOptions { src_dirs: vec![Utf8PathBuf::from_path_buf(dir).unwrap()], ..Default::default() }
 }
 
@@ -150,6 +151,7 @@ fn a_path_outside_every_source_directory_changes_nothing() {
 /// A src dir holding `Widget.tsx` and the options over it; the DTS cache lives beside it, outside the watched tree.
 fn widget_project(source: &str) -> (tempfile::TempDir, Utf8PathBuf, PipelineOptions) {
     let tmp = tempfile::tempdir().expect("tempdir");
+    crate::pipeline::tests::install_stub_typescript(tmp.path());
     let src = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().expect("canonicalize")).expect("utf8").join("src");
     std::fs::create_dir(&src).expect("create src");
     let widget = src.join("Widget.tsx");

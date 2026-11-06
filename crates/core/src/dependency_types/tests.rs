@@ -529,8 +529,12 @@ fn component_props_of_a_default_exported_package_component_resolve_through_its_b
         prop_types(&on, "Tip"),
         [("extra".into(), "number".into()), ("overlay".into(), "string".into()), ("visible".into(), "boolean".into())]
     );
-    // The test project has no `react`; nothing else is unresolved.
-    assert!(on.diagnostics.iter().all(|d| d.message.contains("'react'")), "{:?}", on.diagnostics);
+    // The test project has no `react` or `typescript`; nothing else is unresolved.
+    assert!(
+        on.diagnostics.iter().all(|d| d.message.contains("'react'") || d.message.contains("'typescript'")),
+        "{:?}",
+        on.diagnostics
+    );
 }
 
 /// `export const HiddenInput = Ark.HiddenInput` documents the imported component's props when its package is loaded,
@@ -692,6 +696,99 @@ fn custom_conditions_from_the_governing_tsconfig_pick_the_export_target() {
     let output = extract(&options(&root, true));
 
     assert_eq!(prop_types(&output, "Cond"), [("fromSource".into(), "string".into())]);
+}
+
+/// A re-export hop whose module cannot be resolved is why the name is missing; the package does export it.
+#[test]
+fn a_demand_blocked_by_an_unresolvable_re_export_hop_records_that_cause() {
+    let (_tmp, root) = project(&[
+        ("src/Badge.tsx", BADGE),
+        ("node_modules/hop-kit/package.json", r#"{ "name": "hop-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        (
+            "node_modules/hop-kit/index.d.ts",
+            "export { Named } from './gone';\nexport * as Ns from 'not-installed';\nexport * from './stars';\n",
+        ),
+        ("node_modules/hop-kit/stars.d.ts", "export * from './also-gone';\nexport type Present = string;\n"),
+    ]);
+    let demands = vec![
+        demand(&root, "hop-kit", "Named"),
+        demand(&root, "hop-kit", "Ns.X"),
+        demand(&root, "hop-kit", "Absent"),
+        demand(&root, "hop-kit", "Present"),
+    ];
+
+    let layer = load(demands, &options(&root, true), None);
+
+    let src = root.join("src");
+    assert_eq!(layer.unresolved_reason(&src, "hop-kit", "Named"), Some(Unresolved::Unresolvable));
+    assert_eq!(layer.unresolved_reason(&src, "hop-kit", "Ns.X"), Some(Unresolved::Unresolvable));
+    assert_eq!(layer.unresolved_reason(&src, "hop-kit", "Absent"), Some(Unresolved::Unresolvable));
+    assert_eq!(layer.unresolved_reason(&src, "hop-kit", "Present"), None);
+}
+
+/// `export *` never carries `default`, so a default import that a barrel of only wildcards cannot answer is not
+/// exported, whatever the wildcard's own module is.
+#[test]
+fn a_default_import_is_not_blamed_on_an_unresolvable_wildcard_export() {
+    let (_tmp, root) = project(&[
+        ("src/Badge.tsx", BADGE),
+        ("node_modules/star-kit/package.json", r#"{ "name": "star-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/star-kit/index.d.ts", "export * from './missing';\n"),
+    ]);
+    let demands = vec![demand(&root, "star-kit", "default"), demand(&root, "star-kit", "Named")];
+
+    let layer = load(demands, &options(&root, true), None);
+
+    let src = root.join("src");
+    assert_eq!(layer.unresolved_reason(&src, "star-kit", "default"), Some(Unresolved::NotExported));
+    assert_eq!(layer.unresolved_reason(&src, "star-kit", "Named"), Some(Unresolved::Unresolvable));
+}
+
+/// An explicit export that resolves but does not hold the name still shadows the wildcards, so the name is not
+/// exported rather than blocked by a wildcard's unresolvable module.
+#[test]
+fn a_wildcard_export_does_not_explain_a_name_an_explicit_re_export_lacks() {
+    let (_tmp, root) = project(&[
+        ("src/Badge.tsx", BADGE),
+        ("node_modules/lack-kit/package.json", r#"{ "name": "lack-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/lack-kit/index.d.ts", "export * from './missing';\nexport { Foo } from './present';\n"),
+        ("node_modules/lack-kit/present.d.ts", "export type Other = string;\n"),
+    ]);
+    let demands = vec![demand(&root, "lack-kit", "Foo")];
+
+    let layer = load(demands, &options(&root, true), None);
+
+    assert_eq!(layer.unresolved_reason(&root.join("src"), "lack-kit", "Foo"), Some(Unresolved::NotExported));
+}
+
+/// An explicit export shadows a wildcard one, so a failed explicit hop must not fall through to the wildcard's name.
+#[test]
+fn a_wildcard_export_does_not_answer_for_a_failed_explicit_re_export_of_the_same_name() {
+    let (_tmp, root) = project(&[
+        ("src/Badge.tsx", BADGE),
+        (
+            "node_modules/shadow-kit/package.json",
+            r#"{ "name": "shadow-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/shadow-kit/index.d.ts",
+            "export { Props } from './gone';\nexport * as Ns from 'not-installed';\nexport * from './legacy';\n",
+        ),
+        (
+            "node_modules/shadow-kit/legacy.d.ts",
+            "export interface Props { legacy: string }\nexport interface Ns { x: number }\n",
+        ),
+    ]);
+    let demands = vec![demand(&root, "shadow-kit", "Props"), demand(&root, "shadow-kit", "Ns.x")];
+
+    let layer = load(demands, &options(&root, true), None);
+
+    let index = root.join("node_modules/shadow-kit/index.d.ts");
+    assert_eq!(layer.export_of(&index, "Props"), Some(&None));
+    assert_eq!(layer.export_of(&index, "Ns.x"), Some(&None));
+    let src = root.join("src");
+    assert_eq!(layer.unresolved_reason(&src, "shadow-kit", "Props"), Some(Unresolved::Unresolvable));
+    assert_eq!(layer.unresolved_reason(&src, "shadow-kit", "Ns.x"), Some(Unresolved::Unresolvable));
 }
 
 /// A demand that panics is contained, and its diagnostic reaches the output with the panic text and the demand named.

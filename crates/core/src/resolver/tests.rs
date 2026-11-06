@@ -2684,9 +2684,31 @@ fn ts_lib_paths_keep_the_files_found_and_name_only_the_missing_one() {
 }
 
 #[test]
-fn ts_lib_paths_are_empty_and_silent_without_typescript() {
+fn ts_lib_paths_report_a_missing_typescript_package() {
     let tmp = tempfile::TempDir::new().unwrap();
-    assert_eq!(lib_paths_from(tmp.path()), TsLibs::default());
+
+    let libs = lib_paths_from(tmp.path());
+
+    assert_eq!(libs.paths, Vec::<String>::new());
+    assert_eq!(
+        libs.diagnostic,
+        Some(Diagnostic {
+            severity: DiagnosticSeverity::Warning,
+            message: format!(
+                "The 'typescript' package is not installed in or above '{}' — native and DOM globals (Date, \
+                 HTMLElement, Promise, …) will appear as unexpanded named references",
+                tmp.path().canonicalize().unwrap().display()
+            ),
+            file: None,
+            line: None,
+            column: None,
+            help: Some(
+                "Install typescript as a dependency of the project (for example `npm install -D typescript`).".into()
+            ),
+            code: DiagnosticCode::MissingTypeLibrary,
+            affects: Vec::new(),
+        })
+    );
 }
 
 // ── interface chains resolved once per run (`memo`) ─────────────────────────
