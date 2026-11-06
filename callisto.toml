@@ -1,4 +1,4 @@
-# Pinned to callisto 0.16.0 in .github/workflows/callisto-release.yml.
+# Pinned to callisto 0.17.0 in .github/workflows/callisto-release.yml.
 # Callisto checks build attestations against that exact workflow filename; do not rename it.
 
 # `match` is a package name ("<ecosystem>/<name>"), never a directory path.
@@ -93,10 +93,17 @@ match = "npm/caliper-docgen-storybook"
 publish-to = ["npm"]
 release-trigger = "changeset"
 
-# The npm wrapper is meaningless without a matching binding build.
+# The npm wrapper is meaningless without a matching binding build. The Vite plugin and the
+# Storybook addon depend on the binding at an exact version (`workspace:*` publishes as an
+# exact pin), so a binding release must republish them or their users never receive it.
 [[fixed-group]]
 name = "napi-and-binding"
-members = ["cargo/caliper-docgen-napi", "npm/caliper-docgen-napi"]
+members = [
+  "cargo/caliper-docgen-napi",
+  "npm/caliper-docgen-napi",
+  "npm/caliper-docgen-vite-plugin",
+  "npm/caliper-docgen-storybook",
+]
 
 # The npm wrapper redistributes this crate's binaries.
 [[fixed-group]]

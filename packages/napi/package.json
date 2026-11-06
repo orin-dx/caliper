@@ -29,7 +29,7 @@
     ]
   },
   "scripts": {
-    "build:napi": "napi build --platform --release --manifest-path ../../crates/binding/Cargo.toml --output-dir . --dts binding.d.ts",
+    "build:napi": "napi build --platform --release --manifest-path ../../crates/binding/Cargo.toml --output-dir . --dts binding.d.ts && node ../../scripts/napi-loader-version.mjs",
     "artifacts": "napi artifacts"
   },
   "files": [

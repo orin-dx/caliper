@@ -11,7 +11,7 @@
 //! emitted.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -72,8 +72,12 @@ impl Unresolved {
     }
 }
 
+/// A demanded name that panics the loader under `#[cfg(test)]`, to drive the containment path.
+#[cfg(test)]
+const DEMAND_PANIC_TEST_NAME: &str = "__DEPENDENCY_PANIC_TEST__";
+
 fn is_typescript(path: &Utf8Path) -> bool {
-    matches!(path.extension(), Some("ts" | "tsx" | "mts" | "cts"))
+    crate::extractor::is_typescript(path.as_std_path())
 }
 
 // ─── Demands ──────────────────────────────────────────────────────────────────
@@ -288,9 +292,18 @@ pub(crate) struct DependencyLayer {
     claimed: FxHashSet<(PathKey, CompactString)>,
     /// Every parsed file's data (stubs included), so an extension reuses them.
     parsed: FxHashMap<PathKey, Option<Arc<SourceData>>>,
+    /// The panics this layer's own demands hit, contained; the demands they covered stay unanswered.
+    panics: Vec<Diagnostic>,
 }
 
 impl DependencyLayer {
+    /// The contained panics of this layer and the ones it extends, in message order.
+    pub(crate) fn panic_diagnostics(&self) -> Vec<Diagnostic> {
+        let mut all: Vec<Diagnostic> = self.chain().flat_map(|layer| layer.panics.iter().cloned()).collect();
+        all.sort_by(|a, b| a.message.cmp(&b.message));
+        all
+    }
+
     /// This layer and then each one it extends.
     fn chain(&self) -> impl Iterator<Item = &DependencyLayer> {
         std::iter::successors(Some(self), |layer| layer.parent.as_deref())
@@ -406,6 +419,8 @@ struct Loader<'a> {
     re_exports: FxDashMap<PathKey, Arc<OnceLock<Arc<[String]>>>>,
     /// Something was resolved or answered that the index did not hold.
     learned: AtomicBool,
+    /// The diagnostics of demands that panicked.
+    panics: Mutex<Vec<Diagnostic>>,
 }
 
 impl Loader<'_> {
@@ -445,7 +460,10 @@ impl Loader<'_> {
             ModuleResolution::File(_) => Err(Unresolved::NoTypes),
             ModuleResolution::Unresolved(_) => Err(Unresolved::Unresolvable),
         };
-        self.learn(Utf8Path::new(dir));
+        // An unresolved import is not kept in the index, so asking again is not new knowledge.
+        if result.is_ok() {
+            self.learn(Utf8Path::new(dir));
+        }
         self.resolutions.insert(key, result.clone());
         result
     }
@@ -577,6 +595,8 @@ impl Loader<'_> {
     }
 
     fn demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand) {
+        #[cfg(test)]
+        assert!(&*demand.name != DEMAND_PANIC_TEST_NAME, "injected panic");
         let key = demand.key();
         if self.parent.is_some_and(|parent| parent.has_demand(&key)) || !self.demands.insert(key.clone()) {
             return;
@@ -800,8 +820,9 @@ impl Loader<'_> {
         }
     }
 
-    /// Note that an answer about `dir` is new, when `write_index` would keep it. A project file's own imports are
-    /// resolved on every run and never reach the index, so they must not make a warm run rewrite it.
+    /// Note that an answer about `dir` is new. A project file's own imports are resolved on every run and never reach
+    /// the index, so they must not make a warm run rewrite it. Export answers of a package that `write_index` drops
+    /// still count here, since only the written bytes tell; `write_index` leaves the file alone when they are unchanged.
     fn learn(&self, dir: &Utf8Path) {
         if dir.as_str().contains("/node_modules/") && self.package_of(dir).is_some() {
             self.learned.store(true, Ordering::Relaxed);
@@ -935,6 +956,7 @@ pub(crate) fn load(
         module_demands: DashMap::default(),
         re_exports: DashMap::default(),
         learned: AtomicBool::new(false),
+        panics: Mutex::new(Vec::new()),
     };
     // With the cache off the index is neither read nor written, and the run learns everything again.
     let index_path = options.use_cache.then(|| index_path(options));
@@ -976,6 +998,12 @@ pub(crate) fn load(
                 for (module, files) in &layer.augmenters {
                     loader.augmenters.insert(module.clone(), files.clone());
                 }
+                // The demands a panic covered stay unanswered in the flattened layer, so its report stays too.
+                loader
+                    .panics
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .extend(layer.panics.iter().cloned());
             }
         }
         (Some(_), None) => {}
@@ -985,7 +1013,9 @@ pub(crate) fn load(
             let loader = &loader;
             scope.spawn(move |scope| {
                 let label = format!("dependency demand {}#{}", demand.specifier, demand.name);
-                let _contained = crate::panic_guard::contain_panic(&label, || loader.demand(scope, demand));
+                if let Err(panic) = crate::panic_guard::contain_panic(&label, || loader.demand(scope, demand)) {
+                    loader.panics.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(panic);
+                }
             });
         }
     });
@@ -1061,6 +1091,7 @@ pub(crate) fn load(
         unresolved,
         claimed: loader.claimed.into_iter().collect(),
         parsed: loader.parsed.into_iter().map(|(key, cell)| (key, cell.get().cloned().flatten())).collect(),
+        panics: loader.panics.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner),
     }
 }
 
@@ -1088,6 +1119,10 @@ struct PackageIndex {
     /// A row is dropped on read when any of those packages' `package.json` changed, as well as this package's.
     #[serde(default)]
     augmenters: Vec<AugmenterRow>,
+    /// The other packages the resolutions and exports above lead into. They hold only while those packages'
+    /// `package.json` files do, and while the packages that are themselves in the index do.
+    #[serde(default)]
+    depends_on: Vec<PackageStampRow>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1110,15 +1145,49 @@ fn package_stamp(dir: &str) -> Option<(u128, u64)> {
     Some((mtime, meta.len()))
 }
 
-/// Seed the loader from the index's packages whose `package.json` is unchanged.
+/// The directories of the index's packages whose answers still hold: the package's own `package.json` and those of the
+/// packages it leads into are unchanged, and so are the answers of those that are themselves in the index (a re-export
+/// chain is only as current as its newest link).
+fn current_packages(packages: &[PackageIndex]) -> FxHashSet<&str> {
+    let unchanged = |dir: &str, mtime_ns: u128, size: u64| package_stamp(dir) == Some((mtime_ns, size));
+    let mut current: FxHashSet<&str> = packages
+        .iter()
+        .filter(|package| unchanged(&package.dir, package.mtime_ns, package.size))
+        .filter(|package| package.depends_on.iter().all(|(dir, mtime_ns, size)| unchanged(dir, *mtime_ns, *size)))
+        .map(|package| package.dir.as_str())
+        .collect();
+    let by_dir: FxHashMap<&str, &PackageIndex> =
+        packages.iter().map(|package| (package.dir.as_str(), package)).collect();
+    loop {
+        let stale: Vec<&str> = current
+            .iter()
+            .copied()
+            .filter(|dir| {
+                by_dir[dir]
+                    .depends_on
+                    .iter()
+                    .any(|(dep, ..)| by_dir.contains_key(dep.as_str()) && !current.contains(dep.as_str()))
+            })
+            .collect();
+        if stale.is_empty() {
+            return current;
+        }
+        for dir in stale {
+            current.remove(dir);
+        }
+    }
+}
+
+/// Seed the loader from the index's packages whose answers still hold.
 fn read_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
     let Ok(bytes) = std::fs::read(path) else { return };
     let Ok(index) = rmp_serde::from_slice::<IndexFile>(&bytes) else { return };
     if index.fingerprint != *fingerprint {
         return;
     }
+    let current: FxHashSet<String> = current_packages(&index.packages).into_iter().map(str::to_owned).collect();
     for package in index.packages {
-        if package_stamp(&package.dir) != Some((package.mtime_ns, package.size)) {
+        if !current.contains(&package.dir) {
             continue;
         }
         for (dir, specifier, result) in package.resolutions {
@@ -1157,16 +1226,34 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
                     resolutions: Vec::new(),
                     exports: Vec::new(),
                     augmenters: Vec::new(),
+                    depends_on: Vec::new(),
                 },
             );
         }
         Some(package)
     };
+    // The package a file belongs to, when it is another one than `from`.
+    let other_package = |file: &Utf8Path, from: &str| -> Option<Box<str>> {
+        loader.package_of(file.parent()?).filter(|package| &**package != from)
+    };
+    let mut depends_on: FxHashMap<Box<str>, FxHashSet<Box<str>>> = FxHashMap::default();
+    // A package with an unresolved import, or one leading into such a package, has export lookups that walked past
+    // it; installing the missing package changes them, and the index could not say so, so none of its exports are kept.
+    let mut with_unresolved: FxHashSet<Box<str>> = FxHashSet::default();
     let mut resolutions: Vec<(Box<str>, ResolutionRow)> = Vec::new();
     for item in loader.resolutions.iter() {
         let ((dir, specifier), result) = (item.key(), item.value());
-        if let Some(package) = entry(Utf8Path::new(dir)) {
-            resolutions.push((package, (dir.to_string(), specifier.to_string(), result.clone().map(String::from))));
+        let Some(package) = entry(Utf8Path::new(dir)) else { continue };
+        match result {
+            Ok(target) => {
+                if let Some(other) = other_package(target, &package) {
+                    depends_on.entry(package.clone()).or_default().insert(other);
+                }
+                resolutions.push((package, (dir.to_string(), specifier.to_string(), Ok(target.to_string()))));
+            }
+            Err(_) => {
+                with_unresolved.insert(package);
+            }
         }
     }
     let mut exports: Vec<(Box<str>, ExportRow)> = Vec::new();
@@ -1175,10 +1262,28 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
         let module: &str = std::borrow::Borrow::borrow(module);
         let Some(dir) = Utf8Path::new(module).parent() else { continue };
         if let Some(package) = entry(dir) {
+            if let Some(other) = found.as_ref().and_then(|(file, _)| other_package(file, &package)) {
+                depends_on.entry(package.clone()).or_default().insert(other);
+            }
             let found = found.as_ref().map(|(file, name)| (file.to_string(), name.to_string()));
             exports.push((package, (module.to_owned(), name.to_string(), found)));
         }
     }
+    // A package that leads into one with an unresolved import has export lookups that walked past it too.
+    loop {
+        let reaching: Vec<Box<str>> = depends_on
+            .iter()
+            .filter(|(package, others)| {
+                !with_unresolved.contains(*package) && others.iter().any(|other| with_unresolved.contains(other))
+            })
+            .map(|(package, _)| package.clone())
+            .collect();
+        if reaching.is_empty() {
+            break;
+        }
+        with_unresolved.extend(reaching);
+    }
+    exports.retain(|(package, _)| !with_unresolved.contains(package));
     let mut augmenters: Vec<(Box<str>, AugmenterRow)> = Vec::new();
     for item in loader.augmenters.iter() {
         let (module, files): (&str, _) = (std::borrow::Borrow::borrow(item.key()), item.value());
@@ -1186,6 +1291,17 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
         if let Some(package) = entry(dir) {
             let crossed = loader.augmenter_crossed.get(item.key()).map(|crossed| crossed.clone()).unwrap_or_default();
             augmenters.push((package, (module.to_owned(), files.iter().map(ToString::to_string).collect(), crossed)));
+        }
+    }
+    for (package, others) in depends_on {
+        // A dependency whose stamp cannot be read gets one that never matches, so the rows it supports are dropped.
+        let stamps = others.iter().map(|other| {
+            let (mtime_ns, size) = package_stamp(other).unwrap_or_default();
+            (other.to_string(), mtime_ns, size)
+        });
+        if let Some(index) = packages.get_mut(&package) {
+            index.depends_on.extend(stamps);
+            index.depends_on.sort();
         }
     }
     for (package, row) in augmenters {
@@ -1211,6 +1327,11 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
         package.augmenters.sort();
     }
     let Ok(bytes) = rmp_serde::to_vec(&IndexFile { fingerprint: *fingerprint, packages }) else { return };
+    // Answers the index does not keep (those of a package with an unresolved import) make every run learn again; the
+    // file is left alone when it would not change.
+    if std::fs::read(path).is_ok_and(|existing| existing == bytes) {
+        return;
+    }
     let Some(dir) = path.parent() else { return };
     if std::fs::create_dir_all(dir).is_err() {
         return;

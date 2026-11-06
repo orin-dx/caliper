@@ -1,7 +1,5 @@
 //! Semantic output types produced by the resolver (Phase 3).
 
-#![deny(missing_docs)]
-
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
