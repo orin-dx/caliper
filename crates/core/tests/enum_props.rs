@@ -191,3 +191,21 @@ fn an_enum_in_a_declaration_file_or_a_declare_namespace_has_no_invented_values()
         assert_ne!(props["level"]["kind"], "union", "{file}: {}", props["level"]);
     }
 }
+
+#[test]
+fn enums_in_function_bodies_do_not_replace_or_merge_into_a_module_level_name() {
+    let (props, diagnostics) = props_of(&[(
+        "case.tsx",
+        r#"
+        type Tone = string;
+        function first() { enum Tone { A = "a" } return Tone.A; }
+        function second() { enum Tone { B = "b" } return Tone.B; }
+        enum Level { Low = 1 }
+        function third() { enum Level { High = 2 } return Level.High; }
+        export function C(props: { tone: Tone; level: Level }) { return <b />; }
+        "#,
+    )]);
+    assert_eq!(props["tone"], json!({ "kind": "string" }));
+    assert_eq!(props["level"], json!({ "kind": "numberLiteral", "value": 1.0 }));
+    assert_eq!(diagnostics, Vec::<String>::new());
+}

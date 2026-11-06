@@ -3,7 +3,10 @@
 use oxc_ast::ast::*;
 use rustc_hash::FxHashMap;
 
-use crate::types::{ComponentMapping, DefaultSource, DetectionRule, DiagnosticCode, EnumEntry, EnumValue, RawDefault};
+use crate::types::{
+    CollectedTypeAlias, ComponentMapping, DefaultSource, DetectionRule, DiagnosticCode, EnumEntry, EnumValue,
+    RawDefault,
+};
 
 use super::{is_pascal_case, js_text, SourceDataCollector};
 
@@ -255,6 +258,46 @@ impl<'src> SourceDataCollector<'src> {
                 value
             })
             .collect()
+    }
+
+    /// A prop typed with the enum is the union of its values, over every declaration that merges into it. One declaration
+    /// with a value that is not known leaves the enum without a union, never a partial one.
+    pub(super) fn record_enum_union(&mut self, key: &str, values: &[Option<EnumValue>]) {
+        use crate::types::CollectedType;
+        let previous = self.enum_unions.remove(key);
+        let contribution: Option<Vec<CollectedType>> = values
+            .iter()
+            .map(|value| match value {
+                Some(EnumValue::String(s)) => Some(CollectedType::StringLiteral(s.as_str().into())),
+                Some(EnumValue::Number(n)) => Some(CollectedType::NumberLiteral(*n)),
+                _ => None,
+            })
+            .collect();
+        let merged = match (&previous, contribution) {
+            (None, contribution) => contribution,
+            (Some(Some(earlier)), Some(more)) => Some(earlier.iter().cloned().chain(more).collect()),
+            (Some(_), _) => None,
+        };
+        let target = merged.as_ref().and_then(|members| match members.as_slice() {
+            [] => None,
+            [only] => Some(only.clone()),
+            _ => Some(CollectedType::Union(members.clone())),
+        });
+        match target {
+            Some(target) => {
+                let alias = CollectedTypeAlias::Passthrough { target, file_path: self.file_path.clone() };
+                if previous.is_some() {
+                    self.data.type_aliases.insert(key.to_owned(), alias);
+                } else {
+                    self.data.type_aliases.entry(key.to_owned()).or_insert(alias);
+                }
+            }
+            None if previous.is_some() => {
+                self.data.type_aliases.remove(key);
+            }
+            None => {}
+        }
+        self.enum_unions.insert(key.to_owned(), merged);
     }
 
     pub(super) fn expression_to_enum_value<'a>(&self, expr: &Expression<'a>) -> Option<EnumValue> {

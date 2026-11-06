@@ -5,8 +5,8 @@ use oxc_ast_visit::{walk, Visit};
 use oxc_syntax::scope::ScopeFlags;
 
 use crate::types::{
-    CollectedInterface, CollectedType, CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode, EnumEntry,
-    EnumValue, ExtendsRef, ImportBinding, LexedExport, RawProp, TypeName,
+    CollectedInterface, ComponentMapping, DetectionRule, DiagnosticCode, EnumEntry, EnumValue, ExtendsRef,
+    ImportBinding, LexedExport, RawProp, TypeName,
 };
 
 use super::component::Binding;
@@ -283,44 +283,15 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             })
             .collect();
 
-        // A prop typed with the enum is the union of its values, over every declaration that merges into it. One
-        // declaration with a value that is not known leaves the enum without a union, never a partial one.
-        let previous = self.enum_unions.remove(&key);
-        let contribution: Option<Vec<CollectedType>> = values
-            .iter()
-            .map(|value| match value {
-                Some(EnumValue::String(s)) => Some(CollectedType::StringLiteral(s.as_str().into())),
-                Some(EnumValue::Number(n)) => Some(CollectedType::NumberLiteral(*n)),
-                _ => None,
-            })
-            .collect();
-        let merged = match (&previous, contribution) {
-            (None, contribution) => contribution,
-            (Some(Some(earlier)), Some(more)) => Some(earlier.iter().cloned().chain(more).collect()),
-            (Some(_), _) => None,
-        };
-        let target = merged.as_ref().and_then(|members| match members.as_slice() {
-            [] => None,
-            [only] => Some(only.clone()),
-            _ => Some(CollectedType::Union(members.clone())),
-        });
-        match target {
-            Some(target) => {
-                let alias = CollectedTypeAlias::Passthrough { target, file_path: self.file_path.clone() };
-                if previous.is_some() {
-                    self.data.type_aliases.insert(key.clone(), alias);
-                } else {
-                    self.data.type_aliases.entry(key.clone()).or_insert(alias);
-                }
+        // An enum declared in a function body is not the enum a props type names: `scoped_key` ignores function scope, so
+        // it must neither merge with, nor replace, a module-level name.
+        if self.function_depth == 0 {
+            self.record_enum_union(&key, &values);
+            if !entries.is_empty() {
+                self.data.enums.entry(key).or_default().extend(entries);
             }
-            None if previous.is_some() => {
-                self.data.type_aliases.remove(&key);
-            }
-            None => {}
-        }
-        self.enum_unions.insert(key.clone(), merged);
-        if !entries.is_empty() {
-            self.data.enums.entry(key).or_default().extend(entries);
+        } else if !entries.is_empty() {
+            self.data.enums.insert(key, entries);
         }
     }
 
