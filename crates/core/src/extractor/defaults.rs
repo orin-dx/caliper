@@ -37,6 +37,10 @@ impl<'src> SourceDataCollector<'src> {
                     // The prop is the key; the local name after `:` is only what the body calls it.
                     let name = match (&prop.key, &ap.left) {
                         (PropertyKey::StaticIdentifier(key), _) => key.name.as_str().to_owned(),
+                        (PropertyKey::StringLiteral(key), _) => match key.value.as_str() {
+                            Some(name) => name.to_owned(),
+                            None => continue,
+                        },
                         (_, BindingPattern::BindingIdentifier(id)) => id.name.as_str().to_owned(),
                         _ => continue,
                     };
@@ -58,6 +62,22 @@ impl<'src> SourceDataCollector<'src> {
             Expression::Identifier(id) if id.name.as_str() == "undefined" => {
                 RawDefault { value: "undefined".into(), computed: false, source }
             }
+            // `-1`, `+1` and `!0` are literals, not computations.
+            Expression::UnaryExpression(unary) => match (&unary.operator, &unary.argument) {
+                (UnaryOperator::UnaryNegation, Expression::NumericLiteral(n)) => {
+                    RawDefault { value: (-n.value).to_string(), computed: false, source }
+                }
+                (UnaryOperator::UnaryPlus, Expression::NumericLiteral(n)) => {
+                    RawDefault { value: n.value.to_string(), computed: false, source }
+                }
+                (UnaryOperator::LogicalNot, Expression::NumericLiteral(n)) => {
+                    RawDefault { value: (n.value == 0.0).to_string(), computed: false, source }
+                }
+                (UnaryOperator::LogicalNot, Expression::BooleanLiteral(b)) => {
+                    RawDefault { value: (!b.value).to_string(), computed: false, source }
+                }
+                _ => self.computed_default(expr, source),
+            },
             // String, array and object literals keep their source text, quotes included, as react-docgen-typescript and
             // Storybook's React docgen print them.
             Expression::StringLiteral(_) | Expression::ArrayExpression(_) | Expression::ObjectExpression(_) => {
@@ -70,15 +90,13 @@ impl<'src> SourceDataCollector<'src> {
                 }
             }
             // Everything else (identifier refs, calls, ternaries): computed
-            _ => {
-                use oxc_span::GetSpan;
-                let span = expr.span();
-                RawDefault {
-                    value: self.source[span.start as usize..span.end as usize].to_owned(),
-                    computed: true,
-                    source,
-                }
-            }
+            _ => self.computed_default(expr, source),
         }
+    }
+
+    fn computed_default<'a>(&self, expr: &Expression<'a>, source: DefaultSource) -> RawDefault {
+        use oxc_span::GetSpan;
+        let span = expr.span();
+        RawDefault { value: self.source[span.start as usize..span.end as usize].to_owned(), computed: true, source }
     }
 }

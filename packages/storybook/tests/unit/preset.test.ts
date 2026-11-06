@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import type { CaliperStorybookOptions } from '../../src/index.js'
 import { experimental_docgenProvider, isDocgenProviderEnabled } from '../../src/preset.js'
 
 describe('preset', () => {
@@ -25,6 +26,28 @@ describe('preset', () => {
     })
     expect(ours?.moduleSpecifier).toMatch(/provider\.(js|ts)$/)
     expect(existsSync(ours!.moduleSpecifier.replace(/\.js$/, '.ts')) || existsSync(ours!.moduleSpecifier)).toBe(true)
+  })
+
+  it('forwards every option key to the worker', async () => {
+    const options = {
+      srcDirs: ['lib'],
+      exclude: ['x'],
+      tsconfigPath: 'tsconfig.json',
+      skipHtmlProps: true,
+      htmlAttributes: 'curated',
+      cache: false,
+      loadDependencies: false,
+      collapseInheritedProps: 'all',
+      lazy: false,
+      warmUp: true,
+      fillAfter: 5,
+      semanticTypes: 'on-demand',
+      tscPath: '/bin/tsc',
+      semanticWaitMs: 7,
+      fallback: 'never',
+    } satisfies Record<keyof CaliperStorybookOptions, unknown>
+    const [ours] = await experimental_docgenProvider([], options)
+    expect(ours?.options).toEqual(options)
   })
 
   it('turns on the docgen server', async () => {
