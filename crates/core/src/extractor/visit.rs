@@ -171,7 +171,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
 
     fn visit_ts_interface_declaration(&mut self, node: &TSInterfaceDeclaration<'a>) {
         let name = node.id.name.as_str();
-        let key = self.scoped_key(name);
+        let key = self.declared_type_key(name);
 
         let extends: Vec<ExtendsRef> = node.extends.iter().map(|ext| self.collect_extends(ext)).collect();
 
@@ -183,18 +183,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         let props: Vec<RawProp> =
             node.body.body.iter().filter_map(|sig| self.collect_property_signature(sig)).collect();
 
-        // Function bodies share the module-level key, so the scope each interface was declared in decides what a
-        // second declaration does. Declarations of one name in one scope merge: members and `extends` accumulate, and
-        // the first description stands. A function-body interface never touches a module-level one of the same name;
-        // any other change of scope starts over from the new declaration.
-        let previous_scope = self.interface_scopes.get(&key);
-        let merges = previous_scope.is_none_or(|scope| *scope == self.function_scopes);
-        if previous_scope.is_some_and(Vec::is_empty) && !self.function_scopes.is_empty() {
-            return;
-        }
-        self.interface_scopes.insert(key.clone(), self.function_scopes.clone());
-        let existing = self.data.interfaces.get_mut(&key).filter(|_| merges);
-        if let Some(merged) = existing {
+        // Declarations of one name in one scope share a key and merge: members and `extends` accumulate, and the first
+        // description stands.
+        if let Some(merged) = self.data.interfaces.get_mut(&key) {
             for prop in props {
                 if !merged.props.iter().any(|existing| existing.name == prop.name) {
                     merged.props.push(prop);
@@ -239,7 +230,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
 
     fn visit_ts_type_alias_declaration(&mut self, node: &TSTypeAliasDeclaration<'a>) {
         let name = node.id.name.as_str();
-        let key = self.scoped_key(name);
+        let key = self.declared_type_key(name);
 
         let Some(alias) = self.classify_type_alias(name, &node.type_annotation) else {
             return;
@@ -518,11 +509,32 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
 
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
         self.function_depth += 1;
-        self.function_scope_count += 1;
-        self.function_scopes.push(self.function_scope_count);
+        let entered = self.enter_type_scope(body.span.start, body.statements.iter());
         walk::walk_function_body(self, body);
-        self.function_scopes.pop();
+        self.leave_type_scope(entered);
         self.function_depth -= 1;
+    }
+
+    fn visit_block_statement(&mut self, block: &BlockStatement<'a>) {
+        let entered = self.enter_type_scope(block.span.start, block.body.iter());
+        walk::walk_block_statement(self, block);
+        self.leave_type_scope(entered);
+    }
+
+    fn visit_static_block(&mut self, block: &StaticBlock<'a>) {
+        let entered = self.enter_type_scope(block.span.start, block.body.iter());
+        walk::walk_static_block(self, block);
+        self.leave_type_scope(entered);
+    }
+
+    fn visit_switch_statement(&mut self, switch: &SwitchStatement<'a>) {
+        self.visit_expression(&switch.discriminant);
+        let entered =
+            self.enter_type_scope(switch.span.start, switch.cases.iter().flat_map(|case| case.consequent.iter()));
+        for case in &switch.cases {
+            self.visit_switch_case(case);
+        }
+        self.leave_type_scope(entered);
     }
 
     fn visit_class(&mut self, class: &Class<'a>) {

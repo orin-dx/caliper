@@ -75,6 +75,15 @@ fn is_react_module(specifier: &str) -> bool {
     specifier == "react" || specifier.starts_with("react/") || specifier == "preact/compat"
 }
 
+/// A function body or block that declares interfaces or type aliases. These names are scoped to it: the same name in
+/// another scope, or at module level, is a different type (as in TypeScript). Registry keys carry the frame id.
+pub(super) struct TypeFrame {
+    id: u32,
+    names: FxHashSet<CompactString>,
+    /// `namespace_stack.len()` where the frame opened: a declaration deeper in a namespace belongs to that namespace.
+    namespace_depth: usize,
+}
+
 // ─── Entry Point ─────────────────────────────────────────────────────────────
 
 /// Maximum bracket-nesting depth a source file may contain before we refuse to parse it.
@@ -260,13 +269,9 @@ pub(super) struct SourceDataCollector<'src> {
     /// `TSTypeName::QualifiedName` handling) — so storage keys must match, or a same-file
     /// reference to a namespace member can never resolve.
     pub(super) namespace_stack: Vec<CompactString>,
-    /// Ids of the enclosing function bodies, outermost first; empty at module level. `scoped_key` does not tell
-    /// function bodies apart, so interfaces use this to merge only within one scope.
-    pub(super) function_scopes: Vec<u32>,
-    /// Number of function bodies entered so far: the source of the next scope id.
-    pub(super) function_scope_count: u32,
-    /// The scope each interface key was last declared in.
-    pub(super) interface_scopes: rustc_hash::FxHashMap<String, Vec<u32>>,
+    /// The enclosing function bodies and blocks that declare an interface or type alias, outermost first. Module level
+    /// has no frame. See [`TypeFrame`].
+    pub(super) type_frames: Vec<TypeFrame>,
     /// `X.displayName = "..."` renames recorded during the main traversal but
     /// not yet applied — see `try_scan_display_name`. Applying these
     /// immediately would change `component_name` out from under any later
@@ -337,9 +342,7 @@ impl<'src> SourceDataCollector<'src> {
             element_helpers: FxHashSet::default(),
             consumed_jsdoc: FxHashSet::default(),
             namespace_stack: Vec::new(),
-            function_scopes: Vec::new(),
-            function_scope_count: 0,
-            interface_scopes: rustc_hash::FxHashMap::default(),
+            type_frames: Vec::new(),
             pending_display_name_renames: Vec::new(),
             aliased_away: FxHashSet::default(),
             pending_wrappers: Vec::new(),
@@ -384,6 +387,57 @@ impl<'src> SourceDataCollector<'src> {
             format!("'{name}' is declared inside a function body, so no module can import it"),
             span,
         );
+    }
+
+    /// Enter a function body or block: if it declares interfaces or type aliases, they belong to this scope and not to
+    /// the module. Returns whether a frame was pushed, for [`Self::leave_type_scope`].
+    /// The scope is identified by where its body starts, so entering it twice (once to read a function's result, once
+    /// to walk it) names the same scope both times.
+    pub(super) fn enter_type_scope<'a>(
+        &mut self,
+        start: u32,
+        statements: impl Iterator<Item = &'a Statement<'a>>,
+    ) -> bool {
+        let names: FxHashSet<CompactString> = statements
+            .filter_map(|statement| match statement {
+                Statement::TSInterfaceDeclaration(interface) => Some(interface.id.name.as_str().into()),
+                Statement::TSTypeAliasDeclaration(alias) => Some(alias.id.name.as_str().into()),
+                _ => None,
+            })
+            .collect();
+        if names.is_empty() {
+            return false;
+        }
+        self.type_frames.push(TypeFrame { id: start, names, namespace_depth: self.namespace_stack.len() });
+        true
+    }
+
+    pub(super) fn leave_type_scope(&mut self, entered: bool) {
+        if entered {
+            self.type_frames.pop();
+        }
+    }
+
+    /// The name a type reference uses in the registries: the name itself, or, when an enclosing function body or block
+    /// declares it, the name made unique to that scope. Declarations hoist, so a reference before its declaration
+    /// resolves the same way.
+    pub(super) fn type_name_in_scope(&self, name: &str) -> String {
+        match self.type_frames.iter().rev().find(|frame| frame.names.contains(name)) {
+            Some(frame) => format!("{name}@{}", frame.id),
+            None => name.to_owned(),
+        }
+    }
+
+    /// The registry key of an interface or type alias being declared here: scope-qualified when the innermost function
+    /// body or block declares it, so declarations in different scopes never share an entry and declarations in one
+    /// scope always do.
+    pub(super) fn declared_type_key(&self, name: &str) -> String {
+        match self.type_frames.last() {
+            Some(frame) if frame.namespace_depth == self.namespace_stack.len() && frame.names.contains(name) => {
+                self.scoped_key(&format!("{name}@{}", frame.id))
+            }
+            _ => self.scoped_key(name),
+        }
     }
 
     pub(super) fn scoped_key(&self, name: &str) -> String {
@@ -740,7 +794,7 @@ impl<'src> SourceDataCollector<'src> {
 
     pub(super) fn ts_type_name_str<'a>(&self, name: &TSTypeName<'a>) -> String {
         match name {
-            TSTypeName::IdentifierReference(id) => id.name.as_str().to_owned(),
+            TSTypeName::IdentifierReference(id) => self.type_name_in_scope(id.name.as_str()),
             TSTypeName::QualifiedName(q) => {
                 format!("{}.{}", self.ts_type_name_str(&q.left), q.right.name.as_str())
             }
