@@ -154,8 +154,8 @@ impl<T: Clone> Recording<T> {
             && self.keys_only == state.keys_only
             && reads.visited.iter().all(|(key, present)| state.visited.contains(key) == *present)
             && reads.named.iter().all(|(key, present)| state.named_in_progress.contains(key) == *present)
-            && (!reads.needs_empty_scope || state.scope.is_empty())
-            && reads.in_scope.iter().all(|(name, present)| state.scope.contains(name) == *present)
+            && (!reads.needs_empty_scope || state.binds_nothing())
+            && reads.in_scope.iter().all(|(name, present)| state.binds(name) == *present)
             && reads.defaults.iter().all(|(name, found)| {
                 mapping.is_some_and(|mapping| {
                     mapping.param_defaults.get(name.as_str()).map(|d| (d.value.as_str(), d.computed))

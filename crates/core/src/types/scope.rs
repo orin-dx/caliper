@@ -9,6 +9,23 @@ use compact_str::CompactString;
 /// parameter of the declaration it lands in can capture it.
 pub const PLACEHOLDER_MARK: char = '\u{1}';
 
+/// Ends the name of a reference that must be looked up as a declaration, never as a type parameter: a call's type
+/// argument that names a type parameter of the function it calls (`make<P>` over a module `type P`) is written
+/// where that parameter is not in scope.
+pub const DECLARATION_MARK: char = '\u{2}';
+
+/// `name` marked as the declaration it refers to (`DECLARATION_MARK`).
+pub fn mark_declaration(name: &str) -> CompactString {
+    let mut marked = CompactString::from(name);
+    marked.push(DECLARATION_MARK);
+    marked
+}
+
+/// Whether `name` is a placeholder reference marked by `mark_placeholder`.
+pub fn is_marked_placeholder(name: &str) -> bool {
+    name.ends_with(PLACEHOLDER_MARK)
+}
+
 /// `name` marked as the placeholder it refers to (`PLACEHOLDER_MARK`).
 pub fn mark_placeholder(name: &str) -> CompactString {
     let mut marked = CompactString::from(name);
@@ -16,9 +33,9 @@ pub fn mark_placeholder(name: &str) -> CompactString {
     marked
 }
 
-/// The name a marked placeholder reference stands for, or `name` itself when it is not marked.
+/// The name a marked reference stands for, or `name` itself when it is not marked.
 pub fn unmarked(name: &str) -> &str {
-    name.strip_suffix(PLACEHOLDER_MARK).unwrap_or(name)
+    name.strip_suffix([PLACEHOLDER_MARK, DECLARATION_MARK]).unwrap_or(name)
 }
 
 /// The type parameters in scope where a type is read: a name here is the innermost binding of that name and shadows any
