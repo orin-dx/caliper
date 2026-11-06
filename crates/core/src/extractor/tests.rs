@@ -1782,6 +1782,18 @@ fn an_enum_member_has_one_value_for_its_entry_and_its_union() {
 }
 
 #[test]
+fn an_enum_in_a_function_body_does_not_touch_the_entries_of_a_module_level_enum() {
+    let data = parse_file(
+        Utf8Path::new("/test/local.ts"),
+        "function before() { enum Level { Early = 0 } return Level.Early }\n\
+         enum Level { Low = 1 }\n\
+         function after() { enum Level { High = 2 } return Level.High }",
+    );
+    let names: Vec<&str> = data.enums["/test/local.ts:Level"].iter().map(|entry| entry.name.as_str()).collect();
+    assert_eq!(names, ["Low"]);
+}
+
+#[test]
 fn test_const_array_as_const_collected() {
     // antd's `type ButtonType = (typeof _ButtonTypes)[number]` pattern —
     // a flat array literal, not an object (test_enum_collected above) or a

@@ -261,6 +261,11 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     }
 
     fn visit_ts_enum_declaration(&mut self, node: &TSEnumDeclaration<'a>) {
+        // An enum declared in a function body is not the enum a module's types name: `scoped_key` ignores function scope,
+        // so its union and entries would merge into, or replace, a module-level enum of the same name.
+        if self.function_depth > 0 {
+            return;
+        }
         let enum_name = node.id.name.as_str();
         let key = self.scoped_key(enum_name);
 
@@ -283,15 +288,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             })
             .collect();
 
-        // An enum declared in a function body is not the enum a props type names: `scoped_key` ignores function scope, so
-        // it must neither merge with, nor replace, a module-level name.
-        if self.function_depth == 0 {
-            self.record_enum_union(&key, &values);
-            if !entries.is_empty() {
-                self.data.enums.entry(key).or_default().extend(entries);
-            }
-        } else if !entries.is_empty() {
-            self.data.enums.insert(key, entries);
+        self.record_enum_union(&key, &values);
+        if !entries.is_empty() {
+            self.data.enums.entry(key).or_default().extend(entries);
         }
     }
 
