@@ -128,7 +128,7 @@ export function createDocgenProvider(
     if (node?.type !== 'MemberExpression' || node.computed) return undefined
     if (node.object?.type !== 'Identifier' || !node.object.name || !node.property?.name) return undefined
     const owner = resolveMeta(
-      { _metaAnnotations: { component: node.object }, _file: csf._file } as unknown as CsfFile,
+      { _metaAnnotations: { component: node.object }, editor: csf.editor, program: csf.program } as unknown as CsfFile,
       storyPath,
     )
     if (!('component' in owner) || !owner.component.path) return undefined
@@ -147,7 +147,11 @@ export function createDocgenProvider(
     name?: string,
   ): Promise<{ key: string; path: string; doc: RdtComponentDoc }> {
     const target = name
-      ? ({ _metaAnnotations: { component: expressionFor(name) }, _file: csf._file } as unknown as CsfFile)
+      ? ({
+          _metaAnnotations: { component: expressionFor(name) },
+          editor: csf.editor,
+          program: csf.program,
+        } as unknown as CsfFile)
       : csf
     const session = await getSession()
     const { key, path } = await locate(session, target, storyPath)
@@ -197,7 +201,7 @@ export function createDocgenProvider(
     await session.fresh()
     const { doc } = await component(csf, storyPath)
     const { description, summary, jsDocTags } = extractComponentDescription(
-      extractDescription(csf._metaStatement) || undefined,
+      extractDescription(csf._metaStatement, csf.editor) || undefined,
       doc.description || undefined,
       tagLists(doc.tags),
     )
