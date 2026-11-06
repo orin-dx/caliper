@@ -183,15 +183,18 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         let props: Vec<RawProp> =
             node.body.body.iter().filter_map(|sig| self.collect_property_signature(sig)).collect();
 
-        // An interface in a function body is visible to that body only, and its key is the module-level key: keeping it
-        // would add its members to, or replace, a module-level interface of the same name.
-        if self.function_depth > 0 {
+        // Function bodies share the module-level key, so the scope each interface was declared in decides what a
+        // second declaration does. Declarations of one name in one scope merge: members and `extends` accumulate, and
+        // the first description stands. A function-body interface never touches a module-level one of the same name;
+        // any other change of scope starts over from the new declaration.
+        let previous_scope = self.interface_scopes.get(&key);
+        let merges = previous_scope.is_none_or(|scope| *scope == self.function_scopes);
+        if previous_scope.is_some_and(Vec::is_empty) && !self.function_scopes.is_empty() {
             return;
         }
-
-        // Declarations of one name in one scope merge: members and `extends` accumulate, and the first description
-        // stands.
-        if let Some(merged) = self.data.interfaces.get_mut(&key) {
+        self.interface_scopes.insert(key.clone(), self.function_scopes.clone());
+        let existing = self.data.interfaces.get_mut(&key).filter(|_| merges);
+        if let Some(merged) = existing {
             for prop in props {
                 if !merged.props.iter().any(|existing| existing.name == prop.name) {
                     merged.props.push(prop);
@@ -515,7 +518,10 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
 
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
         self.function_depth += 1;
+        self.function_scope_count += 1;
+        self.function_scopes.push(self.function_scope_count);
         walk::walk_function_body(self, body);
+        self.function_scopes.pop();
         self.function_depth -= 1;
     }
 
