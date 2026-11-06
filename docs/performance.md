@@ -41,7 +41,7 @@ Whether `--load-dependencies` can become the default (ADR 0010). The five repos 
 - **Chakra's peak memory with dependencies, by change** (`/usr/bin/time -l`, default threads): 367 MiB before the literal-type work, 494 MiB after member reads through csstype's `Fallback<T>` (#144), 388 MiB once an alias's arguments are resolved once and equal props are shared. Peak memory scales with threads (248 MiB on one thread, 388 on 18) because each thread holds the types it is building; measure memory before and after any change that evaluates more types, not only time.
 - **Chakra's cost blocks the default.** Loaded dependencies let each of Chakra's 600 components reach its own ~705-prop style system: 398,000 props, 497 ms and 1.3 GB (RDT: 637,000 props, 27 s, 2.7 GB). `--collapse-inherited-props all` cuts that to 5,515 props but still 281 ms and 835 MiB, so most of the cost is not the listed props.
 
-RDT (`withCustomConfig`, `shouldExtractLiteralValuesFromEnum`, `shouldRemoveUndefinedFromOptional`) took 1.6 to 27 s and 0.6 to 2.7 GB per repo. The harness that ran this (`apps/validate`) has since been removed; `scripts/weekly.py` records the same comparison.
+RDT (`withCustomConfig`, `shouldExtractLiteralValuesFromEnum`, `shouldRemoveUndefinedFromOptional`) took 1.6 to 27 s and 0.6 to 2.7 GB per repo. The harness that ran this is not in the repository; `scripts/weekly.py` records the same comparison.
 
 ## Storybook addon request path, 2026-10-24
 
