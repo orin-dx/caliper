@@ -2835,6 +2835,16 @@ fn a_member_call_named_h_is_not_render_evidence() {
 }
 
 #[test]
+fn preacts_namespace_h_call_is_render_evidence_and_not_a_tagged_factory() {
+    let source = "import * as Preact from 'preact';\n\
+        import type { ComponentProps } from 'preact/compat';\n\
+        type ButtonProps = ComponentProps<'button'>;\n\
+        export const Button = Preact.h('button', {});\n\
+        export function Name(props: { id: string }) { return Preact.h('div', null, props.id); }";
+    assert_eq!(components_in(source), ["Name"]);
+}
+
+#[test]
 fn a_local_function_named_h_is_not_render_evidence() {
     let source = "function h(id: string) { return { id }; }\n\
         export function Hash(props: { id: string }) { return h(props.id); }";

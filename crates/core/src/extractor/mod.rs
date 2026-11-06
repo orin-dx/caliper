@@ -1289,11 +1289,15 @@ impl evidence::Scope for SourceDataCollector<'_> {
         matches!(self.react_api(&call.callee), Some(ReactApi::Memo | ReactApi::ForwardRef))
     }
 
-    fn binds_preact_h(&self) -> bool {
+    fn is_preact_h(&self, receiver: Option<&str>) -> bool {
         self.data.imports.iter().any(|import| {
-            import.local_name.as_str() == "h"
-                && import.exported_name.as_str() == "h"
-                && crate::react_types::is_preact_module(&import.specifier)
+            let binds = match receiver {
+                None => import.local_name.as_str() == "h" && import.exported_name.as_str() == "h",
+                Some(object) => {
+                    import.local_name.as_str() == object && matches!(import.exported_name.as_str(), "*" | "default")
+                }
+            };
+            binds && crate::react_types::is_preact_module(&import.specifier)
         })
     }
 }

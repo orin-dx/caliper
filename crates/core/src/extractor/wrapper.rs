@@ -199,11 +199,10 @@ impl<'src> SourceDataCollector<'src> {
         let has_config =
             matches!(config.as_expression().map(super::component::peel_expr), Some(Expression::ObjectExpression(_)));
         let Some(callee) = self.extract_callee_name(call) else { return false };
-        let element_builder = super::evidence::is_element_factory_name(
-            callee.rsplit('.').next().unwrap_or(&callee),
-            callee.contains('.'),
-            &*self,
-        );
+        let element_builder = match callee.rsplit_once('.') {
+            Some((receiver, name)) => super::evidence::is_element_factory_name(name, Some(receiver), &*self),
+            None => super::evidence::is_element_factory_name(&callee, None, &*self),
+        };
         if !is_tag || !has_config || element_builder {
             return false;
         }
@@ -480,7 +479,7 @@ impl<'src> SourceDataCollector<'src> {
         let Expression::Identifier(callee) = super::component::peel_expr(&call.callee) else { return false };
         // A rule that gave its reason for declining the call has already said what it is not.
         let explained = self.decline_reason.is_some() && !self.argument_declined;
-        let element_builder = super::evidence::is_element_factory_name(callee.name.as_str(), false, &*self);
+        let element_builder = super::evidence::is_element_factory_name(callee.name.as_str(), None, &*self);
         if super::is_constant_name(name) || explained || element_builder || self.react_api(&call.callee).is_some() {
             return false;
         }
