@@ -481,6 +481,9 @@ impl CollectedType {
                         if let Some(key) = &f.index_key {
                             map.insert("ik".into(), key.to_json_value());
                         }
+                        if !f.tags.is_empty() {
+                            map.insert("tags".into(), serde_json::json!(f.tags));
+                        }
                     }
                     field
                 }).collect::<Vec<_>>()
@@ -630,6 +633,15 @@ impl CollectedType {
                                 description: o.get("desc").and_then(|v| v.as_str()).unwrap_or("").to_owned(),
                                 readonly: o.get("ro").and_then(|v| v.as_bool()).unwrap_or(false),
                                 index_key: o.get("ik").map(Self::from_json_value).transpose()?.map(Box::new),
+                                tags: o
+                                    .get("tags")
+                                    .and_then(|v| v.as_object())
+                                    .map(|tags| {
+                                        tags.iter()
+                                            .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
                             })
                         })
                         .collect::<Result<_, std::string::String>>()?;
@@ -751,6 +763,9 @@ pub struct CollectedObjectField {
     /// Set for an index signature `[name: K]: T`: the key type `K`, with `collected_type` the value type `T`.
     #[serde(default)]
     pub index_key: Option<Box<CollectedType>>,
+    /// The field's JSDoc tags (`deprecated`, `example`, …), empty when it has none.
+    #[serde(default)]
+    pub tags: BTreeMap<std::string::String, std::string::String>,
 }
 
 impl CollectedObjectField {
@@ -1061,6 +1076,7 @@ impl CollectedType {
                         description: f.description.clone(),
                         readonly: f.readonly,
                         index_key: f.index_key.as_ref().map(|key| Box::new(key.rename_named(rename))),
+                        tags: f.tags.clone(),
                     })
                     .collect(),
             ),
@@ -1556,6 +1572,7 @@ mod tests {
             description: "the label".to_owned(),
             readonly: false,
             index_key: None,
+            tags: Default::default(),
         };
 
         let bytes = rmp_serde::to_vec(&field).expect("serialization should succeed");
@@ -1584,6 +1601,7 @@ mod tests {
                 description: String::new(),
                 readonly: false,
                 index_key: None,
+                tags: Default::default(),
             }]),
         ]);
         let json = original.to_json_value();

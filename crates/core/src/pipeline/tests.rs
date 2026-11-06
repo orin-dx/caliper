@@ -4051,6 +4051,19 @@ fn a_plain_block_comment_is_not_a_description() {
 }
 
 #[test]
+fn an_inline_object_prop_keeps_its_tags() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "export function Box(props: {\n  /**\n   * The size.\n   * @deprecated Use `scale`\n   */\n  size: string;\n  /** The tone. */\n  tone: string;\n}) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    assert_eq!(props["size"].description, "The size.");
+    assert_eq!(props["size"].tags.get("deprecated").map(String::as_str), Some("Use `scale`"));
+    assert!(props["tone"].tags.is_empty(), "{:?}", props["tone"].tags);
+}
+
+#[test]
 fn a_tag_keeps_its_continuation_lines() {
     let output = extract_one(&[(
         "Box.tsx",
