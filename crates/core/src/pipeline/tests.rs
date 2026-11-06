@@ -4513,3 +4513,27 @@ fn a_tag_keeps_its_continuation_lines() {
     assert_eq!(tags["deprecated"], "Use `scale`\ninstead of this.");
     assert_eq!(tags["example"], "<Box size=\"s\" />\n<Box size=\"m\" />");
 }
+
+#[test]
+fn tuple_elements_resolve_whether_plain_labelled_or_optional() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "type Tone = 'a' | 'b';\n\
+         export function Box(props: { plain: [Tone, number]; labelled: [tone: Tone, count?: number]; opt: [flag?: boolean | string] }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    assert_eq!(props["plain"].prop_type.raw_string(), "[\"a\" | \"b\", number]");
+    assert_eq!(props["labelled"].prop_type.raw_string(), "[\"a\" | \"b\", number]");
+    assert_eq!(props["opt"].prop_type.raw_string(), "[boolean | string]");
+}
+
+#[test]
+fn a_css_property_that_takes_a_number_or_a_string_is_both_without_dependencies() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "export function Box(props: { z?: React.CSSProperties['zoom'] }) { return null; }\n",
+    )]);
+
+    assert_eq!(output.components["Box"].props["z"].prop_type.raw_string(), "string | number");
+}
