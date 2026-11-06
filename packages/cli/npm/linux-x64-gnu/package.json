@@ -17,6 +17,9 @@
   "os": [
     "linux"
   ],
+  "libc": [
+    "glibc"
+  ],
   "cpu": [
     "x64"
   ],
