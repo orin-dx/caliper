@@ -1,0 +1,102 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6RTTAREYNT7HTBQDKRGAHRP",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-06T16:24:50.481475Z",
+  "branch": "fix/addon-and-plugin-failures",
+  "checkpoints_count": 3,
+  "save_step_count": 43,
+  "files_touched": [
+    ".changeset/collapse-by-relevance.md",
+    ".changeset/config-cache-dir-relative.md",
+    ".changeset/config-default-export-can-be-a-function-or-promise.md",
+    ".changeset/config-loads-in-commonjs-packages.md",
+    ".changeset/config-paths-resolve-from-the-config-file.md",
+    ".changeset/missing-config-file-error-names-the-path.md",
+    ".changeset/missing-typescript-and-re-export-hop-causes.md",
+    ".changeset/record-values-and-type-parameters-keep-their-types.md",
+    ".changeset/windows-paths-lose-the-verbatim-prefix.md",
+    "crates/core/src/canonical_path.rs",
+    "crates/core/src/extractor/asserted.rs",
+    "scripts/collapse_relevance.py",
+    "scripts/test_collapse_relevance.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "f735d7951d76",
+  "checkpoint_transcript_start": 8898,
+  "transcript_lines_at_start": 8898,
+  "compact_transcript_start": 757,
+  "token_usage": {
+    "input_tokens": 20,
+    "cache_creation_tokens": 22008,
+    "cache_read_tokens": 5644956,
+    "output_tokens": 7475,
+    "api_call_count": 8,
+    "subagent_tokens": {
+      "input_tokens": 80,
+      "cache_creation_tokens": 82521,
+      "cache_read_tokens": 9751065,
+      "output_tokens": 15804,
+      "api_call_count": 36
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 203
+  },
+  "summary": {
+    "intent": "Orchestrate parallel worker agents to land several Caliper PRs (#347, #343, #367/#348/#349, #353), including scaling back an over-engineered #347 fix and resolving a merge conflict on #353 requested by the user.",
+    "outcome": "#347 was redirected to a simpler design (module-level-only interface merging) and a worker was dispatched to resolve the provider.ts conflict on #353; neither result was confirmed yet, and other workers were still running.",
+    "learnings": {
+      "repo": [
+        "Entire trail change URLs map to PRs (trail 206 change 150 is #353, branch fix/addon-and-plugin-failures).",
+        "A lint gate enforces a 300-line limit on files such as vite-plugin/src/index.ts, likely the reason napiOptions was moved to options.ts.",
+        "PR #367 owns the forged `as unknown as CsfFile` objects in the Storybook provider, so other PRs should leave them alone.",
+        "CI includes Entire Gates, and review findings should only be counted after those gates finish.",
+        "Enums and classes are still keyed by bare name in the extractor; function-local interfaces sharing a name with another declaration are not isolated (to be documented in docs/edge-cases.md).",
+        "The resolver already has a scope model, so the extractor should not build a second one."
+      ],
+      "code": [
+        {
+          "path": "packages/storybook/src/provider.ts",
+          "finding": "The only file conflicting when merging main (81 commits ahead) into PR #353; the resolution must keep main's fixes plus the PR's behaviours (warn once on failed start, no cached rejection, start-vs-refresh wording, validated options)."
+        }
+      ],
+      "workflow": [
+        "Interim 'waiting on background work' agent notifications carry no new info; check GitHub state directly instead.",
+        "A verification check that compares only property-name sets cannot catch displayed-type leaks; tests should assert the rendered prop type.",
+        "By round 5 of review, an instruction like 'make it structural' can push a worker into a bigger design than the finding needed; scale back and preserve work on a wip branch.",
+        "Preserve in-progress work on a wip branch and use new commits rather than force-pushing when reverting a design.",
+        "Have conflict-resolution workers re-read merged test files for tests that pass for the wrong reason, and verify with lint, unit and integration tests, and a clean-room run in a pristine worktree."
+      ]
+    },
+    "friction": [
+      "Rework for #347 introduced regressions: function-local interface refs were rewritten to `Name@<offset>` and leaked into output (e.g. `item: Item@57`), and type-parameter shadowing broke (`Props<string>` rendered as `number`).",
+      "#347 has needed five review rounds.",
+      "#353 was 81 commits behind main, producing a conflict in provider.ts.",
+      "Worker agents repeatedly sent interim notifications while waiting on CI, adding noise."
+    ],
+    "open_items": [
+      "Confirm the #347 worker's scale-back (wip/interface-scope-structural branch, removal of scoped-key machinery and oracle script, new tests, docs/edge-cases.md update).",
+      "Confirm the #353 provider.ts conflict resolution and its checks; verify that the napiOptions move to options.ts exists to meet the 300-line lint limit before dismissing the low finding.",
+      "Wait for #347's last four checks and Entire Gates.",
+      "Wait for the #367/#348/#349 worker to finish.",
+      "#367 still owns cleanup of the forged `as unknown as CsfFile` objects."
+    ]
+  }
+}

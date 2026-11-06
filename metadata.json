@@ -1,0 +1,59 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6RTTAREYNT7HTBQDKRGAHRP",
+  "strategy": "manual-commit",
+  "branch": "fix/addon-and-plugin-failures",
+  "checkpoints_count": 3,
+  "files_touched": [
+    ".changeset/collapse-by-relevance.md",
+    ".changeset/config-cache-dir-relative.md",
+    ".changeset/config-default-export-can-be-a-function-or-promise.md",
+    ".changeset/config-loads-in-commonjs-packages.md",
+    ".changeset/config-paths-resolve-from-the-config-file.md",
+    ".changeset/missing-config-file-error-names-the-path.md",
+    ".changeset/missing-typescript-and-re-export-hop-causes.md",
+    ".changeset/record-values-and-type-parameters-keep-their-types.md",
+    ".changeset/windows-paths-lose-the-verbatim-prefix.md",
+    "crates/core/src/canonical_path.rs",
+    "crates/core/src/extractor/asserted.rs",
+    "scripts/collapse_relevance.py",
+    "scripts/test_collapse_relevance.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 20,
+    "cache_creation_tokens": 22008,
+    "cache_read_tokens": 5644956,
+    "output_tokens": 7475,
+    "api_call_count": 8,
+    "subagent_tokens": {
+      "input_tokens": 80,
+      "cache_creation_tokens": 82521,
+      "cache_read_tokens": 9751065,
+      "output_tokens": 15804,
+      "api_call_count": 36
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
