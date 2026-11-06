@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01H3rsCe7rbFQKAkzTfDy1MH",
+  "agent_id": "adc861093d72c6892",
+  "subagent_type": "general-purpose",
+  "task_description": "Write the scoping ADR",
+  "started_at": "2026-11-06T12:18:47.420824-08:00"
+}

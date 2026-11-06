@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01HcANy7C7UTjtxittp2Nrge",
+  "agent_id": "a233d67973dec1b36",
+  "subagent_type": "general-purpose",
+  "task_description": "Wire up InvalidJson in tsc-client",
+  "started_at": "2026-11-06T12:18:45.987656-08:00"
+}
