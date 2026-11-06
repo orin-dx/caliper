@@ -335,7 +335,7 @@ pub(super) fn resolve_base_as_chain(
                     field.required,
                     default_value,
                     field.description.clone(),
-                    Default::default(),
+                    field.tags.clone(),
                     None,
                     vec![],
                 )));

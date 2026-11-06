@@ -66,7 +66,7 @@ Recall is measured against that reference, on the components both tools report (
 | `@types/react` props | RDT's props that `@types/react` declares (`onClick`, `aria-*`, `ref`) that the tool lists |
 | ... with layers      | The same two, also counting a prop held in a collapsed inheritance layer                  |
 
-Caliper collapses an inherited dependency source of more than 30 props into a layer (ADR 0012) and lists only its notable members as props, as Storybook does. A prop in a layer is in the output, named by the layer's `members`, but is not in the flat list, so the table reports both: the plain columns say what the default output lists, "with layers" says what it holds. react-docgen writes no layers, so its two columns are equal.
+Caliper collapses an inherited dependency source of more than 30 props into a layer (`docs/architecture/resolver-type-resolution.md`, Collapse) and lists only its notable members as props, as Storybook does. A prop in a layer is in the output, named by the layer's `members`, but is not in the flat list, so the table reports both: the plain columns say what the default output lists, "with layers" says what it holds. react-docgen writes no layers, so its two columns are equal.
 
 react-docgen parses each file with its default resolver and importer, as Storybook does. The importer follows relative and package imports to the file that declares a type, so a props interface imported from a sibling file is read. It does no type inference: it lists none of React's inherited attributes, and a generic, mapped or conditional type stays the source text. That is the point of the comparison. A file it throws on is counted (`failed`) and listed (`failedFiles`), not dropped silently.
 

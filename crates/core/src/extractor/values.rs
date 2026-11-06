@@ -65,6 +65,7 @@ fn static_fields(object: &ObjectExpression<'_>) -> Option<Vec<CollectedObjectFie
                 description: String::new(),
                 readonly: false,
                 index_key: None,
+                tags: Default::default(),
             })
         })
         .collect()
