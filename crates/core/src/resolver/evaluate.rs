@@ -39,7 +39,7 @@ pub(super) fn reduce(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContex
         return None;
     }
     match ty {
-        CollectedType::AtFile { file, inner, .. } => reduce(inner, file, ctx, depth + 1),
+        CollectedType::AtFile { file, inner } => reduce(inner, file, ctx, depth + 1),
         CollectedType::Conditional { check, extends_type, true_type, false_type } => {
             if let Some(branch) = inferred_component_branch(check, extends_type, true_type, false_type, file, ctx) {
                 return Some((branch, file.to_owned()));
@@ -92,7 +92,7 @@ pub(super) fn mapped_keys(
         return None;
     }
     match constraint {
-        CollectedType::AtFile { file, inner, .. } => mapped_keys(inner, file, ctx, depth + 1),
+        CollectedType::AtFile { file, inner } => mapped_keys(inner, file, ctx, depth + 1),
         // `Record<Breakpoint, V>`: an alias for a union of literals, here or in another file.
         CollectedType::Named { name, args } => {
             let (body, body_file) = alias_body(name, args, file, ctx)?;
@@ -173,7 +173,7 @@ fn atoms(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8
         return None;
     }
     Some(match ty {
-        CollectedType::AtFile { file, inner, .. } => return atoms(inner, file, ctx, depth + 1),
+        CollectedType::AtFile { file, inner } => return atoms(inner, file, ctx, depth + 1),
         CollectedType::StringLiteral(s) => vec![Atom::Str(s.to_string())],
         CollectedType::NumberLiteral(n) => vec![Atom::Num(n.to_string())],
         CollectedType::BoolLiteral(b) => vec![Atom::Bool(*b)],
@@ -232,7 +232,7 @@ fn extends(
 /// What a conditional's check stands for: its atoms, or those of the member a member read reads.
 fn check_atoms(check: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> Option<Vec<Atom>> {
     match check {
-        CollectedType::AtFile { file, inner, .. } => check_atoms(inner, file, ctx, depth + 1),
+        CollectedType::AtFile { file, inner } => check_atoms(inner, file, ctx, depth + 1),
         CollectedType::IndexedAccess { obj, key } => match reduce(check, file, ctx, depth + 1) {
             Some((member, member_file)) => atoms(&member, &member_file, ctx, depth + 1),
             // `Payload["variant"]` on a payload object that declares no `variant` (Mantine's factories).
@@ -262,7 +262,7 @@ pub(super) fn union_members(arg: &CollectedType, file: &Utf8Path, ctx: &Resoluti
         return vec![(arg.clone(), file.to_owned())];
     }
     match arg {
-        CollectedType::AtFile { file, inner, .. } => union_members(inner, file, ctx, depth + 1),
+        CollectedType::AtFile { file, inner } => union_members(inner, file, ctx, depth + 1),
         CollectedType::Union(members) => {
             members.iter().flat_map(|member| union_members(member, file, ctx, depth + 1)).collect()
         }
@@ -293,7 +293,7 @@ fn object_union_members(
         return None;
     }
     match arg {
-        CollectedType::AtFile { file, inner, .. } => object_union_members(inner, file, ctx, depth + 1),
+        CollectedType::AtFile { file, inner } => object_union_members(inner, file, ctx, depth + 1),
         CollectedType::Named { name, args }
             if name == "NonNullable" && args.len() == 1 && super::may_be_ts_lib_type(name, file, ctx) =>
         {
@@ -361,7 +361,7 @@ fn array_element(arg: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, 
         return None;
     }
     match arg {
-        CollectedType::AtFile { file, inner, .. } => array_element(inner, file, ctx, depth + 1),
+        CollectedType::AtFile { file, inner } => array_element(inner, file, ctx, depth + 1),
         CollectedType::Named { name, args }
             if name == "NonNullable" && args.len() == 1 && super::may_be_ts_lib_type(name, file, ctx) =>
         {
@@ -446,7 +446,7 @@ fn lacks_member(obj: &CollectedType, key: &str, file: &Utf8Path, ctx: &Resolutio
         return false;
     }
     match obj {
-        CollectedType::AtFile { file, inner, .. } => lacks_member(inner, key, file, ctx, depth + 1),
+        CollectedType::AtFile { file, inner } => lacks_member(inner, key, file, ctx, depth + 1),
         // An index signature may still hold the member, as may an object with no fields.
         CollectedType::Object(fields) => !fields.is_empty() && fields.iter().all(|f| f.is_member() && f.name != key),
         CollectedType::Named { name, args } => alias_body(name, args, file, ctx)
@@ -461,7 +461,7 @@ pub(super) fn keys_of(target: &CollectedType, file: &Utf8Path, ctx: &ResolutionC
         return None;
     }
     match target {
-        CollectedType::AtFile { file, inner, .. } => keys_of(inner, file, ctx, depth + 1),
+        CollectedType::AtFile { file, inner } => keys_of(inner, file, ctx, depth + 1),
         // `keyof typeof Icons`: the keys of a `const` object literal.
         CollectedType::TypeOf(name) => keys_of(&value_type(name, file, ctx)?, file, ctx, depth + 1),
         CollectedType::Object(fields) => Some(
@@ -632,7 +632,7 @@ fn member_uncached(
         return None;
     }
     match obj {
-        CollectedType::AtFile { file, inner, .. } => member(inner, key, file, ctx, depth + 1),
+        CollectedType::AtFile { file, inner } => member(inner, key, file, ctx, depth + 1),
         // A property of `A & B` is read from the constituents that declare it, as TypeScript reads it: a constituent
         // with only an index signature (`{ spacing: SpacingToken } & { [token: string]: never }`) adds nothing to a
         // declared name. Declared by several, it is their intersection.
@@ -880,7 +880,7 @@ fn literal_set(ty: &CollectedType) -> Option<Vec<String>> {
 
 fn unwrap_at_file(ty: &CollectedType) -> (&CollectedType, Option<&Utf8Path>) {
     match ty {
-        CollectedType::AtFile { file, inner, .. } => (unwrap_at_file(inner).0, Some(file.as_path())),
+        CollectedType::AtFile { file, inner } => (unwrap_at_file(inner).0, Some(file.as_path())),
         other => (other, None),
     }
 }

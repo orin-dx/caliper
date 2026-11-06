@@ -291,7 +291,7 @@ pub(super) fn resolve_props_chain(
             let mut attempt = state.branch();
             // A declared alias is read under no type parameters; the alias the extractor synthesizes for an inline props
             // type is the component's own, and keeps the component's.
-            if !type_name.starts_with("__anon_") {
+            if !is_synthesized_alias(type_name) {
                 attempt.bind_scope(TypeScope::default());
             }
             let chain = resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, &mut attempt, depth);

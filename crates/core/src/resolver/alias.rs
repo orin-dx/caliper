@@ -154,7 +154,7 @@ fn react_picked_props(
     depth: u8,
 ) -> Vec<Arc<ParsedProp>> {
     let (mut base, mut file) = (base, file_path);
-    while let CollectedType::AtFile { file: inner_file, inner, .. } = base {
+    while let CollectedType::AtFile { file: inner_file, inner } = base {
         (base, file) = (inner, inner_file.as_path());
     }
     let CollectedType::Named { name, args } = base else { return Vec::new() };
@@ -221,7 +221,7 @@ fn shared_inline_keys(
                     collect(member, file, ctx, depth + 1, keys);
                 }
             }
-            CollectedType::AtFile { file, inner, .. } => collect(inner, file, ctx, depth + 1, keys),
+            CollectedType::AtFile { file, inner } => collect(inner, file, ctx, depth + 1, keys),
             CollectedType::Named { name, args } => {
                 if let Some((body, body_file)) = super::evaluate::alias_body(name, args, file, ctx) {
                     collect(&body, &body_file, ctx, depth + 1, keys);
@@ -898,7 +898,7 @@ fn resolve_key_set_or_warn(
 /// The name and file of the interface `target` references, through `AtFile`.
 fn react_interface_target<'a>(target: &'a CollectedType, file: &'a Utf8Path) -> Option<(&'a str, &'a Utf8Path)> {
     match target {
-        CollectedType::AtFile { file, inner, .. } => react_interface_target(inner, file),
+        CollectedType::AtFile { file, inner } => react_interface_target(inner, file),
         CollectedType::Named { name, .. } => Some((name.as_str(), file)),
         _ => None,
     }

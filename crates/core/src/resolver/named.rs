@@ -474,7 +474,7 @@ fn can_hold_nullish(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext
         | CollectedType::Conditional { .. }
         | CollectedType::IndexedAccess { .. }
         | CollectedType::TypeOf(_) => true,
-        CollectedType::AtFile { file, inner, .. } => can_hold_nullish(inner, file, ctx, depth + 1),
+        CollectedType::AtFile { file, inner } => can_hold_nullish(inner, file, ctx, depth + 1),
         CollectedType::Union(members) => members.iter().any(|m| can_hold_nullish(m, file, ctx, depth + 1)),
         CollectedType::Array(_)
         | CollectedType::Readonly(_)

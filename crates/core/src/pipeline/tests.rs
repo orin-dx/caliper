@@ -4184,6 +4184,27 @@ fn component_parameters_inside_an_intersection_read_through_an_alias_member_keep
     assert_eq!(props, vec![pair("p1", "Pick<{ a: { a: Value } & { b: A }; b: number }, \"a\">")]);
 }
 
+#[test]
+fn a_factory_parameter_the_call_fills_is_its_argument_not_a_placeholder() {
+    let output = extract_with_installed_libs(&[
+        (
+            "factory.tsx",
+            "import * as React from 'react';\n\
+             export function make<T>(r: (props: any) => unknown): React.FC<{ value: T }> { return r as never; }\n",
+        ),
+        (
+            "Field.tsx",
+            "import { make } from './factory';\n\
+             type T = number;\n\
+             type S = string;\n\
+             export const Field = make<T>((props) => <div />);\n\
+             export const Other = make<S>((props) => <div />);\n",
+        ),
+    ]);
+    assert_eq!(output.components["Field"].props["value"].prop_type.raw_string(), "number");
+    assert_eq!(output.components["Other"].props["value"].prop_type.raw_string(), "string");
+}
+
 /// The props of `Field` from `source`, each as the text of its resolved type.
 fn field_prop_texts(source: &str) -> Vec<(String, String)> {
     let output = extract_one(&[("Field.tsx", source)]);
