@@ -1819,7 +1819,7 @@ fn a_generic_function_types_own_parameters_are_placeholders_not_types_to_look_up
     let result = super::collected::resolve_collected_type(&ct, Utf8Path::new("/test/b.tsx"), &ctx, &mut state, 0);
     assert_eq!(result.raw_string(), "<T>(item: T) => T");
     assert_eq!(state.diagnostics, vec![]);
-    assert!(state.in_scope_type_params.is_empty(), "the function's own parameters leave scope with it");
+    assert!(state.scope.is_empty(), "the function's own parameters leave scope with it");
 }
 
 #[test]

@@ -137,7 +137,7 @@ pub(super) fn resolve_indexed_access(
 ) -> PropType {
     // A substituted argument (`T["_output"]` with `T = Parsed`) is looked up where it was written.
     match (obj, key) {
-        (CollectedType::AtFile { file, inner }, _) => {
+        (CollectedType::AtFile { file, inner, .. }, _) => {
             return resolve_indexed_access(inner, key, file, ctx, state, depth);
         }
         (_, CollectedType::AtFile { inner, .. }) => {

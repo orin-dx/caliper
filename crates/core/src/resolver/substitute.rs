@@ -14,10 +14,12 @@
 //! no type inference, no conditional-type evaluation.
 
 use camino::Utf8Path;
-use rustc_hash::FxHashMap;
+use compact_str::CompactString;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::types::{
     CollectedObjectField, CollectedType, CollectedTypeAlias, Diagnostic, DiagnosticCode, DiagnosticSeverity,
+    ResolveState, TypeScope,
 };
 
 use super::import::resolve_to_canonical;
@@ -43,20 +45,45 @@ pub(super) fn build_substitution<'a>(
     origin_file: &Utf8Path,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Substitution<'a> {
-    bind_args(params, None, args, origin_file, origin_file, diagnostics)
+    bind_args(params, None, args, origin_file, &TypeScope::default(), origin_file, diagnostics)
 }
 
-/// `ty` pinned to the `file` it was written in. A type that is already pinned names its own file, and wrapping it
-/// again would make a recursive alias's arguments (`CssVars<V> = ... | CssVars<V>[]`) a new type at every level, so
-/// the cycle through it would never be found.
-fn pinned_to(file: &Utf8Path, ty: CollectedType) -> CollectedType {
+/// The scope that `args`, written where `state` is, are read under wherever a declaration's body ends up using them:
+/// the type parameters in scope here that they name.
+pub(super) fn pin_scope(state: &mut ResolveState, args: &[CollectedType]) -> TypeScope {
+    if state.scope.is_empty() {
+        // Whether a name is bound here is not looked up name by name: a state that binds any name pins differently.
+        if let Some(reads) = state.reads.as_mut() {
+            if reads.entered_scopes == 0 {
+                reads.needs_empty_scope = true;
+            }
+        }
+        return TypeScope::default();
+    }
+    let referenced = std::cell::RefCell::new(FxHashSet::<CompactString>::default());
+    for arg in args {
+        let _ = arg.rename_named(&|name| {
+            referenced.borrow_mut().insert(CompactString::from(name));
+            None
+        });
+    }
+    let mut names: Vec<CompactString> = referenced.into_inner().into_iter().collect();
+    names.sort_unstable();
+    let bound: Vec<CompactString> = names.into_iter().filter(|name| state.has_type_param(name)).collect();
+    TypeScope::new(&bound)
+}
+
+/// `ty` pinned to the `file` it was written in and the `scope` of type parameters it was written under. A type that is
+/// already pinned names its own, and wrapping it again would make a recursive alias's arguments
+/// (`CssVars<V> = ... | CssVars<V>[]`) a new type at every level, so the cycle through it would never be found.
+fn pinned_to(file: &Utf8Path, scope: &TypeScope, ty: CollectedType) -> CollectedType {
     match ty {
         CollectedType::AtFile { .. } => ty,
-        other => CollectedType::AtFile { file: file.to_owned(), inner: Box::new(other) },
+        other => CollectedType::AtFile { file: file.to_owned(), scope: scope.clone(), inner: Box::new(other) },
     }
 }
 
-/// `params` bound to `args`, written in `args_file`, with a parameter the reference omits taking its declared default
+/// `params` bound to `args`, written in `args_file` under the type parameters `args_scope`, with a parameter the reference omits taking its declared default
 /// (`defaults`, written in `declared_file`), as TypeScript's `fillMissingTypeArguments` does. A default may name an
 /// earlier parameter (`<T, U = T[]>`), so it is bound with the parameters before it. A parameter with neither stays
 /// unbound, with a warning when the reference supplied some arguments but not that one.
@@ -65,6 +92,7 @@ pub(super) fn bind_args<'a>(
     defaults: Option<&[Option<CollectedType>]>,
     args: &[CollectedType],
     args_file: &Utf8Path,
+    args_scope: &TypeScope,
     declared_file: &Utf8Path,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Substitution<'a> {
@@ -72,10 +100,12 @@ pub(super) fn bind_args<'a>(
     let mut unfilled: Vec<&str> = Vec::new();
     for (i, param) in params.iter().enumerate() {
         if let Some(arg) = args.get(i) {
-            subst.insert(param.as_str(), pinned_to(args_file, arg.clone()));
+            subst.insert(param.as_str(), pinned_to(args_file, args_scope, arg.clone()));
         } else if let Some(default) = defaults.and_then(|d| d.get(i)).and_then(Option::as_ref) {
+            // A default is written in the declaration, under the parameters before it that stay placeholders.
+            let declared_scope = TypeScope::new(params.iter().filter(|p| unfilled.contains(&p.as_str())));
             let bound = substitute_type(default, &subst);
-            subst.insert(param.as_str(), pinned_to(declared_file, bound));
+            subst.insert(param.as_str(), pinned_to(declared_file, &declared_scope, bound));
         } else {
             unfilled.push(param.as_str());
         }
@@ -121,6 +151,7 @@ pub(super) fn apply_generic_args(
     declared_at: (&Utf8Path, &str),
     type_args: &[CollectedType],
     consuming_file: &Utf8Path,
+    args_scope: &TypeScope,
     ctx: &ResolutionContext,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CollectedTypeAlias {
@@ -132,7 +163,7 @@ pub(super) fn apply_generic_args(
     if params.is_empty() || (type_args.is_empty() && defaults.is_none()) {
         return alias;
     }
-    let subst = bind_args(params, defaults, type_args, consuming_file, declared_file, diagnostics);
+    let subst = bind_args(params, defaults, type_args, consuming_file, args_scope, declared_file, diagnostics);
     substitute_alias(&alias, &subst)
 }
 
@@ -148,6 +179,7 @@ pub(super) fn generic_alias_with_structured_args(
     name: &str,
     args: &[CollectedType],
     consuming_file: &Utf8Path,
+    args_scope: &TypeScope,
     ctx: &ResolutionContext,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CollectedTypeAlias> {
@@ -166,7 +198,7 @@ pub(super) fn generic_alias_with_structured_args(
     // i.e. `consuming_file` — not `canonical_file` (where the generic alias itself
     // is declared).
     let defaults = ctx.named_types.lookup_type_param_defaults(&canonical_file, &canonical_name);
-    let subst = bind_args(params, defaults, args, consuming_file, &canonical_file, diagnostics);
+    let subst = bind_args(params, defaults, args, consuming_file, args_scope, &canonical_file, diagnostics);
     Some(substitute_alias(alias, &subst))
 }
 
@@ -209,9 +241,11 @@ pub(super) fn substitute_type(ct: &CollectedType, subst: &Substitution) -> Colle
         // pass — `file` is authoritative for `inner` and must not be disturbed, but
         // `inner` itself may still contain further params if it came from an outer
         // generic scope, so keep recursing.
-        CollectedType::AtFile { file, inner } => {
-            CollectedType::AtFile { file: file.clone(), inner: Box::new(substitute_type(inner, subst)) }
-        }
+        CollectedType::AtFile { file, scope, inner } => CollectedType::AtFile {
+            file: file.clone(),
+            scope: scope.clone(),
+            inner: Box::new(substitute_type(inner, subst)),
+        },
         CollectedType::IndexedAccess { obj, key } => CollectedType::IndexedAccess {
             obj: Box::new(substitute_type(obj, subst)),
             key: Box::new(substitute_type(key, subst)),

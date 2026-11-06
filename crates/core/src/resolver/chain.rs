@@ -149,7 +149,7 @@ pub(super) fn resolve_props_chain(
         return ResolvedChain::give_up(type_name.to_owned(), Some(diag), state);
     }
 
-    if state.in_scope_type_params.iter().any(|param| param == type_name) && type_args.is_empty() {
+    if type_args.is_empty() && state.has_type_param(type_name) {
         return ResolvedChain::empty_with_compose(type_name.to_owned());
     }
 
@@ -199,7 +199,11 @@ pub(super) fn resolve_props_chain(
         {
             let members = selected
                 .into_iter()
-                .map(|(inner, file)| CollectedType::AtFile { file, inner: Box::new(inner) })
+                .map(|(inner, file)| CollectedType::AtFile {
+                    file,
+                    scope: TypeScope::default(),
+                    inner: Box::new(inner),
+                })
                 .collect();
             return resolve_type_alias_chain(
                 &CollectedTypeAlias::Union { members, file_path: consuming_file.to_owned() },
@@ -263,11 +267,13 @@ pub(super) fn resolve_props_chain(
             // As for interfaces and for aliases in a prop position: parameters left unfilled by the call site are
             // placeholders in the body, not unresolvable types.
             let unfilled = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key);
+            let args_scope = super::substitute::pin_scope(state, type_args);
             let alias = super::substitute::apply_generic_args(
                 alias,
                 (&canonical_file, &matched_key),
                 type_args,
                 consuming_file,
+                &args_scope,
                 ctx,
                 &mut state.diagnostics,
             );
@@ -290,7 +296,7 @@ pub(super) fn resolve_props_chain(
             }
             let mut attempt = state.branch();
             if let Some(params) = unfilled {
-                attempt.add_type_params(params.iter().skip(type_args.len()));
+                let _ = attempt.enter_scope(TypeScope::new(params.iter().skip(type_args.len())));
             }
             let chain = resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, &mut attempt, depth);
             return known_fallback(
@@ -497,17 +503,40 @@ fn resolve_interface_chain_uncached(
     state: &mut ResolveState,
     depth: u8,
 ) -> ResolvedChain {
+    // The arguments are read under the scope of the reference that supplied them; the members, under the interface's
+    // own parameters that no argument or default replaces (`interface Foo<TData>`): expected, unexpandable
+    // placeholders wherever the body names them, not unresolvable types, and they shadow the module's names.
+    let args_scope = super::substitute::pin_scope(state, type_args);
+    let declared_params = ctx.named_types.lookup_interface_type_params_for(iface);
+    let defaults = ctx.named_types.lookup_interface_param_defaults_for(iface);
+    let unfilled = declared_params.map(|params| {
+        let unfilled = params.iter().enumerate().filter(|(index, _)| {
+            *index >= type_args.len() && defaults.is_none_or(|d| d.get(*index).is_none_or(Option::is_none))
+        });
+        TypeScope::new(unfilled.map(|(_, param)| param))
+    });
+    let caller = state.enter_scope(unfilled.unwrap_or_default());
+    let chain = resolve_interface_members(iface, type_args, &args_scope, consuming_file, mapping, ctx, state, depth);
+    state.leave_scope(caller);
+    chain
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_interface_members(
+    iface: &CollectedInterface,
+    type_args: &[CollectedType],
+    args_scope: &TypeScope,
+    consuming_file: &Utf8Path,
+    mapping: &ComponentMapping,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> ResolvedChain {
     let mut chain = ResolvedChain::empty();
 
-    // A generic interface's own declared type parameters (`interface Foo<TData>`)
-    // are expected, unexpandable placeholders wherever referenced in its body —
-    // not unresolvable types. Register them so `resolve_named` doesn't warn.
-    let declared_params = ctx.named_types.lookup_interface_type_params_for(iface);
-    if let Some(params) = declared_params {
-        state.add_type_params(params.iter());
-    }
     // Supplied arguments replace the parameters, and an omitted one takes its default; a parameter with neither stays
     // a placeholder.
+    let declared_params = ctx.named_types.lookup_interface_type_params_for(iface);
     let defaults = ctx.named_types.lookup_interface_param_defaults_for(iface);
     let substitution = match declared_params {
         Some(params) if !params.is_empty() && (!type_args.is_empty() || defaults.is_some()) => {
@@ -516,6 +545,7 @@ fn resolve_interface_chain_uncached(
                 defaults,
                 type_args,
                 consuming_file,
+                args_scope,
                 &iface.file_path,
                 &mut state.diagnostics,
             ))

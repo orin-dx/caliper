@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use super::diagnostic::Diagnostic;
+use super::scope::TypeScope;
 
 // ─── Type Aliases ─────────────────────────────────────────────────────────────
 
@@ -159,10 +160,14 @@ pub enum CollectedType {
     // substitution (resolver/substitute.rs) splices into a callee's body gets
     // wrapped in this so later name lookups switch back to the correct file.
     /// Resolver-internal; the extractor never produces it. A type argument pinned to the file it was written in, so a
-    /// name inside it resolves relative to that file after a generic alias substitutes it into another file's body.
+    /// name inside it resolves relative to that file, and under those type parameters, after a generic alias
+    /// substitutes it into another declaration's body.
     AtFile {
         /// The file the wrapped type was written in.
         file: Utf8PathBuf,
+        /// The type parameters in scope where the wrapped type was written, which are the only ones that shadow its
+        /// names: the declaration it is substituted into has parameters of its own that must not capture them.
+        scope: TypeScope,
         /// The wrapped type.
         inner: Box<CollectedType>,
     },
@@ -278,8 +283,9 @@ impl CollectedType {
                 name.hash(hasher);
                 all(hasher, args);
             }
-            CollectedType::AtFile { file, inner } => {
+            CollectedType::AtFile { file, scope, inner } => {
                 file.hash(hasher);
+                scope.hash(hasher);
                 inner.structural_hash(hasher);
             }
             CollectedType::IndexedAccess { obj, key } => {
@@ -400,8 +406,13 @@ impl CollectedType {
                     Some(false) => "-?",
                     None => "",
                 };
-                // A key variable the resolver made up for `Record` is not an identifier; TypeScript prints it as `P`.
-                let param = if param.contains(' ') { "P" } else { param.as_str() };
+                // A key variable the resolver made up for `Record` is not an identifier; TypeScript prints it as `P`,
+                // unless the value names a `P` of its own, which the printed variable would then capture.
+                let param = if param.contains(' ') {
+                    ["P", "K", "Key"].into_iter().find(|candidate| !value_type.mentions(candidate)).unwrap_or("P")
+                } else {
+                    param.as_str()
+                };
                 format!("{{ [{param} in {}]{modifier}: {} }}", key_type.to_raw_string(), value_type.to_raw_string())
             }
             CollectedType::Tuple(members) => {
@@ -1034,9 +1045,22 @@ pub enum ExtendsRef {
 }
 
 impl CollectedType {
+    /// Whether a type reference named `name` appears anywhere in this type.
+    fn mentions(&self, name: &str) -> bool {
+        let found = std::cell::Cell::new(false);
+        let _ = self.rename_named(&|referenced| {
+            if referenced == name {
+                found.set(true);
+            }
+            None
+        });
+        found.get()
+    }
+
     /// This type with each reference `rename` maps (a name with no type arguments of its own, or with them) replaced by
     /// the name it returns. A type parameter or mapped key variable that shadows a name is left alone inside its scope.
     #[must_use]
+
     pub(crate) fn rename_named(&self, rename: &dyn Fn(&str) -> Option<TypeName>) -> CollectedType {
         let all = |members: &[CollectedType]| members.iter().map(|m| m.rename_named(rename)).collect::<Vec<_>>();
         match self {
@@ -1050,9 +1074,11 @@ impl CollectedType {
             CollectedType::Array(inner) => CollectedType::Array(Box::new(inner.rename_named(rename))),
             CollectedType::Readonly(inner) => CollectedType::Readonly(Box::new(inner.rename_named(rename))),
             CollectedType::KeyOf(inner) => CollectedType::KeyOf(Box::new(inner.rename_named(rename))),
-            CollectedType::AtFile { file, inner } => {
-                CollectedType::AtFile { file: file.clone(), inner: Box::new(inner.rename_named(rename)) }
-            }
+            CollectedType::AtFile { file, scope, inner } => CollectedType::AtFile {
+                file: file.clone(),
+                scope: scope.clone(),
+                inner: Box::new(inner.rename_named(rename)),
+            },
             CollectedType::Object(fields) => CollectedType::Object(
                 fields
                     .iter()
@@ -1784,5 +1810,17 @@ mod tests {
         };
         assert_eq!(mapped("Record key").to_raw_string(), "{ [P in Keys]: string }");
         assert_eq!(mapped("K").to_raw_string(), "{ [K in Keys]: string }");
+    }
+
+    #[test]
+    fn a_made_up_key_variable_avoids_the_names_its_value_uses() {
+        let mapped = |value: &str| CollectedType::Mapped {
+            param: "Record key".into(),
+            key_type: Box::new(CollectedType::Named { name: "Keys".into(), args: vec![] }),
+            value_type: Box::new(CollectedType::Named { name: value.into(), args: vec![] }),
+            optional: None,
+        };
+        assert_eq!(mapped("P").to_raw_string(), "{ [K in Keys]: P }");
+        assert_eq!(mapped("K").to_raw_string(), "{ [P in Keys]: K }");
     }
 }

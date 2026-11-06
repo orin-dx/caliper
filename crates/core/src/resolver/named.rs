@@ -122,26 +122,24 @@ fn resolve_named_uncycled(
             let params = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key);
             let defaults = ctx.named_types.lookup_type_param_defaults(&canonical_file, &matched_key);
             let outer_named_unevaluated = std::mem::take(&mut state.named_unevaluated);
-            // Only the parameters nothing replaces shadow outer names, and only inside this alias's expansion: the
+            // The alias's body is read under its own parameters that nothing replaces, never under the caller's: the
             // supplied arguments are the caller's names (`Id<Value>` over `type Value`), not the alias's parameters.
             let expanded = match params {
                 Some(params) if !args.is_empty() || defaults.is_some() => {
-                    let unfilled = params.iter().enumerate().filter(|(index, _)| {
-                        *index >= args.len() && defaults.is_none_or(|d| d.get(*index).is_none_or(Option::is_none))
-                    });
-                    let entered = state.enter_type_params(unfilled.map(|(_, param)| param));
-                    let expanded =
-                        expand_alias(&alias, params, defaults, args, consuming_file, &canonical_file, ctx, state, 0);
-                    state.leave_type_params(entered);
-                    expanded
+                    expand_alias(&alias, params, defaults, args, consuming_file, &canonical_file, ctx, state, 0)
                 }
                 Some(params) => {
-                    let entered = state.enter_type_params(params.iter());
+                    let caller = state.enter_scope(TypeScope::new(params.iter()));
                     let expanded = resolve_type_alias_type(&alias, ctx, state, depth);
-                    state.leave_type_params(entered);
+                    state.leave_scope(caller);
                     expanded
                 }
-                None => resolve_type_alias_type(&alias, ctx, state, 0),
+                None => {
+                    let caller = state.enter_scope(TypeScope::default());
+                    let expanded = resolve_type_alias_type(&alias, ctx, state, 0);
+                    state.leave_scope(caller);
+                    expanded
+                }
             };
             let unevaluated = state.named_unevaluated || expanded.holds_unevaluated_type();
             state.named_unevaluated = outer_named_unevaluated || unevaluated;
@@ -311,21 +309,48 @@ fn expand_alias(
     state: &mut ResolveState,
     depth: u8,
 ) -> PropType {
-    let subst = super::substitute::bind_args(params, defaults, args, args_file, declared_file, &mut state.diagnostics);
+    let args_scope = super::substitute::pin_scope(state, args);
+    let subst = super::substitute::bind_args(
+        params,
+        defaults,
+        args,
+        args_file,
+        &args_scope,
+        declared_file,
+        &mut state.diagnostics,
+    );
+    // Only the parameters no argument or default replaces are placeholders in the body.
+    let unfilled = TypeScope::new(params.iter().enumerate().filter_map(|(index, param)| {
+        let defaulted = defaults.is_some_and(|d| d.get(index).is_some_and(Option::is_some));
+        (index >= args.len() && !defaulted).then_some(param)
+    }));
     if let Some(param) = super::evaluate::distributive_param(alias) {
         if let Some(bound) = subst.get(param) {
             let members = literal_members(super::evaluate::union_members(bound, args_file, ctx, 0), ctx, state, depth);
             if members.len() != 1 {
-                let results = members.into_iter().map(|(member, member_file)| {
-                    let mut one = subst.clone();
-                    one.insert(param, CollectedType::AtFile { file: member_file, inner: Box::new(member) });
-                    resolve_type_alias_type(&super::substitute::substitute_alias(alias, &one), ctx, state, depth)
-                });
-                return super::primitives::union_of(results.collect::<Vec<_>>());
+                let caller = state.enter_scope(unfilled);
+                let results: Vec<PropType> = members
+                    .into_iter()
+                    .map(|(member, member_file)| {
+                        let mut one = subst.clone();
+                        let member = CollectedType::AtFile {
+                            file: member_file,
+                            scope: args_scope.clone(),
+                            inner: Box::new(member),
+                        };
+                        one.insert(param, member);
+                        resolve_type_alias_type(&super::substitute::substitute_alias(alias, &one), ctx, state, depth)
+                    })
+                    .collect();
+                state.leave_scope(caller);
+                return super::primitives::union_of(results);
             }
         }
     }
-    resolve_type_alias_type(&super::substitute::substitute_alias(alias, &subst), ctx, state, depth)
+    let caller = state.enter_scope(unfilled);
+    let expanded = resolve_type_alias_type(&super::substitute::substitute_alias(alias, &subst), ctx, state, depth);
+    state.leave_scope(caller);
+    expanded
 }
 
 /// `members` with each one that is not already a literal or primitive resolved (`(typeof SIZES)[number]`, a template
@@ -463,7 +488,7 @@ fn can_hold_nullish(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext
         | CollectedType::Conditional { .. }
         | CollectedType::IndexedAccess { .. }
         | CollectedType::TypeOf(_) => true,
-        CollectedType::AtFile { file, inner } => can_hold_nullish(inner, file, ctx, depth + 1),
+        CollectedType::AtFile { file, inner, .. } => can_hold_nullish(inner, file, ctx, depth + 1),
         CollectedType::Union(members) => members.iter().any(|m| can_hold_nullish(m, file, ctx, depth + 1)),
         CollectedType::Array(_)
         | CollectedType::Readonly(_)
@@ -538,8 +563,9 @@ fn displayed_arg(
         CollectedType::Union(members) => {
             CollectedType::Union(members.iter().map(|m| displayed_arg(m, file, ctx, state, depth + 1)).collect())
         }
-        CollectedType::AtFile { file, inner } => CollectedType::AtFile {
+        CollectedType::AtFile { file, scope, inner } => CollectedType::AtFile {
             file: file.clone(),
+            scope: scope.clone(),
             inner: Box::new(displayed_arg(inner, file, ctx, state, depth + 1)),
         },
         _ => arg.clone(),
