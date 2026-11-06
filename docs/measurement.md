@@ -144,6 +144,59 @@ What it does not establish:
 - `oracle-compare.ts` reads a widened primitive of another kind as `less precise`, not `wrong` (`number` against `'a' | 'b'`). Changing that would move every historical oracle number, so the reference inherits it.
 - The sample is the components Caliper reports, so it says nothing about components Caliper misses.
 
+### Layer-only props
+
+**Which configuration this describes.** The CLI, the NAPI binding and the Vite plugin collapse by default (`collapseInheritedProps: 'dependencies'`). The Storybook addon does not: it defaults to `'none'` (`packages/storybook/src/provider.ts`), which lists every inherited prop with its type, so in a Storybook props table no prop is layer-only. What follows describes what a default CLI, NAPI or agent consumer gets; the addon's configuration is the fully expanded run, reported beside it.
+
+A collapsed inheritance layer (a dependency source declaring more than 30 props, `docs/architecture/resolver-type-resolution.md`, "Collapse") reaches a reader as a list of names, `inheritance[].members`, with no types. `scripts/layer_only_props.py` (`apps/oracle/src/layer-only.ts`) takes every such prop that the component's `props` and `notableInherited` do not list, over all components of a corpus, and sorts it into two classes by a rule that reads only the layer's file, the layer's type name and the prop's name. The first clause that fits decides:
+
+1. **dom file** → ambient. The layer is declared in `@types/react`, or in react-aria's `@react-types/shared/src/dom.d.ts`.
+2. **dom type** → ambient. The layer's type is `GlobalDOMEvents`, `DOMAttributes`, `AriaAttributes`, `AllHTMLAttributes`, `SVGAttributes`, `*HTMLAttributes` or `Aria*Attributes`.
+3. **style type** → ambient. The layer's type is `*StyleProps`, `SystemProps`, or `Space|Layout|Color|Typography|Border|Flex|Grid|Position|Shadow|Background` followed by `Props`.
+4. **global attribute** → ambient. The prop is one every element has (`GLOBAL_ATTRIBUTES` in `layer-only.ts`: `className`, `style`, `id`, `title`, `lang`, `dir`, `hidden`, `tabIndex`, `role`, `slot`, …), or starts `aria-` or `data-`. `value`, `defaultValue`, `type`, `name` and `disabled` are not in it: they are element-specific, and a dependency's component often uses them as its own API.
+5. **dependency api** → API. Anything else a collapsed layer names: the modes, state and composition props of a dependency's component.
+
+The 20 API props that matter most are chosen by category first (state, then mode, composition, constraint, data, other, by the prop's name), then by the number of components it is layer-only in. The report gives each its declaring layer, its declared type (read from the layer's `.d.ts`), and why it matters.
+
+```bash
+scripts/layer_only_props.py --bin target/release/caliper-docgen --corpus antd --corpus shadcn [--runs 3]
+```
+
+Measured on antd and shadcn (Mantine, Chakra and Spectrum are not run). These figures predate the last change to the count: an `Omit` now drops the omitted props from a collapsed layer's `members` (`resolver/alias.rs`), and `expandedDependencySources` skips collapsed sources that list a curated `className`. The layer-only, API and "listed in full" rows, and the "ambient by clause 1 to 3" figure of 13 the proposal below relies on, have not been re-measured since; re-run `scripts/layer_only_props.py` before quoting them.
+
+|                                                     |      antd |      shadcn |
+| --------------------------------------------------- | --------: | ----------: |
+| Layer-only props (component × prop)                 |       669 |       6,774 |
+| API / ambient                                       |   664 / 5 | 267 / 6,507 |
+| Distinct (layer, prop), API / ambient               |   320 / 3 |     89 / 69 |
+| Components with at least one API layer-only prop    | 22 of 253 |  6 of 1,901 |
+| Collapsed layers (all above 30)                     |        10 |           3 |
+| … of which 31 to 40 props / 41 to 60 / 61 and over  | 5 / 4 / 1 |   1 / 0 / 2 |
+| … of which hold API props / all ambient             |    10 / 0 |       2 / 1 |
+| API props in a layer of 31 to 40 props              | 240 (36%) |    81 (30%) |
+| Dependency sources listed in full (all 30 or fewer) |        46 |         314 |
+| … of which ambient by clause 1 to 3                 |         0 |          13 |
+
+shadcn's ambient mass is one layer: react-aria's `GlobalDOMEvents`, 64 handlers on 106 components. Its API props are react-day-picker's `PropsBase` (75 props) and Base UI's `ComboboxRootProps` (38). In antd, nearly everything collapsed is a dependency's API: `@rc-component`'s `IDialogPropTypes`, `BaseSelectProps`, `InputNumberProps`, `MenuProps` and the like, so with the default collapse a CLI, NAPI or agent consumer gets `visible`, `onClose`, `value`, `defaultValue` and `onChange` as names, with no type. The addon's `none` lists them with their types.
+
+What this says about the size rule: it is right where a source happens to be both large and ambient, and wrong where it is large and API. A source of 31 props is collapsed and one of 30 is listed, whatever is in it; 36% and 30% of the API props sit in the 31 to 40 band. It also lists small ambient sources in full (13 in shadcn).
+
+**Proposal: collapse by relevance, not size.** Collapse a dependency source when it is ambient by clause 1 to 3, decided from the source's name and file before anything in it is resolved, whatever its size. Do not collapse a source for being large: list its members, keeping clause 4's global attributes as a name list. This changes the resolver (`collapse_inherited_props`), which this measurement does not.
+
+Who it is for: the default CLI, NAPI and agent consumers, which collapse by size today and so hold the API props above as names. The Storybook addon already lists everything (`none`) and would see no change in its API props; it could adopt the rule to stop listing ambient names, which the "expanding every layer" row prices in output size but which was not measured as a session's payload.
+
+Its measured effect, from the run with `--collapse-inherited-props none` (the canonical JSON's size; the listing counts are exact, the bytes an estimate from the distinct entries plus one name per component):
+
+|  | antd | shadcn |
+| --- | --: | --: |
+| API props it would list | 603 (313 entries, about 199 KB) | 255 (85 entries, about 107 KB) |
+| Ambient props (clauses 1 to 4) from dependency sources it would collapse that are listed today | 37 (about 16 KB) | 2,896 (about 297 KB) |
+| Net change to the output | about +183 KB (+4.6% of 3.95 MB) | about −190 KB (−2.2% of 8.63 MB) |
+| Expanding every layer instead (the Storybook addon's `none`: 0 collapsed layers, 0 layer-only props) | +189 KB (+4.8%); 19,889 component props listed, not 19,281 | +837 KB (+9.7%); 396,864 listed, not 390,102 |
+| Time and peak RSS, default / `none` (fastest of 3, interleaved) | 66 / 74 ms, 116 / 117 MiB | 170 / 177 ms, 295 / 293 MiB |
+
+Time and memory are the size rule's reason (Chakra went from 560 to 398,910 props with its source directory's style system listed), so this does not show the proposal is safe for a corpus with a large dependency API or a large style system: clause 3 keeps a style system collapsed by its type, but a dependency whose own API is hundreds of props would be listed in full. That needs the same run on Chakra, Mantine and Spectrum, which are not installed here.
+
 ## `just bench`
 
 ```bash
