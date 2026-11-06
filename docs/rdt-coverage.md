@@ -397,7 +397,7 @@ Fixed: a top-level `const` initialised with a literal (or an object literal with
 
 ## Note: React 19 `ref`-as-prop — investigated, not a real gap
 
-A `ReactVersion` option (since removed, because nothing in `crates/core` ever read it) was plumbed from the CLI down to `PipelineOptions`. That looked like a real gap — the original spec's worry was that `function Button({ ref, ...props }: ButtonProps)` (React 19's plain-prop `ref`, no `forwardRef`) wouldn't be recognized.
+The worry is that `function Button({ ref, ...props }: ButtonProps)` (React 19's plain-prop `ref`, no `forwardRef`) would not be recognized, since extraction has no React-version option to tell it that `ref` is a prop.
 
 Tested directly against both real shapes:
 
@@ -413,7 +413,7 @@ export function Button({ ref, ...props }: ButtonProps) { ... }
 
 Both already extract `ref` correctly as `{ kind: 'ref', element: 'HTMLButtonElement' }`, no special-casing involved — the extractor doesn't care that the member happens to be named `ref`; it walks whatever the props type structurally contains, same as any other member, regardless of React version. The one case this doesn't cover — `ref` implicitly present via `ComponentProps<'button'>`'s real React 19 typing rather than an explicit member — falls under the existing, already-accepted "curated mode doesn't expand full HTML attributes" limit, not a version-specific gap.
 
-Left the `ReactVersion` fields and CLI flag in place (real, tested, user-facing surface) rather than ripping them out — but didn't invent speculative behavior for a bug that isn't reproducible. If a concrete React-version-dependent extraction difference ever surfaces, this is where it'd get wired in.
+There is no React-version option, and none is needed for these shapes. If a concrete React-version-dependent extraction difference appears, it needs a reproduction first.
 
 ### Fixed: bare passthrough identifier alias not renaming the component
 
