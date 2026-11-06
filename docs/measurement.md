@@ -197,7 +197,7 @@ RDT's memory is its process's peak RSS and its time excludes Node's start; Calip
 
 ## Collapse by relevance, 2026-11-02
 
-A dependency source used to collapse into a layer of names once it declared more than 30 props. It now collapses when it is ambient (DOM and ARIA attribute families, style systems; clauses in `crates/core/src/resolver/ambient.rs`) and past 30 props, or when it is not ambient but past 200 props (`LARGE_API_SOURCE`). Every other dependency source is listed with its types. The rule is checked against the oracle's classifier (`apps/oracle/src/layer-only.ts`) by a fixture of its verdicts (`crates/core/src/resolver/ambient_parity.json`).
+A dependency source used to collapse into a layer of names once it declared more than 30 props. It now collapses when it is ambient (DOM and ARIA attribute families, style systems; clauses in `crates/core/src/resolver/ambient.rs`) and past 30 props, or when it is not ambient but past 200 props (`LARGE_API_SOURCE`). Every other dependency source is listed with its types. The rule is checked by a fixture of the verdicts of the oracle's classifier (`crates/core/src/resolver/ambient_parity.json`); that classifier (`apps/oracle/src/layer-only.ts`) and its "Layer-only props" write-up are on the `measure/layer-only-props` branch, not yet in this tree.
 
 **Who it changes.** The Storybook addon runs with `collapseInheritedProps: none` (`packages/storybook/src/provider.ts`), which lists every inherited prop, so the rule does not change what the addon shows. The output is byte-identical between the two builds on all five corpora in that mode. The rule changes the CLI and NAPI default, and so what agents and TOON readers see.
 
