@@ -118,6 +118,25 @@ describe('createDocgenProvider', () => {
     expect(Object.keys(payload?.argTypes ?? {})).toEqual(['value'])
   })
 
+  it('documents a subcomponent that is a member of a named import', async () => {
+    const fake = binding()
+    fake.output.components!.Select = entry('Select', join(components, 'Select.tsx'))
+    fake.docs.Select = rdtDoc('Select', ['children'])
+    fake.output.components!['Select.Option'] = entry('Select.Option', join(components, 'Select.tsx'))
+    fake.docs['Select.Option'] = rdtDoc('Select.Option', ['value'])
+    const { payload, nextCalls } = await request(fake, story('Picker'))
+    expect(nextCalls).toBe(0)
+    expect(Object.keys(payload?.subcomponents?.Option?.argTypes ?? {})).toEqual(['value'])
+    expect(payload?.subcomponents?.Option?.error).toBeUndefined()
+  })
+
+  it('documents a subcomponent read through a local binding of the story file', async () => {
+    const { payload, nextCalls } = await request(binding(), story('Parts'))
+    expect(nextCalls).toBe(0)
+    expect(payload?.subcomponents?.ListItem?.error).toBeUndefined()
+    expect(Object.keys(payload?.subcomponents?.ListItem?.argTypes ?? {})).toEqual(['bullet'])
+  })
+
   it('asks the next provider when the session has no such component', async () => {
     const fake = binding()
     delete fake.output.components!.Card

@@ -123,7 +123,8 @@ pub struct ExtractArgs {
     #[arg(long, conflicts_with = "load_dependencies")]
     pub no_load_dependencies: bool,
 
-    /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
+    /// Which inherited sources to list as one inherited layer of names instead of prop by prop: large ambient ones
+    /// (DOM and ARIA attributes, style systems) from loaded dependencies by default; a dependency's own API is listed unless it declares more than 200 props
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 
@@ -159,13 +160,13 @@ pub enum HtmlAttributeModeArg {
     None,
 }
 
-/// The values of `--collapse-inherited-props`: which inherited sources of more than 30 props are listed as one
-/// inherited layer instead of prop by prop.
+/// The values of `--collapse-inherited-props`: which inherited sources are listed as one inherited layer of names
+/// instead of prop by prop.
 #[derive(clap::ValueEnum, Clone, Copy)]
 pub enum CollapseInheritedPropsArg {
-    /// Sources from loaded dependencies (default)
+    /// Large ambient sources (DOM and ARIA attributes, style systems) from loaded dependencies (default)
     Dependencies,
-    /// Dependency and project sources
+    /// Those, and project sources of more than 30 props
     All,
     /// List every prop
     None,
@@ -198,7 +199,8 @@ pub struct InspectArgs {
     #[arg(long, conflicts_with = "load_dependencies")]
     pub no_load_dependencies: bool,
 
-    /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
+    /// Which inherited sources to list as one inherited layer of names instead of prop by prop: large ambient ones
+    /// (DOM and ARIA attributes, style systems) from loaded dependencies by default; a dependency's own API is listed unless it declares more than 200 props
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 }
@@ -221,7 +223,8 @@ pub struct WatchArgs {
     #[arg(long, conflicts_with = "load_dependencies")]
     pub no_load_dependencies: bool,
 
-    /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
+    /// Which inherited sources to list as one inherited layer of names instead of prop by prop: large ambient ones
+    /// (DOM and ARIA attributes, style systems) from loaded dependencies by default; a dependency's own API is listed unless it declares more than 200 props
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 }
@@ -248,7 +251,8 @@ pub struct CheckArgs {
     #[arg(long, conflicts_with = "load_dependencies")]
     pub no_load_dependencies: bool,
 
-    /// Which inherited sources of more than 30 props to list as one inherited layer instead of prop by prop
+    /// Which inherited sources to list as one inherited layer of names instead of prop by prop: large ambient ones
+    /// (DOM and ARIA attributes, style systems) from loaded dependencies by default; a dependency's own API is listed unless it declares more than 200 props
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 }

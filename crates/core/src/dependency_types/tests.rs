@@ -529,8 +529,12 @@ fn component_props_of_a_default_exported_package_component_resolve_through_its_b
         prop_types(&on, "Tip"),
         [("extra".into(), "number".into()), ("overlay".into(), "string".into()), ("visible".into(), "boolean".into())]
     );
-    // The test project has no `react`; nothing else is unresolved.
-    assert!(on.diagnostics.iter().all(|d| d.message.contains("'react'")), "{:?}", on.diagnostics);
+    // The test project has no `react` or `typescript`; nothing else is unresolved.
+    assert!(
+        on.diagnostics.iter().all(|d| d.message.contains("'react'") || d.message.contains("'typescript'")),
+        "{:?}",
+        on.diagnostics
+    );
 }
 
 /// `export const HiddenInput = Ark.HiddenInput` documents the imported component's props when its package is loaded,
@@ -692,6 +696,99 @@ fn custom_conditions_from_the_governing_tsconfig_pick_the_export_target() {
     let output = extract(&options(&root, true));
 
     assert_eq!(prop_types(&output, "Cond"), [("fromSource".into(), "string".into())]);
+}
+
+/// A re-export hop whose module cannot be resolved is why the name is missing; the package does export it.
+#[test]
+fn a_demand_blocked_by_an_unresolvable_re_export_hop_records_that_cause() {
+    let (_tmp, root) = project(&[
+        ("src/Badge.tsx", BADGE),
+        ("node_modules/hop-kit/package.json", r#"{ "name": "hop-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        (
+            "node_modules/hop-kit/index.d.ts",
+            "export { Named } from './gone';\nexport * as Ns from 'not-installed';\nexport * from './stars';\n",
+        ),
+        ("node_modules/hop-kit/stars.d.ts", "export * from './also-gone';\nexport type Present = string;\n"),
+    ]);
+    let demands = vec![
+        demand(&root, "hop-kit", "Named"),
+        demand(&root, "hop-kit", "Ns.X"),
+        demand(&root, "hop-kit", "Absent"),
+        demand(&root, "hop-kit", "Present"),
+    ];
+
+    let layer = load(demands, &options(&root, true), None);
+
+    let src = root.join("src");
+    assert_eq!(layer.unresolved_reason(&src, "hop-kit", "Named"), Some(Unresolved::Unresolvable));
+    assert_eq!(layer.unresolved_reason(&src, "hop-kit", "Ns.X"), Some(Unresolved::Unresolvable));
+    assert_eq!(layer.unresolved_reason(&src, "hop-kit", "Absent"), Some(Unresolved::Unresolvable));
+    assert_eq!(layer.unresolved_reason(&src, "hop-kit", "Present"), None);
+}
+
+/// `export *` never carries `default`, so a default import that a barrel of only wildcards cannot answer is not
+/// exported, whatever the wildcard's own module is.
+#[test]
+fn a_default_import_is_not_blamed_on_an_unresolvable_wildcard_export() {
+    let (_tmp, root) = project(&[
+        ("src/Badge.tsx", BADGE),
+        ("node_modules/star-kit/package.json", r#"{ "name": "star-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/star-kit/index.d.ts", "export * from './missing';\n"),
+    ]);
+    let demands = vec![demand(&root, "star-kit", "default"), demand(&root, "star-kit", "Named")];
+
+    let layer = load(demands, &options(&root, true), None);
+
+    let src = root.join("src");
+    assert_eq!(layer.unresolved_reason(&src, "star-kit", "default"), Some(Unresolved::NotExported));
+    assert_eq!(layer.unresolved_reason(&src, "star-kit", "Named"), Some(Unresolved::Unresolvable));
+}
+
+/// An explicit export that resolves but does not hold the name still shadows the wildcards, so the name is not
+/// exported rather than blocked by a wildcard's unresolvable module.
+#[test]
+fn a_wildcard_export_does_not_explain_a_name_an_explicit_re_export_lacks() {
+    let (_tmp, root) = project(&[
+        ("src/Badge.tsx", BADGE),
+        ("node_modules/lack-kit/package.json", r#"{ "name": "lack-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/lack-kit/index.d.ts", "export * from './missing';\nexport { Foo } from './present';\n"),
+        ("node_modules/lack-kit/present.d.ts", "export type Other = string;\n"),
+    ]);
+    let demands = vec![demand(&root, "lack-kit", "Foo")];
+
+    let layer = load(demands, &options(&root, true), None);
+
+    assert_eq!(layer.unresolved_reason(&root.join("src"), "lack-kit", "Foo"), Some(Unresolved::NotExported));
+}
+
+/// An explicit export shadows a wildcard one, so a failed explicit hop must not fall through to the wildcard's name.
+#[test]
+fn a_wildcard_export_does_not_answer_for_a_failed_explicit_re_export_of_the_same_name() {
+    let (_tmp, root) = project(&[
+        ("src/Badge.tsx", BADGE),
+        (
+            "node_modules/shadow-kit/package.json",
+            r#"{ "name": "shadow-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/shadow-kit/index.d.ts",
+            "export { Props } from './gone';\nexport * as Ns from 'not-installed';\nexport * from './legacy';\n",
+        ),
+        (
+            "node_modules/shadow-kit/legacy.d.ts",
+            "export interface Props { legacy: string }\nexport interface Ns { x: number }\n",
+        ),
+    ]);
+    let demands = vec![demand(&root, "shadow-kit", "Props"), demand(&root, "shadow-kit", "Ns.x")];
+
+    let layer = load(demands, &options(&root, true), None);
+
+    let index = root.join("node_modules/shadow-kit/index.d.ts");
+    assert_eq!(layer.export_of(&index, "Props"), Some(&None));
+    assert_eq!(layer.export_of(&index, "Ns.x"), Some(&None));
+    let src = root.join("src");
+    assert_eq!(layer.unresolved_reason(&src, "shadow-kit", "Props"), Some(Unresolved::Unresolvable));
+    assert_eq!(layer.unresolved_reason(&src, "shadow-kit", "Ns.x"), Some(Unresolved::Unresolvable));
 }
 
 /// A demand that panics is contained, and its diagnostic reaches the output with the panic text and the demand named.
@@ -1173,15 +1270,22 @@ fn a_watch_revision_that_first_reads_a_react_member_matches_a_cold_extract() {
 
 // ─── collapseInheritedProps (collapse) ────────────────────────────────────────
 
-/// `big` declares `BigProps` (31 props, two of them notable), `SmallProps` (1) and `BigAlias` (31); the project declares
-/// `LocalBig` (31), and components inheriting each.
+/// `big` declares `SystemProps` and `LayoutProps` (31 props each: style systems, ambient by their names, two notable props
+/// each), `BorderProps` (2: a style system too small to collapse), `ApiProps` (31: a dependency's own API, not
+/// ambient) and `SmallProps` (1); the project declares `LocalBig` (31),
+/// and components inheriting each.
 fn collapse_project() -> (tempfile::TempDir, Utf8PathBuf) {
     let many = |prefix: &str| (0..29).map(|i| format!("{prefix}{i}?: string; ")).collect::<String>();
     let big = format!(
-        "export interface BigProps {{ {}onClick?: () => void; className?: string }}\n\
-         export interface SmallProps {{ only: string }}\nexport type BigAlias = {{ {}id?: string; style?: object }};\n",
+        "export interface SystemProps {{ {}onClick?: () => void; className?: string }}\n\
+         export interface SmallProps {{ only: string }}\nexport type LayoutProps = {{ {}id?: string; style?: object }};\n\
+         export interface ApiProps {{ {}mode?: 'a' | 'b'; open?: boolean }}\n\
+         export interface BorderProps {{ radius?: string; width?: string }}\n\
+         export interface HugeApiProps {{ {} }}\n",
         many("p"),
-        many("q")
+        many("q"),
+        many("a"),
+        (0..201).map(|i| format!("h{i}?: string;")).collect::<String>()
     );
     let local = format!("export interface LocalBig {{ {}l29?: string; l30?: string }}\n", many("l"));
     let files = [
@@ -1190,13 +1294,19 @@ fn collapse_project() -> (tempfile::TempDir, Utf8PathBuf) {
         ("src/local.ts", local),
         (
             "src/Big.tsx",
-            "import type { BigProps, SmallProps, BigAlias } from 'big';\nimport type { LocalBig } from './local';\n\
-             export interface FieldProps extends BigProps, SmallProps { own: number }\n\
+            "import type { SystemProps, SmallProps, LayoutProps, ApiProps, BorderProps, HugeApiProps } from 'big';\nimport type { LocalBig } from './local';\n\
+             export interface FieldProps extends SystemProps, SmallProps { own: number }\n\
+             export interface ApiField extends ApiProps { own: number }\n\
+             export function Api(props: ApiField) { return null; }\n\
+             export interface HugeField extends HugeApiProps { own: number }\n\
+             export function Huge(props: HugeField) { return null; }\n\
+             export interface TinyField extends BorderProps { own: number }\n\
+             export function Tiny(props: TinyField) { return null; }\n\
              export function Field(props: FieldProps) { return null; }\n\
-             export function Aliased(props: BigAlias & { own: number }) { return null; }\n\
-             export function Direct(props: BigProps) { return null; }\n\
-             export function Picked(props: Pick<BigProps, 'p0' | 'p1'>) { return null; }\n\
-             export function Keyed(props: Omit<LocalBig, keyof BigProps | 'l30'>) { return null; }\n\
+             export function Aliased(props: LayoutProps & { own: number }) { return null; }\n\
+             export function Direct(props: SystemProps) { return null; }\n\
+             export function Picked(props: Pick<SystemProps, 'p0' | 'p1'>) { return null; }\n\
+             export function Keyed(props: Omit<LocalBig, keyof SystemProps | 'l30'>) { return null; }\n\
              export interface LocalField extends LocalBig { own: number }\n\
              export function Local(props: LocalField) { return null; }\n\
              export function OwnBig(props: LocalBig) { return null; }\n"
@@ -1228,15 +1338,30 @@ fn a_large_dependency_source_collapses_to_a_layer_and_its_notable_props() {
 
     let field = &output.components["Field"];
     assert_eq!(keys(&field.props), ["only", "own"]);
-    assert_eq!(layers(field), [("BigProps", 31, None)]);
+    assert_eq!(layers(field), [("SystemProps", 31, None)]);
     assert_eq!(field.inheritance[0].file_name, root.join("node_modules/big/index.d.ts").as_str());
     assert_eq!(keys(&field.notable_inherited), ["className", "onClick"]);
     assert_eq!(field.notable_inherited["onClick"].prop_type.raw_string(), "() => void");
 
     let aliased = &output.components["Aliased"];
     assert_eq!(keys(&aliased.props), ["own"]);
-    assert_eq!(layers(aliased), [("BigAlias", 31, None)]);
+    assert_eq!(layers(aliased), [("LayoutProps", 31, None)]);
     assert_eq!(keys(&aliased.notable_inherited), ["id", "style"]);
+
+    // A small ambient source is listed (a layer record costs more than its props)...
+    let tiny = &output.components["Tiny"];
+    assert_eq!(keys(&tiny.props), ["own", "radius", "width"]);
+    assert_eq!(tiny.inheritance, []);
+    // ...and a large source that is a dependency's own API is listed in full, with its types, not collapsed by size.
+    let api = &output.components["Api"];
+    assert_eq!(api.props.len(), 32);
+    assert_eq!(api.inheritance, []);
+    assert_eq!(api.props["mode"].prop_type.raw_string(), r#""a" | "b""#);
+
+    // ...unless it is past `LARGE_API_SOURCE`: a style system under a name the rule does not know.
+    let huge = &output.components["Huge"];
+    assert_eq!(keys(&huge.props), ["own"]);
+    assert_eq!(layers(huge), [("HugeApiProps", 201, None)]);
 
     // The component's own props type, a `Pick` from a large source and a `keyof` operand are never collapsed.
     assert_eq!(output.components["Direct"].props.len(), 31);
@@ -1265,14 +1390,14 @@ fn all_collapses_inherited_project_sources_too_and_none_expands_everything() {
     assert_eq!(all.components["OwnBig"].props.len(), 31, "the component's own props type");
     assert_eq!(keys(&all.components["Field"].props), ["only", "own"]);
 
-    for name in ["Field", "Aliased", "Local", "Direct"] {
+    for name in ["Field", "Aliased", "Local", "Direct", "Tiny", "Api", "Huge"] {
         assert_eq!(none.components[name].inheritance, [], "{name}");
         assert_eq!(none.components[name].notable_inherited.len(), 0, "{name}");
     }
     assert_eq!(none.components["Field"].props.len(), 33);
     assert_eq!(none.components["Aliased"].props.len(), 32);
     // Collapsing only hides props; whatever stays expanded matches a full expansion exactly.
-    for name in ["Direct", "Picked", "Keyed", "Local", "OwnBig"] {
+    for name in ["Direct", "Picked", "Keyed", "Local", "OwnBig", "Api"] {
         assert_eq!(default.components[name], none.components[name], "{name}");
     }
     for (name, prop) in &default.components["Field"].props {
@@ -1291,4 +1416,12 @@ fn the_default_changes_nothing_without_loaded_dependencies() {
     };
 
     assert_eq!(off(CollapseInheritedProps::Dependencies), off(CollapseInheritedProps::None));
+}
+
+#[test]
+fn node_modules_is_found_with_either_separator() {
+    assert!(in_node_modules("/p/node_modules/kit/index.d.ts"));
+    assert!(in_node_modules(r"C:\p\node_modules\kit\index.d.ts"));
+    assert!(!in_node_modules("/p/node_modules-backup/index.d.ts"));
+    assert!(!in_node_modules(r"C:\p\src\Badge.tsx"));
 }

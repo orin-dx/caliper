@@ -125,7 +125,8 @@ pub struct JsExtractOptions {
     pub cache: Option<bool>,
     /// Load the dependency type declarations project types reference (default `true`).
     pub load_dependencies: Option<bool>,
-    /// Which inherited sources of more than 30 props to list as one layer (default `'dependencies'`).
+    /// Which inherited sources to list as one layer of names: large ambient dependency sources (`'dependencies'`, the
+    /// default), those and project sources of more than 30 props (`'all'`), or none.
     #[napi(ts_type = "'dependencies' | 'all' | 'none'")]
     pub collapse_inherited_props: Option<String>,
     /// Session only (`createSession`, `initializeSession`, `extractFileIncremental`): parse and index every file, and
@@ -187,8 +188,7 @@ fn on_demand_checker(
 ) -> Arc<caliper_docgen_semantic::OnDemand> {
     let root = first_src
         .as_deref()
-        .and_then(|dir| std::fs::canonicalize(dir).ok())
-        .and_then(|dir| camino::Utf8PathBuf::from_path_buf(dir).ok())
+        .and_then(|dir| caliper_docgen_core::canonical_path::canonicalize(camino::Utf8Path::new(dir)).ok())
         .or_else(|| std::env::current_dir().ok().and_then(|dir| camino::Utf8PathBuf::from_path_buf(dir).ok()))
         .unwrap_or_default();
     let mut config = caliper_docgen_semantic::OnDemandConfig::new(root.clone());
@@ -765,8 +765,9 @@ mod tests {
         let err = ensure_fresh(session_id).await.expect_err("an unknown session has no options to extract with");
         assert_eq!(err.reason, format!("Unknown session {session_id}"));
 
-        // `./src` holds this crate's Rust sources: an existing directory with no components.
-        let options = PipelineOptions::try_from(base_options()).expect("valid options");
+        // An existing directory with no components, under a TypeScript install so no missing-package warning joins.
+        let project = Project::empty();
+        let options = PipelineOptions::try_from(project.options()).expect("valid options");
         SESSIONS.insert(session_id, Arc::new(WatchSession::new(options)));
         let first = ensure_fresh(session_id).await.expect("a registered session");
         let second = ensure_fresh(session_id).await.expect("a registered session");
@@ -918,6 +919,21 @@ mod tests {
                  export function Button(props: ButtonProps) { return null }\n",
             )
             .expect("write the component");
+            Self(dir)
+        }
+
+        fn empty() -> Self {
+            let dir = std::env::temp_dir().join(format!("caliper-binding-empty-{}", next_session_id()));
+            let lib = dir.join("node_modules/typescript/lib");
+            std::fs::create_dir_all(&lib).expect("create the project directory");
+            std::fs::write(
+                dir.join("node_modules/typescript/package.json"),
+                r#"{"name":"typescript","version":"5.9.3"}"#,
+            )
+            .expect("write the typescript manifest");
+            for file in ["lib.es5.d.ts", "lib.dom.d.ts"] {
+                std::fs::write(lib.join(file), "").expect("write a lib file");
+            }
             Self(dir)
         }
 

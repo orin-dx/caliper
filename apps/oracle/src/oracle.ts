@@ -24,6 +24,7 @@ import { checkCaliperShape, flattenProps, requireComparison } from './caliper-in
 import { exportName, propsTypeOf } from './checker-components.ts'
 import { checkerNormalizer } from './oracle-checker.ts'
 import { caliperNorm, compare, VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'
+import { assertSchemaVersion } from './schema-version.ts'
 import { collapsedLayerFiles, loadTool, normComponent, pathKey, universeRecorder } from './tool-universe.ts'
 
 const KEYS = ['root', 'src', 'tsconfig', 'caliper', 'out', 'files', 'dump', 'rows', 'missing', 'rdt', 'rdg'] as const
@@ -71,7 +72,7 @@ const checkerNorm = checkerNormalizer(checker)
 
 const rel = (path: string) => relative(root, realpathSync(path))
 
-const caliper = JSON.parse(readFileSync(args.caliper, 'utf8'))
+const caliper = assertSchemaVersion(JSON.parse(readFileSync(args.caliper, 'utf8')), 'caliper JSON')
 checkCaliperShape(caliper)
 const caliperByFile = new Map<string, { name: string; key: string; component: any }[]>()
 for (const [componentKey, component] of Object.entries<any>(caliper.components)) {
@@ -182,7 +183,7 @@ function visitExport(exported: any, candidates: { name: string; key: string; com
   if (!match) return
   totals.componentsMatched++
   const shared = own.filter((p: any) => Object.hasOwn(match.component.props, p.name))
-  const layerFiles = collapsedLayerFiles(match.component)
+  const layerFiles = collapsedLayerFiles(caliper, match.component)
   const absent = own.filter((p: any) => !Object.hasOwn(match.component.props, p.name))
   const collapsed: any[] = []
   const missing: any[] = []

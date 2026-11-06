@@ -2,9 +2,10 @@ name: Weekly
 
 # Caliper, react-docgen-typescript and react-docgen on five public repos with their dependencies installed: time,
 # memory and recall (docs/measurement.md), and how often a reader of Caliper's output answers a fixed list of questions
-# wrong without a hint (scripts/agent_eval.py). It compares with last week's record and opens or updates one issue when
-# Caliper got slower, bigger or less complete, or when a silent-wrong answer appears. It never runs on a pull request and
-# never fails one.
+# wrong without a hint (scripts/agent_eval.py). Its headline is how many of the props of the components Caliper reports
+# are right against the checker (scripts/headline.py). It opens or updates one issue when a wrong type is above the gate or
+# rises, when a silent-wrong answer appears, or when a whole run is over a budget; drift in time, memory and recall against
+# RDT is listed in the summary and does not open one. It never runs on a pull request and never fails one.
 on:
   schedule:
     - cron: "0 6 * * 1"
@@ -106,12 +107,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh label create weekly-measurement --description "Caliper got worse in the weekly record" --color D93F0B 2>/dev/null || true
+          gh label create weekly-measurement --description "The weekly record needs attention" --color D93F0B 2>/dev/null || true
           existing=$(gh issue list --label weekly-measurement --state open --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --body-file issue.md
           else
-            gh issue create --title "The weekly record got worse" --label weekly-measurement --body-file issue.md
+            gh issue create --title "The weekly record needs attention" --label weekly-measurement --body-file issue.md
           fi
       - name: Fail when the baseline could not be downloaded
         if: ${{ always() && steps.baseline.outcome == 'failure' }}
