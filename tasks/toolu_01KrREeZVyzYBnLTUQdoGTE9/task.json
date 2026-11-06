@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01KrREeZVyzYBnLTUQdoGTE9",
+  "agent_id": "a0c57b7f22398e446",
+  "subagent_type": "general-purpose",
+  "task_description": "Resolve the provider.ts conflict on PR 353",
+  "token_usage": {
+    "input_tokens": 52,
+    "cache_creation_tokens": 197157,
+    "cache_read_tokens": 1606636,
+    "output_tokens": 7791,
+    "api_call_count": 26
+  },
+  "started_at": "2026-11-06T08:24:01.180066-08:00",
+  "completed_at": "2026-11-06T08:44:48.219453-08:00"
+}

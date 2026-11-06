@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01LJUviDrMuJWYSnn59CZfg7",
+  "agent_id": "aa74b72a2dfb66b80",
+  "subagent_type": "general-purpose",
+  "task_description": "Merge main into PR 345 to clear its conflict flag",
+  "token_usage": {
+    "input_tokens": 118,
+    "cache_creation_tokens": 156248,
+    "cache_read_tokens": 3046052,
+    "output_tokens": 10185,
+    "api_call_count": 46
+  },
+  "started_at": "2026-11-06T08:54:15.572961-08:00",
+  "completed_at": "2026-11-06T08:59:28.106036-08:00"
+}

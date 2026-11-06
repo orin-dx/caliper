@@ -1,0 +1,20 @@
+{
+  "tool_use_id": "toolu_01UB3ahaTjnGZN6ZMm1QTaGb",
+  "agent_id": "ac4c883f1ac7c3abf",
+  "subagent_type": "general-purpose",
+  "task_description": "Address findings on 348, 349 and 367",
+  "files": [
+    "packages/storybook/probe.mts",
+    "packages/storybook/tests/fixtures/project/src/stories/Exported.stories.tsx",
+    "packages/storybook/tests/fixtures/project/src/stories/Factory.stories.tsx"
+  ],
+  "token_usage": {
+    "input_tokens": 548,
+    "cache_creation_tokens": 656128,
+    "cache_read_tokens": 58019345,
+    "output_tokens": 107435,
+    "api_call_count": 274
+  },
+  "started_at": "2026-11-06T07:40:42.136966-08:00",
+  "completed_at": "2026-11-06T08:45:39.798941-08:00"
+}

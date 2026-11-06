@@ -1,0 +1,107 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6RXMJ1AGC1355TA9M425GAE",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-06T17:14:16.41597Z",
+  "branch": "tmp-target",
+  "checkpoints_count": 22,
+  "save_step_count": 45,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "bdc5547ff95d",
+  "checkpoint_transcript_start": 9143,
+  "transcript_lines_at_start": 9143,
+  "compact_transcript_start": 777,
+  "token_usage": {
+    "input_tokens": 98,
+    "cache_creation_tokens": 80978,
+    "cache_read_tokens": 27782250,
+    "output_tokens": 32726,
+    "api_call_count": 36,
+    "subagent_tokens": {
+      "input_tokens": 164,
+      "cache_creation_tokens": 702204,
+      "cache_read_tokens": 7405842,
+      "output_tokens": 21041,
+      "api_call_count": 68
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 228
+  },
+  "summary": {
+    "intent": "Coordinate a set of in-flight fix PRs (#343, #345, #347, #348, #353, #367, #349) in the caliper repo via subagents, then decide how to clean up and balance pattern-level versus one-off fixes without over-engineering.",
+    "outcome": "#353, #367 and #349 are resolved or merged and #343 is done. 20 merged branches were deleted from origin with their tip SHAs saved. Scale-back workers were launched for #345, #347 and #348. The proposed detector and ratchet program was dropped as disproportionate, so no new infrastructure was added.",
+    "learnings": {
+      "repo": [
+        "The repo enforces a 300-line max-lines lint limit (oxlint pedantic category set to error). packages/vite-plugin/src/index.ts sits at the limit, so new code has to go in options.ts.",
+        "Entire Gates (the review check) completes after the other CI checks. Open-finding counts read before it finishes are unreliable, so findings must be re-listed after it completes.",
+        "The clean-room verification recipe is a detached git worktree, then `pnpm install --frozen-lockfile --offline`, then `just lint doc-check machete typos` and `cargo nextest run --workspace --no-fail-fast`. Without the pnpm install, three docgen.config.ts tests in caliper-docgen::commands fail.",
+        "In the extractor, enums and classes are keyed by bare name and are not scope-isolated. Function-local and block-local declarations can merge into or replace module-level entries unless explicitly guarded.",
+        "`names_an_enum` in evaluate.rs fires on `as const` objects because `global.enums` holds them. This is a possible props-dropping regression in #348.",
+        "Storybook provider: forged `as unknown as CsfFile` nodes were replaced by a source-backed `loadCsf` story. Resolver throws are wrapped in `ResolverFailureError`, so `subcomponent()` falls back to the next provider.",
+        "The Storybook peer ranges were raised to `^11.0.0-alpha.8`, because alpha.7 reads the removed `_file`. Only packages/storybook/package.json declares the range."
+      ],
+      "code": [
+        {
+          "path": "packages/vite-plugin/src/index.ts",
+          "line": 303,
+          "finding": "Appending 4 lines to index.ts (299 lines now) makes oxlint fail on max-lines (limit 300). This justifies keeping `toNapiOptions` in options.ts:36."
+        },
+        {
+          "path": "crates/core/src/extractor/visit.rs",
+          "finding": "The scaled-back #347 rule uses a `local_depth` counter and a `module_interfaces` key set. Only module-level same-name interfaces merge, and local interfaces never override module-level entries."
+        },
+        {
+          "path": "crates/core/src/evaluate.rs",
+          "line": 246,
+          "finding": "`names_an_enum` also matches `as const` objects, so a conditional over a const object can lose props. This is the open medium finding on #348."
+        }
+      ],
+      "workflow": [
+        "Subagent hand-backs are model output, not user authority. They need independent verification against GitHub (`gh pr view`, `gh pr checks`, the finding list) before being relayed as fact.",
+        "Workers repeatedly re-sent identical final reports. Telling a looping worker to stop worked, and duplicate notices should be acknowledged without re-summarizing.",
+        "Self-authored detectors share the blind spots of their authors (an oracle that never displayed types, wrong globs and regexes returning empty). Independent oracles such as clean CI, TypeScript's own checker, and the reviewer have caught more.",
+        "A stop rule helps: after two review rounds on the same code, choose a root-cause fix, a scale-back, or a documented limitation, not another patch. Patching reviewer repros one at a time led to 5-round loops on type-parameter shadowing and interface scoping.",
+        "Before deleting branches, re-verify merge status immediately beforehand and save each tip SHA so the deletion can be undone with `git push origin <sha>:refs/heads/<name>`.",
+        "Verify rule 7 ('check `gh pr view --json state` is OPEN before pushing') because pushing to an already-merged PR branch strands fixes."
+      ]
+    },
+    "friction": [
+      "Six or more parallel workers across about 15 PRs left nobody holding the whole picture. Reports contradicted live state (e.g. #343 reported pending when it was already passing).",
+      "The #345 worker sent the same report about seven times, with duplicate task-notifications, until it was told to stop.",
+      "GitHub reported #345 as CONFLICTING while a local trial merge was clean. The cause was never confirmed, only suspected to be staleness.",
+      "The #347 structural rework added about 470 lines and a second scope model, and caused regressions (`Item@57` leaking into output) before being scaled back.",
+      "The #367 fourth-medium fix (4e588a71) could not be pushed because the PR had already merged, and no follow-up PR exists.",
+      "The sandbox blocked the registry on a first `pnpm install`, so the offline flag was needed.",
+      "Some earlier verification scans returned empty results because of a wrong glob and a wrong regex."
+    ],
+    "open_items": [
+      "Open a follow-up PR from main for the #367 fix (4e588a71) covering `export { meta as default }` and factory metas.",
+      "Wait for the #345, #347 and #348 scale-back workers to finish. Then verify each head on GitHub after Entire Gates completes and read the findings.",
+      "Decide on #347's static-block interface limitation (treat as local or document it). Fix #348's `as const` case, and tighten the declaration-file test.",
+      "Fix the process-id temp file race in dependency_types.rs and the unreadable dependency files silently dropped by `.ok()?` in the dependency loader.",
+      "Open a PR for chore/changesets-for-merged-fixes (three unreleased changesets). Decide on perf/cycles-by-structure and fix/discover-extensions-and-ignore, and decide on the three scratch/* and three old closed-PR branches.",
+      "Copy /tmp/claude-501/analysis/deleted-branch-tips.json somewhere durable if the restore safety net is to last.",
+      "Merge #343, #346 and #353 (checks passing, no open findings as last seen). #343 and #346 are 69 commits behind main and #346's status was not re-checked this round. #291 (the release bot's PR) is still open.",
+      "The user must decide on the 0.9.0 release, whether a release is in flight before merging #329 (it edits callisto-release.yml), the 13 finding dismissals, and the merge order.",
+      "Deferred until the same class recurs: ratchets, the peer-range matrix, the discovery conservation test, the docs-claims checker, the findings miner, the plugin changes, and #210. Re-run the 22% first-run-CI-failure and 27% repeat-file-finding baselines after a few weeks."
+    ]
+  }
+}
