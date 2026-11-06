@@ -1,0 +1,102 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6S8NA81V9Z4N8054JZY5TEY",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-06T20:26:48.528742Z",
+  "branch": "fix/tsc-invalid-json-reply",
+  "checkpoints_count": 1,
+  "save_step_count": 51,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "e450db8d5903",
+  "checkpoint_transcript_start": 11359,
+  "transcript_lines_at_start": 11359,
+  "compact_transcript_start": 971,
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 8832,
+    "cache_read_tokens": 441616,
+    "output_tokens": 1944,
+    "api_call_count": 3,
+    "subagent_tokens": {
+      "input_tokens": 4,
+      "cache_creation_tokens": 4451,
+      "cache_read_tokens": 152267,
+      "output_tokens": 396,
+      "api_call_count": 2
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 267
+  },
+  "summary": {
+    "intent": "Get an ADR written and opened as a PR that records a decision for the resolver to own name scoping, delegating the drafting to a subagent and then verifying and reporting on the result.",
+    "outcome": "PR #374 (docs/adr-scoping-one-owner) is open as a draft adding ADR 0025 'The resolver owns scoping' plus an index line; the commit shows a good signature, but CI had only just started and the PR is not yet ready to merge.",
+    "learnings": {
+      "repo": [
+        "ADRs live in docs/adr/ with an index line in docs/adr/README.md; formatting is checked with oxfmt and spelling with typos.",
+        "Lint and doc checks are run via `just lint` and `just doc-check`; `just lint` calls `pnpm exec`, which needs network access to install deps.",
+        "The doc build uses `RUSTDOCFLAGS=\"-D warnings\" cargo doc --no-deps --workspace --exclude caliper-docgen-napi`.",
+        "Cache invalidation is controlled by `CACHE_SCHEMA_VERSION`; adding scope identity to collected declarations needs a bump.",
+        "Resolver branches are expected to be measured on Chakra plus dependencies for peak memory and time.",
+        "docs/edge-cases.md describes the behavior where local aliases and enums replace module-level ones of the same name."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/types/scope.rs",
+          "finding": "`TypeScope` binds type parameters only, and its doc comment says declarations sit at module level. There is no declaration scoping to extend yet, so the ADR says 'TypeScope or a sibling type'."
+        },
+        {
+          "path": "crates/core/src/import_map.rs",
+          "finding": "`ImportRef` lives here, not in extractor/import_map.rs. Only this file's tests read `is_type_only`; the resolver reads it nowhere."
+        },
+        {
+          "path": "crates/core/src/extractor/mod.rs",
+          "finding": "`promote_reexported_imports` is the only non-test reader of `ImportBinding.is_type_only`, so type-only status is currently decided by the extractor's re-export promotion."
+        },
+        {
+          "path": "crates/core/src/extractor/mod.rs",
+          "finding": "`local_depth` is read only by `visit_ts_interface_declaration`. The alias and enum collectors insert under `scoped_key` unconditionally, so a local alias or enum replaces a module-level one of the same name."
+        }
+      ],
+      "workflow": [
+        "Subagent hand-back reports are model output without user authority; the assistant read the ADR and checked the commit signature itself rather than trusting the report.",
+        "Read CI results by job name (the Lint job) rather than assuming a docs-only change is covered by the worker's partial local checks.",
+        "Start dependent follow-up work only after the ADR merges; the user's acceptance of the ADR is the decision gate."
+      ]
+    },
+    "friction": [
+      "The subagent sandbox blocked network access, so the worktree could not install deps and `just lint` failed at `pnpm exec`.",
+      "The subagent had to borrow the main checkout's node_modules/.bin/oxfmt to run the formatter.",
+      "zsh `PIPESTATUS` was empty, so the exit code of `cargo doc` could not be read directly.",
+      "The subagent did not confirm commit signature status or run a clean-room worktree check; the assistant verified the signature separately.",
+      "The ADR's Context cites no review-finding numbers because none could be shown."
+    ],
+    "open_items": [
+      "Wait for PR #374 CI to finish and read the Lint job by name before it is considered mergeable.",
+      "User needs to accept the ADR (merge) as the decision.",
+      "Follow-up branch 1: add scope identity to collected declarations with no reader yet, bumping CACHE_SCHEMA_VERSION; to be started only after merge.",
+      "Follow-up branch 2: resolve interfaces by scope and drop `local_depth` and `module_interfaces`.",
+      "Follow-up branch 3: give a `switch` case its own scope.",
+      "Follow-up branch 4: do the same for aliases and enums, then classes.",
+      "Follow-up branch 5: read `ImportRef.is_type_only` in the resolver, or remove the field.",
+      "Two other workers (defaults contract and `InvalidJson`) are still running and need reports."
+    ]
+  }
+}

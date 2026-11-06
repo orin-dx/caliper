@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01CnEb7QvTpCiXY1aJCU7gxd",
+  "agent_id": "a4b34a6e0dafdb43d",
+  "subagent_type": "general-purpose",
+  "task_description": "Remove unemitted default contract items",
+  "started_at": "2026-11-06T12:18:45.945723-08:00"
+}

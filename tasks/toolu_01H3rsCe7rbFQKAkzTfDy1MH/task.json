@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01H3rsCe7rbFQKAkzTfDy1MH",
+  "agent_id": "adc861093d72c6892",
+  "subagent_type": "general-purpose",
+  "task_description": "Write the scoping ADR",
+  "token_usage": {
+    "input_tokens": 44,
+    "cache_creation_tokens": 93845,
+    "cache_read_tokens": 1657064,
+    "output_tokens": 7881,
+    "api_call_count": 22
+  },
+  "started_at": "2026-11-06T12:18:47.420824-08:00",
+  "completed_at": "2026-11-06T12:24:36.275284-08:00"
+}
