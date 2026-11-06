@@ -24,7 +24,7 @@ use rustix::pty::{grantpt, openpt, ptsname, unlockpt, OpenptFlags};
 use rustix::termios::{tcgetattr, LocalModes, OutputModes};
 
 mod common;
-use common::strip_ansi;
+use common::{install_stub_typescript, strip_ansi};
 
 const WIDGET: &str = "export function Widget(props: { label: string }) { return null; }\n";
 const TIMEOUT: Duration = Duration::from_secs(20);
@@ -66,17 +66,7 @@ struct Watch {
 
 fn watched_dir() -> tempfile::TempDir {
     let src = tempfile::TempDir::new().unwrap();
-    // An empty `typescript` install, so no missing-package warning joins the summary.
-    let lib = src.path().join("node_modules/typescript/lib");
-    std::fs::create_dir_all(&lib).unwrap();
-    std::fs::write(
-        src.path().join("node_modules/typescript/package.json"),
-        r#"{"name":"typescript","version":"5.9.3"}"#,
-    )
-    .unwrap();
-    for file in ["lib.es5.d.ts", "lib.dom.d.ts"] {
-        std::fs::write(lib.join(file), "").unwrap();
-    }
+    install_stub_typescript(src.path());
     std::fs::write(src.path().join("Widget.tsx"), WIDGET).unwrap();
     src
 }

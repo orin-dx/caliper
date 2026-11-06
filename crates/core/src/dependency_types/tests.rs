@@ -726,6 +726,24 @@ fn a_demand_blocked_by_an_unresolvable_re_export_hop_records_that_cause() {
     assert_eq!(layer.unresolved_reason(&src, "hop-kit", "Present"), None);
 }
 
+/// `export *` never carries `default`, so a default import that a barrel of only wildcards cannot answer is not
+/// exported, whatever the wildcard's own module is.
+#[test]
+fn a_default_import_is_not_blamed_on_an_unresolvable_wildcard_export() {
+    let (_tmp, root) = project(&[
+        ("src/Badge.tsx", BADGE),
+        ("node_modules/star-kit/package.json", r#"{ "name": "star-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/star-kit/index.d.ts", "export * from './missing';\n"),
+    ]);
+    let demands = vec![demand(&root, "star-kit", "default"), demand(&root, "star-kit", "Named")];
+
+    let layer = load(demands, &options(&root, true), None);
+
+    let src = root.join("src");
+    assert_eq!(layer.unresolved_reason(&src, "star-kit", "default"), Some(Unresolved::NotExported));
+    assert_eq!(layer.unresolved_reason(&src, "star-kit", "Named"), Some(Unresolved::Unresolvable));
+}
+
 /// An explicit export shadows a wildcard one, so a failed explicit hop must not fall through to the wildcard's name.
 #[test]
 fn a_wildcard_export_does_not_answer_for_a_failed_explicit_re_export_of_the_same_name() {

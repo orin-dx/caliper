@@ -679,7 +679,10 @@ impl Loader<'_> {
                 LexedExport::ReExportNamespace { namespace, source_specifier } if namespace == head => {
                     (source_specifier, rest?.to_owned())
                 }
-                LexedExport::ReExportAll { source_specifier, .. } => (source_specifier, name.to_owned()),
+                // `export *` never carries `default`, as `find_export_uncached` enforces.
+                LexedExport::ReExportAll { source_specifier, .. } if head != "default" => {
+                    (source_specifier, name.to_owned())
+                }
                 _ => continue,
             };
             let star_hop = matches!(export, LexedExport::ReExportAll { .. });

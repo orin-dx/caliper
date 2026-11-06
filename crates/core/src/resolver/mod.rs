@@ -123,11 +123,13 @@ pub(super) fn unresolved_type_help(
     });
     match reason {
         Some(reason) => format!("Dependency types are loaded, but for '{type_name}' {}.", reason.describe()),
-        // A global is declared by TypeScript's lib files; with none found, installing a package would not help.
+        // A global is declared by TypeScript's lib files; with none found, installing a package would not help. An unbound
+        // name is not known to be a global, and the lib files are missing for more than one reason, so the run's own
+        // warning about TypeScript says which.
         None if ctx.ambient_global_files.is_empty() && name_binding(type_name, file, ctx) == NameBinding::Unbound => {
             format!(
-                "'{type_name}' is a global type, and TypeScript's lib files were not found; install typescript as a \
-                 dependency of the project."
+                "'{type_name}' is not declared or imported in this file. If it is a TypeScript global type, TypeScript's \
+                 lib files were not found; the warning about TypeScript for this run says what to install."
             )
         }
         None => otherwise.to_owned(),
