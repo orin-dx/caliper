@@ -183,12 +183,15 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         let props: Vec<RawProp> =
             node.body.body.iter().filter_map(|sig| self.collect_property_signature(sig)).collect();
 
+        // An interface in a function body is visible to that body only, and its key is the module-level key: keeping it
+        // would add its members to, or replace, a module-level interface of the same name.
+        if self.function_depth > 0 {
+            return;
+        }
+
         // Declarations of one name in one scope merge: members and `extends` accumulate, and the first description
         // stands.
-        let same_scope = self.interface_scopes.get(&key).is_none_or(|scope| *scope == self.function_scopes);
-        self.interface_scopes.insert(key.clone(), self.function_scopes.clone());
-        let existing = self.data.interfaces.get_mut(&key).filter(|_| same_scope);
-        if let Some(merged) = existing {
+        if let Some(merged) = self.data.interfaces.get_mut(&key) {
             for prop in props {
                 if !merged.props.iter().any(|existing| existing.name == prop.name) {
                     merged.props.push(prop);
@@ -512,10 +515,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
 
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
         self.function_depth += 1;
-        self.function_scope_count += 1;
-        self.function_scopes.push(self.function_scope_count);
         walk::walk_function_body(self, body);
-        self.function_scopes.pop();
         self.function_depth -= 1;
     }
 

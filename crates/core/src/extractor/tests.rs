@@ -2816,6 +2816,22 @@ fn a_same_name_interface_in_a_function_body_does_not_merge_into_the_module_level
 }
 
 #[test]
+fn a_function_body_interface_declared_after_the_module_level_one_does_not_replace_it() {
+    let source = "interface Props { label: string }\n\
+        function helper() { interface Props { internal: number } }\n\
+        interface Props { extra: string }\n\
+        export function Box(props: Props) { return <div />; }";
+    let data = parse_file(Utf8Path::new("/test/scoped-after.tsx"), source);
+    let members: Vec<Vec<&str>> = data
+        .interfaces
+        .iter()
+        .filter(|(key, _)| key.ends_with(":Props"))
+        .map(|(_, iface)| iface.props.iter().map(|p| p.name.as_str()).collect())
+        .collect();
+    assert_eq!(members, [["label", "extra"]]);
+}
+
+#[test]
 fn a_ts_file_with_only_type_specifiers_from_react_has_no_components() {
     let source = "import { type ReactNode, type FC } from 'react';\n\
         interface Opts { a: string }\n\

@@ -260,13 +260,6 @@ pub(super) struct SourceDataCollector<'src> {
     /// `TSTypeName::QualifiedName` handling) — so storage keys must match, or a same-file
     /// reference to a namespace member can never resolve.
     pub(super) namespace_stack: Vec<CompactString>,
-    /// Ids of the enclosing function bodies, outermost first; empty at module level. Interfaces merge only within one
-    /// scope, and `scoped_key` does not distinguish function bodies.
-    pub(super) function_scopes: Vec<u32>,
-    /// Number of function bodies entered so far: the source of the next scope id.
-    pub(super) function_scope_count: u32,
-    /// The scope each interface key was last declared in.
-    pub(super) interface_scopes: rustc_hash::FxHashMap<String, Vec<u32>>,
     /// `X.displayName = "..."` renames recorded during the main traversal but
     /// not yet applied — see `try_scan_display_name`. Applying these
     /// immediately would change `component_name` out from under any later
@@ -337,9 +330,6 @@ impl<'src> SourceDataCollector<'src> {
             element_helpers: FxHashSet::default(),
             consumed_jsdoc: FxHashSet::default(),
             namespace_stack: Vec::new(),
-            function_scopes: Vec::new(),
-            function_scope_count: 0,
-            interface_scopes: rustc_hash::FxHashMap::default(),
             pending_display_name_renames: Vec::new(),
             aliased_away: FxHashSet::default(),
             pending_wrappers: Vec::new(),
