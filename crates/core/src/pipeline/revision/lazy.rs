@@ -408,6 +408,7 @@ impl Revision {
         if let Some(seed) = lazy.demands.get(mapping.file_path.as_str()) {
             self.grow(options, lazy, seed);
         }
+        let mut asked_for: Vec<dependency_types::Demand> = Vec::new();
         loop {
             let engine = lazy.engine.load_full();
             let (entry, diagnostics, depends_on) = resolve_guarded(&[mapping], &engine.ctx).into_iter().next()?;
@@ -424,11 +425,14 @@ impl Revision {
                 None => Vec::new(),
             };
             // A resolution against a layer that lacked a name it reached is discarded, and so is its context's memo.
-            if missing.is_empty() {
+            // A load that left the same names missing answered none of them (a demand whose load panicked stays
+            // unanswered), so asking again would never end.
+            if missing.is_empty() || missing == asked_for {
                 let resolved = Arc::new(Resolved { entry, diagnostics, depends_on });
                 return Some(lazy.memo.entry(id.clone()).or_insert(resolved).clone());
             }
             self.grow(options, lazy, &missing);
+            asked_for = missing;
         }
     }
 
@@ -646,6 +650,10 @@ impl Revision {
         diagnostics.extend(resolved.diagnostics.own.iter().cloned(), Some(key));
         for chunk in &resolved.diagnostics.shared {
             diagnostics.extend_shared(chunk, key);
+        }
+        // A panic in the dependency loader may have left any component's types unexpanded, so every answer carries it.
+        if let Some(layer) = self.lazy.as_ref().and_then(|lazy| lazy.engine.load_full().layer.clone()) {
+            diagnostics.extend(layer.panic_diagnostics(), None);
         }
         Some(ComponentAnswer { key: key.to_owned(), entry, diagnostics: diagnostics.finish() })
     }

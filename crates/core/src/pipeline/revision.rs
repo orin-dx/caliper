@@ -635,6 +635,9 @@ impl Revision {
             diagnostics.extend(diags.iter().cloned(), None);
         }
         diagnostics.extend(self.lib_diagnostics.iter().cloned(), None);
+        if let Some(layer) = &self.dependencies {
+            diagnostics.extend(layer.panic_diagnostics(), None);
+        }
 
         let mut components = BTreeMap::new();
         let mut keys = FxHashMap::default();
