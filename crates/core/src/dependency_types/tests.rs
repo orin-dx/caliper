@@ -1010,10 +1010,12 @@ fn collapse_project() -> (tempfile::TempDir, Utf8PathBuf) {
         "export interface SystemProps {{ {}onClick?: () => void; className?: string }}\n\
          export interface SmallProps {{ only: string }}\nexport type LayoutProps = {{ {}id?: string; style?: object }};\n\
          export interface ApiProps {{ {}mode?: 'a' | 'b'; open?: boolean }}\n\
-         export interface BorderProps {{ radius?: string; width?: string }}\n",
+         export interface BorderProps {{ radius?: string; width?: string }}\n\
+         export interface HugeApiProps {{ {} }}\n",
         many("p"),
         many("q"),
-        many("a")
+        many("a"),
+        (0..201).map(|i| format!("h{i}?: string;")).collect::<String>()
     );
     let local = format!("export interface LocalBig {{ {}l29?: string; l30?: string }}\n", many("l"));
     let files = [
@@ -1022,10 +1024,12 @@ fn collapse_project() -> (tempfile::TempDir, Utf8PathBuf) {
         ("src/local.ts", local),
         (
             "src/Big.tsx",
-            "import type { SystemProps, SmallProps, LayoutProps, ApiProps, BorderProps } from 'big';\nimport type { LocalBig } from './local';\n\
+            "import type { SystemProps, SmallProps, LayoutProps, ApiProps, BorderProps, HugeApiProps } from 'big';\nimport type { LocalBig } from './local';\n\
              export interface FieldProps extends SystemProps, SmallProps { own: number }\n\
              export interface ApiField extends ApiProps { own: number }\n\
              export function Api(props: ApiField) { return null; }\n\
+             export interface HugeField extends HugeApiProps { own: number }\n\
+             export function Huge(props: HugeField) { return null; }\n\
              export interface TinyField extends BorderProps { own: number }\n\
              export function Tiny(props: TinyField) { return null; }\n\
              export function Field(props: FieldProps) { return null; }\n\
@@ -1084,6 +1088,11 @@ fn a_large_dependency_source_collapses_to_a_layer_and_its_notable_props() {
     assert_eq!(api.inheritance, []);
     assert_eq!(api.props["mode"].prop_type.raw_string(), r#""a" | "b""#);
 
+    // ...unless it is past `LARGE_API_SOURCE`: a style system under a name the rule does not know.
+    let huge = &output.components["Huge"];
+    assert_eq!(keys(&huge.props), ["own"]);
+    assert_eq!(layers(huge), [("HugeApiProps", 201, None)]);
+
     // The component's own props type, a `Pick` from a large source and a `keyof` operand are never collapsed.
     assert_eq!(output.components["Direct"].props.len(), 31);
     assert_eq!(output.components["Direct"].inheritance, []);
@@ -1111,7 +1120,7 @@ fn all_collapses_inherited_project_sources_too_and_none_expands_everything() {
     assert_eq!(all.components["OwnBig"].props.len(), 31, "the component's own props type");
     assert_eq!(keys(&all.components["Field"].props), ["only", "own"]);
 
-    for name in ["Field", "Aliased", "Local", "Direct", "Tiny", "Api"] {
+    for name in ["Field", "Aliased", "Local", "Direct", "Tiny", "Api", "Huge"] {
         assert_eq!(none.components[name].inheritance, [], "{name}");
         assert_eq!(none.components[name].notable_inherited.len(), 0, "{name}");
     }

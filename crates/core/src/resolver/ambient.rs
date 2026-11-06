@@ -18,7 +18,8 @@
 //! Clauses 1 to 3 decide a whole source: an ambient source is one the resolver may collapse, and only when it is also
 //! large (`ResolutionContext::collapses`: a layer record costs more than a handful of props, and listing a small
 //! ambient source gives `aria-label` and `id` their types). Clause 4 decides a prop of a source the first three did not
-//! match; it never collapses a source on its own. A source that is API (clause 5) is never collapsed, however large.
+//! match; it never collapses a source on its own. A source that is API (clause 5) collapses only past
+//! `LARGE_API_SOURCE` props, which no API measured on the pinned corpora and on apps reaches.
 //!
 //! Clause 4 is not part of the production rule: the resolver decides per source (`is_ambient_source`, clauses 1 to 3)
 //! and never reads a prop's name. It is kept under `#[cfg(test)]` so the parity test can compare the whole classifier,

@@ -27,7 +27,7 @@ export interface CaliperDocgenOptions {
   /**
    * Which inherited sources to list as one inherited layer of names instead of prop by prop: large ambient ones (DOM
    * and ARIA attributes, style systems) from loaded dependencies (the default), those and project sources of more than
-   * 30 props, or none. A dependency's own API is always listed.
+   * 30 props, or none. A dependency's own API is listed unless it declares more than 200 props.
    */
   collapseInheritedProps?: 'dependencies' | 'all' | 'none'
 }

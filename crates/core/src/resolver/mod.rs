@@ -586,10 +586,10 @@ impl ResolutionContext {
     /// layer instead of expanded (collapse). Depth 0 is the component's own props type. React's and TypeScript's own
     /// declarations stay with `html_attributes` even under `All`.
     ///
-    /// A dependency source collapses when it is ambient (`ambient`: DOM and ARIA attributes, style systems) and large
-    /// (past `COLLAPSE_THRESHOLD` props), and is listed otherwise: what a dependency's component exposes is the API a
-    /// reader needs typed, however many props it declares, and a small ambient source costs more as a layer than as
-    /// props. A project source (`All` only) collapses past `COLLAPSE_THRESHOLD` props, as before.
+    /// A dependency source collapses when it is ambient (`ambient`: DOM and ARIA attributes, style systems) and past
+    /// `COLLAPSE_THRESHOLD` props, or when it is not ambient but past `LARGE_API_SOURCE` props. Otherwise it is listed:
+    /// what a dependency's component exposes is the API a reader needs typed, and a small ambient source costs more as
+    /// a layer than as props. A project source (`All` only) collapses past `COLLAPSE_THRESHOLD` props, as before.
     pub(crate) fn collapses(
         &self,
         file: &Utf8Path,
@@ -600,8 +600,14 @@ impl ResolutionContext {
     ) -> bool {
         use crate::types::options::CollapseInheritedProps;
         let large = declared > COLLAPSE_THRESHOLD;
-        let dependency =
-            || large && self.is_dependency_file(file) && ambient::is_ambient_source(file.as_str(), type_name);
+        let dependency = || {
+            self.is_dependency_file(file)
+                && if ambient::is_ambient_source(file.as_str(), type_name) {
+                    large
+                } else {
+                    declared > LARGE_API_SOURCE
+                }
+        };
         depth > 0
             && !state.expand_all
             && match self.collapse_inherited_props {
@@ -620,8 +626,15 @@ impl ResolutionContext {
 
 /// A source declaring more than this many props can collapse: an ambient dependency source (see `ambient`), or a
 /// project source under `CollapseInheritedProps::All`. Storybook's react-component-meta hides a dependency source
-/// contributing more than this many props, whatever it contains; here an API source is never hidden.
+/// contributing more than this many props, whatever it contains; here an API source is hidden only past
+/// `LARGE_API_SOURCE`.
 pub(crate) const COLLAPSE_THRESHOLD: usize = 30;
+
+/// A dependency source that is not ambient by name still collapses past this many props: it is a style system under
+/// a name the rule does not know, not an API. Chakra v3's `SystemProperties` declares 705 and, listed, took a
+/// four-component app from 516 KB to 1.96 MB; the largest source that is an API in the pinned corpora and in apps
+/// on Chakra, Mantine and MUI declares 75 (`docs/measurement.md`, "Collapse by relevance").
+pub(crate) const LARGE_API_SOURCE: usize = 200;
 
 /// Changes whenever the options could change what a specifier resolves to: the resolver configuration, the governing
 /// tsconfig and its modification time, and the build. Keys the dependency loader's persisted index.
