@@ -744,6 +744,23 @@ fn a_default_import_is_not_blamed_on_an_unresolvable_wildcard_export() {
     assert_eq!(layer.unresolved_reason(&src, "star-kit", "Named"), Some(Unresolved::Unresolvable));
 }
 
+/// An explicit export that resolves but does not hold the name still shadows the wildcards, so the name is not
+/// exported rather than blocked by a wildcard's unresolvable module.
+#[test]
+fn a_wildcard_export_does_not_explain_a_name_an_explicit_re_export_lacks() {
+    let (_tmp, root) = project(&[
+        ("src/Badge.tsx", BADGE),
+        ("node_modules/lack-kit/package.json", r#"{ "name": "lack-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/lack-kit/index.d.ts", "export * from './missing';\nexport { Foo } from './present';\n"),
+        ("node_modules/lack-kit/present.d.ts", "export type Other = string;\n"),
+    ]);
+    let demands = vec![demand(&root, "lack-kit", "Foo")];
+
+    let layer = load(demands, &options(&root, true), None);
+
+    assert_eq!(layer.unresolved_reason(&root.join("src"), "lack-kit", "Foo"), Some(Unresolved::NotExported));
+}
+
 /// An explicit export shadows a wildcard one, so a failed explicit hop must not fall through to the wildcard's name.
 #[test]
 fn a_wildcard_export_does_not_answer_for_a_failed_explicit_re_export_of_the_same_name() {

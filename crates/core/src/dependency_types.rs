@@ -670,30 +670,38 @@ impl Loader<'_> {
             Some((head, rest)) => (head, Some(rest)),
             None => (name, None),
         };
-        for export in &data.exports {
-            let (specifier, next) = match export {
-                LexedExport::ReExportNamed { local_name, source_name, source_specifier, .. } if local_name == head => {
-                    let next = rest.map_or_else(|| source_name.clone(), |rest| format!("{source_name}.{rest}"));
-                    (source_specifier, next)
-                }
-                LexedExport::ReExportNamespace { namespace, source_specifier } if namespace == head => {
-                    (source_specifier, rest?.to_owned())
-                }
-                // `export *` never carries `default`, as `find_export_uncached` enforces.
-                LexedExport::ReExportAll { source_specifier, .. } if head != "default" => {
-                    (source_specifier, name.to_owned())
-                }
-                _ => continue,
-            };
-            let star_hop = matches!(export, LexedExport::ReExportAll { .. });
-            match self.resolve(module, specifier) {
-                Err(cause) if star_hop => {
-                    star.get_or_insert(cause);
-                }
-                Err(cause) => return Some(cause),
-                Ok(target) => {
-                    if let Some(cause) = self.unresolved_cause_in(&target, &next, visited, star) {
-                        return Some(cause);
+        // The order `find_export_uncached` reads them in: an explicit export answers for its name and shadows every
+        // wildcard, so a wildcard is looked into only when no explicit export names it.
+        for star_pass in [false, true] {
+            for export in &data.exports {
+                let (specifier, next) = match export {
+                    LexedExport::ReExportNamed { local_name, source_name, source_specifier, .. }
+                        if !star_pass && local_name == head =>
+                    {
+                        let next = rest.map_or_else(|| source_name.clone(), |rest| format!("{source_name}.{rest}"));
+                        (source_specifier, next)
+                    }
+                    LexedExport::ReExportNamespace { namespace, source_specifier }
+                        if !star_pass && namespace == head =>
+                    {
+                        (source_specifier, rest?.to_owned())
+                    }
+                    // `export *` never carries `default`, as `find_export_uncached` enforces.
+                    LexedExport::ReExportAll { source_specifier, .. } if star_pass && head != "default" => {
+                        (source_specifier, name.to_owned())
+                    }
+                    _ => continue,
+                };
+                match self.resolve(module, specifier) {
+                    Err(cause) if star_pass => {
+                        star.get_or_insert(cause);
+                    }
+                    Err(cause) => return Some(cause),
+                    Ok(target) => {
+                        let cause = self.unresolved_cause_in(&target, &next, visited, star);
+                        if cause.is_some() || !star_pass {
+                            return cause;
+                        }
                     }
                 }
             }
