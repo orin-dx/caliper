@@ -594,6 +594,16 @@ impl Loader<'_> {
         None
     }
 
+    /// Runs `demand` on the scope, recording a panic as a diagnostic instead of letting it end the whole load.
+    fn spawn_demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand) {
+        scope.spawn(move |scope| {
+            let label = format!("dependency demand {}#{}", demand.specifier, demand.name);
+            if let Err(panic) = crate::panic_guard::contain_panic(&label, || self.demand(scope, demand)) {
+                self.panics.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(panic);
+            }
+        });
+    }
+
     fn demand<'s>(&'s self, scope: &rayon::Scope<'s>, demand: Demand) {
         #[cfg(test)]
         assert!(&*demand.name != DEMAND_PANIC_TEST_NAME, "injected panic");
@@ -814,7 +824,7 @@ impl Loader<'_> {
                 } else if let Some(qualified) = qualified.filter(|q| declares(&data, &file, q)) {
                     stack.push(qualified);
                 } else if let Some(demand) = imported_demand(&file, &data.imports, &reference) {
-                    scope.spawn(move |scope| self.demand(scope, demand));
+                    self.spawn_demand(scope, demand);
                 }
             }
         }
@@ -1011,12 +1021,7 @@ pub(crate) fn load(
     rayon::scope(|scope| {
         for demand in demands {
             let loader = &loader;
-            scope.spawn(move |scope| {
-                let label = format!("dependency demand {}#{}", demand.specifier, demand.name);
-                if let Err(panic) = crate::panic_guard::contain_panic(&label, || loader.demand(scope, demand)) {
-                    loader.panics.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(panic);
-                }
-            });
+            loader.spawn_demand(scope, demand);
         }
     });
     if let (None, Some(path)) = (previous, &index_path) {

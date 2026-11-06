@@ -712,6 +712,30 @@ fn a_panic_in_the_dependency_loader_reaches_the_output_as_a_diagnostic() {
     assert_eq!(panics[0].severity, crate::types::DiagnosticSeverity::Error);
 }
 
+/// A demand that a declaration spawns while it is loaded is contained like a top-level one.
+#[test]
+fn a_panic_in_a_demand_spawned_by_a_declaration_reaches_the_output_as_a_diagnostic() {
+    let (_tmp, root) = project(&[
+        ("node_modules/nest-kit/package.json", r#"{ "name": "nest-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        (
+            "node_modules/nest-kit/index.d.ts",
+            "import type { __DEPENDENCY_PANIC_TEST__ } from 'ui-kit';\n\
+             export interface NestProps { tone?: __DEPENDENCY_PANIC_TEST__ }\n",
+        ),
+        (
+            "src/Nest.tsx",
+            "import type { NestProps } from 'nest-kit';\nexport function Nest(props: NestProps) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+
+    let panics: Vec<_> =
+        output.diagnostics.iter().filter(|d| d.code == crate::types::DiagnosticCode::InternalPanic).collect();
+    assert_eq!(panics.len(), 1, "{:?}", output.diagnostics);
+    assert_eq!(panics[0].message, "dependency demand ui-kit#__DEPENDENCY_PANIC_TEST__ panicked: injected panic");
+}
+
 /// The layer keeps one answer per `(module, name)` for names found through a star-export cycle, loads only declaring
 /// files, and records why each demand it could not satisfy failed.
 #[test]
