@@ -2802,6 +2802,126 @@ fn a_component_declared_inside_a_function_body_is_reported_not_mapped() {
 }
 
 #[test]
+fn a_ts_file_that_imports_react_values_has_its_create_element_components_detected() {
+    let source = "import { createElement, forwardRef } from 'react';\n\
+        interface BoxProps { tone: string }\n\
+        export const Box = forwardRef<HTMLDivElement, BoxProps>((props, ref) => createElement('div', { ref }));\n\
+        export function Plain(props: BoxProps) { return createElement('span', null, props.tone); }";
+    let data = parse_file(Utf8Path::new("/test/box.ts"), source);
+    let found: Vec<(&str, &str)> =
+        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.props_type_name.as_str())).collect();
+    assert_eq!(found, [("Box", "BoxProps"), ("Plain", "BoxProps")]);
+}
+
+#[test]
+fn a_ts_file_without_a_react_value_import_has_no_components() {
+    let source = "import type { ReactNode } from 'react';\n\
+        interface Opts { a: string }\n\
+        export function Builder(opts: Opts): ReactNode { return null; }";
+    let data = parse_file(Utf8Path::new("/test/builder.ts"), source);
+    assert_eq!(data.component_mappings.len(), 0);
+    assert_eq!(data.diagnostics.len(), 0);
+}
+
+#[test]
+fn same_name_interface_declarations_in_one_file_merge_their_members() {
+    let source = "interface Props { a: string }\n\
+        interface Props { b: number }\n\
+        export function Box(props: Props) { return <div />; }";
+    let data = parse_file(Utf8Path::new("/test/merge.tsx"), source);
+    let members: Vec<Vec<&str>> = data
+        .interfaces
+        .iter()
+        .filter(|(key, _)| key.ends_with(":Props"))
+        .map(|(_, iface)| iface.props.iter().map(|p| p.name.as_str()).collect())
+        .collect();
+    assert_eq!(members, [["a", "b"]]);
+}
+
+#[test]
+fn a_same_name_interface_in_a_function_body_does_not_merge_into_the_module_level_one() {
+    let source = "function helper() { interface Props { internal: number } }\n\
+        interface Props { label: string }\n\
+        export function Box(props: Props) { return <div />; }";
+    let data = parse_file(Utf8Path::new("/test/scoped.tsx"), source);
+    let members: Vec<Vec<&str>> = data
+        .interfaces
+        .iter()
+        .filter(|(key, _)| key.ends_with(":Props"))
+        .map(|(_, iface)| iface.props.iter().map(|p| p.name.as_str()).collect())
+        .collect();
+    assert_eq!(members, [["label"]]);
+}
+
+#[test]
+fn an_interface_in_a_class_static_block_does_not_merge_into_the_module_level_one() {
+    let source = "class Helper { static { interface Props { internal: number } } }\n\
+        interface Props { label: string }\n\
+        export function Box(props: Props) { return <div />; }";
+    let data = parse_file(Utf8Path::new("/test/static-block.tsx"), source);
+    let members: Vec<Vec<&str>> = data
+        .interfaces
+        .iter()
+        .filter(|(key, _)| key.ends_with(":Props"))
+        .map(|(_, iface)| iface.props.iter().map(|p| p.name.as_str()).collect())
+        .collect();
+    assert_eq!(members, [["label"]]);
+}
+
+#[test]
+fn an_interface_only_declared_in_a_function_body_is_still_collected_for_factory_results() {
+    let source = "function makeBox() { interface LocalProps { label: string } return (p: LocalProps) => <div />; }\n\
+        export const Box = makeBox();";
+    let data = parse_file(Utf8Path::new("/test/factory-local.tsx"), source);
+    let members: Vec<Vec<&str>> = data
+        .interfaces
+        .iter()
+        .filter(|(_, iface)| iface.name == "LocalProps")
+        .map(|(_, iface)| iface.props.iter().map(|p| p.name.as_str()).collect())
+        .collect();
+    assert_eq!(members, [["label"]]);
+}
+
+#[test]
+fn a_function_body_interface_declared_after_the_module_level_one_does_not_replace_it() {
+    let source = "interface Props { label: string }\n\
+        function helper() { interface Props { internal: number } }\n\
+        interface Props { extra: string }\n\
+        export function Box(props: Props) { return <div />; }";
+    let data = parse_file(Utf8Path::new("/test/scoped-after.tsx"), source);
+    let members: Vec<Vec<&str>> = data
+        .interfaces
+        .iter()
+        .filter(|(key, _)| key.ends_with(":Props"))
+        .map(|(_, iface)| iface.props.iter().map(|p| p.name.as_str()).collect())
+        .collect();
+    assert_eq!(members, [["label", "extra"]]);
+}
+
+#[test]
+fn a_ts_file_with_only_type_specifiers_from_react_has_no_components() {
+    let source = "import { type ReactNode, type FC } from 'react';\n\
+        interface Opts { a: string }\n\
+        export function Builder(opts: Opts): ReactNode { return null; }";
+    let data = parse_file(Utf8Path::new("/test/typed.ts"), source);
+    assert_eq!(data.component_mappings.len(), 0);
+    assert_eq!(data.diagnostics.len(), 0);
+}
+
+#[test]
+fn merging_a_described_interface_keeps_the_first_ones_tags() {
+    let source = "/** @deprecated use Other */\n\
+        interface Props { a: string }\n\
+        /** The props. */\n\
+        interface Props { b: number }\n\
+        export function Box(props: Props) { return <div />; }";
+    let data = parse_file(Utf8Path::new("/test/tags.tsx"), source);
+    let iface = data.interfaces.iter().find(|(key, _)| key.ends_with(":Props")).map(|(_, iface)| iface).unwrap();
+    assert_eq!(iface.tags.get("deprecated").map(String::as_str), Some("use Other"));
+    assert_eq!(iface.description, "The props.");
+}
+
+#[test]
 fn an_object_assign_compound_is_emitted_under_the_exported_root_name() {
     let source = "interface P { a: string }\n\
         function RootImpl(props: P) { return <div />; }\n\
@@ -3012,4 +3132,22 @@ fn unrelated_object_assign_call_is_not_treated_as_a_component_pattern() {
 
     assert!(data.component_mappings.is_empty(), "got {:?}", data.component_mappings);
     assert!(data.diagnostics.is_empty(), "expected no diagnostics, got {:?}", data.diagnostics);
+}
+
+#[test]
+fn a_function_body_interface_keeps_its_type_names_as_written() {
+    let source = "type T = number;\n\
+        interface Props<T> { value: T }\n\
+        function make() { type Item = { id: string }; interface Row { item: Item } return (p: Row) => <div />; }\n\
+        export const Box = make();";
+    let data = parse_file(Utf8Path::new("/test/names.tsx"), source);
+    let type_of = |interface: &str, prop: &str| -> String {
+        let iface = data.interfaces.values().find(|i| i.name == interface).expect("interface is collected");
+        match &iface.props.iter().find(|p| p.name == prop).expect("prop is collected").collected_type {
+            CollectedType::Named { name, .. } => name.to_string(),
+            other => panic!("expected a named type, got {other:?}"),
+        }
+    };
+    assert_eq!(type_of("Props", "value"), "T");
+    assert_eq!(type_of("Row", "item"), "Item");
 }

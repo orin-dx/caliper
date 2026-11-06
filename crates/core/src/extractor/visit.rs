@@ -192,18 +192,46 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         let props: Vec<RawProp> =
             node.body.body.iter().filter_map(|sig| self.collect_property_signature(sig)).collect();
 
-        self.data.interfaces.insert(
-            key.clone(),
-            CollectedInterface {
-                scoped_key: key.clone(),
-                name: name.into(),
-                file_path: self.file_path.clone(),
-                props,
-                extends,
-                description,
-                tags,
-            },
-        );
+        // Module-level declarations of one name merge: members and `extends` accumulate, and the first description
+        // stands. A declaration inside a function body or block shares the module-level key, but it is not the same
+        // type: it never touches a module-level entry, and otherwise keeps the entry a lone declaration always had
+        // (a factory's result can name it). Telling local scopes apart from each other is not attempted.
+        let at_module_level = self.local_depth == 0;
+        let declared_at_module_level = self.module_interfaces.contains(&key);
+        if !at_module_level && declared_at_module_level {
+            return;
+        }
+        if at_module_level {
+            self.module_interfaces.insert(key.clone());
+        }
+        let existing = self.data.interfaces.get_mut(&key).filter(|_| at_module_level && declared_at_module_level);
+        if let Some(merged) = existing {
+            for prop in props {
+                if !merged.props.iter().any(|existing| existing.name == prop.name) {
+                    merged.props.push(prop);
+                }
+            }
+            merged.extends.extend(extends);
+            if merged.description.is_empty() {
+                merged.description = description;
+            }
+            for (tag, value) in tags {
+                merged.tags.entry(tag).or_insert(value);
+            }
+        } else {
+            self.data.interfaces.insert(
+                key.clone(),
+                CollectedInterface {
+                    scoped_key: key.clone(),
+                    name: name.into(),
+                    file_path: self.file_path.clone(),
+                    props,
+                    extends,
+                    description,
+                    tags,
+                },
+            );
+        }
 
         // Record declared type parameter names (`interface Foo<TData, TValue>` →
         // ["TData", "TValue"]) so the resolver can recognize bare references to
@@ -511,13 +539,17 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
 
     fn visit_block_statement(&mut self, block: &BlockStatement<'a>) {
         self.block_depth += 1;
+        self.local_depth += 1;
         walk::walk_block_statement(self, block);
+        self.local_depth -= 1;
         self.block_depth -= 1;
     }
 
     fn visit_static_block(&mut self, block: &StaticBlock<'a>) {
         self.block_depth += 1;
+        self.local_depth += 1;
         walk::walk_static_block(self, block);
+        self.local_depth -= 1;
         self.block_depth -= 1;
     }
 
@@ -529,7 +561,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
 
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
         self.function_depth += 1;
+        self.local_depth += 1;
         walk::walk_function_body(self, body);
+        self.local_depth -= 1;
         self.function_depth -= 1;
     }
 
