@@ -66,11 +66,11 @@ Recall is measured against that reference, on the components both tools report (
 | `@types/react` props | RDT's props that `@types/react` declares (`onClick`, `aria-*`, `ref`) that the tool lists |
 | ... with layers      | The same two, also counting a prop held in a collapsed inheritance layer                  |
 
-Caliper collapses an inherited dependency source of more than 30 props into a layer (`docs/architecture/resolver-type-resolution.md`, Collapse) and lists only its notable members as props, as Storybook does. A prop in a layer is in the output, named by the layer's `members`, but is not in the flat list, so the table reports both: the plain columns say what the default output lists, "with layers" says what it holds. react-docgen writes no layers, so its two columns are equal.
+By default (`collapseInheritedProps: dependencies`) Caliper collapses a large ambient inherited dependency source (DOM and ARIA attributes, style systems; more than 30 props) into a layer (ADR 0012; `docs/architecture/resolver-type-resolution.md`, Collapse) and lists only its notable members as props. A dependency's own API is listed in full (a source past 200 props that is not ambient by name still collapses). The Storybook addon runs with `collapseInheritedProps: none`, which lists every inherited prop; the layers below are what the CLI, the NAPI binding and agents reading the output see. A prop in a layer is in the output, named by the layer's `members`, but is not in the flat list, so the table reports both: the plain columns say what the default output lists, "with layers" says what it holds. react-docgen writes no layers, so its two columns are equal.
 
 react-docgen parses each file with its default resolver and importer, as Storybook does. The importer follows relative and package imports to the file that declares a type, so a props interface imported from a sibling file is read. It does no type inference: it lists none of React's inherited attributes, and a generic, mapped or conditional type stays the source text. That is the point of the comparison. A file it throws on is counted (`failed`) and listed (`failedFiles`), not dropped silently.
 
-The run uploads `weekly.json` and a table to the job summary. It compares with the last successful run's `weekly.json` and opens, or comments on, one issue labelled `weekly-measurement` when Caliper's time or memory is more than 10% worse, or its recall is more than 2 points lower, on any corpus. There is no committed baseline: the previous run is the baseline.
+The run uploads `weekly.json` and a table to the job summary, which opens with a short "how to read these numbers" paragraph and the headline (below). It compares with the last successful run's `weekly.json` and opens, or comments on, one issue labelled `weekly-measurement` only for what is a problem on its own (see "The headline"): a wrong type above the gate or higher than last week, a silent-wrong answer to a reader's question, or a whole run over a budget. Drift in time, memory, recall against RDT and the agent correct rate is listed in the summary under "Changes since last week" and opens nothing: a shared CI machine moves by 10% or more on its own, and recall against RDT is how much of RDT's output we also report, not whether our types are right. There is no committed baseline: the previous run is the baseline for what rose.
 
 ### TypeScript's checker as the oracle
 
@@ -90,13 +90,34 @@ RDT and react-docgen are held to the checker too, by the same rules, so the comp
 
 The **universe** is every own prop the checker finds on an exported function whose only parameter, or `props` parameter, is the props type. React's inherited DOM attributes, `ref` and `key` are not in it. It includes some functions that are not components, because the checker has no notion of one, so read the shares as a comparison between tools, not as a share of real components. For each tool the record has, in `oracle.tools`:
 
-- **Agreement of the whole universe** (`agree_universe`): identical or spelled, over every prop in the universe. A prop the tool omits counts against it. This is the headline.
+- **Agreement of the whole universe** (`agree_universe`): identical or spelled, over every prop in the universe. A prop the tool omits counts against it. This is the comparison between tools; Caliper's own headline is below.
 - **Agreement of listed props** (`agree_listed`) and the share the checker contradicts (`wrong_listed`): over the props the tool lists, which is what Caliper's own `agree` and `wrong` have always been.
 - **Omitted props**, by where the checker declares them (`missing_by_stratum`): the component's own file, another file of the corpus, or a dependency. A prop Caliper lists only as a member of a collapsed inheritance layer is counted apart (`collapsed`), because that is a choice and not an omission.
 - **Why a prop is omitted** (`missing_by_reason`): the tool reports no such component, it reports the component but not the prop, or it threw on the file.
 - **react-docgen's thrown files** (`failed_files`): files its default resolver throws on, 17% to 21% of the files on antd and shadcn. Their props are omitted, so they cost react-docgen agreement; they have their own column so the cost is visible.
 
-`oracle.shared_props`, `agree` and `wrong` keep their meaning, so the weekly history does not move. A local run on antd and shadcn at the commit that added this reads, for the whole universe: Caliper 39.7% and 40.1% (its `collapsed` layers and any component it does not report count against it), RDT 44.8% and 84.8%, react-docgen 24.6% and 1.9%. The step is information, never a gate, and the rules are validated on antd and shadcn only: Mantine, Chakra and Spectrum need a weekly run.
+`oracle.shared_props`, `agree` and `wrong` keep their meaning, so the weekly history does not move. A local run on antd and shadcn at the commit that added this reads, for the whole universe: Caliper 39.7% and 40.1% (its `collapsed` layers and any component it does not report count against it), RDT 44.8% and 84.8%, react-docgen 24.6% and 1.9%. This comparison between tools is information, never a gate, and the rules are validated on antd and shadcn only: Mantine, Chakra and Spectrum need a weekly run.
+
+### The headline
+
+What matters is whether the types Storybook and agents are shown are right, not whether Caliper matches RDT. The headline (`scripts/headline.py`, read from `oracle.tools.caliper_reported`, which `apps/oracle/src/tool-score.ts` `scoreReported` computes) takes every own prop the checker finds on a component Caliper reports, so a function the checker takes for a component and Caliper rightly ignores does not count against it, and sorts each prop into one kind:
+
+- **Correct**: the same type as the checker, or the same type spelled differently.
+- **Less precise**: vaguer than the checker's (a name left unexpanded, `string` for a union of literals), not contradicting it.
+- **Wrong**: describes something else. This is the gate.
+- **No checker type**: the checker has none either (an unresolved import, `any`).
+- **Missing**: Caliper reports the component but not the prop.
+- **Named only**: Caliper lists the prop by name as a member of a collapsed inheritance layer, so it is surfaced but a reader sees no type for it. It is counted apart, as neither correct nor wrong, because correct values reached through a layer are a win and a bare name is not.
+
+The record keeps the counts per corpus as `headline`, next to the unchanged `oracle` and `recall` fields. The shares in the summary are of every prop of the components Caliper reports. The gate uses the wrong share of the props whose type can be judged (correct, less precise and wrong), so a corpus with many layer-only props does not dilute it.
+
+The issue opens when, on any corpus:
+
+- more than 0.1% of the judged props are wrong, or the wrong share is higher than last week's;
+- a question a reader is asked is answered silent-wrong (`scripts/agent_eval.py`);
+- a whole run is over a budget: 2 s or 600 MiB with dependencies loaded, the default (`BUDGETS` in `scripts/headline.py`). The budgets are user-facing limits, not week-over-week ones; Chakra, the largest corpus, runs in about 1 s and 446 MiB.
+
+Recall against RDT stays information. A local run on antd and shadcn at the commit that added this reads: antd 83.7% correct, 6.0% less precise, 0.00% wrong, 10.2% named only (3,426 props); shadcn 54.4% correct, 5.1% less precise, 0.06% wrong (0.096% of the judged props, just under the gate), 0.4% missing, 39.6% named only (13,918 props). Mantine, Chakra and Spectrum need a weekly run.
 
 ### An independent reference
 
@@ -122,6 +143,59 @@ What it does not establish:
 - A and B read the same declaration. They corroborate each other where B can read a type, and say nothing where it cannot (a computed type, which is where a checker-backed mode matters most). Count `checker_only` as props with no independent evidence; a labelled sample is the independent check for those.
 - `oracle-compare.ts` reads a widened primitive of another kind as `less precise`, not `wrong` (`number` against `'a' | 'b'`). Changing that would move every historical oracle number, so the reference inherits it.
 - The sample is the components Caliper reports, so it says nothing about components Caliper misses.
+
+### Layer-only props
+
+**Which configuration this describes.** The CLI, the NAPI binding and the Vite plugin collapse by default (`collapseInheritedProps: 'dependencies'`). The Storybook addon does not: it defaults to `'none'` (`packages/storybook/src/provider.ts`), which lists every inherited prop with its type, so in a Storybook props table no prop is layer-only. What follows describes what a default CLI, NAPI or agent consumer gets; the addon's configuration is the fully expanded run, reported beside it.
+
+A collapsed inheritance layer (a dependency source declaring more than 30 props, `docs/architecture/resolver-type-resolution.md`, "Collapse") reaches a reader as a list of names, `inheritance[].members`, with no types. `scripts/layer_only_props.py` (`apps/oracle/src/layer-only.ts`) takes every such prop that the component's `props` and `notableInherited` do not list, over all components of a corpus, and sorts it into two classes by a rule that reads only the layer's file, the layer's type name and the prop's name. The first clause that fits decides:
+
+1. **dom file** → ambient. The layer is declared in `@types/react`, or in react-aria's `@react-types/shared/src/dom.d.ts`.
+2. **dom type** → ambient. The layer's type is `GlobalDOMEvents`, `DOMAttributes`, `AriaAttributes`, `AllHTMLAttributes`, `SVGAttributes`, `*HTMLAttributes` or `Aria*Attributes`.
+3. **style type** → ambient. The layer's type is `*StyleProps`, `SystemProps`, or `Space|Layout|Color|Typography|Border|Flex|Grid|Position|Shadow|Background` followed by `Props`.
+4. **global attribute** → ambient. The prop is one every element has (`GLOBAL_ATTRIBUTES` in `layer-only.ts`: `className`, `style`, `id`, `title`, `lang`, `dir`, `hidden`, `tabIndex`, `role`, `slot`, …), or starts `aria-` or `data-`. `value`, `defaultValue`, `type`, `name` and `disabled` are not in it: they are element-specific, and a dependency's component often uses them as its own API.
+5. **dependency api** → API. Anything else a collapsed layer names: the modes, state and composition props of a dependency's component.
+
+The 20 API props that matter most are chosen by category first (state, then mode, composition, constraint, data, other, by the prop's name), then by the number of components it is layer-only in. The report gives each its declaring layer, its declared type (read from the layer's `.d.ts`), and why it matters.
+
+```bash
+scripts/layer_only_props.py --bin target/release/caliper-docgen --corpus antd --corpus shadcn [--runs 3]
+```
+
+Measured on antd and shadcn (Mantine, Chakra and Spectrum are not run). These figures predate the last change to the count: an `Omit` now drops the omitted props from a collapsed layer's `members` (`resolver/alias.rs`), and `expandedDependencySources` skips collapsed sources that list a curated `className`. The layer-only, API and "listed in full" rows, and the "ambient by clause 1 to 3" figure of 13 the proposal below relies on, have not been re-measured since; re-run `scripts/layer_only_props.py` before quoting them.
+
+|                                                     |      antd |      shadcn |
+| --------------------------------------------------- | --------: | ----------: |
+| Layer-only props (component × prop)                 |       669 |       6,774 |
+| API / ambient                                       |   664 / 5 | 267 / 6,507 |
+| Distinct (layer, prop), API / ambient               |   320 / 3 |     89 / 69 |
+| Components with at least one API layer-only prop    | 22 of 253 |  6 of 1,901 |
+| Collapsed layers (all above 30)                     |        10 |           3 |
+| … of which 31 to 40 props / 41 to 60 / 61 and over  | 5 / 4 / 1 |   1 / 0 / 2 |
+| … of which hold API props / all ambient             |    10 / 0 |       2 / 1 |
+| API props in a layer of 31 to 40 props              | 240 (36%) |    81 (30%) |
+| Dependency sources listed in full (all 30 or fewer) |        46 |         314 |
+| … of which ambient by clause 1 to 3                 |         0 |          13 |
+
+shadcn's ambient mass is one layer: react-aria's `GlobalDOMEvents`, 64 handlers on 106 components. Its API props are react-day-picker's `PropsBase` (75 props) and Base UI's `ComboboxRootProps` (38). In antd, nearly everything collapsed is a dependency's API: `@rc-component`'s `IDialogPropTypes`, `BaseSelectProps`, `InputNumberProps`, `MenuProps` and the like, so with the default collapse a CLI, NAPI or agent consumer gets `visible`, `onClose`, `value`, `defaultValue` and `onChange` as names, with no type. The addon's `none` lists them with their types.
+
+What this says about the size rule: it is right where a source happens to be both large and ambient, and wrong where it is large and API. A source of 31 props is collapsed and one of 30 is listed, whatever is in it; 36% and 30% of the API props sit in the 31 to 40 band. It also lists small ambient sources in full (13 in shadcn).
+
+**Proposal: collapse by relevance, not size.** Collapse a dependency source when it is ambient by clause 1 to 3, decided from the source's name and file before anything in it is resolved, whatever its size. Do not collapse a source for being large: list its members, keeping clause 4's global attributes as a name list. This changes the resolver (`collapse_inherited_props`), which this measurement does not.
+
+Who it is for: the default CLI, NAPI and agent consumers, which collapse by size today and so hold the API props above as names. The Storybook addon already lists everything (`none`) and would see no change in its API props; it could adopt the rule to stop listing ambient names, which the "expanding every layer" row prices in output size but which was not measured as a session's payload.
+
+Its measured effect, from the run with `--collapse-inherited-props none` (the canonical JSON's size; the listing counts are exact, the bytes an estimate from the distinct entries plus one name per component):
+
+|  | antd | shadcn |
+| --- | --: | --: |
+| API props it would list | 603 (313 entries, about 199 KB) | 255 (85 entries, about 107 KB) |
+| Ambient props (clauses 1 to 4) from dependency sources it would collapse that are listed today | 37 (about 16 KB) | 2,896 (about 297 KB) |
+| Net change to the output | about +183 KB (+4.6% of 3.95 MB) | about −190 KB (−2.2% of 8.63 MB) |
+| Expanding every layer instead (the Storybook addon's `none`: 0 collapsed layers, 0 layer-only props) | +189 KB (+4.8%); 19,889 component props listed, not 19,281 | +837 KB (+9.7%); 396,864 listed, not 390,102 |
+| Time and peak RSS, default / `none` (fastest of 3, interleaved) | 66 / 74 ms, 116 / 117 MiB | 170 / 177 ms, 295 / 293 MiB |
+
+Time and memory are the size rule's reason (Chakra went from 560 to 398,910 props with its source directory's style system listed), so this does not show the proposal is safe for a corpus with a large dependency API or a large style system: clause 3 keeps a style system collapsed by its type, but a dependency whose own API is hundreds of props would be listed in full. That needs the same run on Chakra, Mantine and Spectrum, which are not installed here.
 
 ## `just bench`
 
@@ -194,3 +268,50 @@ Measured with the parity script this replaces: `main` at `7bc120f4`, Apple Silic
 | spectrum |          1087/1408 |                    99.7% |   130 ms, 219 MiB |    2.2 s, 828 MiB |
 
 RDT's memory is its process's peak RSS and its time excludes Node's start; Caliper's time includes process start.
+
+## Collapse by relevance, 2026-11-02
+
+A dependency source used to collapse into a layer of names once it declared more than 30 props. It now collapses when it is ambient (DOM and ARIA attribute families, style systems; clauses in `crates/core/src/resolver/ambient.rs`) and past 30 props, or when it is not ambient but past 200 props (`LARGE_API_SOURCE`). Every other dependency source is listed with its types. The rule is checked by a fixture of the verdicts of the oracle's classifier (`crates/core/src/resolver/ambient_parity.json`); that classifier (`apps/oracle/src/layer-only.ts`) and its "Layer-only props" write-up are on the `measure/layer-only-props` branch, not yet in this tree.
+
+**Who it changes.** The Storybook addon runs with `collapseInheritedProps: none` (`packages/storybook/src/provider.ts`), which lists every inherited prop, so the rule does not change what the addon shows. The output is byte-identical between the two builds on all five corpora in that mode. The rule changes the CLI and NAPI default, and so what agents and TOON readers see.
+
+`scripts/collapse_relevance.py` ran it: two builds (`10f1f072`, the base, and this branch), five corpora on the pinned commits, five interleaved runs, `--no-cache`, whole-process wall time and peak RSS from `/usr/bin/time -l`, load average 29 at the start, so read differences under about 20% as noise: the `none` runs, which execute the same code and print identical output in both builds, differ by up to 16% in a lazy session.
+
+Default mode, base to this branch (canonical JSON, `--html-attributes full --include-unexported --load-dependencies`):
+
+| Corpus   | Bytes                          | Collapsed layers | Wall time      | Peak RSS       |
+| -------- | ------------------------------ | ---------------- | -------------- | -------------- |
+| antd     | 3,954,611 to 4,143,776 (+4.8%) | 24 to 0          | 0.10 to 0.10 s | 119 to 118 MiB |
+| shadcn   | 8,629,920 to 8,781,666 (+1.8%) | 112 to 106       | 0.29 to 0.31 s | 317 to 313 MiB |
+| chakra   | 8,298,481 to 8,357,008 (+0.7%) | 2 to 0           | 0.50 to 0.42 s | 382 to 385 MiB |
+| mantine  | 6,026,955, identical           | 0 to 0           | 0.15 to 0.15 s | 153 to 150 MiB |
+| spectrum | 6,941,080, identical           | 0 to 0           | 0.16 to 0.15 s | 183 to 183 MiB |
+
+antd's 24 layers were all API (`@rc-component` dialog, select, input-number and menu props), as were shadcn's six (react-day-picker's `PropsBase`, Base UI's `ComboboxRootProps`) and Chakra's two (zag-js `ComboboxProps`, `DatePickerProps`); shadcn's 106 `GlobalDOMEvents` layers (64 handlers each) stay collapsed. Mantine and Spectrum have no dependency layers: their sources are project sources.
+
+Type correctness, the oracle's verdicts over the props both sides list (default mode, base to this branch): antd 3,075 to 3,426 shared props, identical 1,772 to 1,972, spelled 1,096 to 1,229, less precise 206 to 224, wrong 0 to 0; shadcn 8,353 to 8,641 shared, wrong 8 to 8; Chakra 486,752 to 486,832, wrong 1 to 1; Mantine and Spectrum identical. The props that become listed are judged as correct as the ones already listed (antd agree 93.1% to 93.4%, shadcn 90.7% to 90.6%), and no wrong verdict appears.
+
+**The Storybook configuration (`none`), which the addon pays today.** Identical output between the builds; per corpus, the new build:
+
+| Corpus   | Bytes     | vs the base default | Wall time | Peak RSS | Lazy: first component, first 50 |
+| -------- | --------- | ------------------- | --------- | -------- | ------------------------------- |
+| antd     | 4,143,776 | +4.8%               | 0.10 s    | 119 MiB  | 58 ms, 88 ms                    |
+| shadcn   | 9,466,482 | +9.7%               | 0.32 s    | 312 MiB  | 134 ms, 388 ms                  |
+| chakra   | 8,357,008 | +0.7%               | 0.37 s    | 384 MiB  | 181 ms, 618 ms                  |
+| mantine  | 6,026,955 | 0                   | 0.14 s    | 154 MiB  | 69 ms, 170 ms                   |
+| spectrum | 6,941,080 | 0                   | 0.14 s    | 184 MiB  | 111 ms, 134 ms                  |
+
+Listing every inherited prop costs bytes only where a dependency layer exists (shadcn's `GlobalDOMEvents`, 106 layers of 64 handlers); time, memory and the lazy first-component and 50-component times are within noise of the default mode on every corpus. Lazy sessions in default mode, base to this branch (first component, first 50): antd 60 to 63 ms and 93 to 94 ms, shadcn 118 to 157 ms and 283 to 350 ms (the same build running `none` moves 335 to 388 ms: noise), Chakra 166 to 166 ms and 568 to 553 ms, Mantine 73 to 83 ms and 183 to 199 ms, Spectrum 118 to 121 ms and 155 to 149 ms.
+
+**The case the five repositories cannot show: an app that consumes a style system from `node_modules`.** The corpora are design-system repositories, where Chakra's and Mantine's style systems are project sources and never collapse under the default. A scratch app with four components each on `@chakra-ui/react`, `@mantine/core` and `@mui/material` (pinned in `package.json`, installed with `npm`, source in a directory beside `node_modules`) shows it:
+
+- **Chakra v3:** the style system is `SystemProperties`, 705 props, under a name none of the clauses knows. Without a size valve the new rule listed it: 516,158 to 1,955,639 bytes (3.8 times), 0.04 to 0.08 s, 74 to 92 MiB, for four components. That is the blow-up (ADR 0010: Chakra 560 to 398,910 props) the size rule existed for. With the valve (a non-ambient dependency source past 200 props collapses) the output is the base's, byte for byte. The largest source that is an API in any corpus or app is 75 props (react-day-picker's `PropsBase`); 200 is 2.7 times that.
+- **Mantine:** `MantineStyleProps` (50 props) matches the `*StyleProps` clause and collapses as before.
+- **MUI:** `BaseTextFieldProps` (31 props) is API and is now listed: 359,062 to 375,089 bytes (+4.5%).
+- In the Storybook configuration the Chakra app is 1,955,639 bytes, 0.07 s and 92 MiB for four components, against 516,158 bytes, 0.04 s and 74 MiB in the default.
+
+**Recommendations, with the numbers behind them.**
+
+- Keep the valve at 200. It is the smallest the data justifies: one measured style system (705) is far above it and no API reached a third of it. Revisit it if a corpus or app shows an API source between 75 and 200 props with a cost problem, or a large non-ambient source that is an API.
+- A larger consumer app on Chakra was not measured (four components). The output interns prop sets, so the cost per component is probably sub-linear, but only the four-component figure is a measurement.
+- The addon's `none` costs +9.7% bytes on shadcn and 3.8 times in a Chakra consumer app, with no measurable time or memory cost on the five corpora; the per-component cost of `none` in a lazy Chakra-consumer session is the number to take if the addon's default is ever reconsidered.

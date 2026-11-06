@@ -118,6 +118,17 @@ fn an_unreadable_dts_file_is_reported_once_and_merges_nothing() {
     assert!(global.interfaces.is_empty());
 }
 
+/// An empty `typescript` install under `root`, so a temp project resolves TypeScript's lib files without the
+/// missing-package warning.
+pub(super) fn install_stub_typescript(root: &std::path::Path) {
+    let lib = root.join("node_modules/typescript/lib");
+    fs::create_dir_all(&lib).unwrap();
+    fs::write(root.join("node_modules/typescript/package.json"), r#"{"name":"typescript","version":"5.9.3"}"#).unwrap();
+    for file in ["lib.es5.d.ts", "lib.dom.d.ts"] {
+        fs::write(lib.join(file), "").unwrap();
+    }
+}
+
 /// Write a file into a temp dir and return its Utf8PathBuf.
 fn write_file(dir: &TempDir, name: &str, content: &str) -> Utf8PathBuf {
     let path = dir.path().join(name);
@@ -329,9 +340,62 @@ fn test_discover_files_reports_diagnostic_for_non_utf8_filename() {
 
 // ── test_extract_empty_src ────────────────────────────────────────────────
 
+/// The help for an undeclared, unimported name when TypeScript's lib files were not found: it does not claim the name
+/// is a global, and it fits a missing package and a missing platform package alike.
+const DATE_WITHOUT_LIB_HELP: &str =
+    "'Date' is not declared or imported in this file. If it is a TypeScript global type, \
+TypeScript's lib files were not found; the warning about TypeScript for this run says what to install.";
+
+fn help_of_unresolved_types(tmp: &TempDir, component: &str) -> Vec<String> {
+    write_file(tmp, "Box.tsx", component);
+    let dir = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+    let output = extract(&PipelineOptions { src_dirs: vec![dir], ..Default::default() });
+    output
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::UnresolvableImport)
+        .map(|d| d.help.clone().unwrap_or_default())
+        .collect()
+}
+
+#[test]
+fn an_unresolved_global_type_blames_the_missing_typescript_not_a_package_install() {
+    let tmp = TempDir::new().unwrap();
+    let help = help_of_unresolved_types(&tmp, "export function Box(props: { when: Date }) { return null; }\n");
+    assert_eq!(help, [DATE_WITHOUT_LIB_HELP]);
+}
+
+#[test]
+fn an_unresolved_name_that_is_no_global_is_not_called_one() {
+    let tmp = TempDir::new().unwrap();
+    let help = help_of_unresolved_types(&tmp, "export function Box(props: { when: Missing }) { return null; }\n");
+    assert_eq!(
+        help,
+        [DATE_WITHOUT_LIB_HELP.replace("'Date'", "'Missing'")],
+        "the help says the name is unknown here and only suggests a global"
+    );
+}
+
+#[test]
+fn a_typescript_without_its_lib_files_does_not_get_told_to_install_typescript() {
+    let tmp = TempDir::new().unwrap();
+    // TypeScript 7 without its `@typescript/typescript-<platform>` package: installed, but no lib files.
+    let manifest = tmp.path().join("node_modules/typescript");
+    fs::create_dir_all(&manifest).unwrap();
+    fs::write(
+        manifest.join("package.json"),
+        r#"{"name":"typescript","version":"7.0.2","exports":{"./package.json":"./package.json"},
+            "optionalDependencies":{"@typescript/typescript-here":"7.0.2"}}"#,
+    )
+    .unwrap();
+    let help = help_of_unresolved_types(&tmp, "export function Box(props: { when: Date }) { return null; }\n");
+    assert_eq!(help, [DATE_WITHOUT_LIB_HELP]);
+}
+
 #[test]
 fn test_extract_empty_src() {
     let tmp = TempDir::new().unwrap();
+    install_stub_typescript(tmp.path());
     let dir = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
 
     let options = PipelineOptions {
@@ -2424,6 +2488,7 @@ fn a_src_dir_physically_under_node_modules_but_not_named_that_way_is_not_exempt(
 #[test]
 fn test_exclude_prefixes_filters_matching_components() {
     let tmp = TempDir::new().unwrap();
+    install_stub_typescript(tmp.path());
     write_file(&tmp, "Button.tsx", "export function Button(props: { label: string }) { return null; }\n");
     write_file(&tmp, "InternalWidget.tsx", "export function InternalWidget(props: { x: string }) { return null; }\n");
 
@@ -2568,6 +2633,7 @@ fn test_exclude_patterns_empty_string_excludes_everything() {
 #[test]
 fn a_diagnostic_shared_by_many_components_is_reported_once_listing_them() {
     let tmp = TempDir::new().unwrap();
+    install_stub_typescript(tmp.path());
     write_file(&tmp, "shared.ts", "import type { X } from './missing';\nexport interface Shared { x: X }\n");
     for name in ["Button", "Card"] {
         write_file(
@@ -2659,6 +2725,7 @@ fn a_generic_alias_in_prop_position_takes_the_call_sites_arguments() {
 
 fn extract_one(files: &[(&str, &str)]) -> ExtractionOutput {
     let tmp = TempDir::new().unwrap();
+    install_stub_typescript(tmp.path());
     for (name, body) in files {
         write_file(&tmp, name, body);
     }
@@ -3574,6 +3641,7 @@ export function Rest(props: Pick<Base, "id"> & Omit<Base, "id">) { return null; 
 #[test]
 fn recipe_props_evaluate_through_conditional_indexed_and_mapped_types() {
     let tmp = TempDir::new().unwrap();
+    install_stub_typescript(tmp.path());
     write_file(&tmp, "recipes.ts", RECIPES);
     write_file(
         &tmp,

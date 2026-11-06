@@ -23,6 +23,7 @@ use crate::types::options::PipelineOptions;
 use crate::types::*;
 
 mod alias;
+pub(crate) mod ambient;
 mod callee;
 mod chain;
 mod collected;
@@ -123,6 +124,15 @@ pub(super) fn unresolved_type_help(
     });
     match reason {
         Some(reason) => format!("Dependency types are loaded, but for '{type_name}' {}.", reason.describe()),
+        // A global is declared by TypeScript's lib files; with none found, installing a package would not help. An unbound
+        // name is not known to be a global, and the lib files are missing for more than one reason, so the run's own
+        // warning about TypeScript says which.
+        None if ctx.ambient_global_files.is_empty() && name_binding(type_name, file, ctx) == NameBinding::Unbound => {
+            format!(
+                "'{type_name}' is not declared or imported in this file. If it is a TypeScript global type, TypeScript's \
+                 lib files were not found; the warning about TypeScript for this run says what to install."
+            )
+        }
         None => otherwise.to_owned(),
     }
 }
@@ -581,26 +591,59 @@ impl ResolutionContext {
         }
     }
 
-    /// Whether a source declaring `declared` props in `file`, reached at `depth`, is recorded as a layer instead of
-    /// expanded (collapse). Depth 0 is the component's own props type. React's and TypeScript's own declarations stay
-    /// with `html_attributes` even under `All`.
-    pub(crate) fn collapses(&self, file: &Utf8Path, declared: usize, depth: u8, state: &ResolveState) -> bool {
+    /// Whether a source of type `type_name` declaring `declared` props in `file`, reached at `depth`, is recorded as a
+    /// layer instead of expanded (collapse). Depth 0 is the component's own props type. React's and TypeScript's own
+    /// declarations stay with `html_attributes` even under `All`.
+    ///
+    /// A dependency source collapses when it is ambient (`ambient`: DOM and ARIA attributes, style systems) and past
+    /// `COLLAPSE_THRESHOLD` props, or when it is not ambient but past `LARGE_API_SOURCE` props. Otherwise it is listed:
+    /// what a dependency's component exposes is the API a reader needs typed, and a small ambient source costs more as
+    /// a layer than as props. A project source (`All` only) collapses past `COLLAPSE_THRESHOLD` props, as before.
+    pub(crate) fn collapses(
+        &self,
+        file: &Utf8Path,
+        type_name: &str,
+        declared: usize,
+        depth: u8,
+        state: &ResolveState,
+    ) -> bool {
         use crate::types::options::CollapseInheritedProps;
+        let large = declared > COLLAPSE_THRESHOLD;
+        let dependency = || {
+            self.is_dependency_file(file)
+                && if ambient::is_ambient_source(file.as_str(), type_name) {
+                    large
+                } else {
+                    declared > LARGE_API_SOURCE
+                }
+        };
         depth > 0
-            && declared > COLLAPSE_THRESHOLD
             && !state.expand_all
             && match self.collapse_inherited_props {
-                CollapseInheritedProps::Dependencies => self.is_dependency_file(file),
+                CollapseInheritedProps::Dependencies => dependency(),
                 CollapseInheritedProps::All => {
-                    self.is_dependency_file(file) || !crate::dependency_types::in_node_modules(file.as_str())
+                    if self.is_dependency_file(file) {
+                        dependency()
+                    } else {
+                        large && !crate::dependency_types::in_node_modules(file.as_str())
+                    }
                 }
                 CollapseInheritedProps::None => false,
             }
     }
 }
 
-/// Storybook's react-component-meta hides a dependency source contributing more than this many props.
+/// A source declaring more than this many props can collapse: an ambient dependency source (see `ambient`), or a
+/// project source under `CollapseInheritedProps::All`. Storybook's react-component-meta hides a dependency source
+/// contributing more than this many props, whatever it contains; here an API source is hidden only past
+/// `LARGE_API_SOURCE`.
 pub(crate) const COLLAPSE_THRESHOLD: usize = 30;
+
+/// A dependency source that is not ambient by name still collapses past this many props: it is a style system under
+/// a name the rule does not know, not an API. Chakra v3's `SystemProperties` declares 705 and, listed, took a
+/// four-component app from 516 KB to 1.96 MB; the largest source that is an API in the pinned corpora and in apps
+/// on Chakra, Mantine and MUI declares 75 (`docs/measurement.md`, "Collapse by relevance").
+pub(crate) const LARGE_API_SOURCE: usize = 200;
 
 /// Changes whenever the options could change what a specifier resolves to: the resolver configuration, the governing
 /// tsconfig and its modification time, and the build. Keys the dependency loader's persisted index.
@@ -756,7 +799,8 @@ fn read_tsconfig_json(path: &Utf8Path) -> Option<serde_json::Value> {
 #[derive(Debug, Default, PartialEq)]
 pub struct TsLibs {
     pub paths: Vec<String>,
-    /// Set when `typescript` is installed but lacks a lib file. Only the pipeline reports it, not the other callers.
+    /// Set when `typescript` is not installed, or is installed but lacks a lib file. Only the pipeline reports it,
+    /// not the other callers.
     pub diagnostic: Option<Diagnostic>,
 }
 
@@ -770,11 +814,11 @@ const TS_OPTIONAL_LIB_FILES: [&str; 3] =
 /// Locate `lib.es5.d.ts`/`lib.dom.d.ts`, which declare the ambient globals (`Date`, `Element`, ...). TS ≤6 keeps them
 /// in `typescript/lib`; TS 7 moves them into an optional `@typescript/typescript-<platform>` package whose `exports`
 /// hide `lib/`, so they're read off disk. They're identical across platforms, so the first installed package (by name)
-/// with a file serves. No `typescript` is silent; one lacking a lib file sets `diagnostic`.
+/// with a file serves. Both a missing `typescript` and one lacking a lib file set `diagnostic`.
 pub fn resolve_ts_lib_paths(from_dir: &camino::Utf8Path) -> TsLibs {
     let resolver = Resolver::new(ResolveOptions::default());
     let Ok(manifest) = resolver.resolve(from_dir.as_std_path(), "typescript/package.json") else {
-        return TsLibs::default();
+        return TsLibs { paths: Vec::new(), diagnostic: Some(missing_typescript_diagnostic(from_dir)) };
     };
     let Some(ts_dir) = manifest.path().parent() else {
         return TsLibs::default();
@@ -829,6 +873,24 @@ fn installed_platform_package_dirs(resolver: &Resolver, ts_dir: &std::path::Path
             })
             .collect(),
     )
+}
+
+fn missing_typescript_diagnostic(from_dir: &Utf8Path) -> Diagnostic {
+    Diagnostic {
+        severity: DiagnosticSeverity::Warning,
+        message: format!(
+            "The 'typescript' package is not installed in or above '{from_dir}' — native and DOM globals (Date, \
+             HTMLElement, Promise, …) will appear as unexpanded named references"
+        ),
+        file: None,
+        line: None,
+        column: None,
+        help: Some(
+            "Install typescript as a dependency of the project (for example `npm install -D typescript`).".into(),
+        ),
+        code: DiagnosticCode::MissingTypeLibrary,
+        affects: Vec::new(),
+    }
 }
 
 fn missing_lib_diagnostic(missing: &[&str], ts_dir: &std::path::Path) -> Diagnostic {

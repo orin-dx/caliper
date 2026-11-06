@@ -45,6 +45,13 @@ pub(super) fn resolve_type_alias_chain(
             chain.notable.retain(|p| !omitted_set.contains(p.name.as_str()));
             // Record omitted keys in the relevant inheritance layer.
             for layer in &mut chain.inheritance {
+                // A collapsed layer names the props it holds, so an omitted one is no longer held.
+                if !layer.members.is_empty() {
+                    let held = layer.members.len();
+                    layer.members.retain(|name| !omitted_set.contains(name.as_str()));
+                    layer.total_props =
+                        layer.total_props.saturating_sub(u32::try_from(held - layer.members.len()).unwrap_or(0));
+                }
                 for key in &omitted {
                     if !layer.omitted.contains(key) {
                         layer.omitted.push(key.clone());
@@ -793,7 +800,16 @@ impl InheritedUnion {
                     && kept.html_element == layer.html_element
             };
             match self.layers.iter_mut().find(|kept| same(kept)) {
-                Some(kept) => kept.omitted.retain(|name| layer.omitted.contains(name)),
+                Some(kept) => {
+                    kept.omitted.retain(|name| layer.omitted.contains(name));
+                    // A branch that omits a prop leaves it out of its own view only: another branch still has it.
+                    for name in &layer.members {
+                        if !kept.members.contains(name) {
+                            kept.members.push(name.clone());
+                            kept.total_props += 1;
+                        }
+                    }
+                }
                 None => self.layers.push(layer.clone()),
             }
         }

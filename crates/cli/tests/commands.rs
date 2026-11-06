@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 mod common;
-use common::strip_ansi;
+use common::{install_stub_typescript, strip_ansi};
 
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_caliper-docgen")).args(args).output().expect("failed to spawn the real binary")
@@ -23,6 +23,7 @@ fn run(args: &[&str]) -> Output {
 /// A source directory holding one clean `Widget` component.
 fn widget_dir() -> TempDir {
     let dir = TempDir::new().unwrap();
+    install_stub_typescript(dir.path());
     std::fs::write(
         dir.path().join("Widget.tsx"),
         "export function Widget(props: { label: string }) { return null; }\n",
@@ -285,6 +286,7 @@ fn a_quiet_watch_still_writes_out_but_prints_nothing() {
 /// A tree whose component names a type that doesn't exist, so extraction reports a warning.
 fn dir_with_an_unresolved_type() -> TempDir {
     let dir = TempDir::new().unwrap();
+    install_stub_typescript(dir.path());
     std::fs::write(dir.path().join("Widget.tsx"), "export function Widget(props: Missing) { return null; }\n").unwrap();
     dir
 }

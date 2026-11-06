@@ -24,7 +24,7 @@ use rustix::pty::{grantpt, openpt, ptsname, unlockpt, OpenptFlags};
 use rustix::termios::{tcgetattr, LocalModes, OutputModes};
 
 mod common;
-use common::strip_ansi;
+use common::{install_stub_typescript, strip_ansi};
 
 const WIDGET: &str = "export function Widget(props: { label: string }) { return null; }\n";
 const TIMEOUT: Duration = Duration::from_secs(20);
@@ -66,6 +66,7 @@ struct Watch {
 
 fn watched_dir() -> tempfile::TempDir {
     let src = tempfile::TempDir::new().unwrap();
+    install_stub_typescript(src.path());
     std::fs::write(src.path().join("Widget.tsx"), WIDGET).unwrap();
     src
 }
