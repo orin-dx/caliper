@@ -22,7 +22,7 @@ This is the only consumer-facing FFI boundary in the workspace: a thin `cdylib` 
 
 **Lazy sessions (ADR 0016).** `JsExtractOptions.lazy: true` on `create_session` (or on the auto-vivifying `initialize_session` and `extract_file_incremental`) makes a `WatchSession::lazy`. `initialize_session` then parses and indexes every file and returns an `ExtractionOutput` with no components; `extract_file_incremental` and `ensure_fresh` return an `IncrementalUpdate` with `updatedKeys` and `removedKeys` for the memoized components the change can affect, and no `updatedComponents`. Without `lazy` every entry point behaves as before.
 
-`SESSIONS` is `static SESSIONS: LazyLock<DashMap<u32, Arc<WatchSession>>>` — a single process-wide session table. `initialize_session` and `extract_file_incremental` both tolerate a missing session ID by silently constructing a fresh `WatchSession` from the passed `options` and inserting it (`lib.rs:171-179`, `200-208`) — this is a lazy-recovery path, not an error case, so a caller that races `create_session` against `initialize_session` (or never calls `create_session` at all) still gets a working session rather than an "unknown session ID" error.
+`SESSIONS` is `static SESSIONS: LazyLock<DashMap<u32, Arc<WatchSession>>>` — a single process-wide session table. `initialize_session`, `initialize_session_index` and `extract_file_incremental` all tolerate a missing session ID by constructing a fresh `WatchSession` from the passed `options` through `new_session` (`crates/binding/src/lib.rs`) and inserting it — this is a lazy-recovery path, not an error case, so a caller that races `create_session` against `initialize_session` (or never calls `create_session` at all) still gets a working session rather than an "unknown session ID" error.
 
 ## Panic-containment boundary (LOCKED DESIGN DECISION — ADR 0005)
 
@@ -62,7 +62,7 @@ The `u32` session ID is split into two 16-bit halves: the low 16 bits of the OS 
 
 ## `JsExtractOptions` → `PipelineOptions`: the shape of the boundary
 
-`JsExtractOptions` (`lib.rs:34-55`) is deliberately flat — every field is a primitive, `String`, `Vec<String>`, or `Option` thereof, `TryFrom<JsExtractOptions> for PipelineOptions` (`Error = String`, not a structured error type) is the single place this flat shape gets reinflated into the richer `PipelineOptions` that `pipeline::extract`/`WatchSession` actually consume. Every one of the five entry points calls this same `TryFrom` before doing anything else — there is no code path that constructs a `PipelineOptions` from `JsExtractOptions` any other way, so a new validation rule (like Invariant 2's `reactVersion` check) added here is guaranteed to apply uniformly across cold extraction, session creation, and session initialization.
+`JsExtractOptions` (`crates/binding/src/lib.rs`) is deliberately flat — every field is a primitive, `String`, `Vec<String>`, or `Option` thereof, `TryFrom<JsExtractOptions> for PipelineOptions` (`Error = String`, not a structured error type) is the single place this flat shape gets reinflated into the richer `PipelineOptions` that `pipeline::extract`/`WatchSession` actually consume. Every one of the five entry points calls this same `TryFrom` before doing anything else — there is no code path that constructs a `PipelineOptions` from `JsExtractOptions` any other way, so a new validation rule (like Invariant 2's `htmlAttributes` check) added here is guaranteed to apply uniformly across cold extraction, session creation, and session initialization.
 
 ## Known gaps
 
