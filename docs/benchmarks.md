@@ -4,7 +4,7 @@
 
 **Hardware:** Apple Silicon (arm64), macOS. Numbers below are absolute and will shift on different hardware — treat the _relative_ comparisons as the durable signal, not the absolute milliseconds.
 
-Whole-library numbers on five pinned public corpora are in [`performance.md`](performance.md), and the weekly record that tracks them against RDT and react-docgen is described in [`measurement.md`](measurement.md). Both halves of this report are a 2026-07-25 snapshot on the fixture libraries, taken with a fixtures harness that has since been removed (it is in git history, in `apps/validate/`, before the rename to `apps/oracle/`).
+Whole-library numbers on five pinned public corpora are in [`performance.md`](performance.md), and the weekly record that tracks them against RDT and react-docgen is described in [`measurement.md`](measurement.md). Both halves of this report are a 2026-07-25 snapshot on the fixture libraries, taken with a fixtures harness that is not in the repository.
 
 This report has two independent halves: **performance** (how fast) and **output quality** (how correct/complete). They're measured differently on purpose — a fast tool that produces wrong output isn't actually useful, and this project's whole premise is "faster AND at least as accurate," so both get held to a real, reproducible standard here. The Rust-internal numbers reproduce with `crates/core/benches/`; the cross-tool ones were produced by the removed harness, and the weekly record replaces them — see [Reproducing these numbers](#reproducing-these-numbers).
 

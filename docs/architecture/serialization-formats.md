@@ -17,7 +17,7 @@ The canonical JSON (`ExtractionOutput`, `IncrementalUpdate`, the session index) 
 
 `crates/core/AGENTS.md` says "no terminal/display code in `crates/core`." The RDT projection (`pipeline/rdt.rs`) and `toon.rs` (`render_output_toon`, `render_component_toon`, `format_type_compact`) live in **`crates/core`**, and both are serialization formats, not extraction logic.
 
-The line the project actually draws, reverse-engineered from where each format lives: "terminal/display code" means code whose job is to _render for a human looking at a terminal_ (colors, tables, spinners — `crates/cli/src/output.rs`'s comfy-table helpers, `indicatif` progress bars). A _serialization format_ — even a human-readable, LLM-optimized one like TOON — is a consumer-facing data contract, judged by "does another program or prompt consume this," not "is it pretty-printed." TOON is core-side because it's plumbed through `PipelineOptions`/pipeline output the same way canonical JSON is (`caliper_docgen_core::toon::render_output_toon(&output)` at `extract.rs:57`), and because a NAPI/plugin consumer could plausibly want TOON output too, not just the CLI. The RDT shape is core-side for the same reason: the NAPI binding's `sessionDocgenInfo` returns it per component for the Storybook provider (`packages/storybook`), and `--format rdt` (`serialize_rdt`) delegates to the same module.
+The line the project actually draws, reverse-engineered from where each format lives: "terminal/display code" means code whose job is to _render for a human looking at a terminal_ (colors, tables, spinners — `crates/cli/src/output.rs`'s comfy-table helpers, `indicatif` progress bars). A _serialization format_ — even a human-readable, LLM-optimized one like TOON — is a consumer-facing data contract, judged by "does another program or prompt consume this," not "is it pretty-printed." TOON is core-side because it's plumbed through `PipelineOptions`/pipeline output the same way canonical JSON is (`caliper_docgen_core::toon::render_output_toon(&output)` called from `cmd_extract` in `crates/cli/src/commands/extract.rs`), and because a NAPI/plugin consumer could plausibly want TOON output too, not just the CLI. The RDT shape is core-side for the same reason: the NAPI binding's `sessionDocgenInfo` returns it per component for the Storybook provider (`packages/storybook`), and `--format rdt` (`serialize_rdt`) delegates to the same module.
 
 **Invariant 1:** A new serialization format belongs in `crates/core` only if a non-CLI consumer (NAPI binding, a plugin, a future query server) could plausibly want to produce it directly from a `PipelineOptions`/`ExtractionOutput` value. If a format exists solely to match another CLI tool's file-format contract, it belongs in `crates/cli/src/commands/`, not `crates/core`.
 
@@ -53,7 +53,7 @@ This exists because Storybook's own docgen addon (a real consumer of RDT's JSON)
 
 ### The 2+ member truthiness rule
 
-`PropType::is_literal_union()` (`crates/core/src/types/output.rs:365`):
+`PropType::is_literal_union()` (`crates/core/src/types/output.rs`):
 
 ```rust
 pub fn is_literal_union(&self) -> bool {
@@ -74,7 +74,7 @@ pub fn is_literal_union(&self) -> bool {
 
 ### `composes` reused for the resolver's give-up cases
 
-RDT natively supports a `composes: string[]` field on each component — "these props come from this named type, listed by reference, not flattened into `props`." This tool's resolver reuses that exact mechanism for a second, distinct purpose: recording every type it gave up trying to resolve. `ResolvedChain::give_up` (`crates/core/src/resolver/mod.rs:380-386`) is "the sanctioned 'give up' entry point for every 'this type couldn't be followed further, stop here' path" — it pushes an optional `Diagnostic` and then calls `empty_with_compose(type_name)`, which sets `composes: vec![type_name]`. Every unresolvable type (a conditional type, a generic pattern the resolver doesn't understand, a cycle) lands in `composes` instead of silently vanishing from `props`.
+RDT natively supports a `composes: string[]` field on each component — "these props come from this named type, listed by reference, not flattened into `props`." This tool's resolver reuses that exact mechanism for a second, distinct purpose: recording every type it gave up trying to resolve. `ResolvedChain::give_up` (`crates/core/src/resolver/mod.rs`) is "the sanctioned 'give up' entry point for every 'this type couldn't be followed further, stop here' path" — it pushes an optional `Diagnostic` and then calls `empty_with_compose(type_name)`, which sets `composes: vec![type_name]`. Every unresolvable type (a conditional type, a generic pattern the resolver doesn't understand, a cycle) lands in `composes` instead of silently vanishing from `props`.
 
 `rdt::docgen_info` passes `entry.composes` straight through (`"composes": entry.composes`) — this was previously a real bug (see `crates/cli/src/commands/extract.rs`'s `rdt_output_includes_composes` test and its docstring): the resolver populated `composes` correctly but `serialize_rdt` silently dropped it from the emitted JSON. Fixed; the field now round-trips.
 
@@ -110,7 +110,7 @@ There is no `parse_toon` / deserializer anywhere in the codebase, and none is pl
 
 ### Truncation with a required indicator — recently made consistent
 
-`truncate_with_indicator(parts: &[String], limit: usize, sep: &str) -> String` (`toon.rs:97-104`) is the single shared helper for "cut a member list down to `limit` items, and if anything was cut, say so":
+`truncate_with_indicator(parts: &[String], limit: usize, sep: &str) -> String` (`crates/core/src/toon.rs`) is the single shared helper for "cut a member list down to `limit` items, and if anything was cut, say so":
 
 ```rust
 fn truncate_with_indicator(parts: &[String], limit: usize, sep: &str) -> String {
@@ -133,7 +133,7 @@ This was a real, confirmed bug before the fix: `LiteralUnion`'s truncate-with-in
 
 ### `format_type_compact` is a total function over `PropType` — no fallback arm
 
-Every `PropType` variant has an explicit match arm in `format_type_compact` (`toon.rs:107-150`) — there is no wildcard `_ => ...` catch-all. `PropType::Object(_)` and `PropType::Tuple(_)` delegate to `raw_string()` rather than a bespoke compact form (both can be arbitrarily nested/structured, so a hand-written compact form isn't obviously better than the existing raw renderer). `PropType::Opaque(detail)` renders as `opaque(<raw of the opaque detail>)`.
+Every `PropType` variant has an explicit match arm in `format_type_compact` (`toon.rs`) — there is no wildcard `_ => ...` catch-all. `PropType::Object(_)` and `PropType::Tuple(_)` delegate to `raw_string()` rather than a bespoke compact form (both can be arbitrarily nested/structured, so a hand-written compact form isn't obviously better than the existing raw renderer). `PropType::Opaque(detail)` renders as `opaque(<raw of the opaque detail>)`.
 
 **Invariant 10:** Adding a new `PropType` variant is a compile error in `format_type_compact` until a match arm is added (Rust's exhaustiveness check enforces this directly — no discipline required, the type system does it). Do not add a wildcard arm to silence that error; picking a deliberate compact representation for each new variant is the point.
 
@@ -145,7 +145,7 @@ Every `PropType` variant has an explicit match arm in `format_type_compact` (`to
 
 ### The drift-detection test's actual mechanism — targeted, not exhaustive
 
-`schema_covers_every_field_name_the_real_output_serializes` (`schema.rs:117-211`) is the only guard against `schema_value()` silently falling out of sync with the real structs. Read honestly, its actual coverage boundary is narrower than "the schema matches the real output":
+`schema_covers_every_field_name_the_real_output_serializes` (`crates/cli/src/commands/schema.rs`) is the only guard against `schema_value()` silently falling out of sync with the real structs. Read honestly, its actual coverage boundary is narrower than "the schema matches the real output":
 
 1. It builds one hand-constructed `ExtractionOutput` fixture with one component (`Button`), one prop (`variant`), one inheritance layer, one diagnostic, and populated stats.
 2. It serializes that fixture to a `serde_json::Value` and collects **field names only** (`obj.keys().cloned()`) from five specific nesting points: the component object itself, the `variant` prop object, the first inheritance-layer object, the first diagnostic object, and the `stats` object.
