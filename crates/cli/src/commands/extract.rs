@@ -96,8 +96,7 @@ fn apply_semantic_backend(
     let project_root = options
         .src_dirs
         .first()
-        .and_then(|dir| std::fs::canonicalize(dir).ok())
-        .and_then(|dir| camino::Utf8PathBuf::from_path_buf(dir).ok())
+        .and_then(|dir| caliper_docgen_core::canonical_path::canonicalize(dir).ok())
         .or_else(|| std::env::current_dir().ok().and_then(|dir| camino::Utf8PathBuf::from_path_buf(dir).ok()));
     let Some(project_root) = project_root else {
         let outcome = caliper_docgen_core::types::semantic::SemanticOutcome::unavailable("no project directory");

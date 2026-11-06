@@ -1292,3 +1292,11 @@ fn the_default_changes_nothing_without_loaded_dependencies() {
 
     assert_eq!(off(CollapseInheritedProps::Dependencies), off(CollapseInheritedProps::None));
 }
+
+#[test]
+fn node_modules_is_found_with_either_separator() {
+    assert!(in_node_modules("/p/node_modules/kit/index.d.ts"));
+    assert!(in_node_modules(r"C:\p\node_modules\kit\index.d.ts"));
+    assert!(!in_node_modules("/p/node_modules-backup/index.d.ts"));
+    assert!(!in_node_modules(r"C:\p\src\Badge.tsx"));
+}
