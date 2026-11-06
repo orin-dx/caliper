@@ -139,10 +139,32 @@ export class DocgenSession {
    */
   async fresh(): Promise<void> {
     this.ready ??= this.initialize()
-    await this.ready
+    const attempt = this.ready
+    try {
+      await attempt
+    } catch (error) {
+      // A failed start is not kept: the next request starts again, with nothing left over from this attempt. Of
+      // several callers that shared it, the first to see it fail clears it.
+      if (this.ready === attempt) {
+        this.ready = undefined
+        this.discard()
+      }
+      throw error
+    }
     if (!this.checking) return this.look()
     this.queued ??= this.lookAfter(this.checking)
     return this.queued
+  }
+
+  /** Releases the native session a failed start created, if it got that far. */
+  private discard(): void {
+    if (this.sessionId === undefined) return
+    try {
+      this.napi.closeSession(this.sessionId)
+    } catch {
+      // The attempt already failed; the next one makes its own session.
+    }
+    this.sessionId = undefined
   }
 
   private async lookAfter(earlier: Promise<void>): Promise<void> {

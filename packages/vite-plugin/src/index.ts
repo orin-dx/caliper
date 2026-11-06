@@ -3,10 +3,11 @@ import * as napi from 'caliper-docgen-napi'
 import type { ExtractionOutput, IncrementalUpdate, RdtComponentDoc } from 'caliper-docgen-napi'
 import { DiagnosticReporter } from './diagnostics.js'
 import { ComponentFiles, docgenAssignments, invalidateDeclaringModules } from './docgen-info.js'
-import type { CaliperDocgenOptions } from './options.js'
+import { toNapiOptions, type CaliperDocgenOptions } from './options.js'
 import { isAbsolute, toPosix } from './paths.js'
 import { assertSchemaVersion, expandDiagnostics } from './schema.js'
-import { updatePayload } from './update.js'
+import { changeFailure, updatePayload } from './update.js'
+import { assertValidOptions } from './validate.js'
 
 const VIRTUAL_ID = 'virtual:caliper-docgen'
 const RESOLVED_VIRTUAL_ID = `\0${VIRTUAL_ID}`
@@ -19,6 +20,7 @@ export type { CaliperDocgenOptions } from './options.js'
 export type { DiagnosticLevel } from './diagnostics.js'
 
 export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
+  assertValidOptions(options)
   let sessionId: number
   let root: string
   let command: 'build' | 'serve' | undefined
@@ -35,21 +37,12 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
   // client must receive them in revision order. The session serializes writers anyway.
   let previousChange: Promise<unknown> = Promise.resolve()
   // `vite build --watch` changes applied before the next rebuild's load().
-  let pendingWatchChanges: Promise<unknown>[] = []
+  let pendingWatchChanges: Promise<string | undefined>[] = []
   let extracted = false
   const componentFiles = new ComponentFiles()
   let reporter = new DiagnosticReporter(options.logLevel ?? 'warn', console, options.onDiagnostic)
 
-  function napiOptions() {
-    return {
-      srcDirs: resolvedSrcDirs,
-      exclude: options.exclude,
-      htmlAttributes: options.htmlAttributes ?? (options.skipHtmlProps ? ('none' as const) : undefined),
-      cache: options.cache,
-      loadDependencies: options.loadDependencies,
-      collapseInheritedProps: options.collapseInheritedProps,
-    }
-  }
+  const napiOptions = () => toNapiOptions(options, resolvedSrcDirs)
 
   function isSrcFile(file: string): boolean {
     const posix = toPosix(file)
@@ -130,8 +123,11 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
         // the configuration that decides how their imports resolve.
         for (const dir of resolvedSrcDirs) this.addWatchFile(dir)
         for (const file of napi.resolutionConfigFiles(sessionId)) this.addWatchFile(file)
-        await Promise.all(pendingWatchChanges)
+        const results = await Promise.all(pendingWatchChanges)
+        const failures = results.filter(Boolean)
         pendingWatchChanges = []
+        // A change that did not apply leaves the docs stale, so the rebuild fails instead of shipping them.
+        if (failures.length > 0) this.error(failures.join('\n'))
       }
       // A watch rebuild reuses the session; its changes arrived through watchChange.
       if (extracted) return
@@ -153,7 +149,10 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
         try {
           await applyChange(id)
         } catch (error) {
-          console.error('[caliper-docgen] Failed to apply the change:', error)
+          // Said now, and again when the rebuild that follows fails for it.
+          const failure = changeFailure(id, error)
+          this.warn(failure)
+          return failure
         }
       })
       pendingWatchChanges.push(change)
@@ -221,7 +220,7 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
         try {
           applied = await applyChange(opts.file)
         } catch (error) {
-          console.error('[caliper-docgen] Failed to apply the change:', error)
+          this.warn(changeFailure(opts.file, error))
           return
         }
         if (!applied) return
