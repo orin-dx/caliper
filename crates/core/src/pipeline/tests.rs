@@ -4098,6 +4098,92 @@ fn a_component_parameter_read_through_an_alias_member_stays_a_placeholder() {
     assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
 }
 
+// Each program below disagreed with TypeScript's own checker over generated programs: a type argument that names the
+// component's parameter, read through a member of a generic declaration, was captured by a module declaration of the
+// same name.
+
+#[test]
+fn a_component_parameter_inside_an_object_read_through_an_alias_member_stays_a_placeholder() {
+    let props = field_prop_texts(
+        "type T = number;\n\
+         type Read<A extends { v: unknown }> = A['v'];\n\
+         export function Field<T>(p: { v: Read<{ v: T }> }) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("v", "T")]);
+}
+
+#[test]
+fn a_component_parameter_in_an_array_read_through_an_alias_member_keeps_its_name() {
+    let props = field_prop_texts(
+        "type A = 42;\n\
+         type T = A[];\n\
+         type Read<X extends { v: unknown }> = X['v'];\n\
+         export function Field<A, T>(p: { p1: Read<{ v: T[] }> }) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("p1", "T[]")]);
+}
+
+#[test]
+fn a_component_parameter_named_like_a_generic_module_alias_is_not_that_alias_when_read_through_a_member() {
+    let props = field_prop_texts(
+        "type K<P> = { w: P };\n\
+         type Read<X extends { v: unknown }> = X['v'];\n\
+         export const Field = <K, P,>(p: { p0: Read<{ v: K }> }) => null;\n",
+    );
+    assert_eq!(props, vec![pair("p0", "K")]);
+}
+
+#[test]
+fn a_member_read_of_an_argument_naming_an_unfilled_parameter_is_that_parameter() {
+    let props = field_prop_texts(
+        "type A<K> = { v: K };\n\
+         type Read<X extends { v: unknown }> = X['v'];\n\
+         export const Field = <P, A,>(p: { p1: Read<{ v: A }> }) => null;\n",
+    );
+    assert_eq!(props, vec![pair("p1", "A")]);
+}
+
+#[test]
+fn a_component_parameter_in_a_picked_member_keeps_its_name() {
+    let props = field_prop_texts(
+        "type T = number;\n\
+         type Read<X extends { v: unknown }> = X['v'];\n\
+         export function Field<T>(p: { p0?: Array<Pick<{ a: Read<{ v: T }>; b: number }, 'a'>> }) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("p0", "Array<Pick<{ a: T; b: number }, \"a\">>")]);
+}
+
+#[test]
+fn a_component_parameter_in_a_tuple_read_through_an_interface_member_keeps_its_name() {
+    let props = field_prop_texts(
+        "type A = number;\n\
+         interface Cell<X> { value: X }\n\
+         export const Field = <A,>(p: { p0?: Cell<[A, number]>['value'] }) => null;\n",
+    );
+    assert_eq!(props, vec![pair("p0", "[A, number]")]);
+}
+
+#[test]
+fn a_component_parameter_inside_a_record_read_through_an_alias_member_keeps_its_name() {
+    let props = field_prop_texts(
+        "type P = 42;\n\
+         type Read<X extends { v: unknown }> = X['v'];\n\
+         export function Field<P>(p: { p2?: Read<{ v: Record<'x' | 'y', P | string[]> }> }) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("p2", "Record<\"x\" | \"y\", P | string[]>")]);
+}
+
+#[test]
+fn component_parameters_inside_an_intersection_read_through_an_alias_member_keep_their_names() {
+    let props = field_prop_texts(
+        "type A<Value> = Value | null;\n\
+         type Value<K> = A<K>;\n\
+         type Read<X extends { v: unknown }> = X['v'];\n\
+         export const Field = <A, Value,>(p: { p1: Read<{ v: Pick<{ a: { a: Value } & { b: A }; b: number }, 'a'> }> }) => null;\n",
+    );
+    assert_eq!(props, vec![pair("p1", "Pick<{ a: { a: Value } & { b: A }; b: number }, \"a\">")]);
+}
+
 /// The props of `Field` from `source`, each as the text of its resolved type.
 fn field_prop_texts(source: &str) -> Vec<(String, String)> {
     let output = extract_one(&[("Field.tsx", source)]);

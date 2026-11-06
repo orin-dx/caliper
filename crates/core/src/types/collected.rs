@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use super::diagnostic::Diagnostic;
-use super::scope::TypeScope;
 
 // ─── Type Aliases ─────────────────────────────────────────────────────────────
 
@@ -164,14 +163,10 @@ pub enum CollectedType {
     // substitution (resolver/substitute.rs) splices into a callee's body gets
     // wrapped in this so later name lookups switch back to the correct file.
     /// Resolver-internal; the extractor never produces it. A type argument pinned to the file it was written in, so a
-    /// name inside it resolves relative to that file, and under those type parameters, after a generic alias
-    /// substitutes it into another declaration's body.
+    /// name inside it resolves relative to that file after a generic alias substitutes it into another file's body.
     AtFile {
         /// The file the wrapped type was written in.
         file: Utf8PathBuf,
-        /// The type parameters in scope where the wrapped type was written, which are the only ones that shadow its
-        /// names: the declaration it is substituted into has parameters of its own that must not capture them.
-        scope: Option<TypeScope>,
         /// The wrapped type.
         inner: Box<CollectedType>,
     },
@@ -287,9 +282,8 @@ impl CollectedType {
                 name.hash(hasher);
                 all(hasher, args);
             }
-            CollectedType::AtFile { file, scope, inner } => {
+            CollectedType::AtFile { file, inner } => {
                 file.hash(hasher);
-                scope.hash(hasher);
                 inner.structural_hash(hasher);
             }
             CollectedType::IndexedAccess { obj, key } => {
@@ -359,9 +353,13 @@ impl CollectedType {
             }
             CollectedType::Array(inner) => format!("{}[]", inner.to_raw_string()),
             CollectedType::Readonly(inner) => format!("readonly {}", inner.to_raw_string()),
-            CollectedType::Named { name, args } if args.is_empty() => name.to_string(),
+            CollectedType::Named { name, args } if args.is_empty() => super::scope::unmarked(name).to_string(),
             CollectedType::Named { name, args } => {
-                format!("{}<{}>", name, args.iter().map(|a| a.to_raw_string()).collect::<Vec<_>>().join(", "))
+                format!(
+                    "{}<{}>",
+                    super::scope::unmarked(name),
+                    args.iter().map(|a| a.to_raw_string()).collect::<Vec<_>>().join(", ")
+                )
             }
             CollectedType::TypeOf(name) => format!("typeof {}", name),
             CollectedType::KeyOf(inner) => format!("keyof {}", inner.to_raw_string()),
@@ -1095,11 +1093,9 @@ impl CollectedType {
             CollectedType::Array(inner) => CollectedType::Array(Box::new(inner.rename_named(rename))),
             CollectedType::Readonly(inner) => CollectedType::Readonly(Box::new(inner.rename_named(rename))),
             CollectedType::KeyOf(inner) => CollectedType::KeyOf(Box::new(inner.rename_named(rename))),
-            CollectedType::AtFile { file, scope, inner } => CollectedType::AtFile {
-                file: file.clone(),
-                scope: scope.clone(),
-                inner: Box::new(inner.rename_named(rename)),
-            },
+            CollectedType::AtFile { file, inner } => {
+                CollectedType::AtFile { file: file.clone(), inner: Box::new(inner.rename_named(rename)) }
+            }
             CollectedType::Object(fields) => CollectedType::Object(
                 fields
                     .iter()

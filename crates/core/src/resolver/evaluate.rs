@@ -16,7 +16,7 @@ use compact_str::CompactString;
 use crate::types::*;
 
 use super::import::{lookup_interface, lookup_interface_including_ambient, lookup_type_alias, resolve_to_canonical};
-use super::substitute::{bind_args, build_substitution, substitute_alias, substitute_type};
+use super::substitute::{bind_declared, build_substitution, substitute_alias, substitute_type};
 use super::{ResolutionContext, MAX_DEPTH};
 
 /// A type, and the file its names resolve in.
@@ -74,7 +74,7 @@ fn inferred_component_branch(
         "Context" => Some(false_type.clone()),
         "ComponentType" if !param.is_empty() => {
             let mut subst = super::substitute::Substitution::default();
-            subst.insert(param, CollectedType::AtFile { file: props_file, scope: None, inner: Box::new(props) });
+            subst.insert(param, CollectedType::AtFile { file: props_file, inner: Box::new(props) });
             Some(substitute_type(true_type, &subst))
         }
         _ => None,
@@ -645,7 +645,7 @@ fn member_uncached(
                     CollectedType::Intersection(
                         found
                             .into_iter()
-                            .map(|(ty, at)| CollectedType::AtFile { file: at, scope: None, inner: Box::new(ty) })
+                            .map(|(ty, at)| CollectedType::AtFile { file: at, inner: Box::new(ty) })
                             .collect(),
                     ),
                     file.to_owned(),
@@ -751,7 +751,7 @@ fn interface_prop(
         .or_else(|| ctx.react_types.as_deref()?.lookup_interface_param_defaults_for(iface));
     let subst = match params {
         Some(params) if !params.is_empty() && (!args.is_empty() || defaults.is_some()) => {
-            Some(bind_args(params, defaults, args, args_file, None, &iface.file_path, &mut Vec::new()))
+            Some(bind_declared(params, defaults, args, args_file, &iface.file_path, &mut Vec::new()))
         }
         _ => None,
     };
@@ -822,7 +822,7 @@ pub(super) fn alias_body(
     let defaults = ctx.named_types.lookup_type_param_defaults(&alias_file, &matched);
     let alias = match ctx.named_types.lookup_type_alias_params(&alias_file, &matched) {
         Some(params) if !args.is_empty() || defaults.is_some() => {
-            substitute_alias(alias, &bind_args(params, defaults, args, file, None, &alias_file, &mut Vec::new()))
+            substitute_alias(alias, &bind_declared(params, defaults, args, file, &alias_file, &mut Vec::new()))
         }
         _ => alias.clone(),
     };

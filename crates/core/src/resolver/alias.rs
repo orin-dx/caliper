@@ -274,12 +274,11 @@ pub(super) fn resolve_base_as_chain(
             // Substituted and resolved directly here so the nested generic survives,
             // rather than falling through to the string-based path below (which would
             // flatten it to a single opaque display string before substitution ever ran).
-            let args_scope = super::substitute::pin_scope(state, args);
+            let marked = super::substitute::mark_args(state, args);
             if let Some(alias) = super::substitute::generic_alias_with_structured_args(
                 name.as_str(),
-                args,
+                &marked,
                 file_path,
-                Some(&args_scope),
                 ctx,
                 &mut state.diagnostics,
             ) {
@@ -305,14 +304,7 @@ pub(super) fn resolve_base_as_chain(
         // whatever file this call chain has been resolving relative to — e.g. a
         // type argument substituted from the caller's scope into a callee alias
         // declared in a different file. Switch file context and continue.
-        CollectedType::AtFile { file, scope, inner } => {
-            let writer = scope.as_ref().map(|scope| state.enter_scope(scope.clone()));
-            let chain = resolve_base_as_chain(inner, file, mapping, ctx, state, depth);
-            if let Some(writer) = writer {
-                state.leave_scope(writer);
-            }
-            chain
-        }
+        CollectedType::AtFile { file, inner } => resolve_base_as_chain(inner, file, mapping, ctx, state, depth),
         CollectedType::Intersection(members) => {
             resolve_intersection_chain(members, file_path, mapping, ctx, state, depth)
         }
@@ -936,14 +928,7 @@ fn resolve_key_set(
             }
             Some(all)
         }
-        CollectedType::AtFile { file, scope, inner } => {
-            let writer = scope.as_ref().map(|scope| state.enter_scope(scope.clone()));
-            let keys = resolve_key_set(inner, file, mapping, ctx, state, depth + 1);
-            if let Some(writer) = writer {
-                state.leave_scope(writer);
-            }
-            keys
-        }
+        CollectedType::AtFile { file, inner } => resolve_key_set(inner, file, mapping, ctx, state, depth + 1),
         // `keyof React.HTMLAttributes<T>`: the names React declares on it, which a props walk does not list (the HTML
         // layer holds them).
         CollectedType::KeyOf(target)
@@ -984,23 +969,17 @@ fn resolve_key_set(
             let Some(super::precedence::SourceOrKnownMatch::TypeAlias { matched_key, alias }) = matched else {
                 return None;
             };
-            let args_scope = super::substitute::pin_scope(state, args);
+            let marked = super::substitute::mark_args(state, args);
             let alias = super::substitute::apply_generic_args(
                 alias,
                 (&canonical_file, &matched_key),
-                args,
+                &marked,
                 file,
-                Some(&args_scope),
                 ctx,
                 &mut state.diagnostics,
             );
-            // The alias's body is read under its own parameters that the arguments leave unfilled.
-            let unfilled = ctx
-                .named_types
-                .lookup_type_alias_params(&canonical_file, &matched_key)
-                .map(|params| TypeScope::new(params.iter().skip(args.len())))
-                .unwrap_or_default();
-            let writer = state.enter_scope(unfilled);
+            // The alias's body is read under no type parameters: the ones the arguments leave unfilled are marked in it.
+            let writer = state.enter_scope(TypeScope::default());
             let keys = match &alias {
                 CollectedTypeAlias::LiteralUnion { members, .. } => Some(members.clone()),
                 CollectedTypeAlias::Union { members, file_path } => {

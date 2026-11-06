@@ -3055,11 +3055,31 @@ export function IdUse<Value>(p: { value: Id<Value> }) { return null; }
 export function IdModule(p: { value: Id<Value> }) { return null; }
 export function PairUse(p: { pair: Pair<Value> }) { return null; }
 export function Keyed<Keys extends string>(p: Record<Keys, Value>) { return null; }
+type ReadV<X extends { v: unknown }> = X['v'];
+export function ReadObject<T>(p: { v: ReadV<{ v: T }> }) { return null; }
+export function ReadModule(p: { v: ReadV<{ v: T }> }) { return null; }
+export function ReadInterface<T>(p: { v: Cell<[T, number]>['value'] }) { return null; }
+export function ReadPlain(p: { v: Cell<[number, number]>['value'] }) { return null; }
 "#;
 
-const SCOPE_COMPONENTS: [&str; 13] = [
-    "Generic", "Plain", "ModuleT", "Member", "Filled", "Passed", "Unfilled", "SavedUse", "FixedUse", "IdUse",
-    "IdModule", "PairUse", "Keyed",
+const SCOPE_COMPONENTS: [&str; 17] = [
+    "Generic",
+    "Plain",
+    "ModuleT",
+    "Member",
+    "Filled",
+    "Passed",
+    "Unfilled",
+    "SavedUse",
+    "FixedUse",
+    "IdUse",
+    "IdModule",
+    "PairUse",
+    "Keyed",
+    "ReadObject",
+    "ReadModule",
+    "ReadInterface",
+    "ReadPlain",
 ];
 
 #[test]
@@ -3115,6 +3135,10 @@ fn type_parameter_scope_answers_do_not_depend_on_the_order_components_resolve_in
         ("IdUse", "value: Value"),
         ("IdModule", "value: number"),
         ("PairUse", "pair: { first: number; second: B }"),
+        ("ReadObject", "v: T"),
+        ("ReadModule", "v: number"),
+        ("ReadInterface", "v: [T, number]"),
+        ("ReadPlain", "v: [number, number]"),
     ];
     for (name, props) in expected {
         assert_eq!(by_name[name], props, "{name}");
