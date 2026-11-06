@@ -11,20 +11,25 @@ install-tools:
     cargo install cargo-semver-checks --locked
     rustup component add llvm-tools-preview
 
-# Check the public Rust API of the core crate for SemVer breaks against the last published version. The version only
-# moves in the release PR, so a break is accepted when a pending minor or major changeset covers the crate.
+# Check the public Rust API of every published library crate for SemVer breaks against the last published version.
+# The version only moves in the release PR, so a break is accepted when a pending minor or major changeset covers the
+# crate. The CLI crate is a binary and has no library API.
 semver:
     #!/usr/bin/env bash
     set -uo pipefail
-    if cargo semver-checks check-release -p caliper-docgen-core; then
-        exit 0
-    fi
-    if grep -qsE '^cargo/caliper-docgen-core: (minor|major)$' .changeset/*.md; then
-        echo "breaking API changes are covered by a pending minor or major changeset for caliper-docgen-core"
-        exit 0
-    fi
-    echo "breaking API changes need a minor or major changeset for cargo/caliper-docgen-core" >&2
-    exit 1
+    status=0
+    for crate in caliper-docgen-core caliper-docgen-semantic caliper-docgen-tsc-client; do
+        if cargo semver-checks check-release -p "$crate"; then
+            continue
+        fi
+        if grep -qsE "^cargo/$crate: (minor|major)$" .changeset/*.md; then
+            echo "breaking API changes are covered by a pending minor or major changeset for $crate"
+            continue
+        fi
+        echo "breaking API changes need a minor or major changeset for cargo/$crate" >&2
+        status=1
+    done
+    exit "$status"
 
 # Build with the minimum supported Rust version declared in Cargo.toml.
 msrv:
@@ -47,14 +52,22 @@ build:
     moon run napi:build vite-plugin:build
     cargo build --release
 
-# Run all tests (Rust + TypeScript)
-test: test-rust test-ts
+# Run all tests (Rust, the native binding crate, TypeScript, Python)
+test: test-rust test-napi test-ts test-py
 
 # Run Rust tests (via nextest, which doesn't run doctests — paired
 # with `cargo test --doc` to cover those too)
 test-rust:
     cargo nextest run --workspace --exclude caliper-docgen-napi --locked
     cargo test --doc --workspace --exclude caliper-docgen-napi
+
+# The binding crate is excluded from the workspace recipes, so its own unit tests run here.
+test-napi:
+    cargo nextest run -p caliper-docgen-napi --locked
+
+# Run the Python tests for the weekly and agent-eval scripts (standard library only, no dependencies)
+test-py:
+    python3 -m unittest discover -s scripts -p 'test_*.py'
 
 # Run TypeScript tests
 test-ts:
@@ -120,6 +133,7 @@ md_src := "'**/*.md' '!node_modules/**' '!target/**' '!dist/**'"
 lint:
     cargo fmt --check
     cargo clippy --workspace --all-targets --locked -- -D warnings
+    node scripts/check-packaging.mjs
     pnpm exec oxfmt --check {{ts_src}}
     pnpm exec oxfmt --check {{md_src}}
     pnpm exec oxlint {{ts_src_only}}
