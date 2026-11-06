@@ -279,7 +279,7 @@ pub(super) fn resolve_base_as_chain(
                 name.as_str(),
                 args,
                 file_path,
-                &args_scope,
+                Some(&args_scope),
                 ctx,
                 &mut state.diagnostics,
             ) {
@@ -306,9 +306,11 @@ pub(super) fn resolve_base_as_chain(
         // type argument substituted from the caller's scope into a callee alias
         // declared in a different file. Switch file context and continue.
         CollectedType::AtFile { file, scope, inner } => {
-            let writer = state.enter_scope(scope.clone());
+            let writer = scope.as_ref().map(|scope| state.enter_scope(scope.clone()));
             let chain = resolve_base_as_chain(inner, file, mapping, ctx, state, depth);
-            state.leave_scope(writer);
+            if let Some(writer) = writer {
+                state.leave_scope(writer);
+            }
             chain
         }
         CollectedType::Intersection(members) => {
@@ -935,9 +937,11 @@ fn resolve_key_set(
             Some(all)
         }
         CollectedType::AtFile { file, scope, inner } => {
-            let writer = state.enter_scope(scope.clone());
+            let writer = scope.as_ref().map(|scope| state.enter_scope(scope.clone()));
             let keys = resolve_key_set(inner, file, mapping, ctx, state, depth + 1);
-            state.leave_scope(writer);
+            if let Some(writer) = writer {
+                state.leave_scope(writer);
+            }
             keys
         }
         // `keyof React.HTMLAttributes<T>`: the names React declares on it, which a props walk does not list (the HTML
@@ -986,7 +990,7 @@ fn resolve_key_set(
                 (&canonical_file, &matched_key),
                 args,
                 file,
-                &args_scope,
+                Some(&args_scope),
                 ctx,
                 &mut state.diagnostics,
             );

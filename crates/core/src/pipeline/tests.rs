@@ -4070,8 +4070,32 @@ fn an_alias_parameter_shadows_an_outer_alias_only_inside_that_alias() {
     )]);
 
     let props = &output.components["Field"].props;
+    assert_eq!(props["first"].prop_type.raw_string(), "{ inner: Value }");
     assert_eq!(props["second"].prop_type.raw_string(), "number");
     assert_eq!(props["third"].prop_type.raw_string(), "number");
+}
+
+#[test]
+fn a_component_parameter_read_through_an_interface_member_stays_a_placeholder() {
+    let output = extract_one(&[(
+        "Field.tsx",
+        "interface Box<T> { value: T }\n\
+         export function Field<T>(p: { value: Box<T>['value'] }) { return null; }\n",
+    )]);
+    assert_eq!(output.components["Field"].props["value"].prop_type.raw_string(), "T");
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+}
+
+#[test]
+fn a_component_parameter_read_through_an_alias_member_stays_a_placeholder() {
+    let output = extract_one(&[(
+        "Field.tsx",
+        "type T = number;\n\
+         type Holder<A> = { value: A };\n\
+         export function Field<T>(p: { value: Holder<T>['value'] }) { return null; }\n",
+    )]);
+    assert_eq!(output.components["Field"].props["value"].prop_type.raw_string(), "T");
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
 }
 
 /// The props of `Field` from `source`, each as the text of its resolved type.

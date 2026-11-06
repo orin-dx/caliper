@@ -315,7 +315,7 @@ fn expand_alias(
         defaults,
         args,
         args_file,
-        &args_scope,
+        Some(&args_scope),
         declared_file,
         &mut state.diagnostics,
     );
@@ -335,7 +335,7 @@ fn expand_alias(
                         let mut one = subst.clone();
                         let member = CollectedType::AtFile {
                             file: member_file,
-                            scope: args_scope.clone(),
+                            scope: Some(args_scope.clone()),
                             inner: Box::new(member),
                         };
                         one.insert(param, member);

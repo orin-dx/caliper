@@ -74,10 +74,7 @@ fn inferred_component_branch(
         "Context" => Some(false_type.clone()),
         "ComponentType" if !param.is_empty() => {
             let mut subst = super::substitute::Substitution::default();
-            subst.insert(
-                param,
-                CollectedType::AtFile { file: props_file, scope: TypeScope::default(), inner: Box::new(props) },
-            );
+            subst.insert(param, CollectedType::AtFile { file: props_file, scope: None, inner: Box::new(props) });
             Some(substitute_type(true_type, &subst))
         }
         _ => None,
@@ -565,7 +562,16 @@ pub(super) fn member_shared(
 ) -> Option<Arc<Located>> {
     // A read from the top of a walk depends only on the declarations, so a run answers it once (`member_reads`).
     if let (CollectedType::Named { name, args }, 0) = (obj, depth) {
-        let name: Box<str> = if args.is_empty() { Box::from(name.as_str()) } else { obj.to_raw_string().into() };
+        // The arguments are keyed by structure: their printed form drops the file and type parameters they are read
+        // under, and the same text read under another scope is another answer.
+        let name: Box<str> = if args.is_empty() {
+            Box::from(name.as_str())
+        } else {
+            use std::hash::Hasher;
+            let mut hasher = rustc_hash::FxHasher::default();
+            obj.structural_hash(&mut hasher);
+            format!("{}#{:x}", obj.to_raw_string(), hasher.finish()).into()
+        };
         let cache_key = (Box::from(file.as_str()), name, Box::from(key));
         if let Some(read) = ctx.member_reads.get(&cache_key) {
             super::deps::replay(&read.deps);
@@ -639,11 +645,7 @@ fn member_uncached(
                     CollectedType::Intersection(
                         found
                             .into_iter()
-                            .map(|(ty, at)| CollectedType::AtFile {
-                                file: at,
-                                scope: TypeScope::default(),
-                                inner: Box::new(ty),
-                            })
+                            .map(|(ty, at)| CollectedType::AtFile { file: at, scope: None, inner: Box::new(ty) })
                             .collect(),
                     ),
                     file.to_owned(),
@@ -749,7 +751,7 @@ fn interface_prop(
         .or_else(|| ctx.react_types.as_deref()?.lookup_interface_param_defaults_for(iface));
     let subst = match params {
         Some(params) if !params.is_empty() && (!args.is_empty() || defaults.is_some()) => {
-            Some(bind_args(params, defaults, args, args_file, &TypeScope::default(), &iface.file_path, &mut Vec::new()))
+            Some(bind_args(params, defaults, args, args_file, None, &iface.file_path, &mut Vec::new()))
         }
         _ => None,
     };
@@ -819,10 +821,9 @@ pub(super) fn alias_body(
     let (matched, alias) = lookup_type_alias(ctx, alias_file.as_str(), &alias_name)?;
     let defaults = ctx.named_types.lookup_type_param_defaults(&alias_file, &matched);
     let alias = match ctx.named_types.lookup_type_alias_params(&alias_file, &matched) {
-        Some(params) if !args.is_empty() || defaults.is_some() => substitute_alias(
-            alias,
-            &bind_args(params, defaults, args, file, &TypeScope::default(), &alias_file, &mut Vec::new()),
-        ),
+        Some(params) if !args.is_empty() || defaults.is_some() => {
+            substitute_alias(alias, &bind_args(params, defaults, args, file, None, &alias_file, &mut Vec::new()))
+        }
         _ => alias.clone(),
     };
     let body = match alias {

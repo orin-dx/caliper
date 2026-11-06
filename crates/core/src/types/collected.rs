@@ -15,6 +15,10 @@ use super::scope::TypeScope;
 /// Compact string used for names, type strings — avoids heap alloc under 24 bytes.
 pub type TypeName = CompactString;
 
+/// The key variable the resolver makes up for the mapped type a `Record` stands for. It is not an identifier, so no
+/// user type can be named it, and the printer shows it as a variable that its value does not use.
+pub const MADE_UP_KEY_VARIABLE: &str = "Record key";
+
 // ─── ParamKind ────────────────────────────────────────────────────────────────
 
 /// How a function parameter is declared: `a`, `a?` or `...a`.
@@ -167,7 +171,7 @@ pub enum CollectedType {
         file: Utf8PathBuf,
         /// The type parameters in scope where the wrapped type was written, which are the only ones that shadow its
         /// names: the declaration it is substituted into has parameters of its own that must not capture them.
-        scope: TypeScope,
+        scope: Option<TypeScope>,
         /// The wrapped type.
         inner: Box<CollectedType>,
     },
@@ -408,7 +412,7 @@ impl CollectedType {
                 };
                 // A key variable the resolver made up for `Record` is not an identifier; TypeScript prints it as `P`,
                 // unless the value names a `P` of its own, which the printed variable would then capture.
-                let param = if param.contains(' ') {
+                let param = if param == MADE_UP_KEY_VARIABLE {
                     ["P", "K", "Key"].into_iter().find(|candidate| !value_type.mentions(candidate)).unwrap_or("P")
                 } else {
                     param.as_str()
@@ -1828,14 +1832,14 @@ mod tests {
             value_type: Box::new(CollectedType::String),
             optional: None,
         };
-        assert_eq!(mapped("Record key").to_raw_string(), "{ [P in Keys]: string }");
+        assert_eq!(mapped(MADE_UP_KEY_VARIABLE).to_raw_string(), "{ [P in Keys]: string }");
         assert_eq!(mapped("K").to_raw_string(), "{ [K in Keys]: string }");
     }
 
     #[test]
     fn a_made_up_key_variable_avoids_the_names_its_value_uses() {
         let mapped = |value: &str| CollectedType::Mapped {
-            param: "Record key".into(),
+            param: MADE_UP_KEY_VARIABLE.into(),
             key_type: Box::new(CollectedType::Named { name: "Keys".into(), args: vec![] }),
             value_type: Box::new(CollectedType::Named { name: value.into(), args: vec![] }),
             optional: None,
