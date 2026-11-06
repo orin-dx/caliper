@@ -2901,7 +2901,7 @@ fn collapsing_all_leaves_a_node_modules_source_alone_whichever_separator_the_pat
     };
     let ctx = ResolutionContext::new(Arc::new(GlobalSourceData::default()), &options);
     let state = ResolveState::default();
-    let collapses = |file: &str| ctx.collapses(Utf8Path::new(file), 31, 1, &state);
+    let collapses = |file: &str| ctx.collapses(Utf8Path::new(file), "Props", 31, 1, &state);
 
     assert!(!collapses("/proj/node_modules/pkg/index.d.ts"));
     assert!(!collapses(r"C:\proj\node_modules\pkg\index.d.ts"));
