@@ -54,8 +54,13 @@ pub(super) fn result_chain(
     let callee = mapping.wrapper_callee.as_ref()?;
     let (props, props_file, type_params, factory_params) = result_props(callee, &mapping.file_path, ctx, 0)?;
     let mut attempt = state.branch();
-    // The callee's own parameters join the component's: the result's props are read under both.
-    let scope = TypeScope::new(attempt.scope.names().iter().chain(&type_params).chain(&factory_params));
+    // The result's call signature has type parameters of its own that join the component's, and so do the factory's: a
+    // local alias in its body names them where nothing substitutes. The call's arguments are written elsewhere, so a
+    // factory parameter they name (`make<T>` over a module `type T`) is not a placeholder to them; `result_props` has
+    // already put them in place of the parameters they fill, and binds the rest to marked placeholders.
+    let named_by_arguments: Vec<TypeName> = callee.type_args.iter().flat_map(CollectedType::referenced_names).collect();
+    let factory_scope = factory_params.iter().filter(|param| !named_by_arguments.contains(param));
+    let scope = TypeScope::new(attempt.scope.names().iter().chain(&type_params).chain(factory_scope));
     attempt.bind_scope(scope);
     let mut chain = resolve_base_as_chain(&props, &props_file, mapping, ctx, &mut attempt, 0);
     if chain
@@ -127,7 +132,9 @@ fn result_props(
         .unwrap_or_else(|| (caller_file.to_owned(), callee.name.to_string()));
     super::deps::record(&file);
     let function = ctx.global.function_results.get(&format!("{file}:{name}"))?;
-    let bindings = build_substitution(&function.type_params, &callee.type_args, caller_file, &mut ignored);
+    let mut bindings = build_substitution(&function.type_params, &callee.type_args, caller_file, &mut ignored);
+    // The parameters the call leaves unfilled stand for themselves in the result, whatever module types are named alike.
+    super::substitute::fill_placeholders(&mut bindings, &function.type_params);
     if let Some(inner) = &function.returned_call {
         let inner = WrapperCallee {
             name: inner.name.clone(),
@@ -251,7 +258,7 @@ fn component_props_type(
         return None;
     }
     match ty {
-        CollectedType::AtFile { file, inner, .. } => component_props_type(inner, file, ctx, depth + 1),
+        CollectedType::AtFile { file, inner } => component_props_type(inner, file, ctx, depth + 1),
         CollectedType::TypeOf(name) => {
             let mut ignored = Vec::new();
             let (canonical_file, canonical_name) = resolve_to_canonical(name, file, ctx, &mut ignored)

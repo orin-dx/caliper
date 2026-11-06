@@ -159,7 +159,7 @@ pub(super) fn unfilled_substitution(params: &[compact_str::CompactString]) -> Su
     subst
 }
 
-fn fill_placeholders<'a>(subst: &mut Substitution<'a>, params: &'a [compact_str::CompactString]) {
+pub(super) fn fill_placeholders<'a>(subst: &mut Substitution<'a>, params: &'a [compact_str::CompactString]) {
     for param in params {
         subst
             .entry(param.as_str())

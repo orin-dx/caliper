@@ -14,6 +14,18 @@ use super::diagnostic::Diagnostic;
 /// Compact string used for names, type strings — avoids heap alloc under 24 bytes.
 pub type TypeName = CompactString;
 
+/// The name the extractor gives the alias it synthesizes for an inline props type (`function Card(props: { title: string })`),
+/// the `index`th alias of its file. Both ends of the convention are here: `is_synthesized_alias` is how the resolver
+/// tells such an alias, the component's own, from a declared one.
+pub fn synthesized_alias_name(index: usize) -> String {
+    format!("__anon_{index}")
+}
+
+/// Whether `name` is the name of an alias the extractor synthesized for an inline props type.
+pub fn is_synthesized_alias(name: &str) -> bool {
+    name.starts_with("__anon_")
+}
+
 /// The key variable the resolver makes up for the mapped type a `Record` stands for. It is not an identifier, so no
 /// user type can be named it, and the printer shows it as a variable that its value does not use.
 pub const MADE_UP_KEY_VARIABLE: &str = "Record key";
