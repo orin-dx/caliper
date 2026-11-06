@@ -12,6 +12,7 @@ Add an entry when you find a gap you are not fixing now. Delete it when you fix 
 ## Resolution
 
 - Mapped types, conditional types and indexed access over an unbound generic, and `@emotion/styled`'s two-argument overload, need real type inference. They degrade to `Opaque` with a diagnostic and, where possible, a `composes` entry. See `type-checker-integration.md`.
+- Tuple element resolution has known gaps. An optional member (`[a?: T]`) is resolved with `undefined` as a union member and renders as its type with no optional marker. A conditional type in a tuple element whose type parameter shadows an alias of the same name (`[T extends string ? 1 : 2]` inside `function Box<T>`) resolves through the alias (`[1]`) instead of staying a conditional. A factory with a generic type argument (`Field = make<Props<string>>()` for `make<Props>(): React.FC<Props>`) resolves its props here; the scoping interaction a review reported for it is not handled. A fuller scoping attempt is on the `wip/css-tuple-full` branch.
 - Ambient globals (`lib.dom.d.ts` and the like) are looked up from `options.src_dirs.first()` only (`pipeline/mod.rs`, `pipeline/revision.rs`). If the first source directory can't resolve `typescript` but a later one could, ambient lookups return nothing for the whole run. Untested against a real multi-root config.
 
 ## Watch and polling

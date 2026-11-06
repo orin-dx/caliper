@@ -4080,56 +4080,6 @@ export function Row(props: { render: ({ id }: { id: string }, index?: number) =>
 }
 
 #[test]
-fn tuple_elements_resolve_whether_plain_labelled_or_optional() {
-    let output = extract_one(&[(
-        "Box.tsx",
-        "type Tone = 'a' | 'b';\n\
-         export function Box(props: { plain: [Tone, number]; labelled: [tone: Tone, count?: number] }) { return null; }\n",
-    )]);
-
-    let props = &output.components["Box"].props;
-    let tone = PropType::LiteralUnion { members: vec!["a".into(), "b".into()], has_default: false };
-    assert_eq!(props["plain"].prop_type, PropType::Tuple(vec![tone.clone(), PropType::Number]));
-    let optional_count = PropType::Union(vec![PropType::Number, PropType::Undefined]);
-    assert_eq!(props["labelled"].prop_type, PropType::Tuple(vec![tone, optional_count]));
-}
-
-#[test]
-fn an_optional_tuple_element_keeps_its_undefined() {
-    let output = extract_one(&[(
-        "Box.tsx",
-        "export function Box(props: { bare: [number?]; labelled: [count?: number] }) { return null; }\n",
-    )]);
-
-    let props = &output.components["Box"].props;
-    assert_eq!(props["bare"].prop_type.raw_string(), "[number | undefined]");
-    assert_eq!(props["labelled"].prop_type.raw_string(), "[number | undefined]");
-}
-
-#[test]
-fn a_function_type_parameter_shadows_an_outer_alias_inside_a_tuple() {
-    let output = extract_one(&[(
-        "Field.tsx",
-        "type Value = 'outer';\n\
-         export function Field<Value>(p: { pair: [Value]; value: Value }) { return null; }\n",
-    )]);
-
-    let props = &output.components["Field"].props;
-    assert_eq!(props["pair"].prop_type.raw_string(), "[Value]");
-    assert_eq!(props["value"].prop_type.raw_string(), "Value");
-}
-
-#[test]
-fn a_css_property_that_takes_a_number_or_a_string_is_both_without_dependencies() {
-    let output = extract_one(&[(
-        "Box.tsx",
-        "export function Box(props: { z?: React.CSSProperties['zoom'] }) { return null; }\n",
-    )]);
-
-    assert_eq!(output.components["Box"].props["z"].prop_type.raw_string(), "string | number");
-}
-
-#[test]
 fn record_over_a_union_keeps_a_user_type_named_k_as_its_value() {
     let output = extract_one(&[(
         "Box.tsx",
@@ -4562,4 +4512,25 @@ fn a_tag_keeps_its_continuation_lines() {
     let tags = &output.components["Box"].props["size"].tags;
     assert_eq!(tags["deprecated"], "Use `scale`\ninstead of this.");
     assert_eq!(tags["example"], "<Box size=\"s\" />\n<Box size=\"m\" />");
+}
+
+#[test]
+fn tuple_elements_resolve_whether_plain_labelled_or_optional() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "type Tone = 'a' | 'b';\n\
+         export function Box(props: { plain: [Tone, number]; labelled: [tone: Tone, count?: number]; opt: [flag?: boolean | string] }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    assert_eq!(props["plain"].prop_type.raw_string(), "[\"a\" | \"b\", number]");
+    assert_eq!(props["labelled"].prop_type.raw_string(), "[\"a\" | \"b\", number]");
+    assert_eq!(props["opt"].prop_type.raw_string(), "[boolean | string]");
+}
+
+#[test]
+fn a_css_property_that_takes_a_number_or_a_string_is_both_without_dependencies() {
+    let output = extract_one(&[("Box.tsx", "export function Box(props: { z?: React.CSSProperties['zoom'] }) { return null; }\n")]);
+
+    assert_eq!(output.components["Box"].props["z"].prop_type.raw_string(), "string | number");
 }

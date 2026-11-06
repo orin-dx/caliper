@@ -59,21 +59,8 @@ pub fn resolve_collected_type(
         CollectedType::Array(inner) => {
             PropType::Array(Box::new(resolve_collected_type(inner, consuming_file, ctx, state, depth + 1)))
         }
-        // An optional element (`[count?: number]`) reaches here as `T | undefined`; the union resolver drops the
-        // `undefined` of a prop's optionality, but a tuple element has no flag to carry it, so it is kept.
         CollectedType::Tuple(members) => PropType::Tuple(
-            members
-                .iter()
-                .map(|m| {
-                    let resolved = resolve_collected_type(m, consuming_file, ctx, state, depth + 1);
-                    match m {
-                        CollectedType::Union(parts) if parts.iter().any(|p| matches!(p, CollectedType::Undefined)) => {
-                            super::primitives::union_of([resolved, PropType::Undefined])
-                        }
-                        _ => resolved,
-                    }
-                })
-                .collect(),
+            members.iter().map(|m| resolve_collected_type(m, consuming_file, ctx, state, depth + 1)).collect(),
         ),
         CollectedType::Readonly(inner) => {
             PropType::Readonly(Box::new(resolve_collected_type(inner, consuming_file, ctx, state, depth + 1)))
