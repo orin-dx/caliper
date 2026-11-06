@@ -1,8 +1,8 @@
-# Semantic model
+# Architecture reference
 
 Read this first. Load only the file your task requires — never load all seven at once. This index is short; each topic file runs 1200-3700 words. The goal is progressive loading, not a single monolithic architecture doc.
 
-**The spec@1 is the authority; these files are the reference layer beneath it.** When a spec (`.claude/specs/`) and a file here disagree, the spec wins for the feature it covers — but that usually means the file here is stale and should be corrected, not ignored. Each file states its `Source:` — the real `.rs` files it's distilled from — so staleness is always checkable against ground truth.
+**These files describe the current system; the source is the ground truth.** When a file here and the code disagree, the code wins and the file is stale: correct it. The records in `.claude/specs/` are historical planning artifacts for work that has shipped; they do not outrank anything here. Each file states its `Source:` — the real `.rs` files it's distilled from — so staleness is always checkable against the code.
 
 ## Task → file routing
 
@@ -19,7 +19,7 @@ Read this first. Load only the file your task requires — never load all seven 
 ## What does NOT live here
 
 - **Source code** — read it directly from the crate. These files summarize invariants, they don't replace reading the function you're about to change.
-- **Spec@1 artifacts** (`.claude/specs/`) — testable acceptance criteria for a specific unit of work. These files are broader and looser; specs are narrow and binding.
+- **Spec@1 artifacts** (`.claude/specs/`) — planning records of the acceptance criteria for a specific unit of work, written before it shipped. They show what was intended then, not what the system does now; these files are the current description.
 - **`docs/edge-cases.md`** — the project's open-gap list. Files here cross-reference it rather than duplicating it; check it directly for current gap status.
 - **`docs/adr/`** — hard-to-reverse decisions with their own record format. Files here cite the relevant ADR by number rather than re-explaining the decision.
 - **`ARCHITECTURE.md`, `AGENTS.md` files** — human-facing prose reference and contributor rules. Treat as context, not as the invariant source — the files here are the ones checked against real source per subsystem.
