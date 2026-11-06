@@ -1165,6 +1165,21 @@ pub enum OpaqueReason {
 }
 
 impl OpaqueReason {
+    /// Every reason's name in the canonical JSON, in declaration order, so a consumer such as the `schema` command can
+    /// list them without a copy of its own. A test keeps it equal to [`OpaqueReason::kind`] over every variant.
+    pub const KINDS: [&'static str; 10] = [
+        "conditionalType",
+        "mappedType",
+        "moduleAugmentation",
+        "runtimeDependent",
+        "unresolvableImport",
+        "pandaCodegenMissing",
+        "depthExceeded",
+        "indexedAccess",
+        "templateLiteral",
+        "unsupportedExpression",
+    ];
+
     /// The reason's name in the canonical JSON (`"mappedType"`), without its payload.
     pub fn kind(&self) -> &'static str {
         match self {
