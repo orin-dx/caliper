@@ -4530,7 +4530,10 @@ fn tuple_elements_resolve_whether_plain_labelled_or_optional() {
 
 #[test]
 fn a_css_property_that_takes_a_number_or_a_string_is_both_without_dependencies() {
-    let output = extract_one(&[("Box.tsx", "export function Box(props: { z?: React.CSSProperties['zoom'] }) { return null; }\n")]);
+    let output = extract_one(&[(
+        "Box.tsx",
+        "export function Box(props: { z?: React.CSSProperties['zoom'] }) { return null; }\n",
+    )]);
 
     assert_eq!(output.components["Box"].props["z"].prop_type.raw_string(), "string | number");
 }

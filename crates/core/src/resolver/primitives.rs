@@ -181,33 +181,10 @@ pub(super) fn resolve_indexed_access(
         // React instantiates csstype's lengths as `string | number`.
         (
             "CSSProperties" | "React.CSSProperties",
-            "zoom"
-            | "width"
-            | "height"
-            | "minWidth"
-            | "minHeight"
-            | "maxWidth"
-            | "maxHeight"
-            | "top"
-            | "right"
-            | "bottom"
-            | "left"
-            | "margin"
-            | "marginTop"
-            | "marginRight"
-            | "marginBottom"
-            | "marginLeft"
-            | "padding"
-            | "paddingTop"
-            | "paddingRight"
-            | "paddingBottom"
-            | "paddingLeft"
-            | "gap"
-            | "rowGap"
-            | "columnGap"
-            | "fontSize"
-            | "borderRadius"
-            | "borderWidth",
+            "zoom" | "width" | "height" | "minWidth" | "minHeight" | "maxWidth" | "maxHeight" | "top" | "right"
+            | "bottom" | "left" | "margin" | "marginTop" | "marginRight" | "marginBottom" | "marginLeft" | "padding"
+            | "paddingTop" | "paddingRight" | "paddingBottom" | "paddingLeft" | "gap" | "rowGap" | "columnGap"
+            | "fontSize" | "borderRadius" | "borderWidth",
         ) => Some(PropType::Union(vec![PropType::String, PropType::Number])),
         ("CSSProperties" | "React.CSSProperties", _) if !key_str.is_empty() => Some(PropType::String),
         (
