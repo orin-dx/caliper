@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01CWvBsSaq3ADaryKvk1P5os",
+  "agent_id": "a87b391d197184370",
+  "subagent_type": "general-purpose",
+  "task_description": "Resolve conflicts and findings on PR 327",
+  "token_usage": {
+    "input_tokens": 94,
+    "cache_creation_tokens": 75036,
+    "cache_read_tokens": 3478175,
+    "output_tokens": 9551,
+    "api_call_count": 46
+  },
+  "started_at": "2026-11-05T17:52:35.901479-08:00",
+  "completed_at": "2026-11-05T17:58:19.849771-08:00"
+}
