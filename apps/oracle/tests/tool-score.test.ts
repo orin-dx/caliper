@@ -2,7 +2,7 @@
 // a second component a tool may not report at all.
 import { describe, expect, it } from 'vitest'
 import { prim, type Norm } from '../src/oracle-compare.ts'
-import { scoreTool, type Reported, type UniverseProp } from '../src/tool-score.ts'
+import { scoreReported, scoreTool, type Reported, type UniverseProp } from '../src/tool-score.ts'
 
 const lit = (value: string): Norm => ({ k: 'lit', value })
 const union = (...members: Norm[]): Norm => ({ k: 'union', members })
@@ -73,5 +73,42 @@ describe('scoreTool', () => {
   it('scores an empty universe as zero, not NaN', () => {
     expect.hasAssertions()
     expect(scoreTool([], () => 'component')).toMatchObject({ universe: 0, agree_universe: 0, agree_listed: 0 })
+  })
+})
+
+describe('scoreReported', () => {
+  it('leaves out the props of a component the tool does not report, and keeps every other verdict and reason', () => {
+    expect.hasAssertions()
+    // Card is not reported: its prop is not Button's omission, so the universe is Button's four props.
+    const score = scoreReported(
+      universe,
+      tool({
+        'Button/size': union(lit('sm'), lit('lg')),
+        'Button/label': prim('number'),
+        'Button/onClick': 'collapsed',
+        'Button/tone': 'prop',
+      }),
+    )
+
+    expect(score).toMatchObject({
+      universe: 4,
+      listed: 2,
+      verdicts: { identical: 1, spelled: 0, 'less precise': 0, wrong: 1, 'checker any/error': 0 },
+      missing_by_reason: { component: 0, failed_file: 0, prop: 1, collapsed: 1 },
+      components: 1,
+      components_found: 1,
+    })
+  })
+
+  it('is scoreTool over the whole universe when the tool reports every component', () => {
+    expect.hasAssertions()
+    const pick = (u: UniverseProp): Reported => (u.prop === 'title' ? prim('string') : 'prop')
+
+    expect(scoreReported(universe, pick)).toStrictEqual(scoreTool(universe, pick))
+  })
+
+  it('is empty when the tool reports nothing', () => {
+    expect.hasAssertions()
+    expect(scoreReported(universe, () => 'component')).toMatchObject({ universe: 0, listed: 0, components: 0 })
   })
 })

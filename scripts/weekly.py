@@ -6,13 +6,14 @@ Caliper the canonical JSON's size. Recall is measured against RDT: of the compon
 the tool also reports (same file, same name), and of their props, how many it lists, split into the props `@types/react`
 declares and the rest. react-docgen follows imports to the file that declares a type but infers nothing, and lists none
 of React's props. With --oracle it also records how often TypeScript 7.1's checker contradicts each tool's prop types,
-over every prop the checker finds. That is information, never a gate. With --agent-eval it also asks a fixed list of
-questions about real components and scores what a reader of Caliper's output answers against the checker
-(scripts/agent_eval.py): silent-wrong answers open the issue below, like a worse recall does.
+over every prop the checker finds, and the headline of scripts/headline.py: how many of the props of the components Caliper
+reports are right. With --agent-eval it also asks a fixed list of questions about real components and scores what a
+reader of Caliper's output answers against the checker (scripts/agent_eval.py).
 
---previous FILE compares with an earlier record (the last green run's artifact) and, when Caliper is more than 10%
-slower or uses more than 10% more memory, or its recall falls by more than 2 points, writes --issue FILE for the
-workflow to open or update one issue with. Nothing here fails a pull request.
+--previous FILE compares with an earlier record (the last green run's artifact) and writes --issue FILE for the workflow
+to open or update one issue with, when a wrong type is above the gate or rises, a reader's question is answered
+silent-wrong, or a whole run is over a budget (scripts/headline.py). Drift in time, memory and recall against RDT is
+listed in the summary, not alarmed on. Nothing here fails a pull request.
 
 Usage: scripts/weekly.py --bin BIN [--corpus NAME]... [--corpora DIR] [--work DIR] [--runs N] [--oracle] [--agent-eval]
                          [--previous FILE] [--baseline-failed] [--out FILE] [--markdown FILE] [--issue FILE]
@@ -28,6 +29,7 @@ import tempfile
 
 import agent_eval
 import corpora
+import headline
 import schema_version
 from corpora import ROOT, run_once, selected
 
@@ -493,6 +495,8 @@ def measure(args, corpus, work):
     if args.oracle:
         try:
             entry['oracle'] = oracle(args.bin, corpus['name'], src, root, work, rdt_out, rdg_out)
+            if h := headline.compute(entry['oracle']):
+                entry['headline'] = h
         except (subprocess.SubprocessError, OSError, KeyError) as error:
             entry['oracle'] = {'error': str(error)}
     if args.agent_eval:
@@ -511,12 +515,22 @@ def same_reference(record, previous):
 
 
 def findings(record, previous):
-    """What got worse since `previous`: Caliper's time and memory by more than 10%, its recall by more than 2 points,
-    which is not compared across references built by different rules."""
+    """What opens the issue: a wrong type above the gate or higher than last week, a silent-wrong answer to a reader's
+    question, a whole run over a budget (scripts/headline.py). Drift against `previous` is `changes`, not a finding."""
     out = []
     for name, entry in record['corpora'].items():
         old = previous.get('corpora', {}).get(name)
-        out += agent_eval.findings(name, entry, old)
+        out += headline.findings(name, entry, old) + agent_eval.findings(name, entry)
+    return out
+
+
+def changes(record, previous):
+    """What moved since `previous`, for the summary and not for an issue: Caliper's time and memory by more than 10%,
+    its recall against RDT by more than 2 points, which is not compared across references built by different rules, and the
+    agent correct rate by more than 5 points."""
+    out = []
+    for name, entry in record['corpora'].items():
+        old = previous.get('corpora', {}).get(name)
         if not old:
             continue
         for key, label in (('ms', 'time'), ('rss_mib', 'peak memory')):
@@ -528,6 +542,7 @@ def findings(record, previous):
             now, before = rate(entry['recall']['caliper'][kind]), rate(old['recall']['caliper'][kind])
             if now < before - RECALL_DROP:
                 out.append(f'{name}: recall of {kind} {100 * before:.1f}% -> {100 * now:.1f}%')
+        out += agent_eval.changes(name, entry, old)
     return out
 
 
@@ -550,10 +565,11 @@ def tool_line(corpus, tool, score):
     return f"- {corpus}, {TOOL_LABELS[tool]}: " + '; '.join(parts)
 
 
-def markdown(record, notes, reference_changed=None, baseline=True, baseline_failed=False):
-    lines = [f"Caliper {record['caliper']}, time the median of {record['runs']} runs (after one warm-up run) and memory the largest peak of them; RDT "
-             'and react-docgen one cold run each, so the comparison favours Caliper. Whole process, Node start included.', '','### Time and memory', '',
-             '| Corpus | Caliper | JSON | RDT | react-docgen |', '| --- | --: | --: | --: | --: |']
+def markdown(record, notes, reference_changed=None, moved=(), baseline=True, baseline_failed=False):
+    lines = headline.markdown(record)
+    lines += [f"Caliper {record['caliper']}, time the median of {record['runs']} runs (after one warm-up run) and memory the largest peak of them; RDT "
+              'and react-docgen one cold run each, so the comparison favours Caliper. Whole process, Node start included.', '', '### Time and memory', '',
+              '| Corpus | Caliper | JSON | RDT | react-docgen |', '| --- | --: | --: | --: | --: |']
     for name, e in record['corpora'].items():
         cell = lambda t: f"{t['ms'] / 1000:.2f} s, {t['rss_mib']:,} MiB"
         lines.append(f"| {name} | {cell(e['caliper'])} | {e['caliper']['json_mb']} MB | {cell(e['rdt'])} | "
@@ -601,7 +617,9 @@ def markdown(record, notes, reference_changed=None, baseline=True, baseline_fail
         lines += ['', f"Recall was not compared with last week's: its reference was built by version {reference_changed} of "
                       f"the rules, this one by version {record['reference_version']}."]
     if notes:
-        lines += ['', '### Worse than last week', ''] + [f'- {n}' for n in notes]
+        lines += ['', '### Needs attention (opens the issue)', ''] + [f'- {n}' for n in notes]
+    if moved:
+        lines += ['', '### Changes since last week (information)', ''] + [f'- {n}' for n in moved]
     return '\n'.join(lines) + '\n'
 
 
@@ -652,11 +670,12 @@ def main():
     if previous and not same_reference(record, previous):
         reference_changed = previous.get('reference_version', 1)
     notes = findings(record, previous) + errors(record)
-    table = markdown(record, notes, reference_changed, baseline=bool(previous), baseline_failed=args.baseline_failed)
+    table = markdown(record, notes, reference_changed, changes(record, previous), baseline=bool(previous),
+                     baseline_failed=args.baseline_failed)
     issue_notes = notes + ([BASELINE_FAILED] if args.baseline_failed else [])
     print(table)
     for path, content in ((args.out, json.dumps(record, indent=2) + '\n'), (args.markdown, table),
-                          (args.issue, 'The weekly record got worse:\n\n' + '\n'.join(f'- {n}' for n in issue_notes) + '\n'
+                          (args.issue, 'The weekly record needs attention:\n\n' + '\n'.join(f'- {n}' for n in issue_notes) + '\n'
                            if issue_notes else None)):
         if path and content:
             with open(path, 'w') as f:

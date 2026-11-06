@@ -291,7 +291,7 @@ class Baseline(unittest.TestCase):
 
     def test_the_header_states_the_warm_versus_cold_measurement(self):
         now = {'caliper': 'x', 'runs': 5, 'reference_version': 2, 'corpora': {}}
-        header = weekly.markdown(now, []).splitlines()[0]
+        header = next(l for l in weekly.markdown(now, []).splitlines() if l.startswith('Caliper x,'))
         self.assertEqual(header, 'Caliper x, time the median of 5 runs (after one warm-up run) and memory the largest peak '
                                  'of them; RDT and react-docgen one cold run each, so the comparison favours Caliper. '
                                  'Whole process, Node start included.')

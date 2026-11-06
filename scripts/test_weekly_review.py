@@ -181,12 +181,12 @@ def record(reference_version=None, recall=0.9, ms=100):
 
 class RecallIsNotComparedAcrossReferences(unittest.TestCase):
     def test_same_reference_compares_recall(self):
-        self.assertEqual(weekly.findings(record(weekly.REFERENCE_VERSION, 0.5), record(weekly.REFERENCE_VERSION, 0.9)),
+        self.assertEqual(weekly.changes(record(weekly.REFERENCE_VERSION, 0.5), record(weekly.REFERENCE_VERSION, 0.9)),
                          ['antd: recall of components 90.0% -> 50.0%'])
 
     def test_another_reference_skips_recall_but_not_time(self):
         now, before = record(weekly.REFERENCE_VERSION, 0.5, ms=200), record(weekly.REFERENCE_VERSION - 1, 0.9)
-        self.assertEqual(weekly.findings(now, before), ['antd: time 100 -> 200'])
+        self.assertEqual(weekly.changes(now, before), ['antd: time 100 -> 200'])
         self.assertFalse(weekly.same_reference(now, before))
 
     def test_a_record_without_a_version_is_version_one(self):

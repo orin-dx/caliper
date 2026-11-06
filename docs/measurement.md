@@ -70,7 +70,7 @@ Caliper collapses an inherited dependency source of more than 30 props into a la
 
 react-docgen parses each file with its default resolver and importer, as Storybook does. The importer follows relative and package imports to the file that declares a type, so a props interface imported from a sibling file is read. It does no type inference: it lists none of React's inherited attributes, and a generic, mapped or conditional type stays the source text. That is the point of the comparison. A file it throws on is counted (`failed`) and listed (`failedFiles`), not dropped silently.
 
-The run uploads `weekly.json` and a table to the job summary. It compares with the last successful run's `weekly.json` and opens, or comments on, one issue labelled `weekly-measurement` when Caliper's time or memory is more than 10% worse, or its recall is more than 2 points lower, on any corpus. There is no committed baseline: the previous run is the baseline.
+The run uploads `weekly.json` and a table to the job summary, which opens with a short "how to read these numbers" paragraph and the headline (below). It compares with the last successful run's `weekly.json` and opens, or comments on, one issue labelled `weekly-measurement` only for what is a problem on its own (see "The headline"): a wrong type above the gate or higher than last week, a silent-wrong answer to a reader's question, or a whole run over a budget. Drift in time, memory, recall against RDT and the agent correct rate is listed in the summary under "Changes since last week" and opens nothing: a shared CI machine moves by 10% or more on its own, and recall against RDT is how much of RDT's output we also report, not whether our types are right. There is no committed baseline: the previous run is the baseline for what rose.
 
 ### TypeScript's checker as the oracle
 
@@ -90,13 +90,34 @@ RDT and react-docgen are held to the checker too, by the same rules, so the comp
 
 The **universe** is every own prop the checker finds on an exported function whose only parameter, or `props` parameter, is the props type. React's inherited DOM attributes, `ref` and `key` are not in it. It includes some functions that are not components, because the checker has no notion of one, so read the shares as a comparison between tools, not as a share of real components. For each tool the record has, in `oracle.tools`:
 
-- **Agreement of the whole universe** (`agree_universe`): identical or spelled, over every prop in the universe. A prop the tool omits counts against it. This is the headline.
+- **Agreement of the whole universe** (`agree_universe`): identical or spelled, over every prop in the universe. A prop the tool omits counts against it. This is the comparison between tools; Caliper's own headline is below.
 - **Agreement of listed props** (`agree_listed`) and the share the checker contradicts (`wrong_listed`): over the props the tool lists, which is what Caliper's own `agree` and `wrong` have always been.
 - **Omitted props**, by where the checker declares them (`missing_by_stratum`): the component's own file, another file of the corpus, or a dependency. A prop Caliper lists only as a member of a collapsed inheritance layer is counted apart (`collapsed`), because that is a choice and not an omission.
 - **Why a prop is omitted** (`missing_by_reason`): the tool reports no such component, it reports the component but not the prop, or it threw on the file.
 - **react-docgen's thrown files** (`failed_files`): files its default resolver throws on, 17% to 21% of the files on antd and shadcn. Their props are omitted, so they cost react-docgen agreement; they have their own column so the cost is visible.
 
-`oracle.shared_props`, `agree` and `wrong` keep their meaning, so the weekly history does not move. A local run on antd and shadcn at the commit that added this reads, for the whole universe: Caliper 39.7% and 40.1% (its `collapsed` layers and any component it does not report count against it), RDT 44.8% and 84.8%, react-docgen 24.6% and 1.9%. The step is information, never a gate, and the rules are validated on antd and shadcn only: Mantine, Chakra and Spectrum need a weekly run.
+`oracle.shared_props`, `agree` and `wrong` keep their meaning, so the weekly history does not move. A local run on antd and shadcn at the commit that added this reads, for the whole universe: Caliper 39.7% and 40.1% (its `collapsed` layers and any component it does not report count against it), RDT 44.8% and 84.8%, react-docgen 24.6% and 1.9%. This comparison between tools is information, never a gate, and the rules are validated on antd and shadcn only: Mantine, Chakra and Spectrum need a weekly run.
+
+### The headline
+
+What matters is whether the types Storybook and agents are shown are right, not whether Caliper matches RDT. The headline (`scripts/headline.py`, read from `oracle.tools.caliper_reported`, which `apps/oracle/src/tool-score.ts` `scoreReported` computes) takes every own prop the checker finds on a component Caliper reports, so a function the checker takes for a component and Caliper rightly ignores does not count against it, and sorts each prop into one kind:
+
+- **Correct**: the same type as the checker, or the same type spelled differently.
+- **Less precise**: vaguer than the checker's (a name left unexpanded, `string` for a union of literals), not contradicting it.
+- **Wrong**: describes something else. This is the gate.
+- **No checker type**: the checker has none either (an unresolved import, `any`).
+- **Missing**: Caliper reports the component but not the prop.
+- **Named only**: Caliper lists the prop by name as a member of a collapsed inheritance layer, so it is surfaced but a reader sees no type for it. It is counted apart, as neither correct nor wrong, because correct values reached through a layer are a win and a bare name is not.
+
+The record keeps the counts per corpus as `headline`, next to the unchanged `oracle` and `recall` fields. The shares in the summary are of every prop of the components Caliper reports. The gate uses the wrong share of the props whose type can be judged (correct, less precise and wrong), so a corpus with many layer-only props does not dilute it.
+
+The issue opens when, on any corpus:
+
+- more than 0.1% of the judged props are wrong, or the wrong share is higher than last week's;
+- a question a reader is asked is answered silent-wrong (`scripts/agent_eval.py`);
+- a whole run is over a budget: 2 s or 600 MiB with dependencies loaded, the default (`BUDGETS` in `scripts/headline.py`). The budgets are user-facing limits, not week-over-week ones; Chakra, the largest corpus, runs in about 1 s and 446 MiB.
+
+Recall against RDT stays information. A local run on antd and shadcn at the commit that added this reads: antd 83.7% correct, 6.0% less precise, 0.00% wrong, 10.2% named only (3,426 props); shadcn 54.4% correct, 5.1% less precise, 0.06% wrong (0.096% of the judged props, just under the gate), 0.4% missing, 39.6% named only (13,918 props). Mantine, Chakra and Spectrum need a weekly run.
 
 ### An independent reference
 
