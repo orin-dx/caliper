@@ -81,8 +81,17 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     public.props_type_args.clear();
                     public.wrapper_callee = None;
                     public.rule = crate::types::DetectionRule::FcAnnotation;
-                    if base_name == exported {
-                        self.data.component_mappings[index] = public;
+                    // `const A = Inner as VFC<P>` was already bound as an alias of `Inner`; the cast replaces that
+                    // mapping so `A` is published once, with `P`.
+                    // A rename (`export { A as B }`) replaces only the mapping of the inner component being re-exported
+                    // under its own name; another local that happens to be called `B` keeps its mapping.
+                    let existing = (local == exported || base_name == exported)
+                        .then(|| {
+                            self.data.component_mappings.iter().position(|mapping| mapping.component_name == exported)
+                        })
+                        .flatten();
+                    if let Some(at) = existing {
+                        self.data.component_mappings[at] = public;
                     } else {
                         self.data.component_mappings.push(public);
                     }

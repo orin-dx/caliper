@@ -101,6 +101,10 @@ pub fn is_attribute_builtin(bare_name: &str) -> bool {
     matches!(bare_name, "AriaAttributes" | "RefAttributes")
 }
 
+/// The `@types/react` function-component types, whose first type argument is the props. The one list the extractor
+/// and the resolver both read, so a name added here is recognised by both.
+pub const FC_FAMILY_TYPE_NAMES: &[&str] = &["FC", "FunctionComponent", "VFC", "VoidFunctionComponent", "ComponentType"];
+
 /// Types that are terminal — never need further resolution.
 ///
 /// These are React-specific type names that we recognize as builtins and don't
@@ -110,6 +114,7 @@ pub fn is_attribute_builtin(bare_name: &str) -> bool {
 /// from `PipelineOptions.extra_builtins` without needing to change this file.
 pub fn is_react_builtin(name: &str, extra: &rustc_hash::FxHashSet<compact_str::CompactString>) -> bool {
     extra.contains(name)
+        || FC_FAMILY_TYPE_NAMES.contains(&name)
         || matches!(
             name,
             "ReactNode"
@@ -147,11 +152,6 @@ pub fn is_react_builtin(name: &str, extra: &rustc_hash::FxHashSet<compact_str::C
                 | "SubmitEventHandler"
                 | "InputEventHandler"
                 | "ToggleEventHandler"
-                | "FC"
-                | "FunctionComponent"
-                | "VFC"
-                | "VoidFunctionComponent"
-                | "ComponentType"
                 | "PropsWithChildren"
                 | "PropsWithRef"
                 | "RefObject"
@@ -327,10 +327,44 @@ pub fn notable_html_attrs(element: &str) -> &'static [&'static str] {
     }
 }
 
+/// Whether an import specifier is React itself: `react`, a subpath of it, its `@types` package, or Preact's
+/// compatibility layer. The extractor and the resolver both ask this, so they agree on which imports are React's.
+pub(crate) fn is_react_module(specifier: &str) -> bool {
+    specifier == "react"
+        || specifier.starts_with("react/")
+        || specifier == "@types/react"
+        || specifier == "preact/compat"
+}
+
+/// Whether an import specifier is Preact: `preact` or a subpath of it, where its `h` lives.
+pub(crate) fn is_preact_module(specifier: &str) -> bool {
+    specifier == "preact" || specifier.starts_with("preact/")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rstest::rstest;
+
+    #[rstest]
+    #[case("react", true)]
+    #[case("react/jsx-runtime", true)]
+    #[case("@types/react", true)]
+    #[case("preact/compat", true)]
+    #[case("preact", false)]
+    #[case("react-dom", false)]
+    fn is_react_module_names_the_modules_that_declare_react_types(#[case] specifier: &str, #[case] expected: bool) {
+        assert_eq!(is_react_module(specifier), expected);
+    }
+
+    #[rstest]
+    #[case("preact", true)]
+    #[case("preact/hooks", true)]
+    #[case("preact-render-to-string", false)]
+    #[case("react", false)]
+    fn is_preact_module_names_preact_and_its_subpaths(#[case] specifier: &str, #[case] expected: bool) {
+        assert_eq!(is_preact_module(specifier), expected);
+    }
 
     // Every match arm in html_element_for, not a sample — including both
     // members of the `SVGAttributes | SVGProps` or-pattern as distinct cases

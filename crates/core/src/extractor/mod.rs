@@ -58,10 +58,7 @@ impl ReactApi {
     }
 }
 
-/// Whether an import specifier is React itself: `react`, a subpath of it, or Preact's compatibility layer.
-fn is_react_module(specifier: &str) -> bool {
-    specifier == "react" || specifier.starts_with("react/") || specifier == "preact/compat"
-}
+use crate::react_types::is_react_module;
 
 // ─── Entry Point ─────────────────────────────────────────────────────────────
 
@@ -668,7 +665,7 @@ impl<'src> SourceDataCollector<'src> {
             .imports
             .iter()
             .find(|imp| imp.local_name.as_str() == name)
-            .is_none_or(|imp| imp.specifier == "react" || imp.specifier.starts_with("react/"))
+            .is_none_or(|imp| is_react_module(&imp.specifier))
     }
 
     // ─── ExtendsRef classification ────────────────────────────────────────────
@@ -1290,5 +1287,17 @@ impl evidence::Scope for SourceDataCollector<'_> {
 
     fn is_react_wrapper(&self, call: &CallExpression<'_>) -> bool {
         matches!(self.react_api(&call.callee), Some(ReactApi::Memo | ReactApi::ForwardRef))
+    }
+
+    fn is_preact_h(&self, receiver: Option<&str>) -> bool {
+        self.data.imports.iter().any(|import| {
+            let binds = match receiver {
+                None => import.local_name.as_str() == "h" && import.exported_name.as_str() == "h",
+                Some(object) => {
+                    import.local_name.as_str() == object && matches!(import.exported_name.as_str(), "*" | "default")
+                }
+            };
+            binds && crate::react_types::is_preact_module(&import.specifier)
+        })
     }
 }
