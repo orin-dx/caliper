@@ -283,6 +283,19 @@ class Baseline(unittest.TestCase):
         self.assertIn('No baseline: there was no earlier record', weekly.markdown(now, [], baseline=False))
         self.assertNotIn('No baseline', weekly.markdown(now, []))
 
+    def test_a_failed_baseline_download_is_not_called_a_missing_baseline(self):
+        now = {'caliper': 'x', 'runs': 1, 'reference_version': 2, 'corpora': {}}
+        table = weekly.markdown(now, [], baseline=False, baseline_failed=True)
+        self.assertIn("The baseline download failed, so this run was not compared with last week's record.", table)
+        self.assertNotIn('No baseline', table)
+
+    def test_the_header_states_the_warm_versus_cold_measurement(self):
+        now = {'caliper': 'x', 'runs': 5, 'reference_version': 2, 'corpora': {}}
+        header = weekly.markdown(now, []).splitlines()[0]
+        self.assertEqual(header, 'Caliper x, time the median of 5 runs (after one warm-up run) and memory the largest peak '
+                                 'of them; RDT and react-docgen one cold run each, so the comparison favours Caliper. '
+                                 'Whole process, Node start included.')
+
     def test_an_oracle_error_is_an_issue_line(self):
         record = {'corpora': {'chakra': {'oracle': {'error': 'the comparison is empty'}, 'agent_eval': {'recall': 1}}}}
         self.assertEqual(weekly.errors(record), ['chakra, oracle: the comparison is empty'])
