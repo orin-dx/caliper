@@ -469,7 +469,7 @@ impl Loader<'_> {
     }
 
     fn in_project(&self, file: &Utf8Path) -> bool {
-        !file.as_str().contains("/node_modules/") && self.project_dirs.iter().any(|dir| file.starts_with(dir))
+        !in_node_modules(file.as_str()) && self.project_dirs.iter().any(|dir| file.starts_with(dir))
     }
 
     /// React's own types stay with the resolver's React handling (builtins, curated HTML attributes).
@@ -834,7 +834,7 @@ impl Loader<'_> {
     /// the index, so they must not make a warm run rewrite it. Export answers of a package that `write_index` drops
     /// still count here, since only the written bytes tell; `write_index` leaves the file alone when they are unchanged.
     fn learn(&self, dir: &Utf8Path) {
-        if dir.as_str().contains("/node_modules/") && self.package_of(dir).is_some() {
+        if in_node_modules(dir.as_str()) && self.package_of(dir).is_some() {
             self.learned.store(true, Ordering::Relaxed);
         }
     }
@@ -846,7 +846,7 @@ impl Loader<'_> {
         let found = dir
             .ancestors()
             .find(|candidate| candidate.join("package.json").is_file())
-            .filter(|candidate| candidate.as_str().contains("/node_modules/"))
+            .filter(|candidate| in_node_modules(candidate.as_str()))
             .map(|candidate| Box::from(candidate.as_str()));
         self.packages.insert(Box::from(dir.as_str()), found.clone());
         found
@@ -939,12 +939,8 @@ pub(crate) fn load(
     previous: Option<&Arc<DependencyLayer>>,
 ) -> DependencyLayer {
     let resolvers = ModuleResolvers::new(options);
-    let project_dirs: Vec<Utf8PathBuf> = options
-        .src_dirs
-        .iter()
-        .filter_map(|dir| std::fs::canonicalize(dir).ok())
-        .filter_map(|dir| Utf8PathBuf::from_path_buf(dir).ok())
-        .collect();
+    let project_dirs: Vec<Utf8PathBuf> =
+        options.src_dirs.iter().filter_map(|dir| crate::canonical_path::canonicalize(dir).ok()).collect();
     let parent: Option<Arc<DependencyLayer>> = previous.filter(|layer| layer.depth < MAX_CHAIN_DEPTH).cloned();
     let flatten = previous.filter(|_| parent.is_none());
     let loader = Loader {
@@ -1142,6 +1138,12 @@ fn index_path(options: &PipelineOptions) -> (Utf8PathBuf, u64) {
     let dir = options.effective_cache_dir();
     let fingerprint = crate::resolver::resolution_fingerprint(options);
     (dir.join(format!("dependency-index-{fingerprint:016x}.msgpack")), fingerprint)
+}
+
+/// Whether `path` lies inside a `node_modules` directory, spelled with either separator (a Windows path has
+/// backslashes once the verbatim prefix is gone).
+pub(crate) fn in_node_modules(path: &str) -> bool {
+    path.contains("/node_modules/") || path.contains(r"\node_modules\")
 }
 
 fn package_stamp(dir: &str) -> Option<(u128, u64)> {
