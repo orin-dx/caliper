@@ -130,6 +130,13 @@ describe('createDocgenProvider', () => {
     expect(payload?.subcomponents?.Option?.error).toBeUndefined()
   })
 
+  it('documents a subcomponent read through a local binding of the story file', async () => {
+    const { payload, nextCalls } = await request(binding(), story('Parts'))
+    expect(nextCalls).toBe(0)
+    expect(payload?.subcomponents?.ListItem?.error).toBeUndefined()
+    expect(Object.keys(payload?.subcomponents?.ListItem?.argTypes ?? {})).toEqual(['bullet'])
+  })
+
   it('asks the next provider when the session has no such component', async () => {
     const fake = binding()
     delete fake.output.components!.Card

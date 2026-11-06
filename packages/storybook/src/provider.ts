@@ -28,15 +28,15 @@ interface StoryFile {
 }
 
 /**
- * A story file whose `meta.component` is `expression`, parsed from the story's own imports plus that expression so every
- * node has source text: Storybook's resolver reads it when it reports an expression it cannot follow.
+ * `csf`'s story file with its default export replaced by one whose `component` is `expression`: every other statement
+ * stays, so the resolver follows the story's imports and local bindings (`const parts = { Item }`) as it would for the
+ * written meta, and every node has source text for it to report an expression it cannot follow.
  */
 function storyFor(csf: CsfFile, storyPath: string, expression: string): CsfFile {
   const source = csf.editor.toString()
-  const imports = csf.program.body
-    .filter((statement) => statement.type === 'ImportDeclaration')
-    .map((statement) => source.slice(statement.start, statement.end))
-  const code = `${imports.join('\n')}\nexport default { component: ${expression} }\n`
+  const meta = csf.program.body.find((statement) => statement.type === 'ExportDefaultDeclaration')
+  const replaced = `export default { component: ${expression} }`
+  const code = meta ? `${source.slice(0, meta.start)}${replaced}${source.slice(meta.end)}` : `${source}\n${replaced}\n`
   return loadCsf(code, { fileName: storyPath, makeTitle: () => 'caliper-docgen' }).parse()
 }
 
@@ -116,12 +116,13 @@ export function createDocgenProvider(
       if (!path) throw new Error(`no file for the import of ${exportName}`)
       const key = await session.resolveExport(path, exportName, localName)
       if (key) return { key, path }
-      // Storybook follows `Select.Option` into the module that declares `Option`; caliper may know it as `Select.Option`.
+      // Storybook follows `Select.Option` into the module that declares `Option` and answers with that local name, which
+      // caliper may know as `Select.Option`.
       const member = memberComponent(session, target, storyPath)
       if (member) return member
       throw new Error(noComponent(session, exportName, path))
     }
-    // Storybook reads `Namespace.Member` only for `import * as Namespace`; `Select.Option` of a named import is common.
+    // A member Storybook cannot follow into a module's source (`Select.Option` of a named import from a barrel).
     const member = memberComponent(session, target, storyPath)
     if (member) return member
     throw new Error(`meta.component: ${resolution.reason}`)

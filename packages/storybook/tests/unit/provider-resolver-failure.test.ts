@@ -12,7 +12,8 @@ vi.mock('storybook/internal/common', async (importOriginal) => {
     createMetaComponentResolver: () => {
       const real = original.createMetaComponentResolver()
       return (...args: Parameters<typeof real>) => {
-        if (args[0].editor.toString().includes('component: Select.Option')) throw new Error('resolver blew up')
+        const component = args[0]._metaAnnotations.component as { type?: string } | undefined
+        if (component?.type === 'MemberExpression') throw new Error('resolver blew up')
         return real(...args)
       }
     },

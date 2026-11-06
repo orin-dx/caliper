@@ -107,4 +107,10 @@ describe.skipIf(!bindingAvailable)('provider in a worker thread', () => {
     expect(payload.subcomponents.Option.error).toBeUndefined()
     expect(Object.keys(payload.subcomponents.Option.argTypes)).toEqual(['value'])
   })
+
+  it('documents a subcomponent read through a local binding of the story file', async () => {
+    const payload = await request('Parts')
+    expect(payload.subcomponents.ListItem.error).toBeUndefined()
+    expect(Object.keys(payload.subcomponents.ListItem.argTypes).toSorted()).toEqual(['bullet', 'children', 'selected'])
+  })
 })
