@@ -55,7 +55,7 @@ pub(super) fn mark_args<'a>(
     state: &mut ResolveState,
     args: &'a [CollectedType],
 ) -> std::borrow::Cow<'a, [CollectedType]> {
-    if state.scope.is_empty() {
+    if state.binds_nothing() {
         // Whether a name is bound here is not looked up name by name: a state that binds any name marks differently.
         if let Some(reads) = state.reads.as_mut() {
             if reads.entered_scopes == 0 {

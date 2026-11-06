@@ -11,7 +11,7 @@ use super::collected::{
     ImportBinding, LexedExport, RawDefault, SourceData, TypeName,
 };
 use super::diagnostic::Diagnostic;
-use super::scope::{unmarked, TypeScope};
+use super::scope::{is_marked_placeholder, TypeScope};
 
 // ─── ResolveState ─────────────────────────────────────────────────────────────
 
@@ -66,6 +66,10 @@ pub(crate) struct ResolveState {
     /// placeholder, not a broken/missing type, and it shadows any declaration of the same name — see
     /// `resolver::named::resolve_named`.
     pub(crate) scope: TypeScope,
+    /// The type parameters of the function a factory call builds its component with, which stay in scope whatever
+    /// declaration is read: a declaration local to that function (`function make<T>() { interface Props { value: T } … }`)
+    /// names them, and `enter_scope` replaces `scope` only.
+    pub(crate) closure: TypeScope,
     /// Set when an alias is shown by its name because its expansion holds a type the resolver can't evaluate, so an
     /// alias whose expansion contains that one is shown by name too — see `resolver::named::alias_display`.
     pub(crate) named_unevaluated: bool,
@@ -175,6 +179,7 @@ impl ResolveState {
             diagnostics: Vec::new(),
             shared_diagnostics: Vec::new(),
             scope: self.scope.clone(),
+            closure: self.closure.clone(),
             named_unevaluated: false,
             expand_all: self.expand_all,
             keys_only: self.keys_only,
@@ -187,6 +192,7 @@ impl ResolveState {
     pub(crate) fn detached(&self) -> ResolveState {
         ResolveState {
             scope: self.scope.clone(),
+            closure: self.closure.clone(),
             expand_all: self.expand_all,
             keys_only: self.keys_only,
             reads: self.reads.as_ref().map(|_| Box::default()),
@@ -253,16 +259,26 @@ impl ResolveState {
     /// Whether `name` is a type parameter in scope: the innermost binding of that name, shadowing any declaration.
     pub(crate) fn has_type_param(&mut self, name: &str) -> bool {
         // A marked name is a placeholder wherever it is read, whatever scope that is.
-        if unmarked(name).len() != name.len() {
+        if is_marked_placeholder(name) {
             return true;
         }
-        let found = self.scope.contains(name);
+        let found = self.binds(name);
         if let Some(reads) = self.reads.as_mut() {
             if reads.entered_scopes == 0 {
                 reads.in_scope.push((CompactString::from(name), found));
             }
         }
         found
+    }
+
+    /// Whether `name` is bound by the scope or the closure.
+    pub(crate) fn binds(&self, name: &str) -> bool {
+        self.scope.contains(name) || self.closure.contains(name)
+    }
+
+    /// Whether nothing is in scope.
+    pub(crate) fn binds_nothing(&self) -> bool {
+        self.scope.is_empty() && self.closure.is_empty()
     }
 
     /// Read what follows under `scope` instead of the current one; give the scope it replaces back to `leave_scope`.

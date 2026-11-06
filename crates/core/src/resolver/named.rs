@@ -80,8 +80,18 @@ fn resolve_named_uncycled(
         return OpaqueDetail::give_up(state, name.to_string(), OpaqueReason::DepthExceeded, diag);
     }
 
+    // A reference marked as a declaration's is looked up as one, whatever type parameter is in scope under its name.
+    let declared_name;
+    let (name, as_declaration) = match name.strip_suffix(DECLARATION_MARK) {
+        Some(bare) => {
+            declared_name = CompactString::from(bare);
+            (&declared_name, true)
+        }
+        None => (name, false),
+    };
+
     // ── 0. A type parameter in scope shadows any declaration of the same name ──
-    if args.is_empty() && state.has_type_param(name) {
+    if !as_declaration && args.is_empty() && state.has_type_param(name) {
         return PropType::Named { name: unmarked(name).into(), args: Vec::new() };
     }
 
@@ -235,7 +245,7 @@ fn resolve_named_uncycled(
     }
 
     // ── 6.5 Enclosing generic's own type parameter — expected, not unresolvable ─
-    if state.has_type_param(bare) {
+    if !as_declaration && state.has_type_param(bare) {
         return PropType::Named { name: unmarked(name).into(), args: resolved_args };
     }
 

@@ -4205,6 +4205,62 @@ fn a_factory_parameter_the_call_fills_is_its_argument_not_a_placeholder() {
     assert_eq!(output.components["Other"].props["value"].prop_type.raw_string(), "string");
 }
 
+#[test]
+fn a_declaration_local_to_a_factory_keeps_the_factory_parameter_in_scope() {
+    for local in ["interface Props { value: T }", "type Props = { value: T };"] {
+        let output = extract_with_installed_libs(&[
+            (
+                "factory.tsx",
+                &format!(
+                    "import * as React from 'react';\n\
+                     export function make<T>() {{ {local} return (p: Props) => <div />; }}\n"
+                ),
+            ),
+            ("Field.tsx", "import { make } from './factory';\nexport const Field = make<number>();\n"),
+        ]);
+        assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new(), "{local}");
+        assert_eq!(output.components["Field"].props["value"].prop_type.raw_string(), "T", "{local}");
+    }
+}
+
+#[test]
+fn a_signature_parameter_of_a_factory_result_does_not_capture_an_argument_named_like_it() {
+    let output = extract_with_installed_libs(&[
+        (
+            "factory.tsx",
+            "import * as React from 'react';\n\
+             export function make<P>(): <C>(p: { value: P; tag?: C }) => React.ReactElement { return null as never; }\n",
+        ),
+        (
+            "Field.tsx",
+            "import { make } from './factory';\ntype C = number;\nexport const Field = make<C>();\n",
+        ),
+    ]);
+    let props = &output.components["Field"].props;
+    assert_eq!(props["value"].prop_type.raw_string(), "number");
+    assert_eq!(props["tag"].prop_type.raw_string(), "C");
+}
+
+#[test]
+fn a_factory_parameter_the_call_leaves_unfilled_is_not_the_argument_named_like_it() {
+    let output = extract_with_installed_libs(&[
+        (
+            "factory.tsx",
+            "import * as React from 'react';\n\
+             export function make<T, P>(r: (props: any) => unknown): React.FC<{ a: T; b: P }> { return r as never; }\n",
+        ),
+        (
+            "Field.tsx",
+            "import { make } from './factory';\n\
+             type P = number;\n\
+             export const Field = make<P>((props) => <div />);\n",
+        ),
+    ]);
+    let props = &output.components["Field"].props;
+    assert_eq!(props["a"].prop_type.raw_string(), "number");
+    assert_eq!(props["b"].prop_type.raw_string(), "P");
+}
+
 /// The props of `Field` from `source`, each as the text of its resolved type.
 fn field_prop_texts(source: &str) -> Vec<(String, String)> {
     let output = extract_one(&[("Field.tsx", source)]);
