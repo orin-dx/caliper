@@ -196,7 +196,6 @@ export function caliperDocgen(options: CaliperDocgenOptions): Plugin {
       // Vite 6+ supplies this.environment in the hotUpdate context.
       // We cast rather than annotating `this:` to avoid fighting the Plugin interface's
       // declared this-type across different Vite patch versions.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const env = (this as any).environment as
         | {
             name: string
