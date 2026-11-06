@@ -4012,6 +4012,377 @@ export function Row(props: { render: ({ id }: { id: string }, index?: number) =>
 }
 
 #[test]
+fn record_over_a_union_keeps_a_user_type_named_k_as_its_value() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "type K = { x: number };\nexport function Box(props: Record<'a' | 'b', K>) { return null; }\n",
+    )]);
+    let props = &output.components["Box"].props;
+    let mut names: Vec<&str> = props.keys().map(String::as_str).collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["a", "b"]);
+    let k = PropType::Object(vec![ObjectField {
+        name: "x".into(),
+        prop_type: PropType::Number,
+        required: true,
+        description: String::new(),
+        readonly: false,
+        index_key: None,
+    }]);
+    assert_eq!(props["a"].prop_type, k);
+    assert_eq!(props["b"].prop_type, k);
+}
+
+#[test]
+fn a_function_type_parameter_shadows_an_outer_alias_of_the_same_name_in_every_use() {
+    let output = extract_one(&[(
+        "Field.tsx",
+        "type Value = { outer: true };\n\
+         export function Field<Value>(p: { value: Value; onChange(v: Value): void }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Field"].props;
+    assert_eq!(props["value"].prop_type, PropType::Named { name: "Value".into(), args: vec![] });
+    assert_eq!(props["onChange"].prop_type.raw_string(), "(v: Value) => void");
+}
+
+#[test]
+fn an_alias_argument_naming_an_outer_alias_is_resolved_in_the_callers_scope() {
+    let output = extract_one(&[(
+        "Field.tsx",
+        "type Value = number;\n\
+         type Id<Value> = Value;\n\
+         export function Field(p: { value: Id<Value>; later: Value }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Field"].props;
+    assert_eq!(props["value"].prop_type.raw_string(), "number");
+    assert_eq!(props["later"].prop_type.raw_string(), "number");
+}
+
+#[test]
+fn an_alias_parameter_shadows_an_outer_alias_only_inside_that_alias() {
+    let output = extract_one(&[(
+        "Field.tsx",
+        "type Value = number;\n\
+         type Wrap<Value> = { inner: Value };\n\
+         export function Field(p: { first: Wrap; second: Value; third: Value }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Field"].props;
+    assert_eq!(props["first"].prop_type.raw_string(), "{ inner: Value }");
+    assert_eq!(props["second"].prop_type.raw_string(), "number");
+    assert_eq!(props["third"].prop_type.raw_string(), "number");
+}
+
+#[test]
+fn a_component_parameter_read_through_an_interface_member_stays_a_placeholder() {
+    let output = extract_one(&[(
+        "Field.tsx",
+        "interface Box<T> { value: T }\n\
+         export function Field<T>(p: { value: Box<T>['value'] }) { return null; }\n",
+    )]);
+    assert_eq!(output.components["Field"].props["value"].prop_type.raw_string(), "T");
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+}
+
+#[test]
+fn a_component_parameter_read_through_an_alias_member_stays_a_placeholder() {
+    let output = extract_one(&[(
+        "Field.tsx",
+        "type T = number;\n\
+         type Holder<A> = { value: A };\n\
+         export function Field<T>(p: { value: Holder<T>['value'] }) { return null; }\n",
+    )]);
+    assert_eq!(output.components["Field"].props["value"].prop_type.raw_string(), "T");
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+}
+
+// Each program below disagreed with TypeScript's own checker over generated programs: a type argument that names the
+// component's parameter, read through a member of a generic declaration, was captured by a module declaration of the
+// same name.
+
+#[test]
+fn a_component_parameter_inside_an_object_read_through_an_alias_member_stays_a_placeholder() {
+    let props = field_prop_texts(
+        "type T = number;\n\
+         type Read<A extends { v: unknown }> = A['v'];\n\
+         export function Field<T>(p: { v: Read<{ v: T }> }) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("v", "T")]);
+}
+
+#[test]
+fn a_component_parameter_in_an_array_read_through_an_alias_member_keeps_its_name() {
+    let props = field_prop_texts(
+        "type A = 42;\n\
+         type T = A[];\n\
+         type Read<X extends { v: unknown }> = X['v'];\n\
+         export function Field<A, T>(p: { p1: Read<{ v: T[] }> }) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("p1", "T[]")]);
+}
+
+#[test]
+fn a_component_parameter_named_like_a_generic_module_alias_is_not_that_alias_when_read_through_a_member() {
+    let props = field_prop_texts(
+        "type K<P> = { w: P };\n\
+         type Read<X extends { v: unknown }> = X['v'];\n\
+         export const Field = <K, P,>(p: { p0: Read<{ v: K }> }) => null;\n",
+    );
+    assert_eq!(props, vec![pair("p0", "K")]);
+}
+
+#[test]
+fn a_member_read_of_an_argument_naming_an_unfilled_parameter_is_that_parameter() {
+    let props = field_prop_texts(
+        "type A<K> = { v: K };\n\
+         type Read<X extends { v: unknown }> = X['v'];\n\
+         export const Field = <P, A,>(p: { p1: Read<{ v: A }> }) => null;\n",
+    );
+    assert_eq!(props, vec![pair("p1", "A")]);
+}
+
+#[test]
+fn a_component_parameter_in_a_picked_member_keeps_its_name() {
+    let props = field_prop_texts(
+        "type T = number;\n\
+         type Read<X extends { v: unknown }> = X['v'];\n\
+         export function Field<T>(p: { p0?: Array<Pick<{ a: Read<{ v: T }>; b: number }, 'a'>> }) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("p0", "Array<Pick<{ a: T; b: number }, \"a\">>")]);
+}
+
+#[test]
+fn a_component_parameter_in_a_tuple_read_through_an_interface_member_keeps_its_name() {
+    let props = field_prop_texts(
+        "type A = number;\n\
+         interface Cell<X> { value: X }\n\
+         export const Field = <A,>(p: { p0?: Cell<[A, number]>['value'] }) => null;\n",
+    );
+    assert_eq!(props, vec![pair("p0", "[A, number]")]);
+}
+
+#[test]
+fn a_component_parameter_inside_a_record_read_through_an_alias_member_keeps_its_name() {
+    let props = field_prop_texts(
+        "type P = 42;\n\
+         type Read<X extends { v: unknown }> = X['v'];\n\
+         export function Field<P>(p: { p2?: Read<{ v: Record<'x' | 'y', P | string[]> }> }) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("p2", "Record<\"x\" | \"y\", P | string[]>")]);
+}
+
+#[test]
+fn component_parameters_inside_an_intersection_read_through_an_alias_member_keep_their_names() {
+    let props = field_prop_texts(
+        "type A<Value> = Value | null;\n\
+         type Value<K> = A<K>;\n\
+         type Read<X extends { v: unknown }> = X['v'];\n\
+         export const Field = <A, Value,>(p: { p1: Read<{ v: Pick<{ a: { a: Value } & { b: A }; b: number }, 'a'> }> }) => null;\n",
+    );
+    assert_eq!(props, vec![pair("p1", "Pick<{ a: { a: Value } & { b: A }; b: number }, \"a\">")]);
+}
+
+#[test]
+fn a_factory_parameter_the_call_fills_is_its_argument_not_a_placeholder() {
+    let output = extract_with_installed_libs(&[
+        (
+            "factory.tsx",
+            "import * as React from 'react';\n\
+             export function make<T>(r: (props: any) => unknown): React.FC<{ value: T }> { return r as never; }\n",
+        ),
+        (
+            "Field.tsx",
+            "import { make } from './factory';\n\
+             type T = number;\n\
+             type S = string;\n\
+             export const Field = make<T>((props) => <div />);\n\
+             export const Other = make<S>((props) => <div />);\n",
+        ),
+    ]);
+    assert_eq!(output.components["Field"].props["value"].prop_type.raw_string(), "number");
+    assert_eq!(output.components["Other"].props["value"].prop_type.raw_string(), "string");
+}
+
+#[test]
+fn a_declaration_local_to_a_factory_keeps_the_factory_parameter_in_scope() {
+    for local in ["interface Props { value: T }", "type Props = { value: T };"] {
+        let output = extract_with_installed_libs(&[
+            (
+                "factory.tsx",
+                &format!(
+                    "import * as React from 'react';\n\
+                     export function make<T>() {{ {local} return (p: Props) => <div />; }}\n"
+                ),
+            ),
+            ("Field.tsx", "import { make } from './factory';\nexport const Field = make<number>();\n"),
+        ]);
+        assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new(), "{local}");
+        assert_eq!(output.components["Field"].props["value"].prop_type.raw_string(), "T", "{local}");
+    }
+}
+
+#[test]
+fn a_signature_parameter_of_a_factory_result_does_not_capture_an_argument_named_like_it() {
+    let output = extract_with_installed_libs(&[
+        (
+            "factory.tsx",
+            "import * as React from 'react';\n\
+             export function make<P>(): <C>(p: { value: P; tag?: C }) => React.ReactElement { return null as never; }\n",
+        ),
+        (
+            "Field.tsx",
+            "import { make } from './factory';\ntype C = number;\nexport const Field = make<C>();\n",
+        ),
+    ]);
+    let props = &output.components["Field"].props;
+    assert_eq!(props["value"].prop_type.raw_string(), "number");
+    assert_eq!(props["tag"].prop_type.raw_string(), "C");
+}
+
+#[test]
+fn a_factory_parameter_the_call_leaves_unfilled_is_not_the_argument_named_like_it() {
+    let output = extract_with_installed_libs(&[
+        (
+            "factory.tsx",
+            "import * as React from 'react';\n\
+             export function make<T, P>(r: (props: any) => unknown): React.FC<{ a: T; b: P }> { return r as never; }\n",
+        ),
+        (
+            "Field.tsx",
+            "import { make } from './factory';\n\
+             type P = number;\n\
+             export const Field = make<P>((props) => <div />);\n",
+        ),
+    ]);
+    let props = &output.components["Field"].props;
+    assert_eq!(props["a"].prop_type.raw_string(), "number");
+    assert_eq!(props["b"].prop_type.raw_string(), "P");
+}
+
+/// The props of `Field` from `source`, each as the text of its resolved type.
+fn field_prop_texts(source: &str) -> Vec<(String, String)> {
+    let output = extract_one(&[("Field.tsx", source)]);
+    let mut props: Vec<(String, String)> = output.components["Field"]
+        .props
+        .iter()
+        .map(|(name, prop)| (name.clone(), prop.prop_type.raw_string()))
+        .collect();
+    props.sort();
+    props
+}
+
+fn pair(name: &str, ty: &str) -> (String, String) {
+    (name.to_owned(), ty.to_owned())
+}
+
+#[test]
+fn an_interface_parameter_does_not_capture_the_callers_argument_of_the_same_name() {
+    let props = field_prop_texts(
+        "type Value = number;\n\
+         interface Props<Value> { value: Value }\n\
+         export function Field(p: Props<Value>) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("value", "number")]);
+}
+
+#[test]
+fn an_interface_parameter_the_caller_leaves_unfilled_stays_a_placeholder() {
+    let props = field_prop_texts(
+        "type Value = number;\n\
+         interface Props<Value> { value: Value }\n\
+         export function Field(p: Props) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("value", "Value")]);
+}
+
+#[test]
+fn a_component_parameter_passed_to_an_interface_stays_a_placeholder() {
+    let props = field_prop_texts(
+        "type Value = number;\n\
+         interface Props<Value> { value: Value }\n\
+         export function Field<Value>(p: Props<Value>) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("value", "Value")]);
+}
+
+#[test]
+fn an_alias_declared_outside_the_component_resolves_its_names_in_module_scope() {
+    let props = field_prop_texts(
+        "type Value = number;\n\
+         type Saved = Value;\n\
+         export function Field<Value>(p: { value: Saved }) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("value", "number")]);
+}
+
+#[test]
+fn an_object_alias_declared_outside_the_component_resolves_its_names_in_module_scope() {
+    let output = extract_one(&[(
+        "Field.tsx",
+        "type Value = 'outer';\n\
+         type Fixed = { value: Value };\n\
+         export function Field<Value>(p: { fixed: Fixed }) { return null; }\n",
+    )]);
+    let expected = PropType::Object(vec![ObjectField {
+        name: "value".into(),
+        prop_type: PropType::StringLiteral("outer".into()),
+        required: true,
+        description: String::new(),
+        readonly: false,
+        index_key: None,
+    }]);
+    assert_eq!(output.components["Field"].props["fixed"].prop_type, expected);
+}
+
+#[test]
+fn a_component_parameter_passed_to_an_alias_stays_a_placeholder() {
+    let props = field_prop_texts(
+        "type Value = number;\n\
+         type Id<Value> = Value;\n\
+         export function Field<Value>(p: { value: Id<Value> }) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("value", "Value")]);
+}
+
+#[test]
+fn an_alias_parameter_named_like_the_argument_does_not_capture_it() {
+    let props = field_prop_texts(
+        "type B = string;\n\
+         type Pair<A, B> = { first: A; second: B };\n\
+         export function Field(p: { pair: Pair<B> }) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("pair", "{ first: string; second: B }")]);
+}
+
+#[test]
+fn a_component_parameter_shadows_an_alias_in_a_nested_use_but_not_inside_the_alias() {
+    let props = field_prop_texts(
+        "type Value = number;\n\
+         type Box = { inner: Value };\n\
+         export function Field<Value>(p: { own: Value; boxed: Box; list: Value[] }) { return null; }\n",
+    );
+    assert_eq!(props, vec![pair("boxed", "{ inner: number }"), pair("list", "Value[]"), pair("own", "Value")]);
+}
+
+#[test]
+fn a_record_over_a_type_parameter_keys_keeps_the_values_name_out_of_the_printed_binder() {
+    let output = extract_one(&[("Box.tsx", "export function Box<T, P>(props: Record<keyof T, P>) { return null; }\n")]);
+    assert_eq!(output.components["Box"].composes, ["{ [K in keyof T]: P }"]);
+}
+
+#[test]
+fn a_record_over_a_type_parameter_with_a_module_alias_value_keeps_its_name_out_of_the_printed_binder() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "type P = number;\n\
+         export function Box<Keys extends string>(props: Record<Keys, P>) { return null; }\n",
+    )]);
+    assert_eq!(output.components["Box"].composes, ["{ [K in Keys]: P }"]);
+}
+
+#[test]
 fn a_destructured_default_is_recorded_under_the_prop_not_the_local_name() {
     let output = extract_one(&[(
         "Box.tsx",

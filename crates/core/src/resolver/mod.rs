@@ -927,8 +927,7 @@ pub(crate) fn resolve_component_shared(
     if aliases_project_component(mapping, ctx) {
         return (unpublished_entry(mapping), ResolvedDiagnostics { own: Vec::new(), shared: Vec::new() });
     }
-    let mut state = ResolveState::default();
-    state.add_type_params(mapping.type_params.iter());
+    let mut state = ResolveState { scope: TypeScope::new(mapping.type_params.iter()), ..ResolveState::default() };
 
     // A component a generic call builds has the props its callee's result type declares; the props type the extractor
     // selected is for a callee whose result isn't known.

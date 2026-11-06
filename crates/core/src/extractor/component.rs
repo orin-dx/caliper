@@ -449,7 +449,7 @@ impl<'src> SourceDataCollector<'src> {
         let (props_name, props_args) = match props_type {
             crate::types::CollectedType::Named { name, args } => (name, args),
             props => {
-                let name = format!("__anon_{}", self.data.type_aliases.len());
+                let name = crate::types::synthesized_alias_name(self.data.type_aliases.len());
                 let key = self.scoped_key(&name);
                 self.data.type_aliases.insert(
                     key,
@@ -535,7 +535,7 @@ impl<'src> SourceDataCollector<'src> {
         let type_params: Vec<crate::types::TypeName> = type_parameters
             .map(|declaration| declaration.params.iter().map(|param| param.name.name.as_str().into()).collect())
             .unwrap_or_default();
-        if props_name.starts_with("__anon_") && !type_params.is_empty() {
+        if crate::types::is_synthesized_alias(&props_name) && !type_params.is_empty() {
             self.data.type_alias_params.insert(self.scoped_key(&props_name), type_params.clone());
             props_args = type_params
                 .iter()
