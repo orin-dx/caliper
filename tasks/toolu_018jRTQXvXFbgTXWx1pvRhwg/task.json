@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_018jRTQXvXFbgTXWx1pvRhwg",
+  "agent_id": "a759f73e09656e23a",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix dependabot bump breaking Storybook addon",
+  "token_usage": {
+    "input_tokens": 96,
+    "cache_creation_tokens": 90384,
+    "cache_read_tokens": 3618960,
+    "output_tokens": 10300,
+    "api_call_count": 48
+  },
+  "started_at": "2026-11-05T17:46:23.26927-08:00",
+  "completed_at": "2026-11-05T17:51:09.75109-08:00"
+}
