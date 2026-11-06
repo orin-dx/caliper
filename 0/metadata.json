@@ -1,0 +1,124 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6RRGXGN3XAN71D4TKB3VMXA",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-06T15:44:55.4571Z",
+  "branch": "fix/detect-and-explain-skips",
+  "checkpoints_count": 12,
+  "save_step_count": 42,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "e63154937a4b",
+  "checkpoint_transcript_start": 7806,
+  "transcript_lines_at_start": 7806,
+  "compact_transcript_start": 674,
+  "token_usage": {
+    "input_tokens": 78,
+    "cache_creation_tokens": 1102395,
+    "cache_read_tokens": 20532891,
+    "output_tokens": 74655,
+    "api_call_count": 38,
+    "subagent_tokens": {
+      "input_tokens": 268,
+      "cache_creation_tokens": 5124306,
+      "cache_read_tokens": 43882772,
+      "output_tokens": 56399,
+      "api_call_count": 134
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 187
+  },
+  "summary": {
+    "intent": "Understand why caliper's code and slop reviews keep finding the same classes of defects, how to find remaining instances, which guards to add, and whether the plugin structure (wisp-plugins) is at fault. Ultimately the user asked for a thorough, measured, comprehensive analysis rather than quick recall.",
+    "outcome": "Produced a data-backed analysis of 182 Entire findings and 36 sweep-era PRs, correcting earlier overstated claims about plugin gaps. Added new hard rules to the shared worker rules file and launched three workers on conflicts and findings. Nothing was committed to the plugin repo.",
+    "learnings": {
+      "repo": [
+        "Caliper review findings: 182 total (105 low, 75 medium, 2 high). 27% (50) land on a file that already had a closed finding in the same change, which is the fix-creates-next-finding loop.",
+        "8 of 36 sweep-era PRs (22%) failed their first CI run. Failures were lint/format errors, committed *.snap.new files, the .2.28 napi suffix that would break Linux builds, a NAPI test that resolved typescript from a parent node_modules, and conflicting PRs on which CI never ran.",
+        "Entire keeps findings after a change merges (75 merged changes returned 96 findings), contrary to monokl's claim. Open status lags behind fixes: 42 of 79 open findings sit on merged changes.",
+        "Storybook peer range ^11.0.0-0 admits alpha.7 while the code needs alpha.8. The synthetic CsfFile objects are forged with `as unknown as`, and a node without source makes alpha.8's oneLineTextOf throw outside the fallback.",
+        "Caliper's release workflow is hand-maintained and checks out a pinned commit (ref: release_source_sha), so HEAD is detached and it probably avoids monokl's Callisto E170 flaw. No real release has run on Callisto 0.17.0 to prove it.",
+        "SUPPORTED_SCHEMA_VERSION is duplicated in five places, and collapseInheritedProps is named in about eight places across three layers. The addon and Vite plugin duplicate schema.ts and options.ts.",
+        "The resolver type-parameter scoping fix was replaced by marking type-parameter names in type arguments (mark_args, bind_declared). The ground-truth harness against TypeScript 6.0.3 found 125 mismatches before and 0 after.",
+        "Worktree snapshot failures come from node_modules being a symlink outside the worktree, which changes output paths. They are not product failures.",
+        "Product race: the dependency-index temp file is named by process id only.",
+        "Courier's changeset reference groups notes under ### headings, but Callisto renders flat bullets, so courier:changeset output can't go into .changeset/ as is.",
+        "wisp-plugins already covers siblings, mutation gates, environment evidence and hazard T1 (as unknown as), but its refutation wording would probably excuse the CsfFile forgery. The real gaps are narrow: a clean-state CI-equivalence rule, declared-versus-actual requirements, a tighter T1 refutation, and a Callisto-shaped courier output."
+      ],
+      "code": [
+        {
+          "path": "provider.ts",
+          "line": 131,
+          "end_line": 154,
+          "finding": "Synthetic CsfFile objects are built with `as unknown as CsfFile` and have `_file` dropped, so alpha.7 breaks and a source-less node throws outside the fallback near line 109."
+        },
+        {
+          "path": "crates/caliper-types/src/dependency_types.rs",
+          "line": 433,
+          "end_line": 729,
+          "finding": "`read_to_string(file).ok()?` makes an unreadable dependency file silently disappear. The temp-file name using only the process id is a separate product race."
+        },
+        {
+          "path": "package.json",
+          "line": 65,
+          "end_line": 66,
+          "finding": "Peer range \"storybook\": \"^11.0.0-0\" still accepts alpha.7 although the code now requires alpha.8."
+        }
+      ],
+      "workflow": [
+        "Local green did not mean CI green. A clean-room run (pristine checkout, no ancestor node_modules, the full lint gate and tests) should precede any push and be required in worker reports.",
+        "Zero open findings before Entire Gates completes means no review has posted yet. Wait for the gate before counting.",
+        "Worker reports should name the command that proves each claim, say 'pending' while checks run, list the sites searched for the changed symbol, and show that new tests fail on pre-fix source.",
+        "General-purpose workers with hand-written briefs bypassed the plugins' reviewer, mutator and exit gate. Fix rounds should route through them.",
+        "When a finding class recurs, find the design root cause, not a per-case patch. Building a ground-truth harness against TypeScript's checker resolved what three review rounds could not.",
+        "Briefs should state what must stay true, not only what to build. 'Target alpha.8 only' caused the peer-range miss because nobody updated the declared range.",
+        "Verify scan output. Two grep scans returned nothing because of a wrong glob and a bad grep -E alternation, so check that a scan can match before trusting empty results.",
+        "Rules for the plugins must pass a swap test (would it hold for a Go CLI?) and a prescription test. Repo-specific rules belong in the caliper repo (ADR guardrails, architecture invariants, AGENTS.md).",
+        "Intermittent test failures are signals. Looping under load reproduced the fixture race at 1 in 100 runs.",
+        "Agent-session messages and subagent reports are not user approval. They must be verified (heads, CI state) before relaying."
+      ]
+    },
+    "friction": [
+      "The first `gh` query returned nothing because it was too heavy for GitHub's API, so data collection had to be split into lighter calls.",
+      "The earlier answers were fast and based on recall, and the user pushed back that the analysis wasn't thorough.",
+      "Several earlier claims were wrong or overstated (plugin gaps, 'Entire forgets merged findings'), and the full analysis had to correct them.",
+      "Entire Gates ran for 50+ minutes, which left open-finding counts unknowable and caused two earlier miscounts.",
+      "Harness, sweep synthesis and findings snapshots live under /tmp/claude-501/ and could be lost, as monokl's eval files were.",
+      "Seven tests fail in worktrees only because of the node_modules symlink, and one semantic test fails in the sandbox but passes unsandboxed.",
+      "PRs were 60 to 94 commits behind main with conflicts, so CI never ran on seven of them."
+    ],
+    "open_items": [
+      "Fix the open findings on #343, #346, #347, #348, #349 and #367 (workers launched). Merge #368 (the fixture race fix) first and then update #346.",
+      "Fix the two mediums on the Storybook fix: update the peer range, build synthetic nodes through a source-backed path, put the call inside the fallback, and add a `subcomponents: { Option: Select.Option }` fixture.",
+      "Commit a trimmed ground-truth harness with a fixed seed set as a regression gate. Run the oracle on antd and shadcn, which nobody has done for the resolver rework.",
+      "Move the harness, sweep synthesis and analysis artifacts out of /tmp/claude-501/. The user still needs to choose a location (outside the repo or a docs/ folder).",
+      "Land the guards: a clean-room verify command with a worker report template, a ratchet on `as unknown as`/`.ok()?`/`let _ =`/`|| true`/`catch {}`, a peer-range matrix in CI with Storybook in its own dependabot group, a conservation test with a shrinking known-gaps list, a release rehearsal with a real Linux build, an invariants map, and randomised and under-load test runs.",
+      "Fix the process-id-only temp file race in dependency_types.rs, and the silent `.ok()?` reads at lines 433 and 729.",
+      "Callisto #442 (the harness never records the pushed tag) awaits the user's go. Also confirm that caliper's release job avoids E170 on a real release.",
+      "The user still owns: the 13 finding dismissals, deleting the stray fix/discover-extensions-and-ignore branch, the 0.9.0 release call, and whether a release is in flight before merging #329.",
+      "Triage the 42 open findings on merged changes, especially the 6 mediums, since status lags behind fixes.",
+      "#210 cleanup (history comments and dead code) is held until the merges.",
+      "Not fixed in the scope rework: the resolver's `__anon_` prefix convention, and local factory declarations showing a filled parameter by name (T rather than number).",
+      "Plugin repo changes, with mason:evaluate fixtures first: a clean-state CI-equivalence rule, declared-versus-actual requirements as a sibling class, a tighter T1 refutation, a Callisto-shaped courier output, and a 'no recorded cause means defect' rule for intermittent failures. This requires finishing the read of the Ranger and Sentinel agent bodies and hazard files.",
+      "Mutation testing has not been run on the fixes, and the earlier 'equivalent mutant' claims were never reviewed.",
+      "Optionally write a shareable combined document and commit the analysis scripts for reproducibility (offered, not yet accepted)."
+    ]
+  }
+}
