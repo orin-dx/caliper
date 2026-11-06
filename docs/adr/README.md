@@ -30,6 +30,7 @@ One line per ADR, with what it guards. Add a line when you add an ADR.
 - [22. Ask a warm checker for the requested component](0022-ask-a-warm-checker-for-the-requested-component.md) — do not route by predicted risk or check the whole project to answer one story: ask the TypeScript checker for the component a request names, wait a bounded time, and take the structural answer when it is slower. Extends 0007's runtime opt-in from a project run to a session.
 - 23. Function parameters carry `optional` and `rest` — removed: a field added under 0017's versioning rule. It lives in `docs/architecture/serialization-formats.md` ("Version 3").
 - 24. List every HTML attribute React declares by default — removed: a default, with its measurements. It lives in `docs/rdt-coverage.md` ("Why `full` is the default") and `docs/performance.md` ("Default changes").
+- [25. The resolver owns scoping; the extractor records where a declaration sits](0025-resolver-owns-scoping.md) — do not decide in a collector which declaration a name refers to, or re-derive an import's type-only status: the extractor records each declaration with its enclosing scope, the resolver looks names up by scope, and `is_type_only` is read from the import.
 
 Changing any of these needs a new ADR. A removed entry keeps its number; its rationale moved to the doc named on its line.
 
