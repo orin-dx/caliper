@@ -946,14 +946,9 @@ impl<'src> SourceDataCollector<'src> {
                 // ...T[] in tuple → Array(T)
                 CollectedType::Array(Box::new(self.ts_type_to_collected_at_depth(&r.type_annotation, depth + 1)))
             }
-            // A labelled member `name: T` or `name?: T` is its type, optional when marked.
+            // A labelled member `name: T` or `name?: T` is its type; an optional marker is not preserved.
             TSTupleElement::TSNamedTupleMember(named) => {
-                let inner = self.ts_tuple_element_to_collected(&named.element_type, depth + 1);
-                if named.optional {
-                    CollectedType::Union(vec![inner, CollectedType::Undefined])
-                } else {
-                    inner
-                }
+                self.ts_tuple_element_to_collected(&named.element_type, depth + 1)
             }
             // The remaining variants are the plain `TSType`s the element inherits.
             other => match other.as_ts_type() {
