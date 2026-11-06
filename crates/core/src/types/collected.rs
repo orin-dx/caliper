@@ -1,8 +1,6 @@
 //! Raw AST-level types produced by the extractor (Phase 0-2).
 //! These are the extractor's output and the resolver's input.
 
-#![deny(missing_docs)]
-
 use camino::{Utf8Path, Utf8PathBuf};
 use compact_str::CompactString;
 use rustc_hash::FxHashMap;
@@ -483,6 +481,9 @@ impl CollectedType {
                         if let Some(key) = &f.index_key {
                             map.insert("ik".into(), key.to_json_value());
                         }
+                        if !f.tags.is_empty() {
+                            map.insert("tags".into(), serde_json::json!(f.tags));
+                        }
                     }
                     field
                 }).collect::<Vec<_>>()
@@ -632,6 +633,15 @@ impl CollectedType {
                                 description: o.get("desc").and_then(|v| v.as_str()).unwrap_or("").to_owned(),
                                 readonly: o.get("ro").and_then(|v| v.as_bool()).unwrap_or(false),
                                 index_key: o.get("ik").map(Self::from_json_value).transpose()?.map(Box::new),
+                                tags: o
+                                    .get("tags")
+                                    .and_then(|v| v.as_object())
+                                    .map(|tags| {
+                                        tags.iter()
+                                            .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
                             })
                         })
                         .collect::<Result<_, std::string::String>>()?;
@@ -753,6 +763,9 @@ pub struct CollectedObjectField {
     /// Set for an index signature `[name: K]: T`: the key type `K`, with `collected_type` the value type `T`.
     #[serde(default)]
     pub index_key: Option<Box<CollectedType>>,
+    /// The field's JSDoc tags (`deprecated`, `example`, …), empty when it has none.
+    #[serde(default)]
+    pub tags: BTreeMap<std::string::String, std::string::String>,
 }
 
 impl CollectedObjectField {
@@ -1063,6 +1076,7 @@ impl CollectedType {
                         description: f.description.clone(),
                         readonly: f.readonly,
                         index_key: f.index_key.as_ref().map(|key| Box::new(key.rename_named(rename))),
+                        tags: f.tags.clone(),
                     })
                     .collect(),
             ),
@@ -1321,6 +1335,34 @@ pub enum DetectionRule {
     FactoryResult,
 }
 
+impl DetectionRule {
+    /// Every rule, so a consumer such as the `schema` command can list them without a copy of its own.
+    pub const ALL: [DetectionRule; 14] = [
+        Self::FcAnnotation,
+        Self::ForwardRef,
+        Self::ForwardRefExoticDecl,
+        Self::HocWrapper,
+        Self::ClassComponent,
+        Self::FunctionDeclaration,
+        Self::AnonymousDefaultExport,
+        Self::AttachedSubComponent,
+        Self::TypedFunctionExpression,
+        Self::WrapperTypeArgument,
+        Self::ImportedMemberAlias,
+        Self::MemoExoticDecl,
+        Self::TaggedFactory,
+        Self::FactoryResult,
+    ];
+
+    /// The name this rule has in serialized output (`detectedBy`).
+    pub fn name(self) -> std::string::String {
+        match serde_json::to_value(self) {
+            Ok(serde_json::Value::String(name)) => name,
+            _ => unreachable!("a unit variant serializes as a string"),
+        }
+    }
+}
+
 /// A component → prop type mapping.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComponentMapping {
@@ -1488,6 +1530,32 @@ pub enum LexedExport {
 mod tests {
     use super::*;
 
+    // The exhaustive match stops compiling when a variant is added, which points at `ALL`.
+    #[test]
+    fn detection_rule_all_lists_every_variant_once() {
+        fn index(rule: DetectionRule) -> usize {
+            match rule {
+                DetectionRule::FcAnnotation => 0,
+                DetectionRule::ForwardRef => 1,
+                DetectionRule::ForwardRefExoticDecl => 2,
+                DetectionRule::HocWrapper => 3,
+                DetectionRule::ClassComponent => 4,
+                DetectionRule::FunctionDeclaration => 5,
+                DetectionRule::AnonymousDefaultExport => 6,
+                DetectionRule::AttachedSubComponent => 7,
+                DetectionRule::TypedFunctionExpression => 8,
+                DetectionRule::WrapperTypeArgument => 9,
+                DetectionRule::ImportedMemberAlias => 10,
+                DetectionRule::MemoExoticDecl => 11,
+                DetectionRule::TaggedFactory => 12,
+                DetectionRule::FactoryResult => 13,
+            }
+        }
+        let indexes: Vec<usize> = DetectionRule::ALL.iter().map(|rule| index(*rule)).collect();
+        assert_eq!(indexes, (0..14).collect::<Vec<_>>());
+        assert_eq!(DetectionRule::FactoryResult.name(), "factoryResult");
+    }
+
     // CollectedType's own Serialize/Deserialize never actually calls into
     // CollectedObjectField's impl (to_json_value/from_json_value build fields
     // manually), so this exercises CollectedObjectField's own impl directly —
@@ -1504,6 +1572,7 @@ mod tests {
             description: "the label".to_owned(),
             readonly: false,
             index_key: None,
+            tags: Default::default(),
         };
 
         let bytes = rmp_serde::to_vec(&field).expect("serialization should succeed");
@@ -1532,6 +1601,7 @@ mod tests {
                 description: String::new(),
                 readonly: false,
                 index_key: None,
+                tags: Default::default(),
             }]),
         ]);
         let json = original.to_json_value();

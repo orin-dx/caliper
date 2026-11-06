@@ -20,18 +20,7 @@
 
 `react-docgen-typescript` builds a full TypeScript `Program`, which takes seconds on a mid-size design system. Caliper parses files in parallel with OXC and skips the type checker.
 
-Cold run over 21 real component libraries, Apple M5 Max, October 2026:
-
-|                                                    | Time  |
-| -------------------------------------------------- | ----- |
-| Caliper binary alone                               | 42ms  |
-| Caliper through a Node harness                     | 0.38s |
-| `react-docgen` through the same harness            | 0.52s |
-| `react-docgen-typescript` through the same harness | 4.9s  |
-
-`react-docgen` and `react-docgen-typescript` only run inside Node, so all three share one harness (`pnpm exec tsx`, 5 runs each). Starting that harness costs 0.32s on its own, which is most of the Caliper figure. A watch-mode update to one file takes about 2ms, where `react-docgen-typescript` pays the full cold cost on every edit. Method and raw numbers: [`docs/benchmarks.md`](docs/benchmarks.md).
-
-On whole libraries (Mantine, Chakra, Ant Design, shadcn/ui and React Spectrum at pinned commits, source only), Caliper takes 34 to 81ms and is 17 to 39 times faster than `react-docgen-typescript` on the same files, a median of 22 times. CI checks this weekly ([`docs/performance.md`](docs/performance.md)). With dependencies installed the comparison is not like for like yet: `react-docgen-typescript` reads every dependency's types, and Caliper reads only `@types/react` until dependency loading lands.
+On whole libraries (Mantine, Chakra, Ant Design, shadcn/ui and React Spectrum at pinned commits, source only), Caliper takes 34 to 81ms and is 17 to 39 times faster than `react-docgen-typescript` on the same files, a median of 22 times. CI checks this weekly ([`docs/performance.md`](docs/performance.md)). Recall and agreement with `react-docgen-typescript` on installed repos are in [`docs/measurement.md`](docs/measurement.md).
 
 ## A component through Caliper
 
@@ -129,7 +118,7 @@ import docgen from 'virtual:caliper-docgen'
 docgen.components['Button'].props
 ```
 
-The module updates through HMR as components change. The plugin exposes the canonical format only, not the `react-docgen-typescript` shape.
+The module updates through HMR as components change. The virtual module is the canonical format; the `injectDocgenInfo` option assigns `__docgenInfo` in the `react-docgen-typescript` shape (see the [plugin README](packages/vite-plugin/README.md)).
 
 ## Storybook
 

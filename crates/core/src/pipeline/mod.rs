@@ -3,8 +3,6 @@
 //! Orchestrates: file discovery → parallel parse → global merge → parallel resolve → output.
 //! Also manages DTS cache and incremental watch-mode state.
 
-#![deny(missing_docs)]
-
 use camino::{Utf8Path, Utf8PathBuf};
 use rayon::prelude::*;
 use serde::Serialize;

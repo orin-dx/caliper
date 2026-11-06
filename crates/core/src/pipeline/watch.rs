@@ -1,7 +1,5 @@
 //! The watch session: an eager or lazy view of the extraction output that follows the files as they change.
 
-#![deny(missing_docs)]
-
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};

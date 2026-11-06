@@ -16,7 +16,7 @@ silent-wrong, or a whole run is over a budget (scripts/headline.py). Drift in ti
 listed in the summary, not alarmed on. Nothing here fails a pull request.
 
 Usage: scripts/weekly.py --bin BIN [--corpus NAME]... [--corpora DIR] [--work DIR] [--runs N] [--oracle] [--agent-eval]
-                         [--previous FILE] [--out FILE] [--markdown FILE] [--issue FILE]
+                         [--previous FILE] [--baseline-failed] [--out FILE] [--markdown FILE] [--issue FILE]
 """
 import argparse
 import json
@@ -32,6 +32,7 @@ import corpora
 import headline
 from corpora import ROOT, run_once, selected
 
+BASELINE_FAILED = "The baseline download failed, so this run was not compared with last week's record."
 SLOWER = 1.10
 RECALL_DROP = 0.02
 # The rules that decide what the reference is: the exclusions and the pairing. Raise it when a change to them moves recall,
@@ -77,8 +78,9 @@ def tool_run(command, out):
 
 
 def caliper_run(binary, src, runs):
-    """Median wall ms and peak RSS MiB of `extract --json` with dependency loading on, and the JSON's size."""
-    command = [binary, 'extract', '--src', src, '--json', '--load-dependencies']
+    """Median wall ms and largest peak RSS MiB of `extract --json` in the Storybook addon's configuration (dependencies
+    loaded, inherited props not collapsed), and the JSON's size."""
+    command = [binary, 'extract', '--src', src, '--json', '--load-dependencies', '--collapse-inherited-props', 'none']
     with tempfile.TemporaryFile() as out:
         run_once(command, stdout=out)
         size = out.tell()
@@ -90,7 +92,7 @@ def caliper_run(binary, src, runs):
 def caliper_components(binary, src, root):
     """Caliper's components in RDT's format, as (file, name) -> prop names."""
     command = [binary, 'extract', '--src', src, '--format', 'rdt', '--html-attributes', 'full', '--include-unexported',
-               '--quiet', '--load-dependencies']
+               '--quiet', '--load-dependencies', '--collapse-inherited-props', 'none']
     out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
     return {(relative(c['filePath'], root), norm_name(c['displayName'])): set(c['props'])
             for c in json.loads(out[out.index('{'):]).values()}
@@ -98,9 +100,9 @@ def caliper_components(binary, src, root):
 
 def caliper_layer_members(binary, src, root):
     """The props Caliper's collapsed inheritance layers hold, as (file, name) -> prop names: the output names them in a
-    layer instead of listing them as props (ADR 0012), and the canonical JSON is the one that carries the layers."""
+    layer instead of listing them as props, and the canonical JSON is the one that carries the layers."""
     command = [binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported', '--quiet',
-               '--load-dependencies']
+               '--load-dependencies', '--collapse-inherited-props', 'none']
     out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
     document = json.loads(out[out.index('{'):])
     lists = document.get('nameLists', {})
@@ -450,7 +452,7 @@ def oracle(binary, name, src, root, work, rdt_out, rdg_out):
     caliper_json = os.path.join(work, f'{name}.caliper.json')
     with open(caliper_json, 'w') as f:
         subprocess.run([binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported',
-                        '--load-dependencies', '--quiet'], stdout=f, check=True)
+                        '--load-dependencies', '--collapse-inherited-props', 'none', '--quiet'], stdout=f, check=True)
     list_file, tsconfig = program_inputs(name, src, work)
     verdicts = os.path.join(work, f'{name}.oracle.json')
     subprocess.run(['pnpm', '--dir', os.path.join(ROOT, 'apps', 'oracle'), 'exec', 'tsx', 'src/oracle.ts', '--root', root,
@@ -562,10 +564,10 @@ def tool_line(corpus, tool, score):
     return f"- {corpus}, {TOOL_LABELS[tool]}: " + '; '.join(parts)
 
 
-def markdown(record, notes, reference_changed=None, moved=()):
+def markdown(record, notes, reference_changed=None, moved=(), baseline=True, baseline_failed=False):
     lines = headline.markdown(record)
-    lines += [f"Caliper {record['caliper']}, median of {record['runs']} runs; RDT and react-docgen one run each. Whole "
-              'process, Node start included.', '', '### Time and memory', '',
+    lines += [f"Caliper {record['caliper']}, time the median of {record['runs']} runs (after one warm-up run) and memory the largest peak of them; RDT "
+              'and react-docgen one cold run each, so the comparison favours Caliper. Whole process, Node start included.', '', '### Time and memory', '',
               '| Corpus | Caliper | JSON | RDT | react-docgen |', '| --- | --: | --: | --: | --: |']
     for name, e in record['corpora'].items():
         cell = lambda t: f"{t['ms'] / 1000:.2f} s, {t['rss_mib']:,} MiB"
@@ -606,6 +608,10 @@ def markdown(record, notes, reference_changed=None, moved=()):
             lines += [tool_line(name, tool, tools[tool]) for name, tools in tool_rows
                       for tool in ('caliper', 'rdt', 'react_docgen') if tool in tools]
     lines += agent_eval.markdown(record)
+    if baseline_failed:
+        lines += ['', BASELINE_FAILED + ' Nothing here was checked for getting worse.']
+    elif not baseline:
+        lines += ['', 'No baseline: there was no earlier record to compare with, so nothing here was checked for getting worse.']
     if reference_changed is not None:
         lines += ['', f"Recall was not compared with last week's: its reference was built by version {reference_changed} of "
                       f"the rules, this one by version {record['reference_version']}."]
@@ -614,6 +620,28 @@ def markdown(record, notes, reference_changed=None, moved=()):
     if moved:
         lines += ['', '### Changes since last week (information)', ''] + [f'- {n}' for n in moved]
     return '\n'.join(lines) + '\n'
+
+
+def load_previous(path):
+    """The earlier record at `path`, `{}` when there is none to compare with. A file that is there but unreadable stops the
+    run before anything is measured: a corrupt baseline is a broken artifact, not an absent one."""
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        with open(path) as f:
+            previous = json.load(f)
+    except (OSError, ValueError) as error:
+        raise SystemExit(f'--previous {path} is not a readable record: {error}')
+    if not isinstance(previous, dict) or not isinstance(previous.get('corpora'), dict):
+        raise SystemExit(f'--previous {path} is not a weekly record: it has no "corpora" object')
+    return previous
+
+
+def errors(record):
+    """What a corpus could not measure (the oracle or the agent evaluation threw), as issue lines."""
+    return [f'{name}, {part.replace("_", " ")}: {entry[part]["error"][:200]}'
+            for name, entry in record['corpora'].items() for part in ('oracle', 'agent_eval')
+            if isinstance(entry.get(part), dict) and 'error' in entry[part]]
 
 
 def main():
@@ -626,28 +654,28 @@ def main():
     parser.add_argument('--oracle', action='store_true')
     parser.add_argument('--agent-eval', action='store_true')
     parser.add_argument('--previous')
+    parser.add_argument('--baseline-failed', action='store_true', help='the download of --previous failed: say so and open the issue')
     parser.add_argument('--out')
     parser.add_argument('--markdown')
     parser.add_argument('--issue')
     args = parser.parse_args()
+    previous = load_previous(args.previous)
     work = os.path.abspath(args.work)
     os.makedirs(work, exist_ok=True)
     version = subprocess.run([args.bin, '--version'], capture_output=True, text=True).stdout.strip()
     record = {'caliper': version, 'runs': args.runs, 'reference_version': REFERENCE_VERSION,
               'corpora': {c['name']: measure(args, c, work) for c in selected(args.corpus)}}
     reference_changed = None
-    previous = {}
-    if args.previous and os.path.exists(args.previous):
-        with open(args.previous) as f:
-            previous = json.load(f)
-        if not same_reference(record, previous):
-            reference_changed = previous.get('reference_version', 1)
-    notes = findings(record, previous)
-    table = markdown(record, notes, reference_changed, changes(record, previous))
+    if previous and not same_reference(record, previous):
+        reference_changed = previous.get('reference_version', 1)
+    notes = findings(record, previous) + errors(record)
+    table = markdown(record, notes, reference_changed, changes(record, previous), baseline=bool(previous),
+                     baseline_failed=args.baseline_failed)
+    issue_notes = notes + ([BASELINE_FAILED] if args.baseline_failed else [])
     print(table)
     for path, content in ((args.out, json.dumps(record, indent=2) + '\n'), (args.markdown, table),
-                          (args.issue, 'The weekly record needs attention:\n\n' + '\n'.join(f'- {n}' for n in notes) + '\n'
-                           if notes else None)):
+                          (args.issue, 'The weekly record got worse:\n\n' + '\n'.join(f'- {n}' for n in issue_notes) + '\n'
+                           if issue_notes else None)):
         if path and content:
             with open(path, 'w') as f:
                 f.write(content)

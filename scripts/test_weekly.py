@@ -256,6 +256,66 @@ class OracleTools(unittest.TestCase):
         self.assertLess(text.index("### TypeScript 7.1's checker"), order[0])
 
 
+class Baseline(unittest.TestCase):
+    def previous_file(self, text):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, 'weekly.json')
+        with open(path, 'w') as f:
+            f.write(text)
+        return path
+
+    def test_a_corrupt_previous_stops_the_run_naming_the_file(self):
+        path = self.previous_file('{"corpora": ')
+        with self.assertRaises(SystemExit) as raised:
+            weekly.load_previous(path)
+        self.assertTrue(str(raised.exception).startswith(f'--previous {path} is not a readable record: '))
+
+    def test_a_previous_with_a_renamed_corpora_key_stops_the_run(self):
+        path = self.previous_file('{"corpus": {}}')
+        with self.assertRaises(SystemExit) as raised:
+            weekly.load_previous(path)
+        self.assertEqual(str(raised.exception), f'--previous {path} is not a weekly record: it has no "corpora" object')
+
+    def test_a_missing_previous_is_no_baseline_and_the_summary_says_so(self):
+        self.assertEqual(weekly.load_previous('/nonexistent/weekly.json'), {})
+        now = {'caliper': 'x', 'runs': 1, 'reference_version': 2, 'corpora': {}}
+        self.assertIn('No baseline: there was no earlier record', weekly.markdown(now, [], baseline=False))
+        self.assertNotIn('No baseline', weekly.markdown(now, []))
+
+    def test_a_failed_baseline_download_is_not_called_a_missing_baseline(self):
+        now = {'caliper': 'x', 'runs': 1, 'reference_version': 2, 'corpora': {}}
+        table = weekly.markdown(now, [], baseline=False, baseline_failed=True)
+        self.assertIn("The baseline download failed, so this run was not compared with last week's record.", table)
+        self.assertNotIn('No baseline', table)
+
+    def test_the_header_states_the_warm_versus_cold_measurement(self):
+        now = {'caliper': 'x', 'runs': 5, 'reference_version': 2, 'corpora': {}}
+        header = next(l for l in weekly.markdown(now, []).splitlines() if l.startswith('Caliper x,'))
+        self.assertEqual(header, 'Caliper x, time the median of 5 runs (after one warm-up run) and memory the largest peak '
+                                 'of them; RDT and react-docgen one cold run each, so the comparison favours Caliper. '
+                                 'Whole process, Node start included.')
+
+    def test_an_oracle_error_is_an_issue_line(self):
+        record = {'corpora': {'chakra': {'oracle': {'error': 'the comparison is empty'}, 'agent_eval': {'recall': 1}}}}
+        self.assertEqual(weekly.errors(record), ['chakra, oracle: the comparison is empty'])
+
+
+class AddonConfiguration(unittest.TestCase):
+    def test_the_timed_command_is_the_addons_collapse_none_with_dependencies(self):
+        commands = []
+
+        def run_once(command, **kwargs):
+            commands.append(command)
+            return 1.0, 10
+
+        with mock.patch.object(weekly, 'run_once', run_once):
+            weekly.caliper_run('/bin/caliper-docgen', '/src', 1)
+        command = commands[-1]
+        self.assertIn('--load-dependencies', command)
+        self.assertEqual(command[command.index('--collapse-inherited-props') + 1], 'none')
+
+
 class PeakRss(unittest.TestCase):
     def test_units(self):
         self.assertEqual(corpora.rss_mib(5 * 2**20, 'darwin'), 5)
