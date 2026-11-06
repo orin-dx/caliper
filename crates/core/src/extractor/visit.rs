@@ -313,6 +313,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 let name = id.name.as_str().to_owned();
                 self.try_collect_variant_bag(declarator, &name);
                 self.record_object_assign_declarator(&name, declarator.init.as_ref());
+                if self.is_tsx && self.function_depth == 0 {
+                    self.try_scan_object_assign_declarator(declarator.init.as_ref());
+                }
                 if self.function_depth == 0 {
                     self.try_record_cast_component_alias(declarator, &name);
                     if let Some(init) = declarator.init.as_ref() {
@@ -667,6 +670,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         self.record_member_assignment(node);
         if self.is_tsx {
             self.try_scan_object_assign_sub_components(node);
+            self.try_scan_member_assigned_sub_component(node);
         }
         walk::walk_expression_statement(self, node);
     }

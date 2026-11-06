@@ -20,6 +20,13 @@ pub(crate) struct NameUses {
     rendered: u32,
 }
 
+/// Whether the call is `Object.assign(...)`.
+pub(super) fn is_object_assign_call(call: &CallExpression<'_>) -> bool {
+    matches!(&call.callee, Expression::StaticMemberExpression(callee)
+        if callee.property.name == "assign"
+            && matches!(&callee.object, Expression::Identifier(object) if object.name == "Object"))
+}
+
 impl<'src> SourceDataCollector<'src> {
     fn uses_of(&mut self, name: &str) -> &mut NameUses {
         self.name_uses.entry(CompactString::from(name)).or_default()
@@ -42,10 +49,7 @@ impl<'src> SourceDataCollector<'src> {
     /// `const Parent = Object.assign(Root, { Sub })`: `Parent` is the root under another name, with `Sub` attached.
     pub(super) fn record_object_assign_declarator(&mut self, parent: &str, init: Option<&Expression<'_>>) {
         let Some(Expression::CallExpression(call)) = init.map(super::component::peel_expr) else { return };
-        let Expression::StaticMemberExpression(callee) = &call.callee else { return };
-        if !matches!(&callee.object, Expression::Identifier(object) if object.name == "Object")
-            || callee.property.name != "assign"
-        {
+        if !is_object_assign_call(call) {
             return;
         }
         for argument in &call.arguments {
