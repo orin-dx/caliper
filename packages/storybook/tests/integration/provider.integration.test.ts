@@ -100,4 +100,11 @@ describe.skipIf(!bindingAvailable)('provider in a worker thread', () => {
     expect(Object.keys(payload.argTypes).toSorted()).toEqual(['children', 'ordered'])
     expect(Object.keys(payload.subcomponents.ListItem.argTypes).toSorted()).toEqual(['bullet', 'children', 'selected'])
   })
+
+  it('documents a subcomponent that is a member of a named import', async () => {
+    const payload = await request('Picker')
+    expect(Object.keys(payload.argTypes)).toEqual(['children'])
+    expect(payload.subcomponents.Option.error).toBeUndefined()
+    expect(Object.keys(payload.subcomponents.Option.argTypes)).toEqual(['value'])
+  })
 })

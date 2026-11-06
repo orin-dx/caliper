@@ -27,16 +27,22 @@ interface StoryFile {
   importPath: string
 }
 
-function identifier(name: string): object {
-  return { type: 'Identifier', name }
+/**
+ * A story file whose `meta.component` is `expression`, parsed from the story's own imports plus that expression so every
+ * node has source text: Storybook's resolver reads it when it reports an expression it cannot follow.
+ */
+function storyFor(csf: CsfFile, storyPath: string, expression: string): CsfFile {
+  const source = csf.editor.toString()
+  const imports = csf.program.body
+    .filter((statement) => statement.type === 'ImportDeclaration')
+    .map((statement) => source.slice(statement.start, statement.end))
+  const code = `${imports.join('\n')}\nexport default { component: ${expression} }\n`
+  return loadCsf(code, { fileName: storyPath, makeTitle: () => 'caliper-docgen' }).parse()
 }
 
-/** A component expression node for a dotted or plain name, the shape the meta-component resolver reads. */
-function expressionFor(name: string): object {
-  const [object, property] = name.split('.')
-  return property
-    ? { type: 'MemberExpression', computed: false, object: identifier(object!), property: identifier(property) }
-    : identifier(name)
+/** The resolver threw instead of answering: a defect to hand to the next provider, not a fact about one subcomponent. */
+class ResolverFailureError extends Error {
+  override name = 'ResolverFailureError'
 }
 
 /** caliper keeps one value per JSDoc tag; Storybook lists every value. */
@@ -79,7 +85,14 @@ export function createDocgenProvider(
   const getSession = () =>
     (sessionPromise ??= (async () =>
       new DocgenSession(sessionOptions, binding ?? (await import('caliper-docgen-napi'))))())
-  const resolveMeta = createMetaComponentResolver()
+  const metaComponent = createMetaComponentResolver()
+  const resolveMeta = (csf: CsfFile, storyPath: string) => {
+    try {
+      return metaComponent(csf, storyPath)
+    } catch (error) {
+      throw new ResolverFailureError((error as Error).message)
+    }
+  }
   const fallback = options.fallback ?? 'degraded'
   let extractArgTypes: Promise<ExtractArgTypes> | undefined
   // A component handed on is reported once, not on every story request that names it.
@@ -103,6 +116,9 @@ export function createDocgenProvider(
       if (!path) throw new Error(`no file for the import of ${exportName}`)
       const key = await session.resolveExport(path, exportName, localName)
       if (key) return { key, path }
+      // Storybook follows `Select.Option` into the module that declares `Option`; caliper may know it as `Select.Option`.
+      const member = memberComponent(session, target, storyPath)
+      if (member) return member
       throw new Error(noComponent(session, exportName, path))
     }
     // Storybook reads `Namespace.Member` only for `import * as Namespace`; `Select.Option` of a named import is common.
@@ -127,10 +143,7 @@ export function createDocgenProvider(
       | undefined
     if (node?.type !== 'MemberExpression' || node.computed) return undefined
     if (node.object?.type !== 'Identifier' || !node.object.name || !node.property?.name) return undefined
-    const owner = resolveMeta(
-      { _metaAnnotations: { component: node.object }, editor: csf.editor, program: csf.program } as unknown as CsfFile,
-      storyPath,
-    )
+    const owner = resolveMeta(storyFor(csf, storyPath, node.object.name), storyPath)
     if (!('component' in owner) || !owner.component.path) return undefined
     const { path, exportName, localName } = owner.component
     const key = session.keyOfMember([localName, exportName], node.property.name, path)
@@ -146,13 +159,7 @@ export function createDocgenProvider(
     storyPath: string,
     name?: string,
   ): Promise<{ key: string; path: string; doc: RdtComponentDoc }> {
-    const target = name
-      ? ({
-          _metaAnnotations: { component: expressionFor(name) },
-          editor: csf.editor,
-          program: csf.program,
-        } as unknown as CsfFile)
-      : csf
+    const target = name ? storyFor(csf, storyPath, name) : csf
     const session = await getSession()
     const { key, path } = await locate(session, target, storyPath)
     const { doc, degradedBy } = session.documentation(key)
@@ -183,6 +190,7 @@ export function createDocgenProvider(
       )
       return { name, path, description, summary, jsDocTags, argTypes: await argTypes(doc) }
     } catch (error) {
+      if (error instanceof ResolverFailureError) throw error
       return {
         name,
         path: importPath,
