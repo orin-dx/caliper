@@ -3,8 +3,8 @@
 
 `setup` fetches each repo, installs its dependencies with its own package manager and lockfile (lifecycle scripts off,
 caches under the corpora directory's parent), and prunes tests, stories and demos from the source directory. With
---sparse it fetches only the source directory and installs nothing: enough for `just bench`, which turns dependency
-loading off.
+--sparse it fetches only the source directory and installs nothing: enough to extract without dependencies, not for
+`just bench`, which loads them.
 
 Usage: scripts/corpora.py setup [--corpora DIR] [--corpus NAME]... [--sparse] [--install-node-dir DIR]
 """

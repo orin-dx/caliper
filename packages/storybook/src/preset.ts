@@ -1,43 +1,11 @@
 import { fileURLToPath } from 'node:url'
 import type { DocgenProviderDescriptor } from 'storybook/internal/types'
 import type { CaliperStorybookOptions } from './index.js'
+import { OPTION_KEYS } from './option-keys.js'
 
 /** The addon's options travel to the docgen worker by structured clone, so only these plain fields go. */
 function workerOptions(options: CaliperStorybookOptions): CaliperStorybookOptions {
-  const {
-    srcDirs,
-    exclude,
-    tsconfigPath,
-    skipHtmlProps,
-    htmlAttributes,
-    cache,
-    loadDependencies,
-    collapseInheritedProps,
-    lazy,
-    warmUp,
-    fillAfter,
-    semanticTypes,
-    tscPath,
-    semanticWaitMs,
-    fallback,
-  } = options
-  return {
-    srcDirs,
-    exclude,
-    tsconfigPath,
-    skipHtmlProps,
-    htmlAttributes,
-    cache,
-    loadDependencies,
-    collapseInheritedProps,
-    lazy,
-    warmUp,
-    fillAfter,
-    semanticTypes,
-    tscPath,
-    semanticWaitMs,
-    fallback,
-  }
+  return Object.fromEntries(OPTION_KEYS.map((key) => [key, options[key]]))
 }
 
 /** Registered last, the provider wraps React's: it answers first and hands on what it can't document. */
