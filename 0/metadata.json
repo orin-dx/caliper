@@ -1,0 +1,107 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6RRXX1TW3NZBJJMBVX4PFW8",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-06T15:51:53.294285Z",
+  "branch": "fix/component-type-lists",
+  "checkpoints_count": 1,
+  "save_step_count": 42,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "818836fff5ad",
+  "checkpoint_transcript_start": 8461,
+  "transcript_lines_at_start": 8461,
+  "compact_transcript_start": 725,
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 14671,
+    "cache_read_tokens": 1276007,
+    "output_tokens": 1228,
+    "api_call_count": 2,
+    "subagent_tokens": {
+      "input_tokens": 66,
+      "cache_creation_tokens": 23428,
+      "cache_read_tokens": 3414124,
+      "output_tokens": 11944,
+      "api_call_count": 33
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 188
+  },
+  "summary": {
+    "intent": "Get two PRs (#323 measure/storybook-accuracy-headline and #327 feat/collapse-by-relevance) merged with origin/main, with conflicts resolved, lint and clean-room tests passing, CI green, and review findings cleared, using delegated worker subagents.",
+    "outcome": "#323 was merged with main, pushed, and verified green on GitHub with 0 open findings. #327 was merged and pushed with a semantic break fixed and a docs finding addressed, but its CI (Test / Rust, Vite plugin, Coverage, SemVer, Entire Gates) was still running, so it is not yet confirmed done.",
+    "learnings": {
+      "repo": [
+        "Local branch names may be unavailable because another worktree has them checked out (m323). Workers used mc323/mc327 and pushed with `git push origin <local>:<remote-branch>`.",
+        "Pre-push gate is `just lint doc-check machete typos`. `just lint` also compiles tests, so it catches semantic breaks after a merge.",
+        "Clean-room verification uses a fresh worktree under /tmp/claude-501 with `pnpm install --frozen-lockfile --offline`, then runs Rust nextest, oracle vitest, Python unittest, napi and Vite plugin tests.",
+        "Review findings are read with `entire trail finding list <trail> --project gh/orin-dx --freshness current --status open --json`. A 0 count is only meaningful after Entire Gates completes.",
+        "CI runs can sit queued for a long time before starting. Only runs on the latest pushed commit count.",
+        "CACHE_SCHEMA_VERSION was 29 on both sides, so there was no cache-version bump to handle.",
+        "Worker rules in use: no `as unknown as` or `let _ =`, new tests must fail before the fix, grep sibling call sites, and check declared vs required dependency versions."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/resolver/mod.rs",
+          "finding": "In the `CollapseInheritedProps::All` arm of `collapses()`, main replaced the inline `/node_modules/` check with `crate::dependency_types::in_node_modules`. Resolution: `large && !crate::dependency_types::in_node_modules(file.as_str())`."
+        },
+        {
+          "path": "crates/core/src/resolver/tests.rs",
+          "finding": "Main's test `collapsing_all_leaves_a_node_modules_source_alone_whichever_separator_the_path_uses` used the old `collapses` signature. After the merge it needed `ctx.collapses(Utf8Path::new(file), \"Props\", 31, 1, &state)`."
+        },
+        {
+          "path": "crates/core/src/resolver/chain.rs",
+          "line": 277,
+          "end_line": 557,
+          "finding": "The only non-test callers of `ctx.collapses(` are at lines 277 and 557, and both already pass the type name."
+        },
+        {
+          "path": "scripts/weekly.py",
+          "finding": "Both PRs added an import at the same spot (`import headline` from #323, `import schema_version` from main). The fix was to keep both."
+        },
+        {
+          "path": "docs/measurement.md",
+          "line": 200,
+          "end_line": 200,
+          "finding": "The doc cited `apps/oracle/src/layer-only.ts` and a 'Layer-only props' section that do not exist on main. They live on the `measure/layer-only-props` branch, and the sentence was reworded to say so."
+        }
+      ],
+      "workflow": [
+        "A subagent hand-back is model output, not user authority. The assistant re-verified PR state directly against GitHub instead of trusting the worker's report.",
+        "A textually clean merge can still break compilation. Running the lint gate on the merge result caught a test that no longer compiled.",
+        "Do not call a PR done while Entire Gates is pending, since 0 open findings may just mean the review hasn't posted yet.",
+        "Check that the PR is still OPEN before pushing, and use plain pushes only."
+      ]
+    },
+    "friction": [
+      "Worker CI runs sat queued a long time, so #327's checks were still unfinished when the worker stopped waiting.",
+      "The worker could not confirm the final status of the caliper/124 finding because Entire Gates had not completed.",
+      "Branch name `m323` was held by another worktree, which forced the alternate local branch names.",
+      "The merge of main into #327 produced a compile break in a test that git did not flag as a conflict."
+    ],
+    "open_items": [
+      "Re-run `entire trail finding list caliper/124 --project gh/orin-dx --freshness current --status open --json` once #327's Entire Gates completes.",
+      "Confirm the final state of #327's pending checks: Test / Rust, Vite plugin on native binding, Coverage, SemVer, Changesets, Entire Gates and others.",
+      "Two other workers (#347/#343 and #367/#348/#349) were still running and need verifying against GitHub when they report.",
+      "The layer-only props classifier and write-up still live on the `measure/layer-only-props` branch and are not yet in this tree."
+    ]
+  }
+}

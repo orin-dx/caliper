@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01Svrhcdd9UjFQLG4QU9gLhS",
+  "agent_id": "a0288b29bd18befdd",
+  "subagent_type": "general-purpose",
+  "task_description": "Resolve conflicts on 323 and 327",
+  "token_usage": {
+    "input_tokens": 148,
+    "cache_creation_tokens": 89945,
+    "cache_read_tokens": 5336167,
+    "output_tokens": 14785,
+    "api_call_count": 74
+  },
+  "started_at": "2026-11-06T07:40:42.135388-08:00",
+  "completed_at": "2026-11-06T07:50:18.361133-08:00"
+}
