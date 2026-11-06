@@ -10,7 +10,7 @@
 //! back to it, re-export answers come from it, and dependency components form a value index for `typeof` that is never
 //! emitted.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
@@ -292,7 +292,8 @@ pub(crate) struct DependencyLayer {
     claimed: FxHashSet<(PathKey, CompactString)>,
     /// Every parsed file's data (stubs included), so an extension reuses them.
     parsed: FxHashMap<PathKey, Option<Arc<SourceData>>>,
-    /// The panics this layer's own demands hit, contained; the demands they covered stay unanswered.
+    /// The panics this layer's own demands hit, contained, and the dependency files it could not read; the demands they
+    /// covered stay unanswered.
     panics: Vec<Diagnostic>,
 }
 
@@ -419,18 +420,38 @@ struct Loader<'a> {
     re_exports: FxDashMap<PathKey, Arc<OnceLock<Arc<[String]>>>>,
     /// Something was resolved or answered that the index did not hold.
     learned: AtomicBool,
-    /// The diagnostics of demands that panicked.
+    /// The diagnostics of demands that panicked and of dependency files that could not be read.
     panics: Mutex<Vec<Diagnostic>>,
 }
 
 impl Loader<'_> {
+    /// The text of a dependency file. One that is missing is skipped quietly, since resolution found it a moment ago and
+    /// a dangling link or a racing uninstall declares nothing; one that exists but cannot be read is reported once,
+    /// because its declarations are then absent from every answer.
+    fn read(&self, file: &Utf8Path) -> Option<String> {
+        match std::fs::read_to_string(file) {
+            Ok(source) => Some(source),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                let mut diagnostic = Diagnostic::io_read_error(file, &error);
+                // The package's types are not the project's, and the run still produces its output.
+                diagnostic.severity = crate::types::DiagnosticSeverity::Warning;
+                let mut failures = self.panics.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if !failures.iter().any(|known| known.file == diagnostic.file) {
+                    failures.push(diagnostic);
+                }
+                None
+            }
+        }
+    }
+
     fn parse(&self, file: &Utf8Path) -> Option<Arc<SourceData>> {
         if let Some(found) = self.parent.and_then(|parent| parent.parsed_data(file.as_str())) {
             return found.clone();
         }
         let cell = self.parsed.entry(PathKey::from(file)).or_default().clone();
         cell.get_or_init(|| {
-            let source = std::fs::read_to_string(file).ok()?;
+            let source = self.read(file)?;
             let mut data = crate::extractor::parse_file(file, &source);
             // Problems inside a package's types are not the project's; an unresolved demand is reported instead.
             data.diagnostics.clear();
@@ -792,7 +813,7 @@ impl Loader<'_> {
                 return Some((false, found.clone()));
             }
         }
-        let source = std::fs::read_to_string(file).ok()?;
+        let source = self.read(file)?;
         if entry || may_declare_into_react(&source) {
             return self.parse(file).map(|data| scan_of(&data, file));
         }
@@ -1409,10 +1430,18 @@ fn write_index((path, fingerprint): &(Utf8PathBuf, u64), loader: &Loader<'_>) {
     if std::fs::create_dir_all(dir).is_err() {
         return;
     }
-    let temp = path.with_extension(format!("tmp{}", std::process::id()));
+    let temp = temp_path(path);
     if std::fs::write(&temp, bytes).is_ok() && std::fs::rename(&temp, path).is_err() {
         let _removed = std::fs::remove_file(&temp);
     }
+}
+
+/// A name no other write of `path` shares, within this process or another: writers racing on one name would rename
+/// each other's half-written files into place.
+fn temp_path(path: &Utf8Path) -> Utf8PathBuf {
+    static WRITES: AtomicU64 = AtomicU64::new(0);
+    let write = WRITES.fetch_add(1, Ordering::Relaxed);
+    path.with_extension(format!("tmp{}-{write}", std::process::id()))
 }
 
 #[cfg(test)]
