@@ -406,16 +406,17 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
-    /// The result type a function declares or returns, and the call it returns when that is all that is known.
-    fn result_parts<'a>(
+    fn record_result_of<'a>(
         &mut self,
-        generic: bool,
+        name: &str,
+        type_parameters: Option<&TSTypeParameterDeclaration<'a>>,
         return_type: Option<&TSTypeAnnotation<'a>>,
         body: Option<&FunctionBody<'a>>,
-    ) -> Option<(CollectedType, Option<WrapperCallee>)> {
-        Some(if let Some(annotation) = return_type {
+    ) {
+        let generic = type_parameters.is_some();
+        let (result, returned_call) = if let Some(annotation) = return_type {
             if !generic {
-                return None;
+                return;
             }
             (self.ts_type_to_collected(&annotation.type_annotation), None)
         } else if let Some(ty) = asserted_return_type(body).filter(|_| generic) {
@@ -427,27 +428,8 @@ impl<'src> SourceDataCollector<'src> {
         } else if generic {
             (CollectedType::Unknown, returned_local_call(self, body))
         } else {
-            return None;
-        })
-    }
-
-    fn record_result_of<'a>(
-        &mut self,
-        name: &str,
-        type_parameters: Option<&TSTypeParameterDeclaration<'a>>,
-        return_type: Option<&TSTypeAnnotation<'a>>,
-        body: Option<&FunctionBody<'a>>,
-    ) {
-        let generic = type_parameters.is_some();
-        // A type read from the body names the interfaces and aliases the body declares; the return annotation sits
-        // outside it.
-        let entered = match body {
-            Some(body) if return_type.is_none() => self.enter_type_scope(body.span.start, body.statements.iter()),
-            _ => false,
+            return;
         };
-        let parts = self.result_parts(generic, return_type, body);
-        self.leave_type_scope(entered);
-        let Some((result, returned_call)) = parts else { return };
         if matches!(result, CollectedType::Unknown) && returned_call.is_none() {
             return;
         }

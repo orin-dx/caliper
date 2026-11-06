@@ -2881,64 +2881,20 @@ fn unrelated_object_assign_call_is_not_treated_as_a_component_pattern() {
     assert!(data.diagnostics.is_empty(), "expected no diagnostics, got {:?}", data.diagnostics);
 }
 
-/// Collects the interfaces of every source in `$INTERFACE_SCOPE_CASES` and writes their property sets to
-/// `$INTERFACE_SCOPE_OUT`, for `scripts/interface_scope_oracle.mjs` to compare with TypeScript's checker.
 #[test]
-#[ignore = "driven by scripts/interface_scope_oracle.mjs"]
-fn interface_scopes_match_typescript() {
-    let input = std::env::var("INTERFACE_SCOPE_CASES").expect("INTERFACE_SCOPE_CASES names the generated cases");
-    let output = std::env::var("INTERFACE_SCOPE_OUT").expect("INTERFACE_SCOPE_OUT names the result file");
-    let sources: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(input).expect("cases are readable")).expect("cases are JSON");
-    let results: Vec<Vec<String>> = sources
-        .iter()
-        .map(|source| {
-            let data = parse_file(Utf8Path::new("/oracle/case.tsx"), source);
-            data.interfaces
-                .values()
-                .map(|iface| {
-                    let mut names: Vec<&str> = iface.props.iter().map(|p| p.name.as_str()).collect();
-                    names.sort_unstable();
-                    names.join(",")
-                })
-                .collect()
-        })
-        .collect();
-    std::fs::write(output, serde_json::to_string(&results).expect("results serialize")).expect("results are writable");
-}
-
-/// Property sets of every collected interface named `Props`, sorted: one entry per declaring scope.
-fn props_interfaces(source: &str) -> Vec<Vec<String>> {
-    let data = parse_file(Utf8Path::new("/test/scopes.tsx"), source);
-    let mut sets: Vec<Vec<String>> = data
-        .interfaces
-        .values()
-        .filter(|iface| iface.name == "Props")
-        .map(|iface| iface.props.iter().map(|p| p.name.to_string()).collect())
-        .collect();
-    sets.sort();
-    sets
-}
-
-#[test]
-fn a_block_scoped_interface_is_a_different_type_from_the_module_level_one() {
-    let source = "{ interface Props { inner: number } }\n\
-        interface Props { a: string }\n\
-        interface Props { b: string }";
-    assert_eq!(props_interfaces(source), [vec!["a", "b"], vec!["inner"]]);
-}
-
-#[test]
-fn interfaces_in_a_function_and_in_a_function_nested_in_it_are_different_types() {
-    let source =
-        "function f() { interface Props { outer: number } function g() { interface Props { inner: number } } }\n\
-        interface Props { top: string }";
-    assert_eq!(props_interfaces(source), [vec!["inner"], vec!["outer"], vec!["top"]]);
-}
-
-#[test]
-fn two_functions_declaring_the_same_interface_name_keep_separate_types() {
-    let source = "function f() { interface Props { one: number } }\n\
-        function g() { interface Props { two: number } }";
-    assert_eq!(props_interfaces(source), [vec!["one"], vec!["two"]]);
+fn a_function_body_interface_keeps_its_type_names_as_written() {
+    let source = "type T = number;\n\
+        interface Props<T> { value: T }\n\
+        function make() { type Item = { id: string }; interface Row { item: Item } return (p: Row) => <div />; }\n\
+        export const Box = make();";
+    let data = parse_file(Utf8Path::new("/test/names.tsx"), source);
+    let type_of = |interface: &str, prop: &str| -> String {
+        let iface = data.interfaces.values().find(|i| i.name == interface).expect("interface is collected");
+        match &iface.props.iter().find(|p| p.name == prop).expect("prop is collected").collected_type {
+            CollectedType::Named { name, .. } => name.to_string(),
+            other => panic!("expected a named type, got {other:?}"),
+        }
+    };
+    assert_eq!(type_of("Props", "value"), "T");
+    assert_eq!(type_of("Row", "item"), "Item");
 }
