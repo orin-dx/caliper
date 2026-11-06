@@ -572,3 +572,29 @@ fn the_whole_project_merge_and_the_session_merge_agree_on_every_prop_the_checker
     assert_eq!(batch.props.keys().cloned().collect::<Vec<_>>(), ["label", "size"]);
     assert_eq!(on_demand.props.keys().cloned().collect::<Vec<_>>(), ["className", "label", "legacy", "size"]);
 }
+
+/// A provider that drops its sender without answering, as a checker whose worker died does.
+struct Hangup;
+
+impl SemanticProvider for Hangup {
+    fn request(&self, _targets: Vec<SemanticTarget>) -> Receiver<SemanticOutcome> {
+        channel().1
+    }
+}
+
+#[test]
+fn a_checker_that_disconnects_without_answering_leaves_the_structural_props_and_says_so() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let session = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() })
+        .with_semantic(Arc::new(Hangup), Duration::from_secs(5));
+    drop(session.initialize());
+
+    let answer = session.component("Button").unwrap();
+
+    assert_eq!(answer.entry.props.keys().cloned().collect::<Vec<_>>(), ["label"]);
+    let notes: Vec<_> = answer.diagnostics.iter().filter(|d| d.code == DiagnosticCode::SemanticBackend).collect();
+    assert_eq!(notes.len(), 1, "{:?}", answer.diagnostics);
+    assert_eq!(notes[0].severity, DiagnosticSeverity::Warning);
+    assert_eq!(notes[0].message, "the TypeScript checker stopped without answering; the structural props are used");
+    assert_eq!(notes[0].affects, ["Button"]);
+}

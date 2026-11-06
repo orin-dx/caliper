@@ -41,7 +41,9 @@ impl<'src> SourceDataCollector<'src> {
                 // is farther still — nothing left in range.
                 break;
             }
-            if c.is_block && !self.consumed_jsdoc.contains(&c.span_end) {
+            // Only `/** */` documents; a plain `/* */` note is skipped so the doc comment before it still counts.
+            let is_doc_comment = c.is_block && self.source[c.span_start as usize..].starts_with("/**");
+            if is_doc_comment && !self.consumed_jsdoc.contains(&c.span_end) {
                 // A comment documents the declaration right after it, so one that something else stands between belongs
                 // to that something: the props of `function Badge(props: { a: string })` follow the component's
                 // comment, but `Badge(props:` is in the way.
@@ -159,7 +161,7 @@ pub(super) fn parse_jsdoc_text(raw: &str) -> String {
 pub(super) fn extract_jsdoc_tags(raw: &str) -> BTreeMap<String, String> {
     let inner = raw.trim_start_matches("/**").trim_end_matches("*/");
     let mut tags: BTreeMap<String, String> = BTreeMap::new();
-    let mut in_tags = false;
+    let mut last_key: Option<String> = None;
 
     for line in inner.lines() {
         let line = line.trim();
@@ -167,7 +169,7 @@ pub(super) fn extract_jsdoc_tags(raw: &str) -> BTreeMap<String, String> {
         let line = line.trim();
 
         if let Some(rest) = line.strip_prefix('@') {
-            in_tags = true;
+            last_key = None;
             let (tag, value) = if let Some(sp) = rest.find(char::is_whitespace) {
                 let tag = &rest[..sp];
                 let value = rest[sp..].trim();
@@ -186,15 +188,26 @@ pub(super) fn extract_jsdoc_tags(raw: &str) -> BTreeMap<String, String> {
                 if let Some(space) = value.find(char::is_whitespace) {
                     let prop_name = &value[..space];
                     let desc = value[space..].trim();
-                    tags.insert(format!("param:{}", prop_name), desc.to_owned());
+                    let key = format!("param:{}", prop_name);
+                    tags.insert(key.clone(), desc.to_owned());
+                    last_key = Some(key);
                 } else if !value.is_empty() {
-                    tags.insert(format!("param:{}", value), String::new());
+                    let key = format!("param:{}", value);
+                    tags.insert(key.clone(), String::new());
+                    last_key = Some(key);
                 }
             } else {
                 tags.insert(tag.to_owned(), value.to_owned());
+                last_key = Some(tag.to_owned());
             }
-        } else if in_tags && !line.is_empty() {
-            // Continuation of a tag — ignore for now
+        } else if let Some(text) = last_key.as_ref().and_then(|key| tags.get_mut(key)) {
+            // A tag's value runs until the next tag.
+            if !line.is_empty() {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(line);
+            }
         }
     }
 

@@ -756,6 +756,48 @@ fn a_wildcard_export_does_not_answer_for_a_failed_explicit_re_export_of_the_same
     assert_eq!(layer.unresolved_reason(&src, "shadow-kit", "Ns.x"), Some(Unresolved::Unresolvable));
 }
 
+/// A demand that panics is contained, and its diagnostic reaches the output with the panic text and the demand named.
+#[test]
+fn a_panic_in_the_dependency_loader_reaches_the_output_as_a_diagnostic() {
+    let (_tmp, root) = project(&[(
+        "src/Badge.tsx",
+        "import type { __DEPENDENCY_PANIC_TEST__ } from 'ui-kit';\n\
+         export function Badge(props: { tone?: __DEPENDENCY_PANIC_TEST__ }) { return null; }\n",
+    )]);
+
+    let output = extract(&options(&root, true));
+
+    let panics: Vec<_> =
+        output.diagnostics.iter().filter(|d| d.code == crate::types::DiagnosticCode::InternalPanic).collect();
+    assert_eq!(panics.len(), 1, "{:?}", output.diagnostics);
+    assert_eq!(panics[0].message, "dependency demand ui-kit#__DEPENDENCY_PANIC_TEST__ panicked: injected panic");
+    assert_eq!(panics[0].severity, crate::types::DiagnosticSeverity::Error);
+}
+
+/// A demand that a declaration spawns while it is loaded is contained like a top-level one.
+#[test]
+fn a_panic_in_a_demand_spawned_by_a_declaration_reaches_the_output_as_a_diagnostic() {
+    let (_tmp, root) = project(&[
+        ("node_modules/nest-kit/package.json", r#"{ "name": "nest-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        (
+            "node_modules/nest-kit/index.d.ts",
+            "import type { __DEPENDENCY_PANIC_TEST__ } from 'ui-kit';\n\
+             export interface NestProps { tone?: __DEPENDENCY_PANIC_TEST__ }\n",
+        ),
+        (
+            "src/Nest.tsx",
+            "import type { NestProps } from 'nest-kit';\nexport function Nest(props: NestProps) { return null; }\n",
+        ),
+    ]);
+
+    let output = extract(&options(&root, true));
+
+    let panics: Vec<_> =
+        output.diagnostics.iter().filter(|d| d.code == crate::types::DiagnosticCode::InternalPanic).collect();
+    assert_eq!(panics.len(), 1, "{:?}", output.diagnostics);
+    assert_eq!(panics[0].message, "dependency demand ui-kit#__DEPENDENCY_PANIC_TEST__ panicked: injected panic");
+}
+
 /// The layer keeps one answer per `(module, name)` for names found through a star-export cycle, loads only declaring
 /// files, and records why each demand it could not satisfy failed.
 #[test]
@@ -832,6 +874,21 @@ fn the_loader_is_deterministic_across_demand_order_and_threads() {
     for (reverse, threads) in [(true, 1), (false, 4), (true, 18)] {
         assert_eq!(snapshot(reverse, threads), first, "reverse {reverse}, {threads} threads");
     }
+}
+
+/// Flattening a chain keeps the panics its layers contained, since the demands they covered stay unanswered.
+#[test]
+fn flattening_a_chain_keeps_the_panics_an_earlier_layer_contained() {
+    let (_tmp, root) = project(&[("src/Badge.tsx", BADGE)]);
+    let options = PipelineOptions { use_cache: false, ..options(&root, true) };
+    let mut chained = Arc::new(load(vec![demand(&root, "ui-kit", "__DEPENDENCY_PANIC_TEST__")], &options, None));
+    for index in 0..9 {
+        chained = Arc::new(load(vec![demand(&root, "ui-kit", &format!("Missing{index}"))], &options, Some(&chained)));
+    }
+
+    assert_eq!(chained.depth, 0, "the ninth extension flattened the chain");
+    let messages: Vec<_> = chained.panic_diagnostics().into_iter().map(|d| d.message).collect();
+    assert_eq!(messages, ["dependency demand ui-kit#__DEPENDENCY_PANIC_TEST__ panicked: injected panic"]);
 }
 
 #[test]
@@ -975,6 +1032,108 @@ fn a_changed_package_is_walked_again_instead_of_answered_from_the_index() {
     assert_eq!(prop_types(&second, "Badge"), [("v2".into(), "number".into())]);
 }
 
+/// An upgrade of only the package a type is re-exported from changes the answer: the importing package's own
+/// `package.json` is untouched, so its rows must be stamped with the target's as well.
+#[test]
+fn upgrading_only_a_re_exported_package_changes_the_warm_answer() {
+    let source =
+        "import type { InnerProps } from 'outer-kit';\nexport function Badge(props: InnerProps) { return null; }\n";
+    let (_tmp, root) = project(&[
+        ("src/Badge.tsx", source),
+        (
+            "node_modules/outer-kit/package.json",
+            r#"{ "name": "outer-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        ("node_modules/outer-kit/index.d.ts", "export * from 'inner-kit';\n"),
+        (
+            "node_modules/inner-kit/package.json",
+            r#"{ "name": "inner-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        ("node_modules/inner-kit/index.d.ts", "export interface InnerProps { old: string }\n"),
+    ]);
+    let first = extract(&options(&root, true));
+    assert_eq!(prop_types(&first, "Badge"), [("old".into(), "string".into())]);
+
+    std::fs::write(root.join("node_modules/inner-kit/index.d.ts"), "export * from './v2';\n").unwrap();
+    std::fs::write(root.join("node_modules/inner-kit/v2.d.ts"), "export interface InnerProps { fresh: number }\n")
+        .unwrap();
+    std::fs::write(
+        root.join("node_modules/inner-kit/package.json"),
+        r#"{ "name": "inner-kit", "version": "2.0.0", "types": "index.d.ts" }"#,
+    )
+    .unwrap();
+
+    let warm = extract(&options(&root, true));
+    assert_eq!(prop_types(&warm, "Badge"), [("fresh".into(), "number".into())]);
+    let mut cold_options = options(&root, true);
+    cold_options.use_cache = false;
+    let cold = extract(&cold_options);
+    assert_eq!((warm.components, warm.diagnostics), (cold.components, cold.diagnostics));
+}
+
+/// A package installed after a run that could not resolve it is found by the next warm run.
+#[test]
+fn installing_a_missing_package_changes_the_warm_answer() {
+    let source =
+        "import type { LateProps } from 'outer-kit';\nexport function Badge(props: LateProps) { return null; }\n";
+    let (_tmp, root) = project(&[
+        ("src/Badge.tsx", source),
+        (
+            "node_modules/outer-kit/package.json",
+            r#"{ "name": "outer-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        ("node_modules/outer-kit/index.d.ts", "export * from 'late-kit';\n"),
+    ]);
+    let first = extract(&options(&root, true));
+    assert!(!first.components["Badge"].props.contains_key("late"), "nothing resolves yet");
+
+    std::fs::create_dir_all(root.join("node_modules/late-kit")).unwrap();
+    std::fs::write(
+        root.join("node_modules/late-kit/package.json"),
+        r#"{ "name": "late-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("node_modules/late-kit/index.d.ts"), "export interface LateProps { late: boolean }\n")
+        .unwrap();
+
+    let warm = extract(&options(&root, true));
+    assert_eq!(prop_types(&warm, "Badge"), [("late".into(), "boolean".into())]);
+    let mut cold_options = options(&root, true);
+    cold_options.use_cache = false;
+    let cold = extract(&cold_options);
+    assert_eq!((warm.components, warm.diagnostics), (cold.components, cold.diagnostics));
+}
+
+/// The missing package may be several re-export levels away from the package the project imports.
+#[test]
+fn installing_a_package_two_re_export_levels_away_changes_the_warm_answer() {
+    let source = "import type { LateProps } from 'a-kit';\nexport function Badge(props: LateProps) { return null; }\n";
+    let (_tmp, root) = project(&[
+        ("src/Badge.tsx", source),
+        ("node_modules/a-kit/package.json", r#"{ "name": "a-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
+        ("node_modules/a-kit/index.d.ts", "export * from 'outer-kit';\n"),
+        (
+            "node_modules/outer-kit/package.json",
+            r#"{ "name": "outer-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+        ),
+        ("node_modules/outer-kit/index.d.ts", "export * from 'late-kit';\n"),
+    ]);
+    let first = extract(&options(&root, true));
+    assert!(!first.components["Badge"].props.contains_key("late"), "nothing resolves yet");
+
+    std::fs::create_dir_all(root.join("node_modules/late-kit")).unwrap();
+    std::fs::write(
+        root.join("node_modules/late-kit/package.json"),
+        r#"{ "name": "late-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("node_modules/late-kit/index.d.ts"), "export interface LateProps { late: boolean }\n")
+        .unwrap();
+
+    let warm = extract(&options(&root, true));
+    assert_eq!(prop_types(&warm, "Badge"), [("late".into(), "boolean".into())]);
+}
+
 #[test]
 fn an_unresolved_package_type_says_why_in_its_diagnostic() {
     let source = "import type { Missing } from 'ui-kit';\nimport type { Gone } from 'not-installed';\n\
@@ -1027,6 +1186,20 @@ fn watch_revisions_with_dependencies_match_a_cold_extract() {
         assert_eq!(watched.diagnostics, cold.diagnostics, "after:\n{edit}");
         assert_eq!(watched.components["Badge"].props.keys().collect::<Vec<_>>(), expected, "after:\n{edit}");
     }
+}
+
+#[test]
+fn a_save_made_just_after_initialize_is_seen_by_the_first_ensure_fresh() {
+    let first = "export function Badge(props: { one: string }) { return null; }\n";
+    let (_tmp, root) = project(&[("src/Badge.tsx", first)]);
+    let session = crate::pipeline::WatchSession::new(options(&root, true));
+    let _initial = session.initialize();
+    std::fs::write(root.join("src/Badge.tsx"), "export function Badge(props: { two: string }) { return null; }\n")
+        .unwrap();
+
+    let _update = session.ensure_fresh();
+
+    assert_eq!(prop_types(&session.snapshot(), "Badge"), [("two".into(), "string".into())]);
 }
 
 /// A revision whose edit first reaches React's `CSSProperties` extends the layer with csstype as a cold run loads it.

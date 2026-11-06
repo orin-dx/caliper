@@ -93,6 +93,14 @@ fn next_session_id() -> u32 {
     compute_session_id(pid, counter)
 }
 
+/// The live session for `session_id`; one never created or already closed is an error, not an empty answer.
+fn live_session(session_id: u32) -> napi::Result<Arc<WatchSession>> {
+    SESSIONS
+        .get(&session_id)
+        .map(|session| session.clone())
+        .ok_or_else(|| napi::Error::from_reason(format!("Unknown session {session_id}")))
+}
+
 // ─── JsExtractOptions ─────────────────────────────────────────────────────────
 
 /// Options passed from TypeScript — flat struct for easy NAPI marshalling.
@@ -399,15 +407,15 @@ pub async fn initialize_session_index(session_id: u32, options: JsExtractOptions
 
 /// The session's components with these keys as react-docgen-typescript documents them (`__docgenInfo`, which
 /// Storybook converts to argTypes), as a JSON object keyed by component key. A key the session doesn't have is left
-/// out; so is every key before the session is initialized.
+/// out; so is every key before the session is initialized. Errors for an unknown or closed session.
 #[napi]
 pub fn session_docgen_info(session_id: u32, keys: Vec<String>) -> napi::Result<String> {
     match caliper_docgen_core::panic_guard::contain_panic("session_docgen_info", move || {
-        let session = SESSIONS.get(&session_id).map(|session| session.clone());
+        let session = live_session(session_id)?;
         let docs: serde_json::Map<String, serde_json::Value> = match session {
             // A lazy session resolves each requested component now, and the ones it already resolved are answered
             // from its memo.
-            Some(session) if session.is_lazy() => {
+            session if session.is_lazy() => {
                 let answers = session.components(&keys);
                 keys.into_iter()
                     .zip(answers)
@@ -417,7 +425,7 @@ pub fn session_docgen_info(session_id: u32, keys: Vec<String>) -> napi::Result<S
                     .collect()
             }
             session => {
-                let output = session.and_then(|session| session.current_output());
+                let output = session.current_output();
                 keys.into_iter()
                     .filter_map(|key| {
                         let entry = output.as_ref()?.components.get(&key)?;
@@ -436,28 +444,25 @@ pub fn session_docgen_info(session_id: u32, keys: Vec<String>) -> napi::Result<S
 /// What a host needs to answer for one component: its documentation as `sessionDocgenInfo` returns it, and its own
 /// diagnostics, each with `affects` set to the key. `{ key: { docgenInfo, diagnostics } }`; a key the session has no
 /// component under is left out. A lazy session resolves each requested component now (in parallel), so a host learns
-/// whether a component's props may be incomplete from the same call that returns them.
+/// whether a component's props may be incomplete from the same call that returns them. Errors for an unknown or closed
+/// session.
 #[napi]
 pub fn session_component_answers(session_id: u32, keys: Vec<String>) -> napi::Result<String> {
     match caliper_docgen_core::panic_guard::contain_panic("session_component_answers", move || {
-        let session = SESSIONS.get(&session_id).map(|session| session.clone());
-        let answers: serde_json::Map<String, serde_json::Value> = match session {
-            Some(session) => {
-                let answered = session.components(&keys);
-                keys.into_iter()
-                    .zip(answered)
-                    .filter_map(|(key, answer)| {
-                        let answer = answer?;
-                        let answer = serde_json::json!({
-                            "docgenInfo": caliper_docgen_core::pipeline::rdt::docgen_info(&answer.entry),
-                            "diagnostics": answer.diagnostics,
-                        });
-                        Some((key, answer))
-                    })
-                    .collect()
-            }
-            None => serde_json::Map::new(),
-        };
+        let session = live_session(session_id)?;
+        let answered = session.components(&keys);
+        let answers: serde_json::Map<String, serde_json::Value> = keys
+            .into_iter()
+            .zip(answered)
+            .filter_map(|(key, answer)| {
+                let answer = answer?;
+                let answer = serde_json::json!({
+                    "docgenInfo": caliper_docgen_core::pipeline::rdt::docgen_info(&answer.entry),
+                    "diagnostics": answer.diagnostics,
+                });
+                Some((key, answer))
+            })
+            .collect();
         serde_json::to_string(&answers).map_err(|e| napi::Error::from_reason(e.to_string()))
     }) {
         Ok(result) => result,
@@ -509,13 +514,15 @@ pub async fn session_warm_up(session_id: u32, count: u32) -> napi::Result<u32> {
 }
 
 /// Every component key `sessionDocgenInfo` answers, sorted. A lazy session resolves only imported-member aliases to
-/// decide; the rest come from parsing alone. Empty for an unknown or uninitialized session.
+/// decide; the rest come from parsing alone. Empty for an uninitialized session; errors for an unknown or closed one.
 #[napi]
-pub fn session_component_keys(session_id: u32) -> Vec<String> {
-    caliper_docgen_core::panic_guard::contain_panic("session_component_keys", move || {
-        SESSIONS.get(&session_id).map(|session| session.component_keys()).unwrap_or_default()
-    })
-    .unwrap_or_default()
+pub fn session_component_keys(session_id: u32) -> napi::Result<Vec<String>> {
+    match caliper_docgen_core::panic_guard::contain_panic("session_component_keys", move || {
+        Ok(live_session(session_id)?.component_keys())
+    }) {
+        Ok(result) => result,
+        Err(diag) => Err(napi::Error::from_reason(diag.to_string())),
+    }
 }
 
 /// What a lazy session has indexed and resolved so far. `None` for an eager, unknown or uninitialized session.
@@ -559,10 +566,7 @@ pub fn session_stats(session_id: u32) -> Option<JsLazyStats> {
 pub async fn ensure_fresh(session_id: u32) -> napi::Result<String> {
     tokio::task::spawn_blocking(move || {
         match caliper_docgen_core::panic_guard::contain_panic("ensure_fresh", move || {
-            let session = SESSIONS
-                .get(&session_id)
-                .map(|s| s.clone())
-                .ok_or_else(|| napi::Error::from_reason(format!("Unknown session {session_id}")))?;
+            let session = live_session(session_id)?;
             let update = session.ensure_fresh();
             incremental_update_to_json(&update).map_err(|e| napi::Error::from_reason(e.to_string()))
         }) {
@@ -705,6 +709,18 @@ mod tests {
         let err = PipelineOptions::try_from(js).expect_err("a typo must not silently fall back to curated");
 
         assert_eq!(err, "htmlAttributes is 'all', expected \"curated\", \"full\" or \"none\"");
+    }
+
+    #[test]
+    fn the_session_queries_error_for_a_closed_session_instead_of_answering_empty() {
+        let id = create_session(base_options()).expect("session");
+        assert_eq!(session_component_keys(id).expect("a live session answers"), Vec::<String>::new());
+        close_session(id);
+
+        let unknown = format!("Unknown session {id}");
+        assert_eq!(session_docgen_info(id, vec!["Button".into()]).expect_err("closed").reason, unknown);
+        assert_eq!(session_component_answers(id, vec!["Button".into()]).expect_err("closed").reason, unknown);
+        assert_eq!(session_component_keys(id).expect_err("closed").reason, unknown);
     }
 
     #[test]
@@ -1037,7 +1053,7 @@ mod tests {
         let stats = session_stats(lazy).expect("lazy stats");
         assert_eq!((stats.components, stats.resolved), (2, 0));
         assert!(session_stats(eager).is_none());
-        assert_eq!(session_component_keys(lazy), ["Button", "Card"]);
+        assert_eq!(session_component_keys(lazy).expect("keys"), ["Button", "Card"]);
 
         let keys = vec!["Button".to_owned(), "Missing".to_owned()];
         let from_eager = session_docgen_info(eager, keys.clone()).expect("eager docgen info");
