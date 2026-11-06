@@ -1,0 +1,45 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6S8G8SFMTD878H65CW8T55T",
+  "strategy": "manual-commit",
+  "branch": "docs/adr-scoping-one-owner",
+  "checkpoints_count": 4,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 26,
+    "cache_creation_tokens": 30704,
+    "cache_read_tokens": 1383003,
+    "output_tokens": 11098,
+    "api_call_count": 11,
+    "subagent_tokens": {
+      "input_tokens": 36,
+      "cache_creation_tokens": 148402,
+      "cache_read_tokens": 1177582,
+      "output_tokens": 4468,
+      "api_call_count": 18
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01HiwyF9kmnCfhNHLTVHGtwj",
+  "agent_id": "ae58af5046461e25e",
+  "subagent_type": "general-purpose",
+  "task_description": "Remove two unused public methods",
+  "token_usage": {
+    "input_tokens": 38,
+    "cache_creation_tokens": 77035,
+    "cache_read_tokens": 1163472,
+    "output_tokens": 5429,
+    "api_call_count": 19
+  },
+  "started_at": "2026-11-06T11:55:31.997228-08:00",
+  "completed_at": "2026-11-06T12:04:45.244224-08:00"
+}

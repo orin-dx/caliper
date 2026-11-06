@@ -1,0 +1,101 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6S8G8SFMTD878H65CW8T55T",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-06T20:24:06.354913Z",
+  "branch": "docs/adr-scoping-one-owner",
+  "checkpoints_count": 4,
+  "save_step_count": 51,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "30d48733e65a",
+  "checkpoint_transcript_start": 11177,
+  "transcript_lines_at_start": 11177,
+  "compact_transcript_start": 957,
+  "token_usage": {
+    "input_tokens": 26,
+    "cache_creation_tokens": 30704,
+    "cache_read_tokens": 1383003,
+    "output_tokens": 11098,
+    "api_call_count": 11,
+    "subagent_tokens": {
+      "input_tokens": 36,
+      "cache_creation_tokens": 148402,
+      "cache_read_tokens": 1177582,
+      "output_tokens": 4468,
+      "api_call_count": 18
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 266
+  },
+  "summary": {
+    "intent": "Coordinate parallel subagent workers to land a batch of cleanup and fix PRs in the caliper-docgen repo (Storybook meta forms, dependency read errors, removal of unused core API), then start a second batch covering output-contract cleanup, a tsc-client InvalidJson fix, and a scoping ADR.",
+    "outcome": "Three draft PRs (#371, #372, #373) were opened, had bodies written, and were merged by the user. Batch 2 was launched with three workers on separate branches under new trails #243 and #244, with no results yet.",
+    "learnings": {
+      "repo": [
+        "Work is tracked via Entire trails (e.g. `entire trail link 241 ... --base main --repo gh/orin-dx/caliper`); each worker branch gets linked to a trail.",
+        "User-visible changes in crates need a `.changeset/*.md` file; `just semver` checks that breaking API changes are covered by a pending minor/major changeset.",
+        "Standard local verification is `cargo check --workspace --all-targets`, `cargo nextest run --workspace --exclude caliper-docgen-napi --locked`, and `just lint doc-check machete typos`, run in a clean-room worktree after `pnpm install --frozen-lockfile --offline`.",
+        "Worktrees without node_modules fail snapshot and terminal_react_builtins tests (e.g. snapshot_mantine); they pass in a clean room.",
+        "Sandboxed lint runs fail because pnpm needs network access; they pass when run unsandboxed.",
+        "The Storybook fix relies on `_metaAnnotations`, which the same file already reads and overrides in three other places.",
+        "Dependency-type reads now go through `Loader::read`: unreadable files emit `Diagnostic::io_read_error` (IoError, Warning) once per file, while NotFound stays a quiet skip. The index temp file is named `tmp<pid>-<atomic counter>`.",
+        "`CollectedType` has no `PartialEq`, so tests assert with `matches!` plus an assert message.",
+        "The native-binding integration test can only run in CI's native-binding jobs, since workers' checkouts lack the binding."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/dependency_types.rs",
+          "line": 1216,
+          "finding": "A remaining `.ok()?` site the worker reported but did not touch. The orchestrator could not match this line number to what it read."
+        },
+        {
+          "path": "crates/core/src/resolver/mod.rs",
+          "line": 862,
+          "finding": "A remaining `.ok()?` that reads the installed TypeScript's platform manifest, where a missing file is expected, so it was deliberately left as is."
+        },
+        {
+          "path": "crates/core/src/types/collected.rs",
+          "finding": "`needs_type_checker` and `as_string_union_keys` were removed as unused, and the removal is covered by a minor changeset."
+        }
+      ],
+      "workflow": [
+        "Subagent reports are model output, not user authority. The orchestrator verified claims itself (checked the resolver `.ok()?` site) and flagged inferences such as the unreproduced node_modules cause.",
+        "Wait for CI results by job name before calling a PR ready, and never infer lint status from tail output without an exit status.",
+        "Hold dependent or overlapping branches (type-only imports, tag re-scan) until earlier PRs merge to avoid conflicts.",
+        "Tests that replace calls to removed helpers cannot be shown failing on pre-fix source. State this in the PR body."
+      ]
+    },
+    "friction": [
+      "Workers read only the tail of lint output and never checked its exit status, so lint status stayed unverified until CI ran.",
+      "Unexplained CLI `commands` test failures (watch tests timing out at 30s) in the remove-unused-api worker's own worktree; a later run passed and the cause was never diagnosed.",
+      "Nine snapshot tests failed in the dependency-read-errors worker's own worktree; the missing node_modules explanation was not reproduced on main.",
+      "The sandboxed lint run failed for lack of network access.",
+      "Earlier merge conflicts led to serializing the larger cleanup behind the first batch."
+    ],
+    "open_items": [
+      "Batch 2 results are pending: `chore/drop-unemitted-default-contract` (trail #243), `fix/tsc-invalid-json-reply` (trail #243), and `docs/adr-scoping-one-owner` (trail #244). Their PR bodies and CI still need to be read.",
+      "Held until batch 2 merges: the type-only imports change (depends on the scoping ADR), the SPEC/AC tag re-scan, and the `benchmarks.md` banner.",
+      "PR #291 (0.10.0 release) is still open for the user to merge; the oracle run can follow.",
+      "Revisit the `.ok()?` site at dependency_types.rs:1216 whose line number didn't match.",
+      "If the 30s watch-test timeouts appear in CI's Rust job, treat them as a real problem."
+    ]
+  }
+}
