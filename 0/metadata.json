@@ -1,0 +1,91 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6RV43428538V39AEWK8585M",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-06T16:30:09.582563Z",
+  "branch": "m348",
+  "checkpoints_count": 1,
+  "save_step_count": 43,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "7565f6daa27e",
+  "checkpoint_transcript_start": 9055,
+  "transcript_lines_at_start": 9055,
+  "compact_transcript_start": 768,
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 6679,
+    "cache_read_tokens": 1440612,
+    "output_tokens": 1381,
+    "api_call_count": 2,
+    "subagent_tokens": {
+      "input_tokens": 70,
+      "cache_creation_tokens": 18995,
+      "cache_read_tokens": 8218572,
+      "output_tokens": 8898,
+      "api_call_count": 35
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 204
+  },
+  "summary": {
+    "intent": "Scale back PR 347 (interface merging / scope isolation in the extractor) to a smaller, safer change and get it through CI and review, while coordinating several parallel worker sessions (#347, #353, #367/#348/#349).",
+    "outcome": "PR 347 was reduced from about +470 to +213/-13 across 6 files and pushed as 093ba504, with the earlier scoped version preserved on wip/interface-scope-structural. Local lint and 1251 tests passed, but CI checks are still queued and Entire Gates is in progress, so there are no review findings yet.",
+    "learnings": {
+      "repo": [
+        "Extractor interface merge rule in visit.rs: two same-name interfaces merge only when both are at module level. Function-body or block interfaces never touch a module-level entry, and a lone local interface keeps its bare-name entry. It uses a `local_depth` counter and a `module_interfaces` key set.",
+        "Enums and classes are keyed by bare name and are not scope-isolated. This is documented as a known limitation in docs/edge-cases.md under Resolution.",
+        "Local interfaces of the same name in different scopes overwrite each other, and a function-local type alias is not separated from a module-level alias of the same name.",
+        "A type-only `.ts` import from React is no longer scanned for components, while a `.ts` file with React value imports is.",
+        "Verification gates used: `CI=true pnpm install --frozen-lockfile --offline`, `just lint doc-check machete typos`, `cargo nextest run --workspace`.",
+        "Review findings are read via `entire trail finding list caliper/144 --project gh/orin-dx --freshness current --status open --json`, then each non-Entire check is read by name."
+      ],
+      "code": [
+        {
+          "path": "crates/.../extractor/visit.rs",
+          "finding": "Holds the module-level-only interface merge rule, implemented with a local_depth counter and a module_interfaces key set. A later module-level declaration replaces a local one."
+        },
+        {
+          "path": "docs/edge-cases.md",
+          "finding": "Documents the dropped scope-isolation limitation for local interfaces and aliases, and notes that enums and classes are unchanged."
+        }
+      ],
+      "workflow": [
+        "Preserve a heavier attempt on a wip branch (pushed, no PR) before scaling a PR back, and use a plain push instead of a force push.",
+        "Verify in a clean-room worktree to avoid contamination from local state.",
+        "Check fail-before by copying the branch's tests onto origin/main source. Four of the eight tests fail there and are real fail-before tests. The other four are regression guards that cannot fail on pre-PR source.",
+        "Add tests that assert user-visible rendered output, such as type names never showing `Item@57`, to catch leaks of internal rewriting.",
+        "Do not treat a PR as done until the review posts and the checks complete."
+      ]
+    },
+    "friction": [
+      "GitHub Actions runners did not start any of the 16 queued checks after about 25 minutes of polling, and have been slow for over an hour.",
+      "The earlier scoped-key approach leaked internal names such as `Item@57` into rendered types, which forced the scale-back.",
+      "The type-specifier test was not isolated on the PR's own intermediate source, so its fail-before status is unknown."
+    ],
+    "open_items": [
+      "Wait for Entire Gates to complete on 093ba504, then re-list open current findings and read each non-Entire check by name.",
+      "Wait for the 16 queued CI checks (Audit, Changesets, Coverage, Install, Lint, MSRV, SemVer, Test, Python scripts, Rust, TypeScript, Vite plugin and others) to run.",
+      "Scope isolation for local interfaces and local type aliases is deferred as a known limitation, and the structural version stays on wip/interface-scope-structural.",
+      "Enums and classes are still not scope-isolated.",
+      "The #353 conflict worker and the #367/#348/#349 worker are still running."
+    ]
+  }
+}
