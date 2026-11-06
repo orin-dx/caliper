@@ -1293,7 +1293,7 @@ impl evidence::Scope for SourceDataCollector<'_> {
         self.data.imports.iter().any(|import| {
             import.local_name.as_str() == "h"
                 && import.exported_name.as_str() == "h"
-                && (import.specifier.as_str() == "preact" || import.specifier.starts_with("preact/"))
+                && crate::react_types::is_preact_module(&import.specifier)
         })
     }
 }

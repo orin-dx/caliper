@@ -2793,6 +2793,26 @@ fn a_component_cast_to_vfc_or_void_function_component_keeps_its_props() {
 }
 
 #[test]
+fn exporting_a_cast_component_under_the_name_of_another_local_leaves_that_local_mapped() {
+    let source = "import type { VFC } from 'react';\n\
+        import { forwardRef } from 'react';\n\
+        interface Props { label: string }\n\
+        interface Q { q: string }\n\
+        const InnerA = forwardRef<HTMLDivElement, Props>((props, ref) => <div ref={ref} />);\n\
+        function B(props: Q) { return <div />; }\n\
+        const A = InnerA as VFC<{ a: string }>;\n\
+        export { A as B };";
+    let data = parse_file(Utf8Path::new("/fixtures/cast-rename.tsx"), source);
+    let local_b: Vec<&str> = data
+        .component_mappings
+        .iter()
+        .filter(|m| m.component_name == "B" && m.rule != crate::types::DetectionRule::FcAnnotation)
+        .map(|m| m.props_type_name.as_str())
+        .collect();
+    assert_eq!(local_b, ["Q"]);
+}
+
+#[test]
 fn preact_compat_element_type_is_react_everywhere() {
     let source = "import type { ReactElement } from 'preact/compat';\n\
         function build(): ReactElement { throw new Error(); }\n\
@@ -2843,13 +2863,6 @@ fn a_component_passed_to_the_jsx_runtime_is_counted_as_rendered() {
         function Row(props: { id: string }, ref: unknown) { return <i />; }\n\
         export const rows = jsx(Row, {});";
     assert_eq!(components_in(source), ["Row"]);
-}
-
-#[test]
-fn preact_compat_type_import_is_react_for_the_resolver_too() {
-    assert!(crate::react_types::is_react_module("preact/compat"));
-    assert!(crate::react_types::is_react_module("@types/react"));
-    assert!(!crate::react_types::is_react_module("preact"));
 }
 
 #[test]

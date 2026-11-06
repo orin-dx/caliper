@@ -336,10 +336,35 @@ pub(crate) fn is_react_module(specifier: &str) -> bool {
         || specifier == "preact/compat"
 }
 
+/// Whether an import specifier is Preact: `preact` or a subpath of it, where its `h` lives.
+pub(crate) fn is_preact_module(specifier: &str) -> bool {
+    specifier == "preact" || specifier.starts_with("preact/")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rstest::rstest;
+
+    #[rstest]
+    #[case("react", true)]
+    #[case("react/jsx-runtime", true)]
+    #[case("@types/react", true)]
+    #[case("preact/compat", true)]
+    #[case("preact", false)]
+    #[case("react-dom", false)]
+    fn is_react_module_names_the_modules_that_declare_react_types(#[case] specifier: &str, #[case] expected: bool) {
+        assert_eq!(is_react_module(specifier), expected);
+    }
+
+    #[rstest]
+    #[case("preact", true)]
+    #[case("preact/hooks", true)]
+    #[case("preact-render-to-string", false)]
+    #[case("react", false)]
+    fn is_preact_module_names_preact_and_its_subpaths(#[case] specifier: &str, #[case] expected: bool) {
+        assert_eq!(is_preact_module(specifier), expected);
+    }
 
     // Every match arm in html_element_for, not a sample — including both
     // members of the `SVGAttributes | SVGProps` or-pattern as distinct cases
