@@ -15,6 +15,8 @@ import re
 import subprocess
 import sys
 
+import schema_version
+
 SEED = 20261021
 
 
@@ -44,7 +46,7 @@ def main():
     for corpus in names:
         run = subprocess.run([binary, 'extract', '--src', os.path.join(corpora, corpus), '--json'],
                              capture_output=True, text=True, check=False)
-        for comp in json.loads(run.stdout)['components'].values():
+        for comp in schema_version.check(json.loads(run.stdout), 'precision-sample')['components'].values():
             rule = comp.get('detectedBy', '?')
             counts[(corpus, rule)] += 1
             by_rule[rule].append((corpus, comp['displayName'], comp['filePath']))
