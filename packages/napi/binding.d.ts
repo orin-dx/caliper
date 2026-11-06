@@ -83,7 +83,10 @@ export interface JsExtractOptions {
   cache?: boolean
   /** Load the dependency type declarations project types reference (default `true`). */
   loadDependencies?: boolean
-  /** Which inherited sources of more than 30 props to list as one layer (default `'dependencies'`). */
+  /**
+   * Which inherited sources to list as one layer of names: large ambient dependency sources (`'dependencies'`, the
+   * default), those and project sources of more than 30 props (`'all'`), or none.
+   */
   collapseInheritedProps?: 'dependencies' | 'all' | 'none'
   /**
    * Session only (`createSession`, `initializeSession`, `extractFileIncremental`): parse and index every file, and

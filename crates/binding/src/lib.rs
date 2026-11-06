@@ -125,7 +125,8 @@ pub struct JsExtractOptions {
     pub cache: Option<bool>,
     /// Load the dependency type declarations project types reference (default `true`).
     pub load_dependencies: Option<bool>,
-    /// Which inherited sources of more than 30 props to list as one layer (default `'dependencies'`).
+    /// Which inherited sources to list as one layer of names: large ambient dependency sources (`'dependencies'`, the
+    /// default), those and project sources of more than 30 props (`'all'`), or none.
     #[napi(ts_type = "'dependencies' | 'all' | 'none'")]
     pub collapse_inherited_props: Option<String>,
     /// Session only (`createSession`, `initializeSession`, `extractFileIncremental`): parse and index every file, and
