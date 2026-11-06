@@ -82,7 +82,7 @@ fn resolve_named_uncycled(
 
     // ── 0. A type parameter in scope shadows any declaration of the same name ──
     if args.is_empty() && state.has_type_param(name) {
-        return PropType::Named { name: name.clone(), args: Vec::new() };
+        return PropType::Named { name: unmarked(name).into(), args: Vec::new() };
     }
 
     // ── 1. React builtin check ────────────────────────────────────────────────
@@ -129,7 +129,9 @@ fn resolve_named_uncycled(
                     expand_alias(&alias, params, defaults, args, consuming_file, &canonical_file, ctx, state, 0)
                 }
                 Some(params) => {
-                    let caller = state.enter_scope(TypeScope::new(params.iter()));
+                    let alias =
+                        super::substitute::substitute_alias(&alias, &super::substitute::unfilled_substitution(params));
+                    let caller = state.enter_scope(TypeScope::default());
                     let expanded = resolve_type_alias_type(&alias, ctx, state, depth);
                     state.leave_scope(caller);
                     expanded
@@ -234,7 +236,7 @@ fn resolve_named_uncycled(
 
     // ── 6.5 Enclosing generic's own type parameter — expected, not unresolvable ─
     if state.has_type_param(bare) {
-        return PropType::Named { name: name.clone(), args: resolved_args };
+        return PropType::Named { name: unmarked(name).into(), args: resolved_args };
     }
 
     // ── 6.7 TypeScript's own ambient globals (Date, RegExp, Element, ...) ────
@@ -309,35 +311,19 @@ fn expand_alias(
     state: &mut ResolveState,
     depth: u8,
 ) -> PropType {
-    let args_scope = super::substitute::pin_scope(state, args);
-    let subst = super::substitute::bind_args(
-        params,
-        defaults,
-        args,
-        args_file,
-        Some(&args_scope),
-        declared_file,
-        &mut state.diagnostics,
-    );
-    // Only the parameters no argument or default replaces are placeholders in the body.
-    let unfilled = TypeScope::new(params.iter().enumerate().filter_map(|(index, param)| {
-        let defaulted = defaults.is_some_and(|d| d.get(index).is_some_and(Option::is_some));
-        (index >= args.len() && !defaulted).then_some(param)
-    }));
+    let args = &*super::substitute::mark_args(state, args);
+    let subst =
+        super::substitute::bind_declared(params, defaults, args, args_file, declared_file, &mut state.diagnostics);
     if let Some(param) = super::evaluate::distributive_param(alias) {
         if let Some(bound) = subst.get(param) {
             let members = literal_members(super::evaluate::union_members(bound, args_file, ctx, 0), ctx, state, depth);
             if members.len() != 1 {
-                let caller = state.enter_scope(unfilled);
+                let caller = state.enter_scope(TypeScope::default());
                 let results: Vec<PropType> = members
                     .into_iter()
                     .map(|(member, member_file)| {
                         let mut one = subst.clone();
-                        let member = CollectedType::AtFile {
-                            file: member_file,
-                            scope: Some(args_scope.clone()),
-                            inner: Box::new(member),
-                        };
+                        let member = CollectedType::AtFile { file: member_file, inner: Box::new(member) };
                         one.insert(param, member);
                         resolve_type_alias_type(&super::substitute::substitute_alias(alias, &one), ctx, state, depth)
                     })
@@ -347,7 +333,7 @@ fn expand_alias(
             }
         }
     }
-    let caller = state.enter_scope(unfilled);
+    let caller = state.enter_scope(TypeScope::default());
     let expanded = resolve_type_alias_type(&super::substitute::substitute_alias(alias, &subst), ctx, state, depth);
     state.leave_scope(caller);
     expanded
@@ -563,9 +549,8 @@ fn displayed_arg(
         CollectedType::Union(members) => {
             CollectedType::Union(members.iter().map(|m| displayed_arg(m, file, ctx, state, depth + 1)).collect())
         }
-        CollectedType::AtFile { file, scope, inner } => CollectedType::AtFile {
+        CollectedType::AtFile { file, inner } => CollectedType::AtFile {
             file: file.clone(),
-            scope: scope.clone(),
             inner: Box::new(displayed_arg(inner, file, ctx, state, depth + 1)),
         },
         _ => arg.clone(),

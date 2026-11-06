@@ -11,7 +11,7 @@ use super::collected::{
     ImportBinding, LexedExport, RawDefault, SourceData, TypeName,
 };
 use super::diagnostic::Diagnostic;
-use super::scope::TypeScope;
+use super::scope::{unmarked, TypeScope};
 
 // ─── ResolveState ─────────────────────────────────────────────────────────────
 
@@ -90,8 +90,8 @@ pub(crate) struct StateReads {
     pub(crate) named: Vec<(u32, bool)>,
     /// Type parameter names looked up in the scope the recording started under, each with whether it was in scope.
     pub(crate) in_scope: Vec<(CompactString, bool)>,
-    /// A type argument was pinned to the scope the recording started under while that scope was empty
-    /// (`ResolveState::pin_scope`), so only a state with an empty scope pins the same.
+    /// A type argument was bound (`mark_args`) while the scope the recording started under was empty
+    /// and so left unmarked; only a state with an empty scope binds the same.
     pub(crate) needs_empty_scope: bool,
     /// How many scopes the recording itself entered and has not left. A lookup under one of them says nothing about the
     /// state the recording started from, so it is not a read.
@@ -252,6 +252,10 @@ impl ResolveState {
 
     /// Whether `name` is a type parameter in scope: the innermost binding of that name, shadowing any declaration.
     pub(crate) fn has_type_param(&mut self, name: &str) -> bool {
+        // A marked name is a placeholder wherever it is read, whatever scope that is.
+        if unmarked(name).len() != name.len() {
+            return true;
+        }
         let found = self.scope.contains(name);
         if let Some(reads) = self.reads.as_mut() {
             if reads.entered_scopes == 0 {

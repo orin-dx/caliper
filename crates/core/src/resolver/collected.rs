@@ -119,14 +119,7 @@ pub fn resolve_collected_type(
         // ── Generic-alias substitution marker — switch file context to where
         // `inner` was actually written (see the `CollectedType::AtFile` doc
         // comment) and continue resolving from there.
-        CollectedType::AtFile { file, scope, inner } => {
-            let writer = scope.as_ref().map(|scope| state.enter_scope(scope.clone()));
-            let resolved = resolve_collected_type(inner, file, ctx, state, depth);
-            if let Some(writer) = writer {
-                state.leave_scope(writer);
-            }
-            resolved
-        }
+        CollectedType::AtFile { file, inner } => resolve_collected_type(inner, file, ctx, state, depth),
 
         // ── Indexed access ───────────────────────────────────────────────────
         CollectedType::IndexedAccess { obj, key } => {

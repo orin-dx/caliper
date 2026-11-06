@@ -4,13 +4,30 @@ use std::sync::Arc;
 
 use compact_str::CompactString;
 
+/// Ends the name of a type parameter reference that crossed from the place that wrote it into another declaration's
+/// body as a type argument. Such a name can only be that placeholder: no declaration is named with it, and no
+/// parameter of the declaration it lands in can capture it.
+pub const PLACEHOLDER_MARK: char = '\u{1}';
+
+/// `name` marked as the placeholder it refers to (`PLACEHOLDER_MARK`).
+pub fn mark_placeholder(name: &str) -> CompactString {
+    let mut marked = CompactString::from(name);
+    marked.push(PLACEHOLDER_MARK);
+    marked
+}
+
+/// The name a marked placeholder reference stands for, or `name` itself when it is not marked.
+pub fn unmarked(name: &str) -> &str {
+    name.strip_suffix(PLACEHOLDER_MARK).unwrap_or(name)
+}
+
 /// The type parameters in scope where a type is read: a name here is the innermost binding of that name and shadows any
 /// declaration of the same name.
 ///
 /// Declarations (interfaces, aliases, components) sit at module level, so a declaration's body is read under its own
-/// parameters only, never under those of whoever refers to it. A type argument is the opposite: it is read under the
-/// parameters of the place that wrote it, wherever a declaration's body ends up using it (`CollectedType::AtFile`
-/// carries that scope next to the file the argument was written in).
+/// parameters only, never under those of whoever refers to it. A type argument is the opposite: its references to the
+/// parameters of the place that wrote it are marked when it is bound (`mark_placeholder`), so it means the same wherever
+/// a declaration's body ends up using it, and nothing reads it under a scope.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct TypeScope(Option<Arc<[CompactString]>>);
 

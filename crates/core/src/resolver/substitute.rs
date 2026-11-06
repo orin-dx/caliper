@@ -15,11 +15,11 @@
 
 use camino::Utf8Path;
 use compact_str::CompactString;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::types::{
-    CollectedObjectField, CollectedType, CollectedTypeAlias, Diagnostic, DiagnosticCode, DiagnosticSeverity,
-    ResolveState, TypeScope,
+    mark_placeholder, unmarked, CollectedObjectField, CollectedType, CollectedTypeAlias, Diagnostic, DiagnosticCode,
+    DiagnosticSeverity, ResolveState,
 };
 
 use super::import::resolve_to_canonical;
@@ -45,49 +45,56 @@ pub(super) fn build_substitution<'a>(
     origin_file: &Utf8Path,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Substitution<'a> {
-    bind_args(params, None, args, origin_file, None, origin_file, diagnostics)
+    bind_args(params, None, args, origin_file, origin_file, diagnostics)
 }
 
-/// The scope that `args`, written where `state` is, are read under wherever a declaration's body ends up using them:
-/// the type parameters in scope here that they name.
-pub(super) fn pin_scope(state: &mut ResolveState, args: &[CollectedType]) -> TypeScope {
+/// `args`, written where `state` is, with each reference to a type parameter in scope here marked
+/// (`mark_placeholder`): a declaration's body that uses them has parameters and declarations of its own, and a marked
+/// name can be none of those, so the argument means the same there as where it was written.
+pub(super) fn mark_args<'a>(
+    state: &mut ResolveState,
+    args: &'a [CollectedType],
+) -> std::borrow::Cow<'a, [CollectedType]> {
     if state.scope.is_empty() {
-        // Whether a name is bound here is not looked up name by name: a state that binds any name pins differently.
+        // Whether a name is bound here is not looked up name by name: a state that binds any name marks differently.
         if let Some(reads) = state.reads.as_mut() {
             if reads.entered_scopes == 0 {
                 reads.needs_empty_scope = true;
             }
         }
-        return TypeScope::default();
+        return std::borrow::Cow::Borrowed(args);
     }
     let mut names: Vec<CompactString> = args.iter().flat_map(CollectedType::referenced_names).collect();
     names.sort_unstable();
     names.dedup();
-    let bound: Vec<CompactString> = names.into_iter().filter(|name| state.has_type_param(name)).collect();
-    TypeScope::new(&bound)
+    let bound: FxHashSet<CompactString> =
+        names.into_iter().filter(|name| unmarked(name).len() == name.len() && state.has_type_param(name)).collect();
+    if bound.is_empty() {
+        return std::borrow::Cow::Borrowed(args);
+    }
+    let mark = |name: &str| bound.contains(name).then(|| mark_placeholder(name));
+    std::borrow::Cow::Owned(args.iter().map(|arg| arg.rename_named(&mark)).collect())
 }
 
-/// `ty` pinned to the `file` it was written in and the `scope` of type parameters it was written under. A type that is
-/// already pinned names its own, and wrapping it again would make a recursive alias's arguments
-/// (`CssVars<V> = ... | CssVars<V>[]`) a new type at every level, so the cycle through it would never be found.
-fn pinned_to(file: &Utf8Path, scope: Option<&TypeScope>, ty: CollectedType) -> CollectedType {
+/// `ty` pinned to the `file` it was written in. A type that is already pinned names its own file, and wrapping it
+/// again would make a recursive alias's arguments (`CssVars<V> = ... | CssVars<V>[]`) a new type at every level, so
+/// the cycle through it would never be found.
+fn pinned_to(file: &Utf8Path, ty: CollectedType) -> CollectedType {
     match ty {
         CollectedType::AtFile { .. } => ty,
-        other => CollectedType::AtFile { file: file.to_owned(), scope: scope.cloned(), inner: Box::new(other) },
+        other => CollectedType::AtFile { file: file.to_owned(), inner: Box::new(other) },
     }
 }
 
-/// `params` bound to `args`, written in `args_file` under the type parameters `args_scope`, with a parameter the reference omits taking its declared default
+/// `params` bound to `args`, written in `args_file`, with a parameter the reference omits taking its declared default
 /// (`defaults`, written in `declared_file`), as TypeScript's `fillMissingTypeArguments` does. A default may name an
 /// earlier parameter (`<T, U = T[]>`), so it is bound with the parameters before it. A parameter with neither stays
 /// unbound, with a warning when the reference supplied some arguments but not that one.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn bind_args<'a>(
     params: &'a [compact_str::CompactString],
     defaults: Option<&[Option<CollectedType>]>,
     args: &[CollectedType],
     args_file: &Utf8Path,
-    args_scope: Option<&TypeScope>,
     declared_file: &Utf8Path,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Substitution<'a> {
@@ -95,12 +102,10 @@ pub(super) fn bind_args<'a>(
     let mut unfilled: Vec<&str> = Vec::new();
     for (i, param) in params.iter().enumerate() {
         if let Some(arg) = args.get(i) {
-            subst.insert(param.as_str(), pinned_to(args_file, args_scope, arg.clone()));
+            subst.insert(param.as_str(), pinned_to(args_file, arg.clone()));
         } else if let Some(default) = defaults.and_then(|d| d.get(i)).and_then(Option::as_ref) {
-            // A default is written in the declaration, under the parameters before it that stay placeholders.
-            let declared_scope = TypeScope::new(params.iter().filter(|p| unfilled.contains(&p.as_str())));
             let bound = substitute_type(default, &subst);
-            subst.insert(param.as_str(), pinned_to(declared_file, Some(&declared_scope), bound));
+            subst.insert(param.as_str(), pinned_to(declared_file, bound));
         } else {
             unfilled.push(param.as_str());
         }
@@ -129,6 +134,39 @@ pub(super) fn bind_args<'a>(
     subst
 }
 
+/// `bind_args`, with each parameter nothing replaces bound to its own marked placeholder (`mark_placeholder`). A
+/// declaration's body then names its unfilled parameters by a name no declaration and no argument can be, so an argument
+/// that names a module type of the same name is not captured by them.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn bind_declared<'a>(
+    params: &'a [compact_str::CompactString],
+    defaults: Option<&[Option<CollectedType>]>,
+    args: &[CollectedType],
+    args_file: &Utf8Path,
+    declared_file: &Utf8Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Substitution<'a> {
+    let mut subst = bind_args(params, defaults, args, args_file, declared_file, diagnostics);
+    fill_placeholders(&mut subst, params);
+    subst
+}
+
+/// The substitution that binds every one of `params` to its marked placeholder: a declaration referenced with no
+/// arguments.
+pub(super) fn unfilled_substitution(params: &[compact_str::CompactString]) -> Substitution<'_> {
+    let mut subst = Substitution::default();
+    fill_placeholders(&mut subst, params);
+    subst
+}
+
+fn fill_placeholders<'a>(subst: &mut Substitution<'a>, params: &'a [compact_str::CompactString]) {
+    for param in params {
+        subst
+            .entry(param.as_str())
+            .or_insert_with(|| CollectedType::Named { name: mark_placeholder(param), args: Vec::new() });
+    }
+}
+
 /// If `scoped_key` names a generic alias (type parameters were recorded during
 /// extraction — see `extractor/visit.rs`) and the call site supplied concrete
 /// `type_args`, substitute the parameters into the alias body. Non-generic
@@ -141,13 +179,11 @@ pub(super) fn bind_args<'a>(
 /// When a call site's own argument is itself structured (e.g. a `Named` type's
 /// `args: Vec<CollectedType>`), prefer `generic_alias_with_structured_args`
 /// instead — it skips this string round-trip entirely.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn apply_generic_args(
     alias: CollectedTypeAlias,
     declared_at: (&Utf8Path, &str),
     type_args: &[CollectedType],
     consuming_file: &Utf8Path,
-    args_scope: Option<&TypeScope>,
     ctx: &ResolutionContext,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CollectedTypeAlias {
@@ -156,10 +192,13 @@ pub(super) fn apply_generic_args(
         return alias;
     };
     let defaults = ctx.named_types.lookup_type_param_defaults(declared_file, declared_name);
-    if params.is_empty() || (type_args.is_empty() && defaults.is_none()) {
+    if params.is_empty() {
         return alias;
     }
-    let subst = bind_args(params, defaults, type_args, consuming_file, args_scope, declared_file, diagnostics);
+    if type_args.is_empty() && defaults.is_none() {
+        return substitute_alias(&alias, &unfilled_substitution(params));
+    }
+    let subst = bind_declared(params, defaults, type_args, consuming_file, declared_file, diagnostics);
     substitute_alias(&alias, &subst)
 }
 
@@ -175,7 +214,6 @@ pub(super) fn generic_alias_with_structured_args(
     name: &str,
     args: &[CollectedType],
     consuming_file: &Utf8Path,
-    args_scope: Option<&TypeScope>,
     ctx: &ResolutionContext,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CollectedTypeAlias> {
@@ -194,7 +232,7 @@ pub(super) fn generic_alias_with_structured_args(
     // i.e. `consuming_file` — not `canonical_file` (where the generic alias itself
     // is declared).
     let defaults = ctx.named_types.lookup_type_param_defaults(&canonical_file, &canonical_name);
-    let subst = bind_args(params, defaults, args, consuming_file, args_scope, &canonical_file, diagnostics);
+    let subst = bind_declared(params, defaults, args, consuming_file, &canonical_file, diagnostics);
     Some(substitute_alias(alias, &subst))
 }
 
@@ -238,11 +276,9 @@ pub(super) fn substitute_type(ct: &CollectedType, subst: &Substitution) -> Colle
         // pass — `file` is authoritative for `inner` and must not be disturbed, but
         // `inner` itself may still contain further params if it came from an outer
         // generic scope, so keep recursing.
-        CollectedType::AtFile { file, scope, inner } => CollectedType::AtFile {
-            file: file.clone(),
-            scope: scope.clone(),
-            inner: Box::new(substitute_type(inner, subst)),
-        },
+        CollectedType::AtFile { file, inner } => {
+            CollectedType::AtFile { file: file.clone(), inner: Box::new(substitute_type(inner, subst)) }
+        }
         CollectedType::IndexedAccess { obj, key } => CollectedType::IndexedAccess {
             obj: Box::new(substitute_type(obj, subst)),
             key: Box::new(substitute_type(key, subst)),
