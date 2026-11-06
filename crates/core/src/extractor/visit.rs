@@ -290,6 +290,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
 
         self.record_enum_union(&key, &values);
         if !entries.is_empty() {
+            self.data.enum_declarations.insert(key.clone());
             self.data.enums.entry(key).or_default().extend(entries);
         }
     }

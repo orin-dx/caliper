@@ -183,20 +183,39 @@ fn an_enum_with_a_value_that_is_not_a_literal_keeps_the_unresolved_name_and_its_
 }
 
 #[test]
+fn a_conditional_over_an_as_const_object_of_the_same_name_still_evaluates() {
+    let (props, diagnostics) = props_of(&[(
+        "case.tsx",
+        r#"
+        const tone = { A: "a" } as const;
+        type tone = "a";
+        type Props = "a" extends tone ? { value: number } : { label: string };
+        export function C(props: Props) { return <b />; }
+        "#,
+    )]);
+    assert_eq!(props.keys().collect::<Vec<_>>(), ["value"]);
+    assert_eq!(diagnostics, Vec::<String>::new());
+}
+
+#[test]
 fn an_enum_in_a_declaration_file_or_a_declare_namespace_has_no_invented_values() {
-    for (file, source) in [
+    for (file, source, name) in [
         (
             "case.d.ts",
             "export enum Level { Low, High }\nexport declare function C(props: { level: Level }): JSX.Element;",
+            "Level",
         ),
         (
             "case.tsx",
             "declare namespace Ui { enum Level { Low, High } }\n\
              export function C(props: { level: Ui.Level }) { return <b />; }",
+            "Ui.Level",
         ),
     ] {
-        let (props, _) = props_of(&[(file, source)]);
-        assert_ne!(props["level"]["kind"], "union", "{file}: {}", props["level"]);
+        let (props, diagnostics) = props_of(&[(file, source)]);
+        assert_eq!(props["level"], json!({ "kind": "named", "name": name, "args": [] }), "{file}");
+        assert_eq!(diagnostics.len(), 1, "{file}: {diagnostics:?}");
+        assert!(diagnostics[0].starts_with(&format!("Cannot resolve type '{name}'")), "{file}: {diagnostics:?}");
     }
 }
 

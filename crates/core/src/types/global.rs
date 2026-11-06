@@ -342,6 +342,9 @@ pub struct GlobalSourceData {
     /// Key: "${absolute_file_path}:${name}"
     pub enums: FxHashMap<String, Vec<EnumEntry>>,
 
+    /// The keys in `enums` written by an `enum` declaration — see `SourceData::enum_declarations`.
+    pub enum_declarations: FxHashSet<String>,
+
     /// All `const X = [...] as const` array literals across all files — see
     /// `SourceData::const_arrays`. Key: "${absolute_file_path}:${name}"
     pub const_arrays: FxHashMap<String, Vec<EnumValue>>,
@@ -384,6 +387,7 @@ impl GlobalSourceData {
         self.type_alias_params.extend(data.type_alias_params);
         self.interface_type_params.extend(data.interface_type_params);
         self.enums.extend(data.enums);
+        self.enum_declarations.extend(data.enum_declarations);
         self.const_arrays.extend(data.const_arrays);
         self.function_results.extend(data.function_results);
         self.type_param_defaults.extend(data.type_param_defaults);
@@ -400,6 +404,7 @@ impl GlobalSourceData {
         self.type_alias_params.retain(|k, _| !k.starts_with(&prefix));
         self.interface_type_params.retain(|k, _| !k.starts_with(&prefix));
         self.enums.retain(|k, _| !k.starts_with(&prefix));
+        self.enum_declarations.retain(|k| !k.starts_with(&prefix));
         self.const_arrays.retain(|k, _| !k.starts_with(&prefix));
         self.function_results.retain(|k, _| !k.starts_with(&prefix));
         self.type_param_defaults.retain(|k, _| !k.starts_with(&prefix));

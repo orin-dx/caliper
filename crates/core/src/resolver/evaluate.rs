@@ -243,7 +243,7 @@ fn names_an_enum(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, d
         CollectedType::Named { name, args } => {
             let (alias_file, alias_name) = canonical(name, file, ctx);
             if lookup_type_alias(ctx, alias_file.as_str(), &alias_name)
-                .is_some_and(|(matched, _)| ctx.global.enums.contains_key(&format!("{alias_file}:{matched}")))
+                .is_some_and(|(matched, _)| ctx.global.enum_declarations.contains(&format!("{alias_file}:{matched}")))
             {
                 return true;
             }
