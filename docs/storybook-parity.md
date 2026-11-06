@@ -1,6 +1,6 @@
 # Storybook parity
 
-`packages/storybook/scripts/storybook-parity.mjs` measures the Storybook addon against Storybook's own docgen on real repositories: how often the addon hands a component on, what it documents that Storybook doesn't, where the two disagree, and what each costs. It is not run in CI; it needs the corpora `scripts/parity.py setup` fetches, installed, plus the native binding.
+`packages/storybook/scripts/storybook-parity.mjs` measures the Storybook addon against Storybook's own docgen on real repositories: how often the addon hands a component on, what it documents that Storybook doesn't, where the two disagree, and what each costs. It is not run in CI; it needs the corpora `scripts/corpora.py setup` fetches, installed, plus the native binding.
 
 ```bash
 pnpm --filter caliper-docgen-storybook build
@@ -37,7 +37,7 @@ Per story, both sides' argTypes are reduced to control kind (`type.name`), optio
 
 The report sorts every disagreement in a table of **deliberate** differences and ones **for review** (`DOM_ATTRIBUTE` and `normalizeType` in the script):
 
-- Deliberate: extra props that are DOM, React or ARIA attributes (the addon's `htmlAttributes: 'full'` default, ADR 0024), extra props inherited from a library, type text that differs only in quotes, spacing, `undefined` or union order, and Storybook-listed DOM attributes the addon left out on purpose.
+- Deliberate: extra props that are DOM, React or ARIA attributes (the addon's `htmlAttributes: 'full'` default, `packages/storybook/src/options.ts`; `HtmlAttributeMode` in `crates/core/src/types/options.rs`), extra props inherited from a library, type text that differs only in quotes, spacing, `undefined` or union order, and Storybook-listed DOM attributes the addon left out on purpose.
 - For review: props Storybook lists that aren't DOM attributes, type text that differs beyond formatting, `required` differing, and defaults only Storybook has. Each is listed by story and prop in the Markdown (the first 12) and in full in the JSON (`details`).
 
 The classes are heuristics: a DOM-attribute pattern, and a formatting-only normaliser that doesn't understand every TypeScript printer difference, so the review lists include differences that read the same to a person.
@@ -48,7 +48,7 @@ Not measured: Storybook's control inference from argTypes (kind is `type.name`),
 
 ### 2026-11-02, main at `a9dfed90` (shadcn and antd)
 
-Apple silicon, the corpora of `scripts/parity.py setup`. Mantine, Chakra and Spectrum are not installed on this machine and are not re-measured: their rows below are from 2026-10-24.
+Apple silicon, the corpora of `scripts/corpora.py setup`. Mantine, Chakra and Spectrum are not installed on this machine and are not re-measured: their rows below are from 2026-10-24.
 
 Fallback rate, components the addon would hand on:
 

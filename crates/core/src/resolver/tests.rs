@@ -1105,6 +1105,7 @@ fn test_component_props_without_ref_in_intersection_alias() {
                     description: String::new(),
                     readonly: false,
                     index_key: None,
+                    tags: Default::default(),
                 }]),
             ],
             file_path: file_path.clone(),
@@ -1890,6 +1891,7 @@ fn test_unhandled_intersection_member_gets_diagnostic_not_silent_drop() {
             description: String::new(),
             readonly: false,
             index_key: None,
+            tags: Default::default(),
         }]),
     ]);
 
@@ -2889,6 +2891,22 @@ fn an_interface_chain_expanded_for_a_pick_is_not_reused_where_it_collapses() {
     let layers: Vec<&str> = results["Q"].0.inheritance.iter().map(|layer| layer.type_name.as_str()).collect();
     assert_eq!(layers, ["Big"]);
     assert_eq!(memo::recording_counts(&shared.interface_chains)[&format!("{dir}/Comp.tsx:Big")], 2);
+}
+
+#[test]
+fn collapsing_all_leaves_a_node_modules_source_alone_whichever_separator_the_path_uses() {
+    let options = PipelineOptions {
+        collapse_inherited_props: crate::types::options::CollapseInheritedProps::All,
+        ..Default::default()
+    };
+    let ctx = ResolutionContext::new(Arc::new(GlobalSourceData::default()), &options);
+    let state = ResolveState::default();
+    let collapses = |file: &str| ctx.collapses(Utf8Path::new(file), 31, 1, &state);
+
+    assert!(!collapses("/proj/node_modules/pkg/index.d.ts"));
+    assert!(!collapses(r"C:\proj\node_modules\pkg\index.d.ts"));
+    assert!(collapses("/proj/src/Props.ts"));
+    assert!(collapses(r"C:\proj\src\Props.ts"));
 }
 
 #[test]

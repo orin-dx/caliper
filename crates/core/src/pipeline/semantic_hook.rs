@@ -107,7 +107,15 @@ impl SemanticHook {
                 pending.affects = vec![answer.key.clone()];
                 answer.diagnostics.push(pending);
             }
-            Err(RecvTimeoutError::Disconnected) => {}
+            Err(RecvTimeoutError::Disconnected) => {
+                let mut stopped = Diagnostic::new(
+                    DiagnosticSeverity::Warning,
+                    DiagnosticCode::SemanticBackend,
+                    "the TypeScript checker stopped without answering; the structural props are used",
+                );
+                stopped.affects = vec![answer.key.clone()];
+                answer.diagnostics.push(stopped);
+            }
         }
         answer
     }

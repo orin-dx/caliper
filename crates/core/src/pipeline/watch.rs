@@ -25,17 +25,13 @@ use super::{IncrementalUpdate, PipelineOptions};
 /// consistent identity across repeated `update_file` calls for the same file,
 /// not the file itself.
 fn canonicalize_best_effort(path: &Utf8Path) -> Utf8PathBuf {
-    if let Ok(p) = std::fs::canonicalize(path.as_std_path()) {
-        if let Ok(p) = Utf8PathBuf::from_path_buf(p) {
-            return p;
-        }
+    if let Ok(p) = crate::canonical_path::canonicalize(path) {
+        return p;
     }
     if let (Some(parent), Some(file_name)) = (path.parent(), path.file_name()) {
-        if let Ok(p) = std::fs::canonicalize(parent.as_std_path()) {
-            if let Ok(mut p) = Utf8PathBuf::from_path_buf(p) {
-                p.push(file_name);
-                return p;
-            }
+        if let Ok(mut p) = crate::canonical_path::canonicalize(parent) {
+            p.push(file_name);
+            return p;
         }
     }
     path.to_owned()
