@@ -27,6 +27,14 @@ fn schema_value() -> serde_json::Value {
                 "type": "string",
                 "pattern": "^[0-9a-f]{16}$"
             },
+            "opaqueReason": {
+                "description": "Why a prop type is `opaque`: `type` of the `reason` in an `{ kind: \"opaque\" }` type, with the named fields of its variant",
+                "type": "object",
+                "required": ["type"],
+                "properties": {
+                    "type": { "type": "string", "enum": caliper_docgen_core::types::OpaqueReason::KINDS }
+                }
+            },
             "prop": {
                 "type": "object",
                 "required": ["name", "required", "type"],
@@ -216,6 +224,46 @@ mod tests {
         let rust_names: Vec<String> =
             caliper_docgen_core::types::DetectionRule::ALL.iter().map(|rule| rule.name()).collect();
         assert_eq!(ts_names, rust_names.iter().map(String::as_str).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn typescript_opaque_reason_union_matches_the_rust_enum() {
+        let declarations = read_repo_file("packages/napi/index.d.ts");
+        let union = declarations
+            .split("export type OpaqueReason =")
+            .nth(1)
+            .and_then(|rest| rest.split("\n\n").next())
+            .expect("index.d.ts declares OpaqueReason");
+        let ts_names: Vec<&str> =
+            union.lines().filter_map(|line| line.trim().strip_prefix("| { type: '")?.split('\'').next()).collect();
+        assert_eq!(ts_names, caliper_docgen_core::types::OpaqueReason::KINDS);
+    }
+
+    #[test]
+    fn schema_opaque_reason_enum_lists_every_rust_variant() {
+        let schema = schema_value();
+        let listed: Vec<&str> = schema["definitions"]["opaqueReason"]["properties"]["type"]["enum"]
+            .as_array()
+            .expect("opaqueReason type enum is an array")
+            .iter()
+            .map(|value| value.as_str().expect("names are strings"))
+            .collect();
+        assert_eq!(listed, caliper_docgen_core::types::OpaqueReason::KINDS);
+    }
+
+    #[test]
+    fn scripts_and_oracle_read_the_schema_version_rust_writes() {
+        let version = caliper_docgen_core::types::SCHEMA_VERSION;
+        let python = read_repo_file("scripts/schema_version.py");
+        assert!(
+            python.lines().any(|line| line == format!("SUPPORTED_SCHEMA_VERSION = {version}")),
+            "scripts/schema_version.py must declare SUPPORTED_SCHEMA_VERSION = {version}"
+        );
+        let oracle = read_repo_file("apps/oracle/src/schema-version.ts");
+        assert!(
+            oracle.lines().any(|line| line == format!("export const SUPPORTED_SCHEMA_VERSION = {version}")),
+            "apps/oracle/src/schema-version.ts must declare SUPPORTED_SCHEMA_VERSION = {version}"
+        );
     }
 
     #[test]

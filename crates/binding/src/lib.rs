@@ -188,8 +188,7 @@ fn on_demand_checker(
 ) -> Arc<caliper_docgen_semantic::OnDemand> {
     let root = first_src
         .as_deref()
-        .and_then(|dir| std::fs::canonicalize(dir).ok())
-        .and_then(|dir| camino::Utf8PathBuf::from_path_buf(dir).ok())
+        .and_then(|dir| caliper_docgen_core::canonical_path::canonicalize(camino::Utf8Path::new(dir)).ok())
         .or_else(|| std::env::current_dir().ok().and_then(|dir| camino::Utf8PathBuf::from_path_buf(dir).ok()))
         .unwrap_or_default();
     let mut config = caliper_docgen_semantic::OnDemandConfig::new(root.clone());

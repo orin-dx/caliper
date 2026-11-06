@@ -158,5 +158,5 @@ impl PipelineOptions {
 /// walk to ever reach the real node_modules tree, so it silently finds
 /// nothing instead of the intended real package.
 pub(crate) fn canonicalize_first_src_dir(src_dirs: &[Utf8PathBuf]) -> Option<Utf8PathBuf> {
-    src_dirs.first().and_then(|dir| std::fs::canonicalize(dir).ok()).and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
+    src_dirs.first().and_then(|dir| crate::canonical_path::canonicalize(dir).ok())
 }
