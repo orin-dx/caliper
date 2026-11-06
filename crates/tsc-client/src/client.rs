@@ -70,11 +70,12 @@ impl Shared {
             Ok(IncomingMessage::Notification(notification)) => {
                 notif_tx.send(Notification { method: notification.method, params: notification.params }).ok();
             }
-            Err(source) => {
-                // A malformed *body* doesn't desync the stream — the declared
-                // Content-Length was honored — so the session stays alive; this one
-                // frame is just unusable.
-                tracing::warn!("dropping unparsable tsc frame: {source}");
+            Err(error) => {
+                // A malformed *body* doesn't desync the stream — the declared Content-Length was honored — so the
+                // session stays alive. The body names no request id, so every waiting caller gets the error now
+                // instead of waiting out its deadline for a reply that was lost.
+                tracing::warn!("unparsable tsc frame: {error}");
+                self.fail_all_pending(&error);
             }
         }
     }

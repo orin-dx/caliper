@@ -12,7 +12,7 @@
 //! `crates/cli/src/config.rs`'s precedent for test/caller-controlled input):
 //! `echo` (default), `never_respond`, `hang_after_n:<N>`, `exit_after:<N>:<code>`,
 //! `crash_immediately:<code>`, `garbage_bytes`, `bad_content_length`,
-//! `oversized_frame:<N>`, `truncated_body`, `reorder_ack`, `shutdown_slow:<ms>`, `never_read`,
+//! `oversized_frame:<N>`, `truncated_body`, `invalid_json_reply`, `reorder_ack`, `shutdown_slow:<ms>`, `never_read`,
 //! `fatal_frame_then_alive`, `fatal_frame_once_then_echo`, `notify_then_echo`, `noisy_stderr`.
 //!
 //! Every scenario appends its PID as one line to `<cwd>/fake-tsc-spawns.log` at startup, where `<cwd>` is the value of
@@ -56,6 +56,7 @@ async fn main() {
         "bad_content_length" => bad_content_length().await,
         "oversized_frame" => oversized_frame(arg1.and_then(|s| s.parse().ok()).unwrap_or(usize::MAX)).await,
         "truncated_body" => truncated_body().await,
+        "invalid_json_reply" => invalid_json_reply().await,
         "reorder_ack" => reorder_ack().await,
         "notify_then_echo" => notify_then_echo().await,
         "noisy_stderr" => noisy_stderr().await,
@@ -230,6 +231,19 @@ async fn truncated_body() {
     let _ = stdout.write_all(b"Content-Length: 100\r\n\r\ntoo short").await;
     let _ = stdout.flush().await;
     tokio::time::sleep(Duration::from_millis(300)).await;
+}
+
+/// Answers the first request with a well-framed body that is not JSON, then behaves like `echo`: the stream stays
+/// in sync, so only that one reply is lost.
+async fn invalid_json_reply() {
+    let mut reader = requests();
+    let mut stdout = tokio::io::stdout();
+    if read_request(&mut reader).await.is_some() {
+        let _ = write_frame(&mut stdout, b"{ this is not json").await;
+    }
+    while let Some(request) = read_request(&mut reader).await {
+        respond(&mut stdout, &request_id(&request), serde_json::json!({ "ok": true })).await;
+    }
 }
 
 /// Reads two requests, answers the second one first — proves a response's `seq`
