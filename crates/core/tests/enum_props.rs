@@ -217,3 +217,18 @@ fn enums_in_function_bodies_do_not_replace_or_merge_into_a_module_level_name() {
     assert_eq!(props["level"], json!({ "kind": "numberLiteral", "value": 1.0 }));
     assert_eq!(diagnostics, Vec::<String>::new());
 }
+
+#[test]
+fn an_enum_in_a_block_does_not_merge_into_a_module_level_enum() {
+    let (props, diagnostics) = props_of(&[(
+        "case.tsx",
+        r#"
+        enum Tone { A = "a" }
+        { enum Tone { B = "b" } }
+        if (Math.random()) { enum Tone { C = "c" } }
+        export function C(props: { tone: Tone }) { return <b />; }
+        "#,
+    )]);
+    assert_eq!(props["tone"], json!({ "kind": "stringLiteral", "value": "a" }));
+    assert_eq!(diagnostics, Vec::<String>::new());
+}

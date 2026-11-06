@@ -288,6 +288,8 @@ pub(super) struct SourceDataCollector<'src> {
     /// How many function bodies enclose the node being visited. A component declared inside one exists per call (a
     /// factory's returned component, a story's local helper), so no module imports it under that name.
     pub(super) function_depth: u32,
+    /// How many block statements, static blocks and `switch` statements enclose the node being visited.
+    pub(super) block_depth: u32,
     /// How many `declare namespace` and `declare module` blocks enclose the node being visited.
     pub(super) ambient_depth: u32,
     /// The values of each enum seen so far, merged over its declarations; `None` once one declaration has a value that
@@ -334,6 +336,7 @@ impl<'src> SourceDataCollector<'src> {
             attached_to: Vec::new(),
             function_depth: 0,
             ambient_depth: 0,
+            block_depth: 0,
             enum_unions: rustc_hash::FxHashMap::default(),
             function_type_params: Vec::new(),
             pending_classes: Vec::new(),

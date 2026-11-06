@@ -261,9 +261,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     }
 
     fn visit_ts_enum_declaration(&mut self, node: &TSEnumDeclaration<'a>) {
-        // An enum declared in a function body is not the enum a module's types name: `scoped_key` ignores function scope,
-        // so its union and entries would merge into, or replace, a module-level enum of the same name.
-        if self.function_depth > 0 {
+        // An enum declared in a function body or a block is not the enum a module's types name: `scoped_key` ignores
+        // those scopes, so its union and entries would merge into, or replace, a module-level enum of the same name.
+        if self.function_depth > 0 || self.block_depth > 0 {
             return;
         }
         let enum_name = node.id.name.as_str();
@@ -494,6 +494,24 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         }
         walk::walk_function(self, func, flags);
         self.props_params.pop();
+    }
+
+    fn visit_block_statement(&mut self, block: &BlockStatement<'a>) {
+        self.block_depth += 1;
+        walk::walk_block_statement(self, block);
+        self.block_depth -= 1;
+    }
+
+    fn visit_static_block(&mut self, block: &StaticBlock<'a>) {
+        self.block_depth += 1;
+        walk::walk_static_block(self, block);
+        self.block_depth -= 1;
+    }
+
+    fn visit_switch_statement(&mut self, switch: &SwitchStatement<'a>) {
+        self.block_depth += 1;
+        walk::walk_switch_statement(self, switch);
+        self.block_depth -= 1;
     }
 
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
