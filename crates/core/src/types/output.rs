@@ -1109,7 +1109,6 @@ fn element_to_type_name(element: &str) -> &'static str {
         "form" => "Form",
         "label" => "Label",
         "img" => "Img",
-        "div" | "span" | "p" | "h1" | "h2" | "h3" => "HTML",
         _ => "HTML",
     }
 }

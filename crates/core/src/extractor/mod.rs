@@ -1067,17 +1067,6 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
-    #[allow(dead_code)]
-    pub(super) fn expression_to_string<'a>(&self, expr: &Expression<'a>) -> String {
-        match expr {
-            Expression::NumericLiteral(n) => n.value.to_string(),
-            Expression::StringLiteral(s) => format!("\"{}\"", js_text::lossy(s.value)),
-            Expression::BooleanLiteral(b) => b.value.to_string(),
-            Expression::NullLiteral(_) => "null".to_owned(),
-            _ => "unknown".to_owned(),
-        }
-    }
-
     // ─── TSTypeReference helpers ──────────────────────────────────────────────
 
     /// Extract the name part of a TSTypeReference (for checking FC, forwardRef, etc.)

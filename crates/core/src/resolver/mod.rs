@@ -12,7 +12,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-#[allow(unused_imports)]
 use camino::{Utf8Path, Utf8PathBuf};
 use compact_str::CompactString;
 use oxc_resolver::{ResolveOptions, Resolver, TsconfigDiscovery, TsconfigOptions, TsconfigReferences};
