@@ -58,6 +58,18 @@ impl ReactApi {
     }
 }
 
+/// Whether an import brings in at least one binding that exists at runtime: not `import type {..}`, not a list of
+/// `type` specifiers, and not a bare `import 'x'`.
+fn imports_a_value(import: &ImportDeclaration<'_>) -> bool {
+    import.import_kind.is_value()
+        && import.specifiers.as_ref().is_some_and(|specifiers| {
+            specifiers.iter().any(|specifier| match specifier {
+                ImportDeclarationSpecifier::ImportSpecifier(named) => named.import_kind.is_value(),
+                _ => true,
+            })
+        })
+}
+
 /// Whether an import specifier is React itself: `react`, a subpath of it, or Preact's compatibility layer.
 fn is_react_module(specifier: &str) -> bool {
     specifier == "react" || specifier.starts_with("react/") || specifier == "preact/compat"
@@ -183,7 +195,7 @@ pub fn parse_file(path: &Utf8Path, source: &str) -> SourceData {
     // for components when it imports a value from React: that keeps the many `.ts` files with no React in them out.
     let imports_react_value = ret.program.body.iter().any(|statement| {
         matches!(statement, Statement::ImportDeclaration(import)
-            if import.import_kind.is_value() && is_react_module(&js_text::lossy(import.source.value)))
+            if imports_a_value(import) && is_react_module(&js_text::lossy(import.source.value)))
     });
     let is_tsx = source_type.is_jsx() || source_type.is_typescript_definition() || imports_react_value;
     let mut collector = SourceDataCollector::new(path, source, is_tsx);
@@ -248,6 +260,13 @@ pub(super) struct SourceDataCollector<'src> {
     /// `TSTypeName::QualifiedName` handling) — so storage keys must match, or a same-file
     /// reference to a namespace member can never resolve.
     pub(super) namespace_stack: Vec<CompactString>,
+    /// Ids of the enclosing function bodies, outermost first; empty at module level. Interfaces merge only within one
+    /// scope, and `scoped_key` does not distinguish function bodies.
+    pub(super) function_scopes: Vec<u32>,
+    /// Number of function bodies entered so far: the source of the next scope id.
+    pub(super) function_scope_count: u32,
+    /// The scope each interface key was last declared in.
+    pub(super) interface_scopes: rustc_hash::FxHashMap<String, Vec<u32>>,
     /// `X.displayName = "..."` renames recorded during the main traversal but
     /// not yet applied — see `try_scan_display_name`. Applying these
     /// immediately would change `component_name` out from under any later
@@ -318,6 +337,9 @@ impl<'src> SourceDataCollector<'src> {
             element_helpers: FxHashSet::default(),
             consumed_jsdoc: FxHashSet::default(),
             namespace_stack: Vec::new(),
+            function_scopes: Vec::new(),
+            function_scope_count: 0,
+            interface_scopes: rustc_hash::FxHashMap::default(),
             pending_display_name_renames: Vec::new(),
             aliased_away: FxHashSet::default(),
             pending_wrappers: Vec::new(),

@@ -185,7 +185,10 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
 
         // Declarations of one name in one scope merge: members and `extends` accumulate, and the first description
         // stands.
-        if let Some(merged) = self.data.interfaces.get_mut(&key) {
+        let same_scope = self.interface_scopes.get(&key).is_none_or(|scope| *scope == self.function_scopes);
+        self.interface_scopes.insert(key.clone(), self.function_scopes.clone());
+        let existing = self.data.interfaces.get_mut(&key).filter(|_| same_scope);
+        if let Some(merged) = existing {
             for prop in props {
                 if !merged.props.iter().any(|existing| existing.name == prop.name) {
                     merged.props.push(prop);
@@ -194,7 +197,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             merged.extends.extend(extends);
             if merged.description.is_empty() {
                 merged.description = description;
-                merged.tags = tags;
+            }
+            for (tag, value) in tags {
+                merged.tags.entry(tag).or_insert(value);
             }
         } else {
             self.data.interfaces.insert(
@@ -507,7 +512,10 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
 
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
         self.function_depth += 1;
+        self.function_scope_count += 1;
+        self.function_scopes.push(self.function_scope_count);
         walk::walk_function_body(self, body);
+        self.function_scopes.pop();
         self.function_depth -= 1;
     }
 

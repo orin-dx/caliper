@@ -2801,6 +2801,44 @@ fn same_name_interface_declarations_in_one_file_merge_their_members() {
 }
 
 #[test]
+fn a_same_name_interface_in_a_function_body_does_not_merge_into_the_module_level_one() {
+    let source = "function helper() { interface Props { internal: number } }\n\
+        interface Props { label: string }\n\
+        export function Box(props: Props) { return <div />; }";
+    let data = parse_file(Utf8Path::new("/test/scoped.tsx"), source);
+    let members: Vec<Vec<&str>> = data
+        .interfaces
+        .iter()
+        .filter(|(key, _)| key.ends_with(":Props"))
+        .map(|(_, iface)| iface.props.iter().map(|p| p.name.as_str()).collect())
+        .collect();
+    assert_eq!(members, [["label"]]);
+}
+
+#[test]
+fn a_ts_file_with_only_type_specifiers_from_react_has_no_components() {
+    let source = "import { type ReactNode, type FC } from 'react';\n\
+        interface Opts { a: string }\n\
+        export function Builder(opts: Opts): ReactNode { return null; }";
+    let data = parse_file(Utf8Path::new("/test/typed.ts"), source);
+    assert_eq!(data.component_mappings.len(), 0);
+    assert_eq!(data.diagnostics.len(), 0);
+}
+
+#[test]
+fn merging_a_described_interface_keeps_the_first_ones_tags() {
+    let source = "/** @deprecated use Other */\n\
+        interface Props { a: string }\n\
+        /** The props. */\n\
+        interface Props { b: number }\n\
+        export function Box(props: Props) { return <div />; }";
+    let data = parse_file(Utf8Path::new("/test/tags.tsx"), source);
+    let iface = data.interfaces.iter().find(|(key, _)| key.ends_with(":Props")).map(|(_, iface)| iface).unwrap();
+    assert_eq!(iface.tags.get("deprecated").map(String::as_str), Some("use Other"));
+    assert_eq!(iface.description, "The props.");
+}
+
+#[test]
 fn unrelated_object_assign_call_is_not_treated_as_a_component_pattern() {
     let source = r#"
         const config = {};
