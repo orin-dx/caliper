@@ -2,7 +2,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 
-/// Walk `src_dirs` and collect every `.ts` / `.tsx` file, excluding:
+/// Walk `src_dirs` and collect every TypeScript file (`.ts`, `.tsx`, `.mts`, `.cts`), excluding:
 /// - Built-in patterns: `.stories.`, `.test.`, `.spec.`, `__snapshots__`, `node_modules`
 /// - User-supplied extra exclude patterns
 ///
@@ -17,11 +17,11 @@ pub(super) fn discover_files(
 
     for dir in src_dirs {
         // If the user explicitly points at a node_modules path, respect it.
-        let dir_is_in_node_modules = dir.as_str().contains("node_modules");
+        let dir_is_in_node_modules = in_node_modules(dir);
 
         // Walking from the canonical root makes every entry's path canonical except a symlink itself (the walker
         // doesn't follow symlinked directories), so only those pay for `canonicalize` below.
-        let root = dir.canonicalize_utf8().unwrap_or_else(|_| dir.clone());
+        let root = crate::canonical_path::canonicalize(dir).unwrap_or_else(|_| dir.clone());
         let walker = ignore::WalkBuilder::new(root.as_std_path())
             .hidden(false)
             .git_ignore(!dir_is_in_node_modules)
@@ -61,8 +61,8 @@ pub(super) fn discover_dirs(
 ) -> (Vec<Utf8PathBuf>, Vec<Utf8PathBuf>) {
     let (mut dirs, mut configs) = (Vec::new(), Vec::new());
     for dir in src_dirs {
-        let dir_is_in_node_modules = dir.as_str().contains("node_modules");
-        let root = dir.canonicalize_utf8().unwrap_or_else(|_| dir.clone());
+        let dir_is_in_node_modules = in_node_modules(dir);
+        let root = crate::canonical_path::canonicalize(dir).unwrap_or_else(|_| dir.clone());
         let walker =
             ignore::WalkBuilder::new(root.as_std_path()).hidden(false).git_ignore(!dir_is_in_node_modules).build();
         for entry in walker.flatten() {
@@ -106,7 +106,7 @@ fn visit(
         }
     };
     let path = entry.path();
-    if !is_typescript(path) {
+    if !crate::extractor::is_typescript(path) {
         return None;
     }
     let relative = path.strip_prefix(root.as_std_path()).unwrap_or(path);
@@ -117,7 +117,7 @@ fn visit(
         // Absolute and canonical, so parent.fileName in output is stable regardless of invocation context (relative
         // --src, absolute --src, cwd inside the src dir). A dangling symlink keeps its own path rather than being
         // dropped.
-        Ok(utf8) if entry.path_is_symlink() => Some(Ok(utf8.canonicalize_utf8().unwrap_or(utf8))),
+        Ok(utf8) if entry.path_is_symlink() => Some(Ok(crate::canonical_path::canonicalize(&utf8).unwrap_or(utf8))),
         Ok(utf8) => Some(Ok(utf8)),
         Err(_) => Some(Err(Diagnostic::new(
             DiagnosticSeverity::Warning,
@@ -128,8 +128,10 @@ fn visit(
     }
 }
 
-fn is_typescript(path: &std::path::Path) -> bool {
-    matches!(path.extension().and_then(|e| e.to_str()), Some("ts" | "tsx"))
+/// Whether `dir` is a `node_modules` directory or inside one: a path component, not text, so `~/node_modules-backup/`
+/// is not.
+fn in_node_modules(dir: &Utf8Path) -> bool {
+    dir.components().any(|component| component.as_str() == "node_modules")
 }
 
 /// Excludes apply to the path inside the source directory: a project checked out under `my.test.repo/` or
@@ -150,14 +152,13 @@ fn excluded(relative: &std::path::Path, dir_is_in_node_modules: bool, extra_excl
 /// Whether discovery would include `path`: TypeScript, under a source directory, and not excluded. Watch mode asks
 /// this of every changed path so an edit to an excluded file (a story, a test) never adds a component.
 pub(super) fn is_source_file(path: &Utf8Path, src_dirs: &[Utf8PathBuf], extra_excludes: &[String]) -> bool {
-    if !is_typescript(path.as_std_path()) {
+    if !crate::extractor::is_typescript(path.as_std_path()) {
         return false;
     }
     src_dirs.iter().any(|dir| {
-        let dir = dir.canonicalize_utf8().unwrap_or_else(|_| dir.clone());
-        path.strip_prefix(&dir).is_ok_and(|relative| {
-            !excluded(relative.as_std_path(), dir.as_str().contains("node_modules"), extra_excludes)
-        })
+        let dir = crate::canonical_path::canonicalize(dir).unwrap_or_else(|_| dir.clone());
+        path.strip_prefix(&dir)
+            .is_ok_and(|relative| !excluded(relative.as_std_path(), in_node_modules(&dir), extra_excludes))
     })
 }
 

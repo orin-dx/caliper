@@ -140,6 +140,11 @@ fn max_bracket_nesting_depth(source: &str) -> usize {
     max_depth
 }
 
+/// Whether `path` names a TypeScript source: the one list that source discovery and dependency loading both use.
+pub(crate) fn is_typescript(path: &std::path::Path) -> bool {
+    matches!(path.extension().and_then(|extension| extension.to_str()), Some("ts" | "tsx" | "mts" | "cts"))
+}
+
 /// Parse a single file and collect all extractable data.
 ///
 /// Completely pure — no I/O, no side effects, no cross-file dependencies.
@@ -987,7 +992,7 @@ impl<'src> SourceDataCollector<'src> {
                     .as_ref()
                     .map(|ta| self.ts_type_to_collected_at_depth(&ta.type_annotation, depth + 1))
                     .unwrap_or(CollectedType::Any);
-                let description = self.find_jsdoc(sig.span.start);
+                let (description, tags) = self.find_jsdoc_with_tags(sig.span.start);
                 Some(CollectedObjectField {
                     name,
                     collected_type,
@@ -995,6 +1000,7 @@ impl<'src> SourceDataCollector<'src> {
                     description,
                     readonly: sig.readonly,
                     index_key: None,
+                    tags,
                 })
             }
             TSSignature::TSIndexSignature(sig) => {
@@ -1006,6 +1012,7 @@ impl<'src> SourceDataCollector<'src> {
                     description: self.find_jsdoc(sig.span.start),
                     readonly: sig.readonly,
                     index_key: Some(Box::new(key)),
+                    tags: Default::default(),
                 })
             }
             TSSignature::TSMethodSignature(sig) => {
@@ -1017,6 +1024,7 @@ impl<'src> SourceDataCollector<'src> {
                     .as_ref()
                     .map(|rt| self.ts_type_to_collected_at_depth(&rt.type_annotation, depth + 1))
                     .unwrap_or(CollectedType::Void);
+                let (description, tags) = self.find_jsdoc_with_tags(sig.span.start);
                 Some(CollectedObjectField {
                     name,
                     collected_type: CollectedType::Function {
@@ -1027,9 +1035,10 @@ impl<'src> SourceDataCollector<'src> {
                         return_type: Box::new(return_type),
                     },
                     required: !sig.optional,
-                    description: String::new(),
+                    description,
                     readonly: false,
                     index_key: None,
+                    tags,
                 })
             }
             _ => None,

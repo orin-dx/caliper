@@ -1,6 +1,6 @@
 # caliper-docgen
 
-10-100x faster than react-docgen-typescript. OXC parses TypeScript/TSX; we extract React component props and emit RDT-compatible JSON via `--format rdt`. See `docs/STATUS.md` for current state and known gaps.
+Faster than react-docgen-typescript; measured numbers are in `docs/performance.md`. OXC parses TypeScript/TSX; we extract React component props and emit RDT-compatible JSON via `--format rdt`. See `docs/STATUS.md` for current state and known gaps.
 
 ## Commands
 
@@ -47,6 +47,8 @@ Two habits that repeatedly caught real bugs during the 2026-08-12 spec-validatio
 - `crates/core` — pure extraction logic; @crates/core/AGENTS.md
 - `crates/cli` — clap CLI, no logic; @crates/cli/AGENTS.md
 - `crates/binding` — thin NAPI wrapper, delegates to core
+- `crates/semantic` — opt-in TypeScript 7.1 checker backend (`docs/type-checker-integration.md`)
+- `crates/tsc-client` — client for the checker process the semantic crate drives
 
 ## Writing and commits
 

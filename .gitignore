@@ -54,3 +54,4 @@ lcov.info
 
 # Measurement corpora, installs and outputs (scripts/corpora.py, weekly.py, bench.py)
 .corpora/
+*.snap.new
