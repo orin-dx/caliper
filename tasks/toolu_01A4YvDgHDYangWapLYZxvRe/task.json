@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01A4YvDgHDYangWapLYZxvRe",
+  "agent_id": "a8a947e0c29f45571",
+  "subagent_type": "general-purpose",
+  "task_description": "Storybook meta-form follow-up",
+  "token_usage": {
+    "input_tokens": 46,
+    "cache_creation_tokens": 70574,
+    "cache_read_tokens": 1413257,
+    "output_tokens": 5272,
+    "api_call_count": 23
+  },
+  "started_at": "2026-11-06T11:55:31.99716-08:00",
+  "completed_at": "2026-11-06T12:00:15.144306-08:00"
+}
