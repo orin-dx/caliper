@@ -31,6 +31,7 @@ import sys
 import time
 
 import corpora
+import schema_version
 from corpora import ROOT
 
 QUESTIONS = os.path.join(ROOT, 'scripts', 'agent_questions.json')
@@ -266,7 +267,7 @@ def caliper_views(binary, src, root):
     base = [binary, 'extract', '--src', src, '--html-attributes', 'full', '--quiet', '--load-dependencies']
     toon = subprocess.run(base + ['--format', 'toon'], capture_output=True, text=True, check=True).stdout
     raw = subprocess.run(base + ['--json'], capture_output=True, text=True, check=True).stdout
-    document = json.loads(raw[raw.index('{'):])
+    document = schema_version.check(json.loads(raw[raw.index('{'):]), 'agent_eval')
     found = {(relative(file, root), name): entry for (file, name), entry in parse_toon(toon).items()}
     key_of = {(relative(c['filePath'], root), c['displayName']): key for key, c in document['components'].items()}
     by_key = {key: found[pair] for pair, key in key_of.items() if pair in found}
