@@ -1820,7 +1820,7 @@ fn a_generic_function_types_own_parameters_are_placeholders_not_types_to_look_up
     let result = super::collected::resolve_collected_type(&ct, Utf8Path::new("/test/b.tsx"), &ctx, &mut state, 0);
     assert_eq!(result.raw_string(), "<T>(item: T) => T");
     assert_eq!(state.diagnostics, vec![]);
-    assert!(state.in_scope_type_params.is_empty(), "the function's own parameters leave scope with it");
+    assert!(state.scope.is_empty(), "the function's own parameters leave scope with it");
 }
 
 #[test]
@@ -2684,9 +2684,31 @@ fn ts_lib_paths_keep_the_files_found_and_name_only_the_missing_one() {
 }
 
 #[test]
-fn ts_lib_paths_are_empty_and_silent_without_typescript() {
+fn ts_lib_paths_report_a_missing_typescript_package() {
     let tmp = tempfile::TempDir::new().unwrap();
-    assert_eq!(lib_paths_from(tmp.path()), TsLibs::default());
+
+    let libs = lib_paths_from(tmp.path());
+
+    assert_eq!(libs.paths, Vec::<String>::new());
+    assert_eq!(
+        libs.diagnostic,
+        Some(Diagnostic {
+            severity: DiagnosticSeverity::Warning,
+            message: format!(
+                "The 'typescript' package is not installed in or above '{}' — native and DOM globals (Date, \
+                 HTMLElement, Promise, …) will appear as unexpanded named references",
+                tmp.path().canonicalize().unwrap().display()
+            ),
+            file: None,
+            line: None,
+            column: None,
+            help: Some(
+                "Install typescript as a dependency of the project (for example `npm install -D typescript`).".into()
+            ),
+            code: DiagnosticCode::MissingTypeLibrary,
+            affects: Vec::new(),
+        })
+    );
 }
 
 // ── interface chains resolved once per run (`memo`) ─────────────────────────
@@ -2901,7 +2923,7 @@ fn collapsing_all_leaves_a_node_modules_source_alone_whichever_separator_the_pat
     };
     let ctx = ResolutionContext::new(Arc::new(GlobalSourceData::default()), &options);
     let state = ResolveState::default();
-    let collapses = |file: &str| ctx.collapses(Utf8Path::new(file), 31, 1, &state);
+    let collapses = |file: &str| ctx.collapses(Utf8Path::new(file), "Props", 31, 1, &state);
 
     assert!(!collapses("/proj/node_modules/pkg/index.d.ts"));
     assert!(!collapses(r"C:\proj\node_modules\pkg\index.d.ts"));
@@ -3043,4 +3065,120 @@ fn component_mapping_is_the_first_match_a_scan_finds() {
             .map(|found| found.props_type_name.to_string()),
         Some("SecondProps".to_owned())
     );
+}
+
+// ── type parameter scope: no answer depends on what was resolved before it ──
+
+const SCOPE_MATRIX: &str = r#"
+type T = number;
+type Value = number;
+interface Cell<A> { value: A }
+type Read<A> = Cell<A>['value'];
+interface Box<X> { value: X }
+interface Props<Value> { value: Value }
+type Saved = Value;
+type Fixed = { value: Value };
+type Id<Value> = Value;
+type Pair<A, B> = { first: A; second: B };
+export function Generic<T>(p: { value: Read<T> }) { return null; }
+export function Plain(p: { value: Read<number> }) { return null; }
+export function ModuleT(p: { value: Read<T> }) { return null; }
+export function Member<T>(p: { value: Box<T>['value'] }) { return null; }
+export function Filled(p: Props<Value>) { return null; }
+export function Passed<Value>(p: Props<Value>) { return null; }
+export function Unfilled(p: Props) { return null; }
+export function SavedUse<Value>(p: { value: Saved }) { return null; }
+export function FixedUse<Value>(p: { fixed: Fixed }) { return null; }
+export function IdUse<Value>(p: { value: Id<Value> }) { return null; }
+export function IdModule(p: { value: Id<Value> }) { return null; }
+export function PairUse(p: { pair: Pair<Value> }) { return null; }
+export function Keyed<Keys extends string>(p: Record<Keys, Value>) { return null; }
+type ReadV<X extends { v: unknown }> = X['v'];
+export function ReadObject<T>(p: { v: ReadV<{ v: T }> }) { return null; }
+export function ReadModule(p: { v: ReadV<{ v: T }> }) { return null; }
+export function ReadInterface<T>(p: { v: Cell<[T, number]>['value'] }) { return null; }
+export function ReadPlain(p: { v: Cell<[number, number]>['value'] }) { return null; }
+"#;
+
+const SCOPE_COMPONENTS: [&str; 17] = [
+    "Generic",
+    "Plain",
+    "ModuleT",
+    "Member",
+    "Filled",
+    "Passed",
+    "Unfilled",
+    "SavedUse",
+    "FixedUse",
+    "IdUse",
+    "IdModule",
+    "PairUse",
+    "Keyed",
+    "ReadObject",
+    "ReadModule",
+    "ReadInterface",
+    "ReadPlain",
+];
+
+#[test]
+fn type_parameter_scope_answers_do_not_depend_on_the_order_components_resolve_in() {
+    // Each component's result on a context that already resolved others must equal its result on a fresh context
+    // (`resolve_shared` asserts it, so every memoized lookup is replayed against a fresh state), forwards, backwards
+    // and in shuffled orders; the printed props must then also agree across orders.
+    let (_tmp, dir) = canonical_temp_dir();
+    let files = [("Comp.tsx", SCOPE_MATRIX)];
+    let forward: Vec<&str> = SCOPE_COMPONENTS.to_vec();
+    let mut orders: Vec<Vec<&str>> = vec![forward.clone(), forward.iter().rev().copied().collect()];
+    let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+    for _ in 0..24 {
+        let mut order = forward.clone();
+        for i in (1..order.len()).rev() {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            order.swap(i, usize::try_from(seed >> 33).unwrap() % (i + 1));
+        }
+        orders.push(order);
+    }
+
+    let mut first_texts: Option<BTreeMap<String, String>> = None;
+    for order in orders {
+        let (_ctx, results) = resolve_shared(&dir, &files, &order);
+        let texts: BTreeMap<String, String> = results
+            .iter()
+            .map(|(name, (entry, _, _))| {
+                let props: Vec<String> = entry
+                    .props
+                    .iter()
+                    .map(|(prop, parsed)| format!("{prop}: {}", parsed.prop_type.raw_string()))
+                    .collect();
+                (name.clone(), props.join("; "))
+            })
+            .collect();
+        match &first_texts {
+            Some(first) => assert_eq!(&texts, first, "order {order:?}"),
+            None => first_texts = Some(texts),
+        }
+    }
+
+    let by_name = first_texts.unwrap();
+    let expected = [
+        ("Generic", "value: T"),
+        ("Plain", "value: number"),
+        ("ModuleT", "value: number"),
+        ("Member", "value: T"),
+        ("Filled", "value: number"),
+        ("Passed", "value: Value"),
+        ("Unfilled", "value: Value"),
+        ("SavedUse", "value: number"),
+        ("FixedUse", "fixed: { value: number }"),
+        ("IdUse", "value: Value"),
+        ("IdModule", "value: number"),
+        ("PairUse", "pair: { first: number; second: B }"),
+        ("ReadObject", "v: T"),
+        ("ReadModule", "v: number"),
+        ("ReadInterface", "v: [T, number]"),
+        ("ReadPlain", "v: [number, number]"),
+    ];
+    for (name, props) in expected {
+        assert_eq!(by_name[name], props, "{name}");
+    }
 }

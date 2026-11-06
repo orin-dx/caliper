@@ -38,7 +38,8 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 /// 25: the `TaggedFactory` detection rule.
 /// 26: function parameters record whether they are optional or rest.
 /// 28: the `FactoryResult` detection rule, and function results recorded for more functions.
-const CACHE_SCHEMA_VERSION: u32 = 29;
+/// 30: `SourceData::enum_declarations`.
+const CACHE_SCHEMA_VERSION: u32 = 30;
 
 const DATA_FILE: &str = "dts.msgpack";
 

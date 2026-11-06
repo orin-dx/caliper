@@ -80,6 +80,21 @@ fn resolve_named_uncycled(
         return OpaqueDetail::give_up(state, name.to_string(), OpaqueReason::DepthExceeded, diag);
     }
 
+    // A reference marked as a declaration's is looked up as one, whatever type parameter is in scope under its name.
+    let declared_name;
+    let (name, as_declaration) = match name.strip_suffix(DECLARATION_MARK) {
+        Some(bare) => {
+            declared_name = CompactString::from(bare);
+            (&declared_name, true)
+        }
+        None => (name, false),
+    };
+
+    // ── 0. A type parameter in scope shadows any declaration of the same name ──
+    if !as_declaration && args.is_empty() && state.has_type_param(name) {
+        return PropType::Named { name: unmarked(name).into(), args: Vec::new() };
+    }
+
     // ── 1. React builtin check ────────────────────────────────────────────────
     let lookup_name = name.strip_prefix("React.").unwrap_or(name.as_str());
     // React's meaning only for React's binding: a project's own `ReactNode` or `Ref` resolves as declared below.
@@ -117,16 +132,26 @@ fn resolve_named_uncycled(
             let params = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key);
             let defaults = ctx.named_types.lookup_type_param_defaults(&canonical_file, &matched_key);
             let outer_named_unevaluated = std::mem::take(&mut state.named_unevaluated);
+            // The alias's body is read under its own parameters that nothing replaces, never under the caller's: the
+            // supplied arguments are the caller's names (`Id<Value>` over `type Value`), not the alias's parameters.
             let expanded = match params {
                 Some(params) if !args.is_empty() || defaults.is_some() => {
-                    state.add_type_params(params.iter());
                     expand_alias(&alias, params, defaults, args, consuming_file, &canonical_file, ctx, state, 0)
                 }
                 Some(params) => {
-                    state.add_type_params(params.iter());
-                    resolve_type_alias_type(&alias, ctx, state, depth)
+                    let alias =
+                        super::substitute::substitute_alias(&alias, &super::substitute::unfilled_substitution(params));
+                    let caller = state.enter_scope(TypeScope::default());
+                    let expanded = resolve_type_alias_type(&alias, ctx, state, depth);
+                    state.leave_scope(caller);
+                    expanded
                 }
-                None => resolve_type_alias_type(&alias, ctx, state, 0),
+                None => {
+                    let caller = state.enter_scope(TypeScope::default());
+                    let expanded = resolve_type_alias_type(&alias, ctx, state, 0);
+                    state.leave_scope(caller);
+                    expanded
+                }
             };
             let unevaluated = state.named_unevaluated || expanded.holds_unevaluated_type();
             state.named_unevaluated = outer_named_unevaluated || unevaluated;
@@ -220,8 +245,8 @@ fn resolve_named_uncycled(
     }
 
     // ── 6.5 Enclosing generic's own type parameter — expected, not unresolvable ─
-    if state.has_type_param(bare) {
-        return PropType::Named { name: name.clone(), args: resolved_args };
+    if !as_declaration && state.has_type_param(bare) {
+        return PropType::Named { name: unmarked(name).into(), args: resolved_args };
     }
 
     // ── 6.7 TypeScript's own ambient globals (Date, RegExp, Element, ...) ────
@@ -296,21 +321,32 @@ fn expand_alias(
     state: &mut ResolveState,
     depth: u8,
 ) -> PropType {
-    let subst = super::substitute::bind_args(params, defaults, args, args_file, declared_file, &mut state.diagnostics);
+    let args = &*super::substitute::mark_args(state, args);
+    let subst =
+        super::substitute::bind_declared(params, defaults, args, args_file, declared_file, &mut state.diagnostics);
     if let Some(param) = super::evaluate::distributive_param(alias) {
         if let Some(bound) = subst.get(param) {
             let members = literal_members(super::evaluate::union_members(bound, args_file, ctx, 0), ctx, state, depth);
             if members.len() != 1 {
-                let results = members.into_iter().map(|(member, member_file)| {
-                    let mut one = subst.clone();
-                    one.insert(param, CollectedType::AtFile { file: member_file, inner: Box::new(member) });
-                    resolve_type_alias_type(&super::substitute::substitute_alias(alias, &one), ctx, state, depth)
-                });
-                return super::primitives::union_of(results.collect::<Vec<_>>());
+                let caller = state.enter_scope(TypeScope::default());
+                let results: Vec<PropType> = members
+                    .into_iter()
+                    .map(|(member, member_file)| {
+                        let mut one = subst.clone();
+                        let member = CollectedType::AtFile { file: member_file, inner: Box::new(member) };
+                        one.insert(param, member);
+                        resolve_type_alias_type(&super::substitute::substitute_alias(alias, &one), ctx, state, depth)
+                    })
+                    .collect();
+                state.leave_scope(caller);
+                return super::primitives::union_of(results);
             }
         }
     }
-    resolve_type_alias_type(&super::substitute::substitute_alias(alias, &subst), ctx, state, depth)
+    let caller = state.enter_scope(TypeScope::default());
+    let expanded = resolve_type_alias_type(&super::substitute::substitute_alias(alias, &subst), ctx, state, depth);
+    state.leave_scope(caller);
+    expanded
 }
 
 /// `members` with each one that is not already a literal or primitive resolved (`(typeof SIZES)[number]`, a template

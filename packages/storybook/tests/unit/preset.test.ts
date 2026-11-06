@@ -28,6 +28,12 @@ describe('preset', () => {
     expect(existsSync(ours!.moduleSpecifier.replace(/\.js$/, '.ts')) || existsSync(ours!.moduleSpecifier)).toBe(true)
   })
 
+  it('fails when Storybook starts for an option that is not a choice', () => {
+    expect(() => experimental_docgenProvider([], { fallback: 'always' as never })).toThrow(
+      "[caliper-docgen] fallback is 'always', expected 'degraded' or 'never'",
+    )
+  })
+
   it('forwards every option key to the worker', async () => {
     const options = {
       srcDirs: ['lib'],

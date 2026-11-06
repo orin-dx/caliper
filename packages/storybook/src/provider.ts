@@ -18,6 +18,7 @@ import type { DocgenMiddleware, DocgenPayload, IndexEntry } from 'storybook/inte
 import { type ExtractArgTypes, loadExtractArgTypes, toArgTypes } from './arg-types.js'
 import type { CaliperStorybookOptions } from './index.js'
 import { DocgenSession, type SessionBinding } from './session.js'
+import { assertValidOptions } from './validate.js'
 
 type Subcomponent = NonNullable<DocgenPayload['subcomponents']>[string]
 
@@ -27,16 +28,22 @@ interface StoryFile {
   importPath: string
 }
 
-function identifier(name: string): object {
-  return { type: 'Identifier', name }
+/**
+ * `csf`'s story file with its default export replaced by one whose `component` is `expression`: every other statement
+ * stays, so the resolver follows the story's imports and local bindings (`const parts = { Item }`) as it would for the
+ * written meta, and every node has source text for it to report an expression it cannot follow.
+ */
+function storyFor(csf: CsfFile, storyPath: string, expression: string): CsfFile {
+  const source = csf.editor.toString()
+  const meta = csf.program.body.find((statement) => statement.type === 'ExportDefaultDeclaration')
+  const replaced = `export default { component: ${expression} }`
+  const code = meta ? `${source.slice(0, meta.start)}${replaced}${source.slice(meta.end)}` : `${source}\n${replaced}\n`
+  return loadCsf(code, { fileName: storyPath, makeTitle: () => 'caliper-docgen' }).parse()
 }
 
-/** A component expression node for a dotted or plain name, the shape the meta-component resolver reads. */
-function expressionFor(name: string): object {
-  const [object, property] = name.split('.')
-  return property
-    ? { type: 'MemberExpression', computed: false, object: identifier(object!), property: identifier(property) }
-    : identifier(name)
+/** The resolver threw instead of answering: a defect to hand to the next provider, not a fact about one subcomponent. */
+class ResolverFailureError extends Error {
+  override name = 'ResolverFailureError'
 }
 
 /** caliper keeps one value per JSDoc tag; Storybook lists every value. */
@@ -56,6 +63,7 @@ export function createDocgenProvider(
   options: CaliperStorybookOptions = {},
   binding?: SessionBinding,
 ): DocgenMiddleware {
+  assertValidOptions(options)
   const cwd = process.cwd()
   const sessionOptions = {
     srcDirs: (options.srcDirs ?? ['src']).map((dir) => resolve(cwd, dir)),
@@ -76,10 +84,57 @@ export function createDocgenProvider(
   }
   // The native binding loads on the first story request, not when Storybook starts the worker.
   let sessionPromise: Promise<DocgenSession> | undefined
-  const getSession = () =>
-    (sessionPromise ??= (async () =>
-      new DocgenSession(sessionOptions, binding ?? (await import('caliper-docgen-napi'))))())
-  const resolveMeta = createMetaComponentResolver()
+  async function getSession(): Promise<DocgenSession> {
+    sessionPromise ??= (async () =>
+      new DocgenSession(sessionOptions, binding ?? (await import('caliper-docgen-napi'))))()
+    const attempt = sessionPromise
+    try {
+      return await attempt
+    } catch (error) {
+      // A binding that failed to load is tried again by the next request, not remembered as failed.
+      if (sessionPromise === attempt) sessionPromise = undefined
+      throw error
+    }
+  }
+  // A session that cannot start is reported once at a level a developer sees, then every story falls back quietly.
+  let startFailureReported = false
+
+  let started = false
+  let refreshFailureReported = false
+
+  /**
+   * The session, up to date with the files. A failure before the first successful `fresh()` is a failure to start;
+   * after it, a failure is a refresh of a running session and is worded as one. Each is reported once until a
+   * `fresh()` succeeds again, and thrown for the fallback either way.
+   */
+  async function freshSession(): Promise<DocgenSession> {
+    try {
+      const session = await getSession()
+      await session.fresh()
+      started = true
+      startFailureReported = false
+      refreshFailureReported = false
+      return session
+    } catch (error) {
+      const { message } = error as Error
+      if (!started && !startFailureReported) {
+        startFailureReported = true
+        logger.warn(`[caliper-docgen] could not start: ${message}; Storybook's own docgen answers instead`)
+      } else if (started && !refreshFailureReported) {
+        refreshFailureReported = true
+        logger.warn(`[caliper-docgen] could not refresh: ${message}; Storybook's own docgen answers instead`)
+      }
+      throw error
+    }
+  }
+  const metaComponent = createMetaComponentResolver()
+  const resolveMeta = (csf: CsfFile, storyPath: string) => {
+    try {
+      return metaComponent(csf, storyPath)
+    } catch (error) {
+      throw new ResolverFailureError((error as Error).message)
+    }
+  }
   const fallback = options.fallback ?? 'degraded'
   let extractArgTypes: Promise<ExtractArgTypes> | undefined
   // A component handed on is reported once, not on every story request that names it.
@@ -103,9 +158,13 @@ export function createDocgenProvider(
       if (!path) throw new Error(`no file for the import of ${exportName}`)
       const key = await session.resolveExport(path, exportName, localName)
       if (key) return { key, path }
+      // Storybook follows `Select.Option` into the module that declares `Option` and answers with that local name, which
+      // caliper may know as `Select.Option`.
+      const member = memberComponent(session, target, storyPath)
+      if (member) return member
       throw new Error(noComponent(session, exportName, path))
     }
-    // Storybook reads `Namespace.Member` only for `import * as Namespace`; `Select.Option` of a named import is common.
+    // A member Storybook cannot follow into a module's source (`Select.Option` of a named import from a barrel).
     const member = memberComponent(session, target, storyPath)
     if (member) return member
     throw new Error(`meta.component: ${resolution.reason}`)
@@ -127,10 +186,7 @@ export function createDocgenProvider(
       | undefined
     if (node?.type !== 'MemberExpression' || node.computed) return undefined
     if (node.object?.type !== 'Identifier' || !node.object.name || !node.property?.name) return undefined
-    const owner = resolveMeta(
-      { _metaAnnotations: { component: node.object }, _file: csf._file } as unknown as CsfFile,
-      storyPath,
-    )
+    const owner = resolveMeta(storyFor(csf, storyPath, node.object.name), storyPath)
     if (!('component' in owner) || !owner.component.path) return undefined
     const { path, exportName, localName } = owner.component
     const key = session.keyOfMember([localName, exportName], node.property.name, path)
@@ -146,9 +202,7 @@ export function createDocgenProvider(
     storyPath: string,
     name?: string,
   ): Promise<{ key: string; path: string; doc: RdtComponentDoc }> {
-    const target = name
-      ? ({ _metaAnnotations: { component: expressionFor(name) }, _file: csf._file } as unknown as CsfFile)
-      : csf
+    const target = name ? storyFor(csf, storyPath, name) : csf
     const session = await getSession()
     const { key, path } = await locate(session, target, storyPath)
     const { doc, degradedBy } = session.documentation(key)
@@ -179,6 +233,7 @@ export function createDocgenProvider(
       )
       return { name, path, description, summary, jsDocTags, argTypes: await argTypes(doc) }
     } catch (error) {
+      if (error instanceof ResolverFailureError) throw error
       return {
         name,
         path: importPath,
@@ -193,11 +248,10 @@ export function createDocgenProvider(
     const code = await readFile(storyPath, 'utf8')
     const csf = loadCsf(code, { fileName: storyPath, makeTitle: () => entry.title }).parse()
     // One look at the files for the story and its subcomponents: they are all answered from the same moment.
-    const session = await getSession()
-    await session.fresh()
+    await freshSession()
     const { doc } = await component(csf, storyPath)
     const { description, summary, jsDocTags } = extractComponentDescription(
-      extractDescription(csf._metaStatement) || undefined,
+      extractDescription(csf._metaStatement, csf.editor) || undefined,
       doc.description || undefined,
       tagLists(doc.tags),
     )

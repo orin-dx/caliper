@@ -3,7 +3,7 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use compact_str::CompactString;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -13,6 +13,22 @@ use super::diagnostic::Diagnostic;
 
 /// Compact string used for names, type strings — avoids heap alloc under 24 bytes.
 pub type TypeName = CompactString;
+
+/// The name the extractor gives the alias it synthesizes for an inline props type (`function Card(props: { title: string })`),
+/// the `index`th alias of its file. Both ends of the convention are here: `is_synthesized_alias` is how the resolver
+/// tells such an alias, the component's own, from a declared one.
+pub fn synthesized_alias_name(index: usize) -> String {
+    format!("__anon_{index}")
+}
+
+/// Whether `name` is the name of an alias the extractor synthesized for an inline props type.
+pub fn is_synthesized_alias(name: &str) -> bool {
+    name.starts_with("__anon_")
+}
+
+/// The key variable the resolver makes up for the mapped type a `Record` stands for. It is not an identifier, so no
+/// user type can be named it, and the printer shows it as a variable that its value does not use.
+pub const MADE_UP_KEY_VARIABLE: &str = "Record key";
 
 // ─── ParamKind ────────────────────────────────────────────────────────────────
 
@@ -349,9 +365,13 @@ impl CollectedType {
             }
             CollectedType::Array(inner) => format!("{}[]", inner.to_raw_string()),
             CollectedType::Readonly(inner) => format!("readonly {}", inner.to_raw_string()),
-            CollectedType::Named { name, args } if args.is_empty() => name.to_string(),
+            CollectedType::Named { name, args } if args.is_empty() => super::scope::unmarked(name).to_string(),
             CollectedType::Named { name, args } => {
-                format!("{}<{}>", name, args.iter().map(|a| a.to_raw_string()).collect::<Vec<_>>().join(", "))
+                format!(
+                    "{}<{}>",
+                    super::scope::unmarked(name),
+                    args.iter().map(|a| a.to_raw_string()).collect::<Vec<_>>().join(", ")
+                )
             }
             CollectedType::TypeOf(name) => format!("typeof {}", name),
             CollectedType::KeyOf(inner) => format!("keyof {}", inner.to_raw_string()),
@@ -399,6 +419,13 @@ impl CollectedType {
                     Some(true) => "?",
                     Some(false) => "-?",
                     None => "",
+                };
+                // A key variable the resolver made up for `Record` is not an identifier; TypeScript prints it as `P`,
+                // unless the value names a `P` of its own, which the printed variable would then capture.
+                let param = if param == MADE_UP_KEY_VARIABLE {
+                    ["P", "K", "Key"].into_iter().find(|candidate| !value_type.mentions(candidate)).unwrap_or("P")
+                } else {
+                    param.as_str()
                 };
                 format!("{{ [{param} in {}]{modifier}: {} }}", key_type.to_raw_string(), value_type.to_raw_string())
             }
@@ -954,6 +981,10 @@ pub struct SourceData {
     /// for the generic aliases and interfaces that declare at least one. Keyed as `type_alias_params` and
     /// `interface_type_params`; a reference that omits trailing arguments takes these, as TypeScript does.
     pub type_param_defaults: FxHashMap<std::string::String, Vec<Option<CollectedType>>>,
+
+    /// The keys in `enums` that a TypeScript `enum` declaration wrote, as against an `as const` object or a variant
+    /// bag. An enum is a type of its own, not the union of its values.
+    pub enum_declarations: FxHashSet<std::string::String>,
 }
 
 /// What a generic function returns: its declared or asserted type, or a generic call stored in a returned local const.
@@ -1047,6 +1078,21 @@ pub enum ExtendsRef {
 }
 
 impl CollectedType {
+    /// The names of the type references in this type, in the order met and with repeats.
+    pub(crate) fn referenced_names(&self) -> Vec<TypeName> {
+        let names = std::cell::RefCell::new(Vec::new());
+        drop(self.rename_named(&|name| {
+            names.borrow_mut().push(TypeName::from(name));
+            None
+        }));
+        names.into_inner()
+    }
+
+    /// Whether a type reference named `name` appears anywhere in this type.
+    fn mentions(&self, name: &str) -> bool {
+        self.referenced_names().iter().any(|referenced| referenced == name)
+    }
+
     /// This type with each reference `rename` maps (a name with no type arguments of its own, or with them) replaced by
     /// the name it returns. A type parameter or mapped key variable that shadows a name is left alone inside its scope.
     #[must_use]
@@ -1788,5 +1834,29 @@ mod tests {
             CollectedType::NumberLiteral(n) => assert_eq!(n, 42.5),
             other => panic!("expected NumberLiteral, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_records_made_up_key_variable_prints_as_a_valid_identifier() {
+        let mapped = |param: &str| CollectedType::Mapped {
+            param: param.into(),
+            key_type: Box::new(CollectedType::Named { name: "Keys".into(), args: vec![] }),
+            value_type: Box::new(CollectedType::String),
+            optional: None,
+        };
+        assert_eq!(mapped(MADE_UP_KEY_VARIABLE).to_raw_string(), "{ [P in Keys]: string }");
+        assert_eq!(mapped("K").to_raw_string(), "{ [K in Keys]: string }");
+    }
+
+    #[test]
+    fn a_made_up_key_variable_avoids_the_names_its_value_uses() {
+        let mapped = |value: &str| CollectedType::Mapped {
+            param: MADE_UP_KEY_VARIABLE.into(),
+            key_type: Box::new(CollectedType::Named { name: "Keys".into(), args: vec![] }),
+            value_type: Box::new(CollectedType::Named { name: value.into(), args: vec![] }),
+            optional: None,
+        };
+        assert_eq!(mapped("P").to_raw_string(), "{ [K in Keys]: P }");
+        assert_eq!(mapped("K").to_raw_string(), "{ [P in Keys]: K }");
     }
 }

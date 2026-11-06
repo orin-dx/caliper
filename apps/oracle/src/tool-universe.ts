@@ -3,9 +3,17 @@
 // root come in as arguments, so this file reads only the dumps the tools wrote. Scoring is src/tool-score.ts.
 import { readFileSync, realpathSync } from 'node:fs'
 import { relative } from 'node:path'
+import { layerMembers } from './canonical.ts'
 import { caliperNorm, VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'
 import { rdgNorm, rdtNorm } from './tool-norm.ts'
-import { scoreTool, type Reported, type Stratum, type ToolScore, type UniverseProp } from './tool-score.ts'
+import {
+  scoreReported,
+  scoreTool,
+  type Reported,
+  type Stratum,
+  type ToolScore,
+  type UniverseProp,
+} from './tool-score.ts'
 
 export const normComponent = (name: string) =>
   (
@@ -21,11 +29,14 @@ export const normComponent = (name: string) =>
 export const pathKey = (path: string) =>
   process.platform === 'darwin' || process.platform === 'win32' ? path.toLowerCase() : path
 
-/** The files of a component's collapsed inheritance layers: Caliper lists their props as members, not as props. */
-export const collapsedLayerFiles = (component: any): Set<string> =>
+/** The files of a component's collapsed inheritance layers: Caliper lists their props as members, not as props. A layer
+ * is collapsed when it lists members. Its size does not tell: `Omit` can leave one at 30 props or fewer, and with
+ * `--collapse-inherited-props none` a layer of more than 30 is expanded. The output omits an empty `members`, so a layer
+ * without it names nothing and has nothing to attribute. */
+export const collapsedLayerFiles = (caliper: any, component: any): Set<string> =>
   new Set(
     (component?.inheritance ?? [])
-      .filter((layer: any) => layer.totalProps > 30)
+      .filter((layer: any) => layerMembers(caliper, layer).length > 0)
       .map((layer: any) => pathKey(String(layer.fileName))),
   )
 
@@ -89,7 +100,7 @@ function caliperReported(match: Match | undefined, p: any, caliper: any): Report
   const id = match?.component.props[p.name]
   if (id !== undefined) return caliperNorm(caliper.props[id].type)
   if (!match) return 'component'
-  const layerFiles = collapsedLayerFiles(match.component)
+  const layerFiles = collapsedLayerFiles(caliper, match.component)
   return p.declarations?.some((d: any) => layerFiles.has(pathKey(String(d.path)))) ? 'collapsed' : 'prop'
 }
 
@@ -139,6 +150,8 @@ export function universeRecorder(env: Environment) {
       }
       return {
         caliper,
+        // Caliper over the components it reports only (src/tool-score.ts `scoreReported`): the weekly headline.
+        caliper_reported: scoreReported(entries, (u) => u.caliper),
         ...(env.rdt && { rdt: scoreTool(entries, (u) => u.rdt!) }),
         ...(env.rdg && {
           react_docgen: { ...scoreTool(entries, (u) => u.rdg!), failed_files: env.rdg.failed.size },

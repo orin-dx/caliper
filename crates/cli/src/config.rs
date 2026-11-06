@@ -72,6 +72,23 @@ impl DocgenConfigSchema {
     }
 }
 
+/// The `--config` path names no file.
+#[derive(Debug, miette::Diagnostic)]
+#[diagnostic(help(
+    "Check the path passed to --config, or drop the flag to look for docgen.config.ts upward from here."
+))]
+pub struct ConfigNotFound {
+    pub path: std::path::PathBuf,
+}
+
+impl std::fmt::Display for ConfigNotFound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "config file {} does not exist", self.path.display())
+    }
+}
+
+impl std::error::Error for ConfigNotFound {}
+
 /// Find and load docgen.config.ts, walking up from start_dir to workspace root.
 ///
 /// Returns `Ok(None)` when no config file exists anywhere between `start_dir` and the
@@ -112,17 +129,33 @@ pub fn try_load_config(path: &std::path::Path) -> Result<Option<PipelineOptions>
     // __DOCGEN_CONFIG_PATH would then resolve against that new cwd instead of
     // the cwd this path was originally relative to (e.g. `--config
     // plain/docgen.config.ts` would fail with ERR_MODULE_NOT_FOUND even though
-    // the file exists). Falls back to the original path if canonicalization
-    // fails (e.g. the file doesn't exist) so the resulting "file not found"
-    // error still names the path the user actually typed.
+    // the file exists). A path that does not exist is reported first, naming
+    // the path the user actually typed.
+    if !path.exists() {
+        return Err(ConfigNotFound { path: path.to_path_buf() }.into());
+    }
     let path = &path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
     // Pass the config path via environment variable to avoid any path content
     // being interpreted as JavaScript (command injection via crafted filenames).
+    //
+    // The config is the default export, or the module itself without one. A function is called and a promise
+    // awaited, so `export default defineConfig(() => ...)` and `export default fetchConfig()` work. In a package
+    // without `"type": "module"` tsx compiles the file to CommonJS, and importing that wraps the exports in a
+    // `default` of their own, which `__esModule` marks for unwrapping.
     let script = "import { pathToFileURL } from 'node:url';\
         const p = process.env.__DOCGEN_CONFIG_PATH;\
         const m = await import(pathToFileURL(p).href);\
-        process.stdout.write(JSON.stringify(m.default ?? m));";
+        let config = m.default ?? m;\
+        if (config && typeof config === 'object' && config.__esModule && 'default' in config) config = config.default;\
+        if (typeof config === 'function') config = config();\
+        config = await config;\
+        if (config === null || typeof config !== 'object' || Array.isArray(config)) {\
+          const kind = config === null ? 'null' : Array.isArray(config) ? 'an array' : config === undefined ? 'undefined' : 'a ' + typeof config;\
+          console.error('docgen.config.ts must export a config object (or a function or promise resolving to one), but its default export is ' + kind);\
+          process.exit(1);\
+        }\
+        process.stdout.write(JSON.stringify(config));";
 
     let mut command = std::process::Command::new("node");
     command
@@ -176,8 +209,24 @@ pub fn try_load_config(path: &std::path::Path) -> Result<Option<PipelineOptions>
         )
     })?;
 
-    let opts =
+    let names_src_dirs = schema.src_dirs.is_some();
+    let mut opts =
         schema.into_pipeline_options().map_err(|e| miette::miette!("docgen.config.ts at {}: {}", path.display(), e))?;
+    // A path the config names is relative to the config, not to wherever the CLI runs from.
+    if let Some(dir) = path.parent().and_then(camino::Utf8Path::from_path) {
+        for src_dir in opts.src_dirs.iter_mut().filter(|src_dir| names_src_dirs && src_dir.is_relative()) {
+            *src_dir = dir.join(&*src_dir);
+        }
+        if let Some(tsconfig) = opts.tsconfig_path.as_mut().filter(|tsconfig| tsconfig.is_relative()) {
+            *tsconfig = dir.join(&*tsconfig);
+        }
+        if let Some(cache_dir) = opts.cache_dir.as_mut().filter(|cache_dir| cache_dir.is_relative()) {
+            *cache_dir = dir.join(&*cache_dir);
+        }
+        if let Some(tsc) = opts.semantic_tsc_path.as_mut().filter(|tsc| tsc.is_relative()) {
+            *tsc = dir.join(&*tsc);
+        }
+    }
     Ok(Some(opts))
 }
 

@@ -37,3 +37,7 @@ export function updatePayload(file: string, update: IncrementalUpdate): CaliperD
     removedDiagnostics: update.removedDiagnostics,
   }
 }
+
+export function changeFailure(file: string, error: unknown): string {
+  return `[caliper-docgen] Failed to apply the change to ${file}, so its docs are stale: ${String(error)}`
+}

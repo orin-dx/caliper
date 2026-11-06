@@ -16,7 +16,7 @@ use compact_str::CompactString;
 use crate::types::*;
 
 use super::import::{lookup_interface, lookup_interface_including_ambient, lookup_type_alias, resolve_to_canonical};
-use super::substitute::{bind_args, build_substitution, substitute_alias, substitute_type};
+use super::substitute::{bind_declared, build_substitution, substitute_alias, substitute_type};
 use super::{ResolutionContext, MAX_DEPTH};
 
 /// A type, and the file its names resolve in.
@@ -222,10 +222,35 @@ fn extends(
             let keys = keys_of(target, target_file.unwrap_or(file), ctx, depth + 1)?;
             Some(values.iter().all(|value| matches!(value, Atom::Str(s) if keys.iter().any(|key| &key.name == s))))
         }
+        // An enum is not the union of its values to assign to: `"primary" extends Tone` is false for a string enum, which
+        // atoms would read as true.
+        _ if names_an_enum(extends_type, file, ctx, depth + 1) => None,
         _ => {
             let targets = atoms(extends_type, file, ctx, depth + 1)?;
             Some(values.iter().all(|value| value.assignable_to(&targets)))
         }
+    }
+}
+
+/// Whether `ty` is, or has among its union members, an enum, here or through an alias.
+fn names_an_enum(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, depth: u8) -> bool {
+    if depth > MAX_DEPTH {
+        return false;
+    }
+    match ty {
+        CollectedType::AtFile { file, inner } => names_an_enum(inner, file, ctx, depth + 1),
+        CollectedType::Union(members) => members.iter().any(|member| names_an_enum(member, file, ctx, depth + 1)),
+        CollectedType::Named { name, args } => {
+            let (alias_file, alias_name) = canonical(name, file, ctx);
+            if lookup_type_alias(ctx, alias_file.as_str(), &alias_name)
+                .is_some_and(|(matched, _)| ctx.global.enum_declarations.contains(&format!("{alias_file}:{matched}")))
+            {
+                return true;
+            }
+            alias_body(name, args, file, ctx)
+                .is_some_and(|(body, body_file)| names_an_enum(&body, &body_file, ctx, depth + 1))
+        }
+        _ => false,
     }
 }
 
@@ -562,7 +587,16 @@ pub(super) fn member_shared(
 ) -> Option<Arc<Located>> {
     // A read from the top of a walk depends only on the declarations, so a run answers it once (`member_reads`).
     if let (CollectedType::Named { name, args }, 0) = (obj, depth) {
-        let name: Box<str> = if args.is_empty() { Box::from(name.as_str()) } else { obj.to_raw_string().into() };
+        // The arguments are keyed by structure: their printed form drops the file and type parameters they are read
+        // under, and the same text read under another scope is another answer.
+        let name: Box<str> = if args.is_empty() {
+            Box::from(name.as_str())
+        } else {
+            use std::hash::Hasher;
+            let mut hasher = rustc_hash::FxHasher::default();
+            obj.structural_hash(&mut hasher);
+            format!("{}#{:x}", obj.to_raw_string(), hasher.finish()).into()
+        };
         let cache_key = (Box::from(file.as_str()), name, Box::from(key));
         if let Some(read) = ctx.member_reads.get(&cache_key) {
             super::deps::replay(&read.deps);
@@ -742,7 +776,7 @@ fn interface_prop(
         .or_else(|| ctx.react_types.as_deref()?.lookup_interface_param_defaults_for(iface));
     let subst = match params {
         Some(params) if !params.is_empty() && (!args.is_empty() || defaults.is_some()) => {
-            Some(bind_args(params, defaults, args, args_file, &iface.file_path, &mut Vec::new()))
+            Some(bind_declared(params, defaults, args, args_file, &iface.file_path, &mut Vec::new()))
         }
         _ => None,
     };
@@ -813,7 +847,7 @@ pub(super) fn alias_body(
     let defaults = ctx.named_types.lookup_type_param_defaults(&alias_file, &matched);
     let alias = match ctx.named_types.lookup_type_alias_params(&alias_file, &matched) {
         Some(params) if !args.is_empty() || defaults.is_some() => {
-            substitute_alias(alias, &bind_args(params, defaults, args, file, &alias_file, &mut Vec::new()))
+            substitute_alias(alias, &bind_declared(params, defaults, args, file, &alias_file, &mut Vec::new()))
         }
         _ => alias.clone(),
     };

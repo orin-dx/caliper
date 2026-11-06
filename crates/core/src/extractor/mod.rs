@@ -58,10 +58,7 @@ impl ReactApi {
     }
 }
 
-/// Whether an import specifier is React itself: `react`, a subpath of it, or Preact's compatibility layer.
-fn is_react_module(specifier: &str) -> bool {
-    specifier == "react" || specifier.starts_with("react/") || specifier == "preact/compat"
-}
+use crate::react_types::is_react_module;
 
 // ─── Entry Point ─────────────────────────────────────────────────────────────
 
@@ -288,6 +285,13 @@ pub(super) struct SourceDataCollector<'src> {
     /// How many function bodies enclose the node being visited. A component declared inside one exists per call (a
     /// factory's returned component, a story's local helper), so no module imports it under that name.
     pub(super) function_depth: u32,
+    /// How many block statements, static blocks and `switch` statements enclose the node being visited.
+    pub(super) block_depth: u32,
+    /// How many `declare namespace` and `declare module` blocks enclose the node being visited.
+    pub(super) ambient_depth: u32,
+    /// The values of each enum seen so far, merged over its declarations; `None` once one declaration has a value that
+    /// is not known.
+    pub(super) enum_unions: rustc_hash::FxHashMap<String, Option<Vec<crate::types::CollectedType>>>,
     /// The span and type parameters of each generic function in the file, for `ComponentMapping::type_params`.
     pub(super) function_type_params: Vec<(u32, u32, Vec<CompactString>)>,
     /// `(scoped key, name, type parameters)` of each named class: a class is also a type, recorded in `finish` as an
@@ -328,6 +332,9 @@ impl<'src> SourceDataCollector<'src> {
             exported_locals: FxHashSet::default(),
             attached_to: Vec::new(),
             function_depth: 0,
+            ambient_depth: 0,
+            block_depth: 0,
+            enum_unions: rustc_hash::FxHashMap::default(),
             function_type_params: Vec::new(),
             pending_classes: Vec::new(),
             props_params: Vec::new(),
@@ -668,7 +675,7 @@ impl<'src> SourceDataCollector<'src> {
             .imports
             .iter()
             .find(|imp| imp.local_name.as_str() == name)
-            .is_none_or(|imp| imp.specifier == "react" || imp.specifier.starts_with("react/"))
+            .is_none_or(|imp| is_react_module(&imp.specifier))
     }
 
     // ─── ExtendsRef classification ────────────────────────────────────────────
@@ -946,22 +953,19 @@ impl<'src> SourceDataCollector<'src> {
                 // ...T[] in tuple → Array(T)
                 CollectedType::Array(Box::new(self.ts_type_to_collected_at_depth(&r.type_annotation, depth + 1)))
             }
-            // All TSType variants are inherited — we can safely transmute via span+raw fallback
-            // but the cleanest approach is to match the known shared variants.
-            // Since TSTupleElement inherits TSType, we cast via the span trick:
-            other => {
-                use oxc_span::GetSpan;
-                let span = other.span();
-                let raw = self.source[span.start as usize..span.end as usize].to_owned();
-                // Try to produce a real type from source-text parsing would require re-parsing,
-                // so instead we check common patterns via span-based raw parsing and use
-                // the raw fallback for anything we can't directly handle.
-                // For the common case of plain TSType variants (not TSOptionalType/TSRestType),
-                // we need to re-interpret the element as a TSType. We can't do this safely
-                // at runtime without unsafe, but all such variants produce valid CollectedType
-                // via raw text. Most real tuple usage is simple types.
-                CollectedType::Raw(raw)
+            // A labelled member `name: T` or `name?: T` is its type; an optional marker is not preserved.
+            TSTupleElement::TSNamedTupleMember(named) => {
+                self.ts_tuple_element_to_collected(&named.element_type, depth + 1)
             }
+            // The remaining variants are the plain `TSType`s the element inherits.
+            other => match other.as_ts_type() {
+                Some(ty) => self.ts_type_to_collected_at_depth(ty, depth + 1),
+                None => {
+                    use oxc_span::GetSpan;
+                    let span = other.span();
+                    CollectedType::Raw(self.source[span.start as usize..span.end as usize].to_owned())
+                }
+            },
         }
     }
 
@@ -1088,7 +1092,7 @@ impl<'src> SourceDataCollector<'src> {
             TSType::TSParenthesizedType(p) => self.extract_type_name_from_type(&p.type_annotation),
             TSType::TSUnionType(u) => {
                 let members: Vec<CollectedType> = u.types.iter().map(|t| self.ts_type_to_collected(t)).collect();
-                let bare = format!("__anon_{}", self.data.type_aliases.len());
+                let bare = crate::types::synthesized_alias_name(self.data.type_aliases.len());
                 let scoped = self.scoped_key(&bare);
                 self.data
                     .type_aliases
@@ -1097,7 +1101,7 @@ impl<'src> SourceDataCollector<'src> {
             }
             TSType::TSIntersectionType(i) => {
                 let members: Vec<CollectedType> = i.types.iter().map(|t| self.ts_type_to_collected(t)).collect();
-                let bare = format!("__anon_{}", self.data.type_aliases.len());
+                let bare = crate::types::synthesized_alias_name(self.data.type_aliases.len());
                 let scoped = self.scoped_key(&bare);
                 self.data
                     .type_aliases
@@ -1110,7 +1114,7 @@ impl<'src> SourceDataCollector<'src> {
                 // alias so the resolver's existing alias machinery can resolve it, instead
                 // of silently dropping the whole component (the `_ => None` fallback below).
                 let collected = self.ts_type_to_collected(ty);
-                let bare = format!("__anon_{}", self.data.type_aliases.len());
+                let bare = crate::types::synthesized_alias_name(self.data.type_aliases.len());
                 let scoped = self.scoped_key(&bare);
                 self.data.type_aliases.insert(
                     scoped,
@@ -1290,5 +1294,17 @@ impl evidence::Scope for SourceDataCollector<'_> {
 
     fn is_react_wrapper(&self, call: &CallExpression<'_>) -> bool {
         matches!(self.react_api(&call.callee), Some(ReactApi::Memo | ReactApi::ForwardRef))
+    }
+
+    fn is_preact_h(&self, receiver: Option<&str>) -> bool {
+        self.data.imports.iter().any(|import| {
+            let binds = match receiver {
+                None => import.local_name.as_str() == "h" && import.exported_name.as_str() == "h",
+                Some(object) => {
+                    import.local_name.as_str() == object && matches!(import.exported_name.as_str(), "*" | "default")
+                }
+            };
+            binds && crate::react_types::is_preact_module(&import.specifier)
+        })
     }
 }

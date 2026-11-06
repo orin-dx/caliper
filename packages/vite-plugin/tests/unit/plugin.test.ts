@@ -180,6 +180,7 @@ describe('caliperDocgen', () => {
     const virtualModule = { id: '\0virtual:caliper-docgen' }
 
     const clientEnv = (withVirtualModule = false) => ({
+      warn: vi.fn(),
       environment: {
         name: 'client',
         hot: { send: vi.fn() },
@@ -306,16 +307,16 @@ describe('caliperDocgen', () => {
       )
     })
 
-    it('logs and sends nothing when the change cannot be applied', async () => {
-      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-      ;(napi.extractFileIncremental as any).mockResolvedValueOnce('not valid json')
+    it('warns through the plugin context and sends nothing when the change cannot be applied', async () => {
+      ;(napi.extractFileIncremental as any).mockRejectedValueOnce(new Error('boom'))
       const ctx = clientEnv(true)
       const result = await (plugin.hotUpdate as Function).call(ctx, makeOpts('/project/src/Button.tsx'))
 
       expect(sentUpdates(ctx)).toEqual([])
       expect(result).toBeUndefined()
-      expect(consoleError).toHaveBeenCalledWith('[caliper-docgen] Failed to apply the change:', expect.any(Error))
-      consoleError.mockRestore()
+      expect(ctx.warn.mock.calls).toEqual([
+        ['[caliper-docgen] Failed to apply the change to /project/src/Button.tsx, so its docs are stale: Error: boom'],
+      ])
     })
 
     // A file-change event arriving while cold extraction is still in flight must wait for it, not race it.
@@ -376,7 +377,6 @@ describe('caliperDocgen', () => {
     })
 
     it('keeps applying changes after one fails', async () => {
-      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
       ;(napi.extractFileIncremental as any)
         .mockRejectedValueOnce(new Error('boom'))
         .mockResolvedValueOnce(update(2, ['Input']))
@@ -388,7 +388,6 @@ describe('caliperDocgen', () => {
       ])
 
       expect(sentUpdates(ctx).map((u: any) => u.updatedKeys[0])).toEqual(['Input'])
-      consoleError.mockRestore()
     })
   })
 
@@ -526,6 +525,52 @@ describe('caliperDocgen', () => {
       expect(napi.initializeSession).toHaveBeenCalledTimes(1)
       const code = await (p.load as Function).call(pluginContext(), '\0virtual:caliper-docgen')
       expect(code).toBe(`export default ${SNAPSHOT}`)
+    })
+  })
+
+  describe('a change that cannot be applied during `vite build --watch`', () => {
+    const watchBuild = () => {
+      const p = caliperDocgen({ srcDirs: ['src'] })
+      ;(p.configResolved as Function)({ root: '/project', command: 'build', build: { watch: {} } })
+      return p
+    }
+    const failure =
+      '[caliper-docgen] Failed to apply the change to /project/src/Button.tsx, so its docs are stale: Error: boom'
+
+    it('warns when it happens and fails the rebuild that would ship the stale docs', async () => {
+      const p = watchBuild()
+      await (p.buildStart as Function).call(pluginContext())
+      ;(napi.extractFileIncremental as any).mockRejectedValueOnce(new Error('boom'))
+
+      const changeContext = { warn: vi.fn() }
+      await (p.watchChange as Function).call(changeContext, '/project/src/Button.tsx', { event: 'update' })
+      expect(changeContext.warn.mock.calls).toEqual([[failure]])
+
+      await expect((p.buildStart as Function).call(pluginContext())).rejects.toThrow(failure)
+    })
+
+    it('does not fail the rebuilds after that one', async () => {
+      const p = watchBuild()
+      await (p.buildStart as Function).call(pluginContext())
+      ;(napi.extractFileIncremental as any).mockRejectedValueOnce(new Error('boom'))
+      await (p.watchChange as Function).call({ warn: vi.fn() }, '/project/src/Button.tsx', { event: 'update' })
+      await expect((p.buildStart as Function).call(pluginContext())).rejects.toThrow(failure)
+
+      await expect((p.buildStart as Function).call(pluginContext())).resolves.toBeUndefined()
+    })
+  })
+
+  // ── options ────────────────────────────────────────────────────────────────
+
+  describe('options', () => {
+    it('rejects a logLevel that is not one of the levels, naming the value', () => {
+      expect(() => caliperDocgen({ srcDirs: ['src'], logLevel: 'warning' as never })).toThrow(
+        "[caliper-docgen] logLevel is 'warning', expected 'silent', 'error', 'warn', 'info'",
+      )
+    })
+
+    it.each(['silent', 'error', 'warn', 'info'] as const)('accepts logLevel %s', (logLevel) => {
+      expect(() => caliperDocgen({ srcDirs: ['src'], logLevel })).not.toThrow()
     })
   })
 

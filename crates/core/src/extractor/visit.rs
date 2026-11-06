@@ -81,8 +81,17 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     public.props_type_args.clear();
                     public.wrapper_callee = None;
                     public.rule = crate::types::DetectionRule::FcAnnotation;
-                    if base_name == exported {
-                        self.data.component_mappings[index] = public;
+                    // `const A = Inner as VFC<P>` was already bound as an alias of `Inner`; the cast replaces that
+                    // mapping so `A` is published once, with `P`.
+                    // A rename (`export { A as B }`) replaces only the mapping of the inner component being re-exported
+                    // under its own name; another local that happens to be called `B` keeps its mapping.
+                    let existing = (local == exported || base_name == exported)
+                        .then(|| {
+                            self.data.component_mappings.iter().position(|mapping| mapping.component_name == exported)
+                        })
+                        .flatten();
+                    if let Some(at) = existing {
+                        self.data.component_mappings[at] = public;
                     } else {
                         self.data.component_mappings.push(public);
                     }
@@ -236,7 +245,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     /// nodes and qualify nothing.
     fn visit_ts_namespace_declaration(&mut self, node: &TSNamespaceDeclaration<'a>) {
         self.namespace_stack.push(node.id.name.as_str().into());
+        self.ambient_depth += u32::from(node.declare);
         walk::walk_ts_namespace_declaration(self, node);
+        self.ambient_depth -= u32::from(node.declare);
         self.qualify_namespace_references();
         self.namespace_stack.pop();
     }
@@ -245,46 +256,51 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     /// declarations are keyed as `React.`-qualified ones (`NamedTypeIndex::react_augmentations` reads them). Any other
     /// `declare module "x"` qualifies nothing.
     fn visit_ts_external_module_declaration(&mut self, node: &TSExternalModuleDeclaration<'a>) {
+        self.ambient_depth += 1;
         if node.id.value != "react" {
             walk::walk_ts_external_module_declaration(self, node);
+            self.ambient_depth -= 1;
             return;
         }
         self.namespace_stack.push("React".into());
         walk::walk_ts_external_module_declaration(self, node);
+        self.ambient_depth -= 1;
         self.qualify_namespace_references();
         self.namespace_stack.pop();
     }
 
     fn visit_ts_enum_declaration(&mut self, node: &TSEnumDeclaration<'a>) {
+        // An enum declared in a function body or a block is not the enum a module's types name: `scoped_key` ignores
+        // those scopes, so its union and entries would merge into, or replace, a module-level enum of the same name.
+        if self.function_depth > 0 || self.block_depth > 0 {
+            return;
+        }
         let enum_name = node.id.name.as_str();
         let key = self.scoped_key(enum_name);
 
+        let values = self.enum_member_values(node);
         let entries: Vec<EnumEntry> = node
             .body
             .members
             .iter()
-            .filter_map(|member| {
+            .zip(&values)
+            .filter_map(|(member, value)| {
                 let name = match &member.id {
                     TSEnumMemberName::Identifier(id) => id.name.as_str().to_owned(),
                     TSEnumMemberName::String(s) => js_text::lossy(s.value).into_owned(),
                     TSEnumMemberName::ComputedString(s) => js_text::lossy(s.value).into_owned(),
                     TSEnumMemberName::ComputedTemplateString(_) => return None,
                 };
-
-                let value = match &member.initializer {
-                    Some(init) => {
-                        self.expression_to_enum_value(init).unwrap_or_else(|| EnumValue::String(name.clone()))
-                    }
-                    None => EnumValue::String(name.clone()),
-                };
-
+                let value = value.clone().unwrap_or_else(|| EnumValue::String(name.clone()));
                 let description = self.find_jsdoc(member.span.start);
                 Some(EnumEntry { name, value, description })
             })
             .collect();
 
+        self.record_enum_union(&key, &values);
         if !entries.is_empty() {
-            self.data.enums.insert(key, entries);
+            self.data.enum_declarations.insert(key.clone());
+            self.data.enums.entry(key).or_default().extend(entries);
         }
     }
 
@@ -491,6 +507,24 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         }
         walk::walk_function(self, func, flags);
         self.props_params.pop();
+    }
+
+    fn visit_block_statement(&mut self, block: &BlockStatement<'a>) {
+        self.block_depth += 1;
+        walk::walk_block_statement(self, block);
+        self.block_depth -= 1;
+    }
+
+    fn visit_static_block(&mut self, block: &StaticBlock<'a>) {
+        self.block_depth += 1;
+        walk::walk_static_block(self, block);
+        self.block_depth -= 1;
+    }
+
+    fn visit_switch_statement(&mut self, switch: &SwitchStatement<'a>) {
+        self.block_depth += 1;
+        walk::walk_switch_statement(self, switch);
+        self.block_depth -= 1;
     }
 
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {

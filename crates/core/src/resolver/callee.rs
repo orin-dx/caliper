@@ -19,17 +19,13 @@ use super::substitute::{build_substitution, substitute_alias, substitute_type};
 use super::ResolutionContext;
 
 /// React types whose first type argument is a component's props.
-const COMPONENT_TYPES: &[&str] = &[
-    "NamedExoticComponent",
-    "ForwardRefExoticComponent",
-    "ExoticComponent",
-    "FC",
-    "FunctionComponent",
-    "VFC",
-    "VoidFunctionComponent",
-    "ComponentType",
-    "JSXElementConstructor",
-];
+const COMPONENT_TYPES: &[&str] =
+    &["NamedExoticComponent", "ForwardRefExoticComponent", "ExoticComponent", "JSXElementConstructor"];
+
+/// Whether `name` (without any `React.` prefix) is a React type whose first type argument is a component's props.
+fn is_component_type(name: &str) -> bool {
+    COMPONENT_TYPES.contains(&name) || crate::react_types::FC_FAMILY_TYPE_NAMES.contains(&name)
+}
 
 /// Aliases followed from the result type to the component type; the bound only guards against a cycle.
 const MAX_DEPTH: u8 = 8;
@@ -54,8 +50,10 @@ pub(super) fn result_chain(
     let callee = mapping.wrapper_callee.as_ref()?;
     let (props, props_file, type_params, factory_params) = result_props(callee, &mapping.file_path, ctx, 0)?;
     let mut attempt = state.branch();
-    attempt.add_type_params(type_params.iter());
-    attempt.add_type_params(factory_params.iter());
+    // A declaration local to the factory names its type parameters wherever nothing substitutes them, so they stay in
+    // scope under every declaration read. The call's arguments and the result's own signature parameters cannot
+    // collide with them: `result_props` marks the first as declarations and the second as placeholders.
+    attempt.closure = TypeScope::new(factory_params.iter());
     let mut chain = resolve_base_as_chain(&props, &props_file, mapping, ctx, &mut attempt, 0);
     if chain
         .composes
@@ -126,17 +124,49 @@ fn result_props(
         .unwrap_or_else(|| (caller_file.to_owned(), callee.name.to_string()));
     super::deps::record(&file);
     let function = ctx.global.function_results.get(&format!("{file}:{name}"))?;
-    let bindings = build_substitution(&function.type_params, &callee.type_args, caller_file, &mut ignored);
-    if let Some(inner) = &function.returned_call {
-        let inner = WrapperCallee {
-            name: inner.name.clone(),
-            type_args: inner.type_args.iter().map(|arg| substitute_type(arg, &bindings)).collect(),
-        };
-        return result_props(&inner, &file, ctx, depth + 1);
+    let mut also_declared: Vec<TypeName> = Vec::new();
+    loop {
+        // The arguments are written at the call, where the function's parameters and its result's signature parameters
+        // are not in scope: an argument named like one is a declaration.
+        let type_args: Vec<CollectedType> = callee
+            .type_args
+            .iter()
+            .map(|arg| {
+                arg.rename_named(&|name| {
+                    (function.type_params.iter().chain(&also_declared).any(|param| param == name))
+                        .then(|| mark_declaration(name))
+                })
+            })
+            .collect();
+        let mut bindings = build_substitution(&function.type_params, &type_args, caller_file, &mut ignored);
+        // The parameters the call leaves unfilled stand for themselves in the result, whatever module types are named
+        // alike.
+        super::substitute::fill_placeholders(&mut bindings, &function.type_params);
+        if let Some(inner) = &function.returned_call {
+            let inner = WrapperCallee {
+                name: inner.name.clone(),
+                type_args: inner.type_args.iter().map(|arg| substitute_type(arg, &bindings)).collect(),
+            };
+            return result_props(&inner, &file, ctx, depth + 1);
+        }
+        let result = substitute_type(&function.result, &bindings);
+        let (props, props_file, type_params) = component_props_type(&result, &file, ctx, 0)?;
+        // The result's call signature binds type parameters of its own (`<C>(props: …)`), placeholders in the props.
+        // An argument that names one is read again with it marked as a declaration, so the substitution leaves it be.
+        let named_by_arguments: Vec<TypeName> =
+            callee.type_args.iter().flat_map(CollectedType::referenced_names).collect();
+        let clashing: Vec<TypeName> = type_params
+            .iter()
+            .filter(|param| named_by_arguments.contains(param) && !also_declared.contains(param))
+            .cloned()
+            .collect();
+        if !clashing.is_empty() {
+            also_declared.extend(clashing);
+            continue;
+        }
+        let props = substitute_type(&props, &super::substitute::unfilled_substitution(&type_params));
+        return Some((props, props_file, type_params, function.type_params.clone()));
     }
-    let result = substitute_type(&function.result, &bindings);
-    let (props, props_file, type_params) = component_props_type(&result, &file, ctx, 0)?;
-    Some((props, props_file, type_params, function.type_params.clone()))
 }
 
 /// The props of a member of a value declared with a mapped type: `Primitive.div` for `declare const Primitive:
@@ -287,7 +317,7 @@ fn component_props_type(
             Some((params.first()?.clone(), file.to_owned(), type_params.clone()))
         }
         CollectedType::Named { name, args } => {
-            if COMPONENT_TYPES.contains(&name.strip_prefix("React.").unwrap_or(name)) {
+            if is_component_type(name.strip_prefix("React.").unwrap_or(name)) {
                 return Some((args.first()?.clone(), file.to_owned(), Vec::new()));
             }
             // `MemoExoticComponent<typeof Impl>` wraps a component, whose props are the component's.
@@ -307,7 +337,7 @@ fn component_props_type(
                     let (ExtendsRef::SameFile { name: base, type_args }
                     | ExtendsRef::Imported { local_name: base, type_args, .. }
                     | ExtendsRef::Builtin { name: base, type_args, .. }) = extends;
-                    if !COMPONENT_TYPES.contains(&base.strip_prefix("React.").unwrap_or(base)) {
+                    if !is_component_type(base.strip_prefix("React.").unwrap_or(base)) {
                         return None;
                     }
                     let props = type_args.first()?;

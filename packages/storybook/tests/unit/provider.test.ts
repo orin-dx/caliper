@@ -118,6 +118,25 @@ describe('createDocgenProvider', () => {
     expect(Object.keys(payload?.argTypes ?? {})).toEqual(['value'])
   })
 
+  it('documents a subcomponent that is a member of a named import', async () => {
+    const fake = binding()
+    fake.output.components!.Select = entry('Select', join(components, 'Select.tsx'))
+    fake.docs.Select = rdtDoc('Select', ['children'])
+    fake.output.components!['Select.Option'] = entry('Select.Option', join(components, 'Select.tsx'))
+    fake.docs['Select.Option'] = rdtDoc('Select.Option', ['value'])
+    const { payload, nextCalls } = await request(fake, story('Picker'))
+    expect(nextCalls).toBe(0)
+    expect(Object.keys(payload?.subcomponents?.Option?.argTypes ?? {})).toEqual(['value'])
+    expect(payload?.subcomponents?.Option?.error).toBeUndefined()
+  })
+
+  it('documents a subcomponent read through a local binding of the story file', async () => {
+    const { payload, nextCalls } = await request(binding(), story('Parts'))
+    expect(nextCalls).toBe(0)
+    expect(payload?.subcomponents?.ListItem?.error).toBeUndefined()
+    expect(Object.keys(payload?.subcomponents?.ListItem?.argTypes ?? {})).toEqual(['bullet'])
+  })
+
   it('asks the next provider when the session has no such component', async () => {
     const fake = binding()
     delete fake.output.components!.Card
@@ -179,6 +198,60 @@ describe('createDocgenProvider', () => {
       collapseInheritedProps: 'all',
     })
     expect(seen[1]).toMatchObject({ loadDependencies: false, collapseInheritedProps: 'all', htmlAttributes: 'full' })
+  })
+
+  it('warns once, at a level Storybook shows, when the session cannot start, and starts again on the next request', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const fake = binding()
+    const create = fake.createSession
+    fake.createSession = () => {
+      throw new Error('no binding for this platform')
+    }
+    const provider = createDocgenProvider({}, fake)(async () => NEXT)
+
+    expect(await provider({ entry: story('Button') })).toBe(NEXT)
+    expect(await provider({ entry: story('Button') })).toBe(NEXT)
+    expect(warn.mock.calls).toEqual([
+      ["[caliper-docgen] could not start: no binding for this platform; Storybook's own docgen answers instead"],
+    ])
+
+    fake.createSession = create
+    expect((await provider({ entry: story('Button') }))?.argTypes).toEqual({ label: labelArgType })
+    warn.mockRestore()
+  })
+
+  it('words a refresh failure of a running session as one, and reports it again after a refresh succeeds', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const fake = binding()
+    const ensureFresh = fake.ensureFresh
+    const provider = createDocgenProvider({}, fake)(async () => NEXT)
+    expect((await provider({ entry: story('Button') }))?.argTypes).toEqual({ label: labelArgType })
+
+    fake.ensureFresh = async () => {
+      throw new Error('disk gone')
+    }
+    expect(await provider({ entry: story('Button') })).toBe(NEXT)
+    expect(await provider({ entry: story('Button') })).toBe(NEXT)
+    fake.ensureFresh = ensureFresh
+    expect((await provider({ entry: story('Button') }))?.argTypes).toEqual({ label: labelArgType })
+    fake.ensureFresh = async () => {
+      throw new Error('disk gone again')
+    }
+    expect(await provider({ entry: story('Button') })).toBe(NEXT)
+    expect(warn.mock.calls).toEqual([
+      ["[caliper-docgen] could not refresh: disk gone; Storybook's own docgen answers instead"],
+      ["[caliper-docgen] could not refresh: disk gone again; Storybook's own docgen answers instead"],
+    ])
+    warn.mockRestore()
+  })
+
+  it('fails at startup for a fallback or semanticTypes that is not a choice', () => {
+    expect(() => createDocgenProvider({ fallback: 'Degraded' as never }, binding())).toThrow(
+      "[caliper-docgen] fallback is 'Degraded', expected 'degraded' or 'never'",
+    )
+    expect(() => createDocgenProvider({ semanticTypes: 'on_demand' as never }, binding())).toThrow(
+      "[caliper-docgen] semanticTypes is 'on_demand', expected 'off' or 'on-demand'",
+    )
   })
 
   it('passes a docs-only entry straight on without starting a session', async () => {
