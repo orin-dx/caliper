@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01F3gfbMwq3kUJ62z8Z42M8V",
+  "agent_id": "ace97a386dd3751b1",
+  "subagent_type": "general-purpose",
+  "task_description": "Root-cause the intermittent worker-thread test",
+  "token_usage": {
+    "input_tokens": 82,
+    "cache_creation_tokens": 79177,
+    "cache_read_tokens": 3222326,
+    "output_tokens": 15683,
+    "api_call_count": 41
+  },
+  "started_at": "2026-11-05T18:46:07.634291-08:00",
+  "completed_at": "2026-11-05T19:10:33.663148-08:00"
+}
