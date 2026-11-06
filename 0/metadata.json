@@ -1,0 +1,100 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6RT0BJ521ZQVJESC0YX0TGC",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-06T16:10:40.751091Z",
+  "branch": "m348",
+  "checkpoints_count": 1,
+  "save_step_count": 42,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "6b9a292aa777",
+  "checkpoint_transcript_start": 8775,
+  "transcript_lines_at_start": 8775,
+  "compact_transcript_start": 750,
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 12238,
+    "cache_read_tokens": 2047348,
+    "output_tokens": 2304,
+    "api_call_count": 3,
+    "subagent_tokens": {
+      "input_tokens": 28,
+      "cache_creation_tokens": 17063,
+      "cache_read_tokens": 2971965,
+      "output_tokens": 5605,
+      "api_call_count": 14
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 199
+  },
+  "summary": {
+    "intent": "Coordinate subagent fixes for two PRs (#347 fix/detect-and-explain-skips and #343 fix/component-type-lists), merging origin/main, resolving review findings, and getting CI and Entire Gates to pass.",
+    "outcome": "Both PRs were merged with main and fixed with pushes, but CI and Entire Gates were still pending. Verification on GitHub showed #347 had two new medium findings despite the worker reporting 0 open, so the worker was sent back to fix the structure; #343 is waiting on queued CI.",
+    "learnings": {
+      "repo": [
+        "Entire Gates review runs after pushes and can add findings after the count briefly reads 0; counts are only reliable once Entire Gates finishes (`entire trail finding list caliper/<id>`).",
+        "Interface collection must be keyed by declaration scope, not bare name: function-local `interface Props` merged into a module-level one leaked a required prop into the exported component.",
+        "React/Preact module checks are consolidated in `react_types::is_react_module` and `is_preact_module`; the resolver also accepts `preact/compat`.",
+        "Element-factory names are consolidated in a single `ELEMENT_FACTORIES` list with `is_element_factory_name`/`is_element_factory_callee`, used by evidence.rs, uses.rs and wrapper.rs.",
+        "`h` counts as render evidence only when imported from Preact (bare or on Preact's namespace), not member calls like `codec.h(...)` or local functions named `h`.",
+        "Pre-commit verification uses `just lint doc-check machete typos`, and clean-room testing uses a detached git worktree with `pnpm install --frozen-lockfile --offline` and `cargo nextest run --workspace --no-fail-fast`.",
+        "Repo rules referenced by the worker: fix siblings via rg (rule 2), declared vs required deps (rule 3), banned patterns like `as unknown as`, `.ok()?`, `let _ =`, `|| true` and empty catch (rule 4), and a failing-before-fix exact-content test (rule 5)."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/extractor/mod.rs",
+          "finding": "`imports_a_value` was added so type-only specifiers from react don't make a TS file count as having components; call sites around lines 644–682 use the shared react-module predicate."
+        },
+        {
+          "path": "crates/core/src/extractor/visit.rs",
+          "line": 18,
+          "end_line": 32,
+          "finding": "Re-exports `is_type_only`; checked as a sibling and not affected by the import-kind fix."
+        },
+        {
+          "path": "pipeline/revision/lazy.rs",
+          "line": 199,
+          "finding": "Demand filter on exact \"react\" specifier; judged out of scope and unaffected by the preact/compat change."
+        }
+      ],
+      "workflow": [
+        "Subagent self-reports of 'open findings 0' can be stale or premature; independently verify CI and review state on GitHub before accepting a hand-back.",
+        "When a review keeps finding variants of the same bug, fix the structure (define the scope model, key by it, enumerate scope × order × count cases against TypeScript's checker, and audit other name-keyed collections) rather than patching each case.",
+        "A clean-room worktree run is a good check against ambient-state test failures in a developer worktree."
+      ]
+    },
+    "friction": [
+      "Interface-merge fix for #347 took three review rounds (order bug, then regression) and still left new medium findings.",
+      "Snapshot tests failed once in the worker's own worktree on #347 due to ambient state, though the clean room passed.",
+      "CI was slow or queued: all 16 non-Entire checks on #343 were still QUEUED and Entire Gates was IN_PROGRESS, so final results could not be confirmed.",
+      "One test was flagged 'leaky' in the #347 clean-room run and was not investigated."
+    ],
+    "open_items": [
+      "Wait for CI and Entire Gates on #343 and re-check its findings once done.",
+      "The #347 worker must resolve the two new medium findings with a scope-keyed interface registry and exhaustive scope × order × count tests.",
+      "Audit other collections keyed by bare name for the same scope flaw.",
+      "Add a resolver-level behavioral test for a `preact/compat` type import (only the predicate is unit-tested).",
+      "Investigate the 'leaky' test flagged in the #347 clean-room run.",
+      "Another worker on #367/#348/#349 is still running.",
+      "No changesets were added to either PR."
+    ]
+  }
+}
