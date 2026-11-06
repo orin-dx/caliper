@@ -199,11 +199,7 @@ pub(super) fn resolve_props_chain(
         {
             let members = selected
                 .into_iter()
-                .map(|(inner, file)| CollectedType::AtFile {
-                    file,
-                    scope: TypeScope::default(),
-                    inner: Box::new(inner),
-                })
+                .map(|(inner, file)| CollectedType::AtFile { file, scope: None, inner: Box::new(inner) })
                 .collect();
             return resolve_type_alias_chain(
                 &CollectedTypeAlias::Union { members, file_path: consuming_file.to_owned() },
@@ -273,7 +269,7 @@ pub(super) fn resolve_props_chain(
                 (&canonical_file, &matched_key),
                 type_args,
                 consuming_file,
-                &args_scope,
+                Some(&args_scope),
                 ctx,
                 &mut state.diagnostics,
             );
@@ -545,7 +541,7 @@ fn resolve_interface_members(
                 defaults,
                 type_args,
                 consuming_file,
-                args_scope,
+                Some(args_scope),
                 &iface.file_path,
                 &mut state.diagnostics,
             ))

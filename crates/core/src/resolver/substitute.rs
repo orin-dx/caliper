@@ -45,7 +45,7 @@ pub(super) fn build_substitution<'a>(
     origin_file: &Utf8Path,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Substitution<'a> {
-    bind_args(params, None, args, origin_file, &TypeScope::default(), origin_file, diagnostics)
+    bind_args(params, None, args, origin_file, None, origin_file, diagnostics)
 }
 
 /// The scope that `args`, written where `state` is, are read under wherever a declaration's body ends up using them:
@@ -70,10 +70,10 @@ pub(super) fn pin_scope(state: &mut ResolveState, args: &[CollectedType]) -> Typ
 /// `ty` pinned to the `file` it was written in and the `scope` of type parameters it was written under. A type that is
 /// already pinned names its own, and wrapping it again would make a recursive alias's arguments
 /// (`CssVars<V> = ... | CssVars<V>[]`) a new type at every level, so the cycle through it would never be found.
-fn pinned_to(file: &Utf8Path, scope: &TypeScope, ty: CollectedType) -> CollectedType {
+fn pinned_to(file: &Utf8Path, scope: Option<&TypeScope>, ty: CollectedType) -> CollectedType {
     match ty {
         CollectedType::AtFile { .. } => ty,
-        other => CollectedType::AtFile { file: file.to_owned(), scope: scope.clone(), inner: Box::new(other) },
+        other => CollectedType::AtFile { file: file.to_owned(), scope: scope.cloned(), inner: Box::new(other) },
     }
 }
 
@@ -87,7 +87,7 @@ pub(super) fn bind_args<'a>(
     defaults: Option<&[Option<CollectedType>]>,
     args: &[CollectedType],
     args_file: &Utf8Path,
-    args_scope: &TypeScope,
+    args_scope: Option<&TypeScope>,
     declared_file: &Utf8Path,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Substitution<'a> {
@@ -100,7 +100,7 @@ pub(super) fn bind_args<'a>(
             // A default is written in the declaration, under the parameters before it that stay placeholders.
             let declared_scope = TypeScope::new(params.iter().filter(|p| unfilled.contains(&p.as_str())));
             let bound = substitute_type(default, &subst);
-            subst.insert(param.as_str(), pinned_to(declared_file, &declared_scope, bound));
+            subst.insert(param.as_str(), pinned_to(declared_file, Some(&declared_scope), bound));
         } else {
             unfilled.push(param.as_str());
         }
@@ -147,7 +147,7 @@ pub(super) fn apply_generic_args(
     declared_at: (&Utf8Path, &str),
     type_args: &[CollectedType],
     consuming_file: &Utf8Path,
-    args_scope: &TypeScope,
+    args_scope: Option<&TypeScope>,
     ctx: &ResolutionContext,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CollectedTypeAlias {
@@ -175,7 +175,7 @@ pub(super) fn generic_alias_with_structured_args(
     name: &str,
     args: &[CollectedType],
     consuming_file: &Utf8Path,
-    args_scope: &TypeScope,
+    args_scope: Option<&TypeScope>,
     ctx: &ResolutionContext,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CollectedTypeAlias> {
@@ -406,7 +406,7 @@ pub(super) fn synthesize_utility_alias(
                 CollectedType::String | CollectedType::Number | CollectedType::Symbol => CollectedType::Object(vec![]),
                 keys => CollectedType::Mapped {
                     // Not a valid identifier, so no type the user declares can be shadowed by the key variable.
-                    param: "Record key".into(),
+                    param: crate::types::MADE_UP_KEY_VARIABLE.into(),
                     key_type: Box::new(keys.clone()),
                     value_type: Box::new(args[1].clone()),
                     optional: None,

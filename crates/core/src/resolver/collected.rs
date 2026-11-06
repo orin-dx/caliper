@@ -120,9 +120,11 @@ pub fn resolve_collected_type(
         // `inner` was actually written (see the `CollectedType::AtFile` doc
         // comment) and continue resolving from there.
         CollectedType::AtFile { file, scope, inner } => {
-            let writer = state.enter_scope(scope.clone());
+            let writer = scope.as_ref().map(|scope| state.enter_scope(scope.clone()));
             let resolved = resolve_collected_type(inner, file, ctx, state, depth);
-            state.leave_scope(writer);
+            if let Some(writer) = writer {
+                state.leave_scope(writer);
+            }
             resolved
         }
 
