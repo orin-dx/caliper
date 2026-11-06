@@ -64,7 +64,7 @@ Two costs affect all three equally, plus one extra for us:
 | `radix/button.d.ts` |                19.82 ms |
 | `mui/Button.d.ts`   | 21.33 ms [20.90, 21.78] |
 
-These all extract a small single-fixture-library directory in isolation with **no DTS cache warm** (`cache_dir: None` in the bench options) — the ~20ms floor here is dominated by re-parsing `@types/react`'s ambient globals from scratch every single call, not by the fixture file itself. This is why the 21-library whole-corpus number above (50ms) isn't 21×20ms: the pipeline parses `@types/react` once per process, not once per library.
+These all extract a small single-fixture-library directory in isolation with the default options, which keep the on-disk cache on; the ~20ms floor here is the per-call cost of parsing `@types/react`'s ambient globals and loading that cache, not the fixture file itself. This is why the 21-library whole-corpus number above (50ms) isn't 21×20ms: the pipeline parses `@types/react` once per process, not once per library.
 
 ### Incremental single-file update — the number RDT and react-docgen cannot produce at all
 
@@ -99,9 +99,9 @@ The single percentage can't distinguish "we're missing things" from "the compara
 
 ### Agreement rate vs. react-docgen-typescript
 
-`react-docgen-typescript` always fully expands the real `HTMLAttributes`/`AriaAttributes`/`<Element>HTMLAttributes` interface chain (~250-300 attrs per element) — it has a real type checker to walk that chain. This tool's _default_ is `HtmlAttributeMode::Curated` (~15-20 hand-picked common attrs).
+`react-docgen-typescript` always fully expands the real `HTMLAttributes`/`AriaAttributes`/`<Element>HTMLAttributes` interface chain (~250-300 attrs per element) — it has a real type checker to walk that chain. This tool's _default_ is `HtmlAttributeMode::Full`, which also expands the chain; `Curated` (~15-20 hand-picked common attrs) is opt-in.
 
-Comparing curated-mode output against RDT's always-full output would manufacture a huge fake "missing props" number — a default-mode mismatch, not a quality gap. So this comparison runs with `--html-attributes full` instead (this tool structurally resolving the same interface chain RDT does), the fair apples-to-apples setting.
+The comparison below ran with `--html-attributes full` (this tool structurally resolving the same interface chain RDT does), the fair apples-to-apples setting; curated output would manufacture a huge fake "missing props" number.
 
 | Metric                                             |     Value |
 | -------------------------------------------------- | --------: |
@@ -130,7 +130,7 @@ That 16.8% needs immediate context: **it is not evenly distributed, and the miss
 | `ark-ui/Select/SelectRoot` | 36 | 314 | same generic-substitution pattern |
 | `headlessui/Listbox/*` (3 components) | 5-14 | 234-246 | conditional type (`PropsOf<TTag> = TTag extends ... ? ... : never`) nested inside generic substitution |
 
-**Type-diff taxonomy** (1,953 real mismatches, classified by observable shape):
+**Type-diff taxonomy** (classified by observable shape; the harness is gone, so the buckets below are the ones it recorded and are not re-derived here, so their counts do not necessarily add up to the totals in the table above):
 
 | Bucket | Count | What it means |
 | --- | --: | --- |
@@ -156,9 +156,9 @@ That 16.8% needs immediate context: **it is not evenly distributed, and the miss
 
 The single most important number in this table is **9 of 20 (45%) returning zero props.** `react-docgen` is a Babel-era tool built primarily for `PropTypes`-based components. Its native TypeScript support is real but shallow — it frequently can't extract anything at all from an `interface`-typed function component, especially when the props type comes from a separate named interface rather than an inline object literal.
 
-A flat per-prop agreement rate is a weak signal when the comparator has no opinion on 42% of the corpus — the coverage claim in the next section is the more honest framing.
+A flat per-prop agreement rate is a weak signal when the comparator has no opinion on 45% of the corpus — the coverage claim in the next section is the more honest framing.
 
-**Type-diff taxonomy** (61 real mismatches):
+**Type-diff taxonomy** (classified by observable shape; the harness is gone, so the buckets below are the ones it recorded and are not re-derived here, so their counts do not necessarily add up to the totals in the table above):
 
 | Bucket                                                             | Count |
 | ------------------------------------------------------------------ | ----: |
@@ -213,3 +213,10 @@ python3 scripts/weekly.py --bin target/release/caliper-docgen --oracle
 ```
 
 The fixture-library tables above (cold extraction of all three tools on 21 libraries, and the per-prop agreement taxonomy) came from a fixtures harness that no longer exists. Re-measure with `scripts/weekly.py`, which runs the same three tools on five pinned corpora and writes the numbers to a job summary instead of regenerated `baselines/` and `analysis.json` files.
+
+## Not measured
+
+- `ensureFresh` after a real edit, end to end: `WatchSession` re-resolving a changed file is timed above (1.7 to 2.1 ms) and `docs/performance.md` reports `ensureFresh` at 3 to 5 ms, but no benchmark times the NAPI `ensureFresh` call path from an edit to its result.
+- The Vite HMR path: no number covers an edit reaching the browser through the plugin.
+- `check`, `inspect` and `watch`: the numbers above are `extract` only.
+- The cold first run of RDT and react-docgen at whole-library scale: `docs/measurement.md` records them as a single run each (only Caliper's time is a median of five), so their numbers are first runs but carry no spread. Caliper's cold extraction is timed per fixture above.

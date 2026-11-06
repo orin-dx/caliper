@@ -201,6 +201,7 @@ pub(super) fn substitute_type(ct: &CollectedType, subst: &Substitution) -> Colle
                     description: f.description.clone(),
                     readonly: f.readonly,
                     index_key: f.index_key.as_deref().map(|key| Box::new(substitute_type(key, subst))),
+                    tags: f.tags.clone(),
                 })
                 .collect(),
         ),
@@ -358,6 +359,7 @@ pub(super) fn synthesize_utility_alias(
                 description: String::new(),
                 readonly: false,
                 index_key: None,
+                tags: Default::default(),
             }]);
             Some(match args.first() {
                 Some(props) => CollectedTypeAlias::Intersection {
