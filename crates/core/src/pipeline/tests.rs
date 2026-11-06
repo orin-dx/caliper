@@ -4075,6 +4075,33 @@ fn an_alias_parameter_shadows_an_outer_alias_only_inside_that_alias() {
 }
 
 #[test]
+fn a_destructured_default_is_recorded_under_the_prop_not_the_local_name() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "export function Box({ 'aria-label': label = 'x' }: { 'aria-label'?: string }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    let default = props["aria-label"].default_value.as_ref().map(|d| (d.value.as_str(), d.computed));
+    assert_eq!(default, Some(("'x'", false)));
+}
+
+#[test]
+fn negative_and_unary_literal_defaults_are_not_computed() {
+    let output = extract_one(&[(
+        "Box.tsx",
+        "export function Box({ a = -1, b = +2, c = !0, d = !1 }: { a?: number; b?: number; c?: boolean; d?: boolean }) { return null; }\n",
+    )]);
+
+    let props = &output.components["Box"].props;
+    let default = |name: &str| props[name].default_value.as_ref().map(|d| (d.value.clone(), d.computed));
+    assert_eq!(default("a"), Some(("-1".to_owned(), false)));
+    assert_eq!(default("b"), Some(("2".to_owned(), false)));
+    assert_eq!(default("c"), Some(("true".to_owned(), false)));
+    assert_eq!(default("d"), Some(("false".to_owned(), false)));
+}
+
+#[test]
 fn a_plain_block_comment_is_not_a_description() {
     let output = extract_one(&[(
         "Box.tsx",

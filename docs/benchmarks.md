@@ -64,7 +64,7 @@ Two costs affect all three equally, plus one extra for us:
 | `radix/button.d.ts` |                19.82 ms |
 | `mui/Button.d.ts`   | 21.33 ms [20.90, 21.78] |
 
-These all extract a small single-fixture-library directory in isolation with **no DTS cache warm** (`cache_dir: None` in the bench options) — the ~20ms floor here is dominated by re-parsing `@types/react`'s ambient globals from scratch every single call, not by the fixture file itself. This is why the 21-library whole-corpus number above (50ms) isn't 21×20ms: the pipeline parses `@types/react` once per process, not once per library.
+These all extract a small single-fixture-library directory in isolation with the default options, which keep the on-disk cache on; the ~20ms floor here is the per-call cost of parsing `@types/react`'s ambient globals and loading that cache, not the fixture file itself. This is why the 21-library whole-corpus number above (50ms) isn't 21×20ms: the pipeline parses `@types/react` once per process, not once per library.
 
 ### Incremental single-file update — the number RDT and react-docgen cannot produce at all
 
