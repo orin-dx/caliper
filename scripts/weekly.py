@@ -674,7 +674,7 @@ def main():
     issue_notes = notes + ([BASELINE_FAILED] if args.baseline_failed else [])
     print(table)
     for path, content in ((args.out, json.dumps(record, indent=2) + '\n'), (args.markdown, table),
-                          (args.issue, 'The weekly record got worse:\n\n' + '\n'.join(f'- {n}' for n in issue_notes) + '\n'
+                          (args.issue, 'The weekly record needs attention:\n\n' + '\n'.join(f'- {n}' for n in issue_notes) + '\n'
                            if issue_notes else None)):
         if path and content:
             with open(path, 'w') as f:
