@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01RdkKgbGw4nYjmjGarZMM1k",
+  "agent_id": "a7ddee2e34675d0df",
+  "subagent_type": "general-purpose",
+  "task_description": "Resolve conflicts on PR 362",
+  "token_usage": {
+    "input_tokens": 60,
+    "cache_creation_tokens": 64801,
+    "cache_read_tokens": 1995465,
+    "output_tokens": 5952,
+    "api_call_count": 30
+  },
+  "started_at": "2026-11-05T17:51:39.024622-08:00",
+  "completed_at": "2026-11-05T17:55:19.555469-08:00"
+}
