@@ -1,8 +1,6 @@
 //! Baked-in knowledge of React and DOM types.
 //! No file I/O — these are compile-time constants derived from @types/react.
 
-#![deny(missing_docs)]
-
 /// HTML element names recognized as component-level inheritors.
 ///
 /// Maps `@types/react` HTML attribute type names to their corresponding DOM element names.

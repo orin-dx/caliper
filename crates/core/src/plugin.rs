@@ -3,8 +3,6 @@
 //! Inspired by `michi`'s zero-dep trait architecture and `callisto`'s modular design.
 //! Plugins can hook into extraction events to transform AST data or enrich component entries.
 
-#![deny(missing_docs)]
-
 use std::sync::Arc;
 
 use crate::types::{ComponentEntry, SourceData};

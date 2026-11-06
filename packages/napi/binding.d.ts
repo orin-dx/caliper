@@ -137,7 +137,8 @@ export declare function resolutionConfigFiles(sessionId: number): Array<string>
  * What a host needs to answer for one component: its documentation as `sessionDocgenInfo` returns it, and its own
  * diagnostics, each with `affects` set to the key. `{ key: { docgenInfo, diagnostics } }`; a key the session has no
  * component under is left out. A lazy session resolves each requested component now (in parallel), so a host learns
- * whether a component's props may be incomplete from the same call that returns them.
+ * whether a component's props may be incomplete from the same call that returns them. Errors for an unknown or closed
+ * session.
  */
 export declare function sessionComponentAnswers(sessionId: number, keys: Array<string>): string
 
@@ -152,14 +153,14 @@ export declare function sessionComponentToon(sessionId: number, key: string): st
 
 /**
  * Every component key `sessionDocgenInfo` answers, sorted. A lazy session resolves only imported-member aliases to
- * decide; the rest come from parsing alone. Empty for an unknown or uninitialized session.
+ * decide; the rest come from parsing alone. Empty for an uninitialized session; errors for an unknown or closed one.
  */
 export declare function sessionComponentKeys(sessionId: number): Array<string>
 
 /**
  * The session's components with these keys as react-docgen-typescript documents them (`__docgenInfo`, which
  * Storybook converts to argTypes), as a JSON object keyed by component key. A key the session doesn't have is left
- * out; so is every key before the session is initialized.
+ * out; so is every key before the session is initialized. Errors for an unknown or closed session.
  */
 export declare function sessionDocgenInfo(sessionId: number, keys: Array<string>): string
 

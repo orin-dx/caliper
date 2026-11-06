@@ -63,7 +63,11 @@ jobs:
           selected_pending=false
           if [[ -z "$release_source_sha" ]]; then
             # Oldest unfinished release first: a failed release is finished before a newer one starts.
-            release_source_sha=$(callisto --format json release pending --from "$RELEASE_PENDING_FROM" | jq -r '.pending[0].source // empty')
+            pending_json=$(callisto --format json release pending --from "$RELEASE_PENDING_FROM")
+            # A renamed or missing `pending` key would read as "nothing unfinished" and skip a stuck release.
+            jq -e '(.pending | type) == "array"' <<<"$pending_json" > /dev/null \
+              || { echo "::error::'release pending' output has no .pending array"; exit 1; }
+            release_source_sha=$(jq -r '.pending[0].source // empty' <<<"$pending_json")
             if [[ -n "$release_source_sha" ]]; then
               selected_pending=true
             elif [[ "$EVENT_NAME" == push ]]; then
@@ -193,7 +197,11 @@ jobs:
         run: |
           set -euo pipefail
           # Own statement: set -e cannot see a substitution failing inside an echo argument.
-          has_artifacts=$(jq '.artifactSlots | length > 0' "${RUNNER_TEMP}/release-intent/release-intent.json")
+          intent="${RUNNER_TEMP}/release-intent/release-intent.json"
+          # A renamed or missing key would read as "no slots" and publish a release without binaries.
+          jq -e 'has("artifactSlots") and (.artifactSlots | type) == "array"' "$intent" > /dev/null \
+            || { echo "::error::release intent has no .artifactSlots array"; exit 1; }
+          has_artifacts=$(jq '.artifactSlots | length > 0' "$intent")
           case "$has_artifacts" in
             true|false) ;;
             *) echo "::error::artifact slot probe returned '$has_artifacts'"; exit 1 ;;
@@ -224,8 +232,8 @@ jobs:
         include:
           - { host: macos-latest, target: aarch64-apple-darwin, platform: darwin-arm64, bin: caliper-docgen, asset: caliper-docgen-aarch64-apple-darwin.tar.gz }
           - { host: macos-latest, target: x86_64-apple-darwin, platform: darwin-x64, bin: caliper-docgen, asset: caliper-docgen-x86_64-apple-darwin.tar.gz }
-          - { host: ubuntu-latest, target: x86_64-unknown-linux-gnu, platform: linux-x64-gnu, bin: caliper-docgen, asset: caliper-docgen-x86_64-unknown-linux-gnu.tar.gz }
-          - { host: ubuntu-latest, target: aarch64-unknown-linux-gnu, platform: linux-arm64-gnu, bin: caliper-docgen, asset: caliper-docgen-aarch64-unknown-linux-gnu.tar.gz, zig: true }
+          - { host: ubuntu-latest, target: x86_64-unknown-linux-gnu, platform: linux-x64-gnu, bin: caliper-docgen, asset: caliper-docgen-x86_64-unknown-linux-gnu.tar.gz, zig: true, glibc: '2.28' }
+          - { host: ubuntu-latest, target: aarch64-unknown-linux-gnu, platform: linux-arm64-gnu, bin: caliper-docgen, asset: caliper-docgen-aarch64-unknown-linux-gnu.tar.gz, zig: true, glibc: '2.28' }
           - { host: windows-latest, target: x86_64-pc-windows-msvc, platform: win32-x64-msvc, bin: caliper-docgen.exe, asset: caliper-docgen-x86_64-pc-windows-msvc.tar.gz }
     defaults:
       run:
@@ -251,21 +259,52 @@ jobs:
           version: 0.14.1
           use-cache: false
       - if: matrix.zig
-        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-zigbuild
       - run: pnpm install --frozen-lockfile --filter caliper-docgen-napi
       - name: Build napi addon
+        if: "!matrix.zig"
         working-directory: packages/napi
         env:
           TARGET: ${{ matrix.target }}
-          ZIG: ${{ matrix.zig }}
-        run: pnpm napi build --platform --release --target "$TARGET" ${ZIG:+--cross-compile} --manifest-path ../../crates/binding/Cargo.toml --output-dir .
+        run: pnpm napi build --platform --release --target "$TARGET" --manifest-path ../../crates/binding/Cargo.toml --output-dir .
+      # napi-rs reads a `.<version>` suffix on `--target` as part of the ABI and
+      # names the file `...linux-x64-gnu.2.28.node`, so the glibc floor is set by
+      # cargo-zigbuild directly and the library is placed at napi's own name.
+      - name: Build napi addon (glibc floor)
+        if: matrix.zig
+        env:
+          TARGET: ${{ matrix.target }}
+          PLATFORM: ${{ matrix.platform }}
+          GLIBC: ${{ matrix.glibc }}
+        run: |
+          set -euo pipefail
+          cargo zigbuild --release --locked -p caliper-docgen-napi --target "${TARGET}.${GLIBC}"
+          cp "target/${TARGET}/release/libcaliper_docgen_napi.so" "packages/napi/caliper_docgen_napi.${PLATFORM}.node"
       - name: Build CLI binary
         env:
           TARGET: ${{ matrix.target }}
           ZIG: ${{ matrix.zig }}
-        run: cargo "${ZIG:+zig}build" --release --locked -p caliper-docgen --target "$TARGET"
+          GLIBC: ${{ matrix.glibc }}
+        run: cargo "${ZIG:+zig}build" --release --locked -p caliper-docgen --target "${TARGET}${GLIBC:+.$GLIBC}"
+      # Fail the job if a Linux binary imports a GLIBC_ symbol newer than the floor.
+      - name: Check the glibc floor
+        if: matrix.glibc
+        env:
+          TARGET: ${{ matrix.target }}
+          PLATFORM: ${{ matrix.platform }}
+          GLIBC: ${{ matrix.glibc }}
+        run: |
+          set -euo pipefail
+          for f in "packages/napi/caliper_docgen_napi.${PLATFORM}.node" "target/${TARGET}/release/caliper-docgen"; do
+            newest=$(objdump -T "$f" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -n 1)
+            echo "$f: newest imported symbol version ${newest:-none}"
+            if [ -n "$newest" ] && [ "$(printf '%s\n' "${newest#GLIBC_}" "$GLIBC" | sort -V | tail -n 1)" != "$GLIBC" ]; then
+              echo "::error::$f needs $newest, above the glibc $GLIBC floor"
+              exit 1
+            fi
+          done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: napi-${{ matrix.platform }}
@@ -442,6 +481,19 @@ jobs:
               [[ -f "$dir/$f" ]] || { echo "::error::missing $dir/$f"; exit 1; }
             done
           done
+      - name: Require registry credentials
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          missing=0
+          for name in NPM_TOKEN CARGO_REGISTRY_TOKEN; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::secret $name is empty; set it before the release can publish"
+              missing=1
+            fi
+          done
+          exit "$missing"
       # npm and pnpm both read the user-level .npmrc.
       - name: Authenticate with the npm registry
         env:

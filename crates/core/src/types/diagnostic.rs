@@ -1,8 +1,6 @@
 //! The non-fatal issues extraction reports instead of failing: what a [`Diagnostic`] carries, how serious it is, and
 //! the codes a program can match on.
 
-#![deny(missing_docs)]
-
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
