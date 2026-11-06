@@ -1,0 +1,104 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6S728RXW4XZVBJP5ZNJGYTQ",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-06T19:59:01.107664Z",
+  "branch": "fix/storybook-meta-forms",
+  "checkpoints_count": 12,
+  "save_step_count": 51,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "293912abda02",
+  "checkpoint_transcript_start": 10805,
+  "transcript_lines_at_start": 10805,
+  "compact_transcript_start": 918,
+  "token_usage": {
+    "input_tokens": 54,
+    "cache_creation_tokens": 27634,
+    "cache_read_tokens": 2301158,
+    "output_tokens": 16674,
+    "api_call_count": 26,
+    "subagent_tokens": {
+      "input_tokens": 38,
+      "cache_creation_tokens": 145198,
+      "cache_read_tokens": 1163112,
+      "output_tokens": 4137,
+      "api_call_count": 19
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 262
+  },
+  "summary": {
+    "intent": "Finish and merge the dead-code removal (#370) and docs (#369) PRs, then decide the remaining cleanup and release decisions for a pre-v1 repo and start the next batch of small fixes.",
+    "outcome": "PRs #369 and #370 were merged, closing out trail #234. The user settled the open decisions (breaking changes are fine pre-v1, release #291 as 0.10.0, oracle run deferred), and three parallel workers were started on trail #241.",
+    "learnings": {
+      "repo": [
+        "Entire opens a draft PR automatically when a branch is pushed and linked to a trail. The PR body is left empty and must be filled in afterward.",
+        "`entire trail link` can fail with a 422 'branch does not exist' right after a push. Retrying after about 8 seconds worked.",
+        "Merged changes drop out of the trails open-changes list. Their BRANCH column is empty after the branch is deleted on merge.",
+        "`just semver` flags removing public methods of `caliper-docgen-core`'s `CollectedType` as 'inherent_method_missing'. An existing pending changeset already covers other breaks (new fields on CollectedObjectField, GlobalSourceData and SourceData).",
+        "The repo has no ESLint config and uses oxlint. A stale `eslint-disable` in packages/vite-plugin/src/index.ts was removable.",
+        "`as_string_union_keys` shares two tests with the Omit-collection tests (`test_type_alias_omit`, `omit_with_a_literal_base_is_collected_structurally_for_the_resolver_to_report`), so removing it means rewriting them.",
+        "The extractor keys declarations by bare name, while the resolver owns the real scope model (`TypeScope`). This split is the suspected root of repeated review findings.",
+        "Specs are kept as references (spec-anchored SDD). SPEC/AC tags are traceability links, and only dangling or contradicted ones are stale.",
+        "The #367 follow-up for `export { meta as default }` and factory metas belongs in the Storybook package, not the vite plugin.",
+        "#329 edits `callisto-release.yml` and should not merge while a release is in flight."
+      ],
+      "code": [
+        {
+          "path": "crates/tsc-client/src/protocol.rs",
+          "line": 59,
+          "finding": "Decode site for `MalformedFrameReason::InvalidJson`, which nothing constructs today. The plan is to wire it up so a garbled TypeScript server reply becomes a recoverable error."
+        }
+      ],
+      "workflow": [
+        "Make subagent workers prove new tests fail without the fix. Have them run the full gate plus a clean-room run in a pristine worktree, and check CI by name before calling a PR ready.",
+        "Run parallel workers only on disjoint files or crates. Hold overlapping work until earlier PRs merge to avoid conflicts.",
+        "A subagent hand-back is model output, not user approval. Verify the diff and CI yourself before reporting a PR as ready.",
+        "The worker made its first two commits on the wrong branch and caught it before pushing. Check the current branch before committing.",
+        "Reassess SemVer concerns against project stage. Pre-v1 with only internal users makes breaking changes cheap."
+      ]
+    },
+    "friction": [
+      "The assistant wrongly suggested archiving or deleting finished specs and removing ~100 AC tags, and the user had to correct it using SDD principles.",
+      "The user said trail #234 showed no changes. The CLI listed two merged changes, and the assistant could not see the user's trails UI, so the discrepancy stayed unresolved.",
+      "The assistant first reported the dead-code work as not pushed. A PR had actually opened just after its check, so the user had to ask.",
+      "The decisions list lacked context, so the user asked for context, the decision and a recommendation for each item.",
+      "The assistant's initial SemVer concern was misplaced for a pre-v1 project that only the user uses.",
+      "The classifier denied the assistant's attempt to dismiss the 13 findings, so the user has to run those.",
+      "The trail body initially named the wrong package for the #367 follow-up and had to be corrected."
+    ],
+    "open_items": [
+      "Release #291 as 0.10.0. The user triggers it. Merge #329 only after the release lands.",
+      "Run the antd and shadcn oracle against the resolver changes later today.",
+      "Three workers are in progress on trail #241: `fix/storybook-meta-forms`, `chore/remove-unused-core-api` and `fix/dependency-read-errors`. Their PR bodies, CI and review are pending.",
+      "Held until the workers merge: the scoping ADR making the resolver the single owner of scoping, removal of the unused default-value contract items (`DefaultSource::JsDoc`, `JsDocDefaultMismatch`, `ComputedDefault`), wiring `InvalidJson`, and making `ImportRef.is_type_only` the single source for type-only imports.",
+      "Re-scan the SPEC/AC tags into live, dangling and contradicted, and remove only the dangling and contradicted ones. Delete SPEC-CLI-001c, which covered the removed `lsp` subcommand.",
+      "Add a 'historical, not reproducible' banner to `benchmarks.md`.",
+      "Decide whether to close trail #234. Trail #235 stays open for decisions.",
+      "Decide on the `@AGENTS.md` import in CLAUDE.md, which is the user's file.",
+      "Decide on `perf/cycles-by-structure`, unmerged with no PR since 2026-10-24.",
+      "Commit the uncommitted ground-truth harness as a small PR.",
+      "Open a PR for `chore/changesets-for-merged-fixes`.",
+      "Delete the stray `fix/discover-extensions-and-ignore` branch and the leftover /tmp worktrees.",
+      "The user must run the 13 finding dismissals."
+    ]
+  }
+}
