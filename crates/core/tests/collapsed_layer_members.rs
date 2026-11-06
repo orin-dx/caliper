@@ -25,7 +25,10 @@ fn source() -> String {
          export function WithInterface(props: FromInterface) {{ return null; }}\n\
          export function WithAlias(props: FromAlias) {{ return null; }}\n\
          export function WithSmall(props: FromSmall) {{ return null; }}\n\
-         export function WithOmit(props: Omit<Big, 'p0'> & {{ own?: boolean }}) {{ return null; }}\n"
+         export function WithOmit(props: Omit<Big, 'p0'> & {{ own?: boolean }}) {{ return null; }}\n\
+         type OmitsP0 = Omit<Big, 'p0'>;\n\
+         type KeepsP0 = Big;\n\
+         export function WithUnion(props: OmitsP0 | KeepsP0) {{ return null; }}\n"
     )
 }
 
@@ -96,6 +99,20 @@ fn an_omitted_prop_is_not_a_member_of_the_layer_it_was_omitted_from() {
     members.sort();
     assert_eq!(members, expected);
     assert_eq!(layer.total_props, 30);
+}
+
+#[test]
+fn a_union_layer_keeps_a_prop_that_one_branch_omits_and_another_keeps() {
+    let output = run(CollapseInheritedProps::All);
+    let layer = &output.components["WithUnion"].inheritance[0];
+    assert_eq!(layer.type_name, "Big");
+    let mut expected = names("p");
+    expected.sort();
+    let mut members = layer.members.clone();
+    members.sort();
+    assert_eq!(members, expected);
+    assert_eq!(layer.total_props, 31);
+    assert!(layer.omitted.is_empty());
 }
 
 #[test]

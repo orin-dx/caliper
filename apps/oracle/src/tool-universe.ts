@@ -23,12 +23,13 @@ export const pathKey = (path: string) =>
   process.platform === 'darwin' || process.platform === 'win32' ? path.toLowerCase() : path
 
 /** The files of a component's collapsed inheritance layers: Caliper lists their props as members, not as props. A layer
- * is collapsed when it lists members; `Omit` can leave one at 30 props or fewer, so its size does not tell. An output with
- * no `members` is read by size. */
+ * is collapsed when it lists members. Its size does not tell: `Omit` can leave one at 30 props or fewer, and with
+ * `--collapse-inherited-props none` a layer of more than 30 is expanded. The output omits an empty `members`, so a layer
+ * without it names nothing and has nothing to attribute. */
 export const collapsedLayerFiles = (caliper: any, component: any): Set<string> =>
   new Set(
     (component?.inheritance ?? [])
-      .filter((layer: any) => layerMembers(caliper, layer).length > 0 || layer.totalProps > 30)
+      .filter((layer: any) => layerMembers(caliper, layer).length > 0)
       .map((layer: any) => pathKey(String(layer.fileName))),
   )
 

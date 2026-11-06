@@ -799,7 +799,16 @@ impl InheritedUnion {
                     && kept.html_element == layer.html_element
             };
             match self.layers.iter_mut().find(|kept| same(kept)) {
-                Some(kept) => kept.omitted.retain(|name| layer.omitted.contains(name)),
+                Some(kept) => {
+                    kept.omitted.retain(|name| layer.omitted.contains(name));
+                    // A branch that omits a prop leaves it out of its own view only: another branch still has it.
+                    for name in &layer.members {
+                        if !kept.members.contains(name) {
+                            kept.members.push(name.clone());
+                            kept.total_props += 1;
+                        }
+                    }
+                }
                 None => self.layers.push(layer.clone()),
             }
         }

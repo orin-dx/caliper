@@ -23,8 +23,8 @@ describe('collapsedLayerFiles', () => {
     expect(collapsedLayerFiles({}, component).size).toBe(0)
   })
 
-  it('still reads an output with no members by its size', () => {
-    const component = { inheritance: [{ typeName: 'Big', fileName: BIG, totalProps: 31 }] }
-    expect([...collapsedLayerFiles({}, component)]).toStrictEqual([pathKey(BIG)])
+  it('does not count an expanded layer of more than 30 props, which `none` leaves without members', () => {
+    const component = { inheritance: [{ typeName: 'Big', fileName: BIG, totalProps: 45 }] }
+    expect(collapsedLayerFiles({}, component).size).toBe(0)
   })
 })
