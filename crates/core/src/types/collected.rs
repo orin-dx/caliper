@@ -3,7 +3,7 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use compact_str::CompactString;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -981,6 +981,10 @@ pub struct SourceData {
     /// for the generic aliases and interfaces that declare at least one. Keyed as `type_alias_params` and
     /// `interface_type_params`; a reference that omits trailing arguments takes these, as TypeScript does.
     pub type_param_defaults: FxHashMap<std::string::String, Vec<Option<CollectedType>>>,
+
+    /// The keys in `enums` that a TypeScript `enum` declaration wrote, as against an `as const` object or a variant
+    /// bag. An enum is a type of its own, not the union of its values.
+    pub enum_declarations: FxHashSet<std::string::String>,
 }
 
 /// What a generic function returns: its declared or asserted type, or a generic call stored in a returned local const.

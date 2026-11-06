@@ -396,7 +396,7 @@ fn package_types_resolve_through_star_exports_cycles_and_namespaces_and_the_valu
             ("gap".into(), "number".into()),
             ("label".into(), "string".into()),
             ("size".into(), "\"sm\" | \"md\" | \"lg\"".into()),
-            ("tone".into(), "Tone".into()),
+            ("tone".into(), "\"info\" | \"warn\"".into()),
         ]
     );
     assert_eq!(
