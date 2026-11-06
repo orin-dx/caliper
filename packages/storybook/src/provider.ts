@@ -29,16 +29,19 @@ interface StoryFile {
 }
 
 /**
- * `csf`'s story file with its default export replaced by one whose `component` is `expression`: every other statement
- * stays, so the resolver follows the story's imports and local bindings (`const parts = { Item }`) as it would for the
- * written meta, and every node has source text for it to report an expression it cannot follow.
+ * `csf`'s story file as the resolver reads it, with `meta.component` being `expression`. The file is parsed again with
+ * the expression appended as a statement, so every node has source text for the resolver to report an expression it
+ * cannot follow, and every statement stays: the resolver follows the story's imports and local bindings
+ * (`const parts = { Item }`) as it does for the written meta, whichever form the meta takes (`export default`,
+ * `export { meta as default }`, a CSF factory's `preview.meta()`).
  */
 function storyFor(csf: CsfFile, storyPath: string, expression: string): CsfFile {
-  const source = csf.editor.toString()
-  const meta = csf.program.body.find((statement) => statement.type === 'ExportDefaultDeclaration')
-  const replaced = `export default { component: ${expression} }`
-  const code = meta ? `${source.slice(0, meta.start)}${replaced}${source.slice(meta.end)}` : `${source}\n${replaced}\n`
-  return loadCsf(code, { fileName: storyPath, makeTitle: () => 'caliper-docgen' }).parse()
+  const code = `${csf.editor.toString()}\n;(${expression})\n`
+  const parsed = loadCsf(code, { fileName: storyPath, makeTitle: () => 'caliper-docgen' }).parse()
+  const statement = parsed.program.body.at(-1)
+  if (statement?.type !== 'ExpressionStatement') throw new Error(`no expression to resolve for ${expression}`)
+  // The parsed file stands in for the written one, with only its component swapped.
+  return Object.create(parsed, { _metaAnnotations: { value: { component: statement.expression } } })
 }
 
 /** The resolver threw instead of answering: a defect to hand to the next provider, not a fact about one subcomponent. */

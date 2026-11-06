@@ -113,4 +113,10 @@ describe.skipIf(!bindingAvailable)('provider in a worker thread', () => {
     expect(payload.subcomponents.ListItem.error).toBeUndefined()
     expect(Object.keys(payload.subcomponents.ListItem.argTypes).toSorted()).toEqual(['bullet', 'children', 'selected'])
   })
+
+  it('documents the subcomponents of a meta exported by name as the default', async () => {
+    const payload = await request('Exported')
+    expect(payload.subcomponents.ListItem.error).toBeUndefined()
+    expect(Object.keys(payload.subcomponents.ListItem.argTypes).toSorted()).toEqual(['bullet', 'children', 'selected'])
+  })
 })
