@@ -137,6 +137,13 @@ describe('createDocgenProvider', () => {
     expect(Object.keys(payload?.subcomponents?.ListItem?.argTypes ?? {})).toEqual(['bullet'])
   })
 
+  it.each(['Exported', 'Factory'])('documents the subcomponents of a %s story meta', async (title) => {
+    const { payload, nextCalls } = await request(binding(), story(title))
+    expect(nextCalls).toBe(0)
+    expect(payload?.subcomponents?.ListItem?.error).toBeUndefined()
+    expect(Object.keys(payload?.subcomponents?.ListItem?.argTypes ?? {})).toEqual(['bullet'])
+  })
+
   it('asks the next provider when the session has no such component', async () => {
     const fake = binding()
     delete fake.output.components!.Card
