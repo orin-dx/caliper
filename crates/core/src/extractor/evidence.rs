@@ -16,8 +16,27 @@ pub(super) type NoRender = &'static str;
 /// Names whose type, as a return annotation, means the function renders.
 const ELEMENT_TYPE_NAMES: &[&str] = &["Element", "ReactElement", "ReactNode", "ReactPortal", "JSX"];
 
-/// Callees that produce an element.
-const ELEMENT_FACTORIES: &[&str] = &["createElement", "cloneElement", "jsx", "jsxs", "jsxDEV", "createPortal", "h"];
+/// Callees that produce an element, by name. Preact's `h` is not here: so short a name proves nothing until it is
+/// known to be imported from Preact (`Scope::binds_preact_h`).
+const ELEMENT_FACTORIES: &[&str] = &["createElement", "cloneElement", "jsx", "jsxs", "jsxDEV", "createPortal"];
+
+/// Whether a callee name, with any receiver already dropped, names an element factory. `h` counts only as a bare
+/// call to Preact's own binding: `codec.h(…)` and a local helper called `h` are not factories.
+pub(super) fn is_element_factory_name(name: &str, receiver: bool, scope: &dyn Scope) -> bool {
+    if name == "h" {
+        return !receiver && scope.binds_preact_h();
+    }
+    ELEMENT_FACTORIES.contains(&name)
+}
+
+/// Whether a call's callee is an element factory: see [`is_element_factory_name`].
+pub(super) fn is_element_factory_callee(callee: &Expression<'_>, scope: &dyn Scope) -> bool {
+    match callee {
+        Expression::Identifier(id) => is_element_factory_name(id.name.as_str(), false, scope),
+        Expression::StaticMemberExpression(m) => is_element_factory_name(m.property.name.as_str(), true, scope),
+        _ => false,
+    }
+}
 
 /// Whether a type name, as written in this file, can be React's or the global `JSX` namespace's. Given the name's
 /// leftmost segment (`React` for `React.ReactNode`), so an element-like name imported from another module does not
@@ -32,6 +51,8 @@ pub(super) trait Scope {
     fn is_element_helper(&self, name: &str) -> bool;
     /// Whether the call is React's `memo(…)` or `forwardRef(…)`, by where its callee was imported from.
     fn is_react_wrapper(&self, call: &CallExpression<'_>) -> bool;
+    /// Whether a bare `h` in this file is the one imported from Preact.
+    fn binds_preact_h(&self) -> bool;
 }
 
 fn leftmost_and_rightmost<'n>(name: &'n TSTypeName<'_>) -> Option<(&'n str, &'n str)> {
@@ -112,7 +133,7 @@ impl<'a> Visit<'a> for ElementInValue<'_> {
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
         let name = callee_name(&it.callee);
         let calls_helper = matches!(&it.callee, Expression::Identifier(id) if self.scope.is_element_helper(&id.name));
-        if calls_helper || name.is_some_and(|c| ELEMENT_FACTORIES.contains(&c)) {
+        if calls_helper || is_element_factory_callee(&it.callee, self.scope) {
             self.found = true;
         // These calls preserve the JSX value; an arbitrary call may turn it into a Response or other data.
         } else if name.is_some_and(|name| matches!(name, "map" | "flatMap" | "reduce"))
@@ -345,6 +366,10 @@ struct Foreign<'f>(&'f FxHashSet<String>);
 impl Scope for Foreign<'_> {
     fn may_be_react(&self, name: &str) -> bool {
         !self.0.contains(name)
+    }
+
+    fn binds_preact_h(&self) -> bool {
+        false
     }
 
     fn is_element_helper(&self, _name: &str) -> bool {

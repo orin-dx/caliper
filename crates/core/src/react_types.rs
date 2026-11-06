@@ -327,6 +327,15 @@ pub fn notable_html_attrs(element: &str) -> &'static [&'static str] {
     }
 }
 
+/// Whether an import specifier is React itself: `react`, a subpath of it, its `@types` package, or Preact's
+/// compatibility layer. The extractor and the resolver both ask this, so they agree on which imports are React's.
+pub(crate) fn is_react_module(specifier: &str) -> bool {
+    specifier == "react"
+        || specifier.starts_with("react/")
+        || specifier == "@types/react"
+        || specifier == "preact/compat"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

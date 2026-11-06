@@ -81,8 +81,12 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     public.props_type_args.clear();
                     public.wrapper_callee = None;
                     public.rule = crate::types::DetectionRule::FcAnnotation;
-                    if base_name == exported {
-                        self.data.component_mappings[index] = public;
+                    // `const A = Inner as VFC<P>` was already bound as an alias of `Inner`; the cast replaces that
+                    // mapping so `A` is published once, with `P`.
+                    let existing =
+                        self.data.component_mappings.iter().position(|mapping| mapping.component_name == exported);
+                    if let Some(at) = existing {
+                        self.data.component_mappings[at] = public;
                     } else {
                         self.data.component_mappings.push(public);
                     }

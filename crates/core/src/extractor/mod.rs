@@ -58,10 +58,7 @@ impl ReactApi {
     }
 }
 
-/// Whether an import specifier is React itself: `react`, a subpath of it, or Preact's compatibility layer.
-fn is_react_module(specifier: &str) -> bool {
-    specifier == "react" || specifier.starts_with("react/") || specifier == "preact/compat"
-}
+use crate::react_types::is_react_module;
 
 // ─── Entry Point ─────────────────────────────────────────────────────────────
 
@@ -1290,5 +1287,13 @@ impl evidence::Scope for SourceDataCollector<'_> {
 
     fn is_react_wrapper(&self, call: &CallExpression<'_>) -> bool {
         matches!(self.react_api(&call.callee), Some(ReactApi::Memo | ReactApi::ForwardRef))
+    }
+
+    fn binds_preact_h(&self) -> bool {
+        self.data.imports.iter().any(|import| {
+            import.local_name.as_str() == "h"
+                && import.exported_name.as_str() == "h"
+                && (import.specifier.as_str() == "preact" || import.specifier.starts_with("preact/"))
+        })
     }
 }
