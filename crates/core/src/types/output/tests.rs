@@ -916,3 +916,39 @@ mod streaming_serialize_tests {
         }
     }
 }
+
+#[test]
+fn opaque_reason_kinds_lists_every_variant_in_declaration_order() {
+    // The match has no wildcard arm: a new variant stops compiling here until it is added to `KINDS` and to the samples.
+    fn position(reason: &OpaqueReason) -> usize {
+        match reason {
+            OpaqueReason::ConditionalType => 0,
+            OpaqueReason::MappedType => 1,
+            OpaqueReason::ModuleAugmentation => 2,
+            OpaqueReason::RuntimeDependent { .. } => 3,
+            OpaqueReason::UnresolvableImport { .. } => 4,
+            OpaqueReason::PandaCodegenMissing => 5,
+            OpaqueReason::DepthExceeded => 6,
+            OpaqueReason::IndexedAccess { .. } => 7,
+            OpaqueReason::TemplateLiteral { .. } => 8,
+            OpaqueReason::UnsupportedExpression => 9,
+        }
+    }
+    let samples = [
+        OpaqueReason::ConditionalType,
+        OpaqueReason::MappedType,
+        OpaqueReason::ModuleAugmentation,
+        OpaqueReason::RuntimeDependent { function_name: "cva".into() },
+        OpaqueReason::UnresolvableImport { specifier: "@acme/ui".into() },
+        OpaqueReason::PandaCodegenMissing,
+        OpaqueReason::DepthExceeded,
+        OpaqueReason::IndexedAccess { expression: "P[\"a\"]".into() },
+        OpaqueReason::TemplateLiteral { expression: "`${A}`".into() },
+        OpaqueReason::UnsupportedExpression,
+    ];
+    for (index, reason) in samples.iter().enumerate() {
+        assert_eq!(position(reason), index);
+        assert_eq!(OpaqueReason::KINDS[index], reason.kind());
+    }
+    assert_eq!(OpaqueReason::KINDS.len(), samples.len());
+}
