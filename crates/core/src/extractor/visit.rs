@@ -526,6 +526,12 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         self.function_depth -= 1;
     }
 
+    fn visit_static_block(&mut self, block: &StaticBlock<'a>) {
+        self.local_depth += 1;
+        walk::walk_static_block(self, block);
+        self.local_depth -= 1;
+    }
+
     fn visit_block_statement(&mut self, block: &BlockStatement<'a>) {
         self.local_depth += 1;
         walk::walk_block_statement(self, block);

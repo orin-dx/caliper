@@ -2816,6 +2816,21 @@ fn a_same_name_interface_in_a_function_body_does_not_merge_into_the_module_level
 }
 
 #[test]
+fn an_interface_in_a_class_static_block_does_not_merge_into_the_module_level_one() {
+    let source = "class Helper { static { interface Props { internal: number } } }\n\
+        interface Props { label: string }\n\
+        export function Box(props: Props) { return <div />; }";
+    let data = parse_file(Utf8Path::new("/test/static-block.tsx"), source);
+    let members: Vec<Vec<&str>> = data
+        .interfaces
+        .iter()
+        .filter(|(key, _)| key.ends_with(":Props"))
+        .map(|(_, iface)| iface.props.iter().map(|p| p.name.as_str()).collect())
+        .collect();
+    assert_eq!(members, [["label"]]);
+}
+
+#[test]
 fn an_interface_only_declared_in_a_function_body_is_still_collected_for_factory_results() {
     let source = "function makeBox() { interface LocalProps { label: string } return (p: LocalProps) => <div />; }\n\
         export const Box = makeBox();";
