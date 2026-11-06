@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01QdFQqtQ8oy5gN3szKVHzqp",
+  "agent_id": "adeaf96b2969a6918",
+  "subagent_type": "general-purpose",
+  "task_description": "Resolve the last conflict on PR 347 against current main",
+  "token_usage": {
+    "input_tokens": 44,
+    "cache_creation_tokens": 49387,
+    "cache_read_tokens": 1326981,
+    "output_tokens": 5393,
+    "api_call_count": 22
+  },
+  "started_at": "2026-11-06T10:21:02.021765-08:00",
+  "completed_at": "2026-11-06T10:28:15.475688-08:00"
+}

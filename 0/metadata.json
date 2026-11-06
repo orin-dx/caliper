@@ -1,0 +1,123 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6S49TVWXFGV84Z3YQ67F57B",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-06T19:10:45.928864Z",
+  "branch": "docs/correct-stale-docs",
+  "checkpoints_count": 21,
+  "save_step_count": 50,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "041b550e6f69",
+  "checkpoint_transcript_start": 9801,
+  "transcript_lines_at_start": 9801,
+  "compact_transcript_start": 837,
+  "token_usage": {
+    "input_tokens": 130,
+    "cache_creation_tokens": 124231,
+    "cache_read_tokens": 46826308,
+    "output_tokens": 64321,
+    "api_call_count": 53,
+    "subagent_tokens": {
+      "input_tokens": 556,
+      "cache_creation_tokens": 1272362,
+      "cache_read_tokens": 30625641,
+      "output_tokens": 148392,
+      "api_call_count": 284
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 249
+  },
+  "summary": {
+    "intent": "Land a set of in-flight caliper PRs (#345, #346, #347, #348) by scaling back overreaching fixes and resolving merge conflicts, avoid repeating the conflict pattern, then analyze narration, stale docs and truly dead code and prepare a trail and PR for the cleanup.",
+    "outcome": "#345, #348, #343, #353 and #346 merged; #347 was conflict-resolved and is mergeable with gates passing. A three-pass read-only cleanup analysis was done and spot-checked, scheduling rules were saved to memory, trails #234 (docs and dead code cleanup) and #235 (known gaps and decisions) were created, and a worker was started on the docs correction branch.",
+    "learnings": {
+      "repo": [
+        "Entire Gates has four sub-gates (approvals, checks, findings, up-to-date). A failing Entire Gates on #346/#347 was only the missing approval, not open findings; open findings below the blocking threshold do not fail it.",
+        "Entire `trail merge` defers branch deletion to GitHub's auto-delete setting for GitHub-backed trails, and GitHub closes a child PR if its parent branch is deleted without retargeting.",
+        "`extractor/tests.rs` and `pipeline/tests.rs` are repeat conflict hotspots because every PR appends tests at the same spot; `provider.ts` and `weekly.py` behave the same way.",
+        "Name resolution has two owners: the resolver has a real scope model, while the extractor keys enums, aliases and classes by bare name with ad hoc counters like `local_depth`. This caused repeated review rounds on scoping.",
+        "Snapshot tests fail in worktrees without `node_modules` or when nested under the caliper checkout (path-prefix differences); clean-room worktrees with `pnpm install --frozen-lockfile --offline` pass.",
+        "CLAUDE.md contains only the Entire block and never imports AGENTS.md, so Claude Code never loaded the repo rule 'comments: only the non-obvious why, no history'.",
+        "`CACHE_SCHEMA_VERSION` was bumped 29 to 30 when cached `SourceData` gained `enum_declarations`; the golden fixture and snapshot must be updated with it.",
+        "Dead-code scan of main found only 5 confirmed-dead items. Narration is small (53 items plus 100 SPEC/AC tag lines), while docs are the real cleanup (54 records, 91 stale `file.rs:NNN` refs in docs/architecture).",
+        "Several public-API items look like unfinished features rather than dead code: `DefaultSource::JsDoc`, `DiagnosticCode::ComputedDefault`, `MalformedFrameReason::InvalidJson`, and `ImportRef.is_type_only` (whose logic overlaps #347's `imports_a_value`)."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/extractor/visit.rs",
+          "line": 529,
+          "end_line": 532,
+          "finding": "`visit_static_block` bumps `local_depth` like `visit_block_statement`; after merging main both sides had defined these methods (E0201), resolved by one method each incrementing `block_depth` and `local_depth`."
+        },
+        {
+          "path": "crates/core/src/resolver/evaluate.rs",
+          "line": 226,
+          "end_line": 227,
+          "finding": "`names_an_enum` now checks the `enum_declarations` set instead of `global.enums`, so `as const` objects of the same name don't count as enums."
+        },
+        {
+          "path": "crates/core/src/extractor/mod.rs",
+          "line": 1046,
+          "finding": "`expression_to_string` is dead code hidden behind `#[allow(dead_code)]`."
+        },
+        {
+          "path": "crates/tsc-client/src/lib.rs",
+          "line": 8,
+          "finding": "Doc comment says checker methods are not wired up yet, but `crates/semantic/src/rpc.rs` already calls them."
+        },
+        {
+          "path": "crates/core/src/extractor/mod.rs",
+          "line": 940,
+          "finding": "The `TSOptionalType` (`T?`) branch still wraps in `Union([T, Undefined])`, which is dead since `resolve_union` strips undefined at render."
+        }
+      ],
+      "workflow": [
+        "Run overlapping PRs one at a time in merge order and start each worker from current main; parallelize only on disjoint files. Resolving two PRs against main in parallel guaranteed a second conflict.",
+        "Read the gate breakdown (approvals, checks, findings, up-to-date) rather than counting findings or trusting the aggregate check status.",
+        "After two review rounds on the same code, choose a root-cause fix, a scale-back, or a documented limitation instead of patching the next repro.",
+        "Spot-check subagent claims against the checkout before relying on them; subagent reports are not user authority.",
+        "Merges can compile-break without textual conflicts (duplicate methods, changed signatures), so a clean-room build and test run after conflict resolution is needed.",
+        "Stacked PRs: link with `entire trail link --base`, merge bottom-up with merge commits, never squash, never merge a child into its parent branch."
+      ]
+    },
+    "friction": [
+      "Merge conflicts kept recurring on #346/#347 because many workers produced overlapping PRs and merges made the others stale; the user pushed back sharply.",
+      "The assistant misread the failing Entire Gates as a serious review finding, and chased findings on PRs whose gate only lacked approval.",
+      "The permission classifier denied the #345 worker's `entire trail finding dismiss` as an external write, though it allowed it for other workers.",
+      "Subagents hit worktree issues: a branch already checked out elsewhere, a mistaken `git reset --hard` that was restored, and snapshot tests failing in worktrees without `node_modules`.",
+      "The #345 scale-back still left 6 open findings, including real accuracy concerns about conditional/optional tuple elements, so it needed a second scale-back proposal.",
+      "The assistant's 'main moved' wording was unclear to the user, who is the sole merger.",
+      "`gh` was blocked in the analysis sandbox, and a dead-code run showed 20 unexplained intermittent core `--lib` failures."
+    ],
+    "open_items": [
+      "Docs correction branch `docs/correct-stale-docs` is in progress; assistant must verify it, then open the PR via the gh shim (needs the user's Touch ID).",
+      "`chore/remove-dead-code` (six safe items) waits until #347 merges.",
+      "Later cleanup PRs: 53 non-test comment rewrites, test comments plus 100 SPEC/AC tag lines, the `rdt-coverage.md` trim, and dated-log trims.",
+      "User decisions pending: keep or remove SPEC tags and archive the done specs; remove or wire the four unused public items; delete or label `benchmarks.md` historical; add `@AGENTS.md` to CLAUDE.md.",
+      "Model decisions: whether `DefaultValue` records provenance (JsDoc/ComputedDefault diagnostics), whether bad JSON frames should surface as recoverable errors, and who owns type-only import logic.",
+      "Scoping/name-resolution architecture: a design note (ADR) and read-only investigation, with exclusive ownership of extractor/resolver files, after #346/#347 land.",
+      "Documented limitations: function-local interfaces, enums and classes keyed by bare name, optional tuple markers, conditionals over shadowed type parameters, interfaces in switch cases.",
+      "Loose ends tracked in trail #235: unpushed #367 follow-up (4e588a71), `perf/cycles-by-structure`, the 13 finding dismissals, the 0.9.0 release call, Callisto #442.",
+      "#345's wip work is preserved on `wip/css-tuple-full`; the user must run two stale-finding dismissals on caliper/142; reconsider limiting tuple resolution to plain/labelled members.",
+      "Possible follow-ups: split append-hotspot test files into per-feature modules, consider a merge queue, and tighten 68 over-wide `pub` items (recommended against)."
+    ]
+  }
+}

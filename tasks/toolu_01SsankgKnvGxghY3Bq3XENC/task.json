@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01SsankgKnvGxghY3Bq3XENC",
+  "agent_id": "ab7ca540f15db9ef3",
+  "subagent_type": "general-purpose",
+  "task_description": "Resolve conflicts on 346 and 347",
+  "token_usage": {
+    "input_tokens": 90,
+    "cache_creation_tokens": 186286,
+    "cache_read_tokens": 3092899,
+    "output_tokens": 11004,
+    "api_call_count": 44
+  },
+  "started_at": "2026-11-06T10:05:23.533447-08:00",
+  "completed_at": "2026-11-06T10:14:07.737164-08:00"
+}
