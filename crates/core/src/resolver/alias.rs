@@ -45,6 +45,13 @@ pub(super) fn resolve_type_alias_chain(
             chain.notable.retain(|p| !omitted_set.contains(p.name.as_str()));
             // Record omitted keys in the relevant inheritance layer.
             for layer in &mut chain.inheritance {
+                // A collapsed layer names the props it holds, so an omitted one is no longer held.
+                if !layer.members.is_empty() {
+                    let held = layer.members.len();
+                    layer.members.retain(|name| !omitted_set.contains(name.as_str()));
+                    layer.total_props =
+                        layer.total_props.saturating_sub(u32::try_from(held - layer.members.len()).unwrap_or(0));
+                }
                 for key in &omitted {
                     if !layer.omitted.contains(key) {
                         layer.omitted.push(key.clone());
@@ -274,9 +281,10 @@ pub(super) fn resolve_base_as_chain(
             // Substituted and resolved directly here so the nested generic survives,
             // rather than falling through to the string-based path below (which would
             // flatten it to a single opaque display string before substitution ever ran).
+            let marked = super::substitute::mark_args(state, args);
             if let Some(alias) = super::substitute::generic_alias_with_structured_args(
                 name.as_str(),
-                args,
+                &marked,
                 file_path,
                 ctx,
                 &mut state.diagnostics,
@@ -792,7 +800,16 @@ impl InheritedUnion {
                     && kept.html_element == layer.html_element
             };
             match self.layers.iter_mut().find(|kept| same(kept)) {
-                Some(kept) => kept.omitted.retain(|name| layer.omitted.contains(name)),
+                Some(kept) => {
+                    kept.omitted.retain(|name| layer.omitted.contains(name));
+                    // A branch that omits a prop leaves it out of its own view only: another branch still has it.
+                    for name in &layer.members {
+                        if !kept.members.contains(name) {
+                            kept.members.push(name.clone());
+                            kept.total_props += 1;
+                        }
+                    }
+                }
                 None => self.layers.push(layer.clone()),
             }
         }
@@ -968,15 +985,18 @@ fn resolve_key_set(
             let Some(super::precedence::SourceOrKnownMatch::TypeAlias { matched_key, alias }) = matched else {
                 return None;
             };
+            let marked = super::substitute::mark_args(state, args);
             let alias = super::substitute::apply_generic_args(
                 alias,
                 (&canonical_file, &matched_key),
-                args,
+                &marked,
                 file,
                 ctx,
                 &mut state.diagnostics,
             );
-            match &alias {
+            // The alias's body is read under no type parameters: the ones the arguments leave unfilled are marked in it.
+            let writer = state.enter_scope(TypeScope::default());
+            let keys = match &alias {
                 CollectedTypeAlias::LiteralUnion { members, .. } => Some(members.clone()),
                 CollectedTypeAlias::Union { members, file_path } => {
                     let union = CollectedType::Union(members.clone());
@@ -986,7 +1006,9 @@ fn resolve_key_set(
                     resolve_key_set(target, file_path, mapping, ctx, state, depth + 1)
                 }
                 _ => None,
-            }
+            };
+            state.leave_scope(writer);
+            keys
         }
         _ => None,
     }

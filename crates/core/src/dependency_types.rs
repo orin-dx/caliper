@@ -540,7 +540,9 @@ impl Loader<'_> {
         for export in &data.exports {
             match export {
                 LexedExport::ReExportNamed { local_name, source_name, source_specifier, .. } if local_name == head => {
-                    let target = self.resolve(module, source_specifier).ok()?;
+                    // An explicit export shadows a wildcard one, so a hop that cannot be resolved leaves the name unanswered
+                    // rather than to a later `export *`; `unresolved_cause` names the hop.
+                    let Ok(target) = self.resolve(module, source_specifier) else { return None };
                     let next = match rest {
                         Some(rest) => format!("{source_name}.{rest}"),
                         None => source_name.clone(),
@@ -548,7 +550,7 @@ impl Loader<'_> {
                     return self.find_export_in(&target, &next, visited, cut);
                 }
                 LexedExport::ReExportNamespace { namespace, source_specifier } if namespace == head => {
-                    let target = self.resolve(module, source_specifier).ok()?;
+                    let Ok(target) = self.resolve(module, source_specifier) else { return None };
                     return self.find_export_in(&target, rest?, visited, cut);
                 }
                 // `export { DialogContent as Content }`, the way bundled typings (Radix's) name their parts.
@@ -638,9 +640,73 @@ impl Loader<'_> {
         match self.find_export(&module, &demand.name) {
             Some((file, name)) => self.load_declaration(scope, file, name),
             None => {
-                self.unresolved.insert(key, Unresolved::NotExported);
+                let cause = self.unresolved_cause(&module, &demand.name).unwrap_or(Unresolved::NotExported);
+                self.unresolved.insert(key, cause);
             }
         }
+    }
+
+    /// Why a name `module` seems not to export was not found: a re-export hop on the way to it that cannot be
+    /// resolved. A named or namespace hop for the name is the cause outright; an unresolvable `export *` only could
+    /// have held it, so it is reported when nothing else explains the miss. `None` means every hop resolved.
+    fn unresolved_cause(&self, module: &Utf8Path, name: &str) -> Option<Unresolved> {
+        let mut visited = FxHashSet::default();
+        let mut star = None;
+        self.unresolved_cause_in(module, name, &mut visited, &mut star).or(star)
+    }
+
+    fn unresolved_cause_in(
+        &self,
+        module: &Utf8Path,
+        name: &str,
+        visited: &mut FxHashSet<(PathKey, CompactString)>,
+        star: &mut Option<Unresolved>,
+    ) -> Option<Unresolved> {
+        if !visited.insert((PathKey::from(module), CompactString::from(name))) {
+            return None;
+        }
+        let data = self.parse(module)?;
+        let (head, rest) = match name.split_once('.') {
+            Some((head, rest)) => (head, Some(rest)),
+            None => (name, None),
+        };
+        // The order `find_export_uncached` reads them in: an explicit export answers for its name and shadows every
+        // wildcard, so a wildcard is looked into only when no explicit export names it.
+        for star_pass in [false, true] {
+            for export in &data.exports {
+                let (specifier, next) = match export {
+                    LexedExport::ReExportNamed { local_name, source_name, source_specifier, .. }
+                        if !star_pass && local_name == head =>
+                    {
+                        let next = rest.map_or_else(|| source_name.clone(), |rest| format!("{source_name}.{rest}"));
+                        (source_specifier, next)
+                    }
+                    LexedExport::ReExportNamespace { namespace, source_specifier }
+                        if !star_pass && namespace == head =>
+                    {
+                        (source_specifier, rest?.to_owned())
+                    }
+                    // `export *` never carries `default`, as `find_export_uncached` enforces.
+                    LexedExport::ReExportAll { source_specifier, .. } if star_pass && head != "default" => {
+                        (source_specifier, name.to_owned())
+                    }
+                    _ => continue,
+                };
+                match self.resolve(module, specifier) {
+                    Err(cause) if star_pass => {
+                        star.get_or_insert(cause);
+                    }
+                    Err(cause) => return Some(cause),
+                    Ok(target) => {
+                        let cause = self.unresolved_cause_in(&target, &next, visited, star);
+                        if cause.is_some() || !star_pass {
+                            return cause;
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// A module imported for its own sake: only what it merges into React is read.

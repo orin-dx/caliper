@@ -19,6 +19,7 @@ pub mod diagnostic;
 pub mod global;
 pub mod options;
 pub mod output;
+pub mod scope;
 pub mod semantic;
 
 // Flat re-export so existing `use crate::types::*` keeps working unchanged.
@@ -27,3 +28,4 @@ pub use diagnostic::*;
 pub use global::*;
 pub use options::*;
 pub use output::*;
+pub use scope::*;

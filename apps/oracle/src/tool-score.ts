@@ -103,3 +103,13 @@ export function scoreTool<T extends UniverseProp>(universe: readonly T[], pick: 
     examples,
   }
 }
+
+/** Like `scoreTool`, over the components the tool reports only: a prop of a component the tool does not report at all
+ * (`component`) is left out, so a function the checker takes for a component and the tool rightly ignores does not
+ * count against it. This is the universe of the weekly headline: what a reader of the tool's output is shown. */
+export function scoreReported<T extends UniverseProp>(universe: readonly T[], pick: (u: T) => Reported): ToolScore {
+  return scoreTool(
+    universe.filter((u) => pick(u) !== 'component'),
+    pick,
+  )
+}

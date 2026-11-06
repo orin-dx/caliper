@@ -14,10 +14,12 @@
 //! no type inference, no conditional-type evaluation.
 
 use camino::Utf8Path;
-use rustc_hash::FxHashMap;
+use compact_str::CompactString;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::types::{
-    CollectedObjectField, CollectedType, CollectedTypeAlias, Diagnostic, DiagnosticCode, DiagnosticSeverity,
+    mark_placeholder, unmarked, CollectedObjectField, CollectedType, CollectedTypeAlias, Diagnostic, DiagnosticCode,
+    DiagnosticSeverity, ResolveState,
 };
 
 use super::import::resolve_to_canonical;
@@ -44,6 +46,34 @@ pub(super) fn build_substitution<'a>(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Substitution<'a> {
     bind_args(params, None, args, origin_file, origin_file, diagnostics)
+}
+
+/// `args`, written where `state` is, with each reference to a type parameter in scope here marked
+/// (`mark_placeholder`): a declaration's body that uses them has parameters and declarations of its own, and a marked
+/// name can be none of those, so the argument means the same there as where it was written.
+pub(super) fn mark_args<'a>(
+    state: &mut ResolveState,
+    args: &'a [CollectedType],
+) -> std::borrow::Cow<'a, [CollectedType]> {
+    if state.binds_nothing() {
+        // Whether a name is bound here is not looked up name by name: a state that binds any name marks differently.
+        if let Some(reads) = state.reads.as_mut() {
+            if reads.entered_scopes == 0 {
+                reads.needs_empty_scope = true;
+            }
+        }
+        return std::borrow::Cow::Borrowed(args);
+    }
+    let mut names: Vec<CompactString> = args.iter().flat_map(CollectedType::referenced_names).collect();
+    names.sort_unstable();
+    names.dedup();
+    let bound: FxHashSet<CompactString> =
+        names.into_iter().filter(|name| unmarked(name).len() == name.len() && state.has_type_param(name)).collect();
+    if bound.is_empty() {
+        return std::borrow::Cow::Borrowed(args);
+    }
+    let mark = |name: &str| bound.contains(name).then(|| mark_placeholder(name));
+    std::borrow::Cow::Owned(args.iter().map(|arg| arg.rename_named(&mark)).collect())
 }
 
 /// `ty` pinned to the `file` it was written in. A type that is already pinned names its own file, and wrapping it
@@ -104,6 +134,39 @@ pub(super) fn bind_args<'a>(
     subst
 }
 
+/// `bind_args`, with each parameter nothing replaces bound to its own marked placeholder (`mark_placeholder`). A
+/// declaration's body then names its unfilled parameters by a name no declaration and no argument can be, so an argument
+/// that names a module type of the same name is not captured by them.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn bind_declared<'a>(
+    params: &'a [compact_str::CompactString],
+    defaults: Option<&[Option<CollectedType>]>,
+    args: &[CollectedType],
+    args_file: &Utf8Path,
+    declared_file: &Utf8Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Substitution<'a> {
+    let mut subst = bind_args(params, defaults, args, args_file, declared_file, diagnostics);
+    fill_placeholders(&mut subst, params);
+    subst
+}
+
+/// The substitution that binds every one of `params` to its marked placeholder: a declaration referenced with no
+/// arguments.
+pub(super) fn unfilled_substitution(params: &[compact_str::CompactString]) -> Substitution<'_> {
+    let mut subst = Substitution::default();
+    fill_placeholders(&mut subst, params);
+    subst
+}
+
+pub(super) fn fill_placeholders<'a>(subst: &mut Substitution<'a>, params: &'a [compact_str::CompactString]) {
+    for param in params {
+        subst
+            .entry(param.as_str())
+            .or_insert_with(|| CollectedType::Named { name: mark_placeholder(param), args: Vec::new() });
+    }
+}
+
 /// If `scoped_key` names a generic alias (type parameters were recorded during
 /// extraction — see `extractor/visit.rs`) and the call site supplied concrete
 /// `type_args`, substitute the parameters into the alias body. Non-generic
@@ -129,10 +192,13 @@ pub(super) fn apply_generic_args(
         return alias;
     };
     let defaults = ctx.named_types.lookup_type_param_defaults(declared_file, declared_name);
-    if params.is_empty() || (type_args.is_empty() && defaults.is_none()) {
+    if params.is_empty() {
         return alias;
     }
-    let subst = bind_args(params, defaults, type_args, consuming_file, declared_file, diagnostics);
+    if type_args.is_empty() && defaults.is_none() {
+        return substitute_alias(&alias, &unfilled_substitution(params));
+    }
+    let subst = bind_declared(params, defaults, type_args, consuming_file, declared_file, diagnostics);
     substitute_alias(&alias, &subst)
 }
 
@@ -166,7 +232,7 @@ pub(super) fn generic_alias_with_structured_args(
     // i.e. `consuming_file` — not `canonical_file` (where the generic alias itself
     // is declared).
     let defaults = ctx.named_types.lookup_type_param_defaults(&canonical_file, &canonical_name);
-    let subst = bind_args(params, defaults, args, consuming_file, &canonical_file, diagnostics);
+    let subst = bind_declared(params, defaults, args, consuming_file, &canonical_file, diagnostics);
     Some(substitute_alias(alias, &subst))
 }
 
@@ -375,7 +441,8 @@ pub(super) fn synthesize_utility_alias(
             let target = match &args[0] {
                 CollectedType::String | CollectedType::Number | CollectedType::Symbol => CollectedType::Object(vec![]),
                 keys => CollectedType::Mapped {
-                    param: "K".into(),
+                    // Not a valid identifier, so no type the user declares can be shadowed by the key variable.
+                    param: crate::types::MADE_UP_KEY_VARIABLE.into(),
                     key_type: Box::new(keys.clone()),
                     value_type: Box::new(args[1].clone()),
                     optional: None,
