@@ -165,9 +165,7 @@ pub(super) fn name_binding(name: &str, file: &Utf8Path, ctx: &ResolutionContext)
 pub(super) fn may_be_react_builtin(name: &str, file: &Utf8Path, ctx: &ResolutionContext) -> bool {
     match name_binding(name, file, ctx) {
         NameBinding::Local => false,
-        NameBinding::Imported(specifier) => {
-            specifier == "react" || specifier.starts_with("react/") || specifier == "@types/react"
-        }
+        NameBinding::Imported(specifier) => crate::react_types::is_react_module(&specifier),
         NameBinding::Unbound => true,
     }
 }

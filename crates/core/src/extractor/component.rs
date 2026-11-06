@@ -68,13 +68,13 @@ impl<'b, 'a> Binding<'b, 'a> {
     }
 }
 
-/// Names `@types/react` (and its `React.`-qualified form) recognizes as a
-/// function-component type. Shared between `extract_props_from_type_annotation`
-/// (which additionally requires the props argument itself to resolve) and
-/// `type_annotation_is_fc_family` below (which only needs to know the
-/// annotation *looked like* one of these) so the two checks can't drift apart.
-const FC_FAMILY_TYPE_NAMES: &[&str] =
-    &["FC", "FunctionComponent", "ComponentType", "VFC", "VoidFunctionComponent", "ForwardRefComponent"];
+/// Whether `bare` is a React export that types a function component: the shared family plus the forwardRef
+/// component type. Used by `extract_props_from_type_annotation` (which additionally requires the props argument
+/// itself to resolve) and `type_annotation_is_fc_family` below (which only needs to know the annotation *looked
+/// like* one of these) so the two checks can't drift apart.
+fn is_fc_family_type(bare: &str) -> bool {
+    crate::react_types::FC_FAMILY_TYPE_NAMES.contains(&bare) || bare == "ForwardRefComponent"
+}
 
 /// PascalCase a file's stem for naming an anonymous default-exported
 /// component that has no identifier of its own — e.g. `button-group.tsx` →
@@ -107,7 +107,7 @@ impl<'src> SourceDataCollector<'src> {
         let TSType::TSTypeReference(reference) = &assertion.type_annotation else { return };
         let type_name = self.extract_type_ref_name(reference);
         let Some(bare) = self.react_type_export(&type_name) else { return };
-        if !matches!(bare.as_str(), "ForwardRefExoticComponent" | "FunctionComponent" | "FC" | "ComponentType") {
+        if bare != "ForwardRefExoticComponent" && !is_fc_family_type(&bare) {
             return;
         }
         let Some(props) = reference.type_arguments.as_ref().and_then(|args| args.params.first()) else { return };
@@ -174,8 +174,7 @@ impl<'src> SourceDataCollector<'src> {
         match ty {
             TSType::TSTypeReference(tr) => {
                 let type_name = self.extract_type_ref_name(tr);
-                if !self.react_type_export(&type_name).is_some_and(|bare| FC_FAMILY_TYPE_NAMES.contains(&bare.as_str()))
-                {
+                if !self.react_type_export(&type_name).is_some_and(|bare| is_fc_family_type(&bare)) {
                     return None;
                 }
                 let (props_name, type_args) = self.extract_props_arg(&tr.type_arguments)?;
@@ -403,7 +402,7 @@ impl<'src> SourceDataCollector<'src> {
                             || self.data.imports.iter().any(|binding| {
                                 binding.local_name == prefix
                                     && binding.exported_name == "*"
-                                    && binding.specifier == "react"
+                                    && super::is_react_module(&binding.specifier)
                             }))
                 })
         };
@@ -513,7 +512,7 @@ impl<'src> SourceDataCollector<'src> {
                 || self.data.imports.iter().any(|binding| {
                     binding.local_name == name
                         && binding.exported_name == "ReactElement"
-                        && binding.specifier == "react"
+                        && super::is_react_module(&binding.specifier)
                 })
         };
         let returns_element = |ty: &crate::types::CollectedType| match ty {
@@ -684,7 +683,7 @@ impl<'src> SourceDataCollector<'src> {
         let Some(type_ann) = decl.type_annotation.as_ref() else { return false };
         let TSType::TSTypeReference(tr) = peel_parens(&type_ann.type_annotation) else { return false };
         let type_name = self.extract_type_ref_name(tr);
-        self.react_type_export(&type_name).is_some_and(|bare| FC_FAMILY_TYPE_NAMES.contains(&bare.as_str()))
+        self.react_type_export(&type_name).is_some_and(|bare| is_fc_family_type(&bare))
     }
 
     /// Rename an already-collected component mapping to its real public export name

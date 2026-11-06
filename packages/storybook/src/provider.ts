@@ -18,6 +18,7 @@ import type { DocgenMiddleware, DocgenPayload, IndexEntry } from 'storybook/inte
 import { type ExtractArgTypes, loadExtractArgTypes, toArgTypes } from './arg-types.js'
 import type { CaliperStorybookOptions } from './index.js'
 import { DocgenSession, type SessionBinding } from './session.js'
+import { assertValidOptions } from './validate.js'
 
 type Subcomponent = NonNullable<DocgenPayload['subcomponents']>[string]
 
@@ -62,6 +63,7 @@ export function createDocgenProvider(
   options: CaliperStorybookOptions = {},
   binding?: SessionBinding,
 ): DocgenMiddleware {
+  assertValidOptions(options)
   const cwd = process.cwd()
   const sessionOptions = {
     srcDirs: (options.srcDirs ?? ['src']).map((dir) => resolve(cwd, dir)),
@@ -82,9 +84,49 @@ export function createDocgenProvider(
   }
   // The native binding loads on the first story request, not when Storybook starts the worker.
   let sessionPromise: Promise<DocgenSession> | undefined
-  const getSession = () =>
-    (sessionPromise ??= (async () =>
-      new DocgenSession(sessionOptions, binding ?? (await import('caliper-docgen-napi'))))())
+  async function getSession(): Promise<DocgenSession> {
+    sessionPromise ??= (async () =>
+      new DocgenSession(sessionOptions, binding ?? (await import('caliper-docgen-napi'))))()
+    const attempt = sessionPromise
+    try {
+      return await attempt
+    } catch (error) {
+      // A binding that failed to load is tried again by the next request, not remembered as failed.
+      if (sessionPromise === attempt) sessionPromise = undefined
+      throw error
+    }
+  }
+  // A session that cannot start is reported once at a level a developer sees, then every story falls back quietly.
+  let startFailureReported = false
+
+  let started = false
+  let refreshFailureReported = false
+
+  /**
+   * The session, up to date with the files. A failure before the first successful `fresh()` is a failure to start;
+   * after it, a failure is a refresh of a running session and is worded as one. Each is reported once until a
+   * `fresh()` succeeds again, and thrown for the fallback either way.
+   */
+  async function freshSession(): Promise<DocgenSession> {
+    try {
+      const session = await getSession()
+      await session.fresh()
+      started = true
+      startFailureReported = false
+      refreshFailureReported = false
+      return session
+    } catch (error) {
+      const { message } = error as Error
+      if (!started && !startFailureReported) {
+        startFailureReported = true
+        logger.warn(`[caliper-docgen] could not start: ${message}; Storybook's own docgen answers instead`)
+      } else if (started && !refreshFailureReported) {
+        refreshFailureReported = true
+        logger.warn(`[caliper-docgen] could not refresh: ${message}; Storybook's own docgen answers instead`)
+      }
+      throw error
+    }
+  }
   const metaComponent = createMetaComponentResolver()
   const resolveMeta = (csf: CsfFile, storyPath: string) => {
     try {
@@ -206,8 +248,7 @@ export function createDocgenProvider(
     const code = await readFile(storyPath, 'utf8')
     const csf = loadCsf(code, { fileName: storyPath, makeTitle: () => entry.title }).parse()
     // One look at the files for the story and its subcomponents: they are all answered from the same moment.
-    const session = await getSession()
-    await session.fresh()
+    await freshSession()
     const { doc } = await component(csf, storyPath)
     const { description, summary, jsDocTags } = extractComponentDescription(
       extractDescription(csf._metaStatement, csf.editor) || undefined,

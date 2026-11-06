@@ -2310,7 +2310,15 @@ expression: value
         "iconSpacing": {
           "name": "iconSpacing",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": {
@@ -2736,7 +2744,15 @@ expression: value
         "mx": {
           "name": "mx",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -2748,7 +2764,15 @@ expression: value
         "my": {
           "name": "my",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -9688,7 +9712,15 @@ expression: value
         "px": {
           "name": "px",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -9700,7 +9732,15 @@ expression: value
         "py": {
           "name": "py",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -10153,7 +10193,15 @@ expression: value
         "rounded": {
           "name": "rounded",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -13058,7 +13106,15 @@ expression: value
         "mx": {
           "name": "mx",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -13070,7 +13126,15 @@ expression: value
         "my": {
           "name": "my",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -19990,7 +20054,15 @@ expression: value
         "px": {
           "name": "px",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -20002,7 +20074,15 @@ expression: value
         "py": {
           "name": "py",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -20435,7 +20515,15 @@ expression: value
         "rounded": {
           "name": "rounded",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -20507,7 +20595,15 @@ expression: value
         "spacing": {
           "name": "spacing",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -23831,7 +23927,15 @@ expression: value
         "mx": {
           "name": "mx",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -23843,7 +23947,15 @@ expression: value
         "my": {
           "name": "my",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -30782,7 +30894,15 @@ expression: value
         "px": {
           "name": "px",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -30794,7 +30914,15 @@ expression: value
         "py": {
           "name": "py",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -31267,7 +31395,15 @@ expression: value
         "rounded": {
           "name": "rounded",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -34228,7 +34364,15 @@ expression: value
         "mx": {
           "name": "mx",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -34240,7 +34384,15 @@ expression: value
         "my": {
           "name": "my",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -41160,7 +41312,15 @@ expression: value
         "px": {
           "name": "px",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -41172,7 +41332,15 @@ expression: value
         "py": {
           "name": "py",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -41605,7 +41773,15 @@ expression: value
         "rounded": {
           "name": "rounded",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -44304,7 +44480,15 @@ expression: value
         "mx": {
           "name": "mx",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -44316,7 +44500,15 @@ expression: value
         "my": {
           "name": "my",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -51236,7 +51428,15 @@ expression: value
         "px": {
           "name": "px",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -51248,7 +51448,15 @@ expression: value
         "py": {
           "name": "py",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -51681,7 +51889,15 @@ expression: value
         "rounded": {
           "name": "rounded",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -54340,7 +54556,15 @@ expression: value
         "mx": {
           "name": "mx",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -54352,7 +54576,15 @@ expression: value
         "my": {
           "name": "my",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -61272,7 +61504,15 @@ expression: value
         "px": {
           "name": "px",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -61284,7 +61524,15 @@ expression: value
         "py": {
           "name": "py",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -61717,7 +61965,15 @@ expression: value
         "rounded": {
           "name": "rounded",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -64396,7 +64652,15 @@ expression: value
         "mx": {
           "name": "mx",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -64408,7 +64672,15 @@ expression: value
         "my": {
           "name": "my",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -71328,7 +71600,15 @@ expression: value
         "px": {
           "name": "px",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -71340,7 +71620,15 @@ expression: value
         "py": {
           "name": "py",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -71773,7 +72061,15 @@ expression: value
         "rounded": {
           "name": "rounded",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -74432,7 +74728,15 @@ expression: value
         "mx": {
           "name": "mx",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -74444,7 +74748,15 @@ expression: value
         "my": {
           "name": "my",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -81364,7 +81676,15 @@ expression: value
         "px": {
           "name": "px",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -81376,7 +81696,15 @@ expression: value
         "py": {
           "name": "py",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,
@@ -81809,7 +82137,15 @@ expression: value
         "rounded": {
           "name": "rounded",
           "type": {
-            "kind": "string"
+            "kind": "union",
+            "members": [
+              {
+                "kind": "string"
+              },
+              {
+                "kind": "number"
+              }
+            ]
           },
           "required": false,
           "defaultValue": null,

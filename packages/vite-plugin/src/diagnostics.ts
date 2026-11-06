@@ -8,7 +8,7 @@ interface Log {
   info(message: string): void
 }
 
-const RANK: Record<DiagnosticLevel, number> = { silent: 0, error: 1, warn: 2, info: 3 }
+export const RANK: Record<DiagnosticLevel, number> = { silent: 0, error: 1, warn: 2, info: 3 }
 const SEVERITY_RANK: Record<Diagnostic['severity'], number> = { error: 1, warning: 2, info: 3 }
 
 function format(diagnostic: Diagnostic): string {

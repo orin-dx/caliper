@@ -1756,6 +1756,44 @@ fn test_enum_collected() {
 }
 
 #[test]
+fn an_enum_member_has_one_value_for_its_entry_and_its_union() {
+    let data = parse_file(
+        Utf8Path::new("/test/level.ts"),
+        "enum Level { Low, Mid = 5, High }\nenum Tone { Primary = \"primary\" }\nenum Tone { Secondary = \"secondary\" }",
+    );
+    let values = |key: &str| -> Vec<(String, EnumValue)> {
+        data.enums[key].iter().map(|entry| (entry.name.clone(), entry.value.clone())).collect()
+    };
+    assert_eq!(
+        values("/test/level.ts:Level"),
+        vec![
+            ("Low".to_string(), EnumValue::Number(0.0)),
+            ("Mid".to_string(), EnumValue::Number(5.0)),
+            ("High".to_string(), EnumValue::Number(6.0)),
+        ]
+    );
+    assert_eq!(
+        values("/test/level.ts:Tone"),
+        vec![
+            ("Primary".to_string(), EnumValue::String("primary".to_string())),
+            ("Secondary".to_string(), EnumValue::String("secondary".to_string())),
+        ]
+    );
+}
+
+#[test]
+fn an_enum_in_a_function_body_does_not_touch_the_entries_of_a_module_level_enum() {
+    let data = parse_file(
+        Utf8Path::new("/test/local.ts"),
+        "function before() { enum Level { Early = 0 } return Level.Early }\n\
+         enum Level { Low = 1 }\n\
+         function after() { enum Level { High = 2 } return Level.High }",
+    );
+    let names: Vec<&str> = data.enums["/test/local.ts:Level"].iter().map(|entry| entry.name.as_str()).collect();
+    assert_eq!(names, ["Low"]);
+}
+
+#[test]
 fn test_const_array_as_const_collected() {
     // antd's `type ButtonType = (typeof _ButtonTypes)[number]` pattern —
     // a flat array literal, not an object (test_enum_collected above) or a
@@ -2881,6 +2919,118 @@ fn merging_a_described_interface_keeps_the_first_ones_tags() {
     let iface = data.interfaces.iter().find(|(key, _)| key.ends_with(":Props")).map(|(_, iface)| iface).unwrap();
     assert_eq!(iface.tags.get("deprecated").map(String::as_str), Some("use Other"));
     assert_eq!(iface.description, "The props.");
+}
+
+#[test]
+fn a_component_cast_to_vfc_or_void_function_component_keeps_its_props() {
+    let source = "import type { VFC, VoidFunctionComponent } from 'react';\n\
+        import { forwardRef } from 'react';\n\
+        interface Props { label: string }\n\
+        const InnerA = forwardRef<HTMLDivElement, Props>((props, ref) => <div ref={ref} />);\n\
+        const InnerB = forwardRef<HTMLDivElement, Props>((props, ref) => <div ref={ref} />);\n\
+        const A = InnerA as VFC<{ a: string }>;\n\
+        const B = InnerB as VoidFunctionComponent<{ b: string }>;\n\
+        export { A, B };";
+    let data = parse_file(Utf8Path::new("/fixtures/cast.tsx"), source);
+    let path = "/fixtures/cast.tsx";
+    let mappings: Vec<(&str, &str)> =
+        data.component_mappings.iter().map(|m| (m.component_name.as_str(), m.props_type_name.as_str())).collect();
+    let names_of = |component: &str| -> Vec<String> {
+        let matching: Vec<&&str> =
+            mappings.iter().filter(|(name, _)| *name == component).map(|(_, props)| props).collect();
+        assert_eq!(matching.len(), 1, "expected one mapping named {component}, got {mappings:?}");
+        match data.type_aliases.get(&format!("{path}:{}", matching[0])) {
+            Some(CollectedTypeAlias::Passthrough { target: CollectedType::Object(fields), .. }) => {
+                fields.iter().map(|f| f.name.to_string()).collect()
+            }
+            other => panic!("expected a Passthrough object alias for {component}, got {other:?} from {mappings:?}"),
+        }
+    };
+    assert_eq!(names_of("A"), ["a"]);
+    assert_eq!(names_of("B"), ["b"]);
+}
+
+#[test]
+fn exporting_a_cast_component_under_the_name_of_another_local_leaves_that_local_mapped() {
+    let source = "import type { VFC } from 'react';\n\
+        import { forwardRef } from 'react';\n\
+        interface Props { label: string }\n\
+        interface Q { q: string }\n\
+        const InnerA = forwardRef<HTMLDivElement, Props>((props, ref) => <div ref={ref} />);\n\
+        function B(props: Q) { return <div />; }\n\
+        const A = InnerA as VFC<{ a: string }>;\n\
+        export { A as B };";
+    let data = parse_file(Utf8Path::new("/fixtures/cast-rename.tsx"), source);
+    let local_b: Vec<&str> = data
+        .component_mappings
+        .iter()
+        .filter(|m| m.component_name == "B" && m.rule != crate::types::DetectionRule::FcAnnotation)
+        .map(|m| m.props_type_name.as_str())
+        .collect();
+    assert_eq!(local_b, ["Q"]);
+}
+
+#[test]
+fn preact_compat_element_type_is_react_everywhere() {
+    let source = "import type { ReactElement } from 'preact/compat';\n\
+        function build(): ReactElement { throw new Error(); }\n\
+        export function Name(props: { id: string }) { return build(); }";
+    assert_eq!(components_in(source), ["Name"]);
+}
+
+#[test]
+fn a_call_to_h_is_render_evidence() {
+    let source = "import { h } from 'preact';\n\
+        export function Name(props: { id: string }) { return h('div', null, props.id); }";
+    assert_eq!(components_in(source), ["Name"]);
+}
+
+#[test]
+fn a_member_call_named_h_is_not_render_evidence() {
+    let source = "import { codec } from './codec';\n\
+        export function Encode(props: { id: string }) { return codec.h(props.id); }";
+    assert_eq!(components_in(source), Vec::<String>::new());
+}
+
+#[test]
+fn preacts_namespace_h_call_is_render_evidence_and_not_a_tagged_factory() {
+    let source = "import * as Preact from 'preact';\n\
+        import type { ComponentProps } from 'preact/compat';\n\
+        type ButtonProps = ComponentProps<'button'>;\n\
+        export const Button = Preact.h('button', {});\n\
+        export function Name(props: { id: string }) { return Preact.h('div', null, props.id); }";
+    assert_eq!(components_in(source), ["Name"]);
+}
+
+#[test]
+fn a_local_function_named_h_is_not_render_evidence() {
+    let source = "function h(id: string) { return { id }; }\n\
+        export function Hash(props: { id: string }) { return h(props.id); }";
+    assert_eq!(components_in(source), Vec::<String>::new());
+}
+
+#[test]
+fn a_component_passed_to_a_local_h_is_not_counted_as_rendered() {
+    let source = "function h(value: unknown) { return value; }\n\
+        function Row(props: { id: string }, ref: unknown) { return <i />; }\n\
+        export const rows = h(Row);";
+    assert_eq!(components_in(source), Vec::<String>::new());
+}
+
+#[test]
+fn a_component_passed_to_preacts_h_is_counted_as_rendered() {
+    let source = "import { h } from 'preact';\n\
+        function Row(props: { id: string }, ref: unknown) { return <i />; }\n\
+        export const rows = h(Row, null);";
+    assert_eq!(components_in(source), ["Row"]);
+}
+
+#[test]
+fn a_component_passed_to_the_jsx_runtime_is_counted_as_rendered() {
+    let source = "import { jsx } from 'react/jsx-runtime';\n\
+        function Row(props: { id: string }, ref: unknown) { return <i />; }\n\
+        export const rows = jsx(Row, {});";
+    assert_eq!(components_in(source), ["Row"]);
 }
 
 #[test]
