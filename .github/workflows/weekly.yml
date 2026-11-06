@@ -66,16 +66,30 @@ jobs:
           INSTALL_NODE_DIR: ${{ steps.corpus-node.outputs.dir }}
         run: python3 scripts/corpora.py setup --install-node-dir "$INSTALL_NODE_DIR"
       - name: Fetch last week's record
+        id: baseline
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+        # A first run has no earlier run to download; a download that fails is a different thing and has to show: it
+        # leaves an error annotation and a line in the summary, and fails this step. The job still measures, tells
+        # weekly.py (`--baseline-failed`, which opens the issue) and then fails in the last step.
         run: |
           id=$(gh run list --workflow weekly.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
-          if [ -n "$id" ]; then gh run download "$id" --name weekly --dir previous; fi
+          if [ -z "$id" ]; then
+            echo "::notice::No earlier successful run exists, so there is no baseline to compare with."
+            echo "No baseline: no earlier successful run exists." >> "$GITHUB_STEP_SUMMARY"
+          elif ! gh run download "$id" --name weekly --dir previous; then
+            rm -rf previous
+            echo "::error::Downloading the baseline from run $id failed, so this run is not compared with last week's."
+            echo "**Baseline download failed** (run $id): nothing below was compared with last week's record." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
       - name: Measure
+        env:
+          BASELINE_FAILED: ${{ steps.baseline.outcome == 'failure' && '--baseline-failed' || '' }}
         run: >-
           python3 scripts/weekly.py --bin target/release/caliper-docgen --oracle --agent-eval
-          --previous previous/weekly.json --out weekly.json --markdown weekly.md --issue issue.md
+          --previous previous/weekly.json $BASELINE_FAILED --out weekly.json --markdown weekly.md --issue issue.md
       - if: always()
         run: cat weekly.md >> "$GITHUB_STEP_SUMMARY" || true
       - if: always()
@@ -99,3 +113,8 @@ jobs:
           else
             gh issue create --title "The weekly record got worse" --label weekly-measurement --body-file issue.md
           fi
+      - name: Fail when the baseline could not be downloaded
+        if: ${{ always() && steps.baseline.outcome == 'failure' }}
+        run: |
+          echo "::error::The baseline download failed, so this run was not compared with last week's record; the issue was opened."
+          exit 1

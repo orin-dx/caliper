@@ -66,7 +66,7 @@ Recall is measured against that reference, on the components both tools report (
 | `@types/react` props | RDT's props that `@types/react` declares (`onClick`, `aria-*`, `ref`) that the tool lists |
 | ... with layers      | The same two, also counting a prop held in a collapsed inheritance layer                  |
 
-Caliper collapses an inherited dependency source of more than 30 props into a layer (ADR 0012) and lists only its notable members as props, as Storybook does. A prop in a layer is in the output, named by the layer's `members`, but is not in the flat list, so the table reports both: the plain columns say what the default output lists, "with layers" says what it holds. react-docgen writes no layers, so its two columns are equal.
+Caliper collapses an inherited dependency source of more than 30 props into a layer (`docs/architecture/resolver-type-resolution.md`, Collapse) and lists only its notable members as props, as Storybook does. A prop in a layer is in the output, named by the layer's `members`, but is not in the flat list, so the table reports both: the plain columns say what the default output lists, "with layers" says what it holds. react-docgen writes no layers, so its two columns are equal.
 
 react-docgen parses each file with its default resolver and importer, as Storybook does. The importer follows relative and package imports to the file that declares a type, so a props interface imported from a sibling file is read. It does no type inference: it lists none of React's inherited attributes, and a generic, mapped or conditional type stays the source text. That is the point of the comparison. A file it throws on is counted (`failed`) and listed (`failedFiles`), not dropped silently.
 
@@ -130,9 +130,9 @@ just bench                 # this checkout, uncommitted work included, against o
 just bench my-branch       # a branch
 ```
 
-`scripts/bench.py` builds both in release mode, then times `extract --json` over Mantine and Chakra (source directory only, nothing installed, dependency loading off, no cache) with the two builds interleaved and alternating which goes first. It prints the median wall time and peak RSS of each and their ratio. The first run fetches the two source directories into `.corpora/`.
+`scripts/bench.py` builds both in release mode, then times `extract --json` over Mantine and Chakra in the Storybook addon's configuration (dependencies loaded, cache on after the warm-up run, inherited props not collapsed) over corpora with their dependencies installed with the two builds interleaved and alternating which goes first. It prints the median wall time and peak RSS of each and their ratio. It stops with the setup command to run when a corpus is not installed, because a sparse fetch has no dependencies to load: run `scripts/corpora.py setup --corpus mantine --corpus chakra` first.
 
-With nothing changed, the ratio stays inside 1.04 for time (95th percentile, 100 trials per corpus on CI and a laptop) and inside 1.12 for memory on CI runners. More than 1.10× in time or 1.20× in memory is worth looking at. Nothing enforces that. Run it before a resolver change goes up for review, and say in the pull request when a cost is intended.
+The 1.10× and 1.20× thresholds come from a calibration made when the bench ran with `--no-cache --no-load-dependencies` (with nothing changed, the ratio stayed inside 1.04 for time, 95th percentile of 100 trials per corpus on CI and a laptop, and inside 1.12 for memory on CI runners). The bench now runs the addon's configuration (dependencies loaded, warm cache) and that calibration has not been repeated for it, so the noise band may differ. More than 1.10× in time or 1.20× in memory is a starting point for looking. Nothing enforces that. Run it before a resolver change goes up for review, and say in the pull request when a cost is intended.
 
 ## Checker modes
 

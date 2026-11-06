@@ -164,6 +164,10 @@ export type DetectionRule =
   | 'attachedSubComponent'
   | 'typedFunctionExpression'
   | 'wrapperTypeArgument'
+  | 'importedMemberAlias'
+  | 'memoExoticDecl'
+  | 'taggedFactory'
+  | 'factoryResult'
 
 export interface EnumEntry {
   name: string

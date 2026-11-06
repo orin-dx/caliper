@@ -176,7 +176,11 @@ $ caliper-docgen schema
               "anonymousDefaultExport",
               "attachedSubComponent",
               "typedFunctionExpression",
-              "wrapperTypeArgument"
+              "wrapperTypeArgument",
+              "importedMemberAlias",
+              "memoExoticDecl",
+              "taggedFactory",
+              "factoryResult"
             ]
           },
           "exported": {
