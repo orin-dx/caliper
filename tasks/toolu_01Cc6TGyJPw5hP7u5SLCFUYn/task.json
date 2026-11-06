@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01Cc6TGyJPw5hP7u5SLCFUYn",
+  "agent_id": "aafb4d4df8399df9b",
+  "subagent_type": "general-purpose",
+  "task_description": "Resolve conflicts and findings on PR 323",
+  "token_usage": {
+    "input_tokens": 68,
+    "cache_creation_tokens": 249862,
+    "cache_read_tokens": 2278074,
+    "output_tokens": 7480,
+    "api_call_count": 34
+  },
+  "started_at": "2026-11-05T17:52:22.477731-08:00",
+  "completed_at": "2026-11-05T18:29:31.754904-08:00"
+}

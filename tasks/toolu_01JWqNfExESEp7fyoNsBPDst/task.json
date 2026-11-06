@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01JWqNfExESEp7fyoNsBPDst",
+  "agent_id": "a3df62e51ccf49824",
+  "subagent_type": "general-purpose",
+  "task_description": "Resolve conflicts on 348, 349, 353",
+  "token_usage": {
+    "input_tokens": 146,
+    "cache_creation_tokens": 314867,
+    "cache_read_tokens": 6018886,
+    "output_tokens": 16701,
+    "api_call_count": 72
+  },
+  "started_at": "2026-11-05T17:53:28.382257-08:00",
+  "completed_at": "2026-11-05T18:25:08.207724-08:00"
+}
