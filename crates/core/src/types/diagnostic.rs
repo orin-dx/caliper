@@ -142,8 +142,6 @@ pub enum DiagnosticCode {
     Unknown,
     /// JSDoc @default conflicts with code default value — code value was used.
     JsDocDefaultMismatch,
-    /// Default value is a runtime expression that could not be statically evaluated.
-    ComputedDefault,
     /// Indexed access type (Type["key"]) that could not be resolved from known tables.
     IndexedAccessOpaque,
     /// Template literal type that could not be statically expanded.

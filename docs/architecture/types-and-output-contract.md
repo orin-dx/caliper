@@ -183,7 +183,7 @@ pub enum DiagnosticSeverity { Error, Warning, Info }
 #[non_exhaustive]
 pub enum DiagnosticCode {
     UnresolvableImport, GenericArgumentMismatch, OpaqueType, MaxDepthExceeded,
-    Unknown, JsDocDefaultMismatch, ComputedDefault, IndexedAccessOpaque,
+    Unknown, JsDocDefaultMismatch, IndexedAccessOpaque,
     TemplateLiteralOpaque, DiscriminatedUnion, IoError, ExcessiveNesting,
     ParseError, InternalPanic, SkippedCandidate, ComponentKeyCollision, DuplicateEnumName, CircularReference, MissingTypeLibrary,
 }

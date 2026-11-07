@@ -1305,8 +1305,6 @@ pub enum DefaultSource {
     Destructuring,
     /// Extracted from `Component.defaultProps = { size: 'md' }` assignment.
     DefaultProps,
-    /// Extracted from `/** @default 'md' */` JSDoc/TSDoc annotation.
-    JsDoc,
 }
 
 /// A default value as collected by the extractor (before resolver processing).
