@@ -1,6 +1,6 @@
 // The oracle's comparison is pure, so its verdicts are tested without a checker.
 import { describe, expect, it } from 'vitest'
-import { compare, prim, type Norm } from '../src/oracle-compare.ts'
+import { caliperNorm, compare, prim, type Norm } from '../src/oracle-compare.ts'
 
 const lit = (value: string): Norm => ({ k: 'lit', value })
 const union = (...members: Norm[]): Norm => ({ k: 'union', members })
@@ -115,5 +115,100 @@ describe('the oracle comparison', () => {
     expect(compare(prim('never'), undef)).toBe('identical')
     expect(compare(prim('never'), prim('string'))).toBe('wrong')
     expect(compare(prim('string'), undef)).toBe('wrong')
+  })
+
+  describe('comparator artifacts', () => {
+    // Caliper's canonical JSON for `{ [id: string]: V }`: one field, named after the signature's parameter, whose
+    // `indexKey` is the key type.
+    const indexSignature = (name: string, value: object) => ({
+      kind: 'object',
+      fields: [{ name, propType: value, required: true, description: '', indexKey: { kind: 'string' } }],
+    })
+    const checkerIndex = (value: Norm): Norm => ({ k: 'object', fields: [], index: true, indexValue: value })
+
+    it('an index signature is read as an index, not as a property named after its parameter', () => {
+      expect.hasAssertions()
+      // shadcn's `defaultLayout?: Layout` with `Layout = { [id: string]: number }`.
+      const caliper = caliperNorm(indexSignature('id', { kind: 'number' }))
+      expect(caliper).toMatchObject({ k: 'object', fields: [], index: true })
+      expect(compare(caliper, optional(checkerIndex(prim('number'))))).toBe('identical')
+      // The parameter's name is not a property under any spelling.
+      expect(compare(caliperNorm(indexSignature('name', { kind: 'string' })), checkerIndex(prim('string')))).toBe(
+        'identical',
+      )
+    })
+
+    it('an index signature keeps its named fields beside it', () => {
+      expect.hasAssertions()
+      const caliper = caliperNorm({
+        kind: 'object',
+        fields: [
+          { name: 'id', propType: { kind: 'number' }, required: true, description: '' },
+          { name: 'key', propType: { kind: 'number' }, required: true, description: '', indexKey: { kind: 'string' } },
+        ],
+      })
+      expect(caliper).toMatchObject({ fields: ['id'], index: true })
+      expect(compare(caliper, { k: 'object', fields: ['id'], index: true, indexValue: prim('number') })).toBe(
+        'identical',
+      )
+      expect(compare(caliper, checkerIndex(prim('number')))).toBe('wrong')
+    })
+
+    it('an index signature of another value type, or against a type with none, is still wrong', () => {
+      expect.hasAssertions()
+      const caliper = caliperNorm(indexSignature('id', { kind: 'number' }))
+      expect(compare(caliper, checkerIndex(prim('string')))).toBe('wrong')
+      expect(compare(caliper, { k: 'object', fields: [], index: false })).toBe('wrong')
+      // A checker index signature Caliper lost reads less precise, as before.
+      expect(compare({ k: 'object', fields: [], index: false }, checkerIndex(prim('number')))).toBe('less precise')
+    })
+
+    it('a readonly array is the array, as the checker reads it', () => {
+      expect.hasAssertions()
+      // chakra's `readonly T[]`, shadcn's `readonly Preset[]`.
+      const readonlyStrings = caliperNorm({ kind: 'readonly', element: { kind: 'array', element: { kind: 'string' } } })
+      expect(readonlyStrings).toStrictEqual({ k: 'array', element: prim('string') })
+      expect(compare(readonlyStrings, { k: 'array', element: prim('string') })).toBe('identical')
+      const readonlyTuple = caliperNorm({
+        kind: 'readonly',
+        element: { kind: 'tuple', elements: [{ kind: 'string' }, { kind: 'number' }] },
+      })
+      expect(compare(readonlyTuple, { k: 'tuple', elements: [prim('string'), prim('number')] })).toBe('identical')
+    })
+
+    it('a readonly array of another element type is still wrong', () => {
+      expect.hasAssertions()
+      const readonlyNumbers = caliperNorm({ kind: 'readonly', element: { kind: 'array', element: { kind: 'number' } } })
+      expect(compare(readonlyNumbers, { k: 'array', element: prim('string') })).toBe('wrong')
+      expect(compare(caliperNorm({ kind: 'number' }), prim('string'))).toBe('wrong')
+    })
+
+    it('literals beside the string that covers them are spelled when the checker spells them out', () => {
+      expect.hasAssertions()
+      // Mantine's `variant?: AccordionVariant | (string & {})`: the checker keeps the literals, Caliper reads
+      // `'default' | … | string`. Both hold every string.
+      const spelledOut = optional(union(lit('default'), lit('filled'), prim('string')))
+      const caliper = caliperNorm({
+        kind: 'union',
+        members: [
+          { kind: 'stringLiteral', value: 'default' },
+          { kind: 'stringLiteral', value: 'filled' },
+          { kind: 'string' },
+        ],
+      })
+      expect(compare(caliper, spelledOut)).toBe('spelled')
+      expect(compare(prim('string'), spelledOut)).toBe('spelled')
+    })
+
+    it('a string where the checker has only literals is still less precise', () => {
+      expect.hasAssertions()
+      // No `string` in the checker's union: it admits fewer values than Caliper's.
+      expect(compare(prim('string'), optional(union(lit('default'), lit('filled'))))).toBe('less precise')
+      expect(compare(union(lit('default'), prim('string')), optional(union(lit('default'), lit('filled'))))).toBe(
+        'less precise',
+      )
+      // A different primitive is not covered by the checker's.
+      expect(compare(prim('number'), optional(union(lit('default'), prim('string'))))).toBe('wrong')
+    })
   })
 })

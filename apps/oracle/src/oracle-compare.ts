@@ -11,7 +11,7 @@ export type Norm = (
   | { k: 'array'; element: Norm }
   | { k: 'tuple'; elements: Norm[] }
   | { k: 'function'; params: { optional: boolean; rest: boolean; type: Norm }[]; returns: Norm }
-  | { k: 'object'; fields: string[]; index: boolean }
+  | { k: 'object'; fields: string[]; index: boolean; indexValue?: Norm }
   | { k: 'name'; name: string }
   | { k: 'param'; name: string; fallback?: Norm; constraint?: Norm }
   | { k: 'opaque' }
@@ -39,6 +39,8 @@ const TERMINALS: Record<string, string> = {
 const PRIMITIVES = new Set(['string', 'number', 'boolean', 'null', 'undefined', 'any', 'unknown', 'never', 'void'])
 const LITERALS = new Set(['stringLiteral', 'numberLiteral', 'boolLiteral'])
 
+const isIndexField = (field: any) => field.indexKey !== undefined
+
 /** Caliper's canonical `PropType` JSON, normalized. */
 export function caliperNorm(t: any, depth = 0): Norm {
   if (!t || depth > MAX_DEPTH) return { k: 'opaque' }
@@ -64,7 +66,23 @@ export function caliperNorm(t: any, depth = 0): Norm {
       return { k: 'tuple', elements: (t.elements ?? t.members ?? []).map((m: any) => inner(m)) }
     }
     case 'object': {
-      return { k: 'object', fields: t.fields.map((field: any) => field.name).toSorted(), index: false }
+      // Caliper writes an index signature as one field whose `indexKey` is the key type: its name is the signature's
+      // parameter name (`[id: string]: number`), not a property.
+      const indexed: any[] = t.fields.filter(isIndexField)
+      const named: any[] = t.fields.filter((field: any) => !isIndexField(field))
+      const indexValues: Norm[] = indexed.map((field) => inner(field.propType))
+      return {
+        k: 'object',
+        fields: named.map((field) => field.name).toSorted(),
+        index: indexed.length > 0,
+        ...(indexed.length > 0 && {
+          indexValue: indexValues.length === 1 ? indexValues[0] : { k: 'union', members: indexValues },
+        }),
+      }
+    }
+    // A `readonly` array or tuple is the array or tuple, as the checker reads it.
+    case 'readonly': {
+      return caliperNorm(t.element, depth)
     }
     case 'function': {
       const params = (t.params ?? []).map((p: any) => ({
@@ -91,7 +109,7 @@ const WIDENING = new Set(['string', 'number', 'boolean'])
 
 /** Union members without `undefined` (an optional prop's, which both sides treat as optional), flattened, with
  * `true | false` as `boolean`. */
-function members(n: Norm, written = false): Norm[] {
+function members(n: Norm, coverLiterals = false): Norm[] {
   const flat: Norm[] = []
   const push = (m: Norm) => {
     if (m.k === 'union') m.members.forEach(push)
@@ -100,12 +118,12 @@ function members(n: Norm, written = false): Norm[] {
   }
   push(n)
   // `'default' | 'large' | string` is `string` to the checker: a literal that a primitive of its kind in the same
-  // union already covers adds nothing, so a union Caliper wrote with it reads the same as one without. Only Caliper's
-  // (`written`): the checker's `"blue" | … | (string & {})` keeps its literals, which are what a reader sees. A
+  // union already covers adds nothing, so a union written with it holds the same values as one without. The checker's
+  // `"blue" | … | (string & {})` keeps its literals for the reader, so `compare` scores it spelled, not identical. A
   // `true`/`false` literal is boolean's, not string's.
   const has = (name: string) => flat.some((m) => m.k === 'prim' && m.name === name)
   const covered = (m: Norm) =>
-    written &&
+    coverLiterals &&
     m.k === 'lit' &&
     m.value !== 'true' &&
     m.value !== 'false' &&
@@ -174,7 +192,13 @@ function compareOne(c: Norm, k: Norm, depth: number): Verdict {
       if (c.k !== 'object') return c.k === 'prim' && c.name === 'object' ? 'less precise' : 'wrong'
       const own = new Set(c.fields)
       if (c.fields.some((f) => !k.fields.includes(f))) return 'wrong'
-      return k.fields.some((f) => !own.has(f)) || k.index ? 'less precise' : 'identical'
+      // An index signature Caliper has and the checker does not describes a different type.
+      if (c.index && !k.index) return 'wrong'
+      const verdicts: Verdict[] = [
+        k.fields.some((f) => !own.has(f)) || (k.index && !c.index) ? 'less precise' : 'identical',
+      ]
+      if (c.indexValue && k.indexValue) verdicts.push(compare(c.indexValue, k.indexValue, depth + 1))
+      return worst(verdicts)
     }
     case 'intersection': {
       if (c.k !== 'intersection') return 'less precise'
@@ -198,8 +222,15 @@ function compareOne(c: Norm, k: Norm, depth: number): Verdict {
   }
 }
 
-/** How Caliper's normalized type `c` stands against the checker's `k`. */
+/** How Caliper's normalized type `c` stands against the checker's `k`. A checker union that spells literals a
+ * primitive in it already covers (`'a' | 'b' | (string & {})`) holds the values Caliper's `string` does, spelled
+ * another way. */
 export function compare(c: Norm, k: Norm, depth = 0): Verdict {
+  const verdict = compareValues(c, k, depth)
+  return verdict === 'identical' && members(k).length !== members(k, true).length ? 'spelled' : verdict
+}
+
+function compareValues(c: Norm, k: Norm, depth: number): Verdict {
   if (depth > MAX_DEPTH) return 'identical'
   // The checker has no type to compare with: an error, `any`, or a top-level `unknown` where Caliper has a type
   // (most often a declaration the program couldn't resolve).
@@ -208,7 +239,7 @@ export function compare(c: Norm, k: Norm, depth = 0): Verdict {
   if (uninformative && !(c.k === 'prim' && k.k === 'prim' && c.name === k.name)) {
     return depth === 0 ? 'checker any/error' : 'identical'
   }
-  const km = members(k)
+  const km = members(k, true)
   // An optional prop of type `never` reads `undefined` in the checker, which `members` drops as the optional marker.
   if (km.length === 0 && c.k === 'prim' && c.name === 'never') return 'identical'
   if (c.k === 'name') {
