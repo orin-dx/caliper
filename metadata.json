@@ -1,0 +1,45 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6SVV86HH5J698D3NR9SCEC3",
+  "strategy": "manual-commit",
+  "branch": "docs/rdt-differences",
+  "checkpoints_count": 3,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 16,
+    "cache_creation_tokens": 24413,
+    "cache_read_tokens": 1255592,
+    "output_tokens": 6820,
+    "api_call_count": 5,
+    "subagent_tokens": {
+      "input_tokens": 309,
+      "cache_creation_tokens": 279674,
+      "cache_read_tokens": 25996906,
+      "output_tokens": 109301,
+      "api_call_count": 156
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
