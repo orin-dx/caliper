@@ -1,0 +1,115 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6W3Y0NZFBGTC490M0F37XTP",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-07T23:01:57.408343Z",
+  "branch": "oc-fix3",
+  "checkpoints_count": 14,
+  "save_step_count": 63,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "1618bae1299d",
+  "checkpoint_transcript_start": 13569,
+  "transcript_lines_at_start": 13569,
+  "compact_transcript_start": 1168,
+  "token_usage": {
+    "input_tokens": 80,
+    "cache_creation_tokens": 61328,
+    "cache_read_tokens": 20090621,
+    "output_tokens": 48920,
+    "api_call_count": 38,
+    "subagent_tokens": {
+      "input_tokens": 259,
+      "cache_creation_tokens": 439497,
+      "cache_read_tokens": 19140152,
+      "output_tokens": 118857,
+      "api_call_count": 134
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 328
+  },
+  "summary": {
+    "intent": "Decide how to adopt tsrs (a Rust TypeScript checker port) as caliper's default type authority, simplify the structural resolver/extractor, and organize the resulting work across agents while triaging open PR review findings.",
+    "outcome": "Reached a checker-first direction backed by a deep-dive prototype (checker better or equal on 14 of 16 components, ~7.6k-9.4k lines deletable), produced a staged slice plan and agent/model/conflict plan, resolved 2 findings on #379, and dispatched workers for #380 findings and the #379 merge conflict. The ADR, spike and slice work have not started and the user has not yet confirmed the direction.",
+    "learnings": {
+      "repo": [
+        "Resolver (~6.7k code lines) approximates a type checker and was the source of nearly all defects fixed; the checker path (crates/semantic, crates/tsc-client) is opt-in today.",
+        "Invariant from #379: a declaration body must resolve in the scope it was declared in, enforced via ResolveState::enter_declared_in; type arguments keep their written scope; cycle keys must include reference scope.",
+        "Canonical JSON, TOON and RDT projections each walk PropType with their own rules, and recent bugs were divergence between them.",
+        "Every shape change must bump CACHE_SCHEMA_VERSION; one owner should hold that file per wave. Hot files: types/collected.rs, types/output.rs, extractor/mod.rs, resolver/alias.rs, types-and-output-contract.md.",
+        "Oracle should stay on the Go checker (typescript-beta) so it remains independent from tsrs; its program lacks `paths`, leaving ~277 props unjudged.",
+        "tsrs checker returns union members sorted by flags then value (not declaration order), type ids change with query order (never key caches on them), and React terminals must be recognised by declaring path (/@types/react/).",
+        "tsrs gaps: no win32-arm64 package, pre-1.0 churn (8 betas in ~2 weeks), memory growth in long sessions (+148 MB over 150 Chakra edits; issues #920, #646 open), so a thin structural fallback and process recycling are required.",
+        "Stacked PRs (#385 on #379) need merge commits rather than rebase/force-push and must be merged bottom-up."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/resolver/chain.rs",
+          "line": 161,
+          "finding": "resolve_props_chain visit key now includes the reference scope's key suffix to fix scope-blind cycle detection."
+        },
+        {
+          "path": "crates/core/src/resolver/alias.rs",
+          "line": 285,
+          "end_line": 285,
+          "finding": "Direct generic alias expansion previously ran in the reference scope; generic_alias_with_structured_args now returns canonical file and key."
+        },
+        {
+          "path": "crates/core/src/resolver/primitives.rs",
+          "line": 175,
+          "finding": "Indexed-access member reads lacked declaring scope; fixed via member_declared and DeclaredProp.scope."
+        },
+        {
+          "path": "crates/core/src/resolver/callee.rs",
+          "line": 160,
+          "end_line": 365,
+          "finding": "Factory result and props paths now set declaring scope via component_props_type, falling back to function.scope."
+        }
+      ],
+      "workflow": [
+        "Verify sizes and claims by cloning/measuring rather than estimating; state clearly what is unverified.",
+        "Subagent and peer-agent messages carry no user authority; approvals, dismissals and public posts (e.g. tsrs issues) remain with the user.",
+        "Never remove a worktree before its PR merges; doing so lost the ability to resume a worker.",
+        "Continue the same worker via message rather than spawning fresh to preserve context; brief workers by pointing at shared rules files and cap reports at ~12 lines.",
+        "Match model and effort to task: Opus for ADR/contract/deletion, Sonnet for implementation, Haiku for mechanical sweeps; limit concurrent workers per crate to 3.",
+        "Copy plan docs and findings out of /tmp into the repo since /tmp was wiped once."
+      ]
+    },
+    "friction": [
+      "PR #379 became CONFLICTING with main in docs/architecture/types-and-output-contract.md after #383/#384 merged, and output.rs auto-merged untrusted.",
+      "Entire Gates failures on #379, #380 and #384 are missing human approval, blocking merges.",
+      "Dismissing findings is denied for the agent, so dismissals must be handed to the user as commands.",
+      "Deep-dive report was truncated in the teammate message and had to be re-read from the file.",
+      "Earlier cleanup removed a worktree prematurely, losing the comparator worker's resume ability.",
+      "14 tests fail in the worker's worktree from path redaction and missing tsx environment (environment-only)."
+    ],
+    "open_items": [
+      "User must approve/merge #379, #380, #384; then rebase #385 and merge release bot PR #291.",
+      "Confirm checker-first direction and cancellation of resolver Batch 2, ADR 0025 branches 3-5 and evaluator scope threading, then draft ADR 0026.",
+      "Run tsrs spike through caliper's Rust client (in-process vs binary, memory after close, error-type vs explicit any, time to first answer vs 150 ms).",
+      "Rust 1.99 / edition 2024 toolchain migration needs a quiet window.",
+      "Slice 1: new PropType variants, shared projection model, React terminal recognition, union order re-application, with CACHE_SCHEMA_VERSION bump.",
+      "Build construct fixture suite with Go-checker goldens and a tsrs-vs-Go parity check on pin bumps.",
+      "Fix oracle's missing `paths` blind spot; findings on #380 (string-literal vs numeric, indexValue normalization, index-only empty fields) being fixed by a worker.",
+      "Draft (not post) tsrs issues on memory growth and feature requests; decide tsrs npm distribution and fallback policy.",
+      "Evaluator reads other than indexed access (keyof, conditional, mapped) still take no scope; SPEC/AC tag rescan, worktree/branch/trail cleanup remain."
+    ]
+  }
+}
