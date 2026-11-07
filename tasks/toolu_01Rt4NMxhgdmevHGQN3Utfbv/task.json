@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01Rt4NMxhgdmevHGQN3Utfbv",
+  "agent_id": "a9be8448b82d8a8b1",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix Storybook control projection",
+  "started_at": "2026-11-06T19:07:26.995416-08:00"
+}

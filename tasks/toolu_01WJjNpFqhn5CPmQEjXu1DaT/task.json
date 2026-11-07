@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01WJjNpFqhn5CPmQEjXu1DaT",
+  "agent_id": "a816669fb43b8744d",
+  "subagent_type": "general-purpose",
+  "task_description": "Write the RDT differences doc",
+  "token_usage": {
+    "input_tokens": 242,
+    "cache_creation_tokens": 245281,
+    "cache_read_tokens": 21395979,
+    "output_tokens": 85337,
+    "api_call_count": 120
+  },
+  "started_at": "2026-11-06T17:46:08.77827-08:00",
+  "completed_at": "2026-11-06T18:03:01.702741-08:00"
+}
