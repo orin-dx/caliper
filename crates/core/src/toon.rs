@@ -9,16 +9,23 @@
 //! TOON is written for a reader that has a token budget, not for a program that reads it back, so it leaves out what
 //! costs tokens and says little. It carries no `schemaVersion` and has no parser. Compared with the canonical JSON:
 //!
-//! - A union or intersection prints at most 4 members, a literal union at most 6, a layer's `members` at most 24, each
-//!   followed by `...(+N)` for the rest. A string literal is written in single quotes (`'primary'`), so a member can
-//!   be told from a type name.
-//! - A function type prints its parameter types, not their names; an object or tuple type prints as its source text.
+//! - A literal union is never cut, nor is a union with a literal member (`'sm'|'md'|null`): an agent writes a call
+//!   from those values and cannot guess the missing ones. A union of types only prints at most 8 members, an
+//!   intersection at most 4 and a layer's `members` at most 24, each followed by `...(+N)` for the rest; the canonical
+//!   JSON holds every member. A string literal is written in single quotes (`'primary'`), so a member can be told from
+//!   a type name.
+//! - A function type prints its parameters with their names (`(value: string, index?: number) => void`); an object or
+//!   tuple type prints as its source text.
 //! - A prop's provenance is its `source` only: the name of the type that declared it, not the file or every
 //!   declaration. Descriptions lose their line breaks.
 //! - `degradedBy` (a column present only when some prop has it) names why a prop's type is partly `opaque`; a name left
 //!   as an unexpanded reference is not flagged there, and the diagnostics below say so.
-//! - The prop's `tags`, the component's `tags`, `composes`, `notableInherited` and the id tables of the canonical JSON
-//!   are not written.
+//! - A prop's `@deprecated`, `@see` and `@since` tags are written in a `tags` column (present only when some prop has
+//!   one) as `deprecated=use X;see=https://…;since=2.1`; its other tags, the component's `tags`, `composes`,
+//!   `notableInherited` and the id tables of the canonical JSON are not written.
+//! - A discriminated union names its discriminant prop in a `discriminant:` line. Its members' props are merged into
+//!   one list, each prop's `source` names the member that declares it and each prop absent from some member is
+//!   optional.
 
 use std::fmt::Write;
 
@@ -26,6 +33,16 @@ use crate::types::{ComponentEntry, Diagnostic, DiagnosticSeverity, ExtractionOut
 
 /// The most names of a collapsed layer's `members` one `inheritance` row lists.
 const LAYER_MEMBERS_LIMIT: usize = 24;
+
+/// The most members a union of types (no literal among them) prints. Real antd props reach 5 members at most in
+/// 2 of 5049 cases; 8 leaves headroom, and the cut is marked.
+const UNION_LIMIT: usize = 8;
+
+/// The most members an intersection prints.
+const INTERSECTION_LIMIT: usize = 4;
+
+/// The tags of a prop that change how an agent uses it, in the order they are written.
+const PROP_TAGS: [&str; 3] = ["deprecated", "see", "since"];
 
 /// Render a single component's prop table into TOON format.
 pub fn render_component_toon(entry: &ComponentEntry) -> String {
@@ -36,13 +53,19 @@ pub fn render_component_toon(entry: &ComponentEntry) -> String {
         writeln!(out, "  description: {}", entry.description.replace('\n', " ")).ok();
     }
 
+    if let Some(discriminant) = &entry.discriminant_prop {
+        writeln!(out, "  discriminant: {discriminant}").ok();
+    }
+
     if !entry.props.is_empty() {
-        // The column exists only when some prop has something to put in it.
+        // A column exists only when some prop has something to put in it.
         let degraded = entry.props.values().any(|prop| !prop.degraded_by.is_empty());
         let degraded_header = if degraded { "degradedBy," } else { "" };
+        let tagged = entry.props.values().any(|prop| !prop_tags_cell(prop).is_empty());
+        let tags_header = if tagged { "tags," } else { "" };
         writeln!(
             out,
-            "  props[{}] {{name,required,type,default,source,{degraded_header}description}}:",
+            "  props[{}] {{name,required,type,default,source,{degraded_header}{tags_header}description}}:",
             entry.props.len()
         )
         .ok();
@@ -56,15 +79,17 @@ pub fn render_component_toon(entry: &ComponentEntry) -> String {
             // Format as CSV line: escape strings containing commas or quotes if needed
             let degraded_cell =
                 if degraded { format!("{},", escape_toon_val(&prop.degraded_by.join("|"))) } else { String::new() };
+            let tags_cell = if tagged { format!("{},", escape_toon_val(&prop_tags_cell(prop))) } else { String::new() };
             writeln!(
                 out,
-                "    {},{},{},{},{},{}{}",
+                "    {},{},{},{},{},{}{}{}",
                 escape_toon_val(prop_name),
                 req_str,
                 escape_toon_val(&type_str),
                 escape_toon_val(default_str),
                 escape_toon_val(source_str),
                 degraded_cell,
+                tags_cell,
                 escape_toon_val(&desc_str)
             )
             .ok();
@@ -162,6 +187,19 @@ pub fn render_output_toon(output: &ExtractionOutput) -> String {
     out
 }
 
+/// A prop's `@deprecated`, `@see` and `@since` tags as `deprecated=use X;since=2.1`; a tag with no text is its name
+/// alone. Empty when the prop has none.
+fn prop_tags_cell(prop: &crate::types::ParsedProp) -> String {
+    PROP_TAGS
+        .iter()
+        .filter_map(|name| {
+            let text = prop.tags.get(*name)?.split_whitespace().collect::<Vec<_>>().join(" ");
+            Some(if text.is_empty() { (*name).to_owned() } else { format!("{name}={text}") })
+        })
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
 /// Truncate `parts` to `limit` items, appending a `"...(+N)"` marker for the
 /// remainder instead of silently dropping them. Shared by every
 /// `format_type_compact` branch that renders a bounded member list.
@@ -190,20 +228,21 @@ fn format_type_compact(prop_type: &PropType) -> String {
         PropType::NumberLiteral(n) => n.to_string(),
         PropType::BoolLiteral(b) => b.to_string(),
         PropType::LiteralUnion { members, .. } => {
-            let quoted: Vec<String> = members.iter().map(|member| quote_literal(member)).collect();
-            truncate_with_indicator(&quoted, 6, "|")
+            // Every value: it is what an agent writes a valid call from.
+            members.iter().map(|member| quote_literal(member)).collect::<Vec<_>>().join("|")
         }
-        // Parameter types only: the names cost tokens and say little an agent needs. An agent does need to know which
-        // arguments it may leave out (`T?`) and which repeat (`...T[]`).
+        // The names say what each argument is for (`(value: string)` and not `(string)`), and the markers which
+        // arguments may be left out (`name?: T`) and which repeat (`...name: T[]`). A destructured parameter has no
+        // name and prints its type alone.
         PropType::Function { params, return_type, .. } => {
             let params: Vec<String> = params
                 .iter()
                 .map(|p| {
                     let ty = format_type_compact(&p.param_type);
-                    match (p.rest, p.optional) {
-                        (true, _) => format!("...{ty}"),
-                        (false, true) => format!("{ty}?"),
-                        (false, false) => ty,
+                    let (rest, optional) = (if p.rest { "..." } else { "" }, if p.optional { "?" } else { "" });
+                    match &p.name {
+                        Some(name) => format!("{rest}{name}{optional}: {ty}"),
+                        None => format!("{rest}{ty}{optional}"),
                     }
                 })
                 .collect();
@@ -222,11 +261,25 @@ fn format_type_compact(prop_type: &PropType) -> String {
         PropType::Tuple(_) => prop_type.raw_string(),
         PropType::Union(members) => {
             let formatted: Vec<String> = members.iter().map(format_type_compact).collect();
-            truncate_with_indicator(&formatted, 4, "|")
+            // A literal among the members is a value an agent may write: show every one. Only a union of types is cut.
+            let has_literal = members.iter().any(|member| {
+                matches!(
+                    member,
+                    PropType::StringLiteral(_)
+                        | PropType::NumberLiteral(_)
+                        | PropType::BoolLiteral(_)
+                        | PropType::LiteralUnion { .. }
+                )
+            });
+            if has_literal {
+                formatted.join("|")
+            } else {
+                truncate_with_indicator(&formatted, UNION_LIMIT, "|")
+            }
         }
         PropType::Intersection(members) => {
             let formatted: Vec<String> = members.iter().map(format_type_compact).collect();
-            truncate_with_indicator(&formatted, 4, "&")
+            truncate_with_indicator(&formatted, INTERSECTION_LIMIT, "&")
         }
         PropType::HtmlAttributes { element, .. } => format!("HTMLAttributes<{element}>"),
         PropType::Named { name, args } => {
@@ -348,7 +401,7 @@ mod tests {
             )],
             return_type: Box::new(PropType::Boolean),
         };
-        assert_eq!(format_type_compact(&on_select), "(MouseEvent) => boolean");
+        assert_eq!(format_type_compact(&on_select), "(event: MouseEvent) => boolean");
         let with_flags = PropType::Function {
             type_params: vec![],
             params: vec![
@@ -367,7 +420,7 @@ mod tests {
             ],
             return_type: Box::new(PropType::Void),
         };
-        assert_eq!(format_type_compact(&with_flags), "(string, number?, ...Array<boolean>) => void");
+        assert_eq!(format_type_compact(&with_flags), "(a: string, b?: number, ...rest: Array<boolean>) => void");
         assert_eq!(
             format_type_compact(&PropType::HtmlAttributes { element: "button".into(), omitted: vec![] }),
             "HTMLAttributes<button>"
@@ -394,21 +447,16 @@ mod tests {
             ],
             has_default: false,
         };
-        assert_eq!(format_type_compact(&large_union), "'a'|'b'|'c'|'d'|'e'|'f'|...(+2)");
+        assert_eq!(format_type_compact(&large_union), "'a'|'b'|'c'|'d'|'e'|'f'|'g'|'h'");
     }
 
     #[test]
     fn test_format_type_compact_union_truncates_with_indicator() {
-        let union = PropType::Union(vec![
-            PropType::StringLiteral("a".into()),
-            PropType::StringLiteral("b".into()),
-            PropType::StringLiteral("c".into()),
-            PropType::StringLiteral("d".into()),
-            PropType::StringLiteral("e".into()),
-            PropType::StringLiteral("f".into()),
-        ]);
+        let union = PropType::Union(
+            ('A'..='J').map(|name| PropType::Named { name: name.to_string().into(), args: vec![] }).collect(),
+        );
         let out = format_type_compact(&union);
-        assert!(out.contains("...(+2)"), "expected a truncation indicator for the 2 dropped members, got: {out}");
+        assert_eq!(out, "A|B|C|D|E|F|G|H|...(+2)", "10 named types: 8 shown, the 2 dropped counted");
     }
 
     #[test]
@@ -431,14 +479,11 @@ mod tests {
 
     #[test]
     fn test_format_type_compact_union_at_cap_has_no_truncation_marker() {
-        let union = PropType::Union(vec![
-            PropType::StringLiteral("a".into()),
-            PropType::StringLiteral("b".into()),
-            PropType::StringLiteral("c".into()),
-            PropType::StringLiteral("d".into()),
-        ]);
+        let union = PropType::Union(
+            ('A'..='H').map(|name| PropType::Named { name: name.to_string().into(), args: vec![] }).collect(),
+        );
         let out = format_type_compact(&union);
-        assert!(!out.contains("...(+"), "at-cap union must not truncate, got: {out}");
+        assert_eq!(out, "A|B|C|D|E|F|G|H", "at-cap union must not truncate");
     }
 
     #[test]
@@ -464,11 +509,14 @@ mod tests {
     }
 
     #[test]
-    fn test_format_type_compact_literal_union_multi_digit_truncation_count() {
-        let members: Vec<String> = (0..20).map(|i| format!("v{i}")).collect();
-        let literal_union = PropType::LiteralUnion { members, has_default: false };
-        let out = format_type_compact(&literal_union);
-        assert!(out.contains("...(+14)"), "expected a 2-digit truncation count (20 members, cap 6 -> +14), got: {out}");
+    fn test_format_type_compact_union_multi_digit_truncation_count() {
+        let union =
+            PropType::Union((0..20).map(|i| PropType::Named { name: format!("T{i}").into(), args: vec![] }).collect());
+        let out = format_type_compact(&union);
+        assert!(
+            out.ends_with("|...(+12)"),
+            "expected a 2-digit truncation count (20 members, cap 8 -> +12), got: {out}"
+        );
     }
 
     fn prop(name: &str, prop_type: PropType, parent: Option<&str>) -> std::sync::Arc<ParsedProp> {
@@ -633,5 +681,112 @@ mod tests {
         let entry = entry_with(vec![prop("size", PropType::String, None)], vec![]);
         let diagnostics = [diagnostic(DiagnosticSeverity::Info, "note", None)];
         assert_eq!(render_component_slice_toon(&entry, &diagnostics), render_component_toon(&entry));
+    }
+
+    fn tagged_prop(name: &str, prop_type: PropType, tags: &[(&str, &str)]) -> std::sync::Arc<ParsedProp> {
+        std::sync::Arc::new(ParsedProp::new(
+            name.into(),
+            prop_type,
+            false,
+            None,
+            "Doc".into(),
+            tags.iter().map(|(tag, text)| ((*tag).to_owned(), (*text).to_owned())).collect(),
+            None,
+            vec![],
+        ))
+    }
+
+    #[test]
+    fn a_shadcn_like_variant_and_size_list_every_value() {
+        let variant = PropType::LiteralUnion {
+            members: ["default", "destructive", "outline", "secondary", "ghost", "link", "success", "warning"]
+                .map(String::from)
+                .to_vec(),
+            has_default: true,
+        };
+        let size = PropType::Union(
+            ["default", "xs", "sm", "lg", "icon", "icon-xs", "icon-sm", "icon-lg"]
+                .map(|value| PropType::StringLiteral(value.into()))
+                .into_iter()
+                .chain([PropType::Null])
+                .collect(),
+        );
+        let toon =
+            render_component_toon(&entry_with(vec![prop("variant", variant, None), prop("size", size, None)], vec![]));
+        assert!(
+            toon.contains("\n    size,false,'default'|'xs'|'sm'|'lg'|'icon'|'icon-xs'|'icon-sm'|'icon-lg'|null,,,\n"),
+            "{toon}"
+        );
+        assert!(
+            toon.contains(
+                "\n    variant,false,'default'|'destructive'|'outline'|'secondary'|'ghost'|'link'|'success'|'warning',,,\n"
+            ),
+            "{toon}"
+        );
+        assert!(!toon.contains("...(+"), "{toon}");
+    }
+
+    #[test]
+    fn a_function_prop_keeps_its_parameter_names() {
+        let on_change = PropType::Function {
+            type_params: vec![],
+            params: vec![
+                crate::types::FunctionParam::new(Some("value".into()), PropType::String),
+                crate::types::FunctionParam {
+                    optional: true,
+                    ..crate::types::FunctionParam::new(Some("index".into()), PropType::Number)
+                },
+                crate::types::FunctionParam::new(None, PropType::Boolean),
+            ],
+            return_type: Box::new(PropType::Void),
+        };
+        let toon = render_component_toon(&entry_with(vec![prop("onChange", on_change, None)], vec![]));
+        assert!(
+            toon.contains("\n    onChange,false,\"(value: string, index?: number, boolean) => void\",,,\n"),
+            "{toon}"
+        );
+    }
+
+    #[test]
+    fn deprecated_see_and_since_tags_get_a_column_that_only_tagged_components_have() {
+        let tagged = tagged_prop(
+            "old",
+            PropType::String,
+            &[("deprecated", "use `next`"), ("see", "https://x.dev/a,b"), ("since", "2.1"), ("internal", "")],
+        );
+        let bare_deprecated = tagged_prop("older", PropType::String, &[("deprecated", "")]);
+        let plain = prop("plain", PropType::String, None);
+        let toon = render_component_toon(&entry_with(vec![tagged, bare_deprecated, plain], vec![]));
+        assert!(toon.contains("props[3] {name,required,type,default,source,tags,description}:\n"), "{toon}");
+        assert!(
+            toon.contains("\n    old,false,string,,,\"deprecated=use `next`;see=https://x.dev/a,b;since=2.1\",Doc\n"),
+            "{toon}"
+        );
+        assert!(toon.contains("\n    older,false,string,,,deprecated,Doc\n"), "{toon}");
+        assert!(toon.contains("\n    plain,false,string,,,,\n"), "{toon}");
+
+        let untagged = render_component_toon(&entry_with(vec![prop("plain", PropType::String, None)], vec![]));
+        assert!(untagged.contains("props[1] {name,required,type,default,source,description}:\n"), "{untagged}");
+    }
+
+    #[test]
+    fn a_discriminated_union_names_its_discriminant() {
+        let mut entry = entry_with(
+            vec![
+                prop("a", PropType::String, Some("A")),
+                prop("b", PropType::Number, Some("B")),
+                prop(
+                    "mode",
+                    PropType::LiteralUnion { members: vec!["a".into(), "b".into()], has_default: false },
+                    Some("A"),
+                ),
+            ],
+            vec![],
+        );
+        entry.discriminant_prop = Some("mode".into());
+        let toon = render_component_toon(&entry);
+        assert!(toon.contains("\n  discriminant: mode\n  props[3] "), "{toon}");
+        let plain = render_component_toon(&entry_with(vec![], vec![]));
+        assert!(!plain.contains("discriminant"), "{plain}");
     }
 }
