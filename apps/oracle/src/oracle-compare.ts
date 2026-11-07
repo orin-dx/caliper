@@ -107,6 +107,21 @@ const isLit = (n: Norm, value?: string) => n.k === 'lit' && (value === undefined
 const isUndefined = (m: Norm) => m.k === 'prim' && m.name === 'undefined'
 const WIDENING = new Set(['string', 'number', 'boolean'])
 
+/** An empty object type, or `Record<…>` (its arguments are not kept): what `string & {}` intersects with. */
+const isEmptyObject = (m: Norm) =>
+  (m.k === 'object' && m.fields.length === 0 && !m.index) || (m.k === 'name' && m.name === 'Record')
+
+/** Whether `m` is the primitive `name`, or `name & {}`, or a union with either. */
+function absorbs(m: Norm, name: string): boolean {
+  if (m.k === 'prim') return m.name === name
+  if (m.k === 'union') return m.members.some((member) => absorbs(member, name))
+  return m.k === 'intersection' && m.members.some(isEmptyObject) && m.members.some((member) => absorbs(member, name))
+}
+
+/** A name or opaque type that Caliper (or the checker) did not expand: what it holds is unknown, so no member beside it
+ * can prove the other side wrong. */
+const isUnexpanded = (m: Norm) => m.k === 'name' || m.k === 'opaque'
+
 /** Union members without `undefined` (an optional prop's, which both sides treat as optional), flattened, with
  * `true | false` as `boolean`. */
 function members(n: Norm, coverLiterals = false): Norm[] {
@@ -121,7 +136,8 @@ function members(n: Norm, coverLiterals = false): Norm[] {
   // union already covers adds nothing, so a union written with it holds the same values as one without. The checker's
   // `"blue" | … | (string & {})` keeps its literals for the reader, so `compare` scores it spelled, not identical. A
   // `true`/`false` literal is boolean's, not string's.
-  const has = (name: string) => flat.some((m) => m.k === 'prim' && m.name === name)
+  // `string & {}` and `string & Record<never, never>` (the `LiteralUnion` spellings) are `string` for this purpose.
+  const has = (name: string) => flat.some((m) => absorbs(m, name))
   const covered = (m: Norm) =>
     coverLiterals &&
     m.k === 'lit' &&
@@ -148,7 +164,10 @@ function compareUnions(cm: Norm[], km: Norm[], depth: number): Verdict {
       km.some((kMember) => kMember.k === 'lit' || (kMember.k === 'prim' && kMember.name === m.name))
     return verdict === 'wrong' && widens ? 'less precise' : verdict
   })
-  return worst([...kCovered, ...cMatched])
+  const verdict = worst([...kCovered, ...cMatched])
+  // A union with a name or opaque member (`MantineColor | 'initials'`, a template literal) may hold the other side's
+  // values in that member, so a member it cannot match is not proof of a different type.
+  return verdict === 'wrong' && [...cm, ...km].some((m) => isUnexpanded(m)) ? 'less precise' : verdict
 }
 
 function compareFunctions(c: Norm & { k: 'function' }, k: Norm & { k: 'function' }, depth: number): Verdict {

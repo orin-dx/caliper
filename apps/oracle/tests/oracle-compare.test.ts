@@ -1,4 +1,6 @@
 // The oracle's comparison is pure, so its verdicts are tested without a checker.
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { caliperNorm, compare, prim, type Norm } from '../src/oracle-compare.ts'
 
@@ -209,6 +211,53 @@ describe('the oracle comparison', () => {
       )
       // A different primitive is not covered by the checker's.
       expect(compare(prim('number'), optional(union(lit('default'), prim('string'))))).toBe('wrong')
+    })
+  })
+
+  describe('rows from the saved weekly oracle runs', () => {
+    // `normalized` forms copied verbatim from the `wrong` examples of the branch's own weekly run (antd, mantine, shadcn,
+    // chakra). Each scored `wrong` there; whether it should is decided below.
+    const rows: Record<string, { normalized: { caliper: Norm; checker: Norm } }> = JSON.parse(
+      readFileSync(join(import.meta.dirname, 'fixtures', 'comparator-artifact-rows.json'), 'utf8'),
+    )
+    const verdict = (name: string) => compare(rows[name].normalized.caliper, rows[name].normalized.checker)
+
+    it.each(['Badge.color', 'Flex.gap', 'Col.flex', 'Input.type'])(
+      "%s: `string & Record<never, never>` absorbs the literals beside it, as the checker's `string` does",
+      (name) => {
+        expect.hasAssertions()
+        expect(verdict(name)).toBe('less precise')
+      },
+    )
+
+    it.each(['Avatar.color', 'BlockImage.placeholder', 'ThemeProvider.attribute'])(
+      '%s: a union with a name or template literal Caliper did not expand is less precise, not wrong',
+      (name) => {
+        expect.hasAssertions()
+        expect(verdict(name)).toBe('less precise')
+      },
+    )
+
+    it.each(['Form.watch', 'Form.getValues', 'AbsoluteCenter.axis'])(
+      '%s: a real difference in the values stays wrong',
+      (name) => {
+        expect.hasAssertions()
+        expect(verdict(name)).toBe('wrong')
+      },
+    )
+
+    it('`string & {}` absorbs literals like `string & Record<never, never>`', () => {
+      expect.hasAssertions()
+      const empty: Norm = { k: 'object', fields: [], index: false }
+      const literalUnion = union(lit('a'), lit('b'), { k: 'intersection', members: [prim('string'), empty] })
+      expect(compare(literalUnion, optional(union(lit('a'), lit('b'), prim('string'))))).toBe('less precise')
+    })
+
+    it('a name beside a literal does not hide a different primitive', () => {
+      expect.hasAssertions()
+      // `number` is not `string`, whatever names the union holds.
+      expect(compare(prim('number'), optional(prim('string')))).toBe('wrong')
+      expect(compare(union(prim('number'), lit('a')), optional(prim('string')))).toBe('wrong')
     })
   })
 })
