@@ -1,0 +1,10 @@
+{
+  "rows": {
+    "seed/01-string-literal-union": { "verdicts": ["identical", "spelled"] },
+    "seed/02-array-of-records": { "verdicts": ["identical", "spelled"] },
+    "seed/03-conditional-type": {
+      "verdicts": ["less precise"],
+      "gap": "Caliper keeps the alias application `Unwrap<Promise<string>>` as a name; the checker evaluates the conditional type to `string`."
+    }
+  }
+}

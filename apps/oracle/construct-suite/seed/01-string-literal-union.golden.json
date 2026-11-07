@@ -1,0 +1,24 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "lit",
+        "value": "large",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "medium",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "small",
+        "of": "string"
+      }
+    ],
+    "alias": "Size"
+  },
+  "text": "Size"
+}
