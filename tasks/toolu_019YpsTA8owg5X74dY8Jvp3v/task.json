@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_019YpsTA8owg5X74dY8Jvp3v",
+  "agent_id": "a8617004bb27b20c1",
+  "subagent_type": "general-purpose",
+  "task_description": "Resolve PR 379 conflict with main",
+  "token_usage": {
+    "input_tokens": 30,
+    "cache_creation_tokens": 47700,
+    "cache_read_tokens": 849673,
+    "output_tokens": 4486,
+    "api_call_count": 15
+  },
+  "started_at": "2026-11-07T15:01:13.015732-08:00",
+  "completed_at": "2026-11-07T15:04:36.484414-08:00"
+}
