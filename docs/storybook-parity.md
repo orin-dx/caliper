@@ -46,6 +46,27 @@ Not measured: Storybook's control inference from argTypes (kind is `type.name`),
 
 ## Results
 
+### 2026-11-06, main at `c5fbb33e`: should an opaque prop hand the component on?
+
+The `degraded` rule counts warnings and errors. A prop the extractor cannot expand (`keyof typeof x`, `-1 | 0`, an indexed access, a mapped or conditional type) is an `info` diagnostic (`OPAQUE_TYPE`, `INDEXED_ACCESS_OPAQUE`) and does not hand the component on, so Storybook shows the raw type text as an `object` control where its own docgen may show a radio. The question was whether `info`-level opaque diagnostics should count as incomplete. The session of each corpus was run with the addon's defaults (`loadDependencies`, `collapseInheritedProps: 'none'`), and each component's diagnostics read from `sessionComponentAnswers`.
+
+Components the addon would hand on, today (warning or error) and with the rule extended to `info` `OPAQUE_TYPE` or `INDEXED_ACCESS_OPAQUE`:
+
+| Corpus  | Components | Handed on today | Also handed on if opaque counts | Total |
+| ------- | ---------- | --------------- | ------------------------------- | ----- |
+| Mantine | 351        | 30 (8.5%)       | 262 (74.6%)                     | 83.2% |
+| Chakra  | 678        | 0 (0%)          | 614 (90.6%)                     | 90.6% |
+| shadcn  | 1914       | 93 (4.9%)       | 1439 (75.2%)                    | 80.0% |
+| antd    | 285        | 11 (3.9%)       | 135 (47.4%)                     | 51.2% |
+
+Spectrum is left out: its install here resolves few dependencies (1323 of 1702 components already degrade today, against 37.9% recorded on 2026-10-24).
+
+Both codes cause it. Of the components that would newly be handed on, `INDEXED_ACCESS_OPAQUE` is on 196 (Mantine), 596 (Chakra), 1369 (shadcn) and 57 (antd), and `OPAQUE_TYPE` on 227, 595, 354 and 120. The messages behind them are mostly not the component's own props: React's `DO_NOT_USE_OR_YOU_WILL_BE_FIRED_EXPERIMENTAL_REACT_NODES[keyof ...]` indexed access that every component with DOM attributes carries, mapped types over style props (342,465 on Chakra), and conditional types in Mantine's theme. Leaving those out and counting only standalone `keyof`, unparsable raw types and other indexed accesses still hands on 213 of 351 (Mantine), 577 of 678 (Chakra), 74 of 1914 (shadcn, 3.9%) and 23 of 285 (antd, 8.1%) in addition to today's.
+
+What a hand-off costs, the same sampled components through Storybook's own docgen and the addon (`storybook-parity.mjs --variants caliper`, Apple silicon): the first request, which builds Storybook's TypeScript program, takes 0.8 s (Mantine, 6 stories), 2.5 s (antd, 41) and 3.0 s (shadcn, 56), against 92 to 136 ms for the addon's session; the later requests take 1 to 20 ms on either side. Peak RSS is 439 to 1153 MB against 185 to 339 MB. A handed-on component is answered by Storybook's docgen, so the first Storybook load pays that program build as it did before the addon.
+
+Decision: leave the rule as it is. Counting opaque props as incomplete would hand on 51% to 91% of components on four of five corpora, which is the addon doing nothing for most of them, to fix a control on the few props that are opaque. A per-prop answer (keep the addon's props, take Storybook's for the opaque ones) cannot be built in this package: the RDT `docgenInfo` the session returns gives an opaque prop the same shape as any other (its `type.name` is the raw type text) and a diagnostic names no prop, so the addon cannot tell which prop to replace. That needs the extractor to mark the prop, which is a `crates/core` change. Until then an opaque prop keeps the `object` control with its type text in the table.
+
 ### 2026-11-02, main at `a9dfed90` (shadcn and antd)
 
 Apple silicon, the corpora of `scripts/corpora.py setup`. Mantine, Chakra and Spectrum are not installed on this machine and are not re-measured: their rows below are from 2026-10-24.
