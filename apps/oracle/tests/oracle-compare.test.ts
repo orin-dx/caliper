@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { caliperNorm, compare, prim, type Norm } from '../src/oracle-compare.ts'
+import { lit } from './lit.ts'
 
-const lit = (value: string): Norm => ({ k: 'lit', value })
 const union = (...members: Norm[]): Norm => ({ k: 'union', members })
 const undef = prim('undefined')
 const optional = (type: Norm): Norm => union(type, undef)
@@ -258,6 +258,65 @@ describe('the oracle comparison', () => {
       // `number` is not `string`, whatever names the union holds.
       expect(compare(prim('number'), optional(prim('string')))).toBe('wrong')
       expect(compare(union(prim('number'), lit('a')), optional(prim('string')))).toBe('wrong')
+    })
+  })
+
+  describe('an index-only object and a string literal are told from `{}` and a number', () => {
+    const idx = (value: object) => ({
+      kind: 'object',
+      fields: [{ name: 'key', propType: value, required: true, description: '', indexKey: { kind: 'string' } }],
+    })
+    const checkerIndex = (value: Norm): Norm => ({ k: 'object', fields: [], index: true, indexValue: value })
+
+    it('a string literal beside `number` is not the number it spells', () => {
+      expect.hasAssertions()
+      // `"0" | number`: the checker keeps the string `"0"`, which `number` does not cover.
+      const checker = optional(union(lit('0', 'string'), prim('number')))
+      expect(compare(prim('number'), checker)).toBe('less precise')
+      // Nor does a `"0" | number` Caliper reports hold only the checker's `number`.
+      expect(compare(union(lit('0', 'string'), prim('number')), optional(prim('number')))).toBe('wrong')
+      // A string literal and a number literal of the same text are two values.
+      expect(compare(lit('0', 'string'), lit('0', 'number'))).toBe('wrong')
+    })
+
+    it('`"true"` is a string literal, covered by `string`, and `true` is not', () => {
+      expect.hasAssertions()
+      expect(compare(prim('string'), optional(union(lit('true', 'string'), prim('string'))))).toBe('spelled')
+      expect(compare(lit('true', 'string'), lit('true', 'boolean'))).toBe('wrong')
+      // `true | false` is still boolean, and `"true" | "false"` is not.
+      expect(compare(prim('boolean'), union(lit('true'), lit('false')))).toBe('identical')
+      expect(compare(prim('boolean'), union(lit('true', 'string'), lit('false', 'string')))).not.toBe('identical')
+    })
+
+    it('a literal a primitive of its kind covers still adds nothing', () => {
+      expect.hasAssertions()
+      expect(compare(prim('number'), optional(union(lit('0', 'number'), prim('number'))))).toBe('spelled')
+      expect(compare(prim('string'), optional(union(lit('0', 'string'), prim('string'))))).toBe('spelled')
+    })
+
+    it('an index-only object beside a named type is not dropped as `{}`', () => {
+      expect.hasAssertions()
+      // Mantine's `labelProps?: React.ComponentPropsWithoutRef<'label'> & { [key: string]: any }`.
+      const caliper = caliperNorm({
+        kind: 'intersection',
+        members: [{ kind: 'named', name: 'ComponentPropsWithoutRef' }, idx({ kind: 'any' })],
+      })
+      expect(caliper.k).toBe('intersection')
+      const checker: Norm = { k: 'intersection', members: [{ k: 'opaque' }, checkerIndex(prim('any'))] }
+      expect(compare(caliper, optional(checker))).toBe('identical')
+      // An empty object is still dropped.
+      const emptied = caliperNorm({
+        kind: 'intersection',
+        members: [{ kind: 'string' }, { kind: 'object', fields: [] }],
+      })
+      expect(emptied).toStrictEqual(prim('string'))
+    })
+
+    it('an index signature stated without its value type is less precise, not identical', () => {
+      expect.hasAssertions()
+      const noValue: Norm = { k: 'object', fields: [], index: true }
+      expect(compare(noValue, checkerIndex(prim('number')))).toBe('less precise')
+      expect(compare(caliperNorm(idx({ kind: 'number' })), noValue)).toBe('less precise')
     })
   })
 })

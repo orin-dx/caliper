@@ -3,8 +3,8 @@
 import { describe, expect, it } from 'vitest'
 import { prim, type Norm } from '../src/oracle-compare.ts'
 import { scoreReported, scoreTool, type Reported, type UniverseProp } from '../src/tool-score.ts'
+import { lit } from './lit.ts'
 
-const lit = (value: string): Norm => ({ k: 'lit', value })
 const union = (...members: Norm[]): Norm => ({ k: 'union', members })
 
 const universe: UniverseProp[] = [

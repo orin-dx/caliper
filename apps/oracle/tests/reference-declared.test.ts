@@ -1,10 +1,9 @@
 // Method B reads what a declaration writes with TypeScript's parser; it never asks the checker for a type, so it needs
 // no program and is tested on source text.
 import { describe, expect, it } from 'vitest'
-import { prim, type Norm } from '../src/oracle-compare.ts'
+import { prim } from '../src/oracle-compare.ts'
 import { annotationText, declaredType, declaredTypeOfAll } from '../src/reference-declared.ts'
-
-const lit = (value: string): Norm => ({ k: 'lit', value })
+import { lit } from './lit.ts'
 
 describe('annotationText', () => {
   it('reads a property signature and keeps the annotation exactly as written', () => {

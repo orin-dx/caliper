@@ -1,7 +1,7 @@
 // The checker side of src/oracle.ts: a TypeScript 7.1 type reduced to the shape src/oracle-compare.ts compares,
 // once per type id and depth.
 import { SignatureKind, SymbolFlags, TypeFlags } from 'typescript-beta/sync'
-import { MAX_DEPTH, prim, type Norm } from './oracle-compare.ts'
+import { isBareObject, lit, MAX_DEPTH, prim, type LiteralKind, type Norm } from './oracle-compare.ts'
 
 const ANONYMOUS = new Set(['__type', '__object', '__function', '__call', ''])
 
@@ -19,6 +19,12 @@ const INTRINSICS: [number, string][] = [
   [TypeFlags.NonPrimitive, 'object'],
   // A pattern such as `var(--${string})` or `Uppercase<string>` stands for strings.
   [TypeFlags.TemplateLiteral | TypeFlags.StringMapping, 'string'],
+]
+
+const LITERAL_FLAGS: [number, LiteralKind][] = [
+  [TypeFlags.StringLiteral, 'string'],
+  [TypeFlags.NumberLiteral, 'number'],
+  [TypeFlags.BigIntLiteral, 'bigint'],
 ]
 
 /** The checker's name for a type: its alias, or the interface, class or enum that declares it. */
@@ -52,10 +58,9 @@ export function checkerNormalizer(checker: any): (t: any) => Norm {
     const intrinsic = INTRINSICS.find(([flag]) => f & flag)
     if (intrinsic) return prim(intrinsic[1])
     // The beta's responses carry neither `value` nor `intrinsicName` for `true` and `false`.
-    if (f & TypeFlags.BooleanLiteral) return { k: 'lit', value: checker.typeToString(t) }
-    if (f & (TypeFlags.StringLiteral | TypeFlags.NumberLiteral | TypeFlags.BigIntLiteral)) {
-      return { k: 'lit', value: String(t.value) }
-    }
+    if (f & TypeFlags.BooleanLiteral) return lit(checker.typeToString(t), 'boolean')
+    const of = LITERAL_FLAGS.find(([flag]) => f & flag)?.[1]
+    if (of) return lit(String(t.value), of)
     return undefined
   }
 
@@ -102,7 +107,7 @@ export function checkerNormalizer(checker: any): (t: any) => Norm {
   function intersection(t: any, depth: number, alias: string | undefined): Norm {
     const parts: Norm[] = (t.getTypes() ?? []).map((m: any) => norm(m, depth + 1))
     // `string & {}` (the keep-the-literals trick) is a string.
-    const meaningful = parts.filter((m) => !(m.k === 'object' && m.fields.length === 0 && !m.index))
+    const meaningful = parts.filter((m) => !isBareObject(m))
     if (meaningful.length === 1) return { ...meaningful[0], alias: alias ?? meaningful[0].alias }
     return { k: 'intersection', members: parts, alias }
   }
