@@ -613,21 +613,16 @@ impl PropType {
         }
     }
 
-    /// True if this type is a pure literal union (all members are literals).
-    /// Used by serializers to choose between "enum" and "union" in RDT output.
-    /// Requires at least 2 members — a 0- or 1-member "union" isn't a
-    /// meaningful `<select>` shape, so RDT output falls back to plain
-    /// `raw_string()` for those instead of an empty/single-option enum.
+    /// True if this type offers string or number options, which RDT output writes as an `enum` so Storybook shows the
+    /// options as a radio: a union of string and number literals, or a single one. A boolean member is not an option
+    /// Storybook can carry (it unquotes each option's source text into a string or a number, and its own docgen gives
+    /// such a union no options), and a union with no members has nothing to offer.
     pub fn is_literal_union(&self) -> bool {
+        let is_option = |m: &PropType| matches!(m, PropType::StringLiteral(_) | PropType::NumberLiteral(_));
         match self {
-            PropType::Union(members) => {
-                members.len() >= 2
-                    && members.iter().all(|m| {
-                        matches!(m, PropType::StringLiteral(_) | PropType::NumberLiteral(_) | PropType::BoolLiteral(_))
-                    })
-            }
-            PropType::LiteralUnion { members, .. } => members.len() >= 2,
-            _ => false,
+            PropType::Union(members) => !members.is_empty() && members.iter().all(is_option),
+            PropType::LiteralUnion { members, .. } => !members.is_empty(),
+            single => is_option(single),
         }
     }
 

@@ -253,19 +253,11 @@ fn rdt_output_gives_each_component_its_absolute_file_path() {
 use caliper_docgen_core::types::PropType;
 
 #[test]
-fn rdt_type_json_zero_and_one_member_unions_never_produce_enum_shape() {
+fn rdt_type_json_empty_unions_never_produce_enum_shape() {
     assert_eq!(rdt_type_json(&PropType::Union(vec![])), serde_json::json!({"name": ""}));
-    assert_eq!(
-        rdt_type_json(&PropType::Union(vec![PropType::StringLiteral("x".into())])),
-        serde_json::json!({"name": "\"x\""})
-    );
     assert_eq!(
         rdt_type_json(&PropType::LiteralUnion { members: vec![], has_default: false }),
         serde_json::json!({"name": ""})
-    );
-    assert_eq!(
-        rdt_type_json(&PropType::LiteralUnion { members: vec!["only".into()], has_default: false }),
-        serde_json::json!({"name": "\"only\""})
     );
 }
 
@@ -622,4 +614,146 @@ fn an_unavailable_checker_adds_one_warning_and_leaves_every_component_as_it_was(
     assert_eq!(added[0]["code"], "SEMANTIC_BACKEND");
     assert_eq!(added[0]["severity"], "warning");
     assert!(added[0]["message"].as_str().unwrap().contains("no tsc binary at"), "{added:?}");
+}
+
+// The RDT-shaped projection Storybook's `extractArgTypes` turns into controls.
+
+#[test]
+fn rdt_type_json_single_literal_is_a_one_option_enum() {
+    assert_eq!(
+        rdt_type_json(&PropType::StringLiteral("button".into())),
+        serde_json::json!({"name": "enum", "raw": "\"button\"", "value": [{"value": "\"button\""}]})
+    );
+    assert_eq!(
+        rdt_type_json(&PropType::NumberLiteral(1.0)),
+        serde_json::json!({"name": "enum", "raw": "1", "value": [{"value": "1"}]})
+    );
+    assert_eq!(
+        rdt_type_json(&PropType::Union(vec![PropType::StringLiteral("x".into())])),
+        serde_json::json!({"name": "enum", "raw": "\"x\"", "value": [{"value": "\"x\""}]})
+    );
+    assert_eq!(
+        rdt_type_json(&PropType::LiteralUnion { members: vec!["only".into()], has_default: false }),
+        serde_json::json!({"name": "enum", "raw": "\"only\"", "value": [{"value": "\"only\""}]})
+    );
+}
+
+#[test]
+fn rdt_type_json_leaves_empty_unions_a_bare_name_and_a_lone_boolean_literal_a_type_name() {
+    assert_eq!(rdt_type_json(&PropType::Union(vec![])), serde_json::json!({"name": ""}));
+    assert_eq!(
+        rdt_type_json(&PropType::LiteralUnion { members: vec![], has_default: false }),
+        serde_json::json!({"name": ""})
+    );
+    // Storybook's own docgen gives a lone `true` no options either.
+    assert_eq!(rdt_type_json(&PropType::BoolLiteral(true)), serde_json::json!({"name": "true"}));
+}
+
+#[test]
+fn rdt_type_json_boolean_in_a_mixed_literal_union_is_never_a_string_option() {
+    let mixed = PropType::Union(vec![
+        PropType::StringLiteral("a".into()),
+        PropType::NumberLiteral(1.0),
+        PropType::BoolLiteral(true),
+    ]);
+    assert_eq!(rdt_type_json(&mixed), serde_json::json!({"name": "\"a\" | 1 | true"}));
+    // Without a boolean the shape is the one the string and number options always had.
+    let plain = PropType::Union(vec![PropType::StringLiteral("a".into()), PropType::NumberLiteral(1.0)]);
+    assert_eq!(
+        rdt_type_json(&plain),
+        serde_json::json!({"name": "enum", "raw": "\"a\" | 1", "value": [{"value": "\"a\""}, {"value": "1"}]})
+    );
+}
+
+#[test]
+fn rdt_type_json_non_literal_unions_and_ordinary_types_are_unchanged() {
+    assert_eq!(rdt_type_json(&PropType::String), serde_json::json!({"name": "string"}));
+    let open = PropType::Union(vec![
+        PropType::StringLiteral("a".into()),
+        PropType::StringLiteral("b".into()),
+        PropType::String,
+    ]);
+    assert_eq!(rdt_type_json(&open), serde_json::json!({"name": "\"a\" | \"b\" | string"}));
+    let nullable =
+        PropType::Union(vec![PropType::StringLiteral("a".into()), PropType::StringLiteral("b".into()), PropType::Null]);
+    assert_eq!(rdt_type_json(&nullable), serde_json::json!({"name": "\"a\" | \"b\" | null"}));
+}
+
+/// The probe rows of the Storybook output review.
+const CONTROL_PROBE: &str = r#"
+import * as React from "react";
+type Size = 'sm' | 'md' | 'lg';
+export interface ProbeProps {
+  /** single literal */ kind?: 'button';
+  /** single number */ one?: 1;
+  /** mixed literal union */ mixed?: 'a' | 1 | true;
+  /** literal union */ size?: Size;
+  /** open union */ loose?: 'a' | 'b' | string;
+  /** plain */ label: string;
+  /** @ignore */ hidden?: string;
+  /** @internal */ internal?: string;
+  /** @deprecated use size */ old?: string;
+}
+export function Probe(props: ProbeProps) { return null; }
+"#;
+
+fn extract_control_probe() -> caliper_docgen_core::types::ExtractionOutput {
+    let tmp = tempfile::TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    std::fs::write(tmp.path().join("Probe.tsx"), CONTROL_PROBE).unwrap();
+    let dir = camino::Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
+    let options = caliper_docgen_core::pipeline::PipelineOptions {
+        src_dirs: vec![dir],
+        cache_dir: Some(camino::Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
+        ..Default::default()
+    };
+    caliper_docgen_core::pipeline::extract(&options)
+}
+
+#[test]
+fn an_ignore_tagged_prop_has_no_rdt_entry_and_other_tags_keep_theirs() {
+    let output = extract_control_probe();
+    let doc = caliper_docgen_core::pipeline::rdt::docgen_info(&output.components["Probe"]);
+    let props = doc["props"].as_object().unwrap();
+    assert!(!props.contains_key("hidden"), "{:?}", props.keys().collect::<Vec<_>>());
+    assert!(props.contains_key("internal") && props.contains_key("old"));
+    let rdt: serde_json::Value = serde_json::from_str(&serialize_rdt(&output, false).unwrap()).unwrap();
+    assert!(!rdt["Probe"]["props"].as_object().unwrap().contains_key("hidden"));
+}
+
+#[test]
+fn the_storybook_docgen_info_projects_the_probe_rows_the_way_storybook_reads_them() {
+    let output = extract_control_probe();
+    let entry = output.components.get("Probe").expect("a Probe component");
+    let doc = caliper_docgen_core::pipeline::rdt::docgen_info(entry);
+    let ty = |prop: &str| doc["props"][prop]["type"].clone();
+
+    assert_eq!(
+        ty("kind"),
+        serde_json::json!({"name": "enum", "raw": "\"button\"", "value": [{"value": "\"button\""}]})
+    );
+    assert_eq!(ty("one"), serde_json::json!({"name": "enum", "raw": "1", "value": [{"value": "1"}]}));
+    assert_eq!(ty("mixed"), serde_json::json!({"name": "\"a\" | 1 | true"}));
+    assert_eq!(
+        ty("size"),
+        serde_json::json!({
+            "name": "enum",
+            "raw": "\"sm\" | \"md\" | \"lg\"",
+            "value": [{"value": "\"sm\""}, {"value": "\"md\""}, {"value": "\"lg\""}]
+        })
+    );
+    assert_eq!(ty("loose"), serde_json::json!({"name": "\"a\" | \"b\" | string"}));
+    assert_eq!(ty("label"), serde_json::json!({"name": "string"}));
+
+    // Storybook's docgen drops `@ignore` and nothing else.
+    let mut names: Vec<&str> = doc["props"].as_object().unwrap().keys().map(String::as_str).collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["internal", "kind", "label", "loose", "mixed", "old", "one", "size"]);
+
+    // `--format rdt` projects the same props.
+    let rdt: serde_json::Value = serde_json::from_str(&serialize_rdt(&output, false).unwrap()).unwrap();
+    assert!(rdt["Probe"]["props"].get("hidden").is_none());
+    assert_eq!(rdt["Probe"]["props"]["kind"]["type"], ty("kind"));
+
+    // The canonical output keeps the ignored prop and its tag.
+    assert_eq!(output.components["Probe"].props["hidden"].tags.get("ignore").map(String::as_str), Some(""));
 }
