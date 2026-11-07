@@ -18,8 +18,8 @@ use rustc_hash::FxHashSet;
 #[cfg(test)]
 use crate::types::LexedExport;
 use crate::types::{
-    CollectedObjectField, CollectedType, CollectedTypeAlias, Diagnostic, DiagnosticCode, DiagnosticSeverity,
-    ExtendsRef, ParamKind, RawProp, SourceData,
+    CollectedObjectField, CollectedType, CollectedTypeAlias, DeclarationScope, Diagnostic, DiagnosticCode,
+    DiagnosticSeverity, ExtendsRef, ParamKind, RawProp, ScopeKind, ScopeStep, SourceData,
 };
 
 mod alias;
@@ -259,6 +259,12 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) namespace_stack: Vec<CompactString>,
     /// How many function bodies and blocks enclose the declaration being visited; 0 at module level.
     pub(super) local_depth: u32,
+    /// The regions that enclose the node being visited, outermost first: the scope a declaration is recorded in.
+    pub(super) scope_path: Vec<ScopeStep>,
+    /// For each region in `scope_path`, how many child regions it has opened so far.
+    pub(super) scope_children: Vec<u32>,
+    /// How many regions the module has opened directly.
+    pub(super) module_children: u32,
     /// Keys of the interfaces declared at module level. Only these merge with a later declaration of the same name.
     pub(super) module_interfaces: FxHashSet<String>,
     /// `X.displayName = "..."` renames recorded during the main traversal but
@@ -318,7 +324,7 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) function_type_params: Vec<(u32, u32, Vec<CompactString>)>,
     /// `(scoped key, name, type parameters)` of each named class: a class is also a type, recorded in `finish` as an
     /// interface with no members unless the file declares an interface or alias of that name.
-    pub(super) pending_classes: Vec<(String, CompactString, Vec<CompactString>)>,
+    pub(super) pending_classes: Vec<(String, CompactString, Vec<CompactString>, DeclarationScope)>,
     /// The first parameter's name of each function being visited, innermost last: `const { size = 'md' } = props` in
     /// the body destructures it.
     pub(super) props_params: Vec<(Option<CompactString>, u32, u32)>,
@@ -339,6 +345,9 @@ impl<'src> SourceDataCollector<'src> {
             consumed_jsdoc: FxHashSet::default(),
             namespace_stack: Vec::new(),
             local_depth: 0,
+            scope_path: Vec::new(),
+            scope_children: Vec::new(),
+            module_children: 0,
             module_interfaces: FxHashSet::default(),
             pending_display_name_renames: Vec::new(),
             aliased_away: FxHashSet::default(),
@@ -387,6 +396,26 @@ impl<'src> SourceDataCollector<'src> {
             format!("'{name}' is declared inside a function body, so no module can import it"),
             span,
         );
+    }
+
+    /// Enter a region of `kind` inside the current one; pair with `leave_scope`.
+    pub(super) fn enter_scope(&mut self, kind: ScopeKind) {
+        let siblings = self.scope_children.last_mut().unwrap_or(&mut self.module_children);
+        let ordinal = *siblings;
+        *siblings += 1;
+        self.scope_path.push(ScopeStep { kind, ordinal });
+        self.scope_children.push(0);
+    }
+
+    /// Leave the region `enter_scope` entered last.
+    pub(super) fn leave_scope(&mut self) {
+        self.scope_path.pop();
+        self.scope_children.pop();
+    }
+
+    /// The scope of a declaration at the node being visited.
+    pub(super) fn current_scope(&self) -> DeclarationScope {
+        DeclarationScope::new(self.scope_path.clone())
     }
 
     pub(super) fn scoped_key(&self, name: &str) -> String {
@@ -530,10 +559,11 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     fn finish(mut self) -> SourceData {
-        for (key, name, params) in std::mem::take(&mut self.pending_classes) {
+        for (key, name, params, scope) in std::mem::take(&mut self.pending_classes) {
             if self.data.interfaces.contains_key(&key) || self.data.type_aliases.contains_key(&key) {
                 continue;
             }
+            self.data.class_scopes.insert(key.clone(), scope);
             self.data.interfaces.insert(
                 key.clone(),
                 crate::types::CollectedInterface {
@@ -1295,6 +1325,9 @@ fn line_and_column(source: &str, offset: u32) -> (u32, u32) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod scope_tests;
 
 impl evidence::Scope for SourceDataCollector<'_> {
     fn may_be_react(&self, name: &str) -> bool {
