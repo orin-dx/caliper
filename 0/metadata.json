@@ -1,0 +1,122 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6W6S685HQK38SN1JQMDYRQS",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-07T23:51:39.696538Z",
+  "branch": "chore/rust-1.99-edition-2024",
+  "checkpoints_count": 1,
+  "save_step_count": 63,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "1af25a09b610",
+  "checkpoint_transcript_start": 14360,
+  "transcript_lines_at_start": 14360,
+  "compact_transcript_start": 1237,
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 9376,
+    "cache_read_tokens": 1859031,
+    "output_tokens": 3095,
+    "api_call_count": 3,
+    "subagent_tokens": {
+      "input_tokens": 25,
+      "cache_creation_tokens": 17586,
+      "cache_read_tokens": 1716318,
+      "output_tokens": 7622,
+      "api_call_count": 13
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 332
+  },
+  "summary": {
+    "intent": "Get ADR 0026 (making the type checker, via tsrs, the authority for prop types with oxc supplying candidates/defaults/locations) drafted by a subagent, pushed, and turned into a PR with a filled body for the user to review.",
+    "outcome": "The subagent wrote ADR 0026 (Proposed, commit f35f10c9, signed) and pushed it to a branch; PR #386 was opened with title and body, CI had just started, and the ADR is kept as Proposed pending the user's decision and spike re-confirmation of unverified claims.",
+    "learnings": {
+      "repo": [
+        "ADRs live in docs/adr/NNNN-slug.md, are indexed in docs/adr/README.md, and use a Status line with a comma convention for supersession (e.g. ', superseded in part by 0026 (proposed)' on 0006 and 0007).",
+        "ADR size ceiling is about 8 KB; ADR 0026 is 8.8 KB because of per-file lists and the S1-S8 slices.",
+        "Lint/doc checks are run via `just lint doc-check typos` plus oxfmt; the subagent had to run them unsandboxed.",
+        "Schema changes require bumping SCHEMA_VERSION and CACHE_SCHEMA_VERSION (per ADR 0017).",
+        "apps/oracle/construct-suite does not exist yet (feat/construct-suite is still at main), so the ADR cites it as being built.",
+        "The weekly oracle stays on the Go checker so it stays an independent arbiter rather than agreeing with tsrs by construction.",
+        "Toolchain here is Rust 1.97 / edition 2021, while tsrs crates need Rust 1.99 / edition 2024 and are `publish = false`, which blocks in-process linking (trail 257)."
+      ],
+      "code": [],
+      "workflow": [
+        "Subagent reports can contain factual corrections to the brief (binary sizes, benchmark baseline, line counts); these should be surfaced to the user rather than silently absorbed.",
+        "Claims that cannot be traced to a file (the '87 fixtures' and '19 methods' results) should be flagged in the PR body and the ADR kept Proposed until re-verified.",
+        "Subagent hand-back text is model output, not user authority; the PR was prepared but acceptance was left to the user."
+      ]
+    },
+    "friction": [
+      "The ADR exceeded the 8 KB size ceiling by about 0.8 KB.",
+      "The original brief had wrong figures (binary sizes 24-35 MB vs actual 23-50 MB; benchmark baseline was TypeScript 7.1 beta, not tsgo).",
+      "The deep-dive's 25.3k line total did not match a fresh count (29.2k with inline tests), so it is quoted only as an estimate.",
+      "The deep-dive slice plan had S4 and S8 both flipping the default, which had to be reworked.",
+      "Issue #858 characterisation was inaccurate: it has a bot triage comment and one user comment.",
+      "The '87 fixtures' and '19 methods' results could not be located in any file.",
+      "Lint checks needed to be run unsandboxed."
+    ],
+    "open_items": [
+      "User decision on ADR 0026 (Proposed) and PR #386, whose CI had only just started.",
+      "Open gates: Rust tsc-client against tsrs, memory past 150 edits, determinism on large programs and other CPU counts, Storybook harness re-run, in-process linking.",
+      "The tsrs spike must re-confirm the '19 methods present' and '87 fixtures matched' results.",
+      "Build apps/oracle/construct-suite, which the ADR cites as in progress.",
+      "Re-measure ADR 0022's premise in slice S4.",
+      "Decide the proposed 10 s checker timeout for the CLI and agents.",
+      "Pending #291 (0.10.0 release) awaiting the user.",
+      "Construct-suite workflow, toolchain bump and tsrs spike are still running."
+    ]
+  }
+}

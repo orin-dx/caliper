@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_013AiqZURM7W3CFx3oAxbkVQ",
+  "agent_id": "a5b7fad4e34337380",
+  "subagent_type": "general-purpose",
+  "task_description": "Draft ADR 0026 checker as type authority",
+  "token_usage": {
+    "input_tokens": 76,
+    "cache_creation_tokens": 159658,
+    "cache_read_tokens": 4811325,
+    "output_tokens": 28845,
+    "api_call_count": 38
+  },
+  "started_at": "2026-11-07T15:36:02.907543-08:00",
+  "completed_at": "2026-11-07T15:43:29.9343-08:00"
+}
