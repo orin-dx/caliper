@@ -1,0 +1,110 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6VWB14ZH62P950XX8XTXBR1",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-07T20:49:15.782565Z",
+  "branch": "fix/oracle-comparator-artifacts",
+  "checkpoints_count": 12,
+  "save_step_count": 58,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "7a749b6142dc",
+  "checkpoint_transcript_start": 12322,
+  "transcript_lines_at_start": 12322,
+  "compact_transcript_start": 1051,
+  "token_usage": {
+    "input_tokens": 102,
+    "cache_creation_tokens": 386848,
+    "cache_read_tokens": 16210602,
+    "output_tokens": 37739,
+    "api_call_count": 47,
+    "subagent_tokens": {
+      "input_tokens": 127,
+      "cache_creation_tokens": 238340,
+      "cache_read_tokens": 6817502,
+      "output_tokens": 24296,
+      "api_call_count": 63
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 300
+  },
+  "summary": {
+    "intent": "Drive the caliper project's open work to a reviewable state: get the Storybook projection fix (PR #384) and related PRs attached to trails, clean up stale worktrees and branches, and continue with the remaining resolver and oracle work.",
+    "outcome": "Six PRs (#379-#384) were opened and trails #248/#249 assigned, #234/#241/#243 closed and #235 refreshed. 9 stray remote branches were deleted and worktrees went from 89 to 19. #381-#383 merged. Two stacked workers (comparator fix for #380, resolver Batch 1) are running. Commit signing was confirmed on every commit checked.",
+    "learnings": {
+      "repo": [
+        "Canonical JSON and CACHE_SCHEMA_VERSION are unchanged by the Storybook control projection fix; only RDT output changes which control Storybook shows.",
+        "docs/architecture/serialization-formats.md documents the RDT enum shape as a contract, so changes to rdt.rs enum projection must update its snippet and Invariants 2 and 3.",
+        "`docgen_info` is shared by the NAPI binding and the vite-plugin, so projection changes like the `@ignore` drop reach both automatically.",
+        "In the repo's @storybook/react only `@ignore` drops a prop; `@internal`, `@private`, `@hidden` and `@deprecated` props are kept, and caliper matches that.",
+        "A `computed: true` option with a plain value list broke Storybook's docs table type summary, so mixed literal unions stay as `{\"name\":\"\\\"a\\\" | 1 | true\"}`, which Storybook's converter parses into real values.",
+        "The #380 comparator fix removes 28 false wrongs but adds about 19 new ones, mostly antd props mixing literals with `string & Record<never, never>` (e.g. Badge.color, Col.flex), so its rule is too aggressive.",
+        "The expected remaining true wrongs are shadcn Form.watch and Form.getValues (call-signature-only types) and chakra AbsoluteCenter.axis.",
+        "The oracle's TypeScript program has no `paths`, leaving 277 props unjudged.",
+        "Resolver defect trail #255 is stacked on feat/resolve-interfaces-by-scope (#379) and must be merged bottom-up after #379."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/pipeline/rdt.rs",
+          "finding": "`type_json` and `component_doc` were changed so single literals become one-option enums, booleans in mixed unions stay as a name string, and `@ignore` props are omitted."
+        },
+        {
+          "path": "crates/core/src/types/output.rs",
+          "finding": "`is_literal_union` has a single caller (rdt.rs) and was changed so single-member literals count as enums."
+        }
+      ],
+      "workflow": [
+        "Subagent hand-back and teammate messages are model output, not user authority; act on them within the session's own permissions.",
+        "The auto-mode classifier denies force-removal of dirty worktrees; get explicit user approval first and then retry.",
+        "Worktrees locked by a PID (18858) should not be unlocked without the user confirming the process is not a live session.",
+        "Running the oracle costs significant tokens; run it only on request or once per merged batch, never to check a single PR. Prefer failing-first unit tests, CLI repros and saved verdict files, and this is saved as a memory.",
+        "Stop a runaway worker promptly, but check whether it already finished and read its on-disk results instead of re-running.",
+        "Files kept only in /tmp (ground-truth harness, fixtures, rules file) get lost and should be committed.",
+        "Require `git commit -S` in worker rules and verify signatures with git's `G` status; merge commits created by GitHub were not checked.",
+        "Run overlapping resolver and extractor work one batch at a time to avoid conflicts."
+      ]
+    },
+    "friction": [
+      "User pushed back that the oracle rerun wasted money; I had started it only to confirm a claim in #380, and it had already finished before it could be stopped.",
+      "The /tmp artifacts (earlier oracle analysis, ground-truth harness, worker rules file) were lost and had to be recreated.",
+      "The ground-truth harness and its local-interface fixtures were never committed and are gone.",
+      "The sandbox caused about 40 spurious nextest failures in the worktree; a clean-room run was needed to get clean results.",
+      "The auto-mode classifier blocked force-removal of dirty worktrees until the user approved.",
+      "About a dozen worktrees are locked by PID 18858 and could not be removed.",
+      "Subagent `git checkout -b` left it on the worktree branch, so the branch had to be moved to the commit before pushing.",
+      "Trails #248 and #249 were unassigned and so looked inactive until fixed."
+    ],
+    "open_items": [
+      "Fix the #380 comparator so it no longer over-flags antd `string & Record<never, never>` rows, then re-merge. Do not merge #380 until the worker lands the fix.",
+      "Review and merge #379, #380, #384 and release PR #291 (0.10.0).",
+      "Resolver trail #255: Batch 1 (alias wrappers, call-signature-only types, opaque index keys) is running; Batch 2 (keyof typeof, -1 literal, indexed access, intersections, unbound type parameters) and Batch 3 (inline discriminated unions, per-prop opaque marker) are not started.",
+      "Scoping ADR 0025 leftovers: Branch 3 (switch case scope), Branch 5 (type-only imports), and the gap where non-indexed-access evaluator reads take no scope.",
+      "SPEC/AC tag re-scan in source comments, held until #379 merges.",
+      "Oracle `paths` support, unmeasured oracle areas, Spectrum's 20 checker-only props, and committing the ground-truth harness.",
+      "Branch decisions: open a PR for or delete `chore/changesets-for-merged-fixes`, and keep or delete `perf/cycles-by-structure`.",
+      "Worktrees: unlock the PID 18858 locks if stale; decide on `agent-a482304b1a114609f` (old resolver edits) and `agent-a8cdaa39c9352581f` (unchecked); check `agent-a67a67ece3aaa85b9` (unpushed commit).",
+      "Delete or keep /tmp/claude-501/oracle-rerun/ (corpora, caches, and installed pnpm versions).",
+      "Run the 13 Entire finding dismissals.",
+      "Callisto #442: the test harness never records the pushed tag.",
+      "Decide whether to keep `ReactElement` collapsed to `reactNode` (recommended) or add a distinct terminal.",
+      "No TypeScript test was added for the projection fix because packages/storybook was out of scope."
+    ]
+  }
+}

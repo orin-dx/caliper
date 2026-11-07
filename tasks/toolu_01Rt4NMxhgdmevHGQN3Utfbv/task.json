@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01Rt4NMxhgdmevHGQN3Utfbv",
+  "agent_id": "a9be8448b82d8a8b1",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix Storybook control projection",
+  "token_usage": {
+    "input_tokens": 214,
+    "cache_creation_tokens": 185288,
+    "cache_read_tokens": 13625174,
+    "output_tokens": 49938,
+    "api_call_count": 107
+  },
+  "started_at": "2026-11-06T19:07:26.995416-08:00",
+  "completed_at": "2026-11-06T19:21:38.685582-08:00"
+}
