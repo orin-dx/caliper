@@ -100,9 +100,9 @@ TOON (Token-Optimized Object Notation) is a compact, indentation-and-CSV-like te
 
 **Locked design decision:** TOON output is not a serialization format in the reversible sense. It:
 
-- Collapses `PropType` into a single compact string per prop (`format_type_compact`) — e.g. `Array<string>`, `Ref<HTMLButtonElement>`, `handler(MouseEvent)`, `opaque(CustomType)` — discarding structure a JSON consumer would get from the tagged `PropType` enum (no way to tell from the string alone whether `SxProps` came from `PropType::SxProps` vs. a `Named` type happening to render the same text).
+- Collapses `PropType` into a single compact string per prop (`format_type_compact`) — e.g. `Array<string>`, `Ref<HTMLButtonElement>`, `(event: MouseEvent) => void`, `opaque(CustomType)` — discarding structure a JSON consumer would get from the tagged `PropType` enum (no way to tell from the string alone whether `SxProps` came from `PropType::SxProps` vs. a `Named` type happening to render the same text).
 - Escapes only for CSV-safety (`escape_toon_val`: commas, newlines, quotes) — not for full round-trip fidelity.
-- Truncates long union/intersection/literal-union member lists to a fixed cap, replacing the tail with a `"...(+N)"` marker rather than emitting every member.
+- Truncates a union of types (more than 8 members), an intersection (more than 4) and a collapsed layer's `members` (more than 24), replacing the tail with a `"...(+N)"` marker; the canonical JSON holds every member. It never cuts a literal union or a union with a literal member, because an agent writes a call from those values. A function type keeps its parameter names. A prop's `@deprecated`, `@see` and `@since` tags are written in a `tags` column (present only when some prop has one), and a discriminated union's discriminant prop in a `discriminant:` line.
 
 There is no `parse_toon` / deserializer anywhere in the codebase, and none is planned — TOON is a one-way export.
 
@@ -123,11 +123,11 @@ fn truncate_with_indicator(parts: &[String], limit: usize, sep: &str) -> String 
 }
 ```
 
-Three call sites route through it, each with its own cap: `LiteralUnion` (limit 6, separator `|`), `Union` (limit 4, separator `|`), `Intersection` (limit 4, separator `&`).
+Three call sites route through it, each with its own cap: `Union` of types only (`UNION_LIMIT` 8, separator `|`; a union with a string, number or boolean literal member is written in full), `Intersection` (limit 4, separator `&`) and a layer's `members` (limit 24). `LiteralUnion` is not cut.
 
 This was a real, confirmed bug before the fix: `LiteralUnion`'s truncate-with-indicator logic existed but was never factored into a shared helper, so when `Union`/`Intersection` needed the same behavior _in the same function_ (`format_type_compact`), the indicator half was silently dropped — those two branches truncated the member list but said nothing about it, making a 6-member union look identical in TOON output to a genuine 4-member union. The fix (this shared helper) is exactly the enforcement `crates/core/AGENTS.md`'s design philosophy wants — a single named constructor/helper instead of parallel hand-copied logic.
 
-**Invariant 8:** Every `PropType` variant in `format_type_compact` that renders a bounded-length member list (currently `LiteralUnion`, `Union`, `Intersection`) must call `truncate_with_indicator` rather than hand-rolling its own `.join()`/slice logic. A new variant added later with the same "list of formatted members, potentially long" shape (e.g. if `Tuple` ever grows a compact-member rendering) should route through the same helper by default — don't reintroduce the exact bug this fix closed.
+**Invariant 8:** Every `PropType` variant in `format_type_compact` that renders a bounded-length member list (currently a union of types and `Intersection`) must call `truncate_with_indicator` rather than hand-rolling its own `.join()`/slice logic. A new variant added later with the same "list of formatted members, potentially long" shape (e.g. if `Tuple` ever grows a compact-member rendering) should route through the same helper by default — don't reintroduce the exact bug this fix closed.
 
 **Invariant 9:** The `"...(+N)"` marker is a required, load-bearing signal, not decorative — `N` must be `parts.len() - limit`, i.e. the exact count of dropped members, not a placeholder or a boolean "more exist" flag. A consumer (LLM agent reading TOON context) uses `N` to judge whether the truncated tail is worth fetching via canonical JSON instead.
 
