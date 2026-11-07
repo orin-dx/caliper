@@ -1,0 +1,99 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6SP7NZHS714722SKKK94QWX",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-07T00:24:02.628451Z",
+  "branch": "docs/benchmarks-historical",
+  "checkpoints_count": 3,
+  "save_step_count": 51,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "20f8a0ce9fd7",
+  "checkpoint_transcript_start": 11410,
+  "transcript_lines_at_start": 11410,
+  "compact_transcript_start": 975,
+  "token_usage": {
+    "input_tokens": 20,
+    "cache_creation_tokens": 162013,
+    "cache_read_tokens": 1159498,
+    "output_tokens": 7192,
+    "api_call_count": 8,
+    "subagent_tokens": {
+      "input_tokens": 42,
+      "cache_creation_tokens": 100543,
+      "cache_read_tokens": 1912830,
+      "output_tokens": 6215,
+      "api_call_count": 21
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 270
+  },
+  "summary": {
+    "intent": "Coordinate a set of parallel subagent workers to land cleanup and fix PRs in the caliper-docgen repo (trail #243/#244): drop unemitted default-contract items, fix InvalidJson handling in the tsc client, and then start the ADR follow-up work (scope identity, benchmarks banner).",
+    "outcome": "PRs #371-#376 were opened and merged (main at a6ae3e67). #375 removed ComputedDefault and DefaultSource::JsDoc while keeping JsDocDefaultMismatch, and #376 made unparseable checker replies fail pending requests immediately with InvalidJson. Two new workers (declaration scope identity, benchmarks.md historical banner) were started and had not reported yet.",
+    "learnings": {
+      "repo": [
+        "Cache encodes DiagnosticCode/DefaultSource variants by name, so removing variants does not change existing bytes and CACHE_SCHEMA_VERSION need not be bumped. A bump to 31 failed the golden test cache::golden::source_data_bytes_are_stable_for_the_current_schema_version on the version header alone.",
+        "Removing public enum variants in caliper-docgen-core is a Rust API break that `just semver` flags. It is covered by a minor changeset in .changeset/.",
+        "Standard verification pipeline: `cargo check --workspace --all-targets`, clean-room detached worktree with `pnpm install --frozen-lockfile --offline`, `cargo nextest run --workspace --exclude caliper-docgen-napi --locked`, `just lint doc-check machete typos`, and `just semver`.",
+        "The semantic layer maps TscClientError via rpc.rs::classify to CallError::Fatal, and answer_with turns that into a Warning diagnostic, so tsc-client error changes need no semantic-layer edits.",
+        "A non-JSON reply body has no request id, so the tsc client can only fail all pending requests rather than one. A garbled notification would also fail waiting requests.",
+        "DefaultSource is read only in a test (extractor/tests.rs), so it earns its place only weakly with its remaining Destructuring and DefaultProps variants."
+      ],
+      "code": [
+        {
+          "path": "crates/docgen-core/src/resolver/chain.rs",
+          "line": 634,
+          "finding": "Emits JsDocDefaultMismatch when a JSDoc @default differs from the code default, and resolver/tests.rs asserts it. The earlier claim that it was never emitted was wrong. (The worker's report cited ~652, and the orchestrator's rg check found line 634.)"
+        },
+        {
+          "path": "crates/tsc-client/src/protocol.rs",
+          "finding": "parse_incoming now returns MalformedFrame{InvalidJson} for any body that fails to decode, whether bad JSON or the wrong shape. Its only callers are client.rs dispatch and its own tests."
+        },
+        {
+          "path": "crates/tsc-client/src/client.rs",
+          "finding": "dispatch now fails every waiting request with the InvalidJson error instead of logging and dropping the frame, which previously ended in a Timeout."
+        }
+      ],
+      "workflow": [
+        "Verify subagent claims independently with rg before acting on them. The orchestrator's premise about JsDocDefaultMismatch was wrong, and the worker's check caught it.",
+        "Prove regression tests fail on pre-fix code by stashing the fix. Unit tests that need the new signature to compile cannot be run pre-fix.",
+        "Run tests in a clean-room worktree. The sandboxed worktree showed 43 unexplained failures that passed clean-room, and the sandbox blocks network and ~/.cargo access.",
+        "Sequence work by file overlap: independent branches run in parallel, while the SPEC/AC tag re-scan and ADR branches 2-5 touch the same extractor files and must land one at a time."
+      ]
+    },
+    "friction": [
+      "The original premise that JsDocDefaultMismatch was unemitted was wrong, so the approved removal scope shrank.",
+      "43 tests failed in the sandboxed worktree (config, watch_process, snapshots, a_running_process_has_resident_memory) and were never diagnosed.",
+      "The sandbox blocked git, gh, entire and some cargo/pnpm steps, so those ran with the sandbox off.",
+      "The worker's line reference for chain.rs (~652) differed from the verified line (634)."
+    ],
+    "open_items": [
+      "Decide whether to keep JsDocDefaultMismatch. This was recommended and effectively kept; the remaining gap is that a default does not record its source.",
+      "Release bot PR #291 (0.10.0) is still open and nothing in flight touches the release workflow.",
+      "The oracle run the user mentioned is still to be done.",
+      "Scope-identity worker (feat/declaration-scope-identity, trail #244) is in flight. It must report peak memory and time on Chakra plus dependencies against main and bumps the cache schema.",
+      "Benchmarks banner worker (docs/benchmarks-historical, trail #234) is in flight.",
+      "The SPEC/AC tag re-scan is held until the scope-identity PR merges.",
+      "ADR branches 2-5 are held and must land one at a time.",
+      "The 43 unexplained sandbox-only test failures remain undiagnosed."
+    ]
+  }
+}
