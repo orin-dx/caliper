@@ -52,9 +52,8 @@ fn extracted() -> Extracted {
     let canonical = Value::Object(
         entry.props.iter().map(|(name, prop)| (name.clone(), serde_json::to_value(prop).unwrap())).collect(),
     );
-    let rdt = Value::Object(
-        entry.props.iter().map(|(name, prop)| (name.clone(), rdt::type_json(&prop.prop_type))).collect(),
-    );
+    let rdt =
+        Value::Object(entry.props.iter().map(|(name, prop)| (name.clone(), rdt::type_json(&prop.prop_type))).collect());
     Extracted { canonical, rdt }
 }
 

@@ -879,7 +879,9 @@ pub(super) fn resolve_type_alias_type(
         // reaches the output as `Partial<Record<K, V>>` exactly as the same text written in a prop does. Forwarding
         // to the base dropped the wrapper: every key came out required, `Omit` kept the omitted key.
         CollectedTypeAlias::Partial { base, .. } => utility_reference("Partial", [base], file_path, ctx, state, depth),
-        CollectedTypeAlias::Required { base, .. } => utility_reference("Required", [base], file_path, ctx, state, depth),
+        CollectedTypeAlias::Required { base, .. } => {
+            utility_reference("Required", [base], file_path, ctx, state, depth)
+        }
         CollectedTypeAlias::Omit { base, keys, .. } => {
             utility_reference("Omit", [base, keys], file_path, ctx, state, depth)
         }

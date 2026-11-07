@@ -905,7 +905,8 @@ impl<'src> SourceDataCollector<'src> {
                     .filter(|member| {
                         matches!(
                             member,
-                            TSSignature::TSCallSignatureDeclaration(_) | TSSignature::TSConstructSignatureDeclaration(_)
+                            TSSignature::TSCallSignatureDeclaration(_)
+                                | TSSignature::TSConstructSignatureDeclaration(_)
                         )
                     })
                     .count();
