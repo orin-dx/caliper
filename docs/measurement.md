@@ -55,7 +55,7 @@ Each corpus entry's `reference.unmatched` says why the items Caliper reports now
 | `call_result` | A value a call builds (`createIcon(...)`, `generateCalendar(...)`). |
 | `file_with_other_components`, `file_without_components` | A declaration Caliper does not report, in a file where it reports others, or none. |
 
-The 16 antd items still unpaired are not pairing cases: the date picker and calendar families (built by factory functions), `Parent.Member` entries Caliper reports under the parent (`Form.List`, `Mentions.Option`, `TreeSelect.TreeNode`), and helpers RDT lists as components (`confirm`, `dropIndicator`). shadcn has no re-export of this kind in the pinned commit, so nothing pairs there; its unpaired items are `Icons.logo`-style object members, aliases such as `const ComboboxRoot = Primitive.Root` and factory results, which Caliper does not detect.
+The 14 antd items still unpaired in the weekly run of 2026-11-06 (16 when this was first written) are not pairing cases: the date picker and calendar families (built by factory functions), `Parent.Member` entries Caliper reports under the parent (`Form.List`, `Mentions.Option`, `TreeSelect.TreeNode`), and helpers RDT lists as components (`confirm`, `dropIndicator`). shadcn has no re-export of this kind in the pinned commit, so nothing pairs there; its unpaired items are `Icons.logo`-style object members, aliases such as `const ComboboxRoot = Primitive.Root` and factory results, which Caliper does not detect.
 
 Recall is measured against that reference, on the components both tools report (same file, same name, or paired):
 
@@ -74,15 +74,15 @@ The run uploads `weekly.json` and a table to the job summary, which opens with a
 
 ### TypeScript's checker as the oracle
 
-RDT has mistakes of its own. With `--oracle` the run also asks TypeScript 7.1's checker (`apps/oracle/src/oracle.ts`, `typescript/sync` of `7.1.0-beta`) for each prop's type and compares it structurally with Caliper's canonical `--json`. The weekly table shows the share of props that agree (identical, or the same type spelled by name) and the share the checker contradicts. This is information only: the checker is a beta and the backend that uses it is an opt-in (`docs/type-checker-integration.md`).
+RDT has mistakes of its own. With `--oracle` the run also asks TypeScript 7.1's checker (`apps/oracle/src/oracle.ts`, `typescript-beta/sync`, the `7.1.0-beta` package) for each prop's type and compares it structurally with Caliper's canonical `--json`, extracted with `--html-attributes full --include-unexported --load-dependencies --collapse-inherited-props none`. The weekly table shows the share of props that agree (identical, or the same type spelled by name) and the share the checker contradicts, for Caliper, RDT and react-docgen, and the headline below. `agree` is the loose number; `wrong` is the one that matters and the one the weekly issue gates on, but the comparator has artifacts that make it both over- and under-report. `docs/rdt-differences.md` lists every class of disagreement with an example, how it is counted and whether the comparator scored it right. The checker is a beta and the backend that uses it is an opt-in (`docs/type-checker-integration.md`), so a disagreement is a reason to look, not a verdict on its own.
 
-| Verdict           | Meaning                                                                          |
-| ----------------- | -------------------------------------------------------------------------------- |
-| Identical         | Both sides describe the same type                                                |
-| Spelled           | The same type, Caliper by name where the checker expands it                      |
-| Less precise      | Caliper's type is looser or left unevaluated                                     |
-| Wrong             | Caliper's type describes something else, such as a literal union missing members |
-| Checker any/error | The checker has no type                                                          |
+| Verdict | Meaning |
+| --- | --- |
+| Identical | Both sides describe the same type |
+| Spelled | The same type, Caliper by name where the checker expands it |
+| Less precise | Caliper's type is looser or left unevaluated |
+| Wrong | Caliper's type describes something else (an omitted key that came back, an object with no fields for a callable) |
+| Checker any/error | The checker has no type |
 
 #### All three tools against the checker
 
@@ -96,7 +96,7 @@ The **universe** is every own prop the checker finds on an exported function who
 - **Why a prop is omitted** (`missing_by_reason`): the tool reports no such component, it reports the component but not the prop, or it threw on the file.
 - **react-docgen's thrown files** (`failed_files`): files its default resolver throws on, 17% to 21% of the files on antd and shadcn. Their props are omitted, so they cost react-docgen agreement; they have their own column so the cost is visible.
 
-`oracle.shared_props`, `agree` and `wrong` keep their meaning, so the weekly history does not move. A local run on antd and shadcn at the commit that added this reads, for the whole universe: Caliper 39.7% and 40.1% (its `collapsed` layers and any component it does not report count against it), RDT 44.8% and 84.8%, react-docgen 24.6% and 1.9%. This comparison between tools is information, never a gate, and the rules are validated on antd and shadcn only: Mantine, Chakra and Spectrum need a weekly run.
+`oracle.shared_props`, `agree` and `wrong` keep their meaning, so the weekly history does not move. A local run on antd and shadcn at the commit that added this, with the default collapse (the weekly record collapses nothing, and reads 44.7% and 90.4% for Caliper), reads, for the whole universe: Caliper 39.7% and 40.1% (its `collapsed` layers and any component it does not report count against it), RDT 44.8% and 84.8%, react-docgen 24.6% and 1.9%. This comparison between tools is information, never a gate, and the rules were validated on antd and shadcn; the weekly run produces all five corpora.
 
 ### The headline
 
@@ -113,11 +113,11 @@ The record keeps the counts per corpus as `headline`, next to the unchanged `ora
 
 The issue opens when, on any corpus:
 
-- more than 0.1% of the judged props are wrong, or the wrong share is higher than last week's;
+- more than 0.1% of the judged props are wrong, or the wrong share is higher than last week's (the count is not trustworthy in either direction yet: the comparator reads an index signature as a property and so reports wrong props that are right, and it scores a dropped `Partial` or `Omit` as less precise or identical, so wrong answers never reach it; `docs/rdt-differences.md`);
 - a question a reader is asked is answered silent-wrong (`scripts/agent_eval.py`);
-- a whole run is over a budget: 2 s or 600 MiB with dependencies loaded, the default (`BUDGETS` in `scripts/headline.py`). The budgets are user-facing limits, not week-over-week ones; Chakra, the largest corpus, runs in about 1 s and 446 MiB.
+- a whole run is over a budget: 2 s or 600 MiB with dependencies loaded, the default (`BUDGETS` in `scripts/headline.py`). The budgets are user-facing limits, not week-over-week ones; Chakra, the largest corpus, ran in 0.24 s and 378 MiB in the weekly run of 2026-11-06.
 
-Recall against RDT stays information. A local run on antd and shadcn at the commit that added this reads: antd 83.7% correct, 6.0% less precise, 0.00% wrong, 10.2% named only (3,426 props); shadcn 54.4% correct, 5.1% less precise, 0.06% wrong (0.096% of the judged props, just under the gate), 0.4% missing, 39.6% named only (13,918 props). Mantine, Chakra and Spectrum need a weekly run.
+Recall against RDT stays information. A local run on antd and shadcn at the commit that added this, with the default collapse, reads: antd 83.7% correct, 6.0% less precise, 0.00% wrong, 10.2% named only (3,426 props); shadcn 54.4% correct, 5.1% less precise, 0.06% wrong (0.096% of the judged props, just under the gate), 0.4% missing, 39.6% named only (13,918 props). The weekly record collapses nothing (`--collapse-inherited-props none`), so named only is 0 there; its run of 2026-11-06 reads antd 94.0% correct, 6.0% less precise, 0 wrong, and shadcn 93.8% correct, 5.3% less precise, 8 wrong (0.058% of the shared props), 0.4% missing (`headline` in `weekly.json`, `main` at `c5fbb33e`). Mantine, Chakra and Spectrum read in that run: 90.9%, 100.0% and 83.7% agree, with 0, 1 and 22 wrong. Of Spectrum's 22, the comparator's index-signature artifact accounts for all (`docs/rdt-differences.md`), so that gate firing is false until the comparator is corrected.
 
 ### An independent reference
 
@@ -228,7 +228,7 @@ What it reports:
 - First load for a session, one request at a time in a seeded order that is the same in every mode: start (create plus index), the first component, and the first 10 and 50 components asked. A figure for more components than were asked is `None`, not the last one reached. The first of the `--runs` runs starts with an empty cache directory (cold), the others with the cache it left (warm), and both are reported.
 - For the on-demand mode: the share of first requests the checker answered within the wait, how many timed out, how many kept the structural result for the checker's own reasons (not exported, a class component, generic props), and the share answered once the late answers had arrived.
 - The props that differ from the structural result: type, required, default and presence. `@types/react` props are counted apart (the whole-project checker pass leaves them out), and a type that differs only in spelling (spacing, `| undefined`, union order, `Array<T>`) is counted as cosmetic. A rest or optional parameter marker is a difference. Each remaining difference gets a coarse category: `only_checker`, `only_structural`, `parameter_marker_lost`, `checker_longer` or `checker_shorter` (the checker's text is more than 20 characters and more than 1.5 times longer or shorter, a length test that says nothing about why, so a longer text may be an alias written out, an object type or a function type), and `other_type`. `--diff-out` has one row per differing prop (without `@types/react` and cosmetic rows, unless `--diff-all`), `--pairs-out` one entry per distinct pair of structural and checker facts with a count, a category and an example, most common first.
-- The checker oracle's verdict on each mode, for information only: the shares of shared props it calls identical or spelled differently (agree), less precise, and wrong. The oracle is the same checker, so it agrees with a checker mode almost by construction, and it credits the structural result for keeping a type's alias name while it scores the checker's expanded union as less precise (`docs/type-checker-integration.md`). Do not read that agree figure as accuracy; judging the checker modes needs a reference that is not the checker. The oracle step runs the CLI as the weekly record does, with its own flags and the default collapse.
+- The checker oracle's verdict on each mode, for information only: the shares of shared props it calls identical or spelled differently (agree), less precise, and wrong. The oracle is the same checker, so it agrees with a checker mode almost by construction, and it credits the structural result for keeping a type's alias name while it scores the checker's expanded union as less precise (`docs/type-checker-integration.md`). Do not read that agree figure as accuracy; judging the checker modes needs a reference that is not the checker. The oracle step runs the CLI with `--html-attributes full --include-unexported --load-dependencies` and the default collapse; the weekly record's own oracle step collapses nothing (`--collapse-inherited-props none`).
 
 ### Results, 2026-11-02 (second run, under the addon's settings)
 
@@ -271,7 +271,7 @@ RDT's memory is its process's peak RSS and its time excludes Node's start; Calip
 
 ## Collapse by relevance, 2026-11-02
 
-A dependency source used to collapse into a layer of names once it declared more than 30 props. It now collapses when it is ambient (DOM and ARIA attribute families, style systems; clauses in `crates/core/src/resolver/ambient.rs`) and past 30 props, or when it is not ambient but past 200 props (`LARGE_API_SOURCE`). Every other dependency source is listed with its types. The rule is checked by a fixture of the verdicts of the oracle's classifier (`crates/core/src/resolver/ambient_parity.json`); that classifier (`apps/oracle/src/layer-only.ts`) and its "Layer-only props" write-up are on the `measure/layer-only-props` branch, not yet in this tree.
+A dependency source used to collapse into a layer of names once it declared more than 30 props. It now collapses when it is ambient (DOM and ARIA attribute families, style systems; clauses in `crates/core/src/resolver/ambient.rs`) and past 30 props, or when it is not ambient but past 200 props (`LARGE_API_SOURCE`). Every other dependency source is listed with its types. The rule is checked by a fixture of the verdicts of the oracle's classifier (`crates/core/src/resolver/ambient_parity.json`); that classifier is `apps/oracle/src/layer-only.ts`, and its write-up is "Layer-only props" above.
 
 **Who it changes.** The Storybook addon runs with `collapseInheritedProps: none` (`packages/storybook/src/provider.ts`), which lists every inherited prop, so the rule does not change what the addon shows. The output is byte-identical between the two builds on all five corpora in that mode. The rule changes the CLI and NAPI default, and so what agents and TOON readers see.
 
