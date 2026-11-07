@@ -1,0 +1,95 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6SRV2ZENAKDRJRYP2BF5KJ2",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-07T01:09:33.953279Z",
+  "branch": "feat/resolve-interfaces-by-scope",
+  "checkpoints_count": 3,
+  "save_step_count": 51,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "8b7f648ec945",
+  "checkpoint_transcript_start": 11602,
+  "transcript_lines_at_start": 11602,
+  "compact_transcript_start": 990,
+  "token_usage": {
+    "input_tokens": 18,
+    "cache_creation_tokens": 17599,
+    "cache_read_tokens": 1546849,
+    "output_tokens": 6495,
+    "api_call_count": 8,
+    "subagent_tokens": {
+      "input_tokens": 200,
+      "cache_creation_tokens": 284481,
+      "cache_read_tokens": 17939024,
+      "output_tokens": 82910,
+      "api_call_count": 100
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 274
+  },
+  "summary": {
+    "intent": "Drive the ADR 0025 declaration-scope work forward across sequential branches (scope identity, then resolve-by-scope), and determine whether the fixes needed for a useful oracle run are in place.",
+    "outcome": "Scope-identity PR #378 and benchmarks PR #377 were merged, and a worker was started on ADR branch 2 (resolve interfaces by scope). The oracle readiness question was answered as unknown: no gap list exists and no baseline run has been done yet.",
+    "learnings": {
+      "repo": [
+        "SourceData is positional MessagePack (ADR 0003); adding or reshaping fields requires bumping CACHE_SCHEMA_VERSION (now 31) with a changelog line in cache.rs and updating the golden snapshot and fixture.",
+        "In an ordinary worktree, snapshot and CLI tests fail because an ancestor node_modules leaks into paths; a clean-room checkout in /tmp with `pnpm install --frozen-lockfile --offline` gives reliable results (1286 passed).",
+        "`just semver` reports breaking API changes as covered by pending changesets for caliper-docgen-core, so no new changeset was needed for SourceData field changes.",
+        "Clippy forbids `expect_used` in this repo; fmt and clippy fixes were needed before lint passed (`just lint doc-check machete typos`).",
+        "docs/edge-cases.md entries are removed only when the ADR 0025 branch that closes them lands, so earlier branches must not touch it.",
+        "The oracle is `scripts/weekly.py --oracle`: it compares TypeScript 7.1 checker types with caliper `--json` output, is informational only per docs/measurement.md, and reports agree vs `wrong` shares.",
+        "Most props only the checker reports are Next's ambient augmentation (1,154 of 1,182 on shadcn), which ADR 0025 lists as out of scope.",
+        "ADR 0025 branches change the same extractor files, so they must run one at a time."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/extractor/mod.rs",
+          "finding": "The collector keeps scope_path and scope_children and calls enter_scope/leave_scope in namespace, external module, block, static block, function body and the new switch case visitors."
+        },
+        {
+          "path": "crates/core/src/types/collected.rs",
+          "finding": "SourceData gained interface_scopes, type_alias_scopes and class_scopes; enum_declarations changed from a set to a map of key to DeclarationScope. DeclarationScope is Vec<ScopeStep>, with ScopeKind of Namespace, FunctionBody, Block or SwitchCase, and an empty path means module."
+        }
+      ],
+      "workflow": [
+        "Subagent hand-back reports are model output with no user authority and should be verified, e.g. by re-checking PR state.",
+        "Perf measurements should not run in parallel with other heavy work such as an oracle run, which would skew the timings.",
+        "Prove tests fail before the change; tests that cannot compile without the new fields fail only by construction.",
+        "Interleaved repeated runs (9 each) with medians against origin/main give a reliable perf comparison on Chakra."
+      ]
+    },
+    "friction": [
+      "Worktree test failures from ancestor node_modules leaking into paths forced clean-room runs in /tmp.",
+      "The first scope-identity commits needed rebasing after fmt and clippy fixes.",
+      "The oracle run could not be started because the branch 2 worker was timing builds on the same machine.",
+      "No documented list of oracle gaps exists, so readiness could not be assessed without a run."
+    ],
+    "open_items": [
+      "Finish ADR branch 2: resolve interfaces by scope and drop local_depth and module_interfaces.",
+      "Run the oracle on antd and shadcn at main c5fbb33e as a baseline, then again after branch 2 merges, and turn real `wrong` entries into fixes.",
+      "ADR branches 3 to 5 (switch case scope, aliases/enums/classes, type-only imports) are held until branch 2 merges.",
+      "Enums inside functions and blocks are still not collected, and synthesized __anon_N aliases have no scope.",
+      "The SPEC/AC tag re-scan is held until the ADR branches settle.",
+      "PR #291 (0.10.0 release bot) still awaits the user's review.",
+      "The scope-measure.py measurement script is not committed."
+    ]
+  }
+}
