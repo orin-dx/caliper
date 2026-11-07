@@ -153,7 +153,7 @@ Components declared through a generic wrapper call, such as Mantine's `factory<B
 - [Project page](https://orin-dx.com/tools/caliper/) on orin-dx.com.
 - [Architecture](ARCHITECTURE.md): pipeline, crate map, invariants.
 - [Decisions](docs/adr/README.md): why OXC, the cache format, panic containment, the planned TypeScript 7 backend.
-- [Status](docs/STATUS.md), [edge cases](docs/edge-cases.md) and [benchmarks](docs/benchmarks.md).
+- [Status](docs/STATUS.md), [edge cases](docs/edge-cases.md), [benchmarks](docs/benchmarks.md) and [where Caliper's types differ from RDT and the checker](docs/rdt-differences.md).
 - [Migrating](MIGRATING.md) from `react-docgen-typescript`.
 - [Contributing](CONTRIBUTING.md) and [security](SECURITY.md).
 
