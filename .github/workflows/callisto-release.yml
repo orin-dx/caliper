@@ -24,7 +24,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   # Keep in lockstep with .prototools.
-  RUST_VERSION: "1.98.1"
+  RUST_VERSION: "1.99.1"
   # `callisto release pending` reads the committed decision of each of the 10 newest release commits,
   # and fails with E166 on older ones whose decision no longer decodes. Count this release and newer.
   RELEASE_PENDING_FROM: 2daef9276b234fcc04d8994d91210eeccd88d7e8

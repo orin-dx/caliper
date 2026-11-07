@@ -6,7 +6,7 @@ By participating in this project, you agree to abide by the [Code of Conduct](./
 
 | Tool  | Min version   | Notes                                         |
 | ----- | ------------- | --------------------------------------------- |
-| Rust  | 1.97          | `rustup update stable`                        |
+| Rust  | 1.99          | `rustup update stable`                        |
 | proto | latest        | manages Node/pnpm versions from `.prototools` |
 | pnpm  | `.prototools` | via proto, or `npm i -g pnpm`                 |
 
