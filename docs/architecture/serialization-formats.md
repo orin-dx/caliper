@@ -40,37 +40,28 @@ if prop_type.is_literal_union() {
         PropType::LiteralUnion { members, .. } => {
             members.iter().map(|m| serde_json::json!({"value": format!("\"{m}\"")})).collect()
         }
-        _ => vec![],
+        single => vec![serde_json::json!({"value": single.raw_string()})],
     };
     return serde_json::json!({ "name": "enum", "raw": prop_type.raw_string(), "value": values });
 }
 serde_json::json!({ "name": prop_type.raw_string() })
 ```
 
+A single string or number literal (`kind?: 'button'`) is a one-option `enum`, which is what Storybook's own docgen produces for it. A union with a boolean member (`'a' | 1 | true`) is not an `enum`: Storybook unquotes each option's source text into a string or a number, so `true` would reach the control as the string `"true"`. It stays a type name, `{"name": "\"a\" | 1 | true"}`, which Storybook's converter splits at the `|` and parses as JSON itself, giving the options `["a", 1, true]` with a real boolean (its own docgen gives such a union no options at all). That holds only while every member's text survives the split and parse: a string holding `|`, `"` or `\` (`'a|b' | true`) is split inside the literal or fails `JSON.parse` (`'a\\b'` parses to a backspace), and Storybook then picks an `object` control. Such a union is an `enum` as before (`true` is then the string "true"), so that no option is lost.
+
 This exists because Storybook's own docgen addon (a real consumer of RDT's JSON) looks for `type.name === "enum"` as the trigger to render a `<select>` control instead of a free-text field — the single highest-value renderer hook for the most commonly curated kind of prop in any design system (`variant`, `size`, `color`, …).
 
-**Invariant 2:** `rdt::type_json` returns `{"name": "enum", "raw": ..., "value": [...]}` if and only if `prop_type.is_literal_union()` is `true`. Do not special-case `PropType::Union`/`PropType::LiteralUnion` shape-matching directly inside `rdt::type_json` — route every literal-union check through `is_literal_union()`, because that's the single place the 2+ member truthiness rule (below) is enforced.
+**Invariant 2:** `rdt::type_json` returns `{"name": "enum", "raw": ..., "value": [...]}` if and only if `prop_type.is_literal_union()` is `true`. Do not special-case `PropType::Union`/`PropType::LiteralUnion` shape-matching directly inside `rdt::type_json` — route every literal-union check through `is_literal_union()`, because that's the single place that rule (below) is enforced.
 
-### The 2+ member truthiness rule
+### Which types are `enum`s
 
-`PropType::is_literal_union()` (`crates/core/src/types/output.rs`):
+`PropType::is_literal_union()` (`crates/core/src/types/output.rs`) is true for a non-empty `Union` whose members are all string or number literals, a `Union` of literals with at least one string or number and a boolean whose text Storybook cannot split and parse from the type name (`reads_as_json_options`), a non-empty `LiteralUnion`, and a lone string or number literal (a bare `StringLiteral`/`NumberLiteral`).
 
-```rust
-pub fn is_literal_union(&self) -> bool {
-    match self {
-        PropType::Union(members) => {
-            members.len() >= 2
-                && members.iter().all(|m| {
-                    matches!(m, PropType::StringLiteral(_) | PropType::NumberLiteral(_) | PropType::BoolLiteral(_))
-                })
-        }
-        PropType::LiteralUnion { members, .. } => members.len() >= 2,
-        _ => false,
-    }
-}
-```
+**Invariant 3:** A `PropType::Union`/`PropType::LiteralUnion` with **0** members, and a union of booleans only (a lone `true` included), is never reported as an `enum` shape. An empty "enum" (`{"name": "enum", "value": []}`) is misleading to a prop-table renderer, and a zero-member `LiteralUnion` is still reachable (if cosmetic) from several construction paths (`known.rs`, `resolver/primitives.rs`, `resolver/alias.rs`, `resolver/mod.rs`, `resolver/template.rs`); the guard in `is_literal_union()` keeps that from surfacing as a broken `enum` shape in RDT output, where it degrades to a plain `{"name": raw_string()}`. A single string or number literal is an enum: before, it was written as a type name, and Storybook picked an `object` control for a prop that is only ever `'button'`.
 
-**Invariant 3:** A `PropType::Union`/`PropType::LiteralUnion` with **0 or 1** members is never reported as an `enum` shape, regardless of whether every present member is a literal. This was a deliberate correctness fix, not an oversight: a 0- or 1-member "enum" (`{"name": "enum", "value": []}` or a single-entry `<select>`) is actively misleading to a prop-table renderer — it implies a meaningful choice exists when there either is no choice or only one option, which real users would read as a broken/degenerate control rather than a legitimate enum. A **zero-member** `LiteralUnion` is still reachable (if cosmetic) from several construction paths (`known.rs`, `resolver/primitives.rs`, `resolver/alias.rs`, `resolver/mod.rs`, `resolver/template.rs`) — the 2+ guard in `is_literal_union()` is exactly what keeps that gap from surfacing as a broken `enum` shape in RDT output; it degrades to a plain `{"name": raw_string()}` instead.
+### `@ignore`
+
+`component_doc` leaves out a prop whose tags hold `ignore`, in both `serialize` and `docgen_info`, because Storybook's own docgen (`@storybook/react`'s `react-component-meta` path) drops `@ignore` props and no other tag (`@internal`, `@private`, `@hidden` and `@deprecated` props are all listed). The canonical output keeps the prop and its tag.
 
 ### `composes` reused for the resolver's give-up cases
 
@@ -100,9 +91,9 @@ TOON (Token-Optimized Object Notation) is a compact, indentation-and-CSV-like te
 
 **Locked design decision:** TOON output is not a serialization format in the reversible sense. It:
 
-- Collapses `PropType` into a single compact string per prop (`format_type_compact`) — e.g. `Array<string>`, `Ref<HTMLButtonElement>`, `handler(MouseEvent)`, `opaque(CustomType)` — discarding structure a JSON consumer would get from the tagged `PropType` enum (no way to tell from the string alone whether `SxProps` came from `PropType::SxProps` vs. a `Named` type happening to render the same text).
+- Collapses `PropType` into a single compact string per prop (`format_type_compact`) — e.g. `Array<string>`, `Ref<HTMLButtonElement>`, `(event: MouseEvent) => void`, `opaque(CustomType)` — discarding structure a JSON consumer would get from the tagged `PropType` enum (no way to tell from the string alone whether `SxProps` came from `PropType::SxProps` vs. a `Named` type happening to render the same text).
 - Escapes only for CSV-safety (`escape_toon_val`: commas, newlines, quotes) — not for full round-trip fidelity.
-- Truncates long union/intersection/literal-union member lists to a fixed cap, replacing the tail with a `"...(+N)"` marker rather than emitting every member.
+- Truncates a union of types (more than 8 members), an intersection (more than 4) and a collapsed layer's `members` (more than 24), replacing the tail with a `"...(+N)"` marker; the canonical JSON holds every member. It never cuts a literal union or a union with a literal member, because an agent writes a call from those values. A function type keeps its parameter names. A prop's `@deprecated`, `@see` and `@since` tags are written in a `tags` column (present only when some prop has one), and a discriminated union's discriminant prop in a `discriminant:` line.
 
 There is no `parse_toon` / deserializer anywhere in the codebase, and none is planned — TOON is a one-way export.
 
@@ -123,11 +114,11 @@ fn truncate_with_indicator(parts: &[String], limit: usize, sep: &str) -> String 
 }
 ```
 
-Three call sites route through it, each with its own cap: `LiteralUnion` (limit 6, separator `|`), `Union` (limit 4, separator `|`), `Intersection` (limit 4, separator `&`).
+Three call sites route through it, each with its own cap: `Union` of types only (`UNION_LIMIT` 8, separator `|`; a union with a string, number or boolean literal member is written in full), `Intersection` (limit 4, separator `&`) and a layer's `members` (limit 24). `LiteralUnion` is not cut.
 
 This was a real, confirmed bug before the fix: `LiteralUnion`'s truncate-with-indicator logic existed but was never factored into a shared helper, so when `Union`/`Intersection` needed the same behavior _in the same function_ (`format_type_compact`), the indicator half was silently dropped — those two branches truncated the member list but said nothing about it, making a 6-member union look identical in TOON output to a genuine 4-member union. The fix (this shared helper) is exactly the enforcement `crates/core/AGENTS.md`'s design philosophy wants — a single named constructor/helper instead of parallel hand-copied logic.
 
-**Invariant 8:** Every `PropType` variant in `format_type_compact` that renders a bounded-length member list (currently `LiteralUnion`, `Union`, `Intersection`) must call `truncate_with_indicator` rather than hand-rolling its own `.join()`/slice logic. A new variant added later with the same "list of formatted members, potentially long" shape (e.g. if `Tuple` ever grows a compact-member rendering) should route through the same helper by default — don't reintroduce the exact bug this fix closed.
+**Invariant 8:** Every `PropType` variant in `format_type_compact` that renders a bounded-length member list (currently a union of types and `Intersection`) must call `truncate_with_indicator` rather than hand-rolling its own `.join()`/slice logic. A new variant added later with the same "list of formatted members, potentially long" shape (e.g. if `Tuple` ever grows a compact-member rendering) should route through the same helper by default — don't reintroduce the exact bug this fix closed.
 
 **Invariant 9:** The `"...(+N)"` marker is a required, load-bearing signal, not decorative — `N` must be `parts.len() - limit`, i.e. the exact count of dropped members, not a placeholder or a boolean "more exist" flag. A consumer (LLM agent reading TOON context) uses `N` to judge whether the truncated tail is worth fetching via canonical JSON instead.
 
