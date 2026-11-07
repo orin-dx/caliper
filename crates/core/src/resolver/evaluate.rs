@@ -242,9 +242,9 @@ fn names_an_enum(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, d
         CollectedType::Union(members) => members.iter().any(|member| names_an_enum(member, file, ctx, depth + 1)),
         CollectedType::Named { name, args } => {
             let (alias_file, alias_name) = canonical(name, file, ctx);
-            if lookup_type_alias(ctx, alias_file.as_str(), &alias_name)
-                .is_some_and(|(matched, _)| ctx.global.enum_declarations.contains(&format!("{alias_file}:{matched}")))
-            {
+            if lookup_type_alias(ctx, alias_file.as_str(), &alias_name).is_some_and(|(matched, _)| {
+                ctx.global.enum_declarations.contains_key(&format!("{alias_file}:{matched}"))
+            }) {
                 return true;
             }
             alias_body(name, args, file, ctx)

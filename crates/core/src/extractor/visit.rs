@@ -6,7 +6,7 @@ use oxc_syntax::scope::ScopeFlags;
 
 use crate::types::{
     CollectedInterface, ComponentMapping, DetectionRule, DiagnosticCode, EnumEntry, EnumValue, ExtendsRef,
-    ImportBinding, LexedExport, RawProp, TypeName,
+    ImportBinding, LexedExport, RawProp, ScopeKind, TypeName,
 };
 
 use super::component::Binding;
@@ -219,6 +219,8 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 merged.tags.entry(tag).or_insert(value);
             }
         } else {
+            let scope = self.current_scope();
+            self.data.interface_scopes.insert(key.clone(), scope);
             self.data.interfaces.insert(
                 key.clone(),
                 CollectedInterface {
@@ -256,6 +258,8 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             return;
         };
         self.data.type_aliases.insert(key.clone(), alias);
+        let scope = self.current_scope();
+        self.data.type_alias_scopes.insert(key.clone(), scope);
 
         // Record declared type parameter names (`type Assign<T, U> = ...` → ["T", "U"])
         // so the resolver can substitute call-site arguments into the alias body —
@@ -274,7 +278,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     fn visit_ts_namespace_declaration(&mut self, node: &TSNamespaceDeclaration<'a>) {
         self.namespace_stack.push(node.id.name.as_str().into());
         self.ambient_depth += u32::from(node.declare);
+        self.enter_scope(ScopeKind::Namespace);
         walk::walk_ts_namespace_declaration(self, node);
+        self.leave_scope();
         self.ambient_depth -= u32::from(node.declare);
         self.qualify_namespace_references();
         self.namespace_stack.pop();
@@ -285,13 +291,16 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     /// `declare module "x"` qualifies nothing.
     fn visit_ts_external_module_declaration(&mut self, node: &TSExternalModuleDeclaration<'a>) {
         self.ambient_depth += 1;
+        self.enter_scope(ScopeKind::Namespace);
         if node.id.value != "react" {
             walk::walk_ts_external_module_declaration(self, node);
+            self.leave_scope();
             self.ambient_depth -= 1;
             return;
         }
         self.namespace_stack.push("React".into());
         walk::walk_ts_external_module_declaration(self, node);
+        self.leave_scope();
         self.ambient_depth -= 1;
         self.qualify_namespace_references();
         self.namespace_stack.pop();
@@ -327,7 +336,8 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
 
         self.record_enum_union(&key, &values);
         if !entries.is_empty() {
-            self.data.enum_declarations.insert(key.clone());
+            let scope = self.current_scope();
+            self.data.enum_declarations.insert(key.clone(), scope);
             self.data.enums.entry(key).or_default().extend(entries);
         }
     }
@@ -540,7 +550,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     fn visit_block_statement(&mut self, block: &BlockStatement<'a>) {
         self.block_depth += 1;
         self.local_depth += 1;
+        self.enter_scope(ScopeKind::Block);
         walk::walk_block_statement(self, block);
+        self.leave_scope();
         self.local_depth -= 1;
         self.block_depth -= 1;
     }
@@ -548,7 +560,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     fn visit_static_block(&mut self, block: &StaticBlock<'a>) {
         self.block_depth += 1;
         self.local_depth += 1;
+        self.enter_scope(ScopeKind::Block);
         walk::walk_static_block(self, block);
+        self.leave_scope();
         self.local_depth -= 1;
         self.block_depth -= 1;
     }
@@ -559,10 +573,20 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         self.block_depth -= 1;
     }
 
+    /// Each `case` or `default` clause is a scope of its own for the declarations directly in it, though in
+    /// JavaScript the whole `switch` body shares one lexical scope.
+    fn visit_switch_case(&mut self, case: &SwitchCase<'a>) {
+        self.enter_scope(ScopeKind::SwitchCase);
+        walk::walk_switch_case(self, case);
+        self.leave_scope();
+    }
+
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
         self.function_depth += 1;
         self.local_depth += 1;
+        self.enter_scope(ScopeKind::FunctionBody);
         walk::walk_function_body(self, body);
+        self.leave_scope();
         self.local_depth -= 1;
         self.function_depth -= 1;
     }
@@ -579,7 +603,8 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 .as_ref()
                 .map(|declaration| declaration.params.iter().map(|p| p.name.name.as_str().into()).collect())
                 .unwrap_or_default();
-            self.pending_classes.push((self.scoped_key(id.name.as_str()), id.name.as_str().into(), params));
+            let scope = self.current_scope();
+            self.pending_classes.push((self.scoped_key(id.name.as_str()), id.name.as_str().into(), params, scope));
         }
         if self.is_tsx && self.function_depth > 0 {
             if let Some(id) = &class.id {

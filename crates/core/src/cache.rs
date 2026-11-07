@@ -39,7 +39,9 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 /// 26: function parameters record whether they are optional or rest.
 /// 28: the `FactoryResult` detection rule, and function results recorded for more functions.
 /// 30: `SourceData::enum_declarations`.
-const CACHE_SCHEMA_VERSION: u32 = 30;
+/// 31: `SourceData::enum_declarations` records each declaration's scope, and `interface_scopes`, `type_alias_scopes`
+///     and `class_scopes` record where the other declarations sit.
+const CACHE_SCHEMA_VERSION: u32 = 31;
 
 const DATA_FILE: &str = "dts.msgpack";
 

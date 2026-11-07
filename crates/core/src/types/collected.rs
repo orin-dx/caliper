@@ -3,7 +3,7 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use compact_str::CompactString;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -897,6 +897,59 @@ impl EnumValue {
     }
 }
 
+// ─── Declaration scope ────────────────────────────────────────────────────────
+
+/// The kind of region that encloses a declaration below module level.
+///
+/// The cache encodes variants by their serialized name, so renaming one changes the cache's bytes and needs a
+/// `CACHE_SCHEMA_VERSION` bump.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ScopeKind {
+    /// `namespace X { ... }`, or `declare module "x" { ... }`.
+    Namespace,
+    /// A function, method or arrow function body.
+    FunctionBody,
+    /// A `{ ... }` block statement or a class `static { ... }` block.
+    Block,
+    /// One `case` or `default` clause of a `switch` statement.
+    SwitchCase,
+}
+
+/// One enclosing region: its kind, and its position among the regions the parent region opens, counting from 0 in
+/// source order. The ordinal tells two sibling blocks apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ScopeStep {
+    /// The kind of region.
+    pub kind: ScopeKind,
+    /// Which of the parent's child regions this is.
+    pub ordinal: u32,
+}
+
+/// Where a declaration sits: the regions that enclose it, outermost first. The empty path is the module.
+///
+/// Two declarations are in the same scope exactly when their paths are equal.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DeclarationScope(Vec<ScopeStep>);
+
+impl DeclarationScope {
+    /// The scope that has the given enclosing regions, outermost first.
+    pub fn new(steps: Vec<ScopeStep>) -> Self {
+        Self(steps)
+    }
+
+    /// The enclosing regions, outermost first; empty at module level.
+    pub fn steps(&self) -> &[ScopeStep] {
+        &self.0
+    }
+
+    /// Whether the declaration sits directly in the module.
+    pub fn is_module(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 // ─── Source Data (collected during Phase 0-2) ─────────────────────────────────
 
 /// Raw data collected from parsing a single file.
@@ -965,8 +1018,20 @@ pub struct SourceData {
     pub type_param_defaults: FxHashMap<std::string::String, Vec<Option<CollectedType>>>,
 
     /// The keys in `enums` that a TypeScript `enum` declaration wrote, as against an `as const` object or a variant
-    /// bag. An enum is a type of its own, not the union of its values.
-    pub enum_declarations: FxHashSet<std::string::String>,
+    /// bag, each with the scope the declaration sits in. An enum is a type of its own, not the union of its values.
+    pub enum_declarations: FxHashMap<std::string::String, DeclarationScope>,
+
+    /// The scope each interface declaration in this file sits in. Keyed as `interfaces`, and the scope is that of the
+    /// declaration whose entry `interfaces` holds (a merge keeps the first declaration's). Nothing reads it yet.
+    pub interface_scopes: FxHashMap<std::string::String, DeclarationScope>,
+
+    /// The scope each type alias declaration in this file sits in. Keyed as `type_aliases`; the last declaration of a
+    /// key wins, as it does there. Aliases the extractor synthesizes have no entry. Nothing reads it yet.
+    pub type_alias_scopes: FxHashMap<std::string::String, DeclarationScope>,
+
+    /// The scope each named class in this file sits in. Keyed as the interface a class is recorded as when the file
+    /// declares no interface or alias of its name; the first class of a key wins. Nothing reads it yet.
+    pub class_scopes: FxHashMap<std::string::String, DeclarationScope>,
 }
 
 /// What a generic function returns: its declared or asserted type, or a generic call stored in a returned local const.

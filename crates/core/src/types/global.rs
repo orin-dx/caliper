@@ -7,8 +7,8 @@ use compact_str::CompactString;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::collected::{
-    CollectedInterface, CollectedType, CollectedTypeAlias, ComponentMapping, EnumEntry, EnumValue, FunctionResult,
-    ImportBinding, LexedExport, RawDefault, SourceData, TypeName,
+    CollectedInterface, CollectedType, CollectedTypeAlias, ComponentMapping, DeclarationScope, EnumEntry, EnumValue,
+    FunctionResult, ImportBinding, LexedExport, RawDefault, SourceData, TypeName,
 };
 use super::diagnostic::Diagnostic;
 use super::scope::{is_marked_placeholder, TypeScope};
@@ -343,7 +343,7 @@ pub struct GlobalSourceData {
     pub enums: FxHashMap<String, Vec<EnumEntry>>,
 
     /// The keys in `enums` written by an `enum` declaration — see `SourceData::enum_declarations`.
-    pub enum_declarations: FxHashSet<String>,
+    pub enum_declarations: FxHashMap<String, DeclarationScope>,
 
     /// All `const X = [...] as const` array literals across all files — see
     /// `SourceData::const_arrays`. Key: "${absolute_file_path}:${name}"
@@ -404,7 +404,7 @@ impl GlobalSourceData {
         self.type_alias_params.retain(|k, _| !k.starts_with(&prefix));
         self.interface_type_params.retain(|k, _| !k.starts_with(&prefix));
         self.enums.retain(|k, _| !k.starts_with(&prefix));
-        self.enum_declarations.retain(|k| !k.starts_with(&prefix));
+        self.enum_declarations.retain(|k, _| !k.starts_with(&prefix));
         self.const_arrays.retain(|k, _| !k.starts_with(&prefix));
         self.function_results.retain(|k, _| !k.starts_with(&prefix));
         self.type_param_defaults.retain(|k, _| !k.starts_with(&prefix));
