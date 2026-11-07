@@ -19,7 +19,11 @@ function push(map: Map<string, string[]>, at: string, key: string): void {
   else map.set(at, [key])
 }
 
-/** The distinct messages of the warnings and errors among `diagnostics`; info says nothing about the props. */
+/**
+ * The distinct messages of the warnings and errors among `diagnostics`. Info does not count, opaque props included:
+ * counting them would hand on most components of the measured corpora (docs/storybook-parity.md), and the answer
+ * names no prop to replace.
+ */
 export function incompleteMessages(diagnostics: Diagnostic[]): string[] {
   return [...new Set(diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').map((d) => d.message))]
 }
