@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_0142FapAGNHBAjhcRABafdWC",
+  "agent_id": "a5d689acea8c89fd0",
+  "subagent_type": "general-purpose",
+  "task_description": "Label benchmarks.md as historical",
+  "token_usage": {
+    "input_tokens": 46,
+    "cache_creation_tokens": 62107,
+    "cache_read_tokens": 1617348,
+    "output_tokens": 7431,
+    "api_call_count": 23
+  },
+  "started_at": "2026-11-06T16:21:50.740375-08:00",
+  "completed_at": "2026-11-06T16:24:26.736474-08:00"
+}
