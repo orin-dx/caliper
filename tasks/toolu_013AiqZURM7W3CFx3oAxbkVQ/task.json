@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_013AiqZURM7W3CFx3oAxbkVQ",
+  "agent_id": "a5b7fad4e34337380",
+  "subagent_type": "general-purpose",
+  "task_description": "Draft ADR 0026 checker as type authority",
+  "started_at": "2026-11-07T15:36:02.907543-08:00"
+}
