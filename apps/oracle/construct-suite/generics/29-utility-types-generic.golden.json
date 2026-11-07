@@ -1,0 +1,33 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "intersection",
+        "members": [
+          {
+            "k": "object",
+            "fields": [
+              "name"
+            ],
+            "index": false,
+            "alias": "Partial"
+          },
+          {
+            "k": "object",
+            "fields": [
+              "id"
+            ],
+            "index": false,
+            "alias": "Omit"
+          }
+        ]
+      }
+    ]
+  },
+  "text": "(Partial<Pick<T, \"name\">> & Omit<T, \"name\">) | undefined"
+}

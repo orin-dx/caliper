@@ -1,0 +1,20 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "param",
+        "name": "T",
+        "constraint": {
+          "k": "prim",
+          "name": "string"
+        }
+      }
+    ]
+  },
+  "text": "T | undefined"
+}

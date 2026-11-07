@@ -1,0 +1,20 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "icon",
+          "onClick"
+        ],
+        "index": false
+      }
+    ]
+  },
+  "text": "{ icon: ReactNode; onClick?: MouseEventHandler<HTMLButtonElement> | undefined; } | undefined"
+}

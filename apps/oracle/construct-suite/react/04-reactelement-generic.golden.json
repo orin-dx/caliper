@@ -1,0 +1,23 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "key",
+          "props",
+          "type"
+        ],
+        "index": false,
+        "alias": "ReactElement"
+      }
+    ],
+    "alias": "ReactElement"
+  },
+  "text": "ReactElement<{ label: string; }, \"div\"> | undefined"
+}

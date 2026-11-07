@@ -1,0 +1,22 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "files",
+          "name"
+        ],
+        "index": false,
+        "alias": "Folder"
+      }
+    ],
+    "alias": "Folder"
+  },
+  "text": "Folder | undefined"
+}

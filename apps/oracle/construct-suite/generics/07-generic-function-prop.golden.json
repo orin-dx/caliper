@@ -1,0 +1,29 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "function",
+        "params": [
+          {
+            "optional": false,
+            "rest": false,
+            "type": {
+              "k": "param",
+              "name": "U"
+            }
+          }
+        ],
+        "returns": {
+          "k": "param",
+          "name": "U"
+        }
+      }
+    ]
+  },
+  "text": "(<U>(item: U) => U) | undefined"
+}

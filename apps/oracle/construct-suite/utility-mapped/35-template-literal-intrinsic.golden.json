@@ -1,0 +1,26 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "onClick",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "onFocus",
+        "of": "string"
+      },
+      {
+        "k": "prim",
+        "name": "string"
+      }
+    ]
+  },
+  "text": "\"onClick\" | \"onFocus\" | `data-${string}` | undefined"
+}

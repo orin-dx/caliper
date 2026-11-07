@@ -1,0 +1,50 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "prim",
+        "name": "null"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "current"
+        ],
+        "index": false,
+        "alias": "RefObject"
+      },
+      {
+        "k": "function",
+        "params": [
+          {
+            "optional": false,
+            "rest": false,
+            "type": {
+              "k": "union",
+              "members": [
+                {
+                  "k": "prim",
+                  "name": "null"
+                },
+                {
+                  "k": "opaque",
+                  "alias": "HTMLButtonElement"
+                }
+              ]
+            }
+          }
+        ],
+        "returns": {
+          "k": "prim",
+          "name": "void"
+        }
+      }
+    ]
+  },
+  "text": "ForwardedRef<HTMLButtonElement> | undefined"
+}

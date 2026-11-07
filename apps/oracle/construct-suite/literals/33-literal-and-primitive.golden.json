@@ -1,0 +1,22 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "x",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "y",
+        "of": "string"
+      }
+    ]
+  },
+  "text": "\"x\" | \"y\" | undefined"
+}

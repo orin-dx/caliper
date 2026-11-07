@@ -1,0 +1,11 @@
+{
+  "checker": {
+    "k": "array",
+    "element": {
+      "k": "prim",
+      "name": "string"
+    },
+    "alias": "Array"
+  },
+  "text": "string[]"
+}

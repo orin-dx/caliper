@@ -1,0 +1,22 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "a",
+          "b"
+        ],
+        "index": false,
+        "alias": "Partial"
+      }
+    ],
+    "alias": "Partial"
+  },
+  "text": "Partial<B> | undefined"
+}

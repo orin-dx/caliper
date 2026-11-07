@@ -1,0 +1,15 @@
+{
+  "checker": {
+    "k": "array",
+    "element": {
+      "k": "object",
+      "fields": [
+        "id",
+        "tags"
+      ],
+      "index": false
+    },
+    "alias": "Array"
+  },
+  "text": "{ id: number; tags: string[]; }[]"
+}

@@ -1,0 +1,28 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "0",
+        "of": "number"
+      },
+      {
+        "k": "lit",
+        "value": "1",
+        "of": "number"
+      },
+      {
+        "k": "lit",
+        "value": "10",
+        "of": "number"
+      }
+    ],
+    "alias": "Level"
+  },
+  "text": "Level | undefined"
+}

@@ -1,0 +1,18 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "small",
+        "of": "string"
+      }
+    ],
+    "alias": "Small"
+  },
+  "text": "Size.Small | undefined"
+}

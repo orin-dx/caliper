@@ -5,7 +5,9 @@
   "license": "FSL-1.1-MIT",
   "type": "module",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "construct:capture": "tsx src/construct-capture.ts",
+    "construct:check": "tsx src/construct-capture.ts --check"
   },
   "dependencies": {
     "react-docgen": "^8.0.4",

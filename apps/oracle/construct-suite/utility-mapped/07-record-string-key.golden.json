@@ -1,0 +1,23 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [],
+        "index": true,
+        "indexValue": {
+          "k": "prim",
+          "name": "boolean"
+        },
+        "alias": "Record"
+      }
+    ],
+    "alias": "Record"
+  },
+  "text": "Record<string, boolean> | undefined"
+}

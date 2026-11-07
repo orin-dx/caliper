@@ -1,0 +1,12 @@
+{
+  "checker": {
+    "k": "object",
+    "fields": [
+      "a",
+      "b"
+    ],
+    "index": false,
+    "alias": "Readonly"
+  },
+  "text": "Readonly<Step2>"
+}

@@ -1,0 +1,22 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "a",
+          "c"
+        ],
+        "index": false,
+        "alias": "Omit"
+      }
+    ],
+    "alias": "Omit"
+  },
+  "text": "Omit<Base, \"b\"> | undefined"
+}
