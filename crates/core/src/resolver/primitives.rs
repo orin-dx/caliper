@@ -172,8 +172,14 @@ pub(super) fn resolve_indexed_access(
             }
             _ => obj,
         };
-        if let Some(found) = super::evaluate::member_shared(located, key_str, consuming_file, ctx, 0) {
-            return resolve_collected_type(&found.0, &found.1, ctx, state, depth + 1);
+        if let Some((found, scope)) = super::evaluate::member_declared(located, key_str, consuming_file, ctx, 0) {
+            // The member's type is read where its declaration is, not where the access is written.
+            let site = scope.as_ref().map(|scope| state.enter_declared_in(scope));
+            let resolved = resolve_collected_type(&found.0, &found.1, ctx, state, depth + 1);
+            if let Some(site) = site {
+                state.leave_declared_in(site);
+            }
+            return resolved;
         }
     }
 

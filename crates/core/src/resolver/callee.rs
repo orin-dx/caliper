@@ -35,7 +35,8 @@ pub(super) fn component_props_of_typeof(
     file: &Utf8Path,
     ctx: &ResolutionContext,
 ) -> Option<(CollectedType, Utf8PathBuf)> {
-    component_props_type(&CollectedType::TypeOf(name.into()), file, ctx, 0).map(|(props, file, _)| (props, file))
+    component_props_type(&CollectedType::TypeOf(name.into()), file, ctx, 0, &mut None)
+        .map(|(props, file, _)| (props, file))
 }
 
 /// The props chain of the component a generic call builds, from its callee's result type. `None` when the callee is
@@ -157,7 +158,8 @@ fn result_props(
             return result_props(&inner, &file, ctx, depth + 1);
         }
         let result = substitute_type(&function.result, &bindings);
-        let (props, props_file, type_params) = component_props_type(&result, &file, ctx, 0)?;
+        let mut props_scope = None;
+        let (props, props_file, type_params) = component_props_type(&result, &file, ctx, 0, &mut props_scope)?;
         // The result's call signature binds type parameters of its own (`<C>(props: …)`), placeholders in the props.
         // An argument that names one is read again with it marked as a declaration, so the substitution leaves it be.
         let named_by_arguments: Vec<TypeName> =
@@ -172,7 +174,9 @@ fn result_props(
             continue;
         }
         let props = substitute_type(&props, &super::substitute::unfilled_substitution(&type_params));
-        return Some((props, props_file, type_params, function.type_params.clone(), function.scope.clone()));
+        // The props are read where the declaration that writes them is, or in the factory when its own result does.
+        let written_in = props_scope.unwrap_or_else(|| function.scope.clone());
+        return Some((props, props_file, type_params, function.type_params.clone(), written_in));
     }
 }
 
@@ -224,7 +228,9 @@ fn value_member_props_at_depth(
     let name = match declared {
         CollectedTypeAlias::Passthrough { target: named @ CollectedType::Named { .. }, .. } => {
             if let Some((member_type, member_file)) = super::evaluate::member(named, &member, &base_file, ctx, 0) {
-                if let Some((props, file, _)) = component_props_type(&member_type, &member_file, ctx, depth + 1) {
+                if let Some((props, file, _)) =
+                    component_props_type(&member_type, &member_file, ctx, depth + 1, &mut None)
+                {
                     return Some((props, file));
                 }
             }
@@ -235,7 +241,7 @@ fn value_member_props_at_depth(
             return fields
                 .iter()
                 .find(|field| field.is_member() && field.name == member)
-                .and_then(|field| component_props_type(&field.collected_type, &base_file, ctx, depth + 1))
+                .and_then(|field| component_props_type(&field.collected_type, &base_file, ctx, depth + 1, &mut None))
                 .map(|(props, file, _)| (props, file));
         }
         CollectedTypeAlias::Passthrough { target: CollectedType::Intersection(members), .. } => {
@@ -243,7 +249,9 @@ fn value_member_props_at_depth(
                 CollectedType::Object(fields) => fields
                     .iter()
                     .find(|field| field.is_member() && field.name == member)
-                    .and_then(|field| component_props_type(&field.collected_type, &base_file, ctx, depth + 1))
+                    .and_then(|field| {
+                        component_props_type(&field.collected_type, &base_file, ctx, depth + 1, &mut None)
+                    })
                     .map(|(props, file, _)| (props, file)),
                 _ => None,
             });
@@ -273,21 +281,24 @@ fn value_member_props_at_depth(
     let mut bindings = super::substitute::Substitution::default();
     bindings.insert(param.as_str(), CollectedType::StringLiteral(member.into()));
     let value = substitute_type(value_type, &bindings);
-    component_props_type(&value, &mapped_file, ctx, depth + 1).map(|(props, file, _)| (props, file))
+    component_props_type(&value, &mapped_file, ctx, depth + 1, &mut None).map(|(props, file, _)| (props, file))
 }
 
 /// The props parameter of the React component type `ty` describes, its file, and any callable type parameters in scope.
+/// `declared_in` is set to the scope of the declaration that writes the props when one does (an alias, an interface or
+/// a component), and left alone where they are written in `ty` itself.
 fn component_props_type(
     ty: &CollectedType,
     file: &Utf8Path,
     ctx: &ResolutionContext,
     depth: u8,
+    declared_in: &mut Option<DeclarationScope>,
 ) -> Option<(CollectedType, Utf8PathBuf, Vec<TypeName>)> {
     if depth > MAX_DEPTH {
         return None;
     }
     match ty {
-        CollectedType::AtFile { file, inner } => component_props_type(inner, file, ctx, depth + 1),
+        CollectedType::AtFile { file, inner } => component_props_type(inner, file, ctx, depth + 1, declared_in),
         CollectedType::TypeOf(name) => {
             let mut ignored = Vec::new();
             let (canonical_file, canonical_name) = resolve_to_canonical(name, file, ctx, &mut ignored)
@@ -300,7 +311,7 @@ fn component_props_type(
                 if let Some((_, CollectedTypeAlias::Passthrough { target, .. })) =
                     lookup_type_alias(ctx, canonical_file.as_str(), &format!("typeof {canonical_name}"))
                 {
-                    if let Some(found) = component_props_type(target, &canonical_file, ctx, depth + 1) {
+                    if let Some(found) = component_props_type(target, &canonical_file, ctx, depth + 1, declared_in) {
                         return Some(found);
                     }
                 }
@@ -308,6 +319,7 @@ fn component_props_type(
                 let (props, props_file) = value_member_props_at_depth(base, member, file, ctx, depth + 1)?;
                 return Some((props, props_file, Vec::new()));
             };
+            *declared_in = Some(DeclarationScope::default());
             Some((
                 CollectedType::Named {
                     name: mapping.props_type_name.clone(),
@@ -317,9 +329,14 @@ fn component_props_type(
                 mapping.type_params.clone(),
             ))
         }
-        CollectedType::Intersection(members) => {
-            members.iter().find_map(|member| component_props_type(member, file, ctx, depth + 1))
-        }
+        CollectedType::Intersection(members) => members.iter().find_map(|member| {
+            let mut own = None;
+            let found = component_props_type(member, file, ctx, depth + 1, &mut own)?;
+            if own.is_some() {
+                *declared_in = own;
+            }
+            Some(found)
+        }),
         CollectedType::Function { type_params, params, .. } => {
             Some((params.first()?.clone(), file.to_owned(), type_params.clone()))
         }
@@ -329,13 +346,14 @@ fn component_props_type(
             }
             // `MemoExoticComponent<typeof Impl>` wraps a component, whose props are the component's.
             if name.strip_prefix("React.").unwrap_or(name) == "MemoExoticComponent" {
-                return component_props_type(args.first()?, file, ctx, depth + 1);
+                return component_props_type(args.first()?, file, ctx, depth + 1, declared_in);
             }
             let mut ignored = Vec::new();
             let (alias_file, alias_name) = resolve_to_canonical(name, file, ctx, &mut ignored)
                 .unwrap_or_else(|| (file.to_owned(), name.to_string()));
             // `interface PrimitiveForwardRefComponent<E> extends React.ForwardRefExoticComponent<Props<E>> {}`.
             if let Some(iface) = lookup_interface(ctx, alias_file.as_str(), &alias_name) {
+                *declared_in = Some(iface.scope.clone());
                 let bindings = ctx
                     .named_types
                     .lookup_interface_type_params_for(iface)
@@ -362,7 +380,13 @@ fn component_props_type(
                 CollectedTypeAlias::Intersection { members, .. } => CollectedType::Intersection(members),
                 _ => return None,
             };
-            component_props_type(&body, &alias_file, ctx, depth + 1)
+            let found = component_props_type(&body, &alias_file, ctx, depth + 1, declared_in)?;
+            // The props are written in the alias's body, unless the alias hands them on from another declaration.
+            if declared_in.is_none() {
+                *declared_in =
+                    Some(ctx.named_types.lookup_local_alias_scope(&alias_file, &matched).cloned().unwrap_or_default());
+            }
+            Some(found)
         }
         _ => None,
     }

@@ -281,8 +281,8 @@ pub(super) fn resolve_base_as_chain(
             // Substituted and resolved directly here so the nested generic survives,
             // rather than falling through to the string-based path below (which would
             // flatten it to a single opaque display string before substitution ever ran).
-            let marked = super::substitute::mark_args(state, args);
-            if let Some(alias) = super::substitute::generic_alias_with_structured_args(
+            let marked = super::substitute::mark_args(ctx, state, file_path, args);
+            if let Some((alias, alias_file, alias_key)) = super::substitute::generic_alias_with_structured_args(
                 name.as_str(),
                 &marked,
                 file_path,
@@ -290,6 +290,8 @@ pub(super) fn resolve_base_as_chain(
                 &mut state.diagnostics,
             ) {
                 let mut attempt = state.branch();
+                // The alias's body is read where the alias is declared, not where it is referenced.
+                drop(super::precedence::enter_alias_site(ctx, &mut attempt, &alias_file, &alias_key));
                 let chain = resolve_type_alias_chain(&alias, file_path, mapping, ctx, &mut attempt, depth + 1);
                 return super::chain::known_fallback_for_alias(
                     chain,
@@ -985,7 +987,7 @@ fn resolve_key_set(
             let Some(super::precedence::SourceOrKnownMatch::TypeAlias { matched_key, alias }) = matched else {
                 return None;
             };
-            let marked = super::substitute::mark_args(state, args);
+            let marked = super::substitute::mark_args(ctx, state, file, args);
             let alias = super::substitute::apply_generic_args(
                 alias,
                 (&canonical_file, &matched_key),

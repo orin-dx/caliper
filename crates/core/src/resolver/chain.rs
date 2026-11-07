@@ -158,7 +158,10 @@ pub(super) fn resolve_props_chain(
     // (e.g. `Partial<RowHeights>` vs `Partial<ColumnWidths>` in the same interface's
     // extends list) are not the same visit and must not collide on the bare name alone. The arguments are keyed by
     // structure: their display form abbreviates object types to `{ ... }`, so distinct instantiations collided.
-    let visit_key: CompactString = format!("{}:{}<{:?}>", consuming_file, type_name, type_args).into();
+    // A name read in a function body, block or `switch` case may mean a declaration of that scope and, from another
+    // scope, a module-level one (`interface Props extends Outer` over `type Outer = Props`): they are not one visit.
+    let site = state.declared_in.as_deref().and_then(DeclarationScope::local_key_suffix).unwrap_or_default();
+    let visit_key: CompactString = format!("{}:{}<{:?}>{site}", consuming_file, type_name, type_args).into();
     if !state.visit(visit_key) {
         return ResolvedChain::give_up(
             type_name.to_owned(),
@@ -262,7 +265,7 @@ pub(super) fn resolve_props_chain(
         Some(super::precedence::SourceOrKnownMatch::TypeAlias { matched_key, alias }) => {
             // As for interfaces and for aliases in a prop position: parameters left unfilled by the call site are
             // placeholders in the body, not unresolvable types.
-            let marked = super::substitute::mark_args(state, type_args);
+            let marked = super::substitute::mark_args(ctx, state, consuming_file, type_args);
             let alias = super::substitute::apply_generic_args(
                 alias,
                 (&canonical_file, &matched_key),
@@ -503,7 +506,7 @@ fn resolve_interface_chain_uncached(
     // The arguments mean what they meant where they were written (`mark_args`); the members are read under the interface's
     // own parameters that no argument or default replaces (`interface Foo<TData>`): expected, unexpandable
     // placeholders wherever the body names them, not unresolvable types, and they shadow the module's names.
-    let marked = super::substitute::mark_args(state, type_args);
+    let marked = super::substitute::mark_args(ctx, state, consuming_file, type_args);
     let caller = state.enter_scope(TypeScope::default());
     let caller_site = state.enter_declared_in(&iface.scope);
     let chain = resolve_interface_members(iface, &marked, consuming_file, mapping, ctx, state, depth);

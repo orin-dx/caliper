@@ -13,7 +13,7 @@
 //! caller's argument, before normal resolution proceeds. Purely structural —
 //! no type inference, no conditional-type evaluation.
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use compact_str::CompactString;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -52,9 +52,25 @@ pub(super) fn build_substitution<'a>(
 /// (`mark_placeholder`): a declaration's body that uses them has parameters and declarations of its own, and a marked
 /// name can be none of those, so the argument means the same there as where it was written.
 pub(super) fn mark_args<'a>(
+    ctx: &ResolutionContext,
     state: &mut ResolveState,
+    file: &Utf8Path,
     args: &'a [CollectedType],
 ) -> std::borrow::Cow<'a, [CollectedType]> {
+    // A declaration local to the scope the arguments are written in is pinned to the name it is stored under, so the
+    // body they are bound into, which is read in the scope its own declaration sits in, still finds that declaration.
+    let pinned: std::borrow::Cow<'a, [CollectedType]> = match state.declared_in.as_deref() {
+        Some(scope) => {
+            let pin = |name: &str| ctx.named_types.local_interface_key(file, name, scope).map(CompactString::from);
+            if args.iter().any(|arg| arg.referenced_names().iter().any(|name| pin(name).is_some())) {
+                std::borrow::Cow::Owned(args.iter().map(|arg| arg.rename_named(&pin)).collect())
+            } else {
+                std::borrow::Cow::Borrowed(args)
+            }
+        }
+        None => std::borrow::Cow::Borrowed(args),
+    };
+    let args = &*pinned;
     if state.binds_nothing() {
         // Whether a name is bound here is not looked up name by name: a state that binds any name marks differently.
         if let Some(reads) = state.reads.as_mut() {
@@ -62,7 +78,7 @@ pub(super) fn mark_args<'a>(
                 reads.needs_empty_scope = true;
             }
         }
-        return std::borrow::Cow::Borrowed(args);
+        return pinned;
     }
     let mut names: Vec<CompactString> = args.iter().flat_map(CollectedType::referenced_names).collect();
     names.sort_unstable();
@@ -70,7 +86,7 @@ pub(super) fn mark_args<'a>(
     let bound: FxHashSet<CompactString> =
         names.into_iter().filter(|name| unmarked(name).len() == name.len() && state.has_type_param(name)).collect();
     if bound.is_empty() {
-        return std::borrow::Cow::Borrowed(args);
+        return pinned;
     }
     let mark = |name: &str| bound.contains(name).then(|| mark_placeholder(name));
     std::borrow::Cow::Owned(args.iter().map(|arg| arg.rename_named(&mark)).collect())
@@ -216,7 +232,7 @@ pub(super) fn generic_alias_with_structured_args(
     consuming_file: &Utf8Path,
     ctx: &ResolutionContext,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Option<CollectedTypeAlias> {
+) -> Option<(CollectedTypeAlias, Utf8PathBuf, String)> {
     if args.is_empty() {
         return None;
     }
@@ -233,7 +249,7 @@ pub(super) fn generic_alias_with_structured_args(
     // is declared).
     let defaults = ctx.named_types.lookup_type_param_defaults(&canonical_file, &canonical_name);
     let subst = bind_declared(params, defaults, args, consuming_file, &canonical_file, diagnostics);
-    Some(substitute_alias(alias, &subst))
+    Some((substitute_alias(alias, &subst), canonical_file, canonical_name))
 }
 
 /// Recursively replace parameter references inside a `CollectedType`.

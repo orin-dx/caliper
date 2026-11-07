@@ -324,7 +324,7 @@ fn expand_alias(
     state: &mut ResolveState,
     depth: u8,
 ) -> PropType {
-    let args = &*super::substitute::mark_args(state, args);
+    let args = &*super::substitute::mark_args(ctx, state, args_file, args);
     let subst =
         super::substitute::bind_declared(params, defaults, args, args_file, declared_file, &mut state.diagnostics);
     if let Some(param) = super::evaluate::distributive_param(alias) {

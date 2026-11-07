@@ -4398,6 +4398,168 @@ fn a_props_alias_in_a_function_body_names_the_local_interface() {
     assert_eq!(prop_names(&output, "Field"), ["extra", "id", "rest"]);
 }
 
+/// A declaration body is read in the scope the declaration sits in, whoever reaches it and by whichever route. Each row
+/// is a factory that shadows a module-level name, one entry point into a declaration body, and the props `Field` has.
+#[test]
+fn a_declaration_body_is_read_in_its_own_scope_by_every_entry_point() {
+    type Row<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)]);
+    let rows: &[Row] = &[
+        (
+            "generic alias expanded directly (alias body names the module Row)",
+            "interface Row { fromModule: string }\n\
+             type Shared<T> = Row & { shared: T };\n\
+             export function make() {\n\
+                 interface Row { local: number }\n\
+                 type Props = Shared<boolean> & { own: string };\n\
+                 return (p: Props) => <div />;\n\
+             }\n",
+            &[("fromModule", "string"), ("own", "string"), ("shared", "boolean")],
+        ),
+        (
+            "generic alias reached by extends",
+            "interface Row { fromModule: string }\n\
+             type Shared<T> = Row & { shared: T };\n\
+             export function make() {\n\
+                 interface Row { local: number }\n\
+                 interface Props extends Shared<boolean> { own: string }\n\
+                 return (p: Props) => <div />;\n\
+             }\n",
+            &[("fromModule", "string"), ("own", "string"), ("shared", "boolean")],
+        ),
+        (
+            "member of a module interface (indexed access)",
+            "interface Row { value: string }\n\
+             interface Table { row: Row['value'] }\n\
+             export function make() {\n\
+                 interface Row { value: number }\n\
+                 interface Props { cell: Table['row'] }\n\
+                 return (p: Props) => <div />;\n\
+             }\n",
+            &[("cell", "string")],
+        ),
+        (
+            "member inherited from a module interface (indexed access)",
+            "interface Row { value: string }\n\
+             interface Base { row: Row['value'] }\n\
+             interface Table extends Base { other: boolean }\n\
+             export function make() {\n\
+                 interface Row { value: number }\n\
+                 interface Props { cell: Table['row'] }\n\
+                 return (p: Props) => <div />;\n\
+             }\n",
+            &[("cell", "string")],
+        ),
+        (
+            "member of a module alias (indexed access)",
+            "interface Row { value: string }\n\
+             type Table = { row: Row['value'] };\n\
+             export function make() {\n\
+                 interface Row { value: number }\n\
+                 interface Props { cell: Table['row'] }\n\
+                 return (p: Props) => <div />;\n\
+             }\n",
+            &[("cell", "string")],
+        ),
+        (
+            "factory result named through a module alias",
+            "interface Props { fromModule: string }\n\
+             type Result = React.FC<Props>;\n\
+             export function make<T>() {\n\
+                 interface Props { local: T }\n\
+                 return ((p: Props) => <div />) as Result;\n\
+             }\n",
+            &[("fromModule", "string")],
+        ),
+        (
+            "factory result written in the factory",
+            "interface Props { fromModule: string }\n\
+             export function make<T>() {\n\
+                 interface Props { local: T }\n\
+                 return ((p: Props) => <div />) as React.FC<Props>;\n\
+             }\n",
+            &[("local", "T")],
+        ),
+        (
+            "distinct declarations of one name reached through an alias hop",
+            "interface Props { a: string }\n\
+             type Outer = Props;\n\
+             export function make() {\n\
+                 interface Props extends Outer { b: number }\n\
+                 return (p: Props) => <div />;\n\
+             }\n",
+            &[("a", "string"), ("b", "number")],
+        ),
+        (
+            "module interface extends a module interface the factory shadows",
+            "interface Row { fromModule: string }\n\
+             interface Base extends Row { base: boolean }\n\
+             export function make() {\n\
+                 interface Row { local: number }\n\
+                 interface Props extends Base { own: string }\n\
+                 return (p: Props) => <div />;\n\
+             }\n",
+            &[("base", "boolean"), ("fromModule", "string"), ("own", "string")],
+        ),
+        (
+            "module alias with a local type argument",
+            "interface Row { fromModule: string }\n\
+             type Box<T> = T & { box: boolean };\n\
+             export function make() {\n\
+                 interface Row { local: number }\n\
+                 type Props = Box<Row> & { own: string };\n\
+                 return (p: Props) => <div />;\n\
+             }\n",
+            &[("box", "boolean"), ("local", "number"), ("own", "string")],
+        ),
+        (
+            "module alias with a local type argument, by extends",
+            "interface Row { fromModule: string }\n\
+             type Box<T> = T & { box: boolean };\n\
+             export function make() {\n\
+                 interface Row { local: number }\n\
+                 interface Props extends Box<Row> { own: string }\n\
+                 return (p: Props) => <div />;\n\
+             }\n",
+            &[("box", "boolean"), ("local", "number"), ("own", "string")],
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (row, source, expected) in rows {
+        let output = extract_with_installed_libs(&[
+            ("factory.tsx", &format!("import * as React from 'react';\n{source}")),
+            ("Field.tsx", "import { make } from './factory';\nexport const Field = make<string>();\n"),
+        ]);
+        let found: Vec<(String, String)> = output.components.get("Field").map_or_else(Vec::new, |c| {
+            c.props.iter().map(|(name, prop)| (name.clone(), prop.prop_type.raw_string())).collect()
+        });
+        let expected: Vec<(String, String)> =
+            expected.iter().map(|(name, ty)| ((*name).to_owned(), (*ty).to_owned())).collect();
+        if found != expected {
+            failures.push(format!("{row}: found {found:?}, expected {expected:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn a_local_interface_passed_to_a_module_alias_is_shown_by_its_name() {
+    let output = extract_with_installed_libs(&[
+        (
+            "factory.tsx",
+            "interface Row { fromModule: string }\n\
+             type Pick2<T> = T extends { id: infer I } ? I : never;\n\
+             export function make() {\n\
+                 interface Row { id: number }\n\
+                 interface Props { cell: Pick2<Row> }\n\
+                 return (p: Props) => <div />;\n\
+             }\n",
+        ),
+        ("Field.tsx", "import { make } from './factory';\nexport const Field = make();\n"),
+    ]);
+    let shown = output.components["Field"].props["cell"].prop_type.raw_string();
+    assert!(!shown.contains('@'), "{shown}");
+}
+
 #[test]
 fn a_signature_parameter_of_a_factory_result_does_not_capture_an_argument_named_like_it() {
     let output = extract_with_installed_libs(&[
