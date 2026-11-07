@@ -1,0 +1,84 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6VWVW3P34M62M0P7HRH1ESW",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-07T20:58:18.994937Z",
+  "branch": "fix/silent-wrong-types",
+  "checkpoints_count": 1,
+  "save_step_count": 58,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "7bcdbc6a42ce",
+  "checkpoint_transcript_start": 13086,
+  "transcript_lines_at_start": 13086,
+  "compact_transcript_start": 1123,
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 7289,
+    "cache_read_tokens": 1632214,
+    "output_tokens": 5647,
+    "api_call_count": 4,
+    "subagent_tokens": {
+      "input_tokens": 18,
+      "cache_creation_tokens": 81159,
+      "cache_read_tokens": 776178,
+      "output_tokens": 2136,
+      "api_call_count": 9
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 303
+  },
+  "summary": {
+    "intent": "Narrow down which TypeScript constructs caliper can handle deterministically, by understanding the AST requirements and checking whether oxc's type checker or TypeScript 7.1 code could be reused.",
+    "outcome": "Found no oxc type checker locally; the oxc-stack and oxc-release-builds directories are older copies of this project (oxc-react-docgen), not the oxc repo. Identified oxc_semantic and oxc_isolated_declarations as possibly useful, while checker-dependent constructs stay with the opt-in TS 7.1 backend. A construct-matrix worker is still running, so its results are not in yet.",
+    "learnings": {
+      "repo": [
+        "Local `oxc-stack` and `oxc-release-builds` directories are older copies of this project (formerly oxc-react-docgen), not the upstream oxc repository, so they contain no type checker.",
+        "caliper reaches the TypeScript 7 compiler (typescript-go) through `crates/tsc-client`, via the opt-in TypeScript 7.1 backend.",
+        "ADR 0025 covers scoping work; oxc_semantic's scope tree could supply declaration identity for it.",
+        "Constructs that need real type instantiation (conditional types over generics, mapped-type instantiation, factory call results) belong to the 'needs the checker' class and go to the TS 7.1 backend."
+      ],
+      "code": [
+        {
+          "path": "crates/tsc-client",
+          "finding": "This crate is caliper's route to the typescript-go (TypeScript 7) compiler, the same backend oxc's tsgolint uses for type-aware linting. No line numbers were cited."
+        }
+      ],
+      "workflow": [
+        "Separate verified findings from belief: the assistant marked claims about oxc having no public type checker and tsgolint using typescript-go as unverified, from memory rather than from the local checkouts.",
+        "A construct-matrix worker with four parts was launched to map TS constructs to caliper handling. One part checks the exact oxc version caliper uses and anything in oxc named type or checker, citing files.",
+        "Local directories with an oxc name may not be the upstream repo, so check their contents before relying on them."
+      ]
+    },
+    "friction": [
+      "Local oxc-named checkouts were not upstream oxc, so they could not be used to study a type checker.",
+      "The assistant could not confirm the claims about oxc's type-checking story from local sources, leaving them unverified.",
+      "The construct-matrix worker results had not arrived when the transcript ended."
+    ],
+    "open_items": [
+      "Collect the construct-matrix worker results and report what is reusable and what is missing.",
+      "Check the exact oxc version caliper uses for anything named type or checker, with file citations.",
+      "Evaluate oxc_semantic as the source of declaration identity for ADR 0025 scoping.",
+      "Evaluate oxc_isolated_declarations as a reference for which type syntax a checker-free tool handles or refuses.",
+      "Verify the unverified claim that oxc has no public type checker and that tsgolint routes through typescript-go.",
+      "Define the deterministic split between constructs handled syntactically and those sent to the TS 7.1 checker backend."
+    ]
+  }
+}
