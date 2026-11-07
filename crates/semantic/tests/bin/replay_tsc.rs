@@ -9,7 +9,8 @@
 //! A fake `tsc --api` that answers from a recording of the real `7.1.0-beta`: every request is matched, by method and
 //! exact params, against the `{method, params, result}` entries of the JSON file named by `REPLAY_FIXTURE`. A request
 //! with no recorded answer gets a JSON-RPC error, so a change to the calls the backend makes fails its test instead of
-//! being silently answered. `REPLAY_SCENARIO=crash` exits at once, `hang` answers nothing.
+//! being silently answered. `REPLAY_SCENARIO=crash` exits at once, `hang` answers nothing, `invalid_json` answers every request after `initialize` with a
+//! well-framed body that is not JSON.
 //!
 //! Paths in the recording are written relative to the project: the project root (`--cwd`) is `<ROOT>`, and its
 //! lower-cased form, which the checker uses as a file's `path` key, is `<root>`. The root must contain an upper-case
@@ -30,6 +31,7 @@ fn main() {
         }
         _ => {}
     }
+    let invalid_json = std::env::var("REPLAY_SCENARIO").as_deref() == Ok("invalid_json");
     let root = std::env::args().skip_while(|arg| arg != "--cwd").nth(1).unwrap_or_default();
     let to_wire = |text: String| text.replace("<ROOT>", &root).replace("<root>", &root.to_lowercase());
     let from_wire = |text: String| text.replace(&root, "<ROOT>").replace(&root.to_lowercase(), "<root>");
@@ -63,6 +65,13 @@ fn main() {
         let answer = recorded.iter().find(|entry| {
             entry.get("method").and_then(|m| m.as_str()) == Some(method) && entry.get("params") == Some(&params)
         });
+        if invalid_json && method != "initialize" {
+            let bytes = b"{ this is not json";
+            write!(stdout, "Content-Length: {}\r\n\r\n", bytes.len()).unwrap();
+            stdout.write_all(bytes).unwrap();
+            stdout.flush().unwrap();
+            continue;
+        }
         let response = match answer {
             Some(entry) => serde_json::json!({ "id": id, "result": entry["result"] }),
             None => serde_json::json!({

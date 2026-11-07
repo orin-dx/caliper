@@ -90,3 +90,22 @@ async fn a_request_after_the_reader_ended_fails_immediately_with_the_closed_reas
         ));
     }
 }
+
+#[tokio::test]
+async fn a_reply_that_is_not_json_fails_that_request_at_once_and_the_session_survives() {
+    let (_dir, config) = common::spawn_fake("invalid_json_reply");
+    let supervisor = Supervisor::spawn(config).await.expect("spawn fake tsc");
+    let client = supervisor.client();
+
+    let start = Instant::now();
+    let first = client.request("ping", serde_json::json!({}), Duration::from_secs(5)).await;
+    assert!(
+        matches!(first, Err(TscClientError::MalformedFrame { reason: MalformedFrameReason::InvalidJson })),
+        "got {first:?}"
+    );
+    assert!(start.elapsed() < Duration::from_secs(2), "waited out the deadline: {:?}", start.elapsed());
+
+    assert!(client.closed().is_none(), "a bad body does not end the session: {:?}", client.closed());
+    let second = client.request("ping", serde_json::json!({}), Duration::from_secs(5)).await.expect("next reply");
+    assert_eq!(second.value, serde_json::json!({ "ok": true }));
+}
