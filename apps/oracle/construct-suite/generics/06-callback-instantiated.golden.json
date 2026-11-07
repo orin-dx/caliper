@@ -1,0 +1,37 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "function",
+        "params": [
+          {
+            "optional": false,
+            "rest": false,
+            "type": {
+              "k": "prim",
+              "name": "string"
+            }
+          },
+          {
+            "optional": false,
+            "rest": false,
+            "type": {
+              "k": "prim",
+              "name": "number"
+            }
+          }
+        ],
+        "returns": {
+          "k": "prim",
+          "name": "boolean"
+        }
+      }
+    ]
+  },
+  "text": "((value: string, index: number) => boolean) | undefined"
+}

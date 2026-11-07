@@ -1,0 +1,32 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "bottom-left",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "bottom-right",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "top-left",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "top-right",
+        "of": "string"
+      }
+    ]
+  },
+  "text": "\"bottom-left\" | \"bottom-right\" | \"top-left\" | \"top-right\" | undefined"
+}

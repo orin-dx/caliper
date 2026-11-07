@@ -1,0 +1,925 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "a",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "abbr",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "address",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "animate",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "animateMotion",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "animateTransform",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "area",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "article",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "aside",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "audio",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "b",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "base",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "bdi",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "bdo",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "big",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "blockquote",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "body",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "br",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "button",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "canvas",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "caption",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "center",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "circle",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "cite",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "clipPath",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "code",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "col",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "colgroup",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "data",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "datalist",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "dd",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "defs",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "del",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "desc",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "details",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "dfn",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "dialog",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "div",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "dl",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "dt",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "ellipse",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "em",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "embed",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feBlend",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feColorMatrix",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feComponentTransfer",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feComposite",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feConvolveMatrix",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feDiffuseLighting",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feDisplacementMap",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feDistantLight",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feDropShadow",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feFlood",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feFuncA",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feFuncB",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feFuncG",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feFuncR",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feGaussianBlur",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feImage",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feMerge",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feMergeNode",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feMorphology",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feOffset",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "fePointLight",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feSpecularLighting",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feSpotLight",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feTile",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "feTurbulence",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "fieldset",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "figcaption",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "figure",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "filter",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "footer",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "foreignObject",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "form",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "g",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "h1",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "h2",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "h3",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "h4",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "h5",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "h6",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "head",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "header",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "hgroup",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "hr",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "html",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "i",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "iframe",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "image",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "img",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "input",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "ins",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "kbd",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "keygen",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "label",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "legend",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "li",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "line",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "linearGradient",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "link",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "main",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "map",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "mark",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "marker",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "mask",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "menu",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "menuitem",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "meta",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "metadata",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "meter",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "mpath",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "nav",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "noindex",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "noscript",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "object",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "ol",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "optgroup",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "option",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "output",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "p",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "param",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "path",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "pattern",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "picture",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "polygon",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "polyline",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "pre",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "progress",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "q",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "radialGradient",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "rect",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "rp",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "rt",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "ruby",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "s",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "samp",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "script",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "search",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "section",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "select",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "set",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "slot",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "small",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "source",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "span",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "stop",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "strong",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "style",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "sub",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "summary",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "sup",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "svg",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "switch",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "symbol",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "table",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "tbody",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "td",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "template",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "text",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "textPath",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "textarea",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "tfoot",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "th",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "thead",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "time",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "title",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "tr",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "track",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "tspan",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "u",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "ul",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "use",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "var",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "video",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "view",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "wbr",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "webview",
+        "of": "string"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "contextType",
+          "defaultProps",
+          "displayName",
+          "getDerivedStateFromError",
+          "getDerivedStateFromProps",
+          "propTypes"
+        ],
+        "index": false,
+        "alias": "ComponentClass"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "displayName",
+          "propTypes"
+        ],
+        "index": false,
+        "alias": "FunctionComponent"
+      }
+    ],
+    "alias": "ElementType"
+  },
+  "text": "ElementType<any, keyof IntrinsicElements> | undefined"
+}

@@ -1,0 +1,22 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "displayName",
+          "propTypes"
+        ],
+        "index": false,
+        "alias": "FC"
+      }
+    ],
+    "alias": "FC"
+  },
+  "text": "FC<IconProps> | undefined"
+}

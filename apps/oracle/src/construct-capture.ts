@@ -36,9 +36,13 @@ function capture(fixture: Fixture): Golden {
   return { checker: norm(type), text: checker.typeToString(type) }
 }
 
+// A unique-symbol key is named `__@tag@<symbol id>` and the id depends on the other files in the program, so adding a
+// fixture would change an unrelated golden. Keep the name, drop the id.
+const stableSymbolIds = (json: string) => json.replaceAll(/__@(\w+)@\d+/g, '__@$1')
+
 const stale: string[] = []
 for (const fixture of fixtures) {
-  const text = `${JSON.stringify(capture(fixture), null, 2)}\n`
+  const text = `${stableSymbolIds(JSON.stringify(capture(fixture), null, 2))}\n`
   const current = existsSync(fixture.golden) ? readFileSync(fixture.golden, 'utf8') : undefined
   if (current === text) continue
   stale.push(fixture.id)

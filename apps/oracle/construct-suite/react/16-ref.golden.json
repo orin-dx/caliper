@@ -1,0 +1,59 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "prim",
+        "name": "null"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "current"
+        ],
+        "index": false,
+        "alias": "RefObject"
+      },
+      {
+        "k": "function",
+        "params": [
+          {
+            "optional": false,
+            "rest": false,
+            "type": {
+              "k": "union",
+              "members": [
+                {
+                  "k": "prim",
+                  "name": "null"
+                },
+                {
+                  "k": "opaque",
+                  "alias": "HTMLDivElement"
+                }
+              ]
+            }
+          }
+        ],
+        "returns": {
+          "k": "union",
+          "members": [
+            {
+              "k": "prim",
+              "name": "void"
+            },
+            {
+              "k": "opaque"
+            }
+          ]
+        },
+        "alias": "bivarianceHack"
+      }
+    ]
+  },
+  "text": "Ref<HTMLDivElement> | undefined"
+}

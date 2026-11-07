@@ -1,0 +1,23 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "red",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "blue",
+        "of": "string"
+      }
+    ],
+    "alias": "Color"
+  },
+  "text": "Color | undefined"
+}

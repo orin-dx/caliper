@@ -1,0 +1,10 @@
+{
+  "checker": {
+    "k": "object",
+    "fields": [
+      "x"
+    ],
+    "index": false
+  },
+  "text": "{ x: number; }"
+}

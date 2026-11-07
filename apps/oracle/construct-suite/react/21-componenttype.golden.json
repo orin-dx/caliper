@@ -1,0 +1,35 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "contextType",
+          "defaultProps",
+          "displayName",
+          "getDerivedStateFromError",
+          "getDerivedStateFromProps",
+          "propTypes"
+        ],
+        "index": false,
+        "alias": "ComponentClass"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "displayName",
+          "propTypes"
+        ],
+        "index": false,
+        "alias": "FunctionComponent"
+      }
+    ],
+    "alias": "ComponentType"
+  },
+  "text": "ComponentType<{ id: string; }> | undefined"
+}

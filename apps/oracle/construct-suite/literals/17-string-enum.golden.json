@@ -1,0 +1,23 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "info",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "danger",
+        "of": "string"
+      }
+    ],
+    "alias": "Intent"
+  },
+  "text": "Intent | undefined"
+}

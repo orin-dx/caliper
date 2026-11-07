@@ -1,0 +1,42 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "tuple",
+        "elements": [
+          {
+            "k": "function",
+            "params": [
+              {
+                "optional": false,
+                "rest": false,
+                "type": {
+                  "k": "prim",
+                  "name": "string"
+                }
+              }
+            ],
+            "returns": {
+              "k": "prim",
+              "name": "void"
+            }
+          },
+          {
+            "k": "function",
+            "params": [],
+            "returns": {
+              "k": "prim",
+              "name": "number"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "text": "[(a: string) => void, () => number] | undefined"
+}

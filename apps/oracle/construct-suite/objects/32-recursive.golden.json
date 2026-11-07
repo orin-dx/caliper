@@ -1,0 +1,22 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "children",
+          "label"
+        ],
+        "index": false,
+        "alias": "Tree"
+      }
+    ],
+    "alias": "Tree"
+  },
+  "text": "Tree | undefined"
+}

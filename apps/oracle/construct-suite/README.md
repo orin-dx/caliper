@@ -12,7 +12,7 @@ construct-suite/
   <family>/<NN>-<slug>.golden.json   its committed golden, written by construct:capture
 ```
 
-A row id is `<family>/<NN>-<slug>`. The harness is `../src/construct-suite.ts` (pure helpers), `../src/construct-capture.ts` (the capture script) and `../tests/construct-suite.test.ts`. `seed/` holds the three rows that prove the harness.
+A row id is `<family>/<NN>-<slug>`. The harness is `../src/construct-suite.ts` (pure helpers), `../src/construct-capture.ts` (the capture script) and `../tests/construct-suite.test.ts`. `seed/` holds the three rows that prove the harness. The other families are `literals`, `objects`, `tuples-arrays`, `utility-mapped`, `generics` and `react`.
 
 A fixture declares one `interface Props` with one prop `p`, and exports a component `Row` that takes it:
 
@@ -70,3 +70,22 @@ pnpm --filter caliper-docgen-oracle construct:check
 ```
 
 Without the build step the suite skips, which is green but covers nothing; a job that must run it should check that the binary exists first.
+
+## Not covered
+
+Constructs the fixture format (one self-contained file, one prop `p`, no runtime code) cannot express, or that were left out:
+
+- `declare const enum`: ambient const enums error under `isolatedModules` (TS2748); a local `const enum` is `literals/19`.
+- Computed enum members (`E.A = 1 << 2`): left out to stay on common spellings.
+- Computed property names from a runtime `const` or enum: needs runtime code; only literal keys and `declare const` unique-symbol keys are covered (`literals/24`, `objects/23`).
+- Cross-file declaration merging and module augmentation: a fixture has no imports beyond React types; same-file merging is `objects/30`.
+- DOM-typed `this` parameters: a plain object `this` type is used (`objects/18`, `generics/18`).
+- `as const` value-derived tuples: needs runtime code; `declare const` with `typeof` covers it (`tuples-arrays/32`, `utility-mapped/22`).
+- `ReactNode[]`: belongs to the React family's scope, not arrays.
+- Generic components instantiated by an alias at JSX level: covered at type level by `generics/13` and `generics/16`.
+- The global `JSX.Element` (removed in @types/react 19; `react/05` uses `React.JSX.Element`), `ReactChild`, `ReactChildren` and `LegacyRef` (removed or unstable across @types/react versions).
+- `forwardRef` / `memo` calls wrapping the component: a fixture exports a plain `Row`; only the resulting exotic types are covered (`react/31`, `react/32`).
+
+Fixtures that emit runtime code regardless: the enum fixtures (`literals/17` to `literals/23`) and the two shadowing fixtures (`generics/24`, `generics/25`), which need a local in the function body.
+
+Dropped as invalid: `literals/26-union-unknown` and `literals/27-union-any`. The checker absorbs the union to `unknown` / `any`, so the golden has no type (`checker any/error`) and the row could not fail.

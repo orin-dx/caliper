@@ -1,0 +1,22 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "getAge",
+          "getName"
+        ],
+        "index": false,
+        "alias": "Getters"
+      }
+    ],
+    "alias": "Getters"
+  },
+  "text": "Getters<Base> | undefined"
+}

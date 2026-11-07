@@ -1,0 +1,27 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "function",
+        "params": [],
+        "returns": {
+          "k": "object",
+          "fields": [
+            "__@toStringTag",
+            "catch",
+            "finally",
+            "then"
+          ],
+          "index": false,
+          "alias": "Promise"
+        }
+      }
+    ]
+  },
+  "text": "(() => Promise<T[]>) | undefined"
+}

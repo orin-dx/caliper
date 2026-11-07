@@ -1,0 +1,22 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "kind",
+          "size"
+        ],
+        "index": false,
+        "alias": "Derived"
+      }
+    ],
+    "alias": "Derived"
+  },
+  "text": "Derived | undefined"
+}

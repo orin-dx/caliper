@@ -1,0 +1,34 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "array",
+        "element": {
+          "k": "function",
+          "params": [
+            {
+              "optional": false,
+              "rest": false,
+              "type": {
+                "k": "prim",
+                "name": "string"
+              }
+            }
+          ],
+          "returns": {
+            "k": "prim",
+            "name": "void"
+          }
+        },
+        "alias": "Array"
+      }
+    ],
+    "alias": "Array"
+  },
+  "text": "((x: string) => void)[] | undefined"
+}

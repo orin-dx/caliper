@@ -1,0 +1,22 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "b",
+          "c"
+        ],
+        "index": false,
+        "alias": "Rest"
+      }
+    ],
+    "alias": "Rest"
+  },
+  "text": "Rest | undefined"
+}

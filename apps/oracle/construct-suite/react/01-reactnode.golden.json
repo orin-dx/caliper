@@ -1,0 +1,79 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "prim",
+        "name": "null"
+      },
+      {
+        "k": "prim",
+        "name": "string"
+      },
+      {
+        "k": "prim",
+        "name": "number"
+      },
+      {
+        "k": "prim",
+        "name": "bigint"
+      },
+      {
+        "k": "lit",
+        "value": "false",
+        "of": "boolean"
+      },
+      {
+        "k": "lit",
+        "value": "true",
+        "of": "boolean"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "__@iterator"
+        ],
+        "index": false,
+        "alias": "Iterable"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "__@toStringTag",
+          "catch",
+          "finally",
+          "then"
+        ],
+        "index": false,
+        "alias": "Promise"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "key",
+          "props",
+          "type"
+        ],
+        "index": false,
+        "alias": "ReactElement"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "children",
+          "key",
+          "props",
+          "type"
+        ],
+        "index": false,
+        "alias": "ReactPortal"
+      }
+    ],
+    "alias": "ReactNode"
+  },
+  "text": "ReactNode"
+}

@@ -1,0 +1,16 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "prim",
+        "name": "number"
+      }
+    ]
+  },
+  "text": "number | undefined"
+}

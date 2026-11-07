@@ -1,0 +1,49 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "prim",
+        "name": "string"
+      },
+      {
+        "k": "prim",
+        "name": "number"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "base",
+          "lg",
+          "md",
+          "sm"
+        ],
+        "index": false,
+        "alias": "Partial"
+      },
+      {
+        "k": "array",
+        "element": {
+          "k": "union",
+          "members": [
+            {
+              "k": "prim",
+              "name": "string"
+            },
+            {
+              "k": "prim",
+              "name": "number"
+            }
+          ]
+        },
+        "alias": "ReadonlyArray"
+      }
+    ],
+    "alias": "Responsive"
+  },
+  "text": "Responsive<string | number> | undefined"
+}

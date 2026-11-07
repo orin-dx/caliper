@@ -1,0 +1,21 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "1",
+          "aria-label",
+          "x y"
+        ],
+        "index": false
+      }
+    ]
+  },
+  "text": "{ 1: string; \"aria-label\": string; 'x y'?: number | undefined; } | undefined"
+}
