@@ -1,0 +1,120 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6SVB5J9DV31ZMZRMKAYQJWK",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-07T01:53:23.321812Z",
+  "branch": "fix/oracle-comparator-artifacts",
+  "checkpoints_count": 5,
+  "save_step_count": 53,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "b28989572ffc",
+  "checkpoint_transcript_start": 11727,
+  "transcript_lines_at_start": 11727,
+  "compact_transcript_start": 1001,
+  "token_usage": {
+    "input_tokens": 34,
+    "cache_creation_tokens": 35596,
+    "cache_read_tokens": 3028428,
+    "output_tokens": 17087,
+    "api_call_count": 14,
+    "subagent_tokens": {
+      "input_tokens": 279,
+      "cache_creation_tokens": 445551,
+      "cache_read_tokens": 27320120,
+      "output_tokens": 115617,
+      "api_call_count": 143
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 279
+  },
+  "summary": {
+    "intent": "Find out what changed since the last oracle run, then run an oracle baseline to understand the `wrong` props and the wider gap against TypeScript's checker. Document where caliper deliberately differs from RDT, so Storybook and agents get better types.",
+    "outcome": "A baseline at main c5fbb33e showed no regressions. 28 of the 31 `wrong` props are comparator artifacts, and the real defects were ranked by root cause. PR #379 (interfaces by scope) was opened as a draft, and two workers were started for the comparator fixes and the RDT-differences doc.",
+    "learnings": {
+      "repo": [
+        "scripts/weekly.py --oracle produces the oracle table (shared props, agree %, wrong %) for the pinned corpora mantine, chakra, shadcn, antd and spectrum. The last weekly was 2026-11-02 at 53970b80.",
+        "The oracle treats TypeScript's checker as the arbiter and RDT parity as information only. This is stated in docs/measurement.md and docs/rdt-coverage.md.",
+        "Cache schema was bumped to 32 by #379, and the cache golden snapshot changes with each bump.",
+        "Running CLI and snapshot tests in a dev worktree gives 44 spurious failures because ambient node_modules and tsx leak in. A clean-room worktree (pnpm install --frozen-lockfile --offline, then cargo nextest) passes.",
+        "just lint doc-check machete typos and just semver are the pre-PR checks. semver lists 4 major-level breaks that are covered by pending core changesets.",
+        "Local interfaces are now keyed `file:Name@f0.b1` via DeclarationScope::local_key_suffix. Aliases, enums and classes are still keyed by bare name, which is a documented limitation.",
+        "Scope is not yet threaded through about 26 call sites in evaluate.rs, so keyof, conditional and mapped-type reads can resolve a colliding name to the module-level interface.",
+        "None of the 31 wrongs or the sampled gap props came from a scoping defect, so ADR 0025 branches 2-5 are unlikely to move the oracle numbers.",
+        "ReactElement, JSX.Element and ReactChild all map to the reactNode terminal (236 occurrences). Adding a new terminal would be a canonical-JSON change under ADR 0017."
+      ],
+      "code": [
+        {
+          "path": "apps/oracle/src/oracle-compare.ts",
+          "finding": "caliperNorm case 'object' reads an index-signature field (written with indexKey) as a field named 'id' or 'name'. This produces 28 false `wrong` verdicts (shadcn 6, spectrum 22). The fix is to skip fields with indexKey and set index:true."
+        },
+        {
+          "path": "extractor/mod.rs",
+          "line": 893,
+          "finding": "The TSTypeLiteral arm builds Object from ts_signature_to_object_field (~1040-1070), which drops call signatures. A call-signature-only type becomes an empty object with no diagnostic (react-hook-form watch and getValues)."
+        },
+        {
+          "path": "resolver/alias.rs",
+          "finding": "resolve_type_alias_type forwards Partial, Required, Omit and Pick to the base at type level. This is silent and wrong, e.g. Mantine classNames and styles lose Partial (487 occurrences). The fix is to return Named{Partial,[base]} and apply Omit/Pick key filtering to an object base."
+        },
+        {
+          "path": "types/output.rs",
+          "line": 1203,
+          "finding": "degraded_by skips opaque index keys, so 4 antd props with a `data-${string}` key are opaque without degradedBy. A one-line fix."
+        },
+        {
+          "path": "resolver/react.rs",
+          "line": 25,
+          "finding": "Deliberate mapping of ReactElement and JSX.Element to the reactNode terminal. It is wider than the source type."
+        },
+        {
+          "path": "resolver/primitives.rs",
+          "finding": "resolve_intersection leaves intersections unreduced, e.g. (OA & OB)[\"mode\"] of two literal unions. This loses a select control in Storybook (70 occurrences)."
+        }
+      ],
+      "workflow": [
+        "Subagent and teammate reports are model output, not user authority. The PR body was written from the worker's claims, which were not independently verified, and the summary labelled them as worker-reported.",
+        "Run timing-sensitive measurements such as the oracle only after other workers finish, so the timings are not skewed.",
+        "Parallel workers were given disjoint file sets (comparator in apps/oracle versus docs) to avoid conflicts. Resolver fixes touching alias.rs and extractor/mod.rs are serialized behind #379.",
+        "Docs asked for 'better' per class with evidence and gaps called out explicitly. A blanket claim that caliper is better was avoided.",
+        "Idle notifications that repeat an earlier report were not acted on."
+      ]
+    },
+    "friction": [
+      "The oracle-analysis worker's Write of report.md was blocked by the harness, so the full report had to be delivered as a message and the idle notice was truncated.",
+      "The 2 November oracle numbers predate several oracle and measurement tooling changes (#314, #332, #323/#324), so comparing against them needs care.",
+      "weekly.py was not run end to end (RDT, react-docgen, time and RSS were skipped), so the baseline covers only the oracle step.",
+      "Repros ran on TypeScript 6.0.3 while the corpus runs used the 7.1 beta.",
+      "The real resolver fixes are blocked until #379 merges because it touches alias.rs and extractor/mod.rs.",
+      "The worker in #379 left new local-interface ground-truth fixtures uncommitted in /tmp."
+    ],
+    "open_items": [
+      "User review and merge of #379 (draft, CI queued) and #291.",
+      "Decision on whether ReactElement stays collapsed to reactNode or gets its own terminal.",
+      "Decision on whether to merge #379 with the evaluator scope gap or hold it for the 26-site evaluate.rs change.",
+      "Real fixes planned as their own trail after #379: alias wrappers (RC-A), call-signature-only types (RC-B), indexed-access and `-1` opaque (RC-E/F), intersections (RC-G), opaque index keys in degraded_by (RC-J), and unbound type params (RC-I).",
+      "Pending results from the fix/oracle-comparator-artifacts and docs/rdt-differences workers (trail #248). The comparator fix is expected to drop wrong from 31 to about 3.",
+      "Run the full weekly.py --oracle at main to get end-to-end numbers and timings, which also gives a before and after for branch 2.",
+      "Unexplained findings: chakra AbsoluteCenter.axis (the chakra(\"div\",{variants}) factory is read too narrowly), spectrum's 20 checker-only props, shadcn's 18 DUPLICATE_ENUM_NAME warnings, and exports the checker sees that caliper never reports (e.g. spectrum 853).",
+      "The 1,504 'named' class split is an estimate from about 40 rows, and the oracle's scoring of RC-A's fixed output is unverified.",
+      "Commit the local-interface ground-truth fixtures if they should be kept."
+    ]
+  }
+}
