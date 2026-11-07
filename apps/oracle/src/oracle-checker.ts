@@ -131,8 +131,17 @@ export function checkerNormalizer(checker: any): (t: any) => Norm {
         alias,
       }
     }
-    const index = checker.getIndexInfosOfType(t).length > 0
-    return { k: 'object', fields: properties.map((p: any) => p.name).toSorted(), index, alias }
+    const infos = checker.getIndexInfosOfType(t)
+    const indexValues: Norm[] = infos.map((info: any) => norm(info.valueType, depth + 1))
+    return {
+      k: 'object',
+      fields: properties.map((p: any) => p.name).toSorted(),
+      index: infos.length > 0,
+      ...(infos.length > 0 && {
+        indexValue: indexValues.length === 1 ? indexValues[0] : { k: 'union', members: indexValues },
+      }),
+      alias,
+    }
   }
 
   function uncached(t: any, depth: number): Norm {
