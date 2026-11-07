@@ -15,10 +15,10 @@ use std::time::Duration;
 use caliper_docgen_core::types::semantic::{SemanticOutcome, SemanticProvider, SemanticTarget};
 use caliper_docgen_tsc_client::Supervisor;
 use camino::Utf8PathBuf;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::rpc::Rpc;
-use crate::{answer_with, supervisor_config, SemanticRequest, SUPPORTED_VERSIONS};
+use crate::{SUPPORTED_VERSIONS, SemanticRequest, answer_with, supervisor_config};
 
 /// Crashes the checker may have before it stays down for the session.
 const MAX_RESTARTS: u32 = 3;
@@ -149,9 +149,10 @@ impl SemanticProvider for OnDemand {
         match &self.jobs {
             Some(jobs) => {
                 if let Err(refused) = jobs.send(Job::Answer { targets, reply })
-                    && let Job::Answer { reply, .. } = refused.0 {
-                        reply.send(SemanticOutcome::unavailable("the checker thread has stopped")).ok();
-                    }
+                    && let Job::Answer { reply, .. } = refused.0
+                {
+                    reply.send(SemanticOutcome::unavailable("the checker thread has stopped")).ok();
+                }
             }
             None => {
                 reply.send(SemanticOutcome::unavailable("could not start the checker thread")).ok();
@@ -169,9 +170,10 @@ impl Drop for OnDemand {
         let receiver = self.stopped.get_mut().ok().and_then(Option::take);
         let stopped = receiver.is_none_or(|receiver| receiver.recv_timeout(self.shutdown_wait).is_ok());
         if let Some(thread) = self.thread.take()
-            && stopped {
-                thread.join().ok();
-            }
+            && stopped
+        {
+            thread.join().ok();
+        }
     }
 }
 

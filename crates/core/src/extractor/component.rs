@@ -7,8 +7,8 @@ use oxc_ast::ast::*;
 
 use crate::types::{CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode};
 
-use super::evidence::{renders, FunctionShape};
-use super::{is_pascal_case, ReactApi, SourceDataCollector};
+use super::evidence::{FunctionShape, renders};
+use super::{ReactApi, SourceDataCollector, is_pascal_case};
 
 /// Peel any wrapping `as X` casts, `satisfies X` checks or `!` assertions down to the real
 /// expression underneath. Needed because component libraries commonly cast a
@@ -127,11 +127,7 @@ impl<'src> SourceDataCollector<'src> {
         match &decl.id {
             BindingPattern::BindingIdentifier(id) => {
                 let name = id.name.as_str();
-                if is_pascal_case(name) {
-                    Some(name.to_owned())
-                } else {
-                    None
-                }
+                if is_pascal_case(name) { Some(name.to_owned()) } else { None }
             }
             _ => None,
         }
@@ -348,9 +344,10 @@ impl<'src> SourceDataCollector<'src> {
 
         // Rules out anonymous utility functions, which aren't components.
         if let Some(fn_name_str) = fn_name
-            && !is_pascal_case(fn_name_str) {
-                return None;
-            }
+            && !is_pascal_case(fn_name_str)
+        {
+            return None;
+        }
 
         let first_param = params.items.first()?;
         let type_ann = first_param.type_annotation.as_ref()?;
@@ -517,11 +514,7 @@ impl<'src> SourceDataCollector<'src> {
         let returns_element = |ty: &crate::types::CollectedType| match ty {
             crate::types::CollectedType::Named { name, .. } => is_element(name),
             crate::types::CollectedType::Union(members) => members.iter().any(|member| {
-                if let crate::types::CollectedType::Named { name, .. } = member {
-                    is_element(name)
-                } else {
-                    false
-                }
+                if let crate::types::CollectedType::Named { name, .. } = member { is_element(name) } else { false }
             }),
             _ => false,
         };

@@ -12,7 +12,7 @@ use dashmap::DashMap;
 use napi_derive::napi;
 
 use caliper_docgen_core::pipeline::{
-    extraction_output_to_json, incremental_update_to_json, PipelineOptions, WatchSession,
+    PipelineOptions, WatchSession, extraction_output_to_json, incremental_update_to_json,
 };
 
 #[global_allocator]
@@ -161,7 +161,7 @@ fn new_session(options: JsExtractOptions) -> napi::Result<Arc<WatchSession>> {
             options.semantic_wait_ms.unwrap_or(DEFAULT_SEMANTIC_WAIT_MS),
         )),
         Some(other) => {
-            return Err(napi::Error::from_reason(format!("semanticTypes must be 'off' or 'on-demand', got '{other}'")))
+            return Err(napi::Error::from_reason(format!("semanticTypes must be 'off' or 'on-demand', got '{other}'")));
         }
     };
     let pipeline_options = PipelineOptions::try_from(options).map_err(napi::Error::from_reason)?;

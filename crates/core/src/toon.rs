@@ -271,11 +271,7 @@ fn format_type_compact(prop_type: &PropType) -> String {
                         | PropType::LiteralUnion { .. }
                 )
             });
-            if has_literal {
-                formatted.join("|")
-            } else {
-                truncate_with_indicator(&formatted, UNION_LIMIT, "|")
-            }
+            if has_literal { formatted.join("|") } else { truncate_with_indicator(&formatted, UNION_LIMIT, "|") }
         }
         PropType::Intersection(members) => {
             let formatted: Vec<String> = members.iter().map(format_type_compact).collect();

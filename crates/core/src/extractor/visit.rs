@@ -1,7 +1,7 @@
 //! `impl Visit for SourceDataCollector` — the AST walker entry points.
 
 use oxc_ast::ast::*;
-use oxc_ast_visit::{walk, Visit};
+use oxc_ast_visit::{Visit, walk};
 use oxc_syntax::scope::ScopeFlags;
 
 use crate::types::{
@@ -10,7 +10,7 @@ use crate::types::{
 };
 
 use super::component::Binding;
-use super::{declaration_name, is_constant_name, is_pascal_case, js_text, SourceDataCollector};
+use super::{SourceDataCollector, declaration_name, is_constant_name, is_pascal_case, js_text};
 
 impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     fn visit_import_declaration(&mut self, node: &ImportDeclaration<'a>) {
@@ -74,29 +74,27 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             if let Some((base_name, props_name)) = self.cast_component_aliases.get(local).cloned()
                 && let Some(index) =
                     self.data.component_mappings.iter().position(|mapping| mapping.component_name == base_name)
-                {
-                    let mut public = self.data.component_mappings[index].clone();
-                    public.component_name = exported.to_owned();
-                    public.props_type_name = props_name;
-                    public.props_type_args.clear();
-                    public.wrapper_callee = None;
-                    public.rule = crate::types::DetectionRule::FcAnnotation;
-                    // `const A = Inner as VFC<P>` was already bound as an alias of `Inner`; the cast replaces that
-                    // mapping so `A` is published once, with `P`.
-                    // A rename (`export { A as B }`) replaces only the mapping of the inner component being re-exported
-                    // under its own name; another local that happens to be called `B` keeps its mapping.
-                    let existing = (local == exported || base_name == exported)
-                        .then(|| {
-                            self.data.component_mappings.iter().position(|mapping| mapping.component_name == exported)
-                        })
-                        .flatten();
-                    if let Some(at) = existing {
-                        self.data.component_mappings[at] = public;
-                    } else {
-                        self.data.component_mappings.push(public);
-                    }
-                    self.record_exported_local(exported);
+            {
+                let mut public = self.data.component_mappings[index].clone();
+                public.component_name = exported.to_owned();
+                public.props_type_name = props_name;
+                public.props_type_args.clear();
+                public.wrapper_callee = None;
+                public.rule = crate::types::DetectionRule::FcAnnotation;
+                // `const A = Inner as VFC<P>` was already bound as an alias of `Inner`; the cast replaces that
+                // mapping so `A` is published once, with `P`.
+                // A rename (`export { A as B }`) replaces only the mapping of the inner component being re-exported
+                // under its own name; another local that happens to be called `B` keeps its mapping.
+                let existing = (local == exported || base_name == exported)
+                    .then(|| self.data.component_mappings.iter().position(|mapping| mapping.component_name == exported))
+                    .flatten();
+                if let Some(at) = existing {
+                    self.data.component_mappings[at] = public;
+                } else {
+                    self.data.component_mappings.push(public);
                 }
+                self.record_exported_local(exported);
+            }
         }
 
         walk::walk_export_named_declaration(self, node);
@@ -350,61 +348,64 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                         self.record_bound_function_result(&name, init);
                     }
                 }
-                if self.function_depth == 0 && node.kind.is_const()
+                if self.function_depth == 0
+                    && node.kind.is_const()
                     && let Some(Expression::Identifier(target)) =
                         declarator.init.as_ref().map(super::component::peel_expr)
-                    {
-                        self.pending_function_aliases.push((name, target.name.as_str().to_owned()));
-                    }
+                {
+                    self.pending_function_aliases.push((name, target.name.as_str().to_owned()));
+                }
             }
             if self.is_tsx && self.function_depth == 0 {
                 self.try_record_destructured_imports(declarator);
             }
             if self.is_tsx && self.function_depth > 0 {
                 if let Some(name) = self.extract_pascal_name(declarator)
-                    && self.detect_component(&Binding::of(declarator), &name).is_some() {
-                        self.skip_local_component(&name, declarator.span);
-                    }
+                    && self.detect_component(&Binding::of(declarator), &name).is_some()
+                {
+                    self.skip_local_component(&name, declarator.span);
+                }
             } else if self.is_tsx
-                && let Some(name) = self.extract_pascal_name(declarator) {
-                    self.decline_reason = None;
-                    self.argument_declined = false;
-                    self.alias_candidate = None;
-                    let binding = Binding::of(declarator);
-                    if let Some(mapping) = self.detect_component(&binding, &name) {
-                        self.data.component_mappings.push(mapping);
-                        continue;
-                    }
-                    // try_rename_identifier_wrapped_component is itself a give-up-quietly
-                    // path (a bare/wrapped identifier re-binding, not a props-bearing
-                    // component candidate) — only record a skip when even that finds
-                    // nothing, so plain aliasing (`const Button = InternalButton;`)
-                    // doesn't spuriously report as an unsupported candidate. Also skip
-                    // no-initializer declarations (`declare var Date: DateConstructor`) —
-                    // those are ambient type-only bindings handled by Pattern 5 below
-                    // (or legitimately not components at all), not failed candidates.
-                    if declarator.init.is_some()
-                        && !self.try_rename_identifier_wrapped_component(&binding, &name)
-                        && !self.try_record_wrapper_call(&binding, &name)
-                        && !self.try_record_tagged_factory(&binding, &name)
-                        && !self.try_record_imported_member_alias(&binding, &name)
-                        && !self.try_record_factory_call(&binding, &name)
-                        && !self.try_defer_identifier_alias(&name, declarator.span)
-                    {
-                        // `MENU_OPTIONS` is a constant, not a component that failed to qualify; a rule that gave a
-                        // reason for declining it still reports it.
-                        let declined = self.decline_reason.take();
-                        if declined.is_some() || !is_constant_name(&name) {
-                            let message = declined.unwrap_or_else(|| {
-                                format!(
-                                    "'{name}' is a PascalCase binding but matched no known component pattern \
+                && let Some(name) = self.extract_pascal_name(declarator)
+            {
+                self.decline_reason = None;
+                self.argument_declined = false;
+                self.alias_candidate = None;
+                let binding = Binding::of(declarator);
+                if let Some(mapping) = self.detect_component(&binding, &name) {
+                    self.data.component_mappings.push(mapping);
+                    continue;
+                }
+                // try_rename_identifier_wrapped_component is itself a give-up-quietly
+                // path (a bare/wrapped identifier re-binding, not a props-bearing
+                // component candidate) — only record a skip when even that finds
+                // nothing, so plain aliasing (`const Button = InternalButton;`)
+                // doesn't spuriously report as an unsupported candidate. Also skip
+                // no-initializer declarations (`declare var Date: DateConstructor`) —
+                // those are ambient type-only bindings handled by Pattern 5 below
+                // (or legitimately not components at all), not failed candidates.
+                if declarator.init.is_some()
+                    && !self.try_rename_identifier_wrapped_component(&binding, &name)
+                    && !self.try_record_wrapper_call(&binding, &name)
+                    && !self.try_record_tagged_factory(&binding, &name)
+                    && !self.try_record_imported_member_alias(&binding, &name)
+                    && !self.try_record_factory_call(&binding, &name)
+                    && !self.try_defer_identifier_alias(&name, declarator.span)
+                {
+                    // `MENU_OPTIONS` is a constant, not a component that failed to qualify; a rule that gave a
+                    // reason for declining it still reports it.
+                    let declined = self.decline_reason.take();
+                    if declined.is_some() || !is_constant_name(&name) {
+                        let message = declined.unwrap_or_else(|| {
+                            format!(
+                                "'{name}' is a PascalCase binding but matched no known component pattern \
                                      (FC annotation, forwardRef, HOC wrapper, or identifier alias)"
-                                )
-                            });
-                            self.record_skip(DiagnosticCode::SkippedCandidate, message, declarator.span);
-                        }
+                            )
+                        });
+                        self.record_skip(DiagnosticCode::SkippedCandidate, message, declarator.span);
                     }
                 }
+            }
             self.record_body_defaults(declarator);
             if node.kind.is_const() {
                 self.record_const_value_type(declarator);
@@ -463,71 +464,74 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         self.props_params.push((first_param_name(&func.params), func.span.start, func.span.end));
         // Pattern 4: `function Button(props: ButtonProps) { ... }`
         if self.is_tsx
-            && let Some(id) = &func.id {
-                let name = id.name.as_str();
-                let declaration =
-                    matches!(func.r#type, FunctionType::FunctionDeclaration | FunctionType::TSDeclareFunction);
-                if is_pascal_case(name) && declaration && self.function_depth > 0 {
-                    let typed = func.params.items.first().is_some_and(|p| p.type_annotation.is_some());
-                    let shape = super::evidence::FunctionShape::of_function(func);
-                    if typed && super::evidence::renders(&shape, &*self).is_ok() {
-                        self.skip_local_component(name, func.span);
-                    }
-                } else if is_pascal_case(name) && declaration
-                    && let Some(first_param) = func.params.items.first() {
-                        if let Some(type_ann) = &first_param.type_annotation {
-                            if let Err(reason) =
-                                super::evidence::renders(&super::evidence::FunctionShape::of_function(func), &*self)
-                            {
-                                // A `declare function` with a non-element return type is an API declaration, not a
-                                // component that failed to qualify: lib.dom.d.ts alone declares dozens of them.
-                                if func.r#type == FunctionType::FunctionDeclaration {
-                                    self.record_skip(
-                                        DiagnosticCode::SkippedCandidate,
-                                        format!("'{name}' takes a typed props parameter but {reason}"),
-                                        func.span,
-                                    );
-                                }
-                            } else if let Some((props_name, type_args)) =
-                                self.extract_type_name_from_type(&type_ann.type_annotation)
-                            {
-                                if func.params.items.len() > 1 {
-                                    self.takes_a_second_parameter.insert(name.into());
-                                }
-                                let (description, tags) = self.find_jsdoc_with_tags(func.span.start);
-                                let param_defaults = self.extract_param_defaults(&func.params);
-                                self.data.component_mappings.push(
-                                    ComponentMapping::new(
-                                        name.to_owned(),
-                                        props_name,
-                                        self.file_path.clone(),
-                                        func.span.start,
-                                        func.span.end,
-                                        DetectionRule::FunctionDeclaration,
-                                    )
-                                    .with_props_type_args(type_args)
-                                    .with_doc(description, tags)
-                                    .with_param_defaults(param_defaults),
-                                );
-                            } else {
-                                self.record_skip(
-                                    DiagnosticCode::SkippedCandidate,
-                                    format!(
-                                        "'{name}' is a PascalCase function declaration whose first param's type \
-                                         annotation isn't a recognizable props type reference"
-                                    ),
-                                    type_ann.span,
-                                );
-                            }
-                        } else {
+            && let Some(id) = &func.id
+        {
+            let name = id.name.as_str();
+            let declaration =
+                matches!(func.r#type, FunctionType::FunctionDeclaration | FunctionType::TSDeclareFunction);
+            if is_pascal_case(name) && declaration && self.function_depth > 0 {
+                let typed = func.params.items.first().is_some_and(|p| p.type_annotation.is_some());
+                let shape = super::evidence::FunctionShape::of_function(func);
+                if typed && super::evidence::renders(&shape, &*self).is_ok() {
+                    self.skip_local_component(name, func.span);
+                }
+            } else if is_pascal_case(name)
+                && declaration
+                && let Some(first_param) = func.params.items.first()
+            {
+                if let Some(type_ann) = &first_param.type_annotation {
+                    if let Err(reason) =
+                        super::evidence::renders(&super::evidence::FunctionShape::of_function(func), &*self)
+                    {
+                        // A `declare function` with a non-element return type is an API declaration, not a
+                        // component that failed to qualify: lib.dom.d.ts alone declares dozens of them.
+                        if func.r#type == FunctionType::FunctionDeclaration {
                             self.record_skip(
                                 DiagnosticCode::SkippedCandidate,
-                                format!("'{name}' is a PascalCase function declaration with an untyped first param"),
-                                first_param.span,
+                                format!("'{name}' takes a typed props parameter but {reason}"),
+                                func.span,
                             );
                         }
+                    } else if let Some((props_name, type_args)) =
+                        self.extract_type_name_from_type(&type_ann.type_annotation)
+                    {
+                        if func.params.items.len() > 1 {
+                            self.takes_a_second_parameter.insert(name.into());
+                        }
+                        let (description, tags) = self.find_jsdoc_with_tags(func.span.start);
+                        let param_defaults = self.extract_param_defaults(&func.params);
+                        self.data.component_mappings.push(
+                            ComponentMapping::new(
+                                name.to_owned(),
+                                props_name,
+                                self.file_path.clone(),
+                                func.span.start,
+                                func.span.end,
+                                DetectionRule::FunctionDeclaration,
+                            )
+                            .with_props_type_args(type_args)
+                            .with_doc(description, tags)
+                            .with_param_defaults(param_defaults),
+                        );
+                    } else {
+                        self.record_skip(
+                            DiagnosticCode::SkippedCandidate,
+                            format!(
+                                "'{name}' is a PascalCase function declaration whose first param's type \
+                                         annotation isn't a recognizable props type reference"
+                            ),
+                            type_ann.span,
+                        );
                     }
+                } else {
+                    self.record_skip(
+                        DiagnosticCode::SkippedCandidate,
+                        format!("'{name}' is a PascalCase function declaration with an untyped first param"),
+                        first_param.span,
+                    );
+                }
             }
+        }
         walk::walk_function(self, func, flags);
         self.props_params.pop();
     }
@@ -597,30 +601,32 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 }
             }
         } else if self.is_tsx
-            && let Some(id) = &class.id {
-                let name = id.name.as_str();
-                if is_pascal_case(name)
-                    && let Some(family) = self.super_class_is_component_family(class) {
-                        if let Some(mapping) = self.try_class_component(class, name) {
-                            self.data.component_mappings.push(mapping);
-                        } else if class.heritage.as_ref().is_some_and(|h| h.type_arguments.is_some()) {
-                            // Extends Component/PureComponent WITH type args, but the
-                            // props argument itself is an exotic shape
-                            // extract_type_name_from_type doesn't match. No type args
-                            // at all is left silent — mirrors visit_function's Pattern 4
-                            // zero-params contract (a genuinely untyped candidate, not a
-                            // malformed one).
-                            self.record_skip(
-                                DiagnosticCode::SkippedCandidate,
-                                format!(
-                                    "'{name}' is a class component extending {family} whose props type \
+            && let Some(id) = &class.id
+        {
+            let name = id.name.as_str();
+            if is_pascal_case(name)
+                && let Some(family) = self.super_class_is_component_family(class)
+            {
+                if let Some(mapping) = self.try_class_component(class, name) {
+                    self.data.component_mappings.push(mapping);
+                } else if class.heritage.as_ref().is_some_and(|h| h.type_arguments.is_some()) {
+                    // Extends Component/PureComponent WITH type args, but the
+                    // props argument itself is an exotic shape
+                    // extract_type_name_from_type doesn't match. No type args
+                    // at all is left silent — mirrors visit_function's Pattern 4
+                    // zero-params contract (a genuinely untyped candidate, not a
+                    // malformed one).
+                    self.record_skip(
+                        DiagnosticCode::SkippedCandidate,
+                        format!(
+                            "'{name}' is a class component extending {family} whose props type \
                                      argument isn't a recognizable props type reference"
-                                ),
-                                class.span,
-                            );
-                        }
-                    }
+                        ),
+                        class.span,
+                    );
+                }
             }
+        }
         walk::walk_class(self, class);
     }
 
@@ -678,9 +684,10 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 }
                 ExportDefaultDeclarationKind::ClassDeclaration(class) if class.id.is_none() => {
                     if let Some(name) = super::component::pascal_case_from_file_stem(&self.file_path)
-                        && let Some(mapping) = self.try_class_component(class, &name) {
-                            self.data.component_mappings.push(mapping);
-                        }
+                        && let Some(mapping) = self.try_class_component(class, &name)
+                    {
+                        self.data.component_mappings.push(mapping);
+                    }
                 }
                 // `export default (props: P) => …`, `export default memo(function Badge(…))`,
                 // `export default forwardRef<El, P>(…)`: an expression, so the declarator rules apply.

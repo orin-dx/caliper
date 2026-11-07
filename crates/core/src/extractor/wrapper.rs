@@ -17,8 +17,8 @@ use crate::types::{
     FunctionResult, TypeName, WrapperCallee,
 };
 
-use super::evidence::{renders, FunctionShape, ReactBinding};
 use super::SourceDataCollector;
+use super::evidence::{FunctionShape, ReactBinding, renders};
 
 /// One type argument of a candidate wrapper call.
 pub(crate) struct WrapperTypeArg {

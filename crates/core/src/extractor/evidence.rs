@@ -6,7 +6,7 @@
 //! returned is not evidence.
 
 use oxc_ast::ast::*;
-use oxc_ast_visit::{walk, Visit};
+use oxc_ast_visit::{Visit, walk};
 use oxc_syntax::scope::ScopeFlags;
 use rustc_hash::FxHashSet;
 
@@ -212,9 +212,10 @@ impl<'a> Visit<'a> for OwnBody<'_> {
     fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
         if self.nested == 0
             && let (BindingPattern::BindingIdentifier(id), Some(init)) = (&it.id, &it.init)
-                && value_has_element(init, self.scope) {
-                    self.element_locals.insert(id.name.to_string());
-                }
+            && value_has_element(init, self.scope)
+        {
+            self.element_locals.insert(id.name.to_string());
+        }
         walk::walk_variable_declarator(self, it);
     }
 
@@ -308,11 +309,12 @@ pub(super) fn element_helpers(program: &Program<'_>) -> FxHashSet<String> {
     let mut foreign = FxHashSet::default();
     for stmt in &program.body {
         if let Statement::ImportDeclaration(import) = stmt
-            && !super::is_react_module(&super::js_text::lossy(import.source.value)) {
-                for spec in import.specifiers.iter().flatten() {
-                    foreign.insert(spec.local().name.to_string());
-                }
+            && !super::is_react_module(&super::js_text::lossy(import.source.value))
+        {
+            for spec in import.specifiers.iter().flatten() {
+                foreign.insert(spec.local().name.to_string());
             }
+        }
     }
     let react = Foreign(&foreign);
     let declarations: Vec<&Declaration<'_>> = program.body.iter().filter_map(|stmt| stmt.as_declaration()).collect();
@@ -323,9 +325,10 @@ pub(super) fn element_helpers(program: &Program<'_>) -> FxHashSet<String> {
         let before = aliases.len();
         for declaration in &declarations {
             if let Declaration::TSTypeAliasDeclaration(alias) = declaration
-                && names_element(&alias.type_annotation, &react, &aliases) {
-                    aliases.insert(alias.id.name.to_string());
-                }
+                && names_element(&alias.type_annotation, &react, &aliases)
+            {
+                aliases.insert(alias.id.name.to_string());
+            }
         }
         if aliases.len() == before {
             break;

@@ -4,9 +4,9 @@ use camino::Utf8Path;
 
 use crate::types::*;
 
+use super::ResolutionContext;
 use super::collected::resolve_collected_type;
 use super::import::resolve_to_canonical;
-use super::ResolutionContext;
 
 pub(super) fn resolve_template_literal(
     parts: &[CollectedType],

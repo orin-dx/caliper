@@ -10,10 +10,10 @@
 //! interfaces (antd's `ProgressAriaProps`), `Record` over a union of literals (antd's `Partial<Record<Breakpoint, …>>`
 //! on `Col`), and `PropsWithChildren` with no argument.
 
-use caliper_docgen_core::pipeline::{extract, HtmlAttributeMode, PipelineOptions};
+use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, extract};
 use caliper_docgen_core::types::{DiagnosticSeverity, ExtractionOutput};
 use camino::Utf8PathBuf;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tempfile::TempDir;
 
 /// Extracts a project of `files`, inside this crate so that `react` resolves to the workspace's `@types/react`.

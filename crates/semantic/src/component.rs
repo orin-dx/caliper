@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 use caliper_docgen_core::types::semantic::{PropInterner, SemanticProp};
 
-use crate::convert::{without_undefined, Converter};
-use crate::rpc::{flag, CallError, Rpc, SymbolInfo};
 use crate::Target;
+use crate::convert::{Converter, without_undefined};
+use crate::rpc::{CallError, Rpc, SymbolInfo, flag};
 
 pub(crate) enum Answer {
     Props(Vec<Arc<SemanticProp>>),
@@ -32,9 +32,11 @@ fn candidate_names(display_name: &str) -> Vec<&str> {
     let mut names = vec![display_name];
     for separator in ['/', '.'] {
         if let Some((_, last)) = display_name.rsplit_once(separator)
-            && !last.is_empty() && !names.contains(&last) {
-                names.push(last);
-            }
+            && !last.is_empty()
+            && !names.contains(&last)
+        {
+            names.push(last);
+        }
     }
     names
 }

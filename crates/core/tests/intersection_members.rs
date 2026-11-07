@@ -12,9 +12,9 @@
 
 use std::collections::BTreeMap;
 
-use caliper_docgen_core::pipeline::{extract, PipelineOptions};
+use caliper_docgen_core::pipeline::{PipelineOptions, extract};
 use camino::Utf8PathBuf;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// The props of the component `name` (`(required, type)` per prop) in a project of one `source`, and its diagnostics
 /// as `"Code: message"`.

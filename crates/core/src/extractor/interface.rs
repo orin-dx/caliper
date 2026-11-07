@@ -8,7 +8,7 @@ use crate::types::{
     RawDefault,
 };
 
-use super::{is_pascal_case, js_text, SourceDataCollector};
+use super::{SourceDataCollector, is_pascal_case, js_text};
 
 /// Extract the binding name and the `as const`-peeled inner expression from
 /// `const NAME = <expr> as const` (or `<const><expr>`). Shared by

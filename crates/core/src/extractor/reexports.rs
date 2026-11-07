@@ -7,7 +7,7 @@ use oxc_ast_visit::Visit;
 use oxc_parser::{ParseOptions, Parser};
 use oxc_span::SourceType;
 
-use super::{js_text, max_bracket_nesting_depth, MAX_SOURCE_NESTING_DEPTH};
+use super::{MAX_SOURCE_NESTING_DEPTH, js_text, max_bracket_nesting_depth};
 
 /// The specifiers of the modules `source` re-exports, in the order `parse_file` records them in `SourceData::exports`:
 /// `export * from`, `export * as ns from`, `export { a } from` (once per name), and `export { a }` where `a` is an
@@ -130,14 +130,29 @@ mod tests {
     }
 
     const SOURCES: &[(&str, &str)] = &[
-        ("index.d.ts", "export * from './a';\nexport * as ns from './b';\nexport { X, Y as Z } from './c';\nexport type { T } from './d';"),
-        ("index.d.ts", "import { A } from './a';\nimport * as B from './b';\nimport C from './c';\nexport { A, B as Bee, C };\nexport { Local };\ndeclare const Local: number;"),
+        (
+            "index.d.ts",
+            "export * from './a';\nexport * as ns from './b';\nexport { X, Y as Z } from './c';\nexport type { T } from './d';",
+        ),
+        (
+            "index.d.ts",
+            "import { A } from './a';\nimport * as B from './b';\nimport C from './c';\nexport { A, B as Bee, C };\nexport { Local };\ndeclare const Local: number;",
+        ),
         ("index.d.ts", "export {} from './empty';\nexport * from './after';"),
         ("index.d.ts", "export { A };\nimport { A } from './late';"),
         ("index.d.ts", "import { A } from './first';\nimport { A as B } from './second';\nexport { A, B };"),
-        ("index.d.ts", "declare module 'x' {\n  import { P } from './p';\n  export * from './inner';\n  export { P };\n}\nexport * from './outer';"),
-        ("index.d.ts", "declare namespace N { export const a: number; }\nexport interface I { a: string }\nexport function f(): void;\nexport * from './g';"),
-        ("index.ts", "export { default } from './d';\nexport { default as Other } from './e';\nexport const x = () => 1;"),
+        (
+            "index.d.ts",
+            "declare module 'x' {\n  import { P } from './p';\n  export * from './inner';\n  export { P };\n}\nexport * from './outer';",
+        ),
+        (
+            "index.d.ts",
+            "declare namespace N { export const a: number; }\nexport interface I { a: string }\nexport function f(): void;\nexport * from './g';",
+        ),
+        (
+            "index.ts",
+            "export { default } from './d';\nexport { default as Other } from './e';\nexport const x = () => 1;",
+        ),
         ("index.d.ts", "import Tooltip from './tooltip';\nexport default Tooltip;"),
         ("index.d.ts", "import Tooltip from './tooltip';\nexport default (Tooltip as any);\nexport * from './z';"),
         ("index.d.ts", "import { A } from './a';\nexport default function A() {}"),

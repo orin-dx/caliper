@@ -2,7 +2,7 @@ use std::io::Write;
 
 use miette::{IntoDiagnostic, Result, WrapErr};
 
-use crate::config::{build_options, BuildOptionsArgs};
+use crate::config::{BuildOptionsArgs, build_options};
 use crate::output::{print_diagnostics, print_summary, write_atomic};
 
 /// Returns the process exit code (0 = success, 2 = extraction reported an

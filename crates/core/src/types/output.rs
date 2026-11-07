@@ -733,11 +733,7 @@ impl PropType {
             PropType::Intersection(_) => Precedence::Intersection,
             _ => Precedence::Array,
         };
-        if own < context {
-            format!("({})", self.raw_string())
-        } else {
-            self.raw_string()
-        }
+        if own < context { format!("({})", self.raw_string()) } else { self.raw_string() }
     }
 }
 

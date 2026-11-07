@@ -5,12 +5,12 @@
 
 use std::time::Duration;
 
-use caliper_docgen_core::pipeline::{extract, PipelineOptions};
-use caliper_docgen_core::types::semantic::{merge_semantic, SemanticOutcome};
+use caliper_docgen_core::pipeline::{PipelineOptions, extract};
+use caliper_docgen_core::types::semantic::{SemanticOutcome, merge_semantic};
 use caliper_docgen_core::types::{
     DefaultValue, DiagnosticCode, DiagnosticSeverity, ExtractionOutput, FunctionParam, ParsedProp, PropType,
 };
-use caliper_docgen_semantic::{resolve, targets_of, SemanticRequest};
+use caliper_docgen_semantic::{SemanticRequest, resolve, targets_of};
 use camino::Utf8PathBuf;
 
 const FAKE_VERSION: &str = "7.1.0-test";

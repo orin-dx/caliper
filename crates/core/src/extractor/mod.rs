@@ -550,9 +550,10 @@ impl<'src> SourceDataCollector<'src> {
             for extends in &mut interface.extends {
                 *extends = extends.map_type_args(|arg| arg.rename_named(&rename));
                 if let ExtendsRef::SameFile { name, .. } = extends
-                    && let Some(renamed) = rename(name) {
-                        *name = renamed;
-                    }
+                    && let Some(renamed) = rename(name)
+                {
+                    *name = renamed;
+                }
             }
         }
     }
@@ -754,9 +755,10 @@ impl<'src> SourceDataCollector<'src> {
         // static result (None for SVGAttributes/SVGProps, a generic "div"
         // fallback for HTMLProps) whenever it's one this crate recognizes.
         if matches!(lookup_name, "SVGAttributes" | "SVGProps" | "HTMLProps")
-            && let Some(element) = type_args.first().and_then(crate::react_types::html_element_from_collected) {
-                return ExtendsRef::Builtin { name: name.into(), element: Some(element.to_owned()), type_args };
-            }
+            && let Some(element) = type_args.first().and_then(crate::react_types::html_element_from_collected)
+        {
+            return ExtendsRef::Builtin { name: name.into(), element: Some(element.to_owned()), type_args };
+        }
 
         if let Some(element) = crate::react_types::html_element_for(lookup_name) {
             return ExtendsRef::Builtin { name: name.into(), element: Some(element.to_owned()), type_args };

@@ -11,7 +11,7 @@
 //! `parity_over_fixtures` runs every fixture. `parity_over_sources` is the same check over directories named by
 //! `CALIPER_PARITY_SRC` (colon-separated), for the large corpora:
 //!   CALIPER_PARITY_SRC=/path/a:/path/b cargo test -p caliper-docgen-core --test lazy_parity --release -- --ignored
-use caliper_docgen_core::pipeline::{extract, ComponentAnswer, HtmlAttributeMode, PipelineOptions, WatchSession};
+use caliper_docgen_core::pipeline::{ComponentAnswer, HtmlAttributeMode, PipelineOptions, WatchSession, extract};
 use caliper_docgen_core::types::{Diagnostic, ExtractionOutput};
 use camino::Utf8PathBuf;
 
@@ -58,8 +58,19 @@ fn assert_same(what: &str, got: Option<ComponentAnswer>, expected: ComponentAnsw
         differing.join("\n"),
         got.diagnostics.len(),
         expected.diagnostics.len(),
-        got.diagnostics.iter().filter(|d| !expected.diagnostics.contains(d)).map(|d| &d.message).take(5).collect::<Vec<_>>(),
-        expected.diagnostics.iter().filter(|d| !got.diagnostics.contains(d)).map(|d| &d.message).take(5).collect::<Vec<_>>(),
+        got.diagnostics
+            .iter()
+            .filter(|d| !expected.diagnostics.contains(d))
+            .map(|d| &d.message)
+            .take(5)
+            .collect::<Vec<_>>(),
+        expected
+            .diagnostics
+            .iter()
+            .filter(|d| !got.diagnostics.contains(d))
+            .map(|d| &d.message)
+            .take(5)
+            .collect::<Vec<_>>(),
     );
 }
 

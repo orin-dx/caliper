@@ -19,7 +19,7 @@ use super::import::{
     lookup_interface_from, lookup_interface_including_ambient, lookup_type_alias, resolve_to_canonical,
 };
 use super::substitute::{bind_declared, build_substitution, substitute_alias, substitute_type};
-use super::{ResolutionContext, MAX_DEPTH};
+use super::{MAX_DEPTH, ResolutionContext};
 
 /// A type, and the file its names resolve in.
 pub(super) type Located = (CollectedType, Utf8PathBuf);

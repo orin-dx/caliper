@@ -13,10 +13,10 @@ use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::types::*;
 
+use super::ResolutionContext;
 use super::alias::resolve_base_as_chain;
 use super::import::{lookup_interface, lookup_type_alias, resolve_to_canonical};
 use super::substitute::{build_substitution, substitute_alias, substitute_type};
-use super::ResolutionContext;
 
 /// React types whose first type argument is a component's props.
 const COMPONENT_TYPES: &[&str] =
@@ -76,9 +76,10 @@ pub(super) fn result_chain(
         // An explicit `any` from the selected payload absorbs the conditional's tentative type in an intersection.
         for prop in &fallback.props {
             if matches!(prop.prop_type, PropType::Any)
-                && let Some(existing) = chain.props.iter_mut().find(|existing| existing.name == prop.name) {
-                    *existing = Arc::clone(prop);
-                }
+                && let Some(existing) = chain.props.iter_mut().find(|existing| existing.name == prop.name)
+            {
+                *existing = Arc::clone(prop);
+            }
         }
         chain.merge_parent(fallback);
     }
@@ -229,9 +230,9 @@ fn value_member_props_at_depth(
             if let Some((member_type, member_file)) = super::evaluate::member(named, &member, &base_file, ctx, 0)
                 && let Some((props, file, _)) =
                     component_props_type(&member_type, &member_file, ctx, depth + 1, &mut None)
-                {
-                    return Some((props, file));
-                }
+            {
+                return Some((props, file));
+            }
             let CollectedType::Named { name, .. } = named else { return None };
             name
         }
@@ -308,9 +309,10 @@ fn component_props_type(
                 // A value declared with a React component type, `declare const Option: React.FC<OptionProps>`.
                 if let Some((_, CollectedTypeAlias::Passthrough { target, .. })) =
                     lookup_type_alias(ctx, canonical_file.as_str(), &format!("typeof {canonical_name}"))
-                    && let Some(found) = component_props_type(target, &canonical_file, ctx, depth + 1, declared_in) {
-                        return Some(found);
-                    }
+                    && let Some(found) = component_props_type(target, &canonical_file, ctx, depth + 1, declared_in)
+                {
+                    return Some(found);
+                }
                 let (base, member) = name.rsplit_once('.')?;
                 let (props, props_file) = value_member_props_at_depth(base, member, file, ctx, depth + 1)?;
                 return Some((props, props_file, Vec::new()));

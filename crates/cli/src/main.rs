@@ -304,7 +304,7 @@ fn log_filter(verbose: u8) -> Option<&'static str> {
 
 fn init_tracing(verbose: u8) {
     let Some(filter) = log_filter(verbose) else { return };
-    use tracing_subscriber::{fmt, EnvFilter};
+    use tracing_subscriber::{EnvFilter, fmt};
     // stderr, never stdout: command payloads (JSON, TOON) own stdout, and a tracing line there corrupts them.
     fmt().with_env_filter(EnvFilter::new(filter)).with_writer(std::io::stderr).init();
 }

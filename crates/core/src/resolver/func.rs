@@ -5,8 +5,8 @@ use compact_str::CompactString;
 
 use crate::types::*;
 
-use super::primitives::union_of;
 use super::ResolutionContext;
+use super::primitives::union_of;
 
 /// A function type with its parameters and return type as written. A signature names its types (`(mode: CalendarMode)
 /// => void`) the way TypeScript prints it; expanding each alias into its definition would read worse and, for a

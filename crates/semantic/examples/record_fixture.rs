@@ -16,8 +16,8 @@
 //! It copies `tests/fixtures/<fixture>` (default `project`) to a scratch directory, runs the structural pass and the backend on it with
 //! recording on, and writes the calls with the scratch path replaced by `<ROOT>` (see `tests/bin/replay_tsc.rs`).
 
-use caliper_docgen_core::pipeline::{extract, PipelineOptions};
-use caliper_docgen_semantic::{targets_of, SemanticRequest};
+use caliper_docgen_core::pipeline::{PipelineOptions, extract};
+use caliper_docgen_semantic::{SemanticRequest, targets_of};
 use camino::Utf8PathBuf;
 
 fn main() {

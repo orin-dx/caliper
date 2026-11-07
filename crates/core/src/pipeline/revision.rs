@@ -23,7 +23,7 @@ use crate::types::*;
 use super::discover::{discover_files, is_source_file, should_skip};
 
 mod lazy;
-use super::{collect_public_enums, merge_parsed_dts_file, parse_cached_dts_file, resolve_guarded, IncrementalUpdate};
+use super::{IncrementalUpdate, collect_public_enums, merge_parsed_dts_file, parse_cached_dts_file, resolve_guarded};
 use crate::types::options::canonicalize_first_src_dir;
 pub use lazy::{ComponentAnswer, ComponentLocation};
 
@@ -819,10 +819,9 @@ fn parse_source_file(path: &Utf8Path, cache: &DtsCache) -> (SourceData, Option<D
         Ok(s) => (s, None),
         Err(e) => (String::new(), Some(Diagnostic::io_read_error(path, &e))),
     };
-    if is_dts
-        && let Some(cached) = cache.get(path, &source) {
-            return (cached, io_diag);
-        }
+    if is_dts && let Some(cached) = cache.get(path, &source) {
+        return (cached, io_diag);
+    }
     let data = crate::extractor::parse_file(path, &source);
     if is_dts {
         cache.insert(path, &source, data.clone());
@@ -835,12 +834,14 @@ fn source_dir_diagnostics(options: &PipelineOptions) -> Vec<Diagnostic> {
     let missing: Vec<&Utf8PathBuf> = options.src_dirs.iter().filter(|dir| !dir.as_std_path().is_dir()).collect();
     let help = "Check --src (or docgen.config.ts srcDirs) for a typo'd or stale path.";
     if options.src_dirs.is_empty() {
-        return vec![Diagnostic::new(
-            DiagnosticSeverity::Error,
-            DiagnosticCode::IoError,
-            "No source directories configured — src_dirs is empty",
-        )
-        .with_help("Set --src (or docgen.config.ts srcDirs) to at least one directory to scan.")];
+        return vec![
+            Diagnostic::new(
+                DiagnosticSeverity::Error,
+                DiagnosticCode::IoError,
+                "No source directories configured — src_dirs is empty",
+            )
+            .with_help("Set --src (or docgen.config.ts srcDirs) to at least one directory to scan."),
+        ];
     }
     if missing.len() == options.src_dirs.len() {
         let mut diag = Diagnostic::new(

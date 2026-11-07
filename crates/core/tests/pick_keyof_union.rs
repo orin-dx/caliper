@@ -11,7 +11,7 @@
 //! `JSX.IntrinsicElements['img']` (next/image) read as `React.JSX` does. A lazy session answers as a batch run does.
 use std::collections::BTreeSet;
 
-use caliper_docgen_core::pipeline::{extract, ComponentAnswer, HtmlAttributeMode, PipelineOptions, WatchSession};
+use caliper_docgen_core::pipeline::{ComponentAnswer, HtmlAttributeMode, PipelineOptions, WatchSession, extract};
 use caliper_docgen_core::types::{ComponentEntry, ExtractionOutput};
 use camino::Utf8PathBuf;
 use tempfile::TempDir;

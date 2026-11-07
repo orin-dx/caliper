@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use caliper_docgen_core::pipeline::{extract, HtmlAttributeMode, PipelineOptions};
+use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, extract};
 use camino::Utf8PathBuf;
 use tempfile::TempDir;
 

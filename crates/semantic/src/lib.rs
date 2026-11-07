@@ -22,8 +22,8 @@ pub use on_demand::{OnDemand, OnDemandConfig};
 use std::sync::Arc;
 use std::time::Duration;
 
-use caliper_docgen_core::types::semantic::{PropInterner, SemanticComponent, SemanticFallback, SemanticOutcome};
 use caliper_docgen_core::types::ExtractionOutput;
+use caliper_docgen_core::types::semantic::{PropInterner, SemanticComponent, SemanticFallback, SemanticOutcome};
 use caliper_docgen_tsc_client::{Supervisor, SupervisorConfig};
 use camino::{Utf8Path, Utf8PathBuf};
 use rustc_hash::FxHashMap;
@@ -249,9 +249,10 @@ async fn session(
 
     if let (Some(path), Some(recording)) = (&request.record_to, rpc.recording())
         && let Ok(json) = serde_json::to_string_pretty(&recording)
-            && let Err(error) = std::fs::write(path, json) {
-                tracing::warn!("could not write the recording to {path}: {error}");
-            }
+        && let Err(error) = std::fs::write(path, json)
+    {
+        tracing::warn!("could not write the recording to {path}: {error}");
+    }
     tracing::debug!(
         requests = ?rpc.calls(),
         files = files.len(),

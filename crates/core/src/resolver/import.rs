@@ -97,9 +97,10 @@ fn follow_reexports(
 ) -> (Utf8PathBuf, String) {
     #[cfg(test)]
     if let Some((scope, count)) = FOLLOW_REEXPORTS_CALLS.lock().unwrap_or_else(|p| p.into_inner()).as_mut()
-        && file.starts_with(&*scope) {
-            *count += 1;
-        }
+        && file.starts_with(&*scope)
+    {
+        *count += 1;
+    }
 
     super::deps::record(&file);
     if depth >= MAX_REEXPORT_DEPTH {

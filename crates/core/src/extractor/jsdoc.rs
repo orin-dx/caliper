@@ -149,7 +149,7 @@ pub(super) fn parse_jsdoc_text(raw: &str) -> String {
         .lines()
         .map(|l| {
             let l = l.trim();
-            
+
             l.strip_prefix("* ").or_else(|| l.strip_prefix('*')).unwrap_or(l)
         })
         .take_while(|l| !l.starts_with('@'))

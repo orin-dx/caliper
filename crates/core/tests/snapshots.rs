@@ -6,7 +6,7 @@
     clippy::print_stderr,
     clippy::let_underscore_must_use
 )]
-use caliper_docgen_core::pipeline::{extract, PipelineOptions};
+use caliper_docgen_core::pipeline::{PipelineOptions, extract};
 /// Snapshot tests for extraction output.
 ///
 /// These lock the exact JSON output for every fixture so that any refactor

@@ -4,11 +4,11 @@ use camino::Utf8Path;
 
 use crate::types::*;
 
+use super::ResolutionContext;
 use super::func::{resolve_function_type, resolve_typeof};
 use super::named::resolve_named;
 use super::primitives::{resolve_indexed_access, resolve_intersection, resolve_union};
 use super::template::resolve_template_literal;
-use super::ResolutionContext;
 
 /// `ty` without the `AtFile` markers around it.
 fn unwrap_at_file(ty: &CollectedType) -> &CollectedType {
@@ -95,9 +95,10 @@ pub fn resolve_collected_type(
             // `keyof typeof Icons` over a `const` object literal: its keys. Another operand would need the keys of an
             // interface with its index signatures and every parent, which a partly loaded dependency can't give.
             if let CollectedType::TypeOf(_) = unwrap_at_file(target)
-                && let Some(keys) = super::evaluate::keys_of(target, consuming_file, ctx, 0) {
-                    return super::primitives::union_of(keys.into_iter().map(|key| PropType::StringLiteral(key.name)));
-                }
+                && let Some(keys) = super::evaluate::keys_of(target, consuming_file, ctx, 0)
+            {
+                return super::primitives::union_of(keys.into_iter().map(|key| PropType::StringLiteral(key.name)));
+            }
             let diag = opaque_diagnostic("a standalone 'keyof'", ct, consuming_file);
             OpaqueDetail::give_up(state, ct.to_raw_string(), OpaqueReason::MappedType, diag)
         }

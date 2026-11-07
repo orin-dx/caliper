@@ -22,8 +22,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::path_key::PathKey;
 
 use crate::types::{
-    CollectedInterface, CollectedType, CollectedTypeAlias, DeclarationScope, EnumValue, GlobalSourceData, SourceData,
-    TypeName, LOCAL_KEY_MARK,
+    CollectedInterface, CollectedType, CollectedTypeAlias, DeclarationScope, EnumValue, GlobalSourceData,
+    LOCAL_KEY_MARK, SourceData, TypeName,
 };
 
 /// The project's declarations. Shared behind an `Arc` so a lazy session's context rebuild, which sets a new

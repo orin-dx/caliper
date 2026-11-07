@@ -5,8 +5,8 @@ use oxc_resolver::Resolver;
 
 use crate::types::*;
 
-use super::collected::resolve_collected_type;
 use super::ResolutionContext;
+use super::collected::resolve_collected_type;
 
 /// Map a React builtin type name to the appropriate `PropType`.
 pub(super) fn react_type_to_prop_type(

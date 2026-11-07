@@ -2,7 +2,7 @@
 //! A source too large to list is collapsed into an inheritance layer, and the layer names the props it holds: a reader
 //! can tell a prop collapsed away from a prop that is not there, and the output still reads back unchanged.
 
-use caliper_docgen_core::pipeline::{extract, CollapseInheritedProps, HtmlAttributeMode, PipelineOptions};
+use caliper_docgen_core::pipeline::{CollapseInheritedProps, HtmlAttributeMode, PipelineOptions, extract};
 use caliper_docgen_core::types::ExtractionOutput;
 use camino::Utf8PathBuf;
 use serde_json::json;
