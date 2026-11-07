@@ -1,5 +1,12 @@
 # npm/caliper-docgen-napi
 
+## 0.10.0
+
+- An editor now shows what each `JsExtractOptions` field and `sessionStats` do when you hover them in the Node binding's types, and `caliper-docgen completions --help` says what its `SHELL` argument is.
+- The Linux x64 binaries now run on systems with glibc 2.28 or newer, such as Debian 12, Ubuntu 22.04 and RHEL 9; they previously needed glibc 2.39 and failed to start on those systems. No action needed.
+- A prop now says why its type is partly a guess: the canonical JSON gains `degradedBy` on a prop whose type holds an opaque member, and the TOON output (`--format toon`) lists each prop's declaring type, quotes string literals in single quotes, shows the names a collapsed inherited layer declares, and adds a `degradedBy` column when a prop has one. A host that works in process can ask the session for one component as TOON with `sessionComponentToon(sessionId, key)` instead of rendering a whole project.
+- Real `extract` output now validates against the schema that `caliper-docgen schema` prints; components found by four of the detection rules, such as `taggedFactory`, used to fail validation because the schema did not list them. No action needed.
+
 ## 0.9.0
 
 - Released together with the `napi-and-binding` fixed group.

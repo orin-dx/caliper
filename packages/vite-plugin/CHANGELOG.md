@@ -1,5 +1,11 @@
 # caliper-docgen-vite-plugin
 
+## 0.10.0
+
+- An invalid option value now fails at startup with a message naming the choices, such as `fallback: 'degrade'` in the addon or `logLevel: 'verbose'` in the Vite plugin; a typo used to log everything or act as `fallback: 'never'`. Check your options if the build now stops with a `[caliper-docgen]` message.
+- The Vite plugin now reports an update it could not apply as a warning in dev and as a failed rebuild under `vite build --watch`, instead of logging to the console and carrying on with stale docs. No action needed.
+- Released together with the `napi-and-binding` fixed group.
+
 ## 0.9.0
 
 - Prop types now keep `readonly` on arrays, tuples and object fields, index signatures such as `{ [key: string]: number }`, and the ref type a prop was written with (`RefObject<T>`, `ForwardedRef<T>`, `RefCallback<T>`) instead of printing them as `string[]`, `{}` and `Ref<T>`. The JSON output moves to schema version 4, which adds a `readonly` type kind, a `name` on `ref` types, and `readonly` and `indexKey` on object fields: update `caliper-docgen`, the Vite plugin and the Storybook addon together, and a mismatched install stops with a message naming both versions. A union such as `string[] | readonly string[]` now lists both members.

@@ -1,5 +1,14 @@
 # caliper-docgen-storybook
 
+## 0.10.0
+
+- A Storybook addon that cannot start, because the native binding failed to load or the session failed to index, now warns once at a level Storybook shows instead of logging at debug level, and starts again on the next request instead of caching the failure until the worker restarts. No action needed.
+- An invalid option value now fails at startup with a message naming the choices, such as `fallback: 'degrade'` in the addon or `logLevel: 'verbose'` in the Vite plugin; a typo used to log everything or act as `fallback: 'never'`. Check your options if the build now stops with a `[caliper-docgen]` message.
+- The addon's option keys are listed once, in a list the compiler checks against `CaliperStorybookOptions`, so a new option cannot be left out of what the addon passes to the docgen worker.
+- The addon requires Storybook 11.0.0-alpha.8 or later, the first version whose component resolver reads the story file's editor and program instead of its file path. A subcomponent that is a member of a named import, such as `subcomponents: { Option: Select.Option }`, now gets its props from caliper-docgen. If Storybook's resolver throws, the story goes to Storybook's own docgen instead of reporting an error for the subcomponent.
+- Subcomponents are documented for every form of story meta, including `export { meta as default }` and a CSF factory's `preview.meta()`; those forms used to lose their subcomponents.
+- Released together with the `napi-and-binding` fixed group.
+
 ## 0.9.0
 
 - Prop types now keep `readonly` on arrays, tuples and object fields, index signatures such as `{ [key: string]: number }`, and the ref type a prop was written with (`RefObject<T>`, `ForwardedRef<T>`, `RefCallback<T>`) instead of printing them as `string[]`, `{}` and `Ref<T>`. The JSON output moves to schema version 4, which adds a `readonly` type kind, a `name` on `ref` types, and `readonly` and `indexKey` on object fields: update `caliper-docgen`, the Vite plugin and the Storybook addon together, and a mismatched install stops with a message naming both versions. A union such as `string[] | readonly string[]` now lists both members.

@@ -1,5 +1,10 @@
 # caliper-docgen-semantic
 
+## 0.3.1
+
+- With the experimental TypeScript checker on, a function prop keeps the optional and rest markers its parameters are written with. antd's `Progress.format` reads `(percent?: number, successPercent?: number) => ReactNode` and `ActionButton.close` reads `(...args: any[]) => void`; the checker's answer used to lose the markers, giving `(percent: undefined | number, …)` and `(args: any[]) => void`, which changes how a call site reads.
+- With the experimental TypeScript checker on, a prop whose name starts with two underscores keeps the name the source writes. Mantine's `__size`, `__vars` and `__clearable` used to come back as `___size`, `___vars` and `___clearable` (the checker keeps such names with a third underscore), so those props appeared under a name nobody wrote.
+
 ## 0.3.0
 
 - The experimental on-demand TypeScript 7.1 checker now works with any 7.1 release (beta, rc or stable) instead of only `7.1.0-beta`, replaces its `tsc` process when it grows past 768 MiB between requests, and no longer makes closing a session wait for a request in progress. For library users: `PINNED_VERSIONS` is now `SUPPORTED_VERSIONS`, and `expected_versions` entries may be a `major.minor` series such as `"7.1"`.
