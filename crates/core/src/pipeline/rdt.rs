@@ -8,6 +8,12 @@ use crate::types::{ComponentEntry, ExtractionOutput, ParsedProp, PropType};
 /// prop-table renderers that pattern-match `type.name === "enum"` (a common
 /// Storybook addon integration point) show a `<select>` control for the most
 /// common, most curated props in any design system (variant, size, color…).
+/// A single string or number literal is a one-option enum, as Storybook's own docgen has it.
+///
+/// Storybook unquotes each option's source text into a string or a number, so `true` in an enum would reach the control
+/// as the string "true". A union with a boolean member therefore stays a type name, which Storybook's converter splits
+/// at the `|` and parses as JSON into the options `["a", 1, true]`, unless a member's text would not survive that (a
+/// string holding `|`, `"` or `\`); it is then an enum, so that no option is lost.
 pub fn type_json(prop_type: &PropType) -> serde_json::Value {
     if prop_type.is_literal_union() {
         let values: Vec<serde_json::Value> = match prop_type {
@@ -15,7 +21,7 @@ pub fn type_json(prop_type: &PropType) -> serde_json::Value {
             PropType::LiteralUnion { members, .. } => {
                 members.iter().map(|m| serde_json::json!({"value": format!("\"{m}\"")})).collect()
             }
-            _ => vec![],
+            single => vec![serde_json::json!({"value": single.raw_string()})],
         };
         return serde_json::json!({ "name": "enum", "raw": prop_type.raw_string(), "value": values });
     }
@@ -37,13 +43,14 @@ pub fn docgen_info(entry: &ComponentEntry) -> serde_json::Value {
 
 /// The props a props table lists: the component's own and inherited ones, then the curated attributes inherited from an
 /// HTML element, which `curated` mode keeps apart so the canonical output can collapse them. A prop named in both is
-/// listed once, as the component declares it.
+/// listed once, as the component declares it. A prop tagged `@ignore` is left out, as Storybook's own docgen leaves it
+/// out; the canonical output keeps it.
 fn component_doc(entry: &ComponentEntry, keep: impl Fn(&ParsedProp) -> bool) -> serde_json::Value {
     let props: serde_json::Map<String, serde_json::Value> = entry
         .props
         .iter()
         .chain(entry.notable_inherited.iter().filter(|(name, _)| !entry.props.contains_key(*name)))
-        .filter(|(_, prop)| keep(prop))
+        .filter(|(_, prop)| keep(prop) && !prop.tags.contains_key("ignore"))
         .map(|(k, prop)| {
             let obj = serde_json::json!({
                 "name": prop.name,

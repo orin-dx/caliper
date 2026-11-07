@@ -40,37 +40,28 @@ if prop_type.is_literal_union() {
         PropType::LiteralUnion { members, .. } => {
             members.iter().map(|m| serde_json::json!({"value": format!("\"{m}\"")})).collect()
         }
-        _ => vec![],
+        single => vec![serde_json::json!({"value": single.raw_string()})],
     };
     return serde_json::json!({ "name": "enum", "raw": prop_type.raw_string(), "value": values });
 }
 serde_json::json!({ "name": prop_type.raw_string() })
 ```
 
+A single string or number literal (`kind?: 'button'`) is a one-option `enum`, which is what Storybook's own docgen produces for it. A union with a boolean member (`'a' | 1 | true`) is not an `enum`: Storybook unquotes each option's source text into a string or a number, so `true` would reach the control as the string `"true"`. It stays a type name, `{"name": "\"a\" | 1 | true"}`, which Storybook's converter splits at the `|` and parses as JSON itself, giving the options `["a", 1, true]` with a real boolean (its own docgen gives such a union no options at all). That holds only while every member's text survives the split and parse: a string holding `|`, `"` or `\` (`'a|b' | true`) is split inside the literal or fails `JSON.parse` (`'a\\b'` parses to a backspace), and Storybook then picks an `object` control. Such a union is an `enum` as before (`true` is then the string "true"), so that no option is lost.
+
 This exists because Storybook's own docgen addon (a real consumer of RDT's JSON) looks for `type.name === "enum"` as the trigger to render a `<select>` control instead of a free-text field — the single highest-value renderer hook for the most commonly curated kind of prop in any design system (`variant`, `size`, `color`, …).
 
-**Invariant 2:** `rdt::type_json` returns `{"name": "enum", "raw": ..., "value": [...]}` if and only if `prop_type.is_literal_union()` is `true`. Do not special-case `PropType::Union`/`PropType::LiteralUnion` shape-matching directly inside `rdt::type_json` — route every literal-union check through `is_literal_union()`, because that's the single place the 2+ member truthiness rule (below) is enforced.
+**Invariant 2:** `rdt::type_json` returns `{"name": "enum", "raw": ..., "value": [...]}` if and only if `prop_type.is_literal_union()` is `true`. Do not special-case `PropType::Union`/`PropType::LiteralUnion` shape-matching directly inside `rdt::type_json` — route every literal-union check through `is_literal_union()`, because that's the single place that rule (below) is enforced.
 
-### The 2+ member truthiness rule
+### Which types are `enum`s
 
-`PropType::is_literal_union()` (`crates/core/src/types/output.rs`):
+`PropType::is_literal_union()` (`crates/core/src/types/output.rs`) is true for a non-empty `Union` whose members are all string or number literals, a `Union` of literals with at least one string or number and a boolean whose text Storybook cannot split and parse from the type name (`reads_as_json_options`), a non-empty `LiteralUnion`, and a lone string or number literal (a bare `StringLiteral`/`NumberLiteral`).
 
-```rust
-pub fn is_literal_union(&self) -> bool {
-    match self {
-        PropType::Union(members) => {
-            members.len() >= 2
-                && members.iter().all(|m| {
-                    matches!(m, PropType::StringLiteral(_) | PropType::NumberLiteral(_) | PropType::BoolLiteral(_))
-                })
-        }
-        PropType::LiteralUnion { members, .. } => members.len() >= 2,
-        _ => false,
-    }
-}
-```
+**Invariant 3:** A `PropType::Union`/`PropType::LiteralUnion` with **0** members, and a union of booleans only (a lone `true` included), is never reported as an `enum` shape. An empty "enum" (`{"name": "enum", "value": []}`) is misleading to a prop-table renderer, and a zero-member `LiteralUnion` is still reachable (if cosmetic) from several construction paths (`known.rs`, `resolver/primitives.rs`, `resolver/alias.rs`, `resolver/mod.rs`, `resolver/template.rs`); the guard in `is_literal_union()` keeps that from surfacing as a broken `enum` shape in RDT output, where it degrades to a plain `{"name": raw_string()}`. A single string or number literal is an enum: before, it was written as a type name, and Storybook picked an `object` control for a prop that is only ever `'button'`.
 
-**Invariant 3:** A `PropType::Union`/`PropType::LiteralUnion` with **0 or 1** members is never reported as an `enum` shape, regardless of whether every present member is a literal. This was a deliberate correctness fix, not an oversight: a 0- or 1-member "enum" (`{"name": "enum", "value": []}` or a single-entry `<select>`) is actively misleading to a prop-table renderer — it implies a meaningful choice exists when there either is no choice or only one option, which real users would read as a broken/degenerate control rather than a legitimate enum. A **zero-member** `LiteralUnion` is still reachable (if cosmetic) from several construction paths (`known.rs`, `resolver/primitives.rs`, `resolver/alias.rs`, `resolver/mod.rs`, `resolver/template.rs`) — the 2+ guard in `is_literal_union()` is exactly what keeps that gap from surfacing as a broken `enum` shape in RDT output; it degrades to a plain `{"name": raw_string()}` instead.
+### `@ignore`
+
+`component_doc` leaves out a prop whose tags hold `ignore`, in both `serialize` and `docgen_info`, because Storybook's own docgen (`@storybook/react`'s `react-component-meta` path) drops `@ignore` props and no other tag (`@internal`, `@private`, `@hidden` and `@deprecated` props are all listed). The canonical output keeps the prop and its tag.
 
 ### `composes` reused for the resolver's give-up cases
 
