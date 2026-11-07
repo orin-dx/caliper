@@ -22,7 +22,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::path_key::PathKey;
 
 use crate::types::{
-    CollectedInterface, CollectedType, CollectedTypeAlias, EnumValue, GlobalSourceData, SourceData, TypeName,
+    CollectedInterface, CollectedType, CollectedTypeAlias, DeclarationScope, EnumValue, GlobalSourceData, SourceData,
+    TypeName, LOCAL_KEY_MARK,
 };
 
 /// The project's declarations. Shared behind an `Arc` so a lazy session's context rebuild, which sets a new
@@ -40,6 +41,12 @@ pub(crate) struct IndexMaps {
     const_arrays: FxHashMap<PathKey, FxHashMap<CompactString, Vec<EnumValue>>>,
     /// Files declaring `React.`-qualified names (`@types/react`), the only ones a qualified fallback can match.
     react_namespaced: FxHashSet<PathKey>,
+    /// The interfaces declared in a function body, block or `switch` case, by the name a reference writes: each with
+    /// its scope and the name it is stored under in `interfaces`.
+    local_interfaces: FxHashMap<PathKey, FxHashMap<CompactString, Vec<(DeclarationScope, CompactString)>>>,
+    /// The scope of each type alias declared in a function body, block or `switch` case (`SourceData::type_alias_scopes`).
+    /// An alias at module level or in a namespace has no entry.
+    local_alias_scopes: FxHashMap<PathKey, FxHashMap<CompactString, DeclarationScope>>,
 }
 
 #[derive(Clone, Default)]
@@ -85,6 +92,7 @@ impl NamedTypeIndex {
             &global.type_alias_params,
             &global.type_param_defaults,
         );
+        index.insert_alias_scopes(&global.type_alias_scopes);
         index.insert_const_arrays(&global.const_arrays);
         index
     }
@@ -109,6 +117,8 @@ impl NamedTypeIndex {
         maps.type_param_defaults.remove(file.as_str());
         maps.const_arrays.remove(file.as_str());
         maps.react_namespaced.remove(file.as_str());
+        maps.local_interfaces.remove(file.as_str());
+        maps.local_alias_scopes.remove(file.as_str());
     }
 
     /// Insert one freshly re-parsed file's own (not yet merged) interfaces/
@@ -123,7 +133,17 @@ impl NamedTypeIndex {
             &data.type_alias_params,
             &data.type_param_defaults,
         );
+        self.insert_alias_scopes(&data.type_alias_scopes);
         self.insert_const_arrays(&data.const_arrays);
+    }
+
+    fn insert_alias_scopes(&mut self, scopes: &FxHashMap<std::string::String, DeclarationScope>) {
+        let maps = std::sync::Arc::make_mut(&mut self.maps);
+        for (key, scope) in scopes.iter().filter(|(_, scope)| scope.local_key_suffix().is_some()) {
+            let Some((file, name)) = key.rsplit_once(':') else { continue };
+            let file = PathKey::from(Utf8Path::new(file));
+            maps.local_alias_scopes.entry(file).or_default().insert(CompactString::from(name), scope.clone());
+        }
     }
 
     /// Splits each flat `"{file}:{name}"` key on its *last* `:` — the same
@@ -153,6 +173,14 @@ impl NamedTypeIndex {
             let file = PathKey::from(Utf8Path::new(file));
             if name.starts_with("React.") {
                 maps.react_namespaced.insert(file.clone());
+            }
+            if let Some((written, _)) = name.split_once(LOCAL_KEY_MARK) {
+                maps.local_interfaces
+                    .entry(file.clone())
+                    .or_default()
+                    .entry(CompactString::from(written))
+                    .or_default()
+                    .push((iface.scope.clone(), CompactString::from(name)));
             }
             maps.interfaces.entry(file.clone()).or_default().insert(CompactString::from(name), iface.clone());
             if let Some(params) = interface_type_params.get(key) {
@@ -213,12 +241,70 @@ impl NamedTypeIndex {
     /// keyed "React.HTMLAttributes" even though nothing imports them that
     /// way — a plain `import type { HTMLAttributes } from "react"` binds the
     /// bare name.
+    ///
+    /// A reference whose scope is unknown finds a declaration local to a function body, block or `switch` case only
+    /// when no module-level one of the name exists and it is the file's only local one: then it is the one declaration
+    /// the name can mean.
     pub(crate) fn lookup_interface(&self, file: &Utf8Path, name: &str) -> Option<&CollectedInterface> {
         let index = self.layer_for(file);
         let per_file = index.interfaces.get(file.as_str())?;
-        per_file.get(name).or_else(|| {
-            index.react_namespaced.contains(file.as_str()).then(|| per_file.get(format!("React.{name}").as_str()))?
-        })
+        per_file
+            .get(name)
+            .or_else(|| {
+                index
+                    .react_namespaced
+                    .contains(file.as_str())
+                    .then(|| per_file.get(format!("React.{name}").as_str()))?
+            })
+            .or_else(|| match index.local_interfaces.get(file.as_str())?.get(name)?.as_slice() {
+                [(_, stored)] => per_file.get(stored.as_str()),
+                _ => None,
+            })
+    }
+
+    /// The interface `name` means where it is written in `scope`: the nearest declaration of that name in a scope
+    /// that encloses it, a function body, block or `switch` case of the same file, before any module-level one.
+    pub(crate) fn lookup_interface_from(
+        &self,
+        file: &Utf8Path,
+        name: &str,
+        scope: &DeclarationScope,
+    ) -> Option<&CollectedInterface> {
+        self.lookup_local_interface(file, name, scope).or_else(|| self.lookup_interface(file, name))
+    }
+
+    /// `lookup_interface_from` for the declarations local to a scope only.
+    pub(crate) fn lookup_local_interface(
+        &self,
+        file: &Utf8Path,
+        name: &str,
+        scope: &DeclarationScope,
+    ) -> Option<&CollectedInterface> {
+        let stored = self.local_interface_key(file, name, scope)?;
+        self.layer_for(file).interfaces.get(file.as_str())?.get(stored)
+    }
+
+    /// The name the nearest declaration of `name` that is local to a scope enclosing `scope` is stored under, which
+    /// finds it again through `lookup_interface` wherever the scope it was written in is no longer known.
+    pub(crate) fn local_interface_key(&self, file: &Utf8Path, name: &str, scope: &DeclarationScope) -> Option<&str> {
+        if scope.is_module() {
+            return None;
+        }
+        let (_, stored) = self
+            .layer_for(file)
+            .local_interfaces
+            .get(file.as_str())?
+            .get(name)?
+            .iter()
+            .filter(|(declared_in, _)| declared_in.encloses(scope))
+            .max_by_key(|(declared_in, _)| declared_in.steps().len())?;
+        Some(stored.as_str())
+    }
+
+    /// The scope a type alias declared in a function body, block or `switch` case sits in, under the key
+    /// `lookup_type_alias` returned for it. `None` for every other alias.
+    pub(crate) fn lookup_local_alias_scope(&self, file: &Utf8Path, key: &str) -> Option<&DeclarationScope> {
+        self.layer_for(file).local_alias_scopes.get(file.as_str())?.get(key)
     }
 
     /// Same as `lookup_interface`, for type aliases. Returns the matched name
@@ -400,6 +486,7 @@ mod tests {
     fn make_interface(scoped_key: &str, file_path: &str, name: &str) -> CollectedInterface {
         CollectedInterface {
             scoped_key: scoped_key.to_owned(),
+            scope: Default::default(),
             name: TypeName::from(name),
             file_path: Utf8PathBuf::from(file_path),
             props: vec![],

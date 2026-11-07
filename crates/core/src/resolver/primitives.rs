@@ -157,8 +157,29 @@ pub(super) fn resolve_indexed_access(
     // The member as its declaration reads, ancestors and type arguments included: React's `CSSProperties` reaches
     // csstype's `Property.ZIndex` when dependencies are loaded.
     if !key_str.is_empty() {
-        if let Some(found) = super::evaluate::member_shared(obj, key_str, consuming_file, ctx, 0) {
-            return resolve_collected_type(&found.0, &found.1, ctx, state, depth + 1);
+        // The evaluator reads names without a scope: an object named for a declaration local to the scope this is
+        // written in is handed over under the name that declaration is stored under.
+        let local;
+        let located = match (obj, state.declared_in.as_deref()) {
+            (CollectedType::Named { name, args }, Some(scope)) => {
+                match ctx.named_types.local_interface_key(consuming_file, name, scope) {
+                    Some(stored) => {
+                        local = CollectedType::Named { name: stored.into(), args: args.clone() };
+                        &local
+                    }
+                    None => obj,
+                }
+            }
+            _ => obj,
+        };
+        if let Some((found, scope)) = super::evaluate::member_declared(located, key_str, consuming_file, ctx, 0) {
+            // The member's type is read where its declaration is, not where the access is written.
+            let site = scope.as_ref().map(|scope| state.enter_declared_in(scope));
+            let resolved = resolve_collected_type(&found.0, &found.1, ctx, state, depth + 1);
+            if let Some(site) = site {
+                state.leave_declared_in(site);
+            }
+            return resolved;
         }
     }
 

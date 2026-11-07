@@ -81,7 +81,6 @@ fn fixture_populates_every_source_data_field() {
         function_results,
         type_param_defaults,
         enum_declarations,
-        interface_scopes,
         type_alias_scopes,
         class_scopes,
     } = fixture();
@@ -99,7 +98,6 @@ fn fixture_populates_every_source_data_field() {
         ("function_results", function_results.is_empty()),
         ("type_param_defaults", type_param_defaults.is_empty()),
         ("enum_declarations", enum_declarations.is_empty()),
-        ("interface_scopes", interface_scopes.is_empty()),
         ("type_alias_scopes", type_alias_scopes.is_empty()),
         ("class_scopes", class_scopes.is_empty()),
     ];

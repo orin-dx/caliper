@@ -15,7 +15,9 @@ use compact_str::CompactString;
 
 use crate::types::*;
 
-use super::import::{lookup_interface, lookup_interface_including_ambient, lookup_type_alias, resolve_to_canonical};
+use super::import::{
+    lookup_interface_from, lookup_interface_including_ambient, lookup_type_alias, resolve_to_canonical,
+};
 use super::substitute::{bind_declared, build_substitution, substitute_alias, substitute_type};
 use super::{ResolutionContext, MAX_DEPTH};
 
@@ -548,7 +550,8 @@ fn interface_keys(iface: &CollectedInterface, ctx: &ResolutionContext, depth: u8
             ExtendsRef::Builtin { name, .. } => name,
         };
         let (file, name) = canonical(name, &iface.file_path, ctx);
-        let found = lookup_interface(ctx, file.as_str(), &name).or_else(|| react_interface(ctx, &file, &name));
+        let found = lookup_interface_from(ctx, file.as_str(), &name, &iface.scope)
+            .or_else(|| react_interface(ctx, &file, &name));
         if let Some(parent) = found {
             interface_keys(parent, ctx, depth + 1, keys);
         }
@@ -585,6 +588,19 @@ pub(super) fn member_shared(
     ctx: &ResolutionContext,
     depth: u8,
 ) -> Option<Arc<Located>> {
+    member_declared(obj, key, file, ctx, depth).map(|(found, _)| found)
+}
+
+/// `member_shared`, with the scope the member's type is written in when a declaration writes it: its names mean what they mean
+/// there, whoever reads the member. `None` where it is written where `obj` is (an inline object, a member found in
+/// several constituents of an intersection).
+pub(super) fn member_declared(
+    obj: &CollectedType,
+    key: &str,
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+    depth: u8,
+) -> Option<(Arc<Located>, Option<DeclarationScope>)> {
     // A read from the top of a walk depends only on the declarations, so a run answers it once (`member_reads`).
     if let (CollectedType::Named { name, args }, 0) = (obj, depth) {
         // The arguments are keyed by structure: their printed form drops the file and type parameters they are read
@@ -602,12 +618,15 @@ pub(super) fn member_shared(
             super::deps::replay(&read.deps);
             return read.found.clone();
         }
-        let (found, deps) = super::deps::capturing(|| member_uncached(obj, key, file, ctx, depth));
-        let found = found.map(Arc::new);
+        let (found, deps) = super::deps::capturing(|| {
+            let mut scope = None;
+            member_uncached(obj, key, file, ctx, depth, &mut scope).map(|found| (Arc::new(found), scope))
+        });
         ctx.member_reads.insert(cache_key, MemberRead { found: found.clone(), deps });
         return found;
     }
-    member_uncached(obj, key, file, ctx, depth).map(Arc::new)
+    let mut scope = None;
+    member_uncached(obj, key, file, ctx, depth, &mut scope).map(|found| (Arc::new(found), scope))
 }
 
 /// The most members a member read's union may have to be shown in place of the read (`Variant["size"]` becomes its
@@ -636,7 +655,7 @@ pub(crate) type MemberReadKey = (Box<str>, Box<str>, Box<str>);
 /// A cached `member` answer and the files it read.
 #[derive(Clone)]
 pub(crate) struct MemberRead {
-    found: Option<Arc<Located>>,
+    found: Option<(Arc<Located>, Option<DeclarationScope>)>,
     deps: super::deps::Dependencies,
 }
 
@@ -646,31 +665,42 @@ impl MemberRead {
     }
 }
 
+/// `scope` is set to the scope the member's type is written in, where a declaration writes it.
 fn member_uncached(
     obj: &CollectedType,
     key: &str,
     file: &Utf8Path,
     ctx: &ResolutionContext,
     depth: u8,
+    scope: &mut Option<DeclarationScope>,
 ) -> Option<Located> {
     if depth > MAX_DEPTH {
         return None;
     }
     match obj {
-        CollectedType::AtFile { file, inner } => member(inner, key, file, ctx, depth + 1),
+        CollectedType::AtFile { file, inner } => member_uncached(inner, key, file, ctx, depth + 1, scope),
         // A property of `A & B` is read from the constituents that declare it, as TypeScript reads it: a constituent
         // with only an index signature (`{ spacing: SpacingToken } & { [token: string]: never }`) adds nothing to a
         // declared name. Declared by several, it is their intersection.
         CollectedType::Intersection(members) => {
-            let mut found: Vec<Located> = members.iter().filter_map(|m| member(m, key, file, ctx, depth + 1)).collect();
+            let mut found: Vec<(Located, Option<DeclarationScope>)> = members
+                .iter()
+                .filter_map(|m| {
+                    let mut own = None;
+                    member_uncached(m, key, file, ctx, depth + 1, &mut own).map(|found| (found, own))
+                })
+                .collect();
             match found.len() {
                 0 => None,
-                1 => found.pop(),
+                1 => found.pop().map(|(found, own)| {
+                    *scope = own;
+                    found
+                }),
                 _ => Some((
                     CollectedType::Intersection(
                         found
                             .into_iter()
-                            .map(|(ty, at)| CollectedType::AtFile { file: at, inner: Box::new(ty) })
+                            .map(|((ty, at), _)| CollectedType::AtFile { file: at, inner: Box::new(ty) })
                             .collect(),
                     ),
                     file.to_owned(),
@@ -685,10 +715,15 @@ fn member_uncached(
             let found = lookup_interface_including_ambient(ctx, canonical_file.as_str(), &canonical_name)
                 .or_else(|| react_interface(ctx, &canonical_file, &canonical_name));
             if let Some(iface) = found {
-                return interface_member(iface, args, key, file, ctx, depth + 1);
+                // Member `key` of the interface, its type parameters bound to `args`.
+                return interface_prop(iface, args, key, file, ctx, depth + 1).map(|prop| {
+                    *scope = Some(prop.scope);
+                    (prop.ty, prop.file)
+                });
             }
-            let (body, body_file) = alias_body(name, args, file, ctx)?;
-            member(&body, key, &body_file, ctx, depth + 1)
+            let (body, body_file, body_scope) = alias_body_declared(name, args, file, ctx)?;
+            *scope = Some(body_scope);
+            member_uncached(&body, key, &body_file, ctx, depth + 1, scope)
         }
         // `{ [P in keyof T]: T[P] | … }["width"]` (csstype's `Fallback<T>`): the value with the key bound, when the keys
         // include it. Over `keyof T` the key's presence is a member read of `T`, which avoids listing all of T's keys.
@@ -709,22 +744,10 @@ fn member_uncached(
         // `A["x"]["y"]`, `(T extends … ? A : B)["x"]`.
         CollectedType::IndexedAccess { .. } | CollectedType::Conditional { .. } => {
             let (reduced, reduced_file) = reduce(obj, file, ctx, depth + 1)?;
-            member(&reduced, key, &reduced_file, ctx, depth + 1)
+            member_uncached(&reduced, key, &reduced_file, ctx, depth + 1, scope)
         }
         _ => None,
     }
-}
-
-/// Member `key` of an interface referenced with `args`, its type parameters bound to them.
-fn interface_member(
-    iface: &CollectedInterface,
-    args: &[CollectedType],
-    key: &str,
-    args_file: &Utf8Path,
-    ctx: &ResolutionContext,
-    depth: u8,
-) -> Option<Located> {
-    interface_prop(iface, args, key, args_file, ctx, depth).map(|prop| (prop.ty, prop.file))
 }
 
 /// A member as its interface declares it: the type with the interface's parameters bound, whether it is required, and
@@ -736,6 +759,8 @@ pub(super) struct DeclaredProp {
     pub(super) file: Utf8PathBuf,
     /// The interface that declares it, which may be an ancestor of the one read.
     pub(super) declared_by: String,
+    /// Where `ty` is written: the scope of the declaration that declares the member.
+    pub(super) scope: DeclarationScope,
 }
 
 /// Whether `name` (as written in `file`) is one of React's interfaces, which `react_declared_prop` can read.
@@ -792,6 +817,7 @@ fn interface_prop(
             description: prop.description.clone(),
             file: iface.file_path.clone(),
             declared_by: iface.name.to_string(),
+            scope: iface.scope.clone(),
         });
     }
     if depth > MAX_DEPTH {
@@ -807,19 +833,23 @@ fn interface_prop(
         };
         let (parent_file, parent_name) = canonical(name, &iface.file_path, ctx);
         let type_args: Vec<CollectedType> = type_args.iter().map(&bind).collect();
-        match lookup_interface(ctx, parent_file.as_str(), &parent_name)
+        match lookup_interface_from(ctx, parent_file.as_str(), &parent_name, &iface.scope)
             .or_else(|| react_interface(ctx, &parent_file, &parent_name))
         {
             Some(parent) => interface_prop(parent, &type_args, key, &iface.file_path, ctx, depth + 1),
             // An interface may extend an alias (csstype's `StandardLonghandPropertiesFallback = Fallback<…>`).
             None => {
                 let parent = CollectedType::Named { name: name.clone(), args: type_args };
-                member(&parent, key, &iface.file_path, ctx, depth + 1).map(|(ty, file)| DeclaredProp {
-                    ty,
-                    required: false,
-                    description: String::new(),
-                    file,
-                    declared_by: name.to_string(),
+                let mut scope = None;
+                member_uncached(&parent, key, &iface.file_path, ctx, depth + 1, &mut scope).map(|(ty, file)| {
+                    DeclaredProp {
+                        ty,
+                        required: false,
+                        description: String::new(),
+                        file,
+                        declared_by: name.to_string(),
+                        scope: scope.unwrap_or_else(|| iface.scope.clone()),
+                    }
                 })
             }
         }
@@ -842,6 +872,16 @@ pub(super) fn alias_body(
     file: &Utf8Path,
     ctx: &ResolutionContext,
 ) -> Option<Located> {
+    alias_body_declared(name, args, file, ctx).map(|(body, body_file, _)| (body, body_file))
+}
+
+/// `alias_body`, with the scope the alias is declared in, which the names in the body are looked up from.
+fn alias_body_declared(
+    name: &CompactString,
+    args: &[CollectedType],
+    file: &Utf8Path,
+    ctx: &ResolutionContext,
+) -> Option<(CollectedType, Utf8PathBuf, DeclarationScope)> {
     let (alias_file, alias_name) = canonical(name, file, ctx);
     let (matched, alias) = lookup_type_alias(ctx, alias_file.as_str(), &alias_name)?;
     let defaults = ctx.named_types.lookup_type_param_defaults(&alias_file, &matched);
@@ -860,7 +900,8 @@ pub(super) fn alias_body(
         }
         _ => return None,
     };
-    Some((body, alias_file))
+    let scope = ctx.named_types.lookup_local_alias_scope(&alias_file, &matched).cloned().unwrap_or_default();
+    Some((body, alias_file, scope))
 }
 
 /// An interface of React's that curated mode indexes apart from the run's declarations (React index): reading a member

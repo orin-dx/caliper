@@ -1229,7 +1229,13 @@ impl PropType {
                     members.iter().for_each(|member| collect(member, kinds));
                 }
                 PropType::Array(inner) | PropType::Readonly(inner) => collect(inner, kinds),
-                PropType::Object(fields) => fields.iter().for_each(|field| collect(&field.prop_type, kinds)),
+                PropType::Object(fields) => fields.iter().for_each(|field| {
+                    // The key of an index signature (`[k: `data-${string}`]: T`) is part of the type too.
+                    if let Some(key) = &field.index_key {
+                        collect(key, kinds);
+                    }
+                    collect(&field.prop_type, kinds);
+                }),
                 PropType::Named { args, .. } => args.iter().for_each(|arg| collect(arg, kinds)),
                 PropType::Function { params, return_type, .. } => {
                     params.iter().for_each(|param| collect(&param.param_type, kinds));

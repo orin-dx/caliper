@@ -34,7 +34,8 @@ pub(super) fn resolve_named(
         use std::hash::Hasher;
         let mut hasher = rustc_hash::FxHasher::default();
         args.iter().for_each(|arg| arg.structural_hash(&mut hasher));
-        format!("{}:{}<{:x}>", consuming_file, name, hasher.finish()).into()
+        let site = state.declared_in.as_deref().and_then(DeclarationScope::local_key_suffix).unwrap_or_default();
+        format!("{}:{}<{:x}>{site}", consuming_file, name, hasher.finish()).into()
     };
 
     // The same reference resolves the same way in any state that answers the reads it made (`resolver::memo`), and
@@ -132,6 +133,7 @@ fn resolve_named_uncycled(
             let params = ctx.named_types.lookup_type_alias_params(&canonical_file, &matched_key);
             let defaults = ctx.named_types.lookup_type_param_defaults(&canonical_file, &matched_key);
             let outer_named_unevaluated = std::mem::take(&mut state.named_unevaluated);
+            let caller_site = super::precedence::enter_alias_site(ctx, state, &canonical_file, &matched_key);
             // The alias's body is read under its own parameters that nothing replaces, never under the caller's: the
             // supplied arguments are the caller's names (`Id<Value>` over `type Value`), not the alias's parameters.
             let expanded = match params {
@@ -153,6 +155,7 @@ fn resolve_named_uncycled(
                     expanded
                 }
             };
+            state.leave_declared_in(caller_site);
             let unevaluated = state.named_unevaluated || expanded.holds_unevaluated_type();
             state.named_unevaluated = outer_named_unevaluated || unevaluated;
             // Printed as its name when it can't be evaluated, or when a generic instantiation expands to a long union, as
@@ -321,7 +324,7 @@ fn expand_alias(
     state: &mut ResolveState,
     depth: u8,
 ) -> PropType {
-    let args = &*super::substitute::mark_args(state, args);
+    let args = &*super::substitute::mark_args(ctx, state, args_file, args);
     let subst =
         super::substitute::bind_declared(params, defaults, args, args_file, declared_file, &mut state.diagnostics);
     if let Some(param) = super::evaluate::distributive_param(alias) {
