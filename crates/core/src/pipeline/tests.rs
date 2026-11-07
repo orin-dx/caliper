@@ -4292,6 +4292,113 @@ fn a_declaration_local_to_a_factory_keeps_the_factory_parameter_in_scope() {
 }
 
 #[test]
+fn an_interface_in_a_function_body_is_not_replaced_by_the_module_level_one_of_its_name() {
+    let output = extract_with_installed_libs(&[
+        (
+            "factory.tsx",
+            "interface Props { fromModule: string }\n\
+             export function Plain(props: Props) { return <div />; }\n\
+             export function make() { interface Props { fromFunction: number } return (p: Props) => <div />; }\n",
+        ),
+        ("Field.tsx", "import { make } from './factory';\nexport const Field = make();\n"),
+    ]);
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+    assert_eq!(prop_names(&output, "Field"), ["fromFunction"]);
+    assert_eq!(prop_names(&output, "Plain"), ["fromModule"]);
+}
+
+#[test]
+fn same_named_interfaces_in_two_functions_stay_apart() {
+    let output = extract_with_installed_libs(&[
+        (
+            "factory.tsx",
+            "export function makeA() { interface Props { a: string } return (p: Props) => <div />; }\n\
+             export function makeB() { interface Props { b: number } return (p: Props) => <div />; }\n",
+        ),
+        (
+            "Fields.tsx",
+            "import { makeA, makeB } from './factory';\nexport const FieldA = makeA();\nexport const FieldB = makeB();\n",
+        ),
+    ]);
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+    assert_eq!(prop_names(&output, "FieldA"), ["a"]);
+    assert_eq!(prop_names(&output, "FieldB"), ["b"]);
+}
+
+#[test]
+fn a_local_interface_extends_the_local_one_of_its_base_name_not_the_module_level_one() {
+    let output = extract_with_installed_libs(&[
+        (
+            "factory.tsx",
+            "interface Base { fromModule: string }\n\
+             export function make() {\n\
+                 interface Base { baseLocal: number }\n\
+                 interface Props extends Base { own: boolean }\n\
+                 return (p: Props) => <div />;\n\
+             }\n",
+        ),
+        ("Field.tsx", "import { make } from './factory';\nexport const Field = make();\n"),
+    ]);
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+    assert_eq!(prop_names(&output, "Field"), ["baseLocal", "own"]);
+}
+
+#[test]
+fn a_module_level_alias_read_from_a_function_body_keeps_naming_the_module_level_interface() {
+    let output = extract_with_installed_libs(&[
+        (
+            "factory.tsx",
+            "interface Row { fromModule: string }\n\
+             type Shared = Row & { shared: boolean };\n\
+             export function make() {\n\
+                 interface Row { local: number }\n\
+                 interface Props extends Shared { own: string }\n\
+                 return (p: Props) => <div />;\n\
+             }\n",
+        ),
+        ("Field.tsx", "import { make } from './factory';\nexport const Field = make();\n"),
+    ]);
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+    assert_eq!(prop_names(&output, "Field"), ["fromModule", "own", "shared"]);
+}
+
+#[test]
+fn an_indexed_access_in_a_function_body_reads_the_local_interface() {
+    let output = extract_with_installed_libs(&[
+        (
+            "factory.tsx",
+            "interface Row { fromModule: string }\n\
+             export function make() {\n\
+                 interface Row { id: string; rest: number }\n\
+                 interface Props { shown: Row['rest'] }\n\
+                 return (p: Props) => <div />;\n\
+             }\n",
+        ),
+        ("Field.tsx", "import { make } from './factory';\nexport const Field = make();\n"),
+    ]);
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+    assert_eq!(output.components["Field"].props["shown"].prop_type.raw_string(), "number");
+}
+
+#[test]
+fn a_props_alias_in_a_function_body_names_the_local_interface() {
+    let output = extract_with_installed_libs(&[
+        (
+            "factory.tsx",
+            "interface Row { fromModule: string }\n\
+             export function make() {\n\
+                 interface Row { id: string; rest: number }\n\
+                 type Props = Row & { extra: boolean };\n\
+                 return (p: Props) => <div />;\n\
+             }\n",
+        ),
+        ("Field.tsx", "import { make } from './factory';\nexport const Field = make();\n"),
+    ]);
+    assert_eq!(severe(&output), Vec::<&crate::types::Diagnostic>::new());
+    assert_eq!(prop_names(&output, "Field"), ["extra", "id", "rest"]);
+}
+
+#[test]
 fn a_signature_parameter_of_a_factory_result_does_not_capture_an_argument_named_like_it() {
     let output = extract_with_installed_libs(&[
         (

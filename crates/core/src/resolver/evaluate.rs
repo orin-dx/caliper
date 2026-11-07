@@ -15,7 +15,9 @@ use compact_str::CompactString;
 
 use crate::types::*;
 
-use super::import::{lookup_interface, lookup_interface_including_ambient, lookup_type_alias, resolve_to_canonical};
+use super::import::{
+    lookup_interface_from, lookup_interface_including_ambient, lookup_type_alias, resolve_to_canonical,
+};
 use super::substitute::{bind_declared, build_substitution, substitute_alias, substitute_type};
 use super::{ResolutionContext, MAX_DEPTH};
 
@@ -548,7 +550,8 @@ fn interface_keys(iface: &CollectedInterface, ctx: &ResolutionContext, depth: u8
             ExtendsRef::Builtin { name, .. } => name,
         };
         let (file, name) = canonical(name, &iface.file_path, ctx);
-        let found = lookup_interface(ctx, file.as_str(), &name).or_else(|| react_interface(ctx, &file, &name));
+        let found = lookup_interface_from(ctx, file.as_str(), &name, &iface.scope)
+            .or_else(|| react_interface(ctx, &file, &name));
         if let Some(parent) = found {
             interface_keys(parent, ctx, depth + 1, keys);
         }
@@ -807,7 +810,7 @@ fn interface_prop(
         };
         let (parent_file, parent_name) = canonical(name, &iface.file_path, ctx);
         let type_args: Vec<CollectedType> = type_args.iter().map(&bind).collect();
-        match lookup_interface(ctx, parent_file.as_str(), &parent_name)
+        match lookup_interface_from(ctx, parent_file.as_str(), &parent_name, &iface.scope)
             .or_else(|| react_interface(ctx, &parent_file, &parent_name))
         {
             Some(parent) => interface_prop(parent, &type_args, key, &iface.file_path, ctx, depth + 1),

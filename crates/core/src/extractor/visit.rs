@@ -180,7 +180,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
 
     fn visit_ts_interface_declaration(&mut self, node: &TSInterfaceDeclaration<'a>) {
         let name = node.id.name.as_str();
-        let key = self.scoped_key(name);
+        let scope = self.current_scope();
+        let mut key = self.scoped_key(name);
+        key.extend(scope.local_key_suffix());
 
         let extends: Vec<ExtendsRef> = node.extends.iter().map(|ext| self.collect_extends(ext)).collect();
 
@@ -192,20 +194,10 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         let props: Vec<RawProp> =
             node.body.body.iter().filter_map(|sig| self.collect_property_signature(sig)).collect();
 
-        // Module-level declarations of one name merge: members and `extends` accumulate, and the first description
-        // stands. A declaration inside a function body or block shares the module-level key, but it is not the same
-        // type: it never touches a module-level entry, and otherwise keeps the entry a lone declaration always had
-        // (a factory's result can name it). Telling local scopes apart from each other is not attempted.
-        let at_module_level = self.local_depth == 0;
-        let declared_at_module_level = self.module_interfaces.contains(&key);
-        if !at_module_level && declared_at_module_level {
-            return;
-        }
-        if at_module_level {
-            self.module_interfaces.insert(key.clone());
-        }
-        let existing = self.data.interfaces.get_mut(&key).filter(|_| at_module_level && declared_at_module_level);
-        if let Some(merged) = existing {
+        // Declarations of one name in one scope merge, as TypeScript merges them: members and `extends` accumulate,
+        // and the first description stands. The key carries the scope, so a declaration in another scope is an entry
+        // of its own.
+        if let Some(merged) = self.data.interfaces.get_mut(&key) {
             for prop in props {
                 if !merged.props.iter().any(|existing| existing.name == prop.name) {
                     merged.props.push(prop);
@@ -219,13 +211,12 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 merged.tags.entry(tag).or_insert(value);
             }
         } else {
-            let scope = self.current_scope();
-            self.data.interface_scopes.insert(key.clone(), scope);
             self.data.interfaces.insert(
                 key.clone(),
                 CollectedInterface {
                     scoped_key: key.clone(),
                     name: name.into(),
+                    scope,
                     file_path: self.file_path.clone(),
                     props,
                     extends,
@@ -549,21 +540,17 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
 
     fn visit_block_statement(&mut self, block: &BlockStatement<'a>) {
         self.block_depth += 1;
-        self.local_depth += 1;
         self.enter_scope(ScopeKind::Block);
         walk::walk_block_statement(self, block);
         self.leave_scope();
-        self.local_depth -= 1;
         self.block_depth -= 1;
     }
 
     fn visit_static_block(&mut self, block: &StaticBlock<'a>) {
         self.block_depth += 1;
-        self.local_depth += 1;
         self.enter_scope(ScopeKind::Block);
         walk::walk_static_block(self, block);
         self.leave_scope();
-        self.local_depth -= 1;
         self.block_depth -= 1;
     }
 
@@ -583,11 +570,13 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
 
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
         self.function_depth += 1;
-        self.local_depth += 1;
         self.enter_scope(ScopeKind::FunctionBody);
+        if self.body_result_keys.iter().any(|(_, start)| *start == body.span.start) {
+            let scope = self.current_scope();
+            self.body_scopes.insert(body.span.start, scope);
+        }
         walk::walk_function_body(self, body);
         self.leave_scope();
-        self.local_depth -= 1;
         self.function_depth -= 1;
     }
 

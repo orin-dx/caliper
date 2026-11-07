@@ -48,8 +48,11 @@ pub(super) fn result_chain(
     state: &mut ResolveState,
 ) -> Option<super::ResolvedChain> {
     let callee = mapping.wrapper_callee.as_ref()?;
-    let (props, props_file, type_params, factory_params) = result_props(callee, &mapping.file_path, ctx, 0)?;
+    let (props, props_file, type_params, factory_params, written_in) =
+        result_props(callee, &mapping.file_path, ctx, 0)?;
     let mut attempt = state.branch();
+    // The result names the declarations local to the factory from inside it.
+    drop(attempt.enter_declared_in(&written_in));
     // A declaration local to the factory names its type parameters wherever nothing substitutes them, so they stay in
     // scope under every declaration read. The call's arguments and the result's own signature parameters cannot
     // collide with them: `result_props` marks the first as declarations and the second as placeholders.
@@ -110,12 +113,16 @@ fn erase_unbound_params<'p>(chain: &mut super::ResolvedChain, params: impl Itera
     }
 }
 
+/// The props type a callee's result gives a component, the file that writes it, the type parameters of the result's own
+/// call signature and of the callee, and the scope the callee writes the props type in.
+type ResultProps = (CollectedType, Utf8PathBuf, Vec<TypeName>, Vec<TypeName>, DeclarationScope);
+
 fn result_props(
     callee: &WrapperCallee,
     caller_file: &Utf8Path,
     ctx: &ResolutionContext,
     depth: u8,
-) -> Option<(CollectedType, Utf8PathBuf, Vec<TypeName>, Vec<TypeName>)> {
+) -> Option<ResultProps> {
     if depth > MAX_DEPTH {
         return None;
     }
@@ -165,7 +172,7 @@ fn result_props(
             continue;
         }
         let props = substitute_type(&props, &super::substitute::unfilled_substitution(&type_params));
-        return Some((props, props_file, type_params, function.type_params.clone()));
+        return Some((props, props_file, type_params, function.type_params.clone(), function.scope.clone()));
     }
 }
 

@@ -257,16 +257,12 @@ pub(super) struct SourceDataCollector<'src> {
     /// `TSTypeName::QualifiedName` handling) — so storage keys must match, or a same-file
     /// reference to a namespace member can never resolve.
     pub(super) namespace_stack: Vec<CompactString>,
-    /// How many function bodies and blocks enclose the declaration being visited; 0 at module level.
-    pub(super) local_depth: u32,
     /// The regions that enclose the node being visited, outermost first: the scope a declaration is recorded in.
     pub(super) scope_path: Vec<ScopeStep>,
     /// For each region in `scope_path`, how many child regions it has opened so far.
     pub(super) scope_children: Vec<u32>,
     /// How many regions the module has opened directly.
     pub(super) module_children: u32,
-    /// Keys of the interfaces declared at module level. Only these merge with a later declaration of the same name.
-    pub(super) module_interfaces: FxHashSet<String>,
     /// `X.displayName = "..."` renames recorded during the main traversal but
     /// not yet applied — see `try_scan_display_name`. Applying these
     /// immediately would change `component_name` out from under any later
@@ -324,6 +320,10 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) function_type_params: Vec<(u32, u32, Vec<CompactString>)>,
     /// `(scoped key, name, type parameters)` of each named class: a class is also a type, recorded in `finish` as an
     /// interface with no members unless the file declares an interface or alias of that name.
+    /// The function results whose scope is that of their function's body, with the start of the body.
+    pub(super) body_result_keys: Vec<(String, u32)>,
+    /// The scope of each body in `body_result_keys`, by start, once it has been entered.
+    pub(super) body_scopes: rustc_hash::FxHashMap<u32, DeclarationScope>,
     pub(super) pending_classes: Vec<(String, CompactString, Vec<CompactString>, DeclarationScope)>,
     /// The first parameter's name of each function being visited, innermost last: `const { size = 'md' } = props` in
     /// the body destructures it.
@@ -344,11 +344,9 @@ impl<'src> SourceDataCollector<'src> {
             element_helpers: FxHashSet::default(),
             consumed_jsdoc: FxHashSet::default(),
             namespace_stack: Vec::new(),
-            local_depth: 0,
             scope_path: Vec::new(),
             scope_children: Vec::new(),
             module_children: 0,
-            module_interfaces: FxHashSet::default(),
             pending_display_name_renames: Vec::new(),
             aliased_away: FxHashSet::default(),
             pending_wrappers: Vec::new(),
@@ -369,6 +367,8 @@ impl<'src> SourceDataCollector<'src> {
             block_depth: 0,
             enum_unions: rustc_hash::FxHashMap::default(),
             function_type_params: Vec::new(),
+            body_result_keys: Vec::new(),
+            body_scopes: Default::default(),
             pending_classes: Vec::new(),
             props_params: Vec::new(),
             body_defaults: Vec::new(),
@@ -559,16 +559,24 @@ impl<'src> SourceDataCollector<'src> {
     }
 
     fn finish(mut self) -> SourceData {
+        for (key, start) in std::mem::take(&mut self.body_result_keys) {
+            if let (Some(result), Some(scope)) =
+                (self.data.function_results.get_mut(&key), self.body_scopes.get(&start))
+            {
+                result.scope = scope.clone();
+            }
+        }
         for (key, name, params, scope) in std::mem::take(&mut self.pending_classes) {
             if self.data.interfaces.contains_key(&key) || self.data.type_aliases.contains_key(&key) {
                 continue;
             }
-            self.data.class_scopes.insert(key.clone(), scope);
+            self.data.class_scopes.insert(key.clone(), scope.clone());
             self.data.interfaces.insert(
                 key.clone(),
                 crate::types::CollectedInterface {
                     scoped_key: key.clone(),
                     name,
+                    scope,
                     file_path: self.file_path.clone(),
                     props: Vec::new(),
                     extends: Vec::new(),

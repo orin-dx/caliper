@@ -948,6 +948,37 @@ impl DeclarationScope {
     pub fn is_module(&self) -> bool {
         self.0.is_empty()
     }
+
+    /// Whether `inner` is this scope or lies within it: the declarations of this scope are visible from `inner`.
+    pub fn encloses(&self, inner: &DeclarationScope) -> bool {
+        inner.0.starts_with(&self.0)
+    }
+
+    /// What a declaration's key carries after its name when a function body, block or `switch` case encloses it, so
+    /// that same-named declarations of different scopes have different keys and same-scope ones share one. A
+    /// namespace is already part of the key as `N.`, and a module-level declaration has no suffix.
+    pub fn local_key_suffix(&self) -> Option<std::string::String> {
+        if self.0.iter().all(|step| step.kind == ScopeKind::Namespace) {
+            return None;
+        }
+        let steps: Vec<std::string::String> =
+            self.0.iter().map(|step| format!("{}{}", step.kind.tag(), step.ordinal)).collect();
+        Some(format!("{LOCAL_KEY_MARK}{}", steps.join(".")))
+    }
+}
+
+/// Starts the scope suffix of a key (`Props@f0.b1`); no identifier or file path contains it.
+pub const LOCAL_KEY_MARK: char = '@';
+
+impl ScopeKind {
+    fn tag(self) -> char {
+        match self {
+            ScopeKind::Namespace => 'n',
+            ScopeKind::FunctionBody => 'f',
+            ScopeKind::Block => 'b',
+            ScopeKind::SwitchCase => 's',
+        }
+    }
 }
 
 // ─── Source Data (collected during Phase 0-2) ─────────────────────────────────
@@ -1021,12 +1052,8 @@ pub struct SourceData {
     /// bag, each with the scope the declaration sits in. An enum is a type of its own, not the union of its values.
     pub enum_declarations: FxHashMap<std::string::String, DeclarationScope>,
 
-    /// The scope each interface declaration in this file sits in. Keyed as `interfaces`, and the scope is that of the
-    /// declaration whose entry `interfaces` holds (a merge keeps the first declaration's). Nothing reads it yet.
-    pub interface_scopes: FxHashMap<std::string::String, DeclarationScope>,
-
     /// The scope each type alias declaration in this file sits in. Keyed as `type_aliases`; the last declaration of a
-    /// key wins, as it does there. Aliases the extractor synthesizes have no entry. Nothing reads it yet.
+    /// key wins, as it does there. Aliases the extractor synthesizes have no entry.
     pub type_alias_scopes: FxHashMap<std::string::String, DeclarationScope>,
 
     /// The scope each named class in this file sits in. Keyed as the interface a class is recorded as when the file
@@ -1044,6 +1071,9 @@ pub struct FunctionResult {
     pub result: CollectedType,
     /// A generic call assigned to a local const and returned by name, when there is no explicit result type.
     pub returned_call: Option<WrapperCallee>,
+    /// Where the names in `result` and `returned_call` are written: the function's body, or the scope around the
+    /// function for a declared result type. A declaration local to the function is found from there.
+    pub scope: DeclarationScope,
 }
 
 /// The generic function a wrapper call invokes, as the call names it, and the type arguments it passes.
@@ -1058,10 +1088,13 @@ pub struct WrapperCallee {
 /// A collected interface declaration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectedInterface {
-    /// Scoped key: "${file_path}:${name}"
+    /// Scoped key: "${file_path}:${name}". An interface in a function body, block or `switch` case has
+    /// `DeclarationScope::local_key_suffix` after the name, so it is an entry of its own beside a module-level one.
     pub scoped_key: std::string::String,
     /// The interface's name.
     pub name: TypeName,
+    /// Where it is declared.
+    pub scope: DeclarationScope,
     /// The file that declares it.
     pub file_path: Utf8PathBuf,
     /// The props it declares itself, in declaration order; the ones it inherits come through `extends`.

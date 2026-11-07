@@ -2852,34 +2852,44 @@ fn same_name_interface_declarations_in_one_file_merge_their_members() {
     assert_eq!(members, [["a", "b"]]);
 }
 
+/// The entries declaring an interface called `name`, by the key's part after the file (`Props`, `Props@f0`), with each
+/// entry's members.
+fn interface_entries<'d>(data: &'d SourceData, name: &str) -> Vec<(String, Vec<&'d str>)> {
+    let mut entries: Vec<(String, Vec<&str>)> = data
+        .interfaces
+        .iter()
+        .filter(|(_, iface)| iface.name == name)
+        .map(|(key, iface)| {
+            let (_, local) = key.split_once(".tsx:").expect("a key names its file");
+            (local.to_owned(), iface.props.iter().map(|p| p.name.as_str()).collect())
+        })
+        .collect();
+    entries.sort();
+    entries
+}
+
 #[test]
-fn a_same_name_interface_in_a_function_body_does_not_merge_into_the_module_level_one() {
+fn a_same_name_interface_in_a_function_body_is_an_entry_of_its_own() {
     let source = "function helper() { interface Props { internal: number } }\n\
         interface Props { label: string }\n\
         export function Box(props: Props) { return <div />; }";
     let data = parse_file(Utf8Path::new("/test/scoped.tsx"), source);
-    let members: Vec<Vec<&str>> = data
-        .interfaces
-        .iter()
-        .filter(|(key, _)| key.ends_with(":Props"))
-        .map(|(_, iface)| iface.props.iter().map(|p| p.name.as_str()).collect())
-        .collect();
-    assert_eq!(members, [["label"]]);
+    assert_eq!(
+        interface_entries(&data, "Props"),
+        [("Props".to_owned(), vec!["label"]), ("Props@f0".to_owned(), vec!["internal"])]
+    );
 }
 
 #[test]
-fn an_interface_in_a_class_static_block_does_not_merge_into_the_module_level_one() {
+fn an_interface_in_a_class_static_block_is_an_entry_of_its_own() {
     let source = "class Helper { static { interface Props { internal: number } } }\n\
         interface Props { label: string }\n\
         export function Box(props: Props) { return <div />; }";
     let data = parse_file(Utf8Path::new("/test/static-block.tsx"), source);
-    let members: Vec<Vec<&str>> = data
-        .interfaces
-        .iter()
-        .filter(|(key, _)| key.ends_with(":Props"))
-        .map(|(_, iface)| iface.props.iter().map(|p| p.name.as_str()).collect())
-        .collect();
-    assert_eq!(members, [["label"]]);
+    assert_eq!(
+        interface_entries(&data, "Props"),
+        [("Props".to_owned(), vec!["label"]), ("Props@b0".to_owned(), vec!["internal"])]
+    );
 }
 
 #[test]
@@ -2887,29 +2897,59 @@ fn an_interface_only_declared_in_a_function_body_is_still_collected_for_factory_
     let source = "function makeBox() { interface LocalProps { label: string } return (p: LocalProps) => <div />; }\n\
         export const Box = makeBox();";
     let data = parse_file(Utf8Path::new("/test/factory-local.tsx"), source);
-    let members: Vec<Vec<&str>> = data
-        .interfaces
-        .iter()
-        .filter(|(_, iface)| iface.name == "LocalProps")
-        .map(|(_, iface)| iface.props.iter().map(|p| p.name.as_str()).collect())
-        .collect();
-    assert_eq!(members, [["label"]]);
+    assert_eq!(interface_entries(&data, "LocalProps"), [("LocalProps@f0".to_owned(), vec!["label"])]);
 }
 
 #[test]
-fn a_function_body_interface_declared_after_the_module_level_one_does_not_replace_it() {
+fn a_function_body_interface_declared_between_module_level_ones_leaves_them_merged() {
     let source = "interface Props { label: string }\n\
         function helper() { interface Props { internal: number } }\n\
         interface Props { extra: string }\n\
         export function Box(props: Props) { return <div />; }";
     let data = parse_file(Utf8Path::new("/test/scoped-after.tsx"), source);
-    let members: Vec<Vec<&str>> = data
-        .interfaces
-        .iter()
-        .filter(|(key, _)| key.ends_with(":Props"))
-        .map(|(_, iface)| iface.props.iter().map(|p| p.name.as_str()).collect())
-        .collect();
-    assert_eq!(members, [["label", "extra"]]);
+    assert_eq!(
+        interface_entries(&data, "Props"),
+        [("Props".to_owned(), vec!["label", "extra"]), ("Props@f0".to_owned(), vec!["internal"])]
+    );
+}
+
+#[test]
+fn same_name_interfaces_in_two_sibling_functions_are_two_entries() {
+    let source = "function a() { interface Props { a: string } }\n\
+        function b() { interface Props { b: string } }";
+    let data = parse_file(Utf8Path::new("/test/siblings.tsx"), source);
+    assert_eq!(
+        interface_entries(&data, "Props"),
+        [("Props@f0".to_owned(), vec!["a"]), ("Props@f1".to_owned(), vec!["b"])]
+    );
+}
+
+#[test]
+fn same_name_interfaces_in_one_function_body_merge() {
+    let source = "function f() { interface Props { a: string } interface Props { b: string } }";
+    let data = parse_file(Utf8Path::new("/test/same-scope.tsx"), source);
+    assert_eq!(interface_entries(&data, "Props"), [("Props@f0".to_owned(), vec!["a", "b"])]);
+}
+
+#[test]
+fn same_name_interfaces_in_sibling_blocks_of_one_function_do_not_merge() {
+    let source = "function f() { { interface Props { a: string } } { interface Props { b: string } } }";
+    let data = parse_file(Utf8Path::new("/test/blocks.tsx"), source);
+    assert_eq!(
+        interface_entries(&data, "Props"),
+        [("Props@f0.b0".to_owned(), vec!["a"]), ("Props@f0.b1".to_owned(), vec!["b"])]
+    );
+}
+
+#[test]
+fn an_interface_in_a_switch_case_does_not_merge_with_the_module_level_one() {
+    let source = "interface Props { label: string }\n\
+        switch (x) { case 1: interface Props { internal: number } break; }";
+    let data = parse_file(Utf8Path::new("/test/switch.tsx"), source);
+    assert_eq!(
+        interface_entries(&data, "Props"),
+        [("Props".to_owned(), vec!["label"]), ("Props@s0".to_owned(), vec!["internal"])]
+    );
 }
 
 #[test]

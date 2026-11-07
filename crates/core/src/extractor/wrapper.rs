@@ -13,8 +13,8 @@ use oxc_ast::ast::*;
 use oxc_span::Span;
 
 use crate::types::{
-    CollectedType, CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode, ExtendsRef, FunctionResult,
-    TypeName, WrapperCallee,
+    CollectedType, CollectedTypeAlias, ComponentMapping, DeclarationScope, DetectionRule, DiagnosticCode, ExtendsRef,
+    FunctionResult, TypeName, WrapperCallee,
 };
 
 use super::evidence::{renders, FunctionShape, ReactBinding};
@@ -414,6 +414,7 @@ impl<'src> SourceDataCollector<'src> {
         body: Option<&FunctionBody<'a>>,
     ) {
         let generic = type_parameters.is_some();
+        let declared = return_type.is_some();
         let (result, returned_call) = if let Some(annotation) = return_type {
             if !generic {
                 return;
@@ -435,7 +436,15 @@ impl<'src> SourceDataCollector<'src> {
         }
         let type_params = super::type_param_names(type_parameters);
         let key = self.scoped_key(name);
-        self.data.function_results.insert(key, FunctionResult { type_params, result, returned_call });
+        // A declared result type is written around the function; every other result is read from its body, whose
+        // scope is known once the body has been walked (`finish`).
+        let mut scope = self.current_scope();
+        self.body_result_keys.retain(|(recorded, _)| *recorded != key);
+        if let (false, Some(body)) = (declared, body) {
+            self.body_result_keys.push((key.clone(), body.span.start));
+            scope = DeclarationScope::default();
+        }
+        self.data.function_results.insert(key, FunctionResult { type_params, result, returned_call, scope });
     }
 
     /// A single top-level `return function Loader(props: Props) { ... }` or `return (props: Props) => ...` that
