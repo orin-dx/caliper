@@ -148,11 +148,10 @@ impl SemanticProvider for OnDemand {
         let (reply, receiver) = mpsc::sync_channel(1);
         match &self.jobs {
             Some(jobs) => {
-                if let Err(refused) = jobs.send(Job::Answer { targets, reply }) {
-                    if let Job::Answer { reply, .. } = refused.0 {
+                if let Err(refused) = jobs.send(Job::Answer { targets, reply })
+                    && let Job::Answer { reply, .. } = refused.0 {
                         reply.send(SemanticOutcome::unavailable("the checker thread has stopped")).ok();
                     }
-                }
             }
             None => {
                 reply.send(SemanticOutcome::unavailable("could not start the checker thread")).ok();
@@ -169,11 +168,10 @@ impl Drop for OnDemand {
         self.jobs.take();
         let receiver = self.stopped.get_mut().ok().and_then(Option::take);
         let stopped = receiver.is_none_or(|receiver| receiver.recv_timeout(self.shutdown_wait).is_ok());
-        if let Some(thread) = self.thread.take() {
-            if stopped {
+        if let Some(thread) = self.thread.take()
+            && stopped {
                 thread.join().ok();
             }
-        }
     }
 }
 

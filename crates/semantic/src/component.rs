@@ -31,11 +31,10 @@ fn is_react_declared(property: &SymbolInfo) -> bool {
 fn candidate_names(display_name: &str) -> Vec<&str> {
     let mut names = vec![display_name];
     for separator in ['/', '.'] {
-        if let Some((_, last)) = display_name.rsplit_once(separator) {
-            if !last.is_empty() && !names.contains(&last) {
+        if let Some((_, last)) = display_name.rsplit_once(separator)
+            && !last.is_empty() && !names.contains(&last) {
                 names.push(last);
             }
-        }
     }
     names
 }

@@ -637,11 +637,10 @@ impl crate::plugin::DocgenPlugin for RedescribeButtonTone {
     }
 
     fn on_component_resolved(&self, entry: &mut ComponentEntry) {
-        if entry.display_name == "Button" {
-            if let Some(tone) = entry.props.get_mut("tone") {
+        if entry.display_name == "Button"
+            && let Some(tone) = entry.props.get_mut("tone") {
                 std::sync::Arc::make_mut(tone).description = "Button's tone".into();
             }
-        }
     }
 }
 

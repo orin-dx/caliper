@@ -347,11 +347,10 @@ impl<'src> SourceDataCollector<'src> {
         };
 
         // Rules out anonymous utility functions, which aren't components.
-        if let Some(fn_name_str) = fn_name {
-            if !is_pascal_case(fn_name_str) {
+        if let Some(fn_name_str) = fn_name
+            && !is_pascal_case(fn_name_str) {
                 return None;
             }
-        }
 
         let first_param = params.items.first()?;
         let type_ann = first_param.type_annotation.as_ref()?;

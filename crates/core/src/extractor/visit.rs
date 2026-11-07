@@ -71,8 +71,8 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 is_type_only: node.export_kind.is_type() || spec.export_kind.is_type(),
                 declared_as: (local != exported).then(|| local.to_owned()),
             });
-            if let Some((base_name, props_name)) = self.cast_component_aliases.get(local).cloned() {
-                if let Some(index) =
+            if let Some((base_name, props_name)) = self.cast_component_aliases.get(local).cloned()
+                && let Some(index) =
                     self.data.component_mappings.iter().position(|mapping| mapping.component_name == base_name)
                 {
                     let mut public = self.data.component_mappings[index].clone();
@@ -97,7 +97,6 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     }
                     self.record_exported_local(exported);
                 }
-            }
         }
 
         walk::walk_export_named_declaration(self, node);
@@ -351,25 +350,23 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                         self.record_bound_function_result(&name, init);
                     }
                 }
-                if self.function_depth == 0 && node.kind.is_const() {
-                    if let Some(Expression::Identifier(target)) =
+                if self.function_depth == 0 && node.kind.is_const()
+                    && let Some(Expression::Identifier(target)) =
                         declarator.init.as_ref().map(super::component::peel_expr)
                     {
                         self.pending_function_aliases.push((name, target.name.as_str().to_owned()));
                     }
-                }
             }
             if self.is_tsx && self.function_depth == 0 {
                 self.try_record_destructured_imports(declarator);
             }
             if self.is_tsx && self.function_depth > 0 {
-                if let Some(name) = self.extract_pascal_name(declarator) {
-                    if self.detect_component(&Binding::of(declarator), &name).is_some() {
+                if let Some(name) = self.extract_pascal_name(declarator)
+                    && self.detect_component(&Binding::of(declarator), &name).is_some() {
                         self.skip_local_component(&name, declarator.span);
                     }
-                }
-            } else if self.is_tsx {
-                if let Some(name) = self.extract_pascal_name(declarator) {
+            } else if self.is_tsx
+                && let Some(name) = self.extract_pascal_name(declarator) {
                     self.decline_reason = None;
                     self.argument_declined = false;
                     self.alias_candidate = None;
@@ -408,7 +405,6 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                         }
                     }
                 }
-            }
             self.record_body_defaults(declarator);
             if node.kind.is_const() {
                 self.record_const_value_type(declarator);
@@ -466,8 +462,8 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         self.record_function_type_params(func.span, func.type_parameters.as_deref());
         self.props_params.push((first_param_name(&func.params), func.span.start, func.span.end));
         // Pattern 4: `function Button(props: ButtonProps) { ... }`
-        if self.is_tsx {
-            if let Some(id) = &func.id {
+        if self.is_tsx
+            && let Some(id) = &func.id {
                 let name = id.name.as_str();
                 let declaration =
                     matches!(func.r#type, FunctionType::FunctionDeclaration | FunctionType::TSDeclareFunction);
@@ -477,8 +473,8 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     if typed && super::evidence::renders(&shape, &*self).is_ok() {
                         self.skip_local_component(name, func.span);
                     }
-                } else if is_pascal_case(name) && declaration {
-                    if let Some(first_param) = func.params.items.first() {
+                } else if is_pascal_case(name) && declaration
+                    && let Some(first_param) = func.params.items.first() {
                         if let Some(type_ann) = &first_param.type_annotation {
                             if let Err(reason) =
                                 super::evidence::renders(&super::evidence::FunctionShape::of_function(func), &*self)
@@ -531,9 +527,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                             );
                         }
                     }
-                }
             }
-        }
         walk::walk_function(self, func, flags);
         self.props_params.pop();
     }
@@ -602,11 +596,11 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     self.skip_local_component(name, class.span);
                 }
             }
-        } else if self.is_tsx {
-            if let Some(id) = &class.id {
+        } else if self.is_tsx
+            && let Some(id) = &class.id {
                 let name = id.name.as_str();
-                if is_pascal_case(name) {
-                    if let Some(family) = self.super_class_is_component_family(class) {
+                if is_pascal_case(name)
+                    && let Some(family) = self.super_class_is_component_family(class) {
                         if let Some(mapping) = self.try_class_component(class, name) {
                             self.data.component_mappings.push(mapping);
                         } else if class.heritage.as_ref().is_some_and(|h| h.type_arguments.is_some()) {
@@ -626,9 +620,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                             );
                         }
                     }
-                }
             }
-        }
         walk::walk_class(self, class);
     }
 
@@ -685,11 +677,10 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     self.try_anonymous_default_export_component(func);
                 }
                 ExportDefaultDeclarationKind::ClassDeclaration(class) if class.id.is_none() => {
-                    if let Some(name) = super::component::pascal_case_from_file_stem(&self.file_path) {
-                        if let Some(mapping) = self.try_class_component(class, &name) {
+                    if let Some(name) = super::component::pascal_case_from_file_stem(&self.file_path)
+                        && let Some(mapping) = self.try_class_component(class, &name) {
                             self.data.component_mappings.push(mapping);
                         }
-                    }
                 }
                 // `export default (props: P) => …`, `export default memo(function Badge(…))`,
                 // `export default forwardRef<El, P>(…)`: an expression, so the declarator rules apply.

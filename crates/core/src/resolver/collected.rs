@@ -94,11 +94,10 @@ pub fn resolve_collected_type(
         CollectedType::KeyOf(target) => {
             // `keyof typeof Icons` over a `const` object literal: its keys. Another operand would need the keys of an
             // interface with its index signatures and every parent, which a partly loaded dependency can't give.
-            if let CollectedType::TypeOf(_) = unwrap_at_file(target) {
-                if let Some(keys) = super::evaluate::keys_of(target, consuming_file, ctx, 0) {
+            if let CollectedType::TypeOf(_) = unwrap_at_file(target)
+                && let Some(keys) = super::evaluate::keys_of(target, consuming_file, ctx, 0) {
                     return super::primitives::union_of(keys.into_iter().map(|key| PropType::StringLiteral(key.name)));
                 }
-            }
             let diag = opaque_diagnostic("a standalone 'keyof'", ct, consuming_file);
             OpaqueDetail::give_up(state, ct.to_raw_string(), OpaqueReason::MappedType, diag)
         }

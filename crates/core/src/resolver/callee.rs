@@ -75,11 +75,10 @@ pub(super) fn result_chain(
         );
         // An explicit `any` from the selected payload absorbs the conditional's tentative type in an intersection.
         for prop in &fallback.props {
-            if matches!(prop.prop_type, PropType::Any) {
-                if let Some(existing) = chain.props.iter_mut().find(|existing| existing.name == prop.name) {
+            if matches!(prop.prop_type, PropType::Any)
+                && let Some(existing) = chain.props.iter_mut().find(|existing| existing.name == prop.name) {
                     *existing = Arc::clone(prop);
                 }
-            }
         }
         chain.merge_parent(fallback);
     }
@@ -227,13 +226,12 @@ fn value_member_props_at_depth(
     let (_, declared) = lookup_type_alias(ctx, base_file.as_str(), &format!("typeof {base_name}"))?;
     let name = match declared {
         CollectedTypeAlias::Passthrough { target: named @ CollectedType::Named { .. }, .. } => {
-            if let Some((member_type, member_file)) = super::evaluate::member(named, &member, &base_file, ctx, 0) {
-                if let Some((props, file, _)) =
+            if let Some((member_type, member_file)) = super::evaluate::member(named, &member, &base_file, ctx, 0)
+                && let Some((props, file, _)) =
                     component_props_type(&member_type, &member_file, ctx, depth + 1, &mut None)
                 {
                     return Some((props, file));
                 }
-            }
             let CollectedType::Named { name, .. } = named else { return None };
             name
         }
@@ -310,11 +308,9 @@ fn component_props_type(
                 // A value declared with a React component type, `declare const Option: React.FC<OptionProps>`.
                 if let Some((_, CollectedTypeAlias::Passthrough { target, .. })) =
                     lookup_type_alias(ctx, canonical_file.as_str(), &format!("typeof {canonical_name}"))
-                {
-                    if let Some(found) = component_props_type(target, &canonical_file, ctx, depth + 1, declared_in) {
+                    && let Some(found) = component_props_type(target, &canonical_file, ctx, depth + 1, declared_in) {
                         return Some(found);
                     }
-                }
                 let (base, member) = name.rsplit_once('.')?;
                 let (props, props_file) = value_member_props_at_depth(base, member, file, ctx, depth + 1)?;
                 return Some((props, props_file, Vec::new()));

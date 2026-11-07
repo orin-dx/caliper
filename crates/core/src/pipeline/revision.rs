@@ -819,11 +819,10 @@ fn parse_source_file(path: &Utf8Path, cache: &DtsCache) -> (SourceData, Option<D
         Ok(s) => (s, None),
         Err(e) => (String::new(), Some(Diagnostic::io_read_error(path, &e))),
     };
-    if is_dts {
-        if let Some(cached) = cache.get(path, &source) {
+    if is_dts
+        && let Some(cached) = cache.get(path, &source) {
             return (cached, io_diag);
         }
-    }
     let data = crate::extractor::parse_file(path, &source);
     if is_dts {
         cache.insert(path, &source, data.clone());

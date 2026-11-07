@@ -73,11 +73,10 @@ pub(super) fn mark_args<'a>(
     let args = &*pinned;
     if state.binds_nothing() {
         // Whether a name is bound here is not looked up name by name: a state that binds any name marks differently.
-        if let Some(reads) = state.reads.as_mut() {
-            if reads.entered_scopes == 0 {
+        if let Some(reads) = state.reads.as_mut()
+            && reads.entered_scopes == 0 {
                 reads.needs_empty_scope = true;
             }
-        }
         return pinned;
     }
     let mut names: Vec<CompactString> = args.iter().flat_map(CollectedType::referenced_names).collect();

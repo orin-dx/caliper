@@ -247,13 +247,11 @@ async fn session(
         return Err(error);
     }
 
-    if let (Some(path), Some(recording)) = (&request.record_to, rpc.recording()) {
-        if let Ok(json) = serde_json::to_string_pretty(&recording) {
-            if let Err(error) = std::fs::write(path, json) {
+    if let (Some(path), Some(recording)) = (&request.record_to, rpc.recording())
+        && let Ok(json) = serde_json::to_string_pretty(&recording)
+            && let Err(error) = std::fs::write(path, json) {
                 tracing::warn!("could not write the recording to {path}: {error}");
             }
-        }
-    }
     tracing::debug!(
         requests = ?rpc.calls(),
         files = files.len(),

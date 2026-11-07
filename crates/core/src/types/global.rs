@@ -268,11 +268,10 @@ impl ResolveState {
             return true;
         }
         let found = self.binds(name);
-        if let Some(reads) = self.reads.as_mut() {
-            if reads.entered_scopes == 0 {
+        if let Some(reads) = self.reads.as_mut()
+            && reads.entered_scopes == 0 {
                 reads.in_scope.push((CompactString::from(name), found));
             }
-        }
         found
     }
 

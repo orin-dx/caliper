@@ -120,11 +120,10 @@ fn read_keys(
     mut on_key: impl FnMut(KeyEvent) -> Option<i32>,
 ) -> std::io::Result<i32> {
     loop {
-        if let Event::Key(key) = next()? {
-            if let Some(code) = on_key(key) {
+        if let Event::Key(key) = next()?
+            && let Some(code) = on_key(key) {
                 return Ok(code);
             }
-        }
     }
 }
 

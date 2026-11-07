@@ -236,21 +236,19 @@ pub(super) fn resolve_indexed_access(
 
     // Try to resolve the object type and look for the key.
     let obj_resolved = resolve_collected_type(obj, consuming_file, ctx, state, depth + 1);
-    if let PropType::Object(fields) = &obj_resolved {
-        if let Some(field) = fields.iter().find(|f| f.is_member() && f.name == key_str) {
+    if let PropType::Object(fields) = &obj_resolved
+        && let Some(field) = fields.iter().find(|f| f.is_member() && f.name == key_str) {
             return field.prop_type.clone();
         }
-    }
 
     // TypeScript resolves the object type of an indexed access by the one path every reference to it takes, then reads
     // the property from the type that gave (`getIndexedAccessType`). The members of a named type are its props chain,
     // the one an `extends` of the same type would read: `ComponentPropsWithoutRef<typeof Tooltip>` is `Tooltip`'s props
     // there, so it is here.
-    if let (CollectedType::Named { name, args }, false) = (obj, key_str.is_empty()) {
-        if let Some(found) = read_from_props_chain(name, args, key_str, consuming_file, ctx, state) {
+    if let (CollectedType::Named { name, args }, false) = (obj, key_str.is_empty())
+        && let Some(found) = read_from_props_chain(name, args, key_str, consuming_file, ctx, state) {
             return found;
         }
-    }
 
     let expression = format!("{}[{}]", obj.to_raw_string(), key.to_raw_string());
     let diagnostic = Diagnostic {

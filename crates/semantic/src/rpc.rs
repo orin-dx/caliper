@@ -228,11 +228,10 @@ impl Rpc {
             *calls.entry(method.to_string()).or_default() += 1;
         }
         let answer = self.client.request(method, params.clone(), self.deadline).await.map_err(classify)?;
-        if let Some(log) = &self.recording {
-            if let Ok(mut log) = log.lock() {
+        if let Some(log) = &self.recording
+            && let Ok(mut log) = log.lock() {
                 log.push(json!({ "method": method, "params": params, "result": answer.value }));
             }
-        }
         Ok(answer.value)
     }
 

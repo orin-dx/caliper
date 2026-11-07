@@ -28,12 +28,11 @@ fn canonicalize_best_effort(path: &Utf8Path) -> Utf8PathBuf {
     if let Ok(p) = crate::canonical_path::canonicalize(path) {
         return p;
     }
-    if let (Some(parent), Some(file_name)) = (path.parent(), path.file_name()) {
-        if let Ok(mut p) = crate::canonical_path::canonicalize(parent) {
+    if let (Some(parent), Some(file_name)) = (path.parent(), path.file_name())
+        && let Ok(mut p) = crate::canonical_path::canonicalize(parent) {
             p.push(file_name);
             return p;
         }
-    }
     path.to_owned()
 }
 

@@ -66,12 +66,11 @@ pub(super) fn find_declaration<'g>(
     let imported = resolve_to_canonical(name, consuming_file, ctx, &mut state.diagnostics);
     // A name no import binds is looked up from where it is written outward: a declaration local to the function,
     // block or `switch` case that encloses it comes before any other of the name, an alias at module level included.
-    if let (None, Some(scope)) = (&imported, state.declared_in.as_deref()) {
-        if let Some(local) = ctx.named_types.lookup_local_interface(consuming_file, name, scope) {
+    if let (None, Some(scope)) = (&imported, state.declared_in.as_deref())
+        && let Some(local) = ctx.named_types.lookup_local_interface(consuming_file, name, scope) {
             super::deps::record(consuming_file);
             return (consuming_file.to_owned(), name.to_owned(), Some(Declared::Interface(local)));
         }
-    }
     let (canonical_file, canonical_name) = imported.unwrap_or_else(|| (consuming_file.to_owned(), name.to_owned()));
 
     if let Some((matched_key, alias)) = lookup_type_alias(ctx, canonical_file.as_str(), &canonical_name) {

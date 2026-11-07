@@ -213,11 +213,10 @@ fn resolve_named_uncycled(
     // cannot be expanded without a type-checker. Return Named silently.
     let bare = name.strip_prefix("React.").unwrap_or(name.as_str());
     // A lib alias that evaluates (`Exclude`, `Extract`, `NonNullable`) is read from TypeScript's own definition.
-    if !args.is_empty() {
-        if let Some(evaluated) = evaluate_lib_alias(bare, args, consuming_file, ctx, state, depth) {
+    if !args.is_empty()
+        && let Some(evaluated) = evaluate_lib_alias(bare, args, consuming_file, ctx, state, depth) {
             return evaluated;
         }
-    }
     if super::is_ts_utility_type(bare)
         || matches!(
             bare,
@@ -327,8 +326,8 @@ fn expand_alias(
     let args = &*super::substitute::mark_args(ctx, state, args_file, args);
     let subst =
         super::substitute::bind_declared(params, defaults, args, args_file, declared_file, &mut state.diagnostics);
-    if let Some(param) = super::evaluate::distributive_param(alias) {
-        if let Some(bound) = subst.get(param) {
+    if let Some(param) = super::evaluate::distributive_param(alias)
+        && let Some(bound) = subst.get(param) {
             let members = literal_members(super::evaluate::union_members(bound, args_file, ctx, 0), ctx, state, depth);
             if members.len() != 1 {
                 let caller = state.enter_scope(TypeScope::default());
@@ -345,7 +344,6 @@ fn expand_alias(
                 return super::primitives::union_of(results);
             }
         }
-    }
     let caller = state.enter_scope(TypeScope::default());
     let expanded = resolve_type_alias_type(&super::substitute::substitute_alias(alias, &subst), ctx, state, depth);
     state.leave_scope(caller);

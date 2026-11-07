@@ -482,11 +482,10 @@ impl ResolutionContext {
         prop.structural_hash(&mut hasher);
         let key = hasher.finish();
         // Nearly every call finds the prop already built, so look under the shard's shared lock first.
-        if let Some(bucket) = self.shared_props.get(&key) {
-            if let Some(found) = bucket.iter().find(|shared| ***shared == prop) {
+        if let Some(bucket) = self.shared_props.get(&key)
+            && let Some(found) = bucket.iter().find(|shared| ***shared == prop) {
                 return Arc::clone(found);
             }
-        }
         let mut bucket = self.shared_props.entry(key).or_default();
         // Another thread may have added it between the two locks.
         if let Some(found) = bucket.iter().find(|shared| ***shared == prop) {
