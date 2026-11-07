@@ -899,12 +899,47 @@ impl<'src> SourceDataCollector<'src> {
             }
 
             TSType::TSTypeLiteral(lit) => {
-                let fields: Vec<CollectedObjectField> = lit
+                let callables = lit
                     .members
                     .iter()
-                    .filter_map(|member| self.ts_signature_to_object_field(member, depth + 1))
-                    .collect();
-                CollectedType::Object(fields)
+                    .filter(|member| {
+                        matches!(
+                            member,
+                            TSSignature::TSCallSignatureDeclaration(_) | TSSignature::TSConstructSignatureDeclaration(_)
+                        )
+                    })
+                    .count();
+                if callables > 0 {
+                    // `{ (a: string): number }` is a function type. Anything else with a call or construct signature
+                    // (overloads, a callable that also has properties) has no `Function` form, and an object of its
+                    // fields would drop the signatures without a word, so it is kept as written and degrades.
+                    match lit.members.as_slice() {
+                        [TSSignature::TSCallSignatureDeclaration(call)] => {
+                            let (params, param_names, param_kinds) =
+                                collect_params(&call.params, |t| self.ts_type_to_collected_at_depth(t, depth + 1));
+                            let return_type = call
+                                .return_type
+                                .as_ref()
+                                .map(|rt| self.ts_type_to_collected_at_depth(&rt.type_annotation, depth + 1))
+                                .unwrap_or(CollectedType::Any);
+                            CollectedType::Function {
+                                type_params: type_param_names(call.type_parameters.as_deref()),
+                                params,
+                                param_names,
+                                param_kinds,
+                                return_type: Box::new(return_type),
+                            }
+                        }
+                        _ => CollectedType::Raw(self.source[lit.span.start as usize..lit.span.end as usize].to_owned()),
+                    }
+                } else {
+                    let fields: Vec<CollectedObjectField> = lit
+                        .members
+                        .iter()
+                        .filter_map(|member| self.ts_signature_to_object_field(member, depth + 1))
+                        .collect();
+                    CollectedType::Object(fields)
+                }
             }
 
             TSType::TSFunctionType(f) => {

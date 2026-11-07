@@ -875,14 +875,31 @@ pub(super) fn resolve_type_alias_type(
         CollectedTypeAlias::Intersection { members, .. } => {
             super::primitives::resolve_intersection(members, file_path, ctx, state, depth)
         }
-        CollectedTypeAlias::Partial { base, .. } | CollectedTypeAlias::Required { base, .. } => {
-            resolve_collected_type(base, file_path, ctx, state, depth + 1)
+        // The utility the alias wraps, rebuilt as the reference the author wrote, so `type S = Partial<Record<K, V>>`
+        // reaches the output as `Partial<Record<K, V>>` exactly as the same text written in a prop does. Forwarding
+        // to the base dropped the wrapper: every key came out required, `Omit` kept the omitted key.
+        CollectedTypeAlias::Partial { base, .. } => utility_reference("Partial", [base], file_path, ctx, state, depth),
+        CollectedTypeAlias::Required { base, .. } => utility_reference("Required", [base], file_path, ctx, state, depth),
+        CollectedTypeAlias::Omit { base, keys, .. } => {
+            utility_reference("Omit", [base, keys], file_path, ctx, state, depth)
         }
-        CollectedTypeAlias::Omit { base, .. } | CollectedTypeAlias::Pick { base, .. } => {
-            // At the type level, just forward to the base type.
-            resolve_collected_type(base, file_path, ctx, state, depth + 1)
+        CollectedTypeAlias::Pick { base, keys, .. } => {
+            utility_reference("Pick", [base, keys], file_path, ctx, state, depth)
         }
     }
+}
+
+/// `name<args>` resolved as a type written in `file_path`, the way a prop's own `Partial<…>` is.
+fn utility_reference<'a>(
+    name: &str,
+    args: impl IntoIterator<Item = &'a CollectedType>,
+    file_path: &Utf8Path,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> PropType {
+    let reference = CollectedType::Named { name: name.into(), args: args.into_iter().cloned().collect() };
+    resolve_collected_type(&reference, file_path, ctx, state, depth + 1)
 }
 
 /// The key set a `Pick`/`Omit` key expression denotes, or a warning and `None` when it can't be known statically.
