@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01QiDnuUWChSX3oj2JkbSaBT",
+  "agent_id": "a7160ab3364b1af57",
+  "subagent_type": "general-purpose",
+  "task_description": "Measure addon handoff for opaque props",
+  "token_usage": {
+    "input_tokens": 110,
+    "cache_creation_tokens": 115103,
+    "cache_read_tokens": 5779899,
+    "output_tokens": 23307,
+    "api_call_count": 55
+  },
+  "started_at": "2026-11-06T19:07:29.159097-08:00",
+  "completed_at": "2026-11-06T19:14:59.921124-08:00"
+}
