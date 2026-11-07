@@ -1,0 +1,139 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6VXDBPD4QWBZ3YA1FGYPP5G",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-07T21:08:01.227032Z",
+  "branch": "fix/storybook-control-projection",
+  "checkpoints_count": 7,
+  "save_step_count": 59,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "8ebe71fda55c",
+  "checkpoint_transcript_start": 13149,
+  "transcript_lines_at_start": 13149,
+  "compact_transcript_start": 1128,
+  "token_usage": {
+    "input_tokens": 40,
+    "cache_creation_tokens": 44331,
+    "cache_read_tokens": 7831577,
+    "output_tokens": 19841,
+    "api_call_count": 18,
+    "subagent_tokens": {
+      "input_tokens": 271,
+      "cache_creation_tokens": 411677,
+      "cache_read_tokens": 17877661,
+      "output_tokens": 114734,
+      "api_call_count": 137
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 310
+  },
+  "summary": {
+    "intent": "Triage and resolve code-review findings on several stacked PRs (#181/#384 pipe-in-literal projection, #176/#379 local-interface scoping), and research whether oxc's tsrs type checker and a construct-by-construct matrix can help fix silent wrong-type defects in the caliper prop-type extractor.",
+    "outcome": "Findings were confirmed valid and handed to workers (fixes for #384 and #379 still in progress); Batch 1 of resolver defects landed as draft PR #385 with passing local tests; the construct matrix was produced, and the tsrs analysis was sent back to the worker after it wrongly reported that oxc has no type checker.",
+    "learnings": {
+      "repo": [
+        "Fixes for PR #384 and #379 are being done by workers on the same branches; review findings cannot be marked resolved by the agent. A clean re-review on the new commit clears them, and invalid findings need a user-run dismissal command because dismissals are denied for the agent.",
+        "Scope-passing code in the resolver has had two review rounds. The invariant is that a declaration body must be resolved under that declaration's own scope, not the reference site's, and cycle detection should key on the resolved declaration, not just file, name and args.",
+        "The evaluator has roughly 26 scope-less call sites, which docs/edge-cases.md already lists as a known gap in #379.",
+        "Storybook's proptypes converter splits a raw type name on every `|` and JSON-parses each piece, so string literals containing `|`, `\"` or `\\` break the raw-name boolean-union form and degrade the control to `object`.",
+        "The direct path keeps `Omit<Base,'x'>` and `Pick` as wrappers around the full base without filtering keys; alias paths in #385 now match that.",
+        "CACHE_SCHEMA_VERSION was not bumped in #385 because the serialized shape is unchanged; the claim that the build fingerprint covers extractor-only changes is unverified.",
+        "The stack is #379 <- #385 (Batch 1, trail #255), so #385 must be rebased after #379 settles. The two touch overlapping resolver files.",
+        "oxc has no type checker of its own: oxc_semantic provides per-file scopes and symbols, oxc_isolated_declarations only copies or infers obvious annotations, and type-aware linting spawns the external tsgolint (Go), the same architecture as crates/tsc-client. oxc-project/tsrs is a separate repo containing a Rust port of the TS7 checker."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/types/output.rs",
+          "line": 623,
+          "finding": "Review finding location: the raw-name fallback for boolean unions breaks literals containing `|`."
+        },
+        {
+          "path": "crates/core/src/pipeline/rdt.rs",
+          "line": 27,
+          "finding": "Raw-name fallback for unions with a boolean member."
+        },
+        {
+          "path": "packages/storybook/src/arg-types.ts",
+          "line": 31,
+          "finding": "The addon forwards the raw type name unchanged to Storybook's converter."
+        },
+        {
+          "path": "crates/core/src/resolver/alias.rs",
+          "line": 878,
+          "end_line": 884,
+          "finding": "On main 644df655, Partial/Required/Omit/Pick aliases were forwarded to their base type (silent wrong type); #385 fixes this."
+        },
+        {
+          "path": "crates/core/src/resolver/primitives.rs",
+          "line": 105,
+          "end_line": 128,
+          "finding": "`'a' | (string & {})` loses the `& {}`."
+        },
+        {
+          "path": "crates/core/src/extractor/mod.rs",
+          "line": 1001,
+          "end_line": 1013,
+          "finding": "Tuple optional elements and labels are dropped, and a rest element becomes a double array (line 1006); PropType::Tuple cannot represent them."
+        },
+        {
+          "path": "crates/core/src/extractor/mod.rs",
+          "line": 1070,
+          "finding": "Getter members become function fields because the signature kind is ignored, and overloads become two fields."
+        },
+        {
+          "path": "crates/core/src/extractor/mod.rs",
+          "line": 943,
+          "finding": "A mapped type's `as` clause and `readonly` modifier are not read."
+        },
+        {
+          "path": "crates/core/src/types/output.rs",
+          "line": 1216,
+          "finding": "PropType::degraded_by did not walk `index_key` (fixed in #385)."
+        }
+      ],
+      "workflow": [
+        "Check upstream sources properly before claiming a tool does not exist; the user caught the agent answering from memory after checking only local copies.",
+        "For recurring review findings, enumerate entry points and build a test table by entry point against scenario, and state the invariant with its single enforcement point, before implementing.",
+        "Require failing-first tests on real source, and prove nothing else moved with unchanged snapshots and a byte-identical output check against main.",
+        "Subagent briefs can carry wrong facts (the 'TS does not reduce literal | string' claim was wrong) and workers can miss later corrections, so re-send corrections and have workers verify against the real checker."
+      ]
+    },
+    "friction": [
+      "The agent's initial answer that oxc has no type checker was wrong, caused by shallow lookup; the user had to correct it.",
+      "The construct-matrix worker went idle still saying 'oxc has no type checker' because it never saw the correction, so the tsrs analysis had to be re-requested.",
+      "The brief said TS does not reduce `'a'|'b'|string`, which is false; the worker corrected it.",
+      "The #176 change showed 4 open findings, not the 3 the user mentioned.",
+      "The worker's checkout was 56 files behind main, so line numbers differ between its report and the working branch.",
+      "Performance evidence for #385 is thin: only the small fixtures/chakra fixture was used, because Mantine is not installed and corpora are not to be fetched.",
+      "Entire Gates on #385 was still pending, and some snapshot tests fail in the worker's worktree on environment issues."
+    ],
+    "open_items": [
+      "Rebase #385 onto #379 after the #379 findings fix lands.",
+      "Await the #379 findings worker and the #384 `|`-in-literal projection fix, then re-review.",
+      "Get the tsrs analysis from the construct-matrix worker (library vs binary, tsc-client API compatibility, pseudochecker, React-type conformance gaps, memory and speed, risks, smallest experiment), with the full report at /tmp/claude-501/ast/FINAL.txt.",
+      "Plan Batch 2: tuple optional/labelled/rest elements, getter and overload members, `string & {}` loss, mapped-type `as`/`readonly`, and computed-key property signatures that are still silently dropped.",
+      "Verify the claim that the build fingerprint covers extractor-only changes, so no CACHE_SCHEMA_VERSION bump is needed.",
+      "Measure #385 at scale on the full Chakra package or Mantine.",
+      "User action needed on #379, #380 (CI), #384, #385 (after #379) and #291.",
+      "If any finding is judged invalid, give the user the exact dismissal command."
+    ]
+  }
+}
