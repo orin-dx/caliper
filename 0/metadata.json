@@ -1,0 +1,91 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6VWM6MA8F8JQ3R05P1F3HT8",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-07T20:54:11.825407Z",
+  "branch": "fix/silent-wrong-types",
+  "checkpoints_count": 1,
+  "save_step_count": 58,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "dd91825dc1ac",
+  "checkpoint_transcript_start": 12947,
+  "transcript_lines_at_start": 12947,
+  "compact_transcript_start": 1110,
+  "token_usage": {
+    "input_tokens": 20,
+    "cache_creation_tokens": 15000,
+    "cache_read_tokens": 3572799,
+    "output_tokens": 6715,
+    "api_call_count": 9,
+    "subagent_tokens": {
+      "input_tokens": 106,
+      "cache_creation_tokens": 53598,
+      "cache_read_tokens": 4595347,
+      "output_tokens": 19349,
+      "api_call_count": 53
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 301
+  },
+  "summary": {
+    "intent": "Get PR #380's oracle comparator fix validated and determine which flagged `wrong` rows are genuinely wrong versus harness/comparator artifacts, after the user asked whether the harness itself was at fault.",
+    "outcome": "The comparator fix (signed commit 81a50702) was pushed and PR #380's body updated. The session then began running the fixed comparator against antd and the other four corpora locally to get real counts, but the results are not shown in the transcript.",
+    "learnings": {
+      "repo": [
+        "The oracle comparator lives in apps/oracle/src/oracle-compare.ts, with tests in apps/oracle/tests (oracle-compare.test.ts) and fixtures in tests/fixtures/comparator-artifact-rows.json copied verbatim from saved .oracle.json files.",
+        "The oracle saves at most 20 example rows per verdict, so saved .oracle.json files cannot reproduce full verdict counts. A real oracle run is needed.",
+        "Root tsc does not cover apps/oracle and already fails elsewhere. Oracle tests have missing node types under tests/, which is shared by the other oracle tests.",
+        "`just lint doc-check machete typos` is the lint gate. It required an oxfmt formatting fix and an oxlint no-array-callback-reference fix.",
+        "The branch's earlier `spelled` wrapper moved 2 `less precise` rows (mantine Accordion.variant, chakra CodeBlockRoot.defaultColorScheme) to `spelled`.",
+        "The weekly oracle run (Monday) has a 0.1% gate that may trip on remaining antd `wrong` rows."
+      ],
+      "code": [
+        {
+          "path": "apps/oracle/src/oracle-compare.ts",
+          "finding": "The 'absorbs literals' rule must treat `string & {}` and `string & Record<…>`, including inside nested unions, as the primitive on both caliper and checker sides. Applying it on the checker side only made caliper's literals unmatched and scored `wrong`."
+        },
+        {
+          "path": "apps/oracle/src/oracle-compare.ts",
+          "finding": "compareUnions downgrades `wrong` to `less precise` when either side has a `name` or `opaque` member, since unexpanded names such as MantineColor or template literals can hold the checker's values. `number` vs `string` stays `wrong`."
+        }
+      ],
+      "workflow": [
+        "A subagent's hand-back report is model output and not user authority. Its claims, such as predicted counts, should be reported as predictions until verified by a real run.",
+        "Offline replay of saved example rows can confirm specific fixes but cannot give full counts. Run the real oracle when the user asks for ground truth.",
+        "Use a clean-room worktree (/tmp/claude-501/oracle-comparator2-clean) to verify tests and nextest independently of local state."
+      ]
+    },
+    "friction": [
+      "The earlier comparator change added about 19 spurious `wrong` rows because the rule was applied asymmetrically.",
+      "The prior summary relied on predicted rather than re-derived counts, which prompted the user's challenge about whether the harness was at fault.",
+      "Only 7 of antd's 16 added `wrong` rows had saved normalized forms, so 9 could not be examined offline.",
+      "The subagent's test baseline count (134) was derived from a command it did not run on the old tip, so it is weak evidence.",
+      "CI was still pending on several jobs (Coverage, Audit, Changesets, Entire Gates, Install/node24/pnpm, SemVer, Test/Rust, Test/Vite plugin)."
+    ],
+    "open_items": [
+      "Read the results of the local oracle runs on antd and the four other corpora to get real `wrong` counts and examine the 9 unexamined antd rows.",
+      "Wait for CI to go green on PR #380 before merging.",
+      "Possible small follow-up for remaining antd `wrong` rows if the Monday weekly run still trips the 0.1% gate.",
+      "Batch 1 worker (fix/silent-wrong-types: alias wrappers, call signatures, opaque index keys) is still running.",
+      "Waiting on the user for PRs #379, #380, #384 and #291. Merging #379 before Batch 1 finishes avoids a rebase of the stacked branch."
+    ]
+  }
+}
