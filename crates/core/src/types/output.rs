@@ -614,16 +614,37 @@ impl PropType {
     }
 
     /// True if this type offers string or number options, which RDT output writes as an `enum` so Storybook shows the
-    /// options as a radio: a union of string and number literals, or a single one. A boolean member is not an option
-    /// Storybook can carry (it unquotes each option's source text into a string or a number, and its own docgen gives
-    /// such a union no options), and a union with no members has nothing to offer.
+    /// options as a radio: a union of string and number literals, or a single one. A union that also has a boolean
+    /// member is an enum only when Storybook cannot read it from its type name (see `reads_as_json_options`), because
+    /// the enum shape turns `true` into the string "true". A union with no members, or only booleans, has nothing to
+    /// offer.
     pub fn is_literal_union(&self) -> bool {
         let is_option = |m: &PropType| matches!(m, PropType::StringLiteral(_) | PropType::NumberLiteral(_));
         match self {
-            PropType::Union(members) => !members.is_empty() && members.iter().all(is_option),
+            PropType::Union(members) => {
+                let is_literal = |m: &PropType| is_option(m) || matches!(m, PropType::BoolLiteral(_));
+                members.iter().any(is_option) && members.iter().all(is_literal) && !self.reads_as_json_options()
+            }
             PropType::LiteralUnion { members, .. } => !members.is_empty(),
             single => is_option(single),
         }
+    }
+
+    /// True for a union with a boolean member whose type name Storybook reads whole: it splits the name at each `|` and
+    /// parses every part as JSON, which gives `true` as a real boolean. That holds only while every member's source
+    /// text is one JSON value that parses back to the member and holds no `|`. A string with a `|`, a `"` or a `\`
+    /// does not, and the union is then an `enum` so that no option is lost.
+    fn reads_as_json_options(&self) -> bool {
+        let PropType::Union(members) = self else { return false };
+        members.iter().any(|m| matches!(m, PropType::BoolLiteral(_)))
+            && members.iter().all(|m| match m {
+                PropType::StringLiteral(s) => {
+                    !s.contains('|')
+                        && serde_json::from_str::<std::string::String>(&m.raw_string()).is_ok_and(|parsed| parsed == *s)
+                }
+                PropType::NumberLiteral(_) | PropType::BoolLiteral(_) => true,
+                _ => false,
+            })
     }
 
     /// Raw type string for display (e.g. in RDT PropItemType.raw)

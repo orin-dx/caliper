@@ -741,9 +741,12 @@ mod is_literal_union_tests {
     }
 
     #[test]
-    fn a_boolean_member_and_an_empty_union_are_not_enums() {
+    fn a_union_storybook_reads_from_its_name_and_an_empty_union_are_not_enums() {
         let mixed = PropType::Union(vec![PropType::StringLiteral("a".into()), PropType::BoolLiteral(true)]);
         assert!(!mixed.is_literal_union());
+        // Text Storybook cannot split and parse from the type name keeps the options as an enum.
+        let piped = PropType::Union(vec![PropType::StringLiteral("a|b".into()), PropType::BoolLiteral(true)]);
+        assert!(piped.is_literal_union());
         assert!(!PropType::BoolLiteral(true).is_literal_union());
         assert!(!PropType::Union(vec![PropType::BoolLiteral(true)]).is_literal_union());
         assert!(!PropType::Union(vec![]).is_literal_union());

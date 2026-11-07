@@ -665,6 +665,43 @@ fn rdt_type_json_boolean_in_a_mixed_literal_union_is_never_a_string_option() {
     );
 }
 
+/// Storybook splits a type name at `|` and `JSON.parse`s each part. Run through its real `extractArgTypes`, the type
+/// names below made `value?: 'a|b' | true` an `object` control and turned `'a\\b'` into a backspace, so a union whose
+/// text does not survive that is an enum, whose options keep the literals ("true" then is the string).
+#[test]
+fn rdt_type_json_boolean_union_with_text_storybook_would_split_or_misparse_stays_an_enum() {
+    let with_bool = |literal: PropType, last: PropType| PropType::Union(vec![literal, last]);
+    assert_eq!(
+        rdt_type_json(&with_bool(PropType::StringLiteral("a|b".into()), PropType::BoolLiteral(true))),
+        serde_json::json!({"name": "enum", "raw": "\"a|b\" | true", "value": [{"value": "\"a|b\""}, {"value": "true"}]})
+    );
+    assert_eq!(
+        rdt_type_json(&with_bool(PropType::StringLiteral("a\"b".into()), PropType::BoolLiteral(true))),
+        serde_json::json!({"name": "enum", "raw": "\"a\"b\" | true", "value": [{"value": "\"a\"b\""}, {"value": "true"}]})
+    );
+    let backslash = PropType::Union(vec![
+        PropType::StringLiteral("a\\b".into()),
+        PropType::NumberLiteral(1.0),
+        PropType::BoolLiteral(false),
+    ]);
+    assert_eq!(
+        rdt_type_json(&backslash),
+        serde_json::json!({"name": "enum", "raw": "\"a\\b\" | 1 | false", "value": [{"value": "\"a\\b\""}, {"value": "1"}, {"value": "false"}]})
+    );
+    // Guards: safe text keeps the type name (a real boolean option); no boolean keeps the enum.
+    let safe = PropType::Union(vec![
+        PropType::StringLiteral("a".into()),
+        PropType::NumberLiteral(1.0),
+        PropType::BoolLiteral(true),
+    ]);
+    assert_eq!(rdt_type_json(&safe), serde_json::json!({"name": "\"a\" | 1 | true"}));
+    let no_bool = with_bool(PropType::StringLiteral("a|b".into()), PropType::StringLiteral("c".into()));
+    assert_eq!(
+        rdt_type_json(&no_bool),
+        serde_json::json!({"name": "enum", "raw": "\"a|b\" | \"c\"", "value": [{"value": "\"a|b\""}, {"value": "\"c\""}]})
+    );
+}
+
 #[test]
 fn rdt_type_json_non_literal_unions_and_ordinary_types_are_unchanged() {
     assert_eq!(rdt_type_json(&PropType::String), serde_json::json!({"name": "string"}));

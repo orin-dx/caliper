@@ -10,9 +10,10 @@ use crate::types::{ComponentEntry, ExtractionOutput, ParsedProp, PropType};
 /// common, most curated props in any design system (variant, size, color…).
 /// A single string or number literal is a one-option enum, as Storybook's own docgen has it.
 ///
-/// Storybook unquotes each option's source text into a string or a number, so a union with a boolean member has no
-/// enum shape (`"true"` would reach the control as a string); it stays a type name, which Storybook's converter splits
-/// at the `|` and parses as JSON into the options `["a", 1, true]`.
+/// Storybook unquotes each option's source text into a string or a number, so `true` in an enum would reach the control
+/// as the string "true". A union with a boolean member therefore stays a type name, which Storybook's converter splits
+/// at the `|` and parses as JSON into the options `["a", 1, true]`, unless a member's text would not survive that (a
+/// string holding `|`, `"` or `\`); it is then an enum, so that no option is lost.
 pub fn type_json(prop_type: &PropType) -> serde_json::Value {
     if prop_type.is_literal_union() {
         let values: Vec<serde_json::Value> = match prop_type {
