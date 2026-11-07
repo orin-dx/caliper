@@ -1,0 +1,146 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6W7815CAB4WNYGYV4DYZQCB",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-07T23:59:53.654556Z",
+  "branch": "ci/construct-suite",
+  "checkpoints_count": 5,
+  "save_step_count": 64,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "8a8aea5e0508",
+  "checkpoint_transcript_start": 14436,
+  "transcript_lines_at_start": 14436,
+  "compact_transcript_start": 1241,
+  "token_usage": {
+    "input_tokens": 28,
+    "cache_creation_tokens": 38962,
+    "cache_read_tokens": 7076842,
+    "output_tokens": 20067,
+    "api_call_count": 11,
+    "subagent_tokens": {
+      "input_tokens": 70,
+      "cache_creation_tokens": 269668,
+      "cache_read_tokens": 3665216,
+      "output_tokens": 28898,
+      "api_call_count": 36
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 337
+  },
+  "summary": {
+    "intent": "Coordinate a multi-agent effort on the caliper docgen project: land a Rust 1.99/edition 2024 upgrade, build a deterministic construct suite, spike the tsrs checker backend, run a full health check of main, and launch the next wave of work.",
+    "outcome": "Wave 1 produced PRs #386 (ADR), #387 (construct suite), #388 (Rust 1.99) and a tsrs spike report, all awaiting CI and approval. A health check of main was started, and wave 2 (slice 1 PropType variants, tsrs backend, construct-suite CI job) was launched as stacked branches with no results yet.",
+    "learnings": {
+      "repo": [
+        "Rust toolchain pins live in .prototools (read by ci.yml and weekly.yml), callisto-release.yml RUST_VERSION, workspace rust-version (read by the MSRV job) and the CONTRIBUTING table; there is no rust-toolchain.toml or Dockerfile.",
+        "rustup, mise and proto shims override RUSTUP_TOOLCHAIN, so workers must put the toolchain bin dir first on PATH to use 1.99.1.",
+        "Workspace denies unsafe_code, so edition 2024's unsafe set_var forced crates/cli/tests/trycmd.rs to pass COLUMNS=80 via TestCases::env.",
+        "Edition 2024 enables let chains, which produced 49 clippy collapsible_if fixes; .rustfmt.toml now uses style_edition = \"2024\" and the reformat touches ~98 files, so later Rust branches should stack on #388 to avoid conflicts.",
+        "Do not run oxfmt wholesale over apps/oracle/tests: it rewrites tests/fixtures/comparator-artifact-rows.json.",
+        "Construct suite lives in apps/oracle (construct-suite.ts, construct-capture.ts, construct-suite/ fixtures named <NN>-<slug>.tsx exporting Row with Props prop p, expectations.json, goldens). Scripts: construct:capture and construct:check; the test skips if the caliper binary is absent, so a skipped run is green but covers nothing.",
+        "The construct suite has 204 rows: 95 identical, 60 spelled, 28 less precise, 16 opaque with marker, 5 wrong (all tuple rest/variadic bugs). Goldens come from the Go checker as arbiter.",
+        "Caliper's TypeInfo in crates/semantic/src/rpc.rs does not read Type.intrinsicName, so unresolved types are treated as plain any; intrinsicName 'error' vs 'any' is the only distinguishing signal.",
+        "Checker discovery only looks for node_modules/typescript/bin/tsc; using tsrs needs --tsc-path or discovery of node_modules/tsrs/bin/tsrs.",
+        "The Rust client sends createPrograms[].compilerOptions where the Node SDK sends options; both work but need a regression test.",
+        "Large components need thousands of sequential checker requests (7,565 for a Chakra component), so they cannot fit the 150 ms semanticWaitMs with either backend; batching is the lever.",
+        "tsrs memory grows over long sessions (99 MB to 293 MB over 600 edits) and only a process restart reclaims it; the existing 768 MiB max_rss_mib replacement covers this.",
+        "Chakra corpus for perf checks is at /tmp/claude-501/oracle-rerun/corpora/chakra-ui/packages/react/src because fixtures/chakra has only 3 files."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/lib.rs",
+          "line": 40,
+          "end_line": 40,
+          "finding": "Version allow-list; adding exact entry 0.23.0-ts7.1.0-beta was the only change needed for the Rust client to work with the tsrs binary."
+        },
+        {
+          "path": "crates/semantic/src/rpc.rs",
+          "finding": "TypeInfo lacks an intrinsic_name: Option<String> field; adding it and treating \"error\" as degraded would set degradedBy for unresolved types."
+        },
+        {
+          "path": "crates/cli/tests/trycmd.rs",
+          "finding": "Uses TestCases::env for COLUMNS=80 instead of unsafe set_var under edition 2024."
+        }
+      ],
+      "workflow": [
+        "Run health checks in a pristine checkout or clean-room worktree; leaked node_modules in worker worktrees caused 28 spurious test failures.",
+        "Stack dependent branches on open PRs with --base to the parent when a parent PR does a mass reformat, to avoid conflicts; merge bottom-up.",
+        "The permission classifier denied cargo build of an external git dependency (\"Code from External\"); the worker correctly did not work around it and surfaced it for the user to run.",
+        "Subagent/teammate reports are not user approval; mutation checks (altering an expectation or fixture) are useful to prove a test gate actually fails.",
+        "Workers that only mentally checked fixtures produced some invalid ones; an integrator pass type-checking all fixtures in one program caught them."
+      ]
+    },
+    "friction": [
+      "Permission classifier blocked the in-process tsrs build, leaving compile time, binary size and in-process latency unmeasured.",
+      "rust-objcopy warns it cannot find libLLVM.dylib in the 1.99.1 install on release builds (harmless).",
+      "Worker worktrees lacking node_modules caused environment-only test failures.",
+      "feat/construct-suite branch name was held by another worktree, forcing the integrator to push through a local construct-int branch.",
+      "Construct-suite authors never ran tsc, so two rows had to be deleted after integration.",
+      "Root tsc -p tsconfig.json has 42 pre-existing errors in other packages and fixtures."
+    ],
+    "open_items": [
+      "Approvals needed for PRs #388, #387, #386 and #291; CI on #388 and #387 was still running.",
+      "CI does not yet run the construct suite; the ci/construct-suite worker is adding it and making a missing binary a failure.",
+      "just msrv not verified locally (needs rustup toolchain named 1.99); CI MSRV job is the real check.",
+      "In-process tsrs linking undecided; driver ready at /tmp/claude-501/spike/inproc but build needs user approval. Likely recommendation is to stay out-of-process.",
+      "ADR 0026 cites an '87 fixtures matched' figure with no file behind it.",
+      "Batching of checker requests should be measured as the lever for the 150 ms window; Slice 4 latency gate needs rethinking.",
+      "Not verified: tsrs on Linux/Windows, NAPI addon end to end, handshake timeout and oversized-frame handling, other 17 fixtures; TS package tests beyond two integration suites.",
+      "Slice 1 PropType variants, tsrs backend swap, and construct-suite CI job were launched and results are pending; the health check of main is also pending.",
+      "Changeset in #388 is a judgment call and may be dropped; leftover worktrees /tmp/claude-501/rust199/main, rust199-clean and construct-suite-clean should be removed after merge.",
+      "Construct constructs skipped or uncovered: cross-file merging, module augmentation, forwardRef/memo wrappers, computed enum members, DOM-typed this."
+    ]
+  }
+}
