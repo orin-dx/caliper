@@ -3,8 +3,8 @@
 import { describe, expect, it } from 'vitest'
 import { compare, prim, type Norm } from '../src/oracle-compare.ts'
 import { rdgNorm, rdtNorm, typeFromText } from '../src/tool-norm.ts'
+import { lit } from './lit.ts'
 
-const lit = (value: string): Norm => ({ k: 'lit', value })
 const union = (...members: Norm[]): Norm => ({ k: 'union', members })
 const name = (value: string): Norm => ({ k: 'name', name: value })
 const opaque: Norm = { k: 'opaque' }
@@ -49,6 +49,7 @@ describe('typeFromText', () => {
       k: 'object',
       fields: ['label', 'root'],
       index: true,
+      indexValue: prim('unknown'),
     })
   })
 
@@ -160,5 +161,37 @@ describe('rdgNorm', () => {
     expect(rdgNorm({ name: 'signature' })).toStrictEqual(opaque)
     expect(rdgNorm({ name: 'union' })).toStrictEqual(opaque)
     expect(rdgNorm(undefined)).toStrictEqual(opaque)
+  })
+})
+
+describe('index signatures and literal kinds in tool text', () => {
+  it('keeps an index signature value type', () => {
+    expect.hasAssertions()
+    expect(typeFromText('{ [key: string]: string }')).toStrictEqual({
+      k: 'object',
+      fields: [],
+      index: true,
+      indexValue: prim('string'),
+    })
+    expect(typeFromText('{ a: number; [key: string]: string | number }')).toMatchObject({
+      fields: ['a'],
+      indexValue: union(prim('string'), prim('number')),
+    })
+  })
+
+  it('a reported index signature of another value type is wrong, not identical', () => {
+    expect.hasAssertions()
+    const checker: Norm = { k: 'object', fields: [], index: true, indexValue: prim('number') }
+    expect(compare(typeFromText('{ [key: string]: string }'), checker)).toBe('wrong')
+    expect(compare(typeFromText('{ [key: string]: number }'), checker)).toBe('identical')
+  })
+
+  it('reads a quoted literal as a string and a bare one as a number', () => {
+    expect.hasAssertions()
+    expect(typeFromText('"0"')).toStrictEqual(lit('0', 'string'))
+    expect(typeFromText('0')).toStrictEqual(lit('0', 'number'))
+    expect(typeFromText('-1')).toStrictEqual(lit('-1', 'number'))
+    expect(typeFromText('true')).toStrictEqual(lit('true', 'boolean'))
+    expect(typeFromText('"true"')).toStrictEqual(lit('true', 'string'))
   })
 })

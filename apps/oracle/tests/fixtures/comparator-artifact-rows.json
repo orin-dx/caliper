@@ -1,0 +1,1005 @@
+{
+ "Badge.color": {
+  "corpus": "antd",
+  "verdictSaved": "wrong",
+  "normalized": {
+   "caliper": {
+    "k": "union",
+    "members": [
+     {
+      "k": "lit",
+      "value": "blue"
+     },
+     {
+      "k": "lit",
+      "value": "purple"
+     },
+     {
+      "k": "lit",
+      "value": "cyan"
+     },
+     {
+      "k": "lit",
+      "value": "green"
+     },
+     {
+      "k": "lit",
+      "value": "magenta"
+     },
+     {
+      "k": "lit",
+      "value": "pink"
+     },
+     {
+      "k": "lit",
+      "value": "red"
+     },
+     {
+      "k": "lit",
+      "value": "orange"
+     },
+     {
+      "k": "lit",
+      "value": "yellow"
+     },
+     {
+      "k": "lit",
+      "value": "volcano"
+     },
+     {
+      "k": "lit",
+      "value": "geekblue"
+     },
+     {
+      "k": "lit",
+      "value": "lime"
+     },
+     {
+      "k": "lit",
+      "value": "gold"
+     },
+     {
+      "k": "intersection",
+      "members": [
+       {
+        "k": "prim",
+        "name": "string"
+       },
+       {
+        "k": "name",
+        "name": "Record"
+       }
+      ]
+     }
+    ]
+   },
+   "checker": {
+    "k": "union",
+    "members": [
+     {
+      "k": "prim",
+      "name": "undefined"
+     },
+     {
+      "k": "lit",
+      "value": "blue"
+     },
+     {
+      "k": "lit",
+      "value": "cyan"
+     },
+     {
+      "k": "lit",
+      "value": "geekblue"
+     },
+     {
+      "k": "lit",
+      "value": "gold"
+     },
+     {
+      "k": "lit",
+      "value": "green"
+     },
+     {
+      "k": "lit",
+      "value": "lime"
+     },
+     {
+      "k": "lit",
+      "value": "magenta"
+     },
+     {
+      "k": "lit",
+      "value": "orange"
+     },
+     {
+      "k": "lit",
+      "value": "pink"
+     },
+     {
+      "k": "lit",
+      "value": "purple"
+     },
+     {
+      "k": "lit",
+      "value": "red"
+     },
+     {
+      "k": "lit",
+      "value": "volcano"
+     },
+     {
+      "k": "lit",
+      "value": "yellow"
+     },
+     {
+      "k": "prim",
+      "name": "string"
+     }
+    ],
+    "alias": "LiteralUnion"
+   }
+  }
+ },
+ "Flex.gap": {
+  "corpus": "antd",
+  "verdictSaved": "wrong",
+  "normalized": {
+   "caliper": {
+    "k": "union",
+    "members": [
+     {
+      "k": "lit",
+      "value": "small"
+     },
+     {
+      "k": "lit",
+      "value": "medium"
+     },
+     {
+      "k": "lit",
+      "value": "middle"
+     },
+     {
+      "k": "lit",
+      "value": "large"
+     },
+     {
+      "k": "intersection",
+      "members": [
+       {
+        "k": "union",
+        "members": [
+         {
+          "k": "lit",
+          "value": "-moz-initial"
+         },
+         {
+          "k": "lit",
+          "value": "inherit"
+         },
+         {
+          "k": "lit",
+          "value": "initial"
+         },
+         {
+          "k": "lit",
+          "value": "revert"
+         },
+         {
+          "k": "lit",
+          "value": "revert-layer"
+         },
+         {
+          "k": "lit",
+          "value": "unset"
+         },
+         {
+          "k": "prim",
+          "name": "string"
+         },
+         {
+          "k": "prim",
+          "name": "number"
+         },
+         {
+          "k": "lit",
+          "value": "normal"
+         }
+        ]
+       },
+       {
+        "k": "name",
+        "name": "Record"
+       }
+      ]
+     }
+    ]
+   },
+   "checker": {
+    "k": "union",
+    "members": [
+     {
+      "k": "prim",
+      "name": "undefined"
+     },
+     {
+      "k": "lit",
+      "value": "large"
+     },
+     {
+      "k": "lit",
+      "value": "medium"
+     },
+     {
+      "k": "lit",
+      "value": "middle"
+     },
+     {
+      "k": "lit",
+      "value": "small"
+     },
+     {
+      "k": "prim",
+      "name": "string"
+     },
+     {
+      "k": "prim",
+      "name": "number"
+     }
+    ],
+    "alias": "LiteralUnion"
+   }
+  }
+ },
+ "Col.flex": {
+  "corpus": "antd",
+  "verdictSaved": "wrong",
+  "normalized": {
+   "caliper": {
+    "k": "union",
+    "members": [
+     {
+      "k": "prim",
+      "name": "number"
+     },
+     {
+      "k": "lit",
+      "value": "none"
+     },
+     {
+      "k": "lit",
+      "value": "auto"
+     },
+     {
+      "k": "intersection",
+      "members": [
+       {
+        "k": "prim",
+        "name": "string"
+       },
+       {
+        "k": "name",
+        "name": "Record"
+       }
+      ]
+     }
+    ]
+   },
+   "checker": {
+    "k": "union",
+    "members": [
+     {
+      "k": "prim",
+      "name": "undefined"
+     },
+     {
+      "k": "prim",
+      "name": "number"
+     },
+     {
+      "k": "lit",
+      "value": "auto"
+     },
+     {
+      "k": "lit",
+      "value": "none"
+     },
+     {
+      "k": "prim",
+      "name": "string"
+     }
+    ],
+    "alias": "FlexType"
+   }
+  }
+ },
+ "Input.type": {
+  "corpus": "antd",
+  "verdictSaved": "wrong",
+  "normalized": {
+   "caliper": {
+    "k": "union",
+    "members": [
+     {
+      "k": "lit",
+      "value": "button"
+     },
+     {
+      "k": "lit",
+      "value": "checkbox"
+     },
+     {
+      "k": "lit",
+      "value": "color"
+     },
+     {
+      "k": "lit",
+      "value": "date"
+     },
+     {
+      "k": "lit",
+      "value": "datetime-local"
+     },
+     {
+      "k": "lit",
+      "value": "email"
+     },
+     {
+      "k": "lit",
+      "value": "file"
+     },
+     {
+      "k": "lit",
+      "value": "hidden"
+     },
+     {
+      "k": "lit",
+      "value": "image"
+     },
+     {
+      "k": "lit",
+      "value": "month"
+     },
+     {
+      "k": "lit",
+      "value": "number"
+     },
+     {
+      "k": "lit",
+      "value": "password"
+     },
+     {
+      "k": "lit",
+      "value": "radio"
+     },
+     {
+      "k": "lit",
+      "value": "range"
+     },
+     {
+      "k": "lit",
+      "value": "reset"
+     },
+     {
+      "k": "lit",
+      "value": "search"
+     },
+     {
+      "k": "lit",
+      "value": "submit"
+     },
+     {
+      "k": "lit",
+      "value": "tel"
+     },
+     {
+      "k": "lit",
+      "value": "text"
+     },
+     {
+      "k": "lit",
+      "value": "time"
+     },
+     {
+      "k": "lit",
+      "value": "url"
+     },
+     {
+      "k": "lit",
+      "value": "week"
+     },
+     {
+      "k": "intersection",
+      "members": [
+       {
+        "k": "prim",
+        "name": "string"
+       },
+       {
+        "k": "name",
+        "name": "Record"
+       }
+      ]
+     }
+    ]
+   },
+   "checker": {
+    "k": "union",
+    "members": [
+     {
+      "k": "prim",
+      "name": "undefined"
+     },
+     {
+      "k": "lit",
+      "value": "button"
+     },
+     {
+      "k": "lit",
+      "value": "checkbox"
+     },
+     {
+      "k": "lit",
+      "value": "color"
+     },
+     {
+      "k": "lit",
+      "value": "date"
+     },
+     {
+      "k": "lit",
+      "value": "datetime-local"
+     },
+     {
+      "k": "lit",
+      "value": "email"
+     },
+     {
+      "k": "lit",
+      "value": "file"
+     },
+     {
+      "k": "lit",
+      "value": "hidden"
+     },
+     {
+      "k": "lit",
+      "value": "image"
+     },
+     {
+      "k": "lit",
+      "value": "month"
+     },
+     {
+      "k": "lit",
+      "value": "number"
+     },
+     {
+      "k": "lit",
+      "value": "password"
+     },
+     {
+      "k": "lit",
+      "value": "radio"
+     },
+     {
+      "k": "lit",
+      "value": "range"
+     },
+     {
+      "k": "lit",
+      "value": "reset"
+     },
+     {
+      "k": "lit",
+      "value": "search"
+     },
+     {
+      "k": "lit",
+      "value": "submit"
+     },
+     {
+      "k": "lit",
+      "value": "tel"
+     },
+     {
+      "k": "lit",
+      "value": "text"
+     },
+     {
+      "k": "lit",
+      "value": "time"
+     },
+     {
+      "k": "lit",
+      "value": "url"
+     },
+     {
+      "k": "lit",
+      "value": "week"
+     },
+     {
+      "k": "prim",
+      "name": "string"
+     }
+    ],
+    "alias": "LiteralUnion"
+   }
+  }
+ },
+ "Avatar.color": {
+  "corpus": "mantine",
+  "verdictSaved": "wrong",
+  "normalized": {
+   "caliper": {
+    "k": "union",
+    "members": [
+     {
+      "k": "name",
+      "name": "MantineColor"
+     },
+     {
+      "k": "lit",
+      "value": "initials"
+     }
+    ]
+   },
+   "checker": {
+    "k": "union",
+    "members": [
+     {
+      "k": "prim",
+      "name": "undefined"
+     },
+     {
+      "k": "lit",
+      "value": "blue"
+     },
+     {
+      "k": "lit",
+      "value": "cyan"
+     },
+     {
+      "k": "lit",
+      "value": "dark"
+     },
+     {
+      "k": "lit",
+      "value": "grape"
+     },
+     {
+      "k": "lit",
+      "value": "gray"
+     },
+     {
+      "k": "lit",
+      "value": "green"
+     },
+     {
+      "k": "lit",
+      "value": "indigo"
+     },
+     {
+      "k": "lit",
+      "value": "initials"
+     },
+     {
+      "k": "lit",
+      "value": "lime"
+     },
+     {
+      "k": "lit",
+      "value": "orange"
+     },
+     {
+      "k": "lit",
+      "value": "pink"
+     },
+     {
+      "k": "lit",
+      "value": "red"
+     },
+     {
+      "k": "lit",
+      "value": "teal"
+     },
+     {
+      "k": "lit",
+      "value": "violet"
+     },
+     {
+      "k": "lit",
+      "value": "yellow"
+     },
+     {
+      "k": "prim",
+      "name": "string"
+     }
+    ]
+   }
+  }
+ },
+ "BlockImage.placeholder": {
+  "corpus": "shadcn",
+  "verdictSaved": "wrong",
+  "normalized": {
+   "caliper": {
+    "k": "union",
+    "members": [
+     {
+      "k": "lit",
+      "value": "blur"
+     },
+     {
+      "k": "lit",
+      "value": "empty"
+     },
+     {
+      "k": "opaque"
+     }
+    ]
+   },
+   "checker": {
+    "k": "union",
+    "members": [
+     {
+      "k": "prim",
+      "name": "undefined"
+     },
+     {
+      "k": "lit",
+      "value": "blur"
+     },
+     {
+      "k": "lit",
+      "value": "empty"
+     },
+     {
+      "k": "prim",
+      "name": "string"
+     }
+    ],
+    "alias": "PlaceholderValue"
+   }
+  }
+ },
+ "ThemeProvider.attribute": {
+  "corpus": "shadcn",
+  "verdictSaved": "wrong",
+  "normalized": {
+   "caliper": {
+    "k": "union",
+    "members": [
+     {
+      "k": "opaque"
+     },
+     {
+      "k": "lit",
+      "value": "class"
+     },
+     {
+      "k": "array",
+      "element": {
+       "k": "union",
+       "members": [
+        {
+         "k": "opaque"
+        },
+        {
+         "k": "lit",
+         "value": "class"
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "checker": {
+    "k": "union",
+    "members": [
+     {
+      "k": "prim",
+      "name": "undefined"
+     },
+     {
+      "k": "lit",
+      "value": "class"
+     },
+     {
+      "k": "array",
+      "element": {
+       "k": "union",
+       "members": [
+        {
+         "k": "lit",
+         "value": "class"
+        },
+        {
+         "k": "prim",
+         "name": "string"
+        }
+       ],
+       "alias": "Attribute"
+      },
+      "alias": "Array"
+     },
+     {
+      "k": "prim",
+      "name": "string"
+     }
+    ]
+   }
+  }
+ },
+ "Form.watch": {
+  "corpus": "shadcn",
+  "verdictSaved": "wrong",
+  "normalized": {
+   "caliper": {
+    "k": "object",
+    "fields": [],
+    "index": false
+   },
+   "checker": {
+    "k": "function",
+    "params": [],
+    "returns": {
+     "k": "param",
+     "name": "TFieldValues",
+     "constraint": {
+      "k": "object",
+      "fields": [],
+      "index": true,
+      "indexValue": {
+       "k": "prim",
+       "name": "any"
+      },
+      "alias": "FieldValues"
+     }
+    },
+    "alias": "UseFormWatch"
+   }
+  }
+ },
+ "Form.getValues": {
+  "corpus": "shadcn",
+  "verdictSaved": "wrong",
+  "normalized": {
+   "caliper": {
+    "k": "object",
+    "fields": [],
+    "index": false
+   },
+   "checker": {
+    "k": "function",
+    "params": [],
+    "returns": {
+     "k": "param",
+     "name": "TFieldValues",
+     "constraint": {
+      "k": "object",
+      "fields": [],
+      "index": true,
+      "indexValue": {
+       "k": "prim",
+       "name": "any"
+      },
+      "alias": "FieldValues"
+     }
+    },
+    "alias": "UseFormGetValues"
+   }
+  }
+ },
+ "AbsoluteCenter.axis": {
+  "corpus": "chakra",
+  "verdictSaved": "wrong",
+  "normalized": {
+   "caliper": {
+    "k": "union",
+    "members": [
+     {
+      "k": "lit",
+      "value": "horizontal"
+     },
+     {
+      "k": "lit",
+      "value": "vertical"
+     },
+     {
+      "k": "lit",
+      "value": "both"
+     }
+    ]
+   },
+   "checker": {
+    "k": "union",
+    "members": [
+     {
+      "k": "prim",
+      "name": "undefined"
+     },
+     {
+      "k": "lit",
+      "value": "both"
+     },
+     {
+      "k": "lit",
+      "value": "horizontal"
+     },
+     {
+      "k": "lit",
+      "value": "vertical"
+     },
+     {
+      "k": "array",
+      "element": {
+       "k": "union",
+       "members": [
+        {
+         "k": "prim",
+         "name": "undefined"
+        },
+        {
+         "k": "prim",
+         "name": "null"
+        },
+        {
+         "k": "lit",
+         "value": "both"
+        },
+        {
+         "k": "lit",
+         "value": "horizontal"
+        },
+        {
+         "k": "lit",
+         "value": "vertical"
+        }
+       ]
+      },
+      "alias": "Array"
+     },
+     {
+      "k": "object",
+      "fields": [
+       "2xl",
+       "2xlDown",
+       "2xlOnly",
+       "_active",
+       "_after",
+       "_atValue",
+       "_autofill",
+       "_backdrop",
+       "_before",
+       "_checked",
+       "_closed",
+       "_complete",
+       "_current",
+       "_currentPage",
+       "_currentStep",
+       "_dark",
+       "_default",
+       "_disabled",
+       "_dragging",
+       "_empty",
+       "_enabled",
+       "_even",
+       "_expanded",
+       "_file",
+       "_first",
+       "_firstLetter",
+       "_firstLine",
+       "_focus",
+       "_focusVisible",
+       "_focusWithin",
+       "_fullscreen",
+       "_grabbed",
+       "_groupActive",
+       "_groupChecked",
+       "_groupDisabled",
+       "_groupExpanded",
+       "_groupFocus",
+       "_groupFocusVisible",
+       "_groupFocusWithin",
+       "_groupHover",
+       "_groupInvalid",
+       "_hidden",
+       "_highContrast",
+       "_highlighted",
+       "_horizontal",
+       "_hover",
+       "_icon",
+       "_inRange",
+       "_incomplete",
+       "_indeterminate",
+       "_invalid",
+       "_landscape",
+       "_last",
+       "_lessContrast",
+       "_light",
+       "_loading",
+       "_ltr",
+       "_marker",
+       "_moreContrast",
+       "_motionReduce",
+       "_motionSafe",
+       "_notFirst",
+       "_notLast",
+       "_now",
+       "_odd",
+       "_only",
+       "_open",
+       "_optional",
+       "_osDark",
+       "_osLight",
+       "_outOfRange",
+       "_overValue",
+       "_peerActive",
+       "_peerChecked",
+       "_peerDisabled",
+       "_peerExpanded",
+       "_peerFocus",
+       "_peerFocusVisible",
+       "_peerFocusWithin",
+       "_peerHover",
+       "_peerInvalid",
+       "_peerPlaceholderShown",
+       "_placeholder",
+       "_placeholderShown",
+       "_portrait",
+       "_pressed",
+       "_print",
+       "_rangeEnd",
+       "_rangeStart",
+       "_readOnly",
+       "_readWrite",
+       "_required",
+       "_rtl",
+       "_scrollbar",
+       "_scrollbarThumb",
+       "_scrollbarTrack",
+       "_selected",
+       "_selection",
+       "_starting",
+       "_target",
+       "_today",
+       "_topmost",
+       "_unavailable",
+       "_underValue",
+       "_valid",
+       "_vertical",
+       "_visited",
+       "base",
+       "lg",
+       "lgDown",
+       "lgOnly",
+       "lgTo2xl",
+       "lgToXl",
+       "md",
+       "mdDown",
+       "mdOnly",
+       "mdTo2xl",
+       "mdToLg",
+       "mdToXl",
+       "sm",
+       "smDown",
+       "smOnly",
+       "smTo2xl",
+       "smToLg",
+       "smToMd",
+       "smToXl",
+       "xl",
+       "xlDown",
+       "xlOnly",
+       "xlTo2xl"
+      ],
+      "index": false
+     }
+    ],
+    "alias": "ConditionalValue"
+   }
+  }
+ }
+}

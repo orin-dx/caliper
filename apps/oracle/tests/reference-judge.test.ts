@@ -2,8 +2,8 @@
 import { describe, expect, it } from 'vitest'
 import { prim, type Norm } from '../src/oracle-compare.ts'
 import { reference, score, type Reference } from '../src/reference-judge.ts'
+import { lit } from './lit.ts'
 
-const lit = (value: string): Norm => ({ k: 'lit', value })
 const union = (...members: Norm[]): Norm => ({ k: 'union', members })
 const name = (value: string, alias?: string): Norm => ({ k: 'name', name: value, alias })
 const sizes = union(lit('small'), lit('large'))

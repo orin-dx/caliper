@@ -7,7 +7,7 @@
 // cannot state (a truncated `Foo<...>`, an indexed access, a conditional type) is `opaque`, which the comparison reads
 // as less precise, never wrong.
 import ts from 'typescript'
-import { bareName, MAX_DEPTH, prim, type Norm } from './oracle-compare.ts'
+import { bareName, isBareObject, lit, MAX_DEPTH, prim, type Norm } from './oracle-compare.ts'
 
 const OPAQUE: Norm = { k: 'opaque' }
 
@@ -37,22 +37,22 @@ function literal(node: ts.LiteralTypeNode['literal']): Norm {
     }
     case ts.SyntaxKind.TrueKeyword:
     case ts.SyntaxKind.FalseKeyword: {
-      return { k: 'lit', value: node.kind === ts.SyntaxKind.TrueKeyword ? 'true' : 'false' }
+      return lit(node.kind === ts.SyntaxKind.TrueKeyword ? 'true' : 'false', 'boolean')
     }
     case ts.SyntaxKind.NumericLiteral: {
       // The checker's literal value is the number, so `1.0` is `1`.
-      return { k: 'lit', value: String(Number(node.text)) }
+      return lit(String(Number(node.text)), 'number')
     }
     case ts.SyntaxKind.PrefixUnaryExpression: {
       const { operand } = node as ts.PrefixUnaryExpression
-      return ts.isNumericLiteral(operand) ? { k: 'lit', value: `-${Number(operand.text)}` } : OPAQUE
+      return ts.isNumericLiteral(operand) ? lit(`-${Number(operand.text)}`, 'number') : OPAQUE
     }
     case ts.SyntaxKind.StringLiteral:
     case ts.SyntaxKind.NoSubstitutionTemplateLiteral: {
-      return { k: 'lit', value: (node as ts.StringLiteral).text }
+      return lit((node as ts.StringLiteral).text, 'string')
     }
     case ts.SyntaxKind.BigIntLiteral: {
-      return { k: 'lit', value: (node as ts.BigIntLiteral).text.replace(/n$/, '') }
+      return lit((node as ts.BigIntLiteral).text.replace(/n$/, ''), 'bigint')
     }
     default: {
       return OPAQUE
@@ -72,7 +72,7 @@ function convert(node: ts.TypeNode, depth: number): Norm {
   if (ts.isIntersectionTypeNode(node)) {
     const parts = node.types.map((n) => inner(n))
     // `string & {}` is a string, as the checker's side reads it.
-    const meaningful = parts.filter((m) => !(m.k === 'object' && m.fields.length === 0 && !m.index))
+    const meaningful = parts.filter((m) => !isBareObject(m))
     return meaningful.length === 1 ? meaningful[0] : { k: 'intersection', members: parts }
   }
   if (ts.isArrayTypeNode(node)) return { k: 'array', element: inner(node.elementType) }
@@ -108,10 +108,14 @@ function convert(node: ts.TypeNode, depth: number): Norm {
       const name = ts.isPropertySignature(m) || ts.isMethodSignature(m) ? memberName(m.name) : undefined
       return name === undefined ? [] : [name]
     })
+    const indexValues = node.members.filter(ts.isIndexSignatureDeclaration).map((m) => inner(m.type))
     return {
       k: 'object',
       fields: fields.toSorted(),
-      index: node.members.some((m) => ts.isIndexSignatureDeclaration(m)),
+      index: indexValues.length > 0,
+      ...(indexValues.length > 0 && {
+        indexValue: indexValues.length === 1 ? indexValues[0] : { k: 'union', members: indexValues },
+      }),
     }
   }
   if (ts.isTypeOperatorNode(node)) {
