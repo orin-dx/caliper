@@ -996,6 +996,7 @@ fn resolve_key_set(
             );
             // The alias's body is read under no type parameters: the ones the arguments leave unfilled are marked in it.
             let writer = state.enter_scope(TypeScope::default());
+            let site = super::precedence::enter_alias_site(ctx, state, &canonical_file, &matched_key);
             let keys = match &alias {
                 CollectedTypeAlias::LiteralUnion { members, .. } => Some(members.clone()),
                 CollectedTypeAlias::Union { members, file_path } => {
@@ -1007,6 +1008,7 @@ fn resolve_key_set(
                 }
                 _ => None,
             };
+            state.leave_declared_in(site);
             state.leave_scope(writer);
             keys
         }

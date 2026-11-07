@@ -289,6 +289,7 @@ pub(super) fn resolve_props_chain(
                 }
             }
             let mut attempt = state.branch();
+            drop(super::precedence::enter_alias_site(ctx, &mut attempt, &canonical_file, &matched_key));
             // A declared alias is read under no type parameters; the alias the extractor synthesizes for an inline props
             // type is the component's own, and keeps the component's.
             if !is_synthesized_alias(type_name) {
@@ -504,7 +505,9 @@ fn resolve_interface_chain_uncached(
     // placeholders wherever the body names them, not unresolvable types, and they shadow the module's names.
     let marked = super::substitute::mark_args(state, type_args);
     let caller = state.enter_scope(TypeScope::default());
+    let caller_site = state.enter_declared_in(&iface.scope);
     let chain = resolve_interface_members(iface, &marked, consuming_file, mapping, ctx, state, depth);
+    state.leave_declared_in(caller_site);
     state.leave_scope(caller);
     chain
 }

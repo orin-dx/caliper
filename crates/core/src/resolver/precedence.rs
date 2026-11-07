@@ -16,6 +16,23 @@ use crate::types::*;
 use super::import::{lookup_interface, lookup_type_alias, resolve_to_canonical};
 use super::ResolutionContext;
 
+/// Read the alias `key` of `file` in the scope it is declared in, so the names in its body are looked up from there. An
+/// alias the extractor synthesizes for an inline type has no scope of its own and keeps the one it is read in. Give the
+/// scope this returns to `ResolveState::leave_declared_in`.
+#[must_use]
+pub(super) fn enter_alias_site(
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    file: &Utf8Path,
+    key: &str,
+) -> Option<std::sync::Arc<DeclarationScope>> {
+    if is_synthesized_alias(key) {
+        return state.declared_in.clone();
+    }
+    let scope = ctx.named_types.lookup_local_alias_scope(file, key).cloned().unwrap_or_default();
+    state.enter_declared_in(&scope)
+}
+
 /// What `resolve_source_defined_or_known` found, in the order it checked.
 pub(super) enum SourceOrKnownMatch<'g> {
     /// A type alias declared in the project's own source (or an already-merged
@@ -46,8 +63,16 @@ pub(super) fn find_declaration<'g>(
     state: &mut ResolveState,
 ) -> (Utf8PathBuf, String, Option<Declared<'g>>) {
     super::deps::record(consuming_file);
-    let (canonical_file, canonical_name) = resolve_to_canonical(name, consuming_file, ctx, &mut state.diagnostics)
-        .unwrap_or_else(|| (consuming_file.to_owned(), name.to_owned()));
+    let imported = resolve_to_canonical(name, consuming_file, ctx, &mut state.diagnostics);
+    // A name no import binds is looked up from where it is written outward: a declaration local to the function,
+    // block or `switch` case that encloses it comes before any other of the name, an alias at module level included.
+    if let (None, Some(scope)) = (&imported, state.declared_in.as_deref()) {
+        if let Some(local) = ctx.named_types.lookup_local_interface(consuming_file, name, scope) {
+            super::deps::record(consuming_file);
+            return (consuming_file.to_owned(), name.to_owned(), Some(Declared::Interface(local)));
+        }
+    }
+    let (canonical_file, canonical_name) = imported.unwrap_or_else(|| (consuming_file.to_owned(), name.to_owned()));
 
     if let Some((matched_key, alias)) = lookup_type_alias(ctx, canonical_file.as_str(), &canonical_name) {
         let declared = Declared::TypeAlias { matched_key: matched_key.to_string(), alias: Box::new(alias.clone()) };
@@ -118,6 +143,7 @@ mod tests {
             scoped_key.clone(),
             CollectedInterface {
                 scoped_key: scoped_key.clone(),
+                scope: Default::default(),
                 name: "SxProps".into(),
                 file_path: file_path.clone(),
                 props: vec![],

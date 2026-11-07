@@ -163,6 +163,18 @@ pub(super) fn lookup_interface<'g>(
     ctx.named_types.lookup_interface(Utf8Path::new(canonical_file), canonical_name)
 }
 
+/// `lookup_interface` for a name written in `scope`: a declaration local to an enclosing function body, block or
+/// `switch` case of the same file comes first.
+pub(super) fn lookup_interface_from<'g>(
+    ctx: &'g ResolutionContext,
+    canonical_file: &str,
+    canonical_name: &str,
+    scope: &DeclarationScope,
+) -> Option<&'g CollectedInterface> {
+    super::deps::record(Utf8Path::new(canonical_file));
+    ctx.named_types.lookup_interface_from(Utf8Path::new(canonical_file), canonical_name, scope)
+}
+
 /// Same as `lookup_interface`, for type aliases. Returns the name that
 /// actually matched (bare or `React.`-qualified) alongside the value, since
 /// callers also need it to look up `type_alias_params` under the same

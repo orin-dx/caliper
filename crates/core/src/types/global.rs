@@ -70,6 +70,9 @@ pub(crate) struct ResolveState {
     /// declaration is read: a declaration local to that function (`function make<T>() { interface Props { value: T } … }`)
     /// names them, and `enter_scope` replaces `scope` only.
     pub(crate) closure: TypeScope,
+    /// Where the declaration being read sits when it is local to a function body, block or `switch` case: a bare
+    /// reference finds the nearest declaration of its name from there outward. `None` at module level.
+    pub(crate) declared_in: Option<Arc<DeclarationScope>>,
     /// Set when an alias is shown by its name because its expansion holds a type the resolver can't evaluate, so an
     /// alias whose expansion contains that one is shown by name too — see `resolver::named::alias_display`.
     pub(crate) named_unevaluated: bool,
@@ -180,6 +183,7 @@ impl ResolveState {
             shared_diagnostics: Vec::new(),
             scope: self.scope.clone(),
             closure: self.closure.clone(),
+            declared_in: self.declared_in.clone(),
             named_unevaluated: false,
             expand_all: self.expand_all,
             keys_only: self.keys_only,
@@ -193,6 +197,7 @@ impl ResolveState {
         ResolveState {
             scope: self.scope.clone(),
             closure: self.closure.clone(),
+            declared_in: self.declared_in.clone(),
             expand_all: self.expand_all,
             keys_only: self.keys_only,
             reads: self.reads.as_ref().map(|_| Box::default()),
@@ -305,6 +310,19 @@ impl ResolveState {
         self.scope = previous;
     }
 
+    /// Read what follows as written in `scope`; give the scope it replaces back to `leave_declared_in`. A declaration is
+    /// read in the scope it sits in, whoever refers to it.
+    #[must_use]
+    pub(crate) fn enter_declared_in(&mut self, scope: &DeclarationScope) -> Option<Arc<DeclarationScope>> {
+        let scope = scope.local_key_suffix().map(|_| Arc::new(scope.clone()));
+        std::mem::replace(&mut self.declared_in, scope)
+    }
+
+    /// Read in `previous` again, the scope `enter_declared_in` returned.
+    pub(crate) fn leave_declared_in(&mut self, previous: Option<Arc<DeclarationScope>>) {
+        self.declared_in = previous;
+    }
+
     /// The component's default for prop `name`.
     pub(crate) fn param_default<'m>(&mut self, mapping: &'m ComponentMapping, name: &str) -> Option<&'m RawDefault> {
         let found = mapping.param_defaults.get(name);
@@ -344,6 +362,10 @@ pub struct GlobalSourceData {
 
     /// The keys in `enums` written by an `enum` declaration — see `SourceData::enum_declarations`.
     pub enum_declarations: FxHashMap<String, DeclarationScope>,
+
+    /// The scope of each type alias declared in a function body, block or `switch` case, across all files — see
+    /// `SourceData::type_alias_scopes`; an alias anywhere else has no entry.
+    pub type_alias_scopes: FxHashMap<String, DeclarationScope>,
 
     /// All `const X = [...] as const` array literals across all files — see
     /// `SourceData::const_arrays`. Key: "${absolute_file_path}:${name}"
@@ -388,6 +410,8 @@ impl GlobalSourceData {
         self.interface_type_params.extend(data.interface_type_params);
         self.enums.extend(data.enums);
         self.enum_declarations.extend(data.enum_declarations);
+        self.type_alias_scopes
+            .extend(data.type_alias_scopes.into_iter().filter(|(_, scope)| scope.local_key_suffix().is_some()));
         self.const_arrays.extend(data.const_arrays);
         self.function_results.extend(data.function_results);
         self.type_param_defaults.extend(data.type_param_defaults);
@@ -405,6 +429,7 @@ impl GlobalSourceData {
         self.interface_type_params.retain(|k, _| !k.starts_with(&prefix));
         self.enums.retain(|k, _| !k.starts_with(&prefix));
         self.enum_declarations.retain(|k, _| !k.starts_with(&prefix));
+        self.type_alias_scopes.retain(|k, _| !k.starts_with(&prefix));
         self.const_arrays.retain(|k, _| !k.starts_with(&prefix));
         self.function_results.retain(|k, _| !k.starts_with(&prefix));
         self.type_param_defaults.retain(|k, _| !k.starts_with(&prefix));

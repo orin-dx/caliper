@@ -131,6 +131,7 @@ mod tests {
                     name: "HookIface".into(),
                     file_path: "src/test.tsx".into(),
                     scoped_key: "src/test.tsx:HookIface".into(),
+                    scope: Default::default(),
                     props: vec![],
                     extends: vec![],
                     description: String::new(),
