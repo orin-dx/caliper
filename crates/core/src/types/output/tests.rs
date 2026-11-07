@@ -732,9 +732,22 @@ mod is_literal_union_tests {
     }
 
     #[test]
-    fn single_member_literal_union_is_not_treated_as_an_enum() {
+    fn single_member_literal_union_is_treated_as_a_one_option_enum() {
         let pt = PropType::LiteralUnion { members: vec!["only".to_string()], has_default: false };
-        assert!(!pt.is_literal_union());
+        assert!(pt.is_literal_union());
+        assert!(PropType::StringLiteral("button".into()).is_literal_union());
+        assert!(PropType::NumberLiteral(1.0).is_literal_union());
+        assert!(PropType::Union(vec![PropType::StringLiteral("x".into())]).is_literal_union());
+    }
+
+    #[test]
+    fn a_boolean_member_and_an_empty_union_are_not_enums() {
+        let mixed = PropType::Union(vec![PropType::StringLiteral("a".into()), PropType::BoolLiteral(true)]);
+        assert!(!mixed.is_literal_union());
+        assert!(!PropType::BoolLiteral(true).is_literal_union());
+        assert!(!PropType::Union(vec![PropType::BoolLiteral(true)]).is_literal_union());
+        assert!(!PropType::Union(vec![]).is_literal_union());
+        assert!(!PropType::String.is_literal_union());
     }
 
     #[test]
