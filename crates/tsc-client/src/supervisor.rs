@@ -26,9 +26,12 @@ pub struct SupervisorConfig {
     pub tsc_path: Utf8PathBuf,
     /// Passed as `tsc --api --async --cwd <cwd>`.
     pub cwd: Utf8PathBuf,
-    /// `tsc_path`'s adjacent `package.json` "version" must match one of these, checked before every spawn. An entry
-    /// is an exact version (`7.1.0-beta`) or a `major.minor` series (`7.1`, which takes `7.1.0`, `7.1.0-rc.1` and
-    /// `7.1.4`, not `7.10.0`). The protocol has no version handshake (ADR 0006), so this and the initialize call
+    /// The "version" of `tsc_path`'s `package.json` must match one of these, checked before every spawn. The file is in
+    /// the package directory: the parent of `bin` for `typescript/bin/tsc` and `tsrs/bin/tsrs`, the binary's own
+    /// directory for `@tsrs/<platform>/tsrs`. An entry is an exact version (`7.1.0-beta`) or a `major.minor` series
+    /// (`7.1`, which takes `7.1.0`, `7.1.0-rc.1` and `7.1.4`, not `7.10.0`). A `tsrs` build, whose version reads
+    /// `<tsrs version>-ts<typescript version>` (`0.23.0-ts7.1.0-beta`), is taken only when it is listed exactly and
+    /// its TypeScript part matches one of the other entries. The protocol has no version handshake (ADR 0006), so this and the initialize call
     /// that follows the spawn are the whole check — the caller decides which builds it has traced the protocol on.
     pub expected_versions: &'static [&'static str],
     /// How long a start-up handshake may take before it fails; 10 seconds by default.
@@ -55,13 +58,19 @@ impl SupervisorConfig {
     }
 }
 
+/// The directory of the package that owns `tsc_path`, where its `package.json` is. `typescript/bin/tsc` and
+/// `tsrs/bin/tsrs` sit in a `bin` directory under the package; the `@tsrs/<platform>/tsrs` binary sits in the package
+/// directory itself, and the directory above it is only the npm scope.
+fn package_dir(tsc_path: &Utf8Path) -> Option<&Utf8Path> {
+    let dir = tsc_path.parent()?;
+    if dir.file_name() == Some("bin") { dir.parent() } else { Some(dir) }
+}
+
 fn check_version(tsc_path: &Utf8Path, expected: &'static [&'static str]) -> Result<(), TscClientError> {
     let reason_at = |reason: String| TscClientError::VersionCheckFailed { path: tsc_path.to_owned(), reason };
 
-    let Some(package_json) =
-        tsc_path.parent().and_then(|bin_dir| bin_dir.parent()).map(|pkg_dir| pkg_dir.join("package.json"))
-    else {
-        return Err(reason_at("tsc_path has no grandparent directory to find package.json in".to_string()));
+    let Some(package_json) = package_dir(tsc_path).map(|pkg_dir| pkg_dir.join("package.json")) else {
+        return Err(reason_at("tsc_path has no parent directory to find package.json in".to_string()));
     };
 
     let contents = std::fs::read_to_string(&package_json)
@@ -72,11 +81,35 @@ fn check_version(tsc_path: &Utf8Path, expected: &'static [&'static str]) -> Resu
         return Err(reason_at(format!("{package_json} has no \"version\" string")));
     };
 
-    if expected.iter().any(|entry| version_matches(found, entry)) {
+    if version_accepted(found, expected) {
         Ok(())
     } else {
         Err(TscClientError::UnsupportedVersion { path: tsc_path.to_owned(), found: found.to_string(), expected })
     }
+}
+
+/// Whether `found` is one of the `expected` builds. A TypeScript version is taken by an exact entry or a series entry
+/// (see [`version_matches`]). A `tsrs` version, `<tsrs version>-ts<typescript version>`, is taken only when it is an
+/// exact entry (a build whose wire protocol was traced) and its TypeScript part is also taken by a TypeScript entry,
+/// so a `tsrs` build is never accepted by prefix and never for a TypeScript that is not allowed.
+fn version_accepted(found: &str, expected: &[&str]) -> bool {
+    match tsrs_parts(found) {
+        Some((_, typescript)) => {
+            expected.contains(&found)
+                && expected
+                    .iter()
+                    .filter(|entry| tsrs_parts(entry).is_none())
+                    .any(|entry| version_matches(typescript, entry))
+        }
+        None => expected.iter().any(|entry| version_matches(found, entry)),
+    }
+}
+
+/// The `tsrs` version and the TypeScript version of `<major>.<minor>.<patch>-ts<typescript version>`.
+fn tsrs_parts(version: &str) -> Option<(&str, &str)> {
+    let (tsrs, typescript) = version.split_once("-ts")?;
+    let is_semver = tsrs.split('.').count() == 3 && tsrs.split('.').all(|part| part.parse::<u32>().is_ok());
+    (is_semver && typescript.starts_with(|c: char| c.is_ascii_digit())).then_some((tsrs, typescript))
 }
 
 /// Whether `found` is `entry` or a release of the `entry` series: `7.1` takes `7.1.0-beta` and `7.1.3`, not `7.10.0`.

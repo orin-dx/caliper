@@ -34,10 +34,12 @@ use crate::component::Answer;
 use crate::convert::Converter;
 use crate::rpc::{CallError, Rpc};
 
-/// The `typescript` releases whose protocol this backend was traced against: the 7.1 series, from `7.1.0-beta` on. The
-/// protocol has no version handshake, so the package's `package.json` version and the initialize call that follows
-/// the spawn are the whole check; a build that fails either takes the structural result with one warning.
-pub const SUPPORTED_VERSIONS: &[&str] = &["7.1"];
+/// The builds whose protocol this backend was traced against: the `typescript` 7.1 series, from `7.1.0-beta` on, and
+/// the `tsrs` builds listed exactly (`<tsrs version>-ts<typescript version>`), each only while its TypeScript part is
+/// in the series above. The protocol has no version handshake, so the package's `package.json` version and the
+/// initialize call that follows the spawn are the whole check; a build that fails either takes the structural result
+/// with one warning.
+pub const SUPPORTED_VERSIONS: &[&str] = &["7.1", "0.23.0-ts7.1.0-beta"];
 
 /// How many files are asked about at once. `tsc` answers requests one at a time; this keeps it from idling on round
 /// trips.

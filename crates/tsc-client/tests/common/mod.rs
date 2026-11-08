@@ -67,6 +67,27 @@ pub fn layout_with_version(dir: &tempfile::TempDir, version: &str) -> (Utf8PathB
     )
 }
 
+/// A copy of `fake-tsc` at `node_modules/<binary>` (for example `tsrs/bin/tsrs` or `@tsrs/darwin-arm64/tsrs`) with a
+/// `package.json` of `version` in `node_modules/<package_dir>`. Returns `(binary path, cwd)`.
+pub fn layout_at(
+    dir: &tempfile::TempDir,
+    package_dir: &str,
+    binary: &str,
+    version: &str,
+) -> (Utf8PathBuf, Utf8PathBuf) {
+    let modules = dir.path().join("node_modules");
+    let package = modules.join(package_dir);
+    let binary = modules.join(binary);
+    std::fs::create_dir_all(binary.parent().expect("a binary has a directory")).expect("create the binary directory");
+    std::fs::create_dir_all(&package).expect("create the package directory");
+    std::fs::write(package.join("package.json"), format!(r#"{{"version": "{version}"}}"#)).expect("write package.json");
+    std::fs::copy(env!("CARGO_BIN_EXE_fake-tsc"), &binary).expect("copy fake-tsc into place");
+    (
+        Utf8PathBuf::from_path_buf(binary).expect("temp path is UTF-8"),
+        Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("temp path is UTF-8"),
+    )
+}
+
 /// Same layout, but without ever placing a binary at `bin/tsc` — for the missing-binary
 /// case.
 pub fn layout_without_binary(dir: &tempfile::TempDir, version: &str) -> (Utf8PathBuf, Utf8PathBuf) {

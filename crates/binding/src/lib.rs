@@ -139,7 +139,7 @@ pub struct JsExtractOptions {
     #[napi(ts_type = "'off' | 'on-demand'")]
     pub semantic_types: Option<String>,
     /// Session only, with `semanticTypes: 'on-demand'`: the `tsc` binary to run, instead of the nearest
-    /// `node_modules/typescript/bin/tsc`.
+    /// `node_modules/typescript/bin/tsc` or `node_modules/tsrs/bin/tsrs`.
     pub tsc_path: Option<String>,
     /// Session only, with `semanticTypes: 'on-demand'`: how many milliseconds a request waits for the checker before
     /// it takes the structural answer (default 150).
