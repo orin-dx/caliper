@@ -321,3 +321,53 @@ fn an_empty_outcome_merges_to_the_structural_output_unchanged() {
 
     assert_eq!(serde_json::to_string(&output).unwrap(), before);
 }
+
+/// The checker gives an unresolved import or an undeclared name the flag of `any` as well; only its `intrinsicName`
+/// (`"error"`, where a written `any` says `"any"`) tells them apart. An error type is not `any`: the prop says it
+/// could not be resolved.
+#[test]
+fn an_unresolved_name_is_degraded_and_a_written_any_is_not() {
+    let project = project_of("errors", &["Errors.tsx", "tsconfig.json"], true);
+    let mut output = structural(&project);
+
+    let outcome = resolve(request_replaying(&project, &output, None, "errors.recording.json"));
+    assert!(outcome.diagnostics.is_empty() && outcome.fallbacks.is_empty(), "{outcome:?}");
+    merge_semantic(&mut output, outcome);
+
+    let degraded_by = |name: &str| prop(&output, "Errors", name).degraded_by;
+    assert_eq!(prop(&output, "Errors", "explicitAny").prop_type, PropType::Any);
+    assert!(degraded_by("explicitAny").is_empty());
+    assert!(degraded_by("label").is_empty());
+    for name in ["fromImport", "undeclared"] {
+        assert_eq!(degraded_by(name), ["unresolvableImport"], "{name}: {:?}", prop(&output, "Errors", name).prop_type);
+        assert_ne!(prop(&output, "Errors", name).prop_type, PropType::Any, "{name}");
+    }
+}
+
+/// The program is created from `createPrograms[].compilerOptions`; the Node client sends the same list under
+/// `options`. The checker accepts both, so this pins the key the backend sends.
+#[test]
+fn the_snapshot_is_created_with_compiler_options_for_the_root_files() {
+    let project = project(true);
+    let output = structural(&project);
+    let log = project.root.join("requests.jsonl");
+    let mut request = request(&project, &output, None);
+    request.extra_env.push(("REPLAY_LOG".to_string(), log.to_string()));
+
+    let outcome = resolve(request);
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+
+    let sent: Vec<serde_json::Value> = std::fs::read_to_string(&log)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .filter(|request: &serde_json::Value| request["method"] == "createSnapshot")
+        .collect();
+    let [snapshot] = sent.as_slice() else { panic!("one createSnapshot expected: {sent:?}") };
+    let [program] = snapshot["params"]["createPrograms"].as_array().unwrap().as_slice() else {
+        panic!("one program expected: {snapshot}")
+    };
+    assert!(program["compilerOptions"].is_object(), "{program}");
+    assert!(program.get("options").is_none(), "{program}");
+    assert!(program["rootFiles"].as_array().is_some_and(|files| !files.is_empty()), "{program}");
+}

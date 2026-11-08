@@ -49,7 +49,7 @@ export interface CaliperStorybookOptions {
    * `typescript@beta` (7.1) installed, or `tscPath`.
    */
   semanticTypes?: 'off' | 'on-demand'
-  /** The `tsc` binary to run, instead of the nearest `node_modules/typescript/bin/tsc`. */
+  /** The `tsc` binary to run, instead of the nearest `node_modules/typescript/bin/tsc` or `node_modules/tsrs/bin/tsrs`. */
   tscPath?: string
   /** How many milliseconds a story waits for the checker before it takes the structural props. Default: `150`. */
   semanticWaitMs?: number

@@ -133,7 +133,8 @@ pub struct ExtractArgs {
     #[arg(long)]
     pub experimental_semantic_types: bool,
 
-    /// The `tsc` binary `--experimental-semantic-types` runs, instead of `node_modules/typescript/bin/tsc`
+    /// The checker binary `--experimental-semantic-types` runs (`tsc` or `tsrs`), instead of the nearest
+    /// `node_modules/typescript/bin/tsc` or `node_modules/tsrs/bin/tsrs`
     #[arg(long, requires = "experimental_semantic_types")]
     pub tsc_path: Option<String>,
 }

@@ -11,7 +11,16 @@ use camino::Utf8PathBuf;
 use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
-use crate::types::output::{ComponentEntry, ExtractionOutput, ParsedProp, PropType};
+use crate::types::output::{ComponentEntry, ExtractionOutput, OpaqueDetail, OpaqueReason, ParsedProp, PropType};
+
+/// The type of a name the checker could not resolve (an import that does not resolve, a name declared nowhere), which
+/// the checker answers with its error type: an `any` that is not a written `any`. It is `opaque` with the reason
+/// `unresolvableImport`, so the prop carries `degradedBy`, and `written` is the name as the source writes it, which is
+/// also what the reason names (the checker does not say which module specifier was behind it).
+pub fn unresolved_type(written: impl Into<String>) -> PropType {
+    let written = written.into();
+    OpaqueDetail::new(written.clone(), OpaqueReason::UnresolvableImport { specifier: written })
+}
 
 /// One prop as the checker reports it.
 #[derive(Debug, Clone, PartialEq)]
@@ -134,7 +143,9 @@ impl SemanticOutcome {
             DiagnosticCode::SemanticBackend,
             format!("TypeScript checker backend unavailable: {}", reason.into()),
         )
-        .with_help("The structural result is used instead. Install `typescript@beta` (7.1) or pass `--tsc-path`.");
+        .with_help(
+            "The structural result is used instead. Install `typescript@beta` (7.1) or `tsrs`, or pass `--tsc-path`.",
+        );
         Self { diagnostics: vec![diagnostic], ..Self::default() }
     }
 }
