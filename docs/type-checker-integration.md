@@ -126,6 +126,16 @@ Mirrors RDT 2.4.0 (`lib/parser.js`). Method names are from the 7.1 client.
 
 RDT also emits any exported symbol that has a JSDoc comment but no props. We don't. In the fixture corpus, 23 of the 26 entries only RDT emits are of this kind, such as enum members, type aliases and functions.
 
+### The converter (ADR 0026, slice S2)
+
+A prop's checker type becomes a `PropType` from structured answers only (`crates/semantic/src/convert.rs`): the type flags, a union's members (`getTypesOfType`), a reference's arguments, a tuple type's element flags (`getTargetOfType`), an object's signatures, properties and index signatures (one `batchRequests`), and an alias's symbol and arguments. `typeToString` is used for a name to display, and for two facts the API does not state: which parameter is optional and what a tuple element is labeled (`printed.rs` reads them from the printed type and refuses text that is cut short).
+
+- **Named boundary.** An interface or class declared under `node_modules` or in the TypeScript lib (`Date`, `Promise<T>`, `HTMLElement`), and an object type a dependency's alias names, stay `named` with their arguments. A function type is always expanded. The lib's utilities (`Partial`, `Pick`, `Omit`, `Record`) are expanded: their result is the type. A dependency's union of literals is expanded, since its members are the values a control offers. React's `ReactNode`, `ElementType`, `CSSProperties` and `ReactElement` are recognized by where they are declared.
+- **Caps.** Depth 5, 100 properties at the top and 40 below it, 500 union members at the top and 120 below it. A cut type is `truncated` with the limit, which `degradedBy` reports.
+- **Recursion** is a `recursive` marker keyed by the declaration (the alias or interface), never by a type id. Type ids change with the order of queries; the one thing keyed on one is the per-snapshot memo, whose key also holds the depth and the enclosing declarations, so a hit gives what a miss would. A test asks last to first and compares bytes.
+- **Union order.** The checker sorts a union's members by kind and value. Where the structural pass resolved the same union (in a parsed file, or a loaded dependency), the merge puts the members back in its order, which it read from the type node (`types/semantic/order.rs`). A union the structural pass left opaque keeps the checker's order, with no marker.
+- **Debug stat.** With `RUST_LOG=caliper_docgen_semantic=debug`, each component logs its request count and milliseconds, and the session logs requests by method and memo hits.
+
 ## TypeScript 7.1 API
 
 | Topic | Detail |

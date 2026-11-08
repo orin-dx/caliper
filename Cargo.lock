@@ -274,6 +274,7 @@ dependencies = [
  "caliper-docgen-core",
  "caliper-docgen-tsc-client",
  "camino",
+ "insta",
  "rustc-hash",
  "serde",
  "serde_json",

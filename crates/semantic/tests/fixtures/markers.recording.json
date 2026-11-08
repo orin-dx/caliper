@@ -268,7 +268,7 @@
       "value": null,
       "isThisType": false,
       "symbol": {
-        "id": 4,
+        "id": 11,
         "file": "77"
       }
     }
@@ -292,7 +292,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 7
+          "id": 12
         },
         "name": "format",
         "flags": 16777220,
@@ -302,7 +302,7 @@
         ],
         "valueDeclaration": "46.173.<root>/markers.tsx",
         "parent": {
-          "id": 4,
+          "id": 11,
           "file": "77"
         }
       },
@@ -317,7 +317,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 8
+          "id": 13
         },
         "name": "close",
         "flags": 16777220,
@@ -327,7 +327,7 @@
         ],
         "valueDeclaration": "64.173.<root>/markers.tsx",
         "parent": {
-          "id": 4,
+          "id": 11,
           "file": "77"
         }
       },
@@ -342,7 +342,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 9
+          "id": 14
         },
         "name": "onClick",
         "flags": 16777220,
@@ -352,7 +352,7 @@
         ],
         "valueDeclaration": "75.173.<root>/markers.tsx",
         "parent": {
-          "id": 4,
+          "id": 11,
           "file": "77"
         }
       },
@@ -367,7 +367,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 5
+          "id": 15
         },
         "name": "plain",
         "flags": 4,
@@ -377,7 +377,7 @@
         ],
         "valueDeclaration": "86.173.<root>/markers.tsx",
         "parent": {
-          "id": 4,
+          "id": 11,
           "file": "77"
         }
       },
@@ -392,7 +392,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 6
+          "id": 16
         },
         "name": "explicit",
         "flags": 4,
@@ -402,7 +402,7 @@
         ],
         "valueDeclaration": "101.173.<root>/markers.tsx",
         "parent": {
-          "id": 4,
+          "id": 11,
           "file": "77"
         }
       }
@@ -424,7 +424,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 7
+          "id": 12
         },
         {
           "kind": 0,
@@ -436,7 +436,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 8
+          "id": 13
         },
         {
           "kind": 0,
@@ -448,7 +448,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 9
+          "id": 14
         },
         {
           "kind": 0,
@@ -460,7 +460,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 5
+          "id": 15
         },
         {
           "kind": 0,
@@ -472,7 +472,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 6
+          "id": 16
         }
       ]
     },
@@ -528,15 +528,6 @@
     ]
   },
   {
-    "method": "getAliasSymbolOfType",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "objectId": 89
-    },
-    "result": null
-  },
-  {
     "method": "getTypesOfType",
     "params": {
       "snapshot": 1,
@@ -568,39 +559,81 @@
     ]
   },
   {
-    "method": "typeToString",
+    "method": "batchRequests",
     "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "type": 88
-    },
-    "result": "(percent?: number | undefined, ...rest: string[]) => string"
-  },
-  {
-    "method": "getSignaturesOfType",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "type": 88,
-      "kind": 0
-    },
-    "result": [
-      {
-        "id": 6,
-        "flags": 1,
-        "declaration": "49.186.<root>/markers.tsx",
-        "parameters": [
-          {
-            "id": 20,
-            "file": "77"
-          },
-          {
-            "id": 21,
-            "file": "77"
+      "requests": [
+        {
+          "method": "getSignaturesOfType",
+          "params": {
+            "type": 88,
+            "kind": 0,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
           }
-        ]
-      }
-    ]
+        },
+        {
+          "method": "getSignaturesOfType",
+          "params": {
+            "type": 88,
+            "kind": 1,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
+          }
+        },
+        {
+          "method": "getPropertiesOfType",
+          "params": {
+            "type": 88,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
+          }
+        },
+        {
+          "method": "getIndexInfosOfType",
+          "params": {
+            "type": 88,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
+          }
+        }
+      ]
+    },
+    "result": {
+      "responses": [
+        {
+          "method": "getSignaturesOfType",
+          "result": [
+            {
+              "id": 6,
+              "flags": 1,
+              "declaration": "49.186.<root>/markers.tsx",
+              "parameters": [
+                {
+                  "id": 20,
+                  "file": "77"
+                },
+                {
+                  "id": 21,
+                  "file": "77"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "method": "getSignaturesOfType",
+          "result": []
+        },
+        {
+          "method": "getPropertiesOfType",
+          "result": []
+        },
+        {
+          "method": "getIndexInfosOfType",
+          "result": []
+        }
+      ]
+    }
   },
   {
     "method": "getParametersOfSignature",
@@ -688,7 +721,7 @@
     },
     "result": [
       {
-        "id": 97,
+        "id": 96,
         "flags": 134217728,
         "objectFlags": 0,
         "isTupleType": false,
@@ -696,7 +729,7 @@
         "isThisType": false
       },
       {
-        "id": 96,
+        "id": 97,
         "flags": 1048576,
         "objectFlags": 536870916,
         "isTupleType": false,
@@ -710,20 +743,20 @@
     ]
   },
   {
-    "method": "getAliasSymbolOfType",
+    "method": "typeToString",
     "params": {
       "snapshot": 1,
       "project": "/dev/null/synthetic/1",
-      "objectId": 97
+      "type": 88
     },
-    "result": null
+    "result": "(percent?: number | undefined, ...rest: string[]) => string"
   },
   {
     "method": "getTypesOfType",
     "params": {
       "snapshot": 1,
       "project": "/dev/null/synthetic/1",
-      "objectId": 97
+      "objectId": 96
     },
     "result": [
       {
@@ -747,20 +780,41 @@
     ]
   },
   {
-    "method": "isArrayType",
+    "method": "getSymbolOfType",
     "params": {
       "snapshot": 1,
       "project": "/dev/null/synthetic/1",
-      "type": 96
+      "objectId": 97
     },
-    "result": true
+    "result": {
+      "reference": {
+        "kind": 1,
+        "snapshot": 1,
+        "project": "/dev/null/synthetic/1",
+        "id": 37
+      },
+      "name": "Array",
+      "flags": 33554497,
+      "checkFlags": 0,
+      "declarations": [
+        "5140.266./private/tmp/claude-501/slice2/node_modules/@tsrs/darwin-arm64/lib.es5.d.ts",
+        "6124.262./private/tmp/claude-501/slice2/node_modules/@tsrs/darwin-arm64/lib.es5.d.ts",
+        "3.266./private/tmp/claude-501/slice2/node_modules/@tsrs/darwin-arm64/lib.es2015.core.d.ts",
+        "282.266./private/tmp/claude-501/slice2/node_modules/@tsrs/darwin-arm64/lib.es2015.iterable.d.ts",
+        "120.266./private/tmp/claude-501/slice2/node_modules/@tsrs/darwin-arm64/lib.es2015.symbol.wellknown.d.ts",
+        "3.266./private/tmp/claude-501/slice2/node_modules/@tsrs/darwin-arm64/lib.es2016.array.include.d.ts",
+        "199.266./private/tmp/claude-501/slice2/node_modules/@tsrs/darwin-arm64/lib.es2019.array.d.ts",
+        "3.266./private/tmp/claude-501/slice2/node_modules/@tsrs/darwin-arm64/lib.es2022.array.d.ts"
+      ],
+      "valueDeclaration": "6124.262./private/tmp/claude-501/slice2/node_modules/@tsrs/darwin-arm64/lib.es5.d.ts"
+    }
   },
   {
     "method": "getTypeArguments",
     "params": {
       "snapshot": 1,
       "project": "/dev/null/synthetic/1",
-      "type": 96
+      "type": 97
     },
     "result": [
       {
@@ -790,15 +844,6 @@
       "isThisType": false,
       "intrinsicName": "string"
     }
-  },
-  {
-    "method": "getAliasSymbolOfType",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "objectId": 91
-    },
-    "result": null
   },
   {
     "method": "getTypesOfType",
@@ -832,35 +877,77 @@
     ]
   },
   {
-    "method": "typeToString",
+    "method": "batchRequests",
     "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "type": 90
-    },
-    "result": "(...args: any[]) => void"
-  },
-  {
-    "method": "getSignaturesOfType",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "type": 90,
-      "kind": 0
-    },
-    "result": [
-      {
-        "id": 7,
-        "flags": 1,
-        "declaration": "67.186.<root>/markers.tsx",
-        "parameters": [
-          {
-            "id": 24,
-            "file": "77"
+      "requests": [
+        {
+          "method": "getSignaturesOfType",
+          "params": {
+            "type": 90,
+            "kind": 0,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
           }
-        ]
-      }
-    ]
+        },
+        {
+          "method": "getSignaturesOfType",
+          "params": {
+            "type": 90,
+            "kind": 1,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
+          }
+        },
+        {
+          "method": "getPropertiesOfType",
+          "params": {
+            "type": 90,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
+          }
+        },
+        {
+          "method": "getIndexInfosOfType",
+          "params": {
+            "type": 90,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
+          }
+        }
+      ]
+    },
+    "result": {
+      "responses": [
+        {
+          "method": "getSignaturesOfType",
+          "result": [
+            {
+              "id": 7,
+              "flags": 1,
+              "declaration": "67.186.<root>/markers.tsx",
+              "parameters": [
+                {
+                  "id": 24,
+                  "file": "77"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "method": "getSignaturesOfType",
+          "result": []
+        },
+        {
+          "method": "getPropertiesOfType",
+          "result": []
+        },
+        {
+          "method": "getIndexInfosOfType",
+          "result": []
+        }
+      ]
+    }
   },
   {
     "method": "getParametersOfSignature",
@@ -929,13 +1016,13 @@
     ]
   },
   {
-    "method": "isArrayType",
+    "method": "typeToString",
     "params": {
       "snapshot": 1,
       "project": "/dev/null/synthetic/1",
-      "type": 77
+      "type": 90
     },
-    "result": true
+    "result": "(...args: any[]) => void"
   },
   {
     "method": "getTypeArguments",
@@ -974,35 +1061,6 @@
     }
   },
   {
-    "method": "getDocumentationComment",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "symbol": {
-        "kind": 0,
-        "file": {
-          "fileName": "<ROOT>/Markers.tsx",
-          "path": "<root>/markers.tsx",
-          "contentHash": "6dcaff95731a90a46d83dc2e3e98dcf2",
-          "parseOptionsKey": "0",
-          "scriptKind": 4,
-          "nodeId": "77"
-        },
-        "id": 8
-      }
-    },
-    "result": ""
-  },
-  {
-    "method": "getAliasSymbolOfType",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "objectId": 93
-    },
-    "result": null
-  },
-  {
     "method": "getTypesOfType",
     "params": {
       "snapshot": 1,
@@ -1034,35 +1092,77 @@
     ]
   },
   {
-    "method": "typeToString",
+    "method": "batchRequests",
     "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "type": 92
-    },
-    "result": "(e?: Event | undefined) => void"
-  },
-  {
-    "method": "getSignaturesOfType",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "type": 92,
-      "kind": 0
-    },
-    "result": [
-      {
-        "id": 8,
-        "flags": 0,
-        "declaration": "78.186.<root>/markers.tsx",
-        "parameters": [
-          {
-            "id": 27,
-            "file": "77"
+      "requests": [
+        {
+          "method": "getSignaturesOfType",
+          "params": {
+            "type": 92,
+            "kind": 0,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
           }
-        ]
-      }
-    ]
+        },
+        {
+          "method": "getSignaturesOfType",
+          "params": {
+            "type": 92,
+            "kind": 1,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
+          }
+        },
+        {
+          "method": "getPropertiesOfType",
+          "params": {
+            "type": 92,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
+          }
+        },
+        {
+          "method": "getIndexInfosOfType",
+          "params": {
+            "type": 92,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
+          }
+        }
+      ]
+    },
+    "result": {
+      "responses": [
+        {
+          "method": "getSignaturesOfType",
+          "result": [
+            {
+              "id": 8,
+              "flags": 0,
+              "declaration": "78.186.<root>/markers.tsx",
+              "parameters": [
+                {
+                  "id": 27,
+                  "file": "77"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "method": "getSignaturesOfType",
+          "result": []
+        },
+        {
+          "method": "getPropertiesOfType",
+          "result": []
+        },
+        {
+          "method": "getIndexInfosOfType",
+          "result": []
+        }
+      ]
+    }
   },
   {
     "method": "getParametersOfSignature",
@@ -1127,13 +1227,13 @@
     ]
   },
   {
-    "method": "getAliasSymbolOfType",
+    "method": "typeToString",
     "params": {
       "snapshot": 1,
       "project": "/dev/null/synthetic/1",
-      "objectId": 99
+      "type": 92
     },
-    "result": null
+    "result": "(e?: Event | undefined) => void"
   },
   {
     "method": "getTypesOfType",
@@ -1161,19 +1261,50 @@
         "isThisType": false,
         "symbol": {
           "id": 38,
-          "file": "187"
+          "file": "19452"
         }
       }
     ]
   },
   {
-    "method": "typeToString",
+    "method": "getSymbolOfType",
     "params": {
       "snapshot": 1,
       "project": "/dev/null/synthetic/1",
-      "type": 98
+      "objectId": 98
     },
-    "result": "Event"
+    "result": {
+      "reference": {
+        "kind": 0,
+        "file": {
+          "fileName": "/private/tmp/claude-501/slice2/node_modules/@tsrs/darwin-arm64/lib.dom.d.ts",
+          "path": "/private/tmp/claude-501/slice2/node_modules/@tsrs/darwin-arm64/lib.dom.d.ts",
+          "contentHash": "7bef8e45599a00823d58da6008f60967",
+          "parseOptionsKey": "0",
+          "scriptKind": 3,
+          "nodeId": "19452"
+        },
+        "id": 38
+      },
+      "name": "Event",
+      "flags": 65,
+      "checkFlags": 0,
+      "declarations": [
+        "36477.266./private/tmp/claude-501/slice2/node_modules/@tsrs/darwin-arm64/lib.dom.d.ts",
+        "36696.262./private/tmp/claude-501/slice2/node_modules/@tsrs/darwin-arm64/lib.dom.d.ts"
+      ],
+      "valueDeclaration": "36696.262./private/tmp/claude-501/slice2/node_modules/@tsrs/darwin-arm64/lib.dom.d.ts"
+    }
+  },
+  {
+    "method": "getSignaturesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 98,
+      "kind": 0
+    },
+    "result": []
   },
   {
     "method": "getReturnTypeOfSignature",
@@ -1193,59 +1324,81 @@
     }
   },
   {
-    "method": "getDocumentationComment",
+    "method": "batchRequests",
     "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "symbol": {
-        "kind": 0,
-        "file": {
-          "fileName": "<ROOT>/Markers.tsx",
-          "path": "<root>/markers.tsx",
-          "contentHash": "6dcaff95731a90a46d83dc2e3e98dcf2",
-          "parseOptionsKey": "0",
-          "scriptKind": 4,
-          "nodeId": "77"
-        },
-        "id": 9
-      }
-    },
-    "result": ""
-  },
-  {
-    "method": "typeToString",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "type": 94
-    },
-    "result": "(a: number, b?: string | undefined) => void"
-  },
-  {
-    "method": "getSignaturesOfType",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "type": 94,
-      "kind": 0
-    },
-    "result": [
-      {
-        "id": 9,
-        "flags": 0,
-        "declaration": "88.186.<root>/markers.tsx",
-        "parameters": [
-          {
-            "id": 31,
-            "file": "77"
-          },
-          {
-            "id": 30,
-            "file": "77"
+      "requests": [
+        {
+          "method": "getSignaturesOfType",
+          "params": {
+            "type": 94,
+            "kind": 0,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
           }
-        ]
-      }
-    ]
+        },
+        {
+          "method": "getSignaturesOfType",
+          "params": {
+            "type": 94,
+            "kind": 1,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
+          }
+        },
+        {
+          "method": "getPropertiesOfType",
+          "params": {
+            "type": 94,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
+          }
+        },
+        {
+          "method": "getIndexInfosOfType",
+          "params": {
+            "type": 94,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
+          }
+        }
+      ]
+    },
+    "result": {
+      "responses": [
+        {
+          "method": "getSignaturesOfType",
+          "result": [
+            {
+              "id": 9,
+              "flags": 0,
+              "declaration": "88.186.<root>/markers.tsx",
+              "parameters": [
+                {
+                  "id": 30,
+                  "file": "77"
+                },
+                {
+                  "id": 31,
+                  "file": "77"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "method": "getSignaturesOfType",
+          "result": []
+        },
+        {
+          "method": "getPropertiesOfType",
+          "result": []
+        },
+        {
+          "method": "getIndexInfosOfType",
+          "result": []
+        }
+      ]
+    }
   },
   {
     "method": "getParametersOfSignature",
@@ -1266,7 +1419,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 31
+          "id": 30
         },
         "name": "a",
         "flags": 1,
@@ -1287,7 +1440,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 30
+          "id": 31
         },
         "name": "b",
         "flags": 1,
@@ -1315,7 +1468,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 31
+          "id": 30
         },
         {
           "kind": 0,
@@ -1327,7 +1480,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 30
+          "id": 31
         }
       ]
     },
@@ -1352,13 +1505,13 @@
     ]
   },
   {
-    "method": "getAliasSymbolOfType",
+    "method": "typeToString",
     "params": {
       "snapshot": 1,
       "project": "/dev/null/synthetic/1",
-      "objectId": 100
+      "type": 94
     },
-    "result": null
+    "result": "(a: number, b?: string | undefined) => void"
   },
   {
     "method": "getTypesOfType",
@@ -1406,39 +1559,81 @@
     }
   },
   {
-    "method": "typeToString",
+    "method": "batchRequests",
     "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "type": 95
-    },
-    "result": "(a: number, b: string | undefined) => void"
-  },
-  {
-    "method": "getSignaturesOfType",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "type": 95,
-      "kind": 0
-    },
-    "result": [
-      {
-        "id": 10,
-        "flags": 0,
-        "declaration": "103.186.<root>/markers.tsx",
-        "parameters": [
-          {
-            "id": 34,
-            "file": "77"
-          },
-          {
-            "id": 35,
-            "file": "77"
+      "requests": [
+        {
+          "method": "getSignaturesOfType",
+          "params": {
+            "type": 95,
+            "kind": 0,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
           }
-        ]
-      }
-    ]
+        },
+        {
+          "method": "getSignaturesOfType",
+          "params": {
+            "type": 95,
+            "kind": 1,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
+          }
+        },
+        {
+          "method": "getPropertiesOfType",
+          "params": {
+            "type": 95,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
+          }
+        },
+        {
+          "method": "getIndexInfosOfType",
+          "params": {
+            "type": 95,
+            "snapshot": 1,
+            "project": "/dev/null/synthetic/1"
+          }
+        }
+      ]
+    },
+    "result": {
+      "responses": [
+        {
+          "method": "getSignaturesOfType",
+          "result": [
+            {
+              "id": 10,
+              "flags": 0,
+              "declaration": "103.186.<root>/markers.tsx",
+              "parameters": [
+                {
+                  "id": 34,
+                  "file": "77"
+                },
+                {
+                  "id": 35,
+                  "file": "77"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "method": "getSignaturesOfType",
+          "result": []
+        },
+        {
+          "method": "getPropertiesOfType",
+          "result": []
+        },
+        {
+          "method": "getIndexInfosOfType",
+          "result": []
+        }
+      ]
+    }
   },
   {
     "method": "getParametersOfSignature",
@@ -1545,6 +1740,15 @@
     ]
   },
   {
+    "method": "typeToString",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 95
+    },
+    "result": "(a: number, b: string | undefined) => void"
+  },
+  {
     "method": "getReturnTypeOfSignature",
     "params": {
       "snapshot": 1,
@@ -1560,6 +1764,46 @@
       "isThisType": false,
       "intrinsicName": "void"
     }
+  },
+  {
+    "method": "getDocumentationComment",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Markers.tsx",
+          "path": "<root>/markers.tsx",
+          "contentHash": "6dcaff95731a90a46d83dc2e3e98dcf2",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 13
+      }
+    },
+    "result": ""
+  },
+  {
+    "method": "getDocumentationComment",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Markers.tsx",
+          "path": "<root>/markers.tsx",
+          "contentHash": "6dcaff95731a90a46d83dc2e3e98dcf2",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 14
+      }
+    },
+    "result": ""
   },
   {
     "method": "getTypeOfSymbol",
@@ -1671,7 +1915,7 @@
       "value": null,
       "isThisType": false,
       "symbol": {
-        "id": 12,
+        "id": 6,
         "file": "77"
       }
     }
@@ -1695,7 +1939,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 13
+          "id": 7
         },
         "name": "_single",
         "flags": 16777220,
@@ -1705,7 +1949,7 @@
         ],
         "valueDeclaration": "6.173.<root>/markers.tsx",
         "parent": {
-          "id": 12,
+          "id": 6,
           "file": "77"
         }
       },
@@ -1720,7 +1964,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 14
+          "id": 8
         },
         "name": "___size",
         "flags": 16777220,
@@ -1730,7 +1974,7 @@
         ],
         "valueDeclaration": "13.173.<root>/markers.tsx",
         "parent": {
-          "id": 12,
+          "id": 6,
           "file": "77"
         }
       },
@@ -1745,7 +1989,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 15
+          "id": 9
         },
         "name": "____triple",
         "flags": 16777220,
@@ -1755,7 +1999,7 @@
         ],
         "valueDeclaration": "20.173.<root>/markers.tsx",
         "parent": {
-          "id": 12,
+          "id": 6,
           "file": "77"
         }
       },
@@ -1770,7 +2014,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 16
+          "id": 10
         },
         "name": "plain",
         "flags": 4,
@@ -1780,7 +2024,7 @@
         ],
         "valueDeclaration": "27.173.<root>/markers.tsx",
         "parent": {
-          "id": 12,
+          "id": 6,
           "file": "77"
         }
       }
@@ -1802,7 +2046,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 13
+          "id": 7
         },
         {
           "kind": 0,
@@ -1814,7 +2058,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 14
+          "id": 8
         },
         {
           "kind": 0,
@@ -1826,7 +2070,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 15
+          "id": 9
         },
         {
           "kind": 0,
@@ -1838,13 +2082,13 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 16
+          "id": 10
         }
       ]
     },
     "result": [
       {
-        "id": 97,
+        "id": 96,
         "flags": 134217728,
         "objectFlags": 0,
         "isTupleType": false,
@@ -1879,20 +2123,11 @@
     ]
   },
   {
-    "method": "getAliasSymbolOfType",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "objectId": 97
-    },
-    "result": null
-  },
-  {
     "method": "getTypesOfType",
     "params": {
       "snapshot": 1,
       "project": "/dev/null/synthetic/1",
-      "objectId": 97
+      "objectId": 96
     },
     "result": [
       {
@@ -1914,15 +2149,6 @@
         "intrinsicName": "number"
       }
     ]
-  },
-  {
-    "method": "getAliasSymbolOfType",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "objectId": 100
-    },
-    "result": null
   },
   {
     "method": "getTypesOfType",
@@ -1951,15 +2177,6 @@
         "intrinsicName": "string"
       }
     ]
-  },
-  {
-    "method": "getAliasSymbolOfType",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "objectId": 103
-    },
-    "result": null
   },
   {
     "method": "getTypesOfType",
@@ -2001,24 +2218,6 @@
     ]
   },
   {
-    "method": "typeToString",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "type": 17
-    },
-    "result": "false"
-  },
-  {
-    "method": "typeToString",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "type": 19
-    },
-    "result": "true"
-  },
-  {
     "method": "getDocumentationComment",
     "params": {
       "snapshot": 1,
@@ -2033,7 +2232,7 @@
           "scriptKind": 4,
           "nodeId": "77"
         },
-        "id": 16
+        "id": 10
       }
     },
     "result": ""

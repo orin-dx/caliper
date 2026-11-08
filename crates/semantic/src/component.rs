@@ -6,18 +6,13 @@ use std::sync::Arc;
 use caliper_docgen_core::types::semantic::{PropInterner, SemanticProp};
 
 use crate::Target;
-use crate::convert::{Converter, without_undefined};
-use crate::rpc::{CallError, Rpc, SymbolInfo, flag};
+use crate::convert::{Converter, declared_in, without_undefined};
+use crate::rpc::{CallError, Rpc, SignatureKind, SymbolInfo, flag};
 
 pub(crate) enum Answer {
     Props(Vec<Arc<SemanticProp>>),
     /// The component keeps its structural result, for this reason.
     Fallback(String),
-}
-
-/// `declarations` entries read `"<nodeId>.<pos>.<path>"`.
-fn declared_in(declaration: &str) -> &str {
-    declaration.splitn(3, '.').nth(2).unwrap_or("")
 }
 
 /// What `@types/react` declares (`key`, `ref`, `children` on `PropsWithChildren`, HTML attributes). Reported with the
@@ -65,7 +60,7 @@ pub(crate) async fn props_of(
     }
 
     let component = rpc.type_of_symbol(&reference).await?;
-    let signatures = rpc.signatures(component.id).await?;
+    let signatures = rpc.signatures(component.id, SignatureKind::Call).await?;
     let [signature] = signatures.as_slice() else {
         return fallback(if signatures.is_empty() {
             "no call signature (class or non-function component)"
@@ -93,13 +88,14 @@ pub(crate) async fn props_of(
     let references: Vec<_> = own.iter().map(|property| &property.reference).collect();
     let types = if references.is_empty() { Vec::new() } else { rpc.types_of_symbols(&references).await? };
 
+    let converted = converter.convert_roots(&types).await?;
     let mut props = Vec::with_capacity(own.len());
-    for (property, ty) in own.iter().zip(&types) {
+    for (property, prop_type) in own.iter().zip(converted) {
         let required = property.flags & flag::SYMBOL_OPTIONAL == 0;
         let react_declared = is_react_declared(property);
         props.push(interner.share(SemanticProp {
             name: property.name.clone(),
-            prop_type: without_undefined(converter.convert(ty, 0).await?, !required),
+            prop_type: without_undefined(prop_type, !required),
             required,
             react_declared,
             // React's own descriptions are the structural pass's to give, and fetching one per attribute is a call each.

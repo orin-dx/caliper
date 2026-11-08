@@ -48,6 +48,15 @@ pub(crate) struct SymbolInfo {
     pub declarations: Vec<String>,
 }
 
+/// A symbol as another response embeds it: the id, and the node id of the file that owns it. The full symbol is one
+/// call away (`getSymbolOfType`, `getAliasSymbolOfType`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+pub(crate) struct CompactSymbol {
+    pub id: u64,
+    #[serde(default)]
+    pub file: Option<String>,
+}
+
 /// The checker keeps a symbol's name in an escaped form: a name that starts with two underscores gets a third
 /// (`escapeLeadingUnderscores`), so that it cannot collide with its own internal names such as `__call`. The source
 /// writes `__size`, the checker answers `___size`. A name with fewer than three leading underscores is unchanged, and
@@ -76,6 +85,30 @@ pub(crate) struct TypeInfo {
     /// the error type of an unresolved name: both carry the `Any` flag, and the error type has an id per site.
     #[serde(default)]
     pub intrinsic_name: Option<String>,
+    /// `TupleElementFlags` of a tuple type's elements: required 1, optional 2, rest 4, variadic 8.
+    #[serde(default)]
+    pub element_flags: Vec<u64>,
+    /// A tuple type written `readonly [...]`.
+    #[serde(default)]
+    pub readonly: bool,
+    /// One declaration handle per element of a tuple whose elements are labeled, `[head: string]`; empty otherwise.
+    #[serde(default)]
+    pub labeled_element_declarations: Vec<String>,
+    /// The text pieces of a template literal type, around its holes.
+    #[serde(default)]
+    pub texts: Vec<String>,
+    /// The `this` type of a class or interface, which the checker also appends to a reference's type arguments.
+    #[serde(default)]
+    pub is_this_type: bool,
+    /// The symbol that declares an object type; absent for primitives and unions.
+    #[serde(default)]
+    pub symbol: Option<CompactSymbol>,
+    /// The alias this type was written through, `Size` in `type Size = "sm" | "lg"`.
+    #[serde(default)]
+    pub alias_symbol: Option<CompactSymbol>,
+    /// Ids of the alias's type arguments; `Rpc::alias_type_arguments` fetches them.
+    #[serde(default)]
+    pub alias_type_arguments: Vec<u64>,
 }
 
 impl TypeInfo {
@@ -86,11 +119,57 @@ impl TypeInfo {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct SignatureInfo {
     pub id: u64,
     /// `SignatureFlags`; see [`flag::SIGNATURE_HAS_REST_PARAMETER`].
     #[serde(default)]
     pub flags: u64,
+    /// The signature's own type parameters (ids; `Rpc::type_parameters` fetches them).
+    #[serde(default)]
+    pub type_parameters: Vec<u64>,
+}
+
+/// What an object type holds, as one batch answers it.
+pub(crate) struct ObjectMembers {
+    pub calls: Vec<SignatureInfo>,
+    pub constructs: Vec<SignatureInfo>,
+    pub properties: Vec<SymbolInfo>,
+    pub indexes: Vec<IndexInfo>,
+}
+
+/// One index signature of an object type, `[key: string]: T`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct IndexInfo {
+    pub key_type: TypeInfo,
+    pub value_type: TypeInfo,
+    #[serde(default)]
+    pub is_readonly: bool,
+}
+
+/// `SignatureKind` as the checker's `getSignaturesOfType` takes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum SignatureKind {
+    Call = 0,
+    Construct = 1,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchPage {
+    responses: Vec<BatchAnswer>,
+    #[serde(default)]
+    continuation_token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BatchAnswer {
+    #[serde(default)]
+    result: Value,
+    #[serde(default)]
+    error: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,17 +191,25 @@ pub(crate) mod flag {
     pub(crate) const VOID: u64 = 16;
     pub(crate) const STRING: u64 = 32;
     pub(crate) const NUMBER: u64 = 64;
+    pub(crate) const BIG_INT: u64 = 128;
     pub(crate) const BOOLEAN: u64 = 256;
+    pub(crate) const ES_SYMBOL: u64 = 512;
     pub(crate) const STRING_LITERAL: u64 = 1024;
     pub(crate) const NUMBER_LITERAL: u64 = 2048;
+    pub(crate) const BIG_INT_LITERAL: u64 = 4096;
     pub(crate) const BOOLEAN_LITERAL: u64 = 8192;
+    pub(crate) const UNIQUE_ES_SYMBOL: u64 = 16384;
     pub(crate) const ENUM_LITERAL: u64 = 32768;
-    pub(crate) const ENUM: u64 = 65536;
+    pub(crate) const NON_PRIMITIVE: u64 = 131072;
     pub(crate) const NEVER: u64 = 262144;
     pub(crate) const TYPE_PARAMETER: u64 = 524288;
     pub(crate) const OBJECT: u64 = 1048576;
+    pub(crate) const INDEX: u64 = 2097152;
     pub(crate) const TEMPLATE_LITERAL: u64 = 4194304;
     pub(crate) const STRING_MAPPING: u64 = 8388608;
+    pub(crate) const SUBSTITUTION: u64 = 16777216;
+    pub(crate) const INDEXED_ACCESS: u64 = 33554432;
+    pub(crate) const CONDITIONAL: u64 = 67108864;
     pub(crate) const UNION: u64 = 134217728;
     pub(crate) const INTERSECTION: u64 = 268435456;
     pub(crate) const SYMBOL_ALIAS: u64 = 2097152;
@@ -130,7 +217,19 @@ pub(crate) mod flag {
     /// `SignatureFlags.HasRestParameter`: the signature's last parameter is a rest parameter. The beta sets it for
     /// `(...args: T[]) => R` and for `(a?: A, ...rest: B[]) => R`, and leaves every other signature at 0.
     pub(crate) const SIGNATURE_HAS_REST_PARAMETER: u64 = 1;
+    /// `ObjectFlags`: a class or interface type, an instantiation of one (a reference), a tuple, a mapped type.
+    pub(crate) const OBJECT_CLASS: u64 = 1;
+    pub(crate) const OBJECT_INTERFACE: u64 = 2;
     pub(crate) const OBJECT_REFERENCE: u64 = 4;
+    /// `TupleElementFlags`.
+    pub(crate) const ELEMENT_OPTIONAL: u64 = 2;
+    pub(crate) const ELEMENT_REST: u64 = 4;
+    pub(crate) const ELEMENT_VARIADIC: u64 = 8;
+}
+
+tokio::task_local! {
+    /// The requests the component being answered has sent, so a debug line can say what each one cost.
+    pub(crate) static REQUESTS: std::sync::Arc<std::sync::atomic::AtomicU64>;
 }
 
 /// One `tsc --api` session bound to a snapshot and project.
@@ -234,6 +333,7 @@ impl Rpc {
         if let Ok(mut calls) = self.calls.lock() {
             *calls.entry(method.to_string()).or_default() += 1;
         }
+        REQUESTS.try_with(|count| count.fetch_add(1, std::sync::atomic::Ordering::Relaxed)).ok();
         let answer = self.client.request(method, params.clone(), self.deadline).await.map_err(classify)?;
         if let Some(log) = &self.recording
             && let Ok(mut log) = log.lock()
@@ -272,8 +372,76 @@ impl Rpc {
         self.scoped("getTypesOfSymbols", json!({ "symbols": symbols })).await
     }
 
-    pub(crate) async fn signatures(&self, type_id: u64) -> Result<Vec<SignatureInfo>, CallError> {
-        self.scoped("getSignaturesOfType", json!({ "type": type_id, "kind": 0 })).await
+    /// The call signatures of a type, or with `SignatureKind::Construct` its construct signatures.
+    pub(crate) async fn signatures(&self, type_id: u64, kind: SignatureKind) -> Result<Vec<SignatureInfo>, CallError> {
+        self.scoped("getSignaturesOfType", json!({ "type": type_id, "kind": kind as u8 })).await
+    }
+
+    pub(crate) async fn type_parameters(&self, signature: u64) -> Result<Vec<TypeInfo>, CallError> {
+        self.scoped("getTypeParametersOfSignature", json!({ "objectId": signature })).await
+    }
+
+    /// The symbol that declares a type: the interface, class, enum member or unique symbol behind it.
+    pub(crate) async fn symbol_of_type(&self, type_id: u64) -> Result<Option<SymbolInfo>, CallError> {
+        self.scoped("getSymbolOfType", json!({ "objectId": type_id })).await
+    }
+
+    pub(crate) async fn alias_type_arguments(&self, type_id: u64) -> Result<Vec<TypeInfo>, CallError> {
+        self.scoped("getAliasTypeArgumentsOfType", json!({ "objectId": type_id })).await
+    }
+
+    /// The generic type a reference instantiates; for a tuple reference, the tuple type that holds its element flags.
+    pub(crate) async fn target_of_type(&self, type_id: u64) -> Result<TypeInfo, CallError> {
+        self.scoped("getTargetOfType", json!({ "objectId": type_id })).await
+    }
+
+    pub(crate) async fn parent_of_symbol(&self, symbol: &Value) -> Result<Option<SymbolInfo>, CallError> {
+        self.scoped("getParentOfSymbolForChecker", json!({ "symbol": symbol })).await
+    }
+
+    /// Whether each property is declared `readonly`, in one round trip.
+    pub(crate) async fn readonly_symbols(&self, symbols: &[&Value]) -> Result<Vec<bool>, CallError> {
+        let requests = symbols.iter().map(|symbol| ("isReadonlySymbol", json!({ "symbol": symbol }))).collect();
+        self.batch(requests).await?.into_iter().map(decode).collect()
+    }
+
+    /// Several requests in one round trip. A request the checker rejects fails the batch: nothing here asks for one
+    /// that may legitimately fail.
+    pub(crate) async fn batch(&self, requests: Vec<(&str, Value)>) -> Result<Vec<Value>, CallError> {
+        let wanted = requests.len();
+        let scoped: Vec<Value> = requests
+            .into_iter()
+            .map(|(method, mut params)| {
+                if let Value::Object(map) = &mut params {
+                    map.insert("snapshot".to_string(), json!(self.snapshot));
+                    map.insert("project".to_string(), json!(self.project));
+                }
+                json!({ "method": method, "params": params })
+            })
+            .collect();
+        let mut answers = Vec::with_capacity(wanted);
+        let mut token: Option<String> = None;
+        loop {
+            let mut params = json!({ "requests": scoped });
+            if let (Some(token), Some(map)) = (&token, params.as_object_mut()) {
+                map.insert("continuationToken".to_string(), json!(token));
+            }
+            let page: BatchPage = decode(self.call("batchRequests", params).await?)?;
+            for response in page.responses {
+                if let Some(error) = response.error {
+                    return Err(CallError::Rejected(error));
+                }
+                answers.push(response.result);
+            }
+            match page.continuation_token {
+                Some(next) => token = Some(next),
+                None => break,
+            }
+        }
+        if answers.len() != wanted {
+            return Err(CallError::Rejected(format!("a batch of {wanted} requests got {} answers", answers.len())));
+        }
+        Ok(answers)
     }
 
     pub(crate) async fn parameters(&self, signature: u64) -> Result<Vec<SymbolInfo>, CallError> {
@@ -296,8 +464,22 @@ impl Rpc {
         self.scoped("getTypeArguments", json!({ "type": type_id })).await
     }
 
-    pub(crate) async fn is_array(&self, type_id: u64) -> Result<bool, CallError> {
-        self.scoped("isArrayType", json!({ "type": type_id })).await
+    /// The call and construct signatures, the properties and the index signatures of a type, in one round trip.
+    pub(crate) async fn object_members(&self, type_id: u64) -> Result<ObjectMembers, CallError> {
+        let requests = vec![
+            ("getSignaturesOfType", json!({ "type": type_id, "kind": SignatureKind::Call as u8 })),
+            ("getSignaturesOfType", json!({ "type": type_id, "kind": SignatureKind::Construct as u8 })),
+            ("getPropertiesOfType", json!({ "type": type_id })),
+            ("getIndexInfosOfType", json!({ "type": type_id })),
+        ];
+        let mut answers = self.batch(requests).await?.into_iter();
+        let mut next = || answers.next().ok_or_else(|| CallError::Rejected("a short batch".to_string()));
+        Ok(ObjectMembers {
+            calls: decode(next()?)?,
+            constructs: decode(next()?)?,
+            properties: decode(next()?)?,
+            indexes: decode(next()?)?,
+        })
     }
 
     pub(crate) async fn alias_symbol(&self, type_id: u64) -> Result<Option<SymbolInfo>, CallError> {

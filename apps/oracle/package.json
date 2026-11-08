@@ -7,7 +7,8 @@
   "scripts": {
     "test": "vitest run",
     "construct:capture": "tsx src/construct-capture.ts",
-    "construct:check": "tsx src/construct-capture.ts --check"
+    "construct:check": "tsx src/construct-capture.ts --check",
+    "construct:checker": "tsx src/construct-checker-lane.ts"
   },
   "dependencies": {
     "react-docgen": "^8.0.4",

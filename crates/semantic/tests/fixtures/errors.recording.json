@@ -243,7 +243,7 @@
       "value": null,
       "isThisType": false,
       "symbol": {
-        "id": 4,
+        "id": 5,
         "file": "77"
       }
     }
@@ -267,7 +267,7 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 5
+          "id": 6
         },
         "name": "explicitAny",
         "flags": 4,
@@ -277,32 +277,7 @@
         ],
         "valueDeclaration": "13.173.<root>/errors.tsx",
         "parent": {
-          "id": 4,
-          "file": "77"
-        }
-      },
-      {
-        "reference": {
-          "kind": 0,
-          "file": {
-            "fileName": "<ROOT>/Errors.tsx",
-            "path": "<root>/errors.tsx",
-            "contentHash": "7f1c195aac0f78c745105f8506cb660e",
-            "parseOptionsKey": "0",
-            "scriptKind": 4,
-            "nodeId": "77"
-          },
-          "id": 6
-        },
-        "name": "fromImport",
-        "flags": 4,
-        "checkFlags": 0,
-        "declarations": [
-          "19.173.<root>/errors.tsx"
-        ],
-        "valueDeclaration": "19.173.<root>/errors.tsx",
-        "parent": {
-          "id": 4,
+          "id": 5,
           "file": "77"
         }
       },
@@ -319,15 +294,15 @@
           },
           "id": 7
         },
-        "name": "undeclared",
+        "name": "fromImport",
         "flags": 4,
         "checkFlags": 0,
         "declarations": [
-          "26.173.<root>/errors.tsx"
+          "19.173.<root>/errors.tsx"
         ],
-        "valueDeclaration": "26.173.<root>/errors.tsx",
+        "valueDeclaration": "19.173.<root>/errors.tsx",
         "parent": {
-          "id": 4,
+          "id": 5,
           "file": "77"
         }
       },
@@ -344,6 +319,31 @@
           },
           "id": 8
         },
+        "name": "undeclared",
+        "flags": 4,
+        "checkFlags": 0,
+        "declarations": [
+          "26.173.<root>/errors.tsx"
+        ],
+        "valueDeclaration": "26.173.<root>/errors.tsx",
+        "parent": {
+          "id": 5,
+          "file": "77"
+        }
+      },
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Errors.tsx",
+            "path": "<root>/errors.tsx",
+            "contentHash": "7f1c195aac0f78c745105f8506cb660e",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 9
+        },
         "name": "label",
         "flags": 4,
         "checkFlags": 0,
@@ -352,7 +352,7 @@
         ],
         "valueDeclaration": "33.173.<root>/errors.tsx",
         "parent": {
-          "id": 4,
+          "id": 5,
           "file": "77"
         }
       }
@@ -374,18 +374,6 @@
             "scriptKind": 4,
             "nodeId": "77"
           },
-          "id": 5
-        },
-        {
-          "kind": 0,
-          "file": {
-            "fileName": "<ROOT>/Errors.tsx",
-            "path": "<root>/errors.tsx",
-            "contentHash": "7f1c195aac0f78c745105f8506cb660e",
-            "parseOptionsKey": "0",
-            "scriptKind": 4,
-            "nodeId": "77"
-          },
           "id": 6
         },
         {
@@ -411,6 +399,18 @@
             "nodeId": "77"
           },
           "id": 8
+        },
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Errors.tsx",
+            "path": "<root>/errors.tsx",
+            "contentHash": "7f1c195aac0f78c745105f8506cb660e",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 9
         }
       ]
     },
@@ -492,7 +492,7 @@
           "scriptKind": 4,
           "nodeId": "77"
         },
-        "id": 8
+        "id": 9
       }
     },
     "result": ""
