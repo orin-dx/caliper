@@ -21,10 +21,6 @@ declare const brand: unique symbol;
 type Ev = 'click' | 'focus';
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 type Loop = Loop;
-interface Box {
-  get value(): string;
-  set value(next: string);
-}
 export interface WidgetProps {
   rest?: [string, ...number[]];
   leadingRest?: [...string[], number];
@@ -47,9 +43,11 @@ export interface WidgetProps {
   json?: Json;
   loop?: Loop;
   getter?: { get size(): number };
-  accessor?: Box;
   inlineAccessor?: { get value(): string; set value(next: string) };
+  spreadOptional?: [...[string?], number];
+  optionalUnion?: [(string | number)?];
   get label(): string;
+  set label(next: string | number);
 }
 export function Widget(props: WidgetProps) { return <div />; }
 "#;
@@ -95,6 +93,7 @@ fn tuple_elements_keep_their_rest_optional_and_label_markers() {
         ("labeledRest", "[head: string, ...tail: number[]]"),
         ("optional", "[string, number?]"),
         ("labeledOptional", "[x: number, y?: number]"),
+        ("optionalUnion", "[(string | number)?]"),
     ];
     for (name, printed) in cases {
         let (rdt, _, degraded) = prop(&out, name);
@@ -122,6 +121,8 @@ fn a_spread_of_a_known_tuple_is_flattened() {
     for name in ["spread", "genericSpread"] {
         assert_eq!(prop(&out, name).0, &json!("[string, number, boolean]"), "{name}");
     }
+    // An optional element spread in before a required one is required and admits `undefined`, as TypeScript has it.
+    assert_eq!(prop(&out, "spreadOptional").0, &json!("[string | undefined, number]"));
 }
 
 #[test]
@@ -225,5 +226,6 @@ fn a_getter_is_a_property_not_a_method() {
     let out = extracted();
     assert_eq!(prop(&out, "getter").0, &json!("{ readonly size: number }"));
     assert_eq!(prop(&out, "inlineAccessor").0, &json!("{ value: string }"));
+    // A props interface's getter and setter are one prop, typed by the getter, not by the setter's wider parameter.
     assert_eq!(prop(&out, "label").0, &json!("string"));
 }

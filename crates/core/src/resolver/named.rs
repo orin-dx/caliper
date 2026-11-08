@@ -42,6 +42,18 @@ pub(super) fn resolve_named(
     // Chakra's style props name a few thousand distinct ones a million times.
     ctx.named_results.get_or_resolve(&visit_key, depth, state, None, |state| {
         if !state.enter_named(&visit_key) {
+            // The same reference, being resolved: the type it names encloses this one.
+            return PropType::Recursive {
+                name: unmarked(name).into(),
+                args: args.iter().map(super::func::as_written).collect(),
+            };
+        }
+
+        let result = resolve_named_uncycled(name, args, consuming_file, ctx, state, depth);
+        state.leave_named(&visit_key);
+        // TypeScript defers a recursive reference only inside an object, array or tuple: `type Loop = Loop` or
+        // `type A = A | string` is an error ("circularly references itself"), not a recursive type.
+        if refers_to_itself_directly(&result, unmarked(name)) {
             state.diagnostics.push(Diagnostic {
                 severity: DiagnosticSeverity::Info,
                 message: format!(
@@ -55,18 +67,6 @@ pub(super) fn resolve_named(
                 code: DiagnosticCode::CircularReference,
                 affects: Vec::new(),
             });
-            // The same reference, being resolved: the type it names encloses this one.
-            return PropType::Recursive {
-                name: unmarked(name).into(),
-                args: args.iter().map(super::func::as_written).collect(),
-            };
-        }
-
-        let result = resolve_named_uncycled(name, args, consuming_file, ctx, state, depth);
-        state.leave_named(&visit_key);
-        // TypeScript defers a recursive reference only inside an object, array or tuple: `type Loop = Loop` or
-        // `type A = A | string` is an error ("circularly references itself"), not a recursive type.
-        if refers_to_itself_directly(&result, unmarked(name)) {
             return OpaqueDetail::new(name.to_string(), OpaqueReason::DepthExceeded);
         }
         result

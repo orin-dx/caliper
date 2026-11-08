@@ -232,6 +232,17 @@ pub(super) fn tuple_of(
         };
         out.push(TupleElement { element_type: ty, kind, label });
     }
+    // TypeScript allows an optional element only after the last required one; one spread in before it
+    // (`[...[string?], number]`) becomes required and admits `undefined`: `[string | undefined, number]`.
+    if let Some(last_required) = out.iter().rposition(|e| e.kind == TupleElementKind::Required) {
+        for element in &mut out[..last_required] {
+            if element.kind == TupleElementKind::Optional {
+                element.kind = TupleElementKind::Required;
+                let ty = std::mem::replace(&mut element.element_type, PropType::Undefined);
+                element.element_type = super::primitives::union_of([ty, PropType::Undefined]);
+            }
+        }
+    }
     PropType::Tuple(out)
 }
 

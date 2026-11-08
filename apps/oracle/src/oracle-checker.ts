@@ -12,6 +12,8 @@ const INTRINSICS: [number, string][] = [
   [TypeFlags.Number, 'number'],
   [TypeFlags.BigInt, 'bigint'],
   [TypeFlags.ESSymbol, 'symbol'],
+  // A symbol type of its own (`typeof brand` for `declare const brand: unique symbol`), not `symbol`.
+  [TypeFlags.UniqueESSymbol, 'unique symbol'],
   [TypeFlags.Null, 'null'],
   [TypeFlags.Undefined, 'undefined'],
   [TypeFlags.Void, 'void'],

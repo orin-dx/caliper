@@ -39298,20 +39298,6 @@ expression: value
     },
     {
       "severity": "info",
-      "message": "Circular type reference detected resolving 'ReactNode' in '[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts' — stopping here to avoid infinite recursion",
-      "file": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts",
-      "line": null,
-      "column": null,
-      "help": "This type (directly or indirectly) references itself.",
-      "code": "CIRCULAR_REFERENCE",
-      "affects": [
-        "Box",
-        "Card",
-        "Icon"
-      ]
-    },
-    {
-      "severity": "info",
       "message": "Indexed access type 'DO_NOT_USE_OR_YOU_WILL_BE_FIRED_EXPERIMENTAL_FORM_ACTIONS[keyof DO_NOT_USE_OR_YOU_WILL_BE_FIRED_EXPERIMENTAL_FORM_ACTIONS]' could not be statically resolved",
       "file": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts",
       "line": null,

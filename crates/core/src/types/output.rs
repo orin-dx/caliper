@@ -1762,11 +1762,15 @@ impl TupleElement {
     /// The element as TypeScript prints it: `string`, `string?`, `...number[]`, `...T`, `head: string`,
     /// `tail?: number`, `...rest: number[]`.
     fn source(&self) -> std::string::String {
+        // Without a label, `?` and `...` bind to the type itself: `(string | number)?`, `...(A | B)`.
+        let operand = || match self.label {
+            Some(_) => self.element_type.raw_string(),
+            None => self.element_type.operand_string(Precedence::Array),
+        };
         let ty = match self.kind {
             TupleElementKind::Rest => format!("{}[]", self.element_type.operand_string(Precedence::Array)),
-            TupleElementKind::Required | TupleElementKind::Optional | TupleElementKind::Variadic => {
-                self.element_type.raw_string()
-            }
+            TupleElementKind::Optional | TupleElementKind::Variadic => operand(),
+            TupleElementKind::Required => self.element_type.raw_string(),
         };
         let spread = match self.kind {
             TupleElementKind::Rest | TupleElementKind::Variadic => "...",

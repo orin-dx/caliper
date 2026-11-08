@@ -81,6 +81,7 @@ export function caliperNorm(t: any, depth = 0): Norm {
     case 'templateLiteral': {
       return prim('string')
     }
+    // The checker side reads a `UniqueESSymbol` the same way; neither keeps which declaration it belongs to.
     case 'uniqueSymbol': {
       return prim('unique symbol')
     }
