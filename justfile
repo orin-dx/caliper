@@ -75,6 +75,10 @@ test-ts:
     pnpm --filter caliper-docgen-storybook test
     pnpm --filter caliper-docgen-oracle test
 
+# Compare the Go checker and tsrs on every construct-suite row (run on every tsrs bump; see apps/oracle/construct-suite/README.md)
+test-parity:
+    pnpm --filter caliper-docgen-oracle construct:parity
+
 # Build the native binding and run the Vite plugin against it
 test-integration:
     pnpm --filter caliper-docgen-napi build:napi
