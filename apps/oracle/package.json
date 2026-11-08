@@ -8,6 +8,7 @@
     "test": "vitest run",
     "construct:capture": "tsx src/construct-capture.ts",
     "construct:check": "tsx src/construct-capture.ts --check",
+    "construct:checker": "tsx src/construct-checker-lane.ts",
     "construct:parity": "tsx src/construct-parity.ts"
   },
   "dependencies": {

@@ -1,343 +1,860 @@
-//! A checker type reduced to the existing [`PropType`], where that is lossless; otherwise the checker's own text as a
-//! `Named` type. The output schema is unchanged: nothing here adds a variant.
+//! A checker type converted to [`PropType`] from the checker's structured answers: type flags, a union's members, a
+//! reference's type arguments, a tuple's element flags, an object's properties, index and call signatures, an alias's
+//! symbol and arguments. The printed type (`typeToString`) names things for display and for the two facts the
+//! structure does not state (see [`crate::printed`]); no shape is read from it.
+//!
+//! The conversion of a type is a function of the type, how deep it sits and which instantiations enclose it, never of
+//! the order the checker was asked in, so the memo can be keyed by the checker's type handle (valid inside one
+//! snapshot) without making the output depend on query order. A handle is also what tells one instantiation from
+//! another while a type is being expanded (`Box<Box<string>>` is two instantiations of one declaration): only its
+//! equality is read, inside one conversion, so the answer does not depend on the numbers. The recursion marker that
+//! results is named by the declaration (the alias or interface) and holds no handle.
+//!
+//! Every descent into the parts of a type (members, properties, elements, holes) passes [`Converter::enter`], which
+//! decides before anything is fetched or converted whether the type is an enclosing instantiation (a back-reference),
+//! sits too deep, or is too wide.
+//!
+//! What stays a name instead of an expansion, the named boundary: an object type declared in a dependency
+//! (`node_modules`) or an interface or class of the TypeScript lib (`Date`, `HTMLElement`, `Promise<T>`), with its type
+//! arguments; a function type is always expanded, since its parameters are what a reader wants. The lib's type-level
+//! utilities (`Partial`, `Pick`, `Omit`, `Record`) are evaluated, not named: their result is the type. A dependency's
+//! union of literals is expanded too, since its members are the values a control offers. What the caps cut is a typed
+//! [`PropType::Truncated`], never the checker's text standing in as a name.
 
 use std::future::Future;
+use std::hash::{Hash, Hasher};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use caliper_docgen_core::types::semantic::unresolved_type;
-use caliper_docgen_core::types::{FunctionParam, ObjectField, PropType};
-use rustc_hash::FxHashMap;
+use caliper_docgen_core::types::semantic::{degraded_type, unresolved_type};
+use caliper_docgen_core::types::{
+    BigIntValue, CallSignature, EnumMemberValue, FunctionParam, ObjectField, OpaqueReason, PropType,
+    SignatureKind as Kind, TemplatePart, TruncationLimit, TupleElement, TupleElementKind, TupleLabel,
+};
+use rustc_hash::{FxHashMap, FxHasher};
 
-use crate::rpc::{CallError, Rpc, SymbolInfo, TypeInfo, flag};
+use crate::printed::{Marker, SignatureMarkers, signature_markers, tuple_labels};
+use crate::rpc::{
+    CallError, CompactSymbol, ObjectMembers, Rpc, SignatureInfo, SignatureKind, SymbolInfo, TypeInfo, flag,
+};
 
-/// Nesting past which a type is written as the checker prints it.
-const MAX_DEPTH: u8 = 4;
-/// An inline object type with more fields than this is written as the checker prints it.
-const MAX_INLINE_FIELDS: usize = 16;
+/// Nesting past which an object, union or intersection is cut with [`TruncationLimit::Depth`].
+const MAX_DEPTH: u8 = 5;
+/// The most properties an object type lists at the top (a prop's own type) and below it.
+const MAX_FIELDS: [usize; 2] = [100, 40];
+/// The most members a union or intersection lists at the top and below it.
+const MAX_MEMBERS: [usize; 2] = [500, 120];
 
-type Cache = Mutex<FxHashMap<(u64, u8), PropType>>;
+/// What a descent found at [`Converter::enter`].
+enum Gate<T> {
+    /// The type is not expanded: it is a back-reference, or a cap cut it.
+    Stop(PropType),
+    /// The parts of the type, and the context to convert them in.
+    Open { parts: T, inner: Cx },
+}
+
 type Converted<'a> = Pin<Box<dyn Future<Output = Result<PropType, CallError>> + Send + 'a>>;
+
+/// Where a type sits: how deep, and which named instantiations (an alias or interface with its type arguments, as the
+/// checker's type handle) enclose it, sorted so that the same set is the same key whatever path led to it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Cx {
+    depth: u8,
+    enclosing: Arc<Vec<u64>>,
+}
+
+impl Cx {
+    /// The context of what a name carries, its type arguments: one level down. Each argument is converted on its own
+    /// and passes [`Converter::enter`] if it has parts.
+    fn argument(&self) -> Cx {
+        Cx { depth: self.depth.saturating_add(1), enclosing: self.enclosing.clone() }
+    }
+
+    /// The context of the parts of a type that [`Converter::enter`] has admitted. Only a named instance is kept, since
+    /// only a name can be pointed back to.
+    fn below(&self, instance: Option<u64>) -> Cx {
+        let mut enclosing = self.enclosing.clone();
+        if let Some(id) = instance
+            && let Err(at) = enclosing.binary_search(&id)
+        {
+            let mut grown = (*enclosing).clone();
+            grown.insert(at, id);
+            enclosing = Arc::new(grown);
+        }
+        Cx { depth: self.depth.saturating_add(1), enclosing }
+    }
+
+    fn encloses(&self, id: u64) -> bool {
+        self.enclosing.binary_search(&id).is_ok()
+    }
+
+    fn limit<const N: usize>(&self, limits: [usize; N]) -> usize {
+        limits[usize::from(self.depth > 0).min(N - 1)]
+    }
+
+    fn fingerprint(&self) -> u64 {
+        let mut hasher = FxHasher::default();
+        self.enclosing.hash(&mut hasher);
+        hasher.finish()
+    }
+}
+
+/// What declares a type: the alias it was written through, else its interface or class.
+#[derive(Debug, Clone)]
+struct Origin {
+    name: String,
+    /// The declaring file as the checker keys it (lower-cased path).
+    file: String,
+    alias: bool,
+}
+
+impl Origin {
+    fn of(symbol: &SymbolInfo, alias: bool) -> Self {
+        let declaration = symbol.declarations.first().map(String::as_str);
+        Origin {
+            name: symbol.name.clone(),
+            file: declaration.map(|declaration| declared_in(declaration).to_string()).unwrap_or_default(),
+            alias,
+        }
+    }
+
+    fn in_dependency(&self) -> bool {
+        self.file.contains("/node_modules/")
+    }
+
+    fn in_lib(&self) -> bool {
+        let name = self.file.rsplit('/').next().unwrap_or("");
+        name.starts_with("lib.") && name.ends_with(".d.ts")
+    }
+
+    fn in_react(&self) -> bool {
+        self.file.contains("/@types/react/")
+    }
+
+    /// Whether the name stands for the type: declared in a dependency, or an interface or class of the lib. An alias
+    /// of the lib is a type-level function (`Partial<T>`), and its result is the type.
+    fn is_boundary(&self) -> bool {
+        // The lib may itself sit under `node_modules` (`typescript/lib`, `@tsrs/<platform>`).
+        if self.in_lib() { !self.alias } else { self.in_dependency() }
+    }
+
+    /// The React type that PropType holds as a terminal, found by the declaration and not by how it prints.
+    fn react_terminal(&self) -> Option<PropType> {
+        if !self.in_react() {
+            return None;
+        }
+        match (self.name.as_str(), self.alias) {
+            ("ReactNode", true) | ("ReactElement" | "Element", false) => Some(PropType::ReactNode),
+            ("ElementType", true) => Some(PropType::ElementType),
+            ("CSSProperties", false) => Some(PropType::CssProperties),
+            _ => None,
+        }
+    }
+}
+
+/// `declarations` entries read `"<node index>.<kind>.<path>"`: the path is lower-cased, as the checker keys files.
+pub(crate) fn declared_in(declaration: &str) -> &str {
+    declaration.splitn(3, '.').nth(2).unwrap_or("")
+}
+
+type Memo = Mutex<FxHashMap<(u64, u8, u64), PropType>>;
+
+#[derive(Default)]
+struct State {
+    /// Conversions by (type handle, depth, enclosing instantiations). The handles are valid inside this snapshot only.
+    memo: Memo,
+    origins: Mutex<FxHashMap<(bool, CompactSymbol), Option<Origin>>>,
+    /// By (type handle, whether printed expanded: see [`Rpc::type_to_string_expanded`]).
+    printed: Mutex<FxHashMap<(u64, bool), String>>,
+    hits: AtomicU64,
+    misses: AtomicU64,
+}
 
 #[derive(Clone)]
 pub(crate) struct Converter {
     rpc: Arc<Rpc>,
-    cache: Arc<Cache>,
+    state: Arc<State>,
+    /// Ask the checker about the members of a type last to first. The answer is the same, and a test holds it to that.
+    reverse: bool,
 }
 
 impl Converter {
-    pub(crate) fn new(rpc: Arc<Rpc>) -> Self {
-        Self { rpc, cache: Arc::new(Mutex::new(FxHashMap::default())) }
+    pub(crate) fn new(rpc: Arc<Rpc>, reverse: bool) -> Self {
+        Self { rpc, state: Arc::new(State::default()), reverse }
     }
 
-    pub(crate) fn convert<'a>(&'a self, info: &'a TypeInfo, depth: u8) -> Converted<'a> {
+    /// Every type converted, in the order of `infos`, though when `reverse` is set the checker is asked last to first.
+    async fn convert_all(&self, infos: &[TypeInfo], cx: &Cx) -> Result<Vec<PropType>, CallError> {
+        let mut slots: Vec<Option<PropType>> = vec![None; infos.len()];
+        let order: Box<dyn Iterator<Item = usize> + Send> =
+            if self.reverse { Box::new((0..infos.len()).rev()) } else { Box::new(0..infos.len()) };
+        for index in order {
+            if let (Some(info), Some(slot)) = (infos.get(index), slots.get_mut(index)) {
+                *slot = Some(self.convert(info, cx).await?);
+            }
+        }
+        Ok(slots.into_iter().flatten().collect())
+    }
+
+    /// Memo hits and misses so far, for the debug line.
+    pub(crate) fn memo_stats(&self) -> (u64, u64) {
+        (self.state.hits.load(Ordering::Relaxed), self.state.misses.load(Ordering::Relaxed))
+    }
+
+    /// The own types of a component's props, from the top.
+    pub(crate) async fn convert_roots(&self, infos: &[TypeInfo]) -> Result<Vec<PropType>, CallError> {
+        self.convert_all(infos, &Cx::default()).await
+    }
+
+    fn convert<'a>(&'a self, info: &'a TypeInfo, cx: &'a Cx) -> Converted<'a> {
         Box::pin(async move {
-            let key = (info.id, depth);
-            if let Some(hit) = self.cache.lock().ok().and_then(|cache| cache.get(&key).cloned()) {
+            let key = (info.id, cx.depth, cx.fingerprint());
+            if let Some(hit) = self.state.memo.lock().ok().and_then(|memo| memo.get(&key).cloned()) {
+                self.state.hits.fetch_add(1, Ordering::Relaxed);
                 return Ok(hit);
             }
-            let converted = self.uncached(info, depth).await?;
-            if let Ok(mut cache) = self.cache.lock() {
-                cache.insert(key, converted.clone());
+            self.state.misses.fetch_add(1, Ordering::Relaxed);
+            let converted = self.uncached(info, cx).await?;
+            if let Ok(mut memo) = self.state.memo.lock() {
+                memo.insert(key, converted.clone());
             }
             Ok(converted)
         })
     }
 
-    async fn uncached(&self, info: &TypeInfo, depth: u8) -> Result<PropType, CallError> {
-        let flags = info.flags;
+    async fn uncached(&self, info: &TypeInfo, cx: &Cx) -> Result<PropType, CallError> {
         if info.is_error() {
-            return Ok(unresolved_type(self.rpc.type_to_string(info.id).await?));
+            return Ok(unresolved_type(self.display(info.id).await?));
         }
-        let simple = [
-            (flag::ANY, PropType::Any),
-            (flag::UNKNOWN, PropType::Unknown),
-            (flag::UNDEFINED, PropType::Undefined),
-            (flag::NULL, PropType::Null),
-            (flag::VOID, PropType::Void),
-            (flag::NEVER, PropType::Never),
-            (flag::STRING, PropType::String),
-            (flag::NUMBER, PropType::Number),
-            (flag::BOOLEAN, PropType::Boolean),
-            // A pattern such as `var(--${string})` or `Uppercase<string>` stands for strings.
-            (flag::TEMPLATE_LITERAL | flag::STRING_MAPPING, PropType::String),
-        ];
-        if let Some((_, known)) = simple.into_iter().find(|(bit, _)| flags & bit != 0) {
-            return Ok(known);
+        if let Some(simple) = simple(info) {
+            return Ok(simple);
         }
-        if flags & (flag::ENUM_LITERAL | flag::ENUM | flag::TYPE_PARAMETER) != 0 {
-            return self.named(info).await;
+        let flags = info.flags;
+        if flags & flag::TYPE_PARAMETER != 0 {
+            return self.type_parameter(info).await;
         }
-        if flags & flag::STRING_LITERAL != 0 {
-            return match info.value.as_ref().and_then(|value| value.as_str()) {
-                Some(text) => Ok(PropType::StringLiteral(text.to_string())),
-                None => self.named(info).await,
-            };
+        if flags & (flag::STRING_LITERAL | flag::NUMBER_LITERAL | flag::BIG_INT_LITERAL) != 0 {
+            return self.literal(info).await;
         }
-        if flags & flag::NUMBER_LITERAL != 0 {
-            return match info.value.as_ref().and_then(|value| value.as_f64()) {
-                Some(number) => Ok(PropType::NumberLiteral(number)),
-                None => self.named(info).await,
-            };
-        }
-        // The beta's responses carry neither `value` nor `intrinsicName` for `true` and `false`.
         if flags & flag::BOOLEAN_LITERAL != 0 {
-            return Ok(PropType::BoolLiteral(self.rpc.type_to_string(info.id).await? == "true"));
+            return Ok(PropType::BoolLiteral(self.boolean_value(info).await?));
         }
-        if depth >= MAX_DEPTH {
-            return self.named(info).await;
+        if flags & flag::UNIQUE_ES_SYMBOL != 0 {
+            let name = self.rpc.symbol_of_type(info.id).await?.map(|symbol| symbol.name);
+            return Ok(match name {
+                Some(name) => PropType::UniqueSymbol { name: name.into() },
+                None => named(self.display(info.id).await?, Vec::new()),
+            });
+        }
+        if flags & flag::TEMPLATE_LITERAL != 0 {
+            return self.template(info, cx).await;
+        }
+        // `Uppercase<string>` and its siblings: a name, since there is no shape to expand.
+        if flags & flag::STRING_MAPPING != 0 {
+            return Ok(named(self.display(info.id).await?, Vec::new()));
+        }
+        // Types the checker could not resolve because a type parameter is still open.
+        if flags & (flag::CONDITIONAL | flag::INDEXED_ACCESS | flag::INDEX | flag::SUBSTITUTION) != 0 {
+            let text = self.display(info.id).await?;
+            let reason = if flags & flag::CONDITIONAL != 0 {
+                OpaqueReason::ConditionalType
+            } else if flags & flag::INDEXED_ACCESS != 0 {
+                OpaqueReason::IndexedAccess { expression: text.clone() }
+            } else {
+                OpaqueReason::UnsupportedExpression
+            };
+            return Ok(degraded_type(text, reason));
         }
         if flags & flag::UNION != 0 {
-            return self.union(info, depth).await;
+            return self.union(info, cx).await;
         }
         if flags & flag::INTERSECTION != 0 {
-            return self.intersection(info, depth).await;
+            return self.intersection(info, cx).await;
         }
         if flags & flag::OBJECT != 0 {
-            return self.object(info, depth).await;
+            return self.object(info, cx).await;
         }
-        self.named(info).await
+        Ok(named(self.display(info.id).await?, Vec::new()))
     }
 
-    async fn named(&self, info: &TypeInfo) -> Result<PropType, CallError> {
-        Ok(PropType::Named { name: self.rpc.type_to_string(info.id).await?.into(), args: Vec::new() })
+    /// How the checker prints the type; only ever a name for display, a truncated type's text, or the source of the two
+    /// facts in [`crate::printed`].
+    async fn display(&self, id: u64) -> Result<String, CallError> {
+        self.printed(id, false).await
     }
 
-    /// `ReactNode` is a union alias of a dozen members; the alias is what the structural result reports too.
-    async fn react_alias(&self, info: &TypeInfo) -> Result<Option<PropType>, CallError> {
-        let Some(SymbolInfo { name, .. }) = self.rpc.alias_symbol(info.id).await? else { return Ok(None) };
-        Ok(match name.as_str() {
-            "ReactNode" => Some(PropType::ReactNode),
-            "ElementType" => Some(PropType::ElementType),
-            _ => None,
-        })
+    /// How the checker prints the type with an alias at the top expanded and nothing cut short: the text a signature's
+    /// parameter markers are read from, since the alias's name states no parameter list.
+    async fn display_expanded(&self, id: u64) -> Result<String, CallError> {
+        self.printed(id, true).await
     }
 
-    async fn members(&self, info: &TypeInfo, depth: u8) -> Result<Vec<PropType>, CallError> {
-        let mut converted = Vec::new();
-        for member in self.rpc.members(info.id).await? {
-            converted.push(self.convert(&member, depth + 1).await?);
+    async fn printed(&self, id: u64, expanded: bool) -> Result<String, CallError> {
+        let key = (id, expanded);
+        if let Some(text) = self.state.printed.lock().ok().and_then(|printed| printed.get(&key).cloned()) {
+            return Ok(text);
         }
-        Ok(converted)
+        let text =
+            if expanded { self.rpc.type_to_string_expanded(id).await? } else { self.rpc.type_to_string(id).await? };
+        if let Ok(mut printed) = self.state.printed.lock() {
+            printed.insert(key, text.clone());
+        }
+        Ok(text)
     }
 
-    async fn union(&self, info: &TypeInfo, depth: u8) -> Result<PropType, CallError> {
-        if let Some(known) = self.react_alias(info).await? {
+    /// The alias a type was written through, when it has one.
+    async fn alias_origin(&self, info: &TypeInfo) -> Result<Option<Origin>, CallError> {
+        match &info.alias_symbol {
+            Some(alias) => self.origin_of(alias, true, info.id).await,
+            None => Ok(None),
+        }
+    }
+
+    /// What declares the type, when it has a name of its own: an alias, or an interface, class or instantiation of one.
+    async fn origin(&self, info: &TypeInfo) -> Result<Option<Origin>, CallError> {
+        if info.alias_symbol.is_some() {
+            return self.alias_origin(info).await;
+        }
+        if info.object_flags & (flag::OBJECT_CLASS | flag::OBJECT_INTERFACE | flag::OBJECT_REFERENCE) != 0 {
+            return self.symbol_origin(info).await;
+        }
+        Ok(None)
+    }
+
+    /// The interface or class a type is, whatever alias it was written through.
+    async fn symbol_origin(&self, info: &TypeInfo) -> Result<Option<Origin>, CallError> {
+        match &info.symbol {
+            Some(symbol) => self.origin_of(symbol, false, info.id).await,
+            None => Ok(None),
+        }
+    }
+
+    /// The declaration behind a symbol, asked once per symbol however many types refer to it.
+    async fn origin_of(&self, symbol: &CompactSymbol, alias: bool, type_id: u64) -> Result<Option<Origin>, CallError> {
+        let key = (alias, symbol.clone());
+        if let Some(known) = self.state.origins.lock().ok().and_then(|origins| origins.get(&key).cloned()) {
             return Ok(known);
         }
-        let mut flat = Vec::new();
-        for member in self.members(info, depth).await? {
-            match member {
-                PropType::Union(inner) => flat.extend(inner),
-                other => flat.push(other),
-            }
+        let found =
+            if alias { self.rpc.alias_symbol(type_id).await? } else { self.rpc.symbol_of_type(type_id).await? };
+        // `__type` and `__object` are the checker's names for a type that has none.
+        let found = found.map(|symbol| Origin::of(&symbol, alias)).filter(|origin| !origin.name.starts_with("__"));
+        if let Ok(mut origins) = self.state.origins.lock() {
+            origins.insert(key, found.clone());
         }
-        // `boolean` is the union `false | true`.
-        let has_both = flat.contains(&PropType::BoolLiteral(true)) && flat.contains(&PropType::BoolLiteral(false));
-        let mut members: Vec<PropType> = Vec::new();
-        for member in flat {
-            let member = match member {
-                PropType::BoolLiteral(_) if has_both => PropType::Boolean,
-                other => other,
-            };
-            if !members.contains(&member) {
-                members.push(member);
-            }
-        }
-        Ok(if members.len() == 1 { members.swap_remove(0) } else { PropType::Union(members) })
+        Ok(found)
     }
 
-    async fn intersection(&self, info: &TypeInfo, depth: u8) -> Result<PropType, CallError> {
-        // `string & {}` (the keep-the-literals trick) is a string.
-        let mut members: Vec<PropType> = self
-            .members(info, depth)
-            .await?
-            .into_iter()
-            .filter(|member| !matches!(member, PropType::Object(fields) if fields.is_empty()))
-            .collect();
-        Ok(if members.len() == 1 { members.swap_remove(0) } else { PropType::Intersection(members) })
-    }
-
-    async fn object(&self, info: &TypeInfo, depth: u8) -> Result<PropType, CallError> {
-        if info.is_tuple_type {
-            let mut elements = Vec::new();
-            for element in self.rpc.type_arguments(info.id).await? {
-                elements.push(self.convert(&element, depth + 1).await?);
-            }
-            return Ok(PropType::Tuple(
-                elements.into_iter().map(caliper_docgen_core::types::TupleElement::required).collect(),
-            ));
+    async fn type_parameter(&self, info: &TypeInfo) -> Result<PropType, CallError> {
+        if info.is_this_type {
+            return Ok(named("this".to_string(), Vec::new()));
         }
-        if info.object_flags & flag::OBJECT_REFERENCE != 0 && self.rpc.is_array(info.id).await? {
-            let arguments = self.rpc.type_arguments(info.id).await?;
-            let Some(element) = arguments.first() else { return self.named(info).await };
-            return Ok(PropType::Array(Box::new(self.convert(element, depth + 1).await?)));
-        }
-        let text = self.rpc.type_to_string(info.id).await?;
-        match text.as_str() {
-            "CSSProperties" | "React.CSSProperties" => return Ok(PropType::CssProperties),
-            "JSX.Element" | "Element" => return Ok(PropType::ReactNode),
-            _ if text.starts_with("ReactElement<") => return Ok(PropType::ReactNode),
-            _ => {}
-        }
-        if text.starts_with('(') || text.starts_with('<') {
-            return self.function(info, depth, text).await;
-        }
-        if text.starts_with('{') {
-            return self.inline_object(info, depth, text).await;
-        }
-        Ok(PropType::Named { name: text.into(), args: Vec::new() })
-    }
-
-    async fn function(&self, info: &TypeInfo, depth: u8, text: String) -> Result<PropType, CallError> {
-        let signatures = self.rpc.signatures(info.id).await?;
-        let [signature] = signatures.as_slice() else {
-            return Ok(PropType::Named { name: text.into(), args: Vec::new() });
+        let name = match self.rpc.symbol_of_type(info.id).await? {
+            Some(symbol) => symbol.name,
+            None => self.display(info.id).await?,
         };
+        Ok(named(name, Vec::new()))
+    }
+
+    async fn literal(&self, info: &TypeInfo) -> Result<PropType, CallError> {
+        let flags = info.flags;
+        let value = info.value.as_ref();
+        let known = if flags & flag::BIG_INT_LITERAL != 0 {
+            value.and_then(|value| value.as_str()).and_then(BigIntValue::parse).map(PropType::BigIntLiteral)
+        } else if flags & flag::STRING_LITERAL != 0 {
+            value.and_then(|value| value.as_str()).map(|text| PropType::StringLiteral(text.to_string()))
+        } else {
+            value.and_then(|value| value.as_f64()).map(PropType::NumberLiteral)
+        };
+        let Some(literal) = known else { return Ok(named(self.display(info.id).await?, Vec::new())) };
+        if flags & flag::ENUM_LITERAL == 0 {
+            return Ok(literal);
+        }
+        // A member of an enum is its value and keeps the enum's name.
+        let Some(member) = self.rpc.symbol_of_type(info.id).await? else { return Ok(literal) };
+        let Some(parent) = self.rpc.parent_of_symbol(&member.reference).await? else { return Ok(literal) };
+        let value = match literal {
+            PropType::StringLiteral(text) => EnumMemberValue::String(text),
+            PropType::NumberLiteral(number) => EnumMemberValue::Number(number),
+            other => return Ok(other),
+        };
+        Ok(PropType::EnumMember { enum_name: parent.name.into(), member: member.name.into(), value })
+    }
+
+    /// The beta's responses carry neither `value` nor, in some builds, `intrinsicName` for `true` and `false`.
+    async fn boolean_value(&self, info: &TypeInfo) -> Result<bool, CallError> {
+        if let Some(name) = info.intrinsic_name.as_deref() {
+            return Ok(name == "true");
+        }
+        if let Some(value) = info.value.as_ref().and_then(|value| value.as_bool()) {
+            return Ok(value);
+        }
+        Ok(self.display(info.id).await? == "true")
+    }
+
+    async fn template(&self, info: &TypeInfo, cx: &Cx) -> Result<PropType, CallError> {
+        let origin = self.alias_origin(info).await?;
+        let gate = self.enter(info, origin.as_ref(), cx, MAX_MEMBERS, || self.members_of(info)).await?;
+        let (holes, inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
+        let mut types = self.convert_all(&holes, &inner).await?.into_iter();
+        let mut parts = Vec::new();
+        for text in &info.texts {
+            if !text.is_empty() {
+                parts.push(TemplatePart::Text(text.clone()));
+            }
+            if let Some(hole) = types.next() {
+                parts.push(TemplatePart::Type(hole));
+            }
+        }
+        Ok(PropType::TemplateLiteral(parts))
+    }
+
+    /// The cut type for a cap: its declaration's name, else how the checker prints it.
+    async fn truncated(
+        &self,
+        info: &TypeInfo,
+        origin: Option<&Origin>,
+        limit: TruncationLimit,
+    ) -> Result<PropType, CallError> {
+        let text = match origin {
+            Some(origin) => origin.name.clone(),
+            None => self.display(info.id).await?,
+        };
+        Ok(PropType::Truncated { text, limit })
+    }
+
+    /// The reference back to a declaration that is being expanded around this type.
+    async fn recursive(&self, info: &TypeInfo, origin: &Origin, cx: &Cx) -> Result<PropType, CallError> {
+        let args = self.type_arguments_of(info, origin, cx).await?;
+        Ok(PropType::Recursive { name: origin.name.clone().into(), args })
+    }
+
+    /// The type arguments a name carries: an alias's own, or the instantiation's (without the `this` type the checker
+    /// appends to a class or interface).
+    async fn type_arguments_of(&self, info: &TypeInfo, origin: &Origin, cx: &Cx) -> Result<Vec<PropType>, CallError> {
+        let arguments = if origin.alias {
+            if info.alias_type_arguments.is_empty() {
+                Vec::new()
+            } else {
+                self.rpc.alias_type_arguments(info.id).await?
+            }
+        } else if info.object_flags & flag::OBJECT_REFERENCE != 0 {
+            let mut arguments = self.rpc.type_arguments(info.id).await?;
+            while arguments.last().is_some_and(|argument| argument.is_this_type) {
+                arguments.pop();
+            }
+            arguments
+        } else {
+            Vec::new()
+        };
+        self.convert_all(&arguments, &cx.argument()).await
+    }
+
+    async fn named_type(&self, info: &TypeInfo, origin: &Origin, cx: &Cx) -> Result<PropType, CallError> {
+        let args = self.type_arguments_of(info, origin, cx).await?;
+        Ok(PropType::Named { name: origin.name.clone().into(), args })
+    }
+
+    /// The one gate every descent into the parts of a type passes, before the parts are converted. It stops, in this
+    /// order, a type that is an instantiation already being expanded around it (a back-reference to its declaration,
+    /// whose arguments are the instantiation's), a type past [`MAX_DEPTH`], and a type whose `measure`d parts exceed the
+    /// `limits`. `measure` fetches the parts and says how many there are; it is not called for a type stopped before.
+    /// Otherwise the parts come back with the context to convert them in.
+    async fn enter<T, F, Fut>(
+        &self,
+        info: &TypeInfo,
+        origin: Option<&Origin>,
+        cx: &Cx,
+        limits: [usize; 2],
+        measure: F,
+    ) -> Result<Gate<T>, CallError>
+    where
+        T: Send,
+        F: FnOnce() -> Fut + Send,
+        Fut: Future<Output = Result<(T, usize), CallError>> + Send,
+    {
+        // The handle is the instantiation: `Box<string>` inside `Box<Box<string>>` is another type from the one around it.
+        if let Some(origin) = origin
+            && cx.encloses(info.id)
+        {
+            return Ok(Gate::Stop(self.recursive(info, origin, cx).await?));
+        }
+        if cx.depth >= MAX_DEPTH {
+            return Ok(Gate::Stop(self.truncated(info, origin, TruncationLimit::Depth).await?));
+        }
+        let (parts, total) = measure().await?;
+        if total > cx.limit(limits) {
+            let limit = TruncationLimit::Members { total: to_u32(total) };
+            return Ok(Gate::Stop(self.truncated(info, origin, limit).await?));
+        }
+        Ok(Gate::Open { parts, inner: cx.below(origin.map(|_| info.id)) })
+    }
+
+    async fn union(&self, info: &TypeInfo, cx: &Cx) -> Result<PropType, CallError> {
+        let origin = self.origin(info).await?;
+        if let Some(terminal) = origin.as_ref().and_then(Origin::react_terminal) {
+            return Ok(terminal);
+        }
+        let gate = self.enter(info, origin.as_ref(), cx, MAX_MEMBERS, || self.members_of(info)).await?;
+        let (members, inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
+        Ok(union_of(self.convert_all(&members, &inner).await?))
+    }
+
+    /// The members of a union, intersection or template literal, and how many there are.
+    async fn members_of(&self, info: &TypeInfo) -> Result<(Vec<TypeInfo>, usize), CallError> {
+        let members = self.rpc.members(info.id).await?;
+        let total = members.len();
+        Ok((members, total))
+    }
+
+    async fn intersection(&self, info: &TypeInfo, cx: &Cx) -> Result<PropType, CallError> {
+        let origin = self.origin(info).await?;
+        // A dependency's `Nested<Style>`-like alias is a name, as its interface would be.
+        if let Some(origin) = &origin
+            && origin.is_boundary()
+        {
+            return self.named_type(info, origin, cx).await;
+        }
+        let gate = self.enter(info, origin.as_ref(), cx, MAX_MEMBERS, || self.members_of(info)).await?;
+        let (members, inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
+        let mut converted: Vec<PropType> = Vec::with_capacity(members.len());
+        for member in self.convert_all(&members, &inner).await? {
+            if !converted.contains(&member) {
+                converted.push(member);
+            }
+        }
+        Ok(if converted.len() == 1 { converted.swap_remove(0) } else { PropType::Intersection(converted) })
+    }
+
+    async fn object(&self, info: &TypeInfo, cx: &Cx) -> Result<PropType, CallError> {
+        if info.is_tuple_type {
+            return self.tuple(info, cx).await;
+        }
+        if info.object_flags & flag::OBJECT_REFERENCE != 0
+            && let Some(own) = self.symbol_origin(info).await?
+            && own.in_lib()
+            && !own.alias
+            && matches!(own.name.as_str(), "Array" | "ReadonlyArray")
+        {
+            return self.array(info, own.name == "ReadonlyArray", cx).await;
+        }
+        let origin = self.origin(info).await?;
+        if let Some(terminal) = origin.as_ref().and_then(Origin::react_terminal) {
+            return Ok(terminal);
+        }
+        let boundary = origin.as_ref().filter(|origin| origin.is_boundary());
+        // A dependency's interface is a name unless it is callable; its properties are not asked for.
+        if let Some(origin) = boundary
+            && self.rpc.signatures(info.id, SignatureKind::Call).await?.is_empty()
+        {
+            return self.named_type(info, origin, cx).await;
+        }
+        let gate = self
+            .enter(info, origin.as_ref(), cx, MAX_FIELDS, || async {
+                let members = self.rpc.object_members(info.id).await?;
+                // A dependency's function with properties of its own (a component, a hook) is a name, however many.
+                let named = boundary.is_some() && !members.properties.is_empty();
+                let total = if named { 0 } else { members.properties.len() + members.indexes.len() };
+                Ok((members, total))
+            })
+            .await?;
+        let (members, inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
+        let ObjectMembers { calls, constructs, properties, indexes } = members;
+        if let Some(origin) = boundary
+            && !properties.is_empty()
+        {
+            return self.named_type(info, origin, cx).await;
+        }
+
+        // Which of a signature's parameters are optional is read from the printed type here, and nowhere else.
+        let Some(markers) = self.printed_markers(info.id, &calls, &constructs).await? else {
+            return self.unreadable_signatures(info.id).await;
+        };
+        let mut signatures = Vec::with_capacity(calls.len() + constructs.len());
+        for (kind, group, printed) in
+            [(Kind::Call, &calls, &markers.calls), (Kind::Construct, &constructs, &markers.constructs)]
+        {
+            for (index, signature) in group.iter().enumerate() {
+                let printed = printed.get(index).map(Vec::as_slice);
+                let Some((type_params, params, return_type)) = self.signature_parts(signature, printed, &inner).await?
+                else {
+                    return self.unreadable_signatures(info.id).await;
+                };
+                signatures.push(CallSignature { kind, type_params, params, return_type });
+            }
+        }
+        if signatures.len() == 1 && calls.len() == 1 && properties.is_empty() && indexes.is_empty() {
+            let CallSignature { type_params, params, return_type, .. } = signatures.swap_remove(0);
+            return Ok(PropType::Function { type_params, params, return_type: Box::new(return_type) });
+        }
+        let fields = self.fields(&properties, &indexes, &inner).await?;
+        if signatures.is_empty() {
+            return Ok(PropType::Object(fields));
+        }
+        Ok(PropType::Callable { signatures, fields })
+    }
+
+    async fn array(&self, info: &TypeInfo, readonly: bool, cx: &Cx) -> Result<PropType, CallError> {
+        // Only an alias can name an array that contains itself (`type Loop = Loop[]`); `Array` is the lib's.
+        let origin = self.alias_origin(info).await?;
+        let gate = self
+            .enter(info, origin.as_ref(), cx, MAX_MEMBERS, || async {
+                let arguments = self.rpc.type_arguments(info.id).await?;
+                let total = arguments.len();
+                Ok((arguments, total))
+            })
+            .await?;
+        let (arguments, inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
+        let Some(element) = arguments.first() else {
+            return Ok(named(self.display(info.id).await?, Vec::new()));
+        };
+        let element = PropType::Array(Box::new(self.convert(element, &inner).await?));
+        // `readonly T[]` is `ReadonlyArray<T>`: the same reference through another declaration.
+        Ok(if readonly { PropType::Readonly(Box::new(element)) } else { element })
+    }
+
+    async fn tuple(&self, info: &TypeInfo, cx: &Cx) -> Result<PropType, CallError> {
+        let origin = self.alias_origin(info).await?;
+        let gate = self
+            .enter(info, origin.as_ref(), cx, MAX_MEMBERS, || async {
+                // The reference carries the arguments; the tuple type it instantiates carries how each element is declared.
+                let arguments = self.rpc.type_arguments(info.id).await?;
+                let target = self.rpc.target_of_type(info.id).await?;
+                let total = arguments.len();
+                Ok(((arguments, target), total))
+            })
+            .await?;
+        let ((arguments, target), inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
+        let labels = if target.labeled_element_declarations.is_empty() {
+            None
+        } else {
+            tuple_labels(&self.display(info.id).await?, arguments.len())
+        };
+        let element_types = self.convert_all(&arguments, &inner).await?;
+        let mut elements = Vec::with_capacity(arguments.len());
+        for (index, element_type) in element_types.into_iter().enumerate() {
+            let element_flags = target.element_flags.get(index).copied().unwrap_or(1);
+            let kind = if element_flags & flag::ELEMENT_VARIADIC != 0 {
+                TupleElementKind::Variadic
+            } else if element_flags & flag::ELEMENT_REST != 0 {
+                TupleElementKind::Rest
+            } else if element_flags & flag::ELEMENT_OPTIONAL != 0 {
+                TupleElementKind::Optional
+            } else {
+                TupleElementKind::Required
+            };
+            let label = labels.as_ref().and_then(|labels| labels.get(index)).and_then(|label| TupleLabel::new(label));
+            // An optional element's type argument includes the `undefined` of leaving it out.
+            let element_type = without_undefined(element_type, kind == TupleElementKind::Optional);
+            elements.push(TupleElement { element_type, kind, label });
+        }
+        let tuple = PropType::Tuple(elements);
+        Ok(if target.readonly { PropType::Readonly(Box::new(tuple)) } else { tuple })
+    }
+
+    async fn fields(
+        &self,
+        properties: &[SymbolInfo],
+        indexes: &[crate::rpc::IndexInfo],
+        cx: &Cx,
+    ) -> Result<Vec<ObjectField>, CallError> {
+        let references: Vec<_> = properties.iter().map(|property| &property.reference).collect();
+        let (types, readonly) = if references.is_empty() {
+            (Vec::new(), Vec::new())
+        } else {
+            (self.rpc.types_of_symbols(&references).await?, self.rpc.readonly_symbols(&references).await?)
+        };
+        let converted = self.convert_all(&types, cx).await?;
+        let mut fields = Vec::with_capacity(properties.len() + indexes.len());
+        for ((property, prop_type), readonly) in properties.iter().zip(converted).zip(readonly) {
+            let required = property.flags & flag::SYMBOL_OPTIONAL == 0;
+            let prop_type = without_undefined(prop_type, !required);
+            let mut field = ObjectField::new(property_name(&property.name), prop_type, required, String::new());
+            field.readonly = readonly;
+            fields.push(field);
+        }
+        let sides: Vec<TypeInfo> =
+            indexes.iter().flat_map(|index| [index.key_type.clone(), index.value_type.clone()]).collect();
+        let mut sides = self.convert_all(&sides, cx).await?.into_iter();
+        for index in indexes {
+            let (Some(key), Some(value)) = (sides.next(), sides.next()) else { break };
+            let mut field = ObjectField::new("key", value, true, String::new());
+            field.readonly = index.is_readonly;
+            field.index_key = Some(Box::new(key));
+            fields.push(field);
+        }
+        Ok(fields)
+    }
+
+    /// The parameter markers of the signatures of an object type, as the checker prints the type (see
+    /// [`crate::printed`]): the only source of which parameters are optional, since the API's parameter symbols do not
+    /// say. `None` when some signature has a parameter and the printed type does not state one entry per signature.
+    async fn printed_markers(
+        &self,
+        id: u64,
+        calls: &[SignatureInfo],
+        constructs: &[SignatureInfo],
+    ) -> Result<Option<SignatureMarkers>, CallError> {
+        if !calls.iter().chain(constructs).any(|signature| !signature.parameters.is_empty()) {
+            let none = |count: usize| vec![Vec::new(); count];
+            return Ok(Some(SignatureMarkers { calls: none(calls.len()), constructs: none(constructs.len()) }));
+        }
+        let stated = signature_markers(&self.display_expanded(id).await?);
+        Ok(stated.filter(|stated| stated.calls.len() == calls.len() && stated.constructs.len() == constructs.len()))
+    }
+
+    /// A type whose signatures state parameters that cannot be told optional from required is not given a shape that
+    /// would assert one of them: it is opaque, with how the checker prints it.
+    async fn unreadable_signatures(&self, id: u64) -> Result<PropType, CallError> {
+        Ok(degraded_type(self.display_expanded(id).await?, OpaqueReason::UnsupportedExpression))
+    }
+
+    /// One signature's type parameters, parameters and return type; `None` when a parameter that is not the rest
+    /// parameter has no marker, since whether it is optional is then unknown and is not guessed.
+    async fn signature_parts(
+        &self,
+        signature: &SignatureInfo,
+        printed: Option<&[Marker]>,
+        cx: &Cx,
+    ) -> Result<Option<(Vec<String>, Vec<FunctionParam>, PropType)>, CallError> {
         let parameters = self.rpc.parameters(signature.id).await?;
+        let has_rest = signature.flags & flag::SIGNATURE_HAS_REST_PARAMETER != 0;
+        // A printed signature that does not give one entry per parameter states none of them.
+        let markers = printed.filter(|markers| markers.len() == parameters.len());
+        let known_without_markers = usize::from(has_rest);
+        if markers.is_none() && parameters.len() > known_without_markers {
+            return Ok(None);
+        }
         let references: Vec<_> = parameters.iter().map(|parameter| &parameter.reference).collect();
         let types = if references.is_empty() { Vec::new() } else { self.rpc.types_of_symbols(&references).await? };
-        // The checker's parameter symbols say neither which parameter is optional nor which is the rest parameter;
-        // its printed signature does (`percent?: number`, `...rest: string[]`), and its signature flags say whether
-        // the last parameter is a rest parameter. A printed signature that does not parse into one entry per
-        // parameter (a long one is cut short) leaves the markers off, as before.
-        let markers = parameter_markers(&text).filter(|markers| markers.len() == parameters.len());
-        let has_rest = signature.flags & flag::SIGNATURE_HAS_REST_PARAMETER != 0;
-        let mut params = Vec::new();
-        for (index, (parameter, ty)) in parameters.iter().zip(&types).enumerate() {
-            let marker = markers.as_ref().and_then(|markers| markers.get(index)).copied().unwrap_or_default();
+        let converted = self.convert_all(&types, cx).await?;
+        let mut params = Vec::with_capacity(parameters.len());
+        for (index, (parameter, param_type)) in parameters.iter().zip(converted).enumerate() {
+            let marker = markers.and_then(|markers| markers.get(index)).copied().unwrap_or_default();
             let rest = marker.rest || (has_rest && index + 1 == parameters.len());
             let optional = marker.optional && !rest;
-            let param_type = without_undefined(self.convert(ty, depth + 1).await?, optional);
-            params.push(FunctionParam { name: Some(parameter.name.clone()), param_type, optional, rest });
+            let param_type = without_undefined(param_type, optional);
+            // A destructured parameter has no name of its own; the checker calls it `__0`.
+            let name = (!is_destructured(&parameter.name)).then(|| parameter.name.clone());
+            params.push(FunctionParam { name, param_type, optional, rest });
         }
-        let return_type = self.rpc.return_type(signature.id).await?;
-        Ok(PropType::Function {
-            type_params: Vec::new(),
-            params,
-            return_type: Box::new(self.convert(&return_type, depth + 1).await?),
-        })
-    }
-
-    async fn inline_object(&self, info: &TypeInfo, depth: u8, text: String) -> Result<PropType, CallError> {
-        let properties = self.rpc.properties(info.id).await?;
-        if properties.is_empty() || properties.len() > MAX_INLINE_FIELDS {
-            return Ok(PropType::Named { name: text.into(), args: Vec::new() });
-        }
-        let references: Vec<_> = properties.iter().map(|property| &property.reference).collect();
-        let types = self.rpc.types_of_symbols(&references).await?;
-        let mut fields = Vec::new();
-        for (property, ty) in properties.iter().zip(&types) {
-            let required = property.flags & flag::SYMBOL_OPTIONAL == 0;
-            fields.push(ObjectField::new(
-                property.name.clone(),
-                without_undefined(self.convert(ty, depth + 1).await?, !required),
-                required,
-                String::new(),
-            ));
-        }
-        Ok(PropType::Object(fields))
-    }
-}
-
-/// How the checker prints one parameter of a function type: `name?: T` is optional, `...name: T[]` is the rest
-/// parameter.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct Marker {
-    pub optional: bool,
-    pub rest: bool,
-}
-
-/// The markers of the parameters of a function type as the checker prints it, `(percent?: number, ...rest: string[])
-/// => string`, one per parameter in order. `None` when the text is not a parameter list that can be read to its end
-/// (a long type is cut short with `...`).
-pub(crate) fn parameter_markers(text: &str) -> Option<Vec<Marker>> {
-    let chars: Vec<char> = text.chars().collect();
-    // Type parameters come first: `<T>(value: T) => T`.
-    let open = if chars.first() == Some(&'<') { matching_close(&chars, 0)? + 1 } else { 0 };
-    if chars.get(open) != Some(&'(') {
-        return None;
-    }
-    let close = matching_close(&chars, open)?;
-    let list = chars.get(open + 1..close)?;
-    if list.iter().all(|c| c.is_whitespace()) {
-        return Some(Vec::new());
-    }
-    top_level_segments(list)?.into_iter().map(parameter_marker).collect()
-}
-
-fn parameter_marker(parameter: &[char]) -> Option<Marker> {
-    let text: String = parameter.iter().collect();
-    let text = text.trim_start();
-    let (rest, text) = match text.strip_prefix("...") {
-        Some(after) => (true, after),
-        None => (false, text),
-    };
-    // The name: an identifier, or `__0` for a destructured parameter. Whatever follows it, `?` marks it optional.
-    let after_name = text.trim_start_matches(|c: char| c.is_alphanumeric() || c == '_' || c == '$');
-    if after_name.len() == text.len() {
-        return None;
-    }
-    Some(Marker { optional: after_name.starts_with('?'), rest })
-}
-
-/// The parts of a parameter list between its top-level commas.
-fn top_level_segments(list: &[char]) -> Option<Vec<&[char]>> {
-    let mut segments = Vec::new();
-    let (mut start, mut i) = (0, 0);
-    while i < list.len() {
-        match list.get(i)? {
-            '"' | '\'' | '`' => i = skip_string(list, i)?,
-            '(' | '[' | '{' | '<' => i = matching_close(list, i)?,
-            '=' if list.get(i + 1) == Some(&'>') => i += 1,
-            ',' => {
-                segments.push(list.get(start..i)?);
-                start = i + 1;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    segments.push(list.get(start..)?);
-    Some(segments)
-}
-
-/// The index of the bracket that closes the one at `open`, skipping strings and the `>` of `=>`.
-fn matching_close(chars: &[char], open: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    let mut i = open;
-    while i < chars.len() {
-        match chars.get(i)? {
-            '"' | '\'' | '`' => i = skip_string(chars, i)?,
-            '=' if chars.get(i + 1) == Some(&'>') => i += 1,
-            '(' | '[' | '{' | '<' => depth += 1,
-            ')' | ']' | '}' | '>' => {
-                depth = depth.checked_sub(1)?;
-                if depth == 0 {
-                    return Some(i);
+        let return_info = self.rpc.return_type(signature.id).await?;
+        let return_type = self.convert(&return_info, cx).await?;
+        let mut type_params = Vec::new();
+        if !signature.type_parameters.is_empty() {
+            for parameter in self.rpc.type_parameters(signature.id).await? {
+                match self.rpc.symbol_of_type(parameter.id).await? {
+                    Some(symbol) => type_params.push(symbol.name),
+                    None => type_params.push(self.display(parameter.id).await?),
                 }
             }
-            _ => {}
         }
-        i += 1;
+        Ok(Some((type_params, params, return_type)))
     }
-    None
 }
 
-/// The index of the quote that closes the string, or template literal, that starts at `open`.
-fn skip_string(chars: &[char], open: usize) -> Option<usize> {
-    let quote = *chars.get(open)?;
-    let mut i = open + 1;
-    while i < chars.len() {
-        match chars.get(i)? {
-            '\\' => i += 1,
-            c if *c == quote => return Some(i),
-            '$' if quote == '`' && chars.get(i + 1) == Some(&'{') => i = matching_close(chars, i + 1)?,
-            _ => {}
-        }
-        i += 1;
+/// The checker keys a property named by a symbol `__@<name>@<symbol id>`; the source writes `[Symbol.iterator]` or
+/// `[brand]`. The id is the checker's and does not belong in an answer.
+fn property_name(name: &str) -> String {
+    const WELL_KNOWN: [&str; 15] = [
+        "iterator",
+        "asyncIterator",
+        "hasInstance",
+        "isConcatSpreadable",
+        "match",
+        "matchAll",
+        "replace",
+        "search",
+        "species",
+        "split",
+        "toPrimitive",
+        "toStringTag",
+        "unscopables",
+        "dispose",
+        "asyncDispose",
+    ];
+    let Some((symbol, _id)) = name.strip_prefix("__@").and_then(|rest| rest.rsplit_once('@')) else {
+        return name.to_string();
+    };
+    if WELL_KNOWN.contains(&symbol) { format!("[Symbol.{symbol}]") } else { format!("[{symbol}]") }
+}
+
+fn is_destructured(name: &str) -> bool {
+    name.strip_prefix("__").is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()))
+}
+
+fn to_u32(count: usize) -> u32 {
+    u32::try_from(count).unwrap_or(u32::MAX)
+}
+
+fn named(name: String, args: Vec<PropType>) -> PropType {
+    PropType::Named { name: name.into(), args }
+}
+
+/// The types whose conversion needs nothing but their flags.
+fn simple(info: &TypeInfo) -> Option<PropType> {
+    let flags = info.flags;
+    // `boolean` is the union `false | true` and carries both flags.
+    if flags & flag::BOOLEAN != 0 {
+        return Some(PropType::Boolean);
     }
-    None
+    let known = [
+        (flag::ANY, PropType::Any),
+        (flag::UNKNOWN, PropType::Unknown),
+        (flag::UNDEFINED, PropType::Undefined),
+        (flag::NULL, PropType::Null),
+        (flag::VOID, PropType::Void),
+        (flag::NEVER, PropType::Never),
+        (flag::STRING, PropType::String),
+        (flag::NUMBER, PropType::Number),
+        (flag::BIG_INT, named("bigint".to_string(), Vec::new())),
+        (flag::ES_SYMBOL, named("symbol".to_string(), Vec::new())),
+        (flag::NON_PRIMITIVE, named("object".to_string(), Vec::new())),
+    ];
+    known.into_iter().find(|(bit, _)| flags & bit != 0).map(|(_, converted)| converted)
+}
+
+/// A union of converted members: `false | true` is `boolean`, a union inside a union is flattened, a repeated member
+/// is kept once, and a union of one is that member.
+fn union_of(converted: Vec<PropType>) -> PropType {
+    let mut flat = Vec::with_capacity(converted.len());
+    for member in converted {
+        match member {
+            PropType::Union(inner) => flat.extend(inner),
+            other => flat.push(other),
+        }
+    }
+    let both_booleans = flat.contains(&PropType::BoolLiteral(true)) && flat.contains(&PropType::BoolLiteral(false));
+    let mut members: Vec<PropType> = Vec::with_capacity(flat.len());
+    for member in flat {
+        let member = match member {
+            PropType::BoolLiteral(_) if both_booleans => PropType::Boolean,
+            other => other,
+        };
+        if !members.contains(&member) {
+            members.push(member);
+        }
+    }
+    if members.len() == 1 { members.swap_remove(0) } else { PropType::Union(members) }
 }
 
 /// An optional prop's type includes `undefined`; react-docgen-typescript drops it, as does the structural result.
@@ -348,61 +865,5 @@ pub(crate) fn without_undefined(prop_type: PropType, optional: bool) -> PropType
             if kept.len() == 1 { kept.swap_remove(0) } else { PropType::Union(kept) }
         }
         other => other,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const REQUIRED: Marker = Marker { optional: false, rest: false };
-    const OPTIONAL: Marker = Marker { optional: true, rest: false };
-    const REST: Marker = Marker { optional: false, rest: true };
-
-    #[test]
-    fn a_printed_signature_gives_one_marker_per_parameter() {
-        let cases: [(&str, Vec<Marker>); 6] = [
-            ("() => void", vec![]),
-            ("(a: number) => void", vec![REQUIRED]),
-            ("(percent?: number, ...rest: string[]) => string", vec![OPTIONAL, REST]),
-            ("(...args: any[]) => void", vec![REST]),
-            ("(a: number, b?: string) => void", vec![REQUIRED, OPTIONAL]),
-            // `undefined` in the type is not the `?` marker.
-            ("(a: number, b: string | undefined) => void", vec![REQUIRED, REQUIRED]),
-        ];
-        for (text, expected) in cases {
-            assert_eq!(parameter_markers(text), Some(expected), "{text}");
-        }
-    }
-
-    #[test]
-    fn markers_inside_a_parameter_type_are_not_the_parameters() {
-        let cases: [(&str, Vec<Marker>); 5] = [
-            ("(handler: (a?: number, ...b: string[]) => void, c?: string) => void", vec![REQUIRED, OPTIONAL]),
-            ("(options: { a?: number; b: string }, c?: boolean) => void", vec![REQUIRED, OPTIONAL]),
-            ("(pair: [first?: string, second?: number], ...more: Array<string>) => void", vec![REQUIRED, REST]),
-            // Commas and brackets inside a string literal or a template literal type.
-            ("(key: \"a,b\" | 'c)', template?: `--${string}`) => void", vec![REQUIRED, OPTIONAL]),
-            ("(map: Map<string, Array<number>>, last?: number) => void", vec![REQUIRED, OPTIONAL]),
-        ];
-        for (text, expected) in cases {
-            assert_eq!(parameter_markers(text), Some(expected), "{text}");
-        }
-    }
-
-    #[test]
-    fn type_parameters_and_destructured_parameters_are_skipped_over() {
-        assert_eq!(parameter_markers("<T>(value: T, key?: keyof T) => T"), Some(vec![REQUIRED, OPTIONAL]));
-        assert_eq!(parameter_markers("<T extends { a?: 1 }, U = (x?: 1) => 2>(v: T) => U"), Some(vec![REQUIRED]));
-        assert_eq!(parameter_markers("(__0: { a: string }, __1?: number) => void"), Some(vec![REQUIRED, OPTIONAL]));
-    }
-
-    #[test]
-    fn text_that_is_not_a_complete_parameter_list_has_no_markers() {
-        for text in
-            ["(a: number, b?: Very.Long.Type<With, Many...", "{ a: number }", "", "(a: number", "new (a?: 1) => X"]
-        {
-            assert_eq!(parameter_markers(text), None, "{text:?}");
-        }
     }
 }

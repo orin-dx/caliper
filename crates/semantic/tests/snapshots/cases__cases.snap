@@ -1,0 +1,3298 @@
+---
+source: crates/semantic/tests/cases.rs
+expression: rendered(&outcome)
+---
+{
+  "components": {
+    "Cb": [
+      {
+        "name": "onChange",
+        "required": true,
+        "type": {
+          "kind": "function",
+          "typeParams": [],
+          "params": [
+            {
+              "name": "value",
+              "type": {
+                "kind": "string"
+              }
+            },
+            {
+              "name": "ev",
+              "type": {
+                "kind": "named",
+                "name": "ChangeEvent",
+                "args": [
+                  {
+                    "kind": "named",
+                    "name": "HTMLInputElement",
+                    "args": []
+                  }
+                ]
+              },
+              "optional": true
+            },
+            {
+              "name": "rest",
+              "type": {
+                "kind": "array",
+                "element": {
+                  "kind": "number"
+                }
+              },
+              "rest": true
+            }
+          ],
+          "returnType": {
+            "kind": "void"
+          }
+        }
+      },
+      {
+        "name": "render",
+        "required": false,
+        "type": {
+          "kind": "function",
+          "typeParams": [],
+          "params": [
+            {
+              "name": "x",
+              "type": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "a",
+                    "propType": {
+                      "kind": "number"
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "reactNode"
+          }
+        }
+      }
+    ],
+    "Colored": [
+      {
+        "name": "color",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "stringLiteral",
+              "value": "green"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "red"
+            },
+            {
+              "kind": "intersection",
+              "members": [
+                {
+                  "kind": "string"
+                },
+                {
+                  "kind": "object",
+                  "fields": []
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "level",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "numberLiteral",
+              "value": 1.0
+            },
+            {
+              "kind": "numberLiteral",
+              "value": 2.0
+            },
+            {
+              "kind": "numberLiteral",
+              "value": 3.0
+            }
+          ]
+        }
+      },
+      {
+        "name": "flag",
+        "required": true,
+        "type": {
+          "kind": "boolean"
+        }
+      }
+    ],
+    "CondC": [
+      {
+        "name": "k",
+        "required": true,
+        "type": {
+          "kind": "opaque",
+          "raw": "T extends string ? \"str\" : \"other\"",
+          "reason": {
+            "type": "conditionalType"
+          }
+        }
+      }
+    ],
+    "Dep": [
+      {
+        "name": "own",
+        "required": true,
+        "type": {
+          "kind": "string"
+        }
+      },
+      {
+        "name": "tone",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "stringLiteral",
+              "value": "calm"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "loud"
+            }
+          ]
+        }
+      },
+      {
+        "name": "onTone",
+        "required": false,
+        "type": {
+          "kind": "function",
+          "typeParams": [],
+          "params": [
+            {
+              "name": "t",
+              "type": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "stringLiteral",
+                    "value": "calm"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "loud"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "ev",
+              "type": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "x",
+                    "propType": {
+                      "kind": "number"
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "void"
+          }
+        }
+      }
+    ],
+    "Fc": [
+      {
+        "name": "a",
+        "required": false,
+        "type": {
+          "kind": "string"
+        }
+      }
+    ],
+    "Fwd": [
+      {
+        "name": "variant",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "stringLiteral",
+              "value": "ghost"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "solid"
+            }
+          ]
+        }
+      }
+    ],
+    "Idx": [
+      {
+        "name": "fixed",
+        "required": true,
+        "type": {
+          "kind": "string"
+        }
+      }
+    ],
+    "Mapper": [
+      {
+        "name": "a",
+        "required": false,
+        "type": {
+          "kind": "string"
+        }
+      },
+      {
+        "name": "b",
+        "required": false,
+        "type": {
+          "kind": "number"
+        }
+      },
+      {
+        "name": "c",
+        "required": false,
+        "type": {
+          "kind": "boolean"
+        }
+      },
+      {
+        "name": "x",
+        "required": true,
+        "type": {
+          "kind": "number"
+        }
+      },
+      {
+        "name": "y",
+        "required": true,
+        "type": {
+          "kind": "number"
+        }
+      },
+      {
+        "name": "extra",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "a",
+              "propType": {
+                "kind": "string"
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      }
+    ],
+    "Misc": [
+      {
+        "name": "tree",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "value",
+              "propType": {
+                "kind": "string"
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "children",
+              "propType": {
+                "kind": "array",
+                "element": {
+                  "kind": "recursive",
+                  "name": "Tree",
+                  "args": []
+                }
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "parent",
+              "propType": {
+                "kind": "recursive",
+                "name": "Tree",
+                "args": []
+              },
+              "required": false,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "dir",
+        "required": true,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "enumMember",
+              "enum": "Dir",
+              "member": "Up",
+              "value": {
+                "kind": "stringLiteral",
+                "value": "UP"
+              }
+            },
+            {
+              "kind": "enumMember",
+              "enum": "Dir",
+              "member": "Down",
+              "value": {
+                "kind": "stringLiteral",
+                "value": "DOWN"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "big",
+        "required": true,
+        "type": {
+          "kind": "named",
+          "name": "bigint",
+          "args": []
+        }
+      },
+      {
+        "name": "tpl",
+        "required": true,
+        "type": {
+          "kind": "templateLiteral",
+          "parts": [
+            {
+              "text": "row-"
+            },
+            {
+              "type": {
+                "kind": "number"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "s",
+        "required": true,
+        "type": {
+          "kind": "uniqueSymbol",
+          "name": "sym"
+        }
+      },
+      {
+        "name": "fn",
+        "required": true,
+        "type": {
+          "kind": "callable",
+          "signatures": [
+            {
+              "typeParams": [],
+              "params": [
+                {
+                  "name": "a",
+                  "type": {
+                    "kind": "string"
+                  }
+                }
+              ],
+              "returnType": {
+                "kind": "void"
+              }
+            },
+            {
+              "typeParams": [],
+              "params": [
+                {
+                  "name": "a",
+                  "type": {
+                    "kind": "number"
+                  }
+                }
+              ],
+              "returnType": {
+                "kind": "void"
+              }
+            }
+          ],
+          "fields": []
+        }
+      },
+      {
+        "name": "getter",
+        "required": false,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "x",
+              "propType": {
+                "kind": "number"
+              },
+              "required": true,
+              "description": "",
+              "readonly": true
+            }
+          ]
+        }
+      }
+    ],
+    "Plain": [
+      {
+        "name": "label",
+        "required": true,
+        "type": {
+          "kind": "string"
+        }
+      },
+      {
+        "name": "count",
+        "required": false,
+        "type": {
+          "kind": "number"
+        }
+      },
+      {
+        "name": "disabled",
+        "required": false,
+        "type": {
+          "kind": "boolean"
+        }
+      },
+      {
+        "name": "size",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "stringLiteral",
+              "value": "lg"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "md"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "sm"
+            }
+          ]
+        }
+      },
+      {
+        "name": "id",
+        "required": false,
+        "type": {
+          "kind": "string"
+        }
+      },
+      {
+        "name": "children",
+        "required": false,
+        "type": {
+          "kind": "reactNode"
+        }
+      }
+    ],
+    "Poly": [
+      {
+        "name": "as",
+        "required": false,
+        "type": {
+          "kind": "named",
+          "name": "E",
+          "args": []
+        }
+      },
+      {
+        "name": "tone",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "stringLiteral",
+              "value": "a"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "b"
+            }
+          ]
+        }
+      }
+    ],
+    "Tup": [
+      {
+        "name": "pos",
+        "required": true,
+        "type": {
+          "kind": "tuple",
+          "elements": [
+            {
+              "type": {
+                "kind": "number"
+              }
+            },
+            {
+              "type": {
+                "kind": "number"
+              },
+              "modifier": "optional"
+            }
+          ]
+        }
+      },
+      {
+        "name": "named",
+        "required": true,
+        "type": {
+          "kind": "tuple",
+          "elements": [
+            {
+              "type": {
+                "kind": "number"
+              },
+              "label": "x"
+            },
+            {
+              "type": {
+                "kind": "string"
+              },
+              "label": "y"
+            }
+          ]
+        }
+      },
+      {
+        "name": "rest",
+        "required": true,
+        "type": {
+          "kind": "tuple",
+          "elements": [
+            {
+              "type": {
+                "kind": "string"
+              }
+            },
+            {
+              "type": {
+                "kind": "number"
+              },
+              "modifier": "rest"
+            }
+          ]
+        }
+      },
+      {
+        "name": "ro",
+        "required": true,
+        "type": {
+          "kind": "readonly",
+          "element": {
+            "kind": "tuple",
+            "elements": [
+              {
+                "type": {
+                  "kind": "numberLiteral",
+                  "value": 1.0
+                }
+              },
+              {
+                "type": {
+                  "kind": "numberLiteral",
+                  "value": 2.0
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "arr",
+        "required": true,
+        "type": {
+          "kind": "readonly",
+          "element": {
+            "kind": "array",
+            "element": {
+              "kind": "string"
+            }
+          }
+        }
+      }
+    ],
+    "Aliases": [
+      {
+        "name": "local",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "x",
+              "propType": {
+                "kind": "number"
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "y",
+              "propType": {
+                "kind": "number"
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "style",
+        "required": true,
+        "type": {
+          "kind": "named",
+          "name": "DepStyle",
+          "args": []
+        }
+      },
+      {
+        "name": "theme",
+        "required": true,
+        "type": {
+          "kind": "named",
+          "name": "DepTheme",
+          "args": []
+        }
+      },
+      {
+        "name": "size",
+        "required": true,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "stringLiteral",
+              "value": "calm"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "loud"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "tiny"
+            }
+          ]
+        }
+      },
+      {
+        "name": "tone",
+        "required": true,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "stringLiteral",
+              "value": "calm"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "loud"
+            }
+          ]
+        }
+      },
+      {
+        "name": "partial",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "x",
+              "propType": {
+                "kind": "number"
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "y",
+              "propType": {
+                "kind": "number"
+              },
+              "required": false,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "record",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "a",
+              "propType": {
+                "kind": "number"
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "b",
+              "propType": {
+                "kind": "number"
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      }
+    ],
+    "Caps": [
+      {
+        "name": "deep",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "a",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "b",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "c",
+                          "propType": {
+                            "kind": "object",
+                            "fields": [
+                              {
+                                "name": "d",
+                                "propType": {
+                                  "kind": "object",
+                                  "fields": [
+                                    {
+                                      "name": "e",
+                                      "propType": {
+                                        "kind": "truncated",
+                                        "text": "{ f: { g: string; }; }",
+                                        "limit": {
+                                          "type": "depth"
+                                        }
+                                      },
+                                      "required": true,
+                                      "description": ""
+                                    }
+                                  ]
+                                },
+                                "required": true,
+                                "description": ""
+                              }
+                            ]
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "wide",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "inside",
+              "propType": {
+                "kind": "truncated",
+                "text": "Wide",
+                "limit": {
+                  "type": "members",
+                  "total": 42
+                }
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "wideTop",
+        "required": true,
+        "type": {
+          "kind": "truncated",
+          "text": "WideTop",
+          "limit": {
+            "type": "members",
+            "total": 101
+          }
+        }
+      },
+      {
+        "name": "many",
+        "required": true,
+        "type": {
+          "kind": "truncated",
+          "text": "\"000\" | \"001\" | \"002\" | \"003\" | \"004\" | \"005\" | \"010\" | \"011\" | \"012\" | \"013\" | \"014\" | \"015\" | \"020\" | \"021\" | \"022\" | \"023\" | \"024\" | \"025\" | \"030\" | \"031\" | \"032\" | \"033\" | \"034\" | ... 576 more ... | \"995\"",
+          "limit": {
+            "type": "members",
+            "total": 600
+          }
+        }
+      },
+      {
+        "name": "nestedMany",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "inside",
+              "propType": {
+                "kind": "truncated",
+                "text": "\"000\" | \"001\" | \"010\" | \"011\" | \"020\" | \"021\" | \"030\" | \"031\" | \"040\" | \"041\" | \"050\" | \"051\" | \"060\" | \"061\" | \"070\" | \"071\" | \"080\" | \"081\" | \"090\" | \"091\" | \"100\" | \"101\" | \"110\" | ... 176 more ... | \"991\"",
+                "limit": {
+                  "type": "members",
+                  "total": 200
+                }
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "allOf",
+        "required": true,
+        "type": {
+          "kind": "truncated",
+          "text": "{ k1: 1; } & { k2: 2; } & { k3: 3; } & { k4: 4; } & { k5: 5; } & { k6: 6; } & { k7: 7; } & { k8: 8; } & { k9: 9; } & { k10: 10; } & { k11: 11; } & { k12: 12; } & { k13: 13; } & { k14: 14; } & { k15: 15; } & { k16: 16; } & { k17: 17; } & { k18: 18; } & ... 482 more ... & ...",
+          "limit": {
+            "type": "members",
+            "total": 501
+          }
+        }
+      },
+      {
+        "name": "nestedAllOf",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "inside",
+              "propType": {
+                "kind": "truncated",
+                "text": "{ k1: 1; } & { k2: 2; } & { k3: 3; } & { k4: 4; } & { k5: 5; } & { k6: 6; } & { k7: 7; } & { k8: 8; } & { k9: 9; } & { k10: 10; } & { k11: 11; } & { k12: 12; } & { k13: 13; } & { k14: 14; } & { k15: 15; } & { k16: 16; } & { k17: 17; } & { k18: 18; } & ... 102 more ... & ...",
+                "limit": {
+                  "type": "members",
+                  "total": 121
+                }
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "longTuple",
+        "required": true,
+        "type": {
+          "kind": "truncated",
+          "text": "[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, ... 457 more ..., 500]",
+          "limit": {
+            "type": "members",
+            "total": 501
+          }
+        }
+      },
+      {
+        "name": "nestedTuple",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "inside",
+              "propType": {
+                "kind": "truncated",
+                "text": "[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, ... 77 more ..., 120]",
+                "limit": {
+                  "type": "members",
+                  "total": 121
+                }
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "withinLimits",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "inside",
+              "propType": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "stringLiteral",
+                    "value": "00"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "01"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "02"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "03"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "04"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "05"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "06"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "07"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "08"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "09"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "10"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "11"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "12"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "13"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "14"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "15"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "16"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "17"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "18"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "19"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "20"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "21"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "22"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "23"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "24"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "25"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "26"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "27"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "28"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "29"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "30"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "31"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "32"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "33"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "34"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "35"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "36"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "37"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "38"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "39"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "40"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "41"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "42"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "43"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "44"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "45"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "46"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "47"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "48"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "49"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "50"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "51"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "52"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "53"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "54"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "55"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "56"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "57"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "58"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "59"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "60"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "61"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "62"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "63"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "64"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "65"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "66"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "67"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "68"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "69"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "70"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "71"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "72"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "73"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "74"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "75"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "76"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "77"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "78"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "79"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "80"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "81"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "82"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "83"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "84"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "85"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "86"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "87"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "88"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "89"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "90"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "91"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "92"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "93"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "94"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "95"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "96"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "97"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "98"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "99"
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      }
+    ],
+    "DeepKinds": [
+      {
+        "name": "union",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "a",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "b",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "c",
+                          "propType": {
+                            "kind": "object",
+                            "fields": [
+                              {
+                                "name": "d",
+                                "propType": {
+                                  "kind": "object",
+                                  "fields": [
+                                    {
+                                      "name": "e",
+                                      "propType": {
+                                        "kind": "truncated",
+                                        "text": "\"x\" | \"y\"",
+                                        "limit": {
+                                          "type": "depth"
+                                        }
+                                      },
+                                      "required": true,
+                                      "description": ""
+                                    }
+                                  ]
+                                },
+                                "required": true,
+                                "description": ""
+                              }
+                            ]
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "intersection",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "a",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "b",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "c",
+                          "propType": {
+                            "kind": "object",
+                            "fields": [
+                              {
+                                "name": "d",
+                                "propType": {
+                                  "kind": "object",
+                                  "fields": [
+                                    {
+                                      "name": "e",
+                                      "propType": {
+                                        "kind": "truncated",
+                                        "text": "{ p: 1; } & { q: 2; }",
+                                        "limit": {
+                                          "type": "depth"
+                                        }
+                                      },
+                                      "required": true,
+                                      "description": ""
+                                    }
+                                  ]
+                                },
+                                "required": true,
+                                "description": ""
+                              }
+                            ]
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "array",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "a",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "b",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "c",
+                          "propType": {
+                            "kind": "object",
+                            "fields": [
+                              {
+                                "name": "d",
+                                "propType": {
+                                  "kind": "object",
+                                  "fields": [
+                                    {
+                                      "name": "e",
+                                      "propType": {
+                                        "kind": "truncated",
+                                        "text": "string[]",
+                                        "limit": {
+                                          "type": "depth"
+                                        }
+                                      },
+                                      "required": true,
+                                      "description": ""
+                                    }
+                                  ]
+                                },
+                                "required": true,
+                                "description": ""
+                              }
+                            ]
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "tuple",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "a",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "b",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "c",
+                          "propType": {
+                            "kind": "object",
+                            "fields": [
+                              {
+                                "name": "d",
+                                "propType": {
+                                  "kind": "object",
+                                  "fields": [
+                                    {
+                                      "name": "e",
+                                      "propType": {
+                                        "kind": "truncated",
+                                        "text": "[1, 2]",
+                                        "limit": {
+                                          "type": "depth"
+                                        }
+                                      },
+                                      "required": true,
+                                      "description": ""
+                                    }
+                                  ]
+                                },
+                                "required": true,
+                                "description": ""
+                              }
+                            ]
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "template",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "a",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "b",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "c",
+                          "propType": {
+                            "kind": "object",
+                            "fields": [
+                              {
+                                "name": "d",
+                                "propType": {
+                                  "kind": "object",
+                                  "fields": [
+                                    {
+                                      "name": "e",
+                                      "propType": {
+                                        "kind": "truncated",
+                                        "text": "`${number}px`",
+                                        "limit": {
+                                          "type": "depth"
+                                        }
+                                      },
+                                      "required": true,
+                                      "description": ""
+                                    }
+                                  ]
+                                },
+                                "required": true,
+                                "description": ""
+                              }
+                            ]
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "scalar",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "a",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "b",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "c",
+                          "propType": {
+                            "kind": "object",
+                            "fields": [
+                              {
+                                "name": "d",
+                                "propType": {
+                                  "kind": "object",
+                                  "fields": [
+                                    {
+                                      "name": "e",
+                                      "propType": {
+                                        "kind": "string"
+                                      },
+                                      "required": true,
+                                      "description": ""
+                                    }
+                                  ]
+                                },
+                                "required": true,
+                                "description": ""
+                              }
+                            ]
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      }
+    ],
+    "Enums": [
+      {
+        "name": "size",
+        "required": true,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "enumMember",
+              "enum": "Size",
+              "member": "Small",
+              "value": {
+                "kind": "stringLiteral",
+                "value": "small"
+              }
+            },
+            {
+              "kind": "enumMember",
+              "enum": "Size",
+              "member": "Large",
+              "value": {
+                "kind": "stringLiteral",
+                "value": "large"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "member",
+        "required": true,
+        "type": {
+          "kind": "enumMember",
+          "enum": "Size",
+          "member": "Small",
+          "value": {
+            "kind": "stringLiteral",
+            "value": "small"
+          }
+        }
+      },
+      {
+        "name": "two",
+        "required": true,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "enumMember",
+              "enum": "Size",
+              "member": "Small",
+              "value": {
+                "kind": "stringLiteral",
+                "value": "small"
+              }
+            },
+            {
+              "kind": "enumMember",
+              "enum": "Level",
+              "member": "High",
+              "value": {
+                "kind": "numberLiteral",
+                "value": 5.0
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "level",
+        "required": true,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "enumMember",
+              "enum": "Level",
+              "member": "Low",
+              "value": {
+                "kind": "numberLiteral",
+                "value": 0.0
+              }
+            },
+            {
+              "kind": "enumMember",
+              "enum": "Level",
+              "member": "High",
+              "value": {
+                "kind": "numberLiteral",
+                "value": 5.0
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "Instances": [
+      {
+        "name": "loopArray",
+        "required": true,
+        "type": {
+          "kind": "array",
+          "element": {
+            "kind": "recursive",
+            "name": "LoopArray",
+            "args": []
+          }
+        }
+      },
+      {
+        "name": "loopTuple",
+        "required": true,
+        "type": {
+          "kind": "tuple",
+          "elements": [
+            {
+              "type": {
+                "kind": "recursive",
+                "name": "LoopTuple",
+                "args": []
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "readonlyLoop",
+        "required": true,
+        "type": {
+          "kind": "readonly",
+          "element": {
+            "kind": "array",
+            "element": {
+              "kind": "recursive",
+              "name": "ReadonlyLoop",
+              "args": []
+            }
+          }
+        }
+      },
+      {
+        "name": "boxed",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "value",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "value",
+                    "propType": {
+                      "kind": "string"
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "twice",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "first",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "x",
+                    "propType": {
+                      "kind": "number"
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "second",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "x",
+                    "propType": {
+                      "kind": "number"
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "nestedPair",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "first",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "first",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "x",
+                          "propType": {
+                            "kind": "number"
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "second",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "x",
+                          "propType": {
+                            "kind": "number"
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "second",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "x",
+                    "propType": {
+                      "kind": "number"
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "tree",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "value",
+              "propType": {
+                "kind": "string"
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "kids",
+              "propType": {
+                "kind": "array",
+                "element": {
+                  "kind": "recursive",
+                  "name": "Tree",
+                  "args": [
+                    {
+                      "kind": "string"
+                    }
+                  ]
+                }
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "mutual",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "pong",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "ping",
+                    "propType": {
+                      "kind": "recursive",
+                      "name": "Ping",
+                      "args": [
+                        {
+                          "kind": "number"
+                        }
+                      ]
+                    },
+                    "required": false,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": false,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "grow",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "next",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "next",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "next",
+                          "propType": {
+                            "kind": "truncated",
+                            "text": "Grow<string[][][]> | undefined",
+                            "limit": {
+                              "type": "depth"
+                            }
+                          },
+                          "required": false,
+                          "description": ""
+                        },
+                        {
+                          "name": "item",
+                          "propType": {
+                            "kind": "truncated",
+                            "text": "string[][]",
+                            "limit": {
+                              "type": "depth"
+                            }
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "item",
+                    "propType": {
+                      "kind": "array",
+                      "element": {
+                        "kind": "string"
+                      }
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "item",
+              "propType": {
+                "kind": "string"
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      }
+    ],
+    "Literals": [
+      {
+        "name": "str",
+        "required": true,
+        "type": {
+          "kind": "stringLiteral",
+          "value": "a"
+        }
+      },
+      {
+        "name": "num",
+        "required": true,
+        "type": {
+          "kind": "numberLiteral",
+          "value": -3.0
+        }
+      },
+      {
+        "name": "yes",
+        "required": true,
+        "type": {
+          "kind": "boolLiteral",
+          "value": true
+        }
+      },
+      {
+        "name": "no",
+        "required": true,
+        "type": {
+          "kind": "boolLiteral",
+          "value": false
+        }
+      },
+      {
+        "name": "big",
+        "required": true,
+        "type": {
+          "kind": "bigintLiteral",
+          "value": "10"
+        }
+      },
+      {
+        "name": "neg",
+        "required": true,
+        "type": {
+          "kind": "bigintLiteral",
+          "value": "-1"
+        }
+      },
+      {
+        "name": "mixed",
+        "required": true,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "null"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "x"
+            },
+            {
+              "kind": "numberLiteral",
+              "value": 2.0
+            },
+            {
+              "kind": "boolLiteral",
+              "value": true
+            }
+          ]
+        }
+      }
+    ],
+    "Lost": [
+      {
+        "name": "gone",
+        "required": true,
+        "type": {
+          "kind": "opaque",
+          "raw": "any",
+          "reason": {
+            "type": "unresolvableImport",
+            "specifier": "any"
+          }
+        }
+      }
+    ],
+    "Named": [
+      {
+        "name": "date",
+        "required": true,
+        "type": {
+          "kind": "named",
+          "name": "Date",
+          "args": []
+        }
+      },
+      {
+        "name": "promise",
+        "required": true,
+        "type": {
+          "kind": "named",
+          "name": "Promise",
+          "args": [
+            {
+              "kind": "string"
+            }
+          ]
+        }
+      },
+      {
+        "name": "map",
+        "required": true,
+        "type": {
+          "kind": "named",
+          "name": "Map",
+          "args": [
+            {
+              "kind": "string"
+            },
+            {
+              "kind": "array",
+              "element": {
+                "kind": "number"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "node",
+        "required": true,
+        "type": {
+          "kind": "reactNode"
+        }
+      },
+      {
+        "name": "element",
+        "required": true,
+        "type": {
+          "kind": "reactNode"
+        }
+      },
+      {
+        "name": "css",
+        "required": true,
+        "type": {
+          "kind": "cssProperties"
+        }
+      },
+      {
+        "name": "as",
+        "required": true,
+        "type": {
+          "kind": "elementType"
+        }
+      },
+      {
+        "name": "ref",
+        "required": true,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "null"
+            },
+            {
+              "kind": "function",
+              "typeParams": [],
+              "params": [
+                {
+                  "name": "instance",
+                  "type": {
+                    "kind": "union",
+                    "members": [
+                      {
+                        "kind": "null"
+                      },
+                      {
+                        "kind": "named",
+                        "name": "HTMLDivElement",
+                        "args": []
+                      }
+                    ]
+                  }
+                }
+              ],
+              "returnType": {
+                "kind": "void"
+              }
+            },
+            {
+              "kind": "named",
+              "name": "RefObject",
+              "args": [
+                {
+                  "kind": "named",
+                  "name": "HTMLDivElement",
+                  "args": []
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "handler",
+        "required": true,
+        "type": {
+          "kind": "function",
+          "typeParams": [],
+          "params": [
+            {
+              "name": "event",
+              "type": {
+                "kind": "named",
+                "name": "MouseEvent",
+                "args": [
+                  {
+                    "kind": "named",
+                    "name": "HTMLButtonElement",
+                    "args": []
+                  }
+                ]
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "void"
+          }
+        }
+      }
+    ],
+    "Objects": [
+      {
+        "name": "shape",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "id",
+              "propType": {
+                "kind": "string"
+              },
+              "required": true,
+              "description": "",
+              "readonly": true
+            },
+            {
+              "name": "label",
+              "propType": {
+                "kind": "string"
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "method",
+              "propType": {
+                "kind": "function",
+                "typeParams": [],
+                "params": [
+                  {
+                    "name": "a",
+                    "type": {
+                      "kind": "number"
+                    }
+                  }
+                ],
+                "returnType": {
+                  "kind": "string"
+                }
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "computed",
+              "propType": {
+                "kind": "number"
+              },
+              "required": true,
+              "description": "",
+              "readonly": true
+            },
+            {
+              "name": "key",
+              "propType": {
+                "kind": "unknown"
+              },
+              "required": true,
+              "description": "",
+              "indexKey": {
+                "kind": "string"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "withCall",
+        "required": true,
+        "type": {
+          "kind": "callable",
+          "signatures": [
+            {
+              "typeParams": [],
+              "params": [
+                {
+                  "name": "a",
+                  "type": {
+                    "kind": "string"
+                  }
+                }
+              ],
+              "returnType": {
+                "kind": "number"
+              }
+            }
+          ],
+          "fields": [
+            {
+              "name": "displayName",
+              "propType": {
+                "kind": "string"
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "ctor",
+        "required": true,
+        "type": {
+          "kind": "callable",
+          "signatures": [
+            {
+              "construct": true,
+              "typeParams": [],
+              "params": [
+                {
+                  "name": "a",
+                  "type": {
+                    "kind": "string"
+                  }
+                }
+              ],
+              "returnType": {
+                "kind": "named",
+                "name": "Date",
+                "args": []
+              }
+            }
+          ],
+          "fields": []
+        }
+      },
+      {
+        "name": "overloaded",
+        "required": true,
+        "type": {
+          "kind": "callable",
+          "signatures": [
+            {
+              "typeParams": [],
+              "params": [
+                {
+                  "name": "a",
+                  "type": {
+                    "kind": "string"
+                  }
+                }
+              ],
+              "returnType": {
+                "kind": "string"
+              }
+            },
+            {
+              "typeParams": [],
+              "params": [
+                {
+                  "name": "a",
+                  "type": {
+                    "kind": "number"
+                  }
+                }
+              ],
+              "returnType": {
+                "kind": "number"
+              }
+            }
+          ],
+          "fields": []
+        }
+      },
+      {
+        "name": "symbolKeyed",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "[Symbol.iterator]",
+              "propType": {
+                "kind": "function",
+                "typeParams": [],
+                "params": [],
+                "returnType": {
+                  "kind": "void"
+                }
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "plain",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 1.0
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "numeric",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "key",
+              "propType": {
+                "kind": "string"
+              },
+              "required": true,
+              "description": "",
+              "indexKey": {
+                "kind": "number"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "Open": [
+      {
+        "name": "item",
+        "required": true,
+        "type": {
+          "kind": "named",
+          "name": "T",
+          "args": []
+        }
+      },
+      {
+        "name": "key",
+        "required": true,
+        "type": {
+          "kind": "opaque",
+          "raw": "keyof T",
+          "reason": {
+            "type": "unsupportedExpression"
+          }
+        }
+      },
+      {
+        "name": "value",
+        "required": true,
+        "type": {
+          "kind": "opaque",
+          "raw": "T[\"k\"]",
+          "reason": {
+            "type": "indexedAccess",
+            "expression": "T[\"k\"]"
+          }
+        }
+      },
+      {
+        "name": "cond",
+        "required": true,
+        "type": {
+          "kind": "opaque",
+          "raw": "T extends string ? 1 : 2",
+          "reason": {
+            "type": "conditionalType"
+          }
+        }
+      },
+      {
+        "name": "fn",
+        "required": true,
+        "type": {
+          "kind": "function",
+          "typeParams": [
+            "U"
+          ],
+          "params": [
+            {
+              "name": "u",
+              "type": {
+                "kind": "named",
+                "name": "U",
+                "args": []
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "named",
+            "name": "U",
+            "args": []
+          }
+        }
+      }
+    ],
+    "Recursion": [
+      {
+        "name": "json",
+        "required": true,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "null"
+            },
+            {
+              "kind": "string"
+            },
+            {
+              "kind": "number"
+            },
+            {
+              "kind": "boolean"
+            },
+            {
+              "kind": "array",
+              "element": {
+                "kind": "recursive",
+                "name": "Json",
+                "args": []
+              }
+            },
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "key",
+                  "propType": {
+                    "kind": "recursive",
+                    "name": "Json",
+                    "args": []
+                  },
+                  "required": true,
+                  "description": "",
+                  "indexKey": {
+                    "kind": "string"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "left",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "right",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "left",
+                    "propType": {
+                      "kind": "recursive",
+                      "name": "Left",
+                      "args": []
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "id",
+                    "propType": {
+                      "kind": "number"
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "name",
+              "propType": {
+                "kind": "string"
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      }
+    ],
+    "Scalars": [
+      {
+        "name": "s",
+        "required": true,
+        "type": {
+          "kind": "string"
+        }
+      },
+      {
+        "name": "n",
+        "required": true,
+        "type": {
+          "kind": "number"
+        }
+      },
+      {
+        "name": "b",
+        "required": true,
+        "type": {
+          "kind": "boolean"
+        }
+      },
+      {
+        "name": "big",
+        "required": true,
+        "type": {
+          "kind": "named",
+          "name": "bigint",
+          "args": []
+        }
+      },
+      {
+        "name": "sym",
+        "required": true,
+        "type": {
+          "kind": "named",
+          "name": "symbol",
+          "args": []
+        }
+      },
+      {
+        "name": "obj",
+        "required": true,
+        "type": {
+          "kind": "named",
+          "name": "object",
+          "args": []
+        }
+      },
+      {
+        "name": "nul",
+        "required": true,
+        "type": {
+          "kind": "null"
+        }
+      },
+      {
+        "name": "und",
+        "required": false,
+        "type": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "name": "nev",
+        "required": true,
+        "type": {
+          "kind": "never"
+        }
+      },
+      {
+        "name": "unk",
+        "required": true,
+        "type": {
+          "kind": "unknown"
+        }
+      },
+      {
+        "name": "any",
+        "required": true,
+        "type": {
+          "kind": "any"
+        }
+      },
+      {
+        "name": "vd",
+        "required": true,
+        "type": {
+          "kind": "function",
+          "typeParams": [],
+          "params": [],
+          "returnType": {
+            "kind": "void"
+          }
+        }
+      }
+    ],
+    "Templates": [
+      {
+        "name": "pattern",
+        "required": true,
+        "type": {
+          "kind": "templateLiteral",
+          "parts": [
+            {
+              "type": {
+                "kind": "number"
+              }
+            },
+            {
+              "text": "px"
+            }
+          ]
+        }
+      },
+      {
+        "name": "two",
+        "required": true,
+        "type": {
+          "kind": "templateLiteral",
+          "parts": [
+            {
+              "text": "--"
+            },
+            {
+              "type": {
+                "kind": "string"
+              }
+            },
+            {
+              "text": "-"
+            },
+            {
+              "type": {
+                "kind": "number"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "expanded",
+        "required": true,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "stringLiteral",
+              "value": "a-1"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "a-2"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "b-1"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "b-2"
+            }
+          ]
+        }
+      },
+      {
+        "name": "upper",
+        "required": true,
+        "type": {
+          "kind": "named",
+          "name": "Uppercase<string>",
+          "args": []
+        }
+      }
+    ],
+    "Tuples": [
+      {
+        "name": "labeled",
+        "required": true,
+        "type": {
+          "kind": "tuple",
+          "elements": [
+            {
+              "type": {
+                "kind": "string"
+              },
+              "label": "head"
+            },
+            {
+              "type": {
+                "kind": "number"
+              },
+              "label": "tail",
+              "modifier": "optional"
+            },
+            {
+              "type": {
+                "kind": "boolean"
+              },
+              "label": "rest",
+              "modifier": "rest"
+            }
+          ]
+        }
+      },
+      {
+        "name": "variadic",
+        "required": true,
+        "type": {
+          "kind": "tuple",
+          "elements": [
+            {
+              "type": {
+                "kind": "string"
+              },
+              "modifier": "rest"
+            },
+            {
+              "type": {
+                "kind": "number"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "nested",
+        "required": true,
+        "type": {
+          "kind": "tuple",
+          "elements": [
+            {
+              "type": {
+                "kind": "tuple",
+                "elements": [
+                  {
+                    "type": {
+                      "kind": "number"
+                    }
+                  },
+                  {
+                    "type": {
+                      "kind": "string"
+                    },
+                    "modifier": "optional"
+                  }
+                ]
+              }
+            },
+            {
+              "type": {
+                "kind": "numberLiteral",
+                "value": 1.0
+              }
+            },
+            {
+              "type": {
+                "kind": "numberLiteral",
+                "value": 2.0
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "empty",
+        "required": true,
+        "type": {
+          "kind": "tuple",
+          "elements": []
+        }
+      },
+      {
+        "name": "readonlyLabeled",
+        "required": true,
+        "type": {
+          "kind": "readonly",
+          "element": {
+            "kind": "tuple",
+            "elements": [
+              {
+                "type": {
+                  "kind": "numberLiteral",
+                  "value": 1.0
+                },
+                "label": "a"
+              },
+              {
+                "type": {
+                  "kind": "numberLiteral",
+                  "value": 2.0
+                },
+                "label": "b"
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "Unions": [
+      {
+        "name": "shape",
+        "required": true,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "kind",
+                  "propType": {
+                    "kind": "stringLiteral",
+                    "value": "circle"
+                  },
+                  "required": true,
+                  "description": ""
+                },
+                {
+                  "name": "r",
+                  "propType": {
+                    "kind": "number"
+                  },
+                  "required": true,
+                  "description": ""
+                }
+              ]
+            },
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "kind",
+                  "propType": {
+                    "kind": "stringLiteral",
+                    "value": "square"
+                  },
+                  "required": true,
+                  "description": ""
+                },
+                {
+                  "name": "side",
+                  "propType": {
+                    "kind": "number"
+                  },
+                  "required": true,
+                  "description": ""
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "both",
+        "required": true,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "intersection",
+              "members": [
+                {
+                  "kind": "object",
+                  "fields": [
+                    {
+                      "name": "kind",
+                      "propType": {
+                        "kind": "stringLiteral",
+                        "value": "circle"
+                      },
+                      "required": true,
+                      "description": ""
+                    },
+                    {
+                      "name": "r",
+                      "propType": {
+                        "kind": "number"
+                      },
+                      "required": true,
+                      "description": ""
+                    }
+                  ]
+                },
+                {
+                  "kind": "object",
+                  "fields": [
+                    {
+                      "name": "id",
+                      "propType": {
+                        "kind": "string"
+                      },
+                      "required": true,
+                      "description": ""
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "kind": "intersection",
+              "members": [
+                {
+                  "kind": "object",
+                  "fields": [
+                    {
+                      "name": "kind",
+                      "propType": {
+                        "kind": "stringLiteral",
+                        "value": "square"
+                      },
+                      "required": true,
+                      "description": ""
+                    },
+                    {
+                      "name": "side",
+                      "propType": {
+                        "kind": "number"
+                      },
+                      "required": true,
+                      "description": ""
+                    }
+                  ]
+                },
+                {
+                  "kind": "object",
+                  "fields": [
+                    {
+                      "name": "id",
+                      "propType": {
+                        "kind": "string"
+                      },
+                      "required": true,
+                      "description": ""
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "nullable",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "null"
+            },
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "kind",
+                  "propType": {
+                    "kind": "stringLiteral",
+                    "value": "circle"
+                  },
+                  "required": true,
+                  "description": ""
+                },
+                {
+                  "name": "r",
+                  "propType": {
+                    "kind": "number"
+                  },
+                  "required": true,
+                  "description": ""
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "fallbacks": {
+    "Klass": "no call signature (class or non-function component)",
+    "Over": "overloaded call signatures"
+  }
+}

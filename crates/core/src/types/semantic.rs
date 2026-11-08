@@ -10,6 +10,8 @@ use std::sync::{Arc, Mutex};
 use camino::Utf8PathBuf;
 use rustc_hash::{FxHashMap, FxHasher};
 
+mod order;
+
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use crate::types::output::{ComponentEntry, ExtractionOutput, OpaqueDetail, OpaqueReason, ParsedProp, PropType};
 
@@ -20,6 +22,13 @@ use crate::types::output::{ComponentEntry, ExtractionOutput, OpaqueDetail, Opaqu
 pub fn unresolved_type(written: impl Into<String>) -> PropType {
     let written = written.into();
     OpaqueDetail::new(written.clone(), OpaqueReason::UnresolvableImport { specifier: written })
+}
+
+/// A type the checker holds that PropType has no shape for: a conditional or indexed access type it could not resolve
+/// (its parameters are still open), `keyof T`. It is `opaque` with `reason`, so the prop carries `degradedBy`, and
+/// `raw` is how the checker prints it.
+pub fn degraded_type(raw: impl Into<String>, reason: OpaqueReason) -> PropType {
+    OpaqueDetail::new(raw, reason)
 }
 
 /// One prop as the checker reports it.
@@ -196,9 +205,15 @@ fn replace_props<'a>(
         } else {
             prop.description.clone()
         };
+        // The checker sorts a union's members; where the structural pass resolved the same union, its order is the
+        // declared one.
+        let prop_type = match structural {
+            Some(structural) => order::in_declared_order(prop.prop_type.clone(), &structural.prop_type),
+            None => prop.prop_type.clone(),
+        };
         let merged = ParsedProp::new(
             prop.name.clone(),
-            prop.prop_type.clone(),
+            prop_type,
             prop.required,
             structural.and_then(|s| s.default_value.clone()),
             description,

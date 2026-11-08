@@ -247,6 +247,7 @@ impl Checker {
                 expected_versions: config.expected_versions,
                 record_to: None,
                 extra_env: config.extra_env.clone(),
+                reverse_queries: false,
                 prepared_options: None,
             };
             let started = supervisor_config(&request).map_err(|reason| self.stay_down(reason))?;
