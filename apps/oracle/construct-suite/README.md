@@ -71,6 +71,22 @@ pnpm --filter caliper-docgen-oracle construct:check
 
 Without the build step the suite skips, which is green but covers nothing; a job that must run it should check that the binary exists first.
 
+## tsrs parity
+
+ADR 0026 makes the Go checker (`typescript-beta`) the type authority and lets tsrs, the Rust port, stand in for it only while it agrees. `construct:parity` is that agreement check: it runs the same one-program capture as `construct:capture` once with the Go checker and once with the exact `tsrs` version pinned in `apps/oracle/package.json`, normalizes both through `src/oracle-checker.ts`, and compares every row on four facts: the normalized type, the `typeToString` text, and the prop type's `flags` and `intrinsicName` (the facts Caliper reads through the API to tell the error type from `any`). It needs no corpora and no network, and takes a couple of seconds.
+
+```sh
+pnpm --filter caliper-docgen-oracle construct:parity   # or: just test-parity
+```
+
+Run it on every tsrs bump, before changing the pin in the version allow-lists (`crates/tsc-client/src/supervisor.rs`, `crates/semantic/src/lib.rs`), together with the construct suite. Bump the `tsrs` devDependency of `apps/oracle` first, run it, and change the Rust pins only when it passes. The weekly oracle keeps the Go checker as the independent arbiter; this run does not replace it.
+
+A reported difference is a row where tsrs gives a different answer than the Go checker. The report names the row, both `typeToString` texts, the differing facts, and a diff of the two normalized forms (`-` Go, `+` tsrs). Treat it as a tsrs bug or a protocol change until shown otherwise: do not pin that tsrs version, and report it upstream.
+
+`parity-allowlist.json` maps a row id to the reason its difference is harmless (for example a lib file path inside an `import("...")` text). Add an entry only for a difference that cannot change the type Caliper reports, and give the reason. An entry whose row stops differing, or names no row, fails the run, so the list stays honest: remove it. The list is empty while every row is identical.
+
+`tests/construct-parity.test.ts` runs the same comparison in-process. It skips with a warning when `tsrs` is not installed; set `REQUIRE_TSRS=1` to fail instead.
+
 ## Not covered
 
 Constructs the fixture format (one self-contained file, one prop `p`, no runtime code) cannot express, or that were left out:
