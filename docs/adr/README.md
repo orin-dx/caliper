@@ -31,6 +31,7 @@ One line per ADR, with what it guards. Add a line when you add an ADR.
 - 23. Function parameters carry `optional` and `rest` — removed: a field added under 0017's versioning rule. It lives in `docs/architecture/serialization-formats.md` ("Version 3").
 - 24. List every HTML attribute React declares by default — removed: a default, with its measurements. It lives in `docs/rdt-coverage.md` ("Why `full` is the default") and `docs/performance.md` ("Default changes").
 - [25. The resolver owns scoping; the extractor records where a declaration sits](0025-resolver-owns-scoping.md) — do not decide in a collector which declaration a name refers to, or re-derive an import's type-only status: the extractor records each declaration with its enclosing scope, the resolver looks names up by scope, and `is_type_only` is read from the import.
+- [26. The checker is the type authority; oxc supplies syntax](0026-the-checker-is-the-type-authority.md) — Proposed. Do not make a type decision in a projection, key a cache on a checker type id, or bump the pinned tsrs without the construct suite and a parity run against the Go checker: the checker gives the prop set, types, requiredness and descriptions, oxc the candidates, defaults, positions and declaration order, and the structural resolver is only the fallback. Supersedes in part 0006 and 0007.
 
 Changing any of these needs a new ADR. A removed entry keeps its number; its rationale moved to the doc named on its line.
 

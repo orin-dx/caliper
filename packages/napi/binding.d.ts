@@ -102,7 +102,7 @@ export interface JsExtractOptions {
   semanticTypes?: 'off' | 'on-demand'
   /**
    * Session only, with `semanticTypes: 'on-demand'`: the `tsc` binary to run, instead of the nearest
-   * `node_modules/typescript/bin/tsc`.
+   * `node_modules/typescript/bin/tsc` or `node_modules/tsrs/bin/tsrs`.
    */
   tscPath?: string
   /**

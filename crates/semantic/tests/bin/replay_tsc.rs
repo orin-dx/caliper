@@ -12,6 +12,8 @@
 //! being silently answered. `REPLAY_SCENARIO=crash` exits at once, `hang` answers nothing, `invalid_json` answers every request after `initialize` with a
 //! well-framed body that is not JSON.
 //!
+//! `REPLAY_LOG` names a file that gets every request, one JSON object per line, as the backend sent it.
+//!
 //! Paths in the recording are written relative to the project: the project root (`--cwd`) is `<ROOT>`, and its
 //! lower-cased form, which the checker uses as a file's `path` key, is `<root>`. The root must contain an upper-case
 //! letter, or the two spellings collide.
@@ -59,6 +61,10 @@ fn main() {
         stdin.read_exact(&mut body).unwrap();
 
         let request: serde_json::Value = serde_json::from_str(&from_wire(String::from_utf8(body).unwrap())).unwrap();
+        if let Ok(log) = std::env::var("REPLAY_LOG") {
+            let mut file = std::fs::OpenOptions::new().create(true).append(true).open(log).unwrap();
+            writeln!(file, "{}", to_wire(serde_json::to_string(&request).unwrap())).unwrap();
+        }
         let id = request.get("id").cloned().unwrap_or(serde_json::Value::Null);
         let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
         let params = request.get("params").cloned().unwrap_or(serde_json::Value::Null);
