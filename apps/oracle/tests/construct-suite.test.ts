@@ -1,6 +1,6 @@
 // The deterministic construct suite (apps/oracle/construct-suite/README.md): Caliper's prop `p` of every fixture against
 // the golden TypeScript 7.1's checker gave it, held to the verdict expectations.json allows. The binary is Caliper's own,
-// so without one the suite skips; the pure helpers are tested either way.
+// so without one the suite skips (and fails instead when REQUIRE_CALIPER_BIN=1, as CI sets); the pure helpers are tested either way.
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -22,7 +22,8 @@ const here = import.meta.dirname
 const suite = realpathSync(join(here, '..', 'construct-suite'))
 const bin = resolve(process.env.CALIPER_BIN ?? join(here, '..', '..', '..', 'target', 'release', 'caliper-docgen'))
 const available = existsSync(bin)
-if (!available) {
+const required = process.env.REQUIRE_CALIPER_BIN === '1'
+if (!available && !required) {
   console.warn(
     `construct suite skipped: no caliper binary at ${bin}. Build one (cargo build --release -p caliper-docgen) ` +
       'or point CALIPER_BIN at it.',
@@ -95,6 +96,10 @@ describe('the construct suite helpers', () => {
     const missing = listFixtures(suite).filter((f) => !existsSync(f.golden))
     expect(missing.map((f) => f.id)).toStrictEqual([])
   })
+})
+
+it.runIf(required)('the caliper binary REQUIRE_CALIPER_BIN=1 demands exists', () => {
+  expect(available, `REQUIRE_CALIPER_BIN=1 but there is no caliper binary at ${bin}`).toBe(true)
 })
 
 describe.skipIf(!available)('the construct suite against the caliper binary', () => {
