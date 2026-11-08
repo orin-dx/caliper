@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01BbGeCCxYchAGAiMqUFtnDh",
+  "agent_id": "a8db326ff83fe02b6",
+  "subagent_type": "general-purpose",
+  "task_description": "Record ADR 0026 as accepted with gates",
+  "token_usage": {
+    "input_tokens": 28,
+    "cache_creation_tokens": 54011,
+    "cache_read_tokens": 889760,
+    "output_tokens": 6835,
+    "api_call_count": 14
+  },
+  "started_at": "2026-11-07T21:10:32.897908-08:00",
+  "completed_at": "2026-11-07T21:12:35.997743-08:00"
+}
