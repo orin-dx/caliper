@@ -4791,8 +4791,9 @@ fn tuple_elements_resolve_whether_plain_labelled_or_optional() {
 
     let props = &output.components["Box"].props;
     assert_eq!(props["plain"].prop_type.raw_string(), "[\"a\" | \"b\", number]");
-    assert_eq!(props["labelled"].prop_type.raw_string(), "[\"a\" | \"b\", number]");
-    assert_eq!(props["opt"].prop_type.raw_string(), "[boolean | string]");
+    // The labels and the optional marker are kept, as TypeScript prints them.
+    assert_eq!(props["labelled"].prop_type.raw_string(), "[tone: \"a\" | \"b\", count?: number]");
+    assert_eq!(props["opt"].prop_type.raw_string(), "[flag?: boolean | string]");
 }
 
 #[test]

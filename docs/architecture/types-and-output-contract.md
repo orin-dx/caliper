@@ -15,10 +15,11 @@ There are two recursive "type" enums, one per side of the resolver boundary:
 
 ```rust
 pub enum CollectedType {
-    String, Number, Boolean, Null, Undefined, Any, Never, Unknown, Void, BigInt, Symbol,
-    StringLiteral(CompactString), NumberLiteral(f64), BoolLiteral(bool),
+    String, Number, Boolean, Null, Undefined, Any, Never, Unknown, Void, BigInt, Symbol, UniqueSymbol,
+    StringLiteral(CompactString), NumberLiteral(f64), BoolLiteral(bool), BigIntLiteral(CompactString),
     Union(Vec<CollectedType>), Intersection(Vec<CollectedType>), Array(Box<CollectedType>),
-    Tuple(Vec<CollectedType>), Object(Vec<CollectedObjectField>),
+    Tuple(Vec<CollectedTupleElement>), Object(Vec<CollectedObjectField>),
+    Callable { signatures: Vec<CollectedSignature>, fields: Vec<CollectedObjectField> },
     Named { name: CompactString, args: Vec<CollectedType> },
     TypeOf(CompactString),
     KeyOf(Box<CollectedType>),
@@ -35,10 +36,15 @@ pub enum CollectedType {
 ```rust
 pub enum PropType {
     String, Number, Boolean, Null, Undefined, Any, Never, Unknown, Void,
-    StringLiteral(String), NumberLiteral(f64), BoolLiteral(bool),
+    StringLiteral(String), NumberLiteral(f64), BoolLiteral(bool), BigIntLiteral(BigIntValue),
+    UniqueSymbol { name: TypeName }, EnumMember { enum_name: TypeName, member: TypeName, value: EnumMemberValue },
+    TemplateLiteral(Vec<TemplatePart>),
     Union(Vec<PropType>), Intersection(Vec<PropType>), Array(Box<PropType>),
-    Tuple(Vec<PropType>), Object(Vec<ObjectField>),
+    Tuple(Vec<TupleElement>), Readonly(Box<PropType>), Object(Vec<ObjectField>),
+    Callable { signatures: Vec<CallSignature>, fields: Vec<ObjectField> },
     Named { name: TypeName, args: Vec<PropType> },
+    Recursive { name: TypeName, args: Vec<PropType> },
+    Truncated { text: String, limit: TruncationLimit },
     ReactNode, CssProperties,
     Function { type_params: Vec<String>, params: Vec<FunctionParam>, return_type: Box<PropType> }, // FunctionParam: name, type, optional, rest
     Ref { element: Option<String> },
@@ -50,7 +56,24 @@ pub enum PropType {
 }
 ```
 
-Note what disappeared crossing the boundary: `BigInt`, `Symbol`, `TypeOf`, `KeyOf`, `AtFile`, `IndexedAccess`, `TemplateLiteral`, `Function`, `Conditional`, `Mapped`, `Raw` are all gone from `PropType`. Each either resolves into a concrete `PropType` variant (`Function` becomes `PropType::Function` with its parameters and return type resolved) or terminates in `PropType::Opaque` with an `OpaqueReason` explaining exactly which unresolvable TypeScript construct it was (`ConditionalType`, `MappedType`, `IndexedAccess`, `TemplateLiteral`, ...). This is the resolver's entire job, structurally: eliminate every "can't be sure yet" variant.
+Note what disappeared crossing the boundary: `BigInt`, `Symbol`, `TypeOf`, `KeyOf`, `AtFile`, `IndexedAccess`, `Conditional`, `Mapped`, `Raw` are all gone from `PropType`. Each either resolves into a concrete `PropType` variant (`Function` becomes `PropType::Function` with its parameters and return type as written, a template literal that does not expand becomes `PropType::TemplateLiteral`) or terminates in `PropType::Opaque` with an `OpaqueReason` explaining exactly which unresolvable TypeScript construct it was (`ConditionalType`, `MappedType`, `IndexedAccess`, ...). This is the resolver's entire job, structurally: eliminate every "can't be sure yet" variant.
+
+## Schema version 5: what the checker states (ADR 0026, slice S1)
+
+`PropType` holds what TypeScript's checker states about a prop's type and the structural path used to lose. Each shape is the checker's own (a rest element is listed by its element type, as `getTypeArguments` lists a tuple's), so the checker converter (slice S2) fills the same variants the structural path does and no projection decides a type. A payload with an invariant is a newtype (`TupleLabel` is an identifier, `BigIntValue` decimal digits after an optional `-`) whose reader rejects anything else; names stay `TypeName` like every other name in the enum. Matches on `PropType` stay exhaustive: the serializer, `operand_string`, `literal_kind`, `visit` and TOON's `format_type_compact` have no wildcard arm.
+
+- **`Tuple(Vec<TupleElement>)`**: each element is `{ element_type, kind, label }`, `kind` one of `Required`, `Optional`, `Rest` (`...T[]`, `element_type` is `T`) and `Variadic` (`...T` of a type that is not a known array or tuple, `element_type` is `T`). The resolver reads a rest element's operand (`resolver/collected.rs`, `tuple_of`): a known tuple is spread in, as TypeScript flattens `[string, ...Tail]`; an array is a `Rest` of its element; anything else is `Variadic`. Filled by the structural path. JSON: `{ "kind": "tuple", "elements": [{ "type", "label"?, "modifier"?: "optional" | "rest" | "variadic" }] }`.
+- **`BigIntLiteral(BigIntValue)`**: `10n`, `-1n`. Filled by the structural path. JSON `{ "kind": "bigintLiteral", "value": "-1" }`. A negative number literal (`-1`) is a `NumberLiteral`, read from the prefix expression a literal type allows.
+- **`UniqueSymbol { name }`**: `typeof brand` for `declare const brand: unique symbol`. Filled by the structural path through the declared value's alias (`record_declared_value_type`, `resolve_typeof`); a bare `unique symbol` elsewhere, which TypeScript rejects, stays `symbol`. JSON `{ "kind": "uniqueSymbol", "name": "brand" }`.
+- **`EnumMember { enum_name, member, value }`**: `Size.Small` when `Size` is an `enum` declaration (not a variant bag, which shares `GlobalSourceData::enums`), with its string or number value. Filled by the structural path for a member reference (`resolver/named.rs`, `enum_member`); a reference to the whole enum stays the union of its literal values. JSON `{ "kind": "enumMember", "enum", "member", "value": <stringLiteral or numberLiteral> }`.
+- **`TemplateLiteral(Vec<TemplatePart>)`**: a pattern such as `` `${number}px` ``, its text and `${…}` holes. A template whose holes are finite literal unions is still expanded to its strings, now through `Uppercase`, `Lowercase`, `Capitalize` and `Uncapitalize` too; otherwise the pattern is kept, with each hole as written (names stay names, as a function signature's types do). It is the exact type, so it is not in `degradedBy`; the `TEMPLATE_LITERAL_OPAQUE` info diagnostic still says it lists no values. Filled by the structural path. The `templateLiteral` opaque reason, which only this case wrote, is gone. JSON `{ "kind": "templateLiteral", "parts": [{ "text" } | { "type" }] }`.
+- **`Callable { signatures, fields }`**: an object type with call or construct signatures that is not one call signature alone (that stays a `Function`): overloads, `new (…): T`, or signatures beside properties. Each `CallSignature` has a `kind` (`Call`, `Construct`), type parameters, parameters and return type, as written like a function type's. Filled by the structural path for a type literal. JSON `{ "kind": "callable", "signatures": [{ "construct"?: true, "typeParams", "params", "returnType" }], "fields" }`.
+- **`Recursive { name, args }`**: a reference back to the type whose expansion encloses it, the nested `Json` in `type Json = string | Json[] | { [key: string]: Json }`, where the cycle check in `resolve_named` used to give `opaque` (`depthExceeded`). It is not a loss and not in `degradedBy`. A reference that is the whole expansion or a direct union or intersection member (`type Loop = Loop`, `type A = A | string`) is a TypeScript error, not a recursive type, and stays `opaque`. Filled by the structural path. JSON `{ "kind": "recursive", "name", "args" }`.
+- **`Truncated { text, limit }`**: a type cut at a depth or member limit, with `TruncationLimit::Depth` or `Members { total }`; it counts in `degradedBy` as `truncated`, and `holds_opaque` is true for it, so the on-demand checker is asked again. Unread by the structural path, which never truncates by choice (its depth guard is a `depthExceeded` opaque type with a diagnostic): it is for the checker converter's named-boundary policy (S2). A test builds it directly (`types/output/tests.rs`, `streaming_serialize_tests`), and every projection prints it. JSON `{ "kind": "truncated", "text", "limit": { "type": "depth" } | { "type": "members", "total" } }`.
+
+A getter is a property, not a method: `{ get size(): number }` is `{ readonly size: number }`, a getter and a setter of one name are one writable property typed by the getter, and a setter alone is typed by its parameter (`extractor::Accessors`, `method_signature_type`). The tuple shape changed the JSON a version 4 reader reads, so this is one bump for all of them; the parse cache moved to `CACHE_SCHEMA_VERSION` 33.
+
+The projections decide a literal and an option once: `PropType::literal_kind` says what primitive a type is one literal of (an enum member is its value's), and RDT's `enum` shape (`is_literal_union`) and TOON's uncut unions both ask it; `PropType::option_text` is the text RDT writes for an option, an enum member's value (`"small"`) rather than its name. Display text is `raw_string` for all three: TOON prints the new kinds as `raw_string` does, except `truncated(text)` beside `opaque(raw)`.
 
 ## LOCKED DESIGN DECISION: manual Serialize/Deserialize on the recursive enums (ADR-0002)
 
@@ -73,7 +96,6 @@ pub enum OpaqueReason {
     UnresolvableImport { specifier: String },
     PandaCodegenMissing, DepthExceeded,
     IndexedAccess { expression: String },
-    TemplateLiteral { expression: String },
     UnsupportedExpression,
 }
 ```
@@ -120,7 +142,7 @@ impl OpaqueDetail {
 
 **Who actually calls which, verified against current source:**
 
-- `resolver/collected.rs`, `resolver/primitives.rs`, `resolver/template.rs`, `resolver/named.rs` — every one of these resolver-internal degradation sites calls `OpaqueDetail::give_up`, each with its own specific `OpaqueReason` (`DepthExceeded`, `MappedType`, `ConditionalType`, `UnsupportedExpression`, `IndexedAccess`, `TemplateLiteral`) and a diagnostic message tailored to that reason.
+- `resolver/collected.rs`, `resolver/primitives.rs`, `resolver/template.rs`, `resolver/named.rs` — every one of these resolver-internal degradation sites calls `OpaqueDetail::give_up`, each with its own specific `OpaqueReason` (`DepthExceeded`, `MappedType`, `ConditionalType`, `UnsupportedExpression`, `IndexedAccess`) and a diagnostic message tailored to that reason.
 - `known.rs` — every call is `OpaqueDetail::new`, for the documented exception: `known.rs` has no `ResolveState` of its own to push a diagnostic onto (it's a lookup table, not a resolution pass), so it pushes its diagnostic separately through `push_known_opaque_diagnostic` (`known.rs`) at the call site that invokes the lookup, rather than inline in the constructor.
 - `output.rs`'s own `from_tagged_value` — deserialization uses `OpaqueDetail::new` for both the "opaque" JSON tag and the catch-all unknown-`kind` fallback (line 712). This is deserialization, not resolution — there is no `ResolveState` in scope during deserialization, and re-diagnosing a value that's simply being read back off disk/wire would be meaningless (the diagnostic, if any, was already emitted and persisted when the value was first produced).
 

@@ -1,5 +1,10 @@
 use super::*;
 
+/// A tuple of required, unlabeled elements.
+fn tuple(types: Vec<PropType>) -> PropType {
+    PropType::Tuple(types.into_iter().map(TupleElement::required).collect())
+}
+
 /// The wire shape built as a `serde_json::Value`, as `Serialize` did before it streamed; tests check the two agree.
 fn to_tagged_value(pt: &PropType) -> serde_json::Value {
     match pt {
@@ -50,9 +55,74 @@ fn to_tagged_value(pt: &PropType) -> serde_json::Value {
             "kind": "array",
             "element": to_tagged_value(inner)
         }),
-        PropType::Tuple(members) => serde_json::json!({
+        PropType::Tuple(elements) => serde_json::json!({
             "kind": "tuple",
-            "elements": members.iter().map(to_tagged_value).collect::<Vec<_>>()
+            "elements": elements.iter().map(|e| {
+                let mut element = serde_json::json!({ "type": to_tagged_value(&e.element_type) });
+                if let Some(label) = &e.label {
+                    element["label"] = serde_json::json!(label.as_str());
+                }
+                let modifier = match e.kind {
+                    TupleElementKind::Required => None,
+                    TupleElementKind::Optional => Some("optional"),
+                    TupleElementKind::Rest => Some("rest"),
+                    TupleElementKind::Variadic => Some("variadic"),
+                };
+                if let Some(modifier) = modifier {
+                    element["modifier"] = serde_json::json!(modifier);
+                }
+                element
+            }).collect::<Vec<_>>()
+        }),
+        PropType::BigIntLiteral(value) => serde_json::json!({"kind": "bigintLiteral", "value": value.as_str()}),
+        PropType::UniqueSymbol { name } => serde_json::json!({"kind": "uniqueSymbol", "name": name.as_str()}),
+        PropType::EnumMember { enum_name, member, value } => serde_json::json!({
+            "kind": "enumMember",
+            "enum": enum_name.as_str(),
+            "member": member.as_str(),
+            "value": to_tagged_value(&match value {
+                EnumMemberValue::String(s) => PropType::StringLiteral(s.clone()),
+                EnumMemberValue::Number(n) => PropType::NumberLiteral(*n),
+            }),
+        }),
+        PropType::TemplateLiteral(parts) => serde_json::json!({
+            "kind": "templateLiteral",
+            "parts": parts.iter().map(|part| match part {
+                TemplatePart::Text(text) => serde_json::json!({ "text": text }),
+                TemplatePart::Type(ty) => serde_json::json!({ "type": to_tagged_value(ty) }),
+            }).collect::<Vec<_>>()
+        }),
+        PropType::Callable { signatures, fields } => serde_json::json!({
+            "kind": "callable",
+            "signatures": signatures.iter().map(|s| {
+                let function = to_tagged_value(&PropType::Function {
+                    type_params: s.type_params.clone(),
+                    params: s.params.clone(),
+                    return_type: Box::new(s.return_type.clone()),
+                });
+                let mut signature = serde_json::Map::new();
+                if s.kind == SignatureKind::Construct {
+                    signature.insert("construct".into(), serde_json::Value::Bool(true));
+                }
+                for key in ["typeParams", "params", "returnType"] {
+                    signature.insert(key.into(), function[key].clone());
+                }
+                serde_json::Value::Object(signature)
+            }).collect::<Vec<_>>(),
+            "fields": to_tagged_value(&PropType::Object(fields.clone()))["fields"],
+        }),
+        PropType::Recursive { name, args } => serde_json::json!({
+            "kind": "recursive",
+            "name": name.as_str(),
+            "args": args.iter().map(to_tagged_value).collect::<Vec<_>>()
+        }),
+        PropType::Truncated { text, limit } => serde_json::json!({
+            "kind": "truncated",
+            "text": text,
+            "limit": match limit {
+                TruncationLimit::Depth => serde_json::json!({"type": "depth"}),
+                TruncationLimit::Members { total } => serde_json::json!({"type": "members", "total": total}),
+            },
         }),
         PropType::Readonly(inner) => serde_json::json!({
             "kind": "readonly",
@@ -133,9 +203,6 @@ fn to_tagged_value(pt: &PropType) -> serde_json::Value {
                 OpaqueReason::IndexedAccess { expression } => {
                     serde_json::json!({"type": "indexedAccess", "expression": expression})
                 }
-                OpaqueReason::TemplateLiteral { expression } => {
-                    serde_json::json!({"type": "templateLiteral", "expression": expression})
-                }
                 OpaqueReason::UnsupportedExpression => {
                     serde_json::json!({"type": "unsupportedExpression"})
                 }
@@ -174,7 +241,7 @@ fn an_operand_is_parenthesized_where_typescript_needs_it() {
 
 #[test]
 fn tuple_raw_string_renders_real_elements_not_a_placeholder() {
-    let ty = PropType::Tuple(vec![PropType::Number, PropType::Number]);
+    let ty = tuple(vec![PropType::Number, PropType::Number]);
     assert_eq!(ty.raw_string(), "[number, number]");
 }
 
@@ -340,7 +407,7 @@ mod number_literal_roundtrip_tests {
         let original = PropType::Union(vec![
             PropType::Intersection(vec![PropType::NumberLiteral(f64::NAN), PropType::String]),
             PropType::Array(Box::new(PropType::NumberLiteral(f64::NAN))),
-            PropType::Tuple(vec![PropType::NumberLiteral(f64::NAN), PropType::String]),
+            tuple(vec![PropType::NumberLiteral(f64::NAN), PropType::String]),
             PropType::Object(vec![ObjectField {
                 name: "n".into(),
                 prop_type: PropType::NumberLiteral(f64::NAN),
@@ -372,7 +439,7 @@ mod number_literal_roundtrip_tests {
 
         let PropType::Tuple(items) = &members[2] else { panic!("expected Tuple, got {:?}", members[2]) };
         assert!(
-            matches!(items[0], PropType::NumberLiteral(n) if n.is_nan()),
+            matches!(items[0].element_type, PropType::NumberLiteral(n) if n.is_nan()),
             "NaN nested in Tuple did not survive, got {:?}",
             items[0]
         );
@@ -475,7 +542,7 @@ mod prop_type_composite_roundtrip_tests {
 
     #[test]
     fn tuple_and_named_with_args_round_trip_exactly() {
-        let original = PropType::Tuple(vec![PropType::String, PropType::Named { name: "Bar".into(), args: vec![] }]);
+        let original = tuple(vec![PropType::String, PropType::Named { name: "Bar".into(), args: vec![] }]);
         let json = serde_json::to_value(&original).expect("serialize");
         let restored: PropType = serde_json::from_value(json).expect("deserialize");
         assert_eq!(restored, original);
@@ -774,7 +841,6 @@ mod streaming_serialize_tests {
             OpaqueReason::PandaCodegenMissing,
             OpaqueReason::DepthExceeded,
             OpaqueReason::IndexedAccess { expression: "T[\"k\"]".into() },
-            OpaqueReason::TemplateLiteral { expression: "`a-${B}`".into() },
             OpaqueReason::UnsupportedExpression,
         ];
         let mut shapes = vec![
@@ -801,8 +867,8 @@ mod streaming_serialize_tests {
             PropType::Union(vec![PropType::String, PropType::Null]),
             PropType::Intersection(vec![PropType::Number, PropType::Unknown]),
             PropType::Array(Box::new(PropType::Boolean)),
-            PropType::Tuple(vec![PropType::Number, PropType::String]),
-            PropType::Tuple(vec![]),
+            tuple(vec![PropType::Number, PropType::String]),
+            tuple(vec![]),
             PropType::Object(vec![ObjectField {
                 name: "x".into(),
                 prop_type: PropType::Union(vec![PropType::String, PropType::Number]),
@@ -829,7 +895,7 @@ mod streaming_serialize_tests {
             PropType::Ref { name: "RefObject".into(), element: Some("HTMLDivElement".into()) },
             PropType::Ref { name: "ElementRef".into(), element: None },
             PropType::Readonly(Box::new(PropType::Array(Box::new(PropType::String)))),
-            PropType::Readonly(Box::new(PropType::Tuple(vec![PropType::String, PropType::Number]))),
+            PropType::Readonly(Box::new(tuple(vec![PropType::String, PropType::Number]))),
             PropType::Object(vec![
                 ObjectField {
                     name: "id".into(),
@@ -850,9 +916,239 @@ mod streaming_serialize_tests {
             ]),
             PropType::HtmlAttributes { element: "button".into(), omitted: vec!["type".into()] },
             PropType::LiteralUnion { members: vec!["sm".into(), "lg".into()], has_default: true },
+            every_tuple_element(),
+            PropType::BigIntLiteral(BigIntValue::parse("-10").unwrap()),
+            PropType::UniqueSymbol { name: "brand".into() },
+            size_small(),
+            PropType::EnumMember {
+                enum_name: "Level".into(),
+                member: "High".into(),
+                value: EnumMemberValue::Number(2.0),
+            },
+            pixels(),
+            overloads(),
+            PropType::Recursive { name: "Json".into(), args: vec![] },
+            PropType::Recursive { name: "Tree".into(), args: vec![PropType::String] },
+            PropType::Truncated { text: "SystemStyleObject".into(), limit: TruncationLimit::Depth },
+            PropType::Truncated { text: "HTMLAttributes".into(), limit: TruncationLimit::Members { total: 880 } },
         ];
         shapes.extend(reasons.into_iter().map(|reason| OpaqueDetail::new("Raw<T>", reason)));
         shapes
+    }
+
+    /// `[string, number?, ...rest: boolean[], ...T]`, a label on the second.
+    fn every_tuple_element() -> PropType {
+        PropType::Tuple(vec![
+            TupleElement::required(PropType::String),
+            TupleElement {
+                kind: TupleElementKind::Optional,
+                label: TupleLabel::new("count"),
+                ..TupleElement::required(PropType::Number)
+            },
+            TupleElement {
+                kind: TupleElementKind::Rest,
+                label: TupleLabel::new("rest"),
+                ..TupleElement::required(PropType::Boolean)
+            },
+            TupleElement {
+                kind: TupleElementKind::Variadic,
+                ..TupleElement::required(PropType::Named { name: "T".into(), args: vec![] })
+            },
+        ])
+    }
+
+    /// `Size.Small`, whose value is `"small"`.
+    fn size_small() -> PropType {
+        PropType::EnumMember {
+            enum_name: "Size".into(),
+            member: "Small".into(),
+            value: EnumMemberValue::String("small".into()),
+        }
+    }
+
+    /// `` `${number}px` ``
+    fn pixels() -> PropType {
+        PropType::TemplateLiteral(vec![TemplatePart::Type(PropType::Number), TemplatePart::Text("px".into())])
+    }
+
+    /// `{ (value: string): string; new (value: number): Date; displayName?: string }`
+    fn overloads() -> PropType {
+        PropType::Callable {
+            signatures: vec![
+                CallSignature {
+                    kind: SignatureKind::Call,
+                    type_params: vec![],
+                    params: vec![FunctionParam::new(Some("value".into()), PropType::String)],
+                    return_type: PropType::String,
+                },
+                CallSignature {
+                    kind: SignatureKind::Construct,
+                    type_params: vec![],
+                    params: vec![FunctionParam::new(Some("value".into()), PropType::Number)],
+                    return_type: PropType::Named { name: "Date".into(), args: vec![] },
+                },
+            ],
+            fields: vec![ObjectField::new("displayName", PropType::String, false, "")],
+        }
+    }
+
+    #[test]
+    fn each_new_kind_prints_as_typescript_writes_it() {
+        let cases = [
+            (every_tuple_element(), "[string, count?: number, ...rest: boolean[], ...T]"),
+            (PropType::BigIntLiteral(BigIntValue::parse("-10").unwrap()), "-10n"),
+            (PropType::UniqueSymbol { name: "brand".into() }, "typeof brand"),
+            (size_small(), "Size.Small"),
+            (pixels(), "`${number}px`"),
+            (overloads(), "{ (value: string): string; new (value: number): Date; displayName?: string }"),
+            (PropType::Recursive { name: "Tree".into(), args: vec![PropType::String] }, "Tree<string>"),
+            (
+                PropType::Truncated { text: "SystemStyleObject".into(), limit: TruncationLimit::Depth },
+                "SystemStyleObject",
+            ),
+        ];
+        for (ty, expected) in cases {
+            assert_eq!(ty.raw_string(), expected, "{ty:?}");
+        }
+        // A rest element of a union is parenthesized before its `[]`.
+        let rest_union = PropType::Tuple(vec![TupleElement {
+            kind: TupleElementKind::Rest,
+            ..TupleElement::required(PropType::Union(vec![PropType::String, PropType::Number]))
+        }]);
+        assert_eq!(rest_union.raw_string(), "[...(string | number)[]]");
+    }
+
+    #[test]
+    fn each_new_kind_is_written_with_its_fields() {
+        let wire = |ty: PropType| serde_json::to_value(ty).expect("serialize");
+        assert_eq!(
+            wire(every_tuple_element())["elements"],
+            serde_json::json!([
+                { "type": { "kind": "string" } },
+                { "type": { "kind": "number" }, "label": "count", "modifier": "optional" },
+                { "type": { "kind": "boolean" }, "label": "rest", "modifier": "rest" },
+                { "type": { "kind": "named", "name": "T", "args": [] }, "modifier": "variadic" },
+            ])
+        );
+        assert_eq!(
+            wire(size_small()),
+            serde_json::json!({
+                "kind": "enumMember", "enum": "Size", "member": "Small",
+                "value": { "kind": "stringLiteral", "value": "small" },
+            })
+        );
+        assert_eq!(
+            wire(pixels()),
+            serde_json::json!({ "kind": "templateLiteral", "parts": [{ "type": { "kind": "number" } }, { "text": "px" }] })
+        );
+        assert_eq!(wire(overloads())["signatures"][1]["construct"], serde_json::json!(true));
+        assert_eq!(wire(overloads())["signatures"][0].get("construct"), None);
+        assert_eq!(
+            wire(PropType::Truncated { text: "A".into(), limit: TruncationLimit::Members { total: 3 } })["limit"],
+            serde_json::json!({ "type": "members", "total": 3 })
+        );
+    }
+
+    #[test]
+    fn a_reader_rejects_what_the_new_kinds_cannot_hold() {
+        let read = |json: serde_json::Value| PropType::from_tagged_value(&json);
+        assert!(read(serde_json::json!({ "kind": "bigintLiteral", "value": "1.5" })).is_err());
+        assert!(read(serde_json::json!({ "kind": "tuple", "elements": [{ "type": { "kind": "string" }, "modifier": "spread" }] })).is_err());
+        assert!(
+            read(
+                serde_json::json!({ "kind": "tuple", "elements": [{ "type": { "kind": "string" }, "label": "a b" }] })
+            )
+            .is_err()
+        );
+        assert!(read(serde_json::json!({ "kind": "enumMember", "enum": "E", "member": "A", "value": { "kind": "boolLiteral", "value": true } })).is_err());
+        assert!(read(serde_json::json!({ "kind": "truncated", "text": "A", "limit": { "type": "width" } })).is_err());
+        assert!(read(serde_json::json!({ "kind": "templateLiteral", "parts": [{}] })).is_err());
+    }
+
+    #[test]
+    fn only_a_truncated_member_degrades_among_the_new_kinds() {
+        for shape in [every_tuple_element(), size_small(), pixels(), overloads()] {
+            assert!(shape.degraded_by().is_empty(), "{shape:?}");
+            assert!(!shape.holds_opaque(), "{shape:?}");
+        }
+        assert!(PropType::Recursive { name: "Json".into(), args: vec![] }.degraded_by().is_empty());
+        let cut = PropType::Array(Box::new(PropType::Truncated { text: "A".into(), limit: TruncationLimit::Depth }));
+        assert_eq!(cut.degraded_by(), vec!["truncated"]);
+        assert!(cut.holds_opaque(), "the checker may answer a truncated type");
+        // Inside a tuple, a template hole and a signature, an opaque member is still found.
+        let opaque = || OpaqueDetail::new("X", OpaqueReason::ConditionalType);
+        let holders = [
+            PropType::Tuple(vec![TupleElement { kind: TupleElementKind::Rest, ..TupleElement::required(opaque()) }]),
+            PropType::TemplateLiteral(vec![TemplatePart::Type(opaque())]),
+            PropType::Callable {
+                signatures: vec![CallSignature {
+                    kind: SignatureKind::Call,
+                    type_params: vec![],
+                    params: vec![],
+                    return_type: opaque(),
+                }],
+                fields: vec![],
+            },
+        ];
+        for holder in holders {
+            assert_eq!(holder.degraded_by(), vec!["conditionalType"], "{holder:?}");
+            assert!(holder.holds_unevaluated_type(), "{holder:?}");
+        }
+    }
+
+    #[test]
+    fn enum_members_are_options_and_offer_their_values() {
+        let large = PropType::EnumMember {
+            enum_name: "Size".into(),
+            member: "Large".into(),
+            value: EnumMemberValue::String("large".into()),
+        };
+        let union = PropType::Union(vec![size_small(), large]);
+        assert!(union.is_literal_union());
+        assert_eq!(
+            crate::pipeline::rdt::type_json(&union),
+            serde_json::json!({
+                "name": "enum",
+                "raw": "Size.Small | Size.Large",
+                "value": [{ "value": "\"small\"" }, { "value": "\"large\"" }],
+            })
+        );
+        // With a boolean the members' names are not JSON, so it stays an enum, as a string with a `|` does.
+        assert!(PropType::Union(vec![size_small(), PropType::BoolLiteral(true)]).is_literal_union());
+        // A bigint is not an option Storybook can pass back.
+        let bigints = PropType::Union(vec![
+            PropType::BigIntLiteral(BigIntValue::parse("1").unwrap()),
+            PropType::BigIntLiteral(BigIntValue::parse("2").unwrap()),
+        ]);
+        assert!(!bigints.is_literal_union());
+        assert_eq!(crate::pipeline::rdt::type_json(&bigints), serde_json::json!({ "name": "1n | 2n" }));
+    }
+
+    #[test]
+    fn the_new_kinds_hash_apart() {
+        use std::hash::{DefaultHasher, Hasher};
+        let hash = |ty: &PropType| {
+            let mut hasher = DefaultHasher::new();
+            ty.structural_hash(&mut hasher);
+            hasher.finish()
+        };
+        let optional = PropType::Tuple(vec![TupleElement {
+            kind: TupleElementKind::Optional,
+            ..TupleElement::required(PropType::String)
+        }]);
+        let labeled = PropType::Tuple(vec![TupleElement {
+            label: TupleLabel::new("a"),
+            ..TupleElement::required(PropType::String)
+        }]);
+        let plain = tuple(vec![PropType::String]);
+        let named = PropType::Named { name: "Json".into(), args: vec![] };
+        let recursive = PropType::Recursive { name: "Json".into(), args: vec![] };
+        let hashes = [hash(&optional), hash(&labeled), hash(&plain), hash(&named), hash(&recursive)];
+        for (i, a) in hashes.iter().enumerate() {
+            for b in &hashes[i + 1..] {
+                assert_ne!(a, b, "{hashes:?}");
+            }
+        }
     }
 
     /// `(a: string, b?: number, ...rest: boolean[]) => void`
@@ -946,8 +1242,7 @@ fn opaque_reason_kinds_lists_every_variant_in_declaration_order() {
             OpaqueReason::PandaCodegenMissing => 5,
             OpaqueReason::DepthExceeded => 6,
             OpaqueReason::IndexedAccess { .. } => 7,
-            OpaqueReason::TemplateLiteral { .. } => 8,
-            OpaqueReason::UnsupportedExpression => 9,
+            OpaqueReason::UnsupportedExpression => 8,
         }
     }
     let samples = [
@@ -959,7 +1254,6 @@ fn opaque_reason_kinds_lists_every_variant_in_declaration_order() {
         OpaqueReason::PandaCodegenMissing,
         OpaqueReason::DepthExceeded,
         OpaqueReason::IndexedAccess { expression: "P[\"a\"]".into() },
-        OpaqueReason::TemplateLiteral { expression: "`${A}`".into() },
         OpaqueReason::UnsupportedExpression,
     ];
     for (index, reason) in samples.iter().enumerate() {

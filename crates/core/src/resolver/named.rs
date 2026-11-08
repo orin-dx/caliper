@@ -55,13 +55,31 @@ pub(super) fn resolve_named(
                 code: DiagnosticCode::CircularReference,
                 affects: Vec::new(),
             });
-            return OpaqueDetail::new(name.to_string(), OpaqueReason::DepthExceeded);
+            // The same reference, being resolved: the type it names encloses this one.
+            return PropType::Recursive {
+                name: unmarked(name).into(),
+                args: args.iter().map(super::func::as_written).collect(),
+            };
         }
 
         let result = resolve_named_uncycled(name, args, consuming_file, ctx, state, depth);
         state.leave_named(&visit_key);
+        // TypeScript defers a recursive reference only inside an object, array or tuple: `type Loop = Loop` or
+        // `type A = A | string` is an error ("circularly references itself"), not a recursive type.
+        if refers_to_itself_directly(&result, unmarked(name)) {
+            return OpaqueDetail::new(name.to_string(), OpaqueReason::DepthExceeded);
+        }
         result
     })
+}
+
+/// Whether `ty` is a recursive reference to `name`, or a union or intersection with one as a member.
+fn refers_to_itself_directly(ty: &PropType, name: &str) -> bool {
+    let is_self = |member: &PropType| matches!(member, PropType::Recursive { name: own, .. } if own == name);
+    if let PropType::Union(members) | PropType::Intersection(members) = ty {
+        return members.iter().any(is_self);
+    }
+    is_self(ty)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -198,6 +216,11 @@ fn resolve_named_uncycled(
             };
         }
         None => {}
+    }
+
+    // `Size.Small`: a member of an `enum` declaration, as a type.
+    if let Some(member) = enum_member(name, consuming_file, ctx) {
+        return member;
     }
 
     // A builtin name bound elsewhere whose binding didn't resolve (a re-export of React's type, a package not
@@ -499,6 +522,9 @@ fn can_hold_nullish(ty: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext
         | CollectedType::Boolean
         | CollectedType::BigInt
         | CollectedType::Symbol
+        | CollectedType::UniqueSymbol
+        | CollectedType::BigIntLiteral(_)
+        | CollectedType::Callable { .. }
         | CollectedType::Never
         | CollectedType::StringLiteral(_)
         | CollectedType::NumberLiteral(_)
@@ -570,6 +596,24 @@ fn displayed_arg(
     }
 }
 
+/// `Enum.Member` as the member's type, when `Enum` is an `enum` declaration (not a variant bag, which shares the
+/// table) with a string or number member of that name.
+fn enum_member(name: &str, consuming_file: &Utf8Path, ctx: &ResolutionContext) -> Option<PropType> {
+    let (enum_name, member) = name.rsplit_once('.')?;
+    super::deps::record_bare_name(enum_name);
+    let key = ctx.enum_key_for(enum_name, consuming_file)?;
+    if !ctx.global.enum_declarations.contains_key(&key) {
+        return None;
+    }
+    let entry = ctx.global.enums.get(&key)?.iter().find(|entry| entry.name == member)?;
+    let value = match &entry.value {
+        EnumValue::String(s) => EnumMemberValue::String(s.clone()),
+        EnumValue::Number(n) => EnumMemberValue::Number(*n),
+        EnumValue::Bool(_) | EnumValue::Spread { .. } => return None,
+    };
+    Some(PropType::EnumMember { enum_name: unmarked(enum_name).into(), member: member.into(), value })
+}
+
 /// The most nodes a generic alias's expansion may have to be shown instead of its name (`ConditionalValue<…>` over
 /// csstype's keyword unions has hundreds). Its arguments say as much, and a copy of the union for every style prop of
 /// every component is most of a large design system's memory.
@@ -583,17 +627,46 @@ fn exceeds_expanded_size(ty: &PropType) -> bool {
         }
         *budget -= 1;
         match ty {
-            PropType::Union(members) | PropType::Intersection(members) | PropType::Tuple(members) => {
+            PropType::Union(members) | PropType::Intersection(members) => {
                 members.iter().any(|member| count(member, budget))
             }
+            PropType::Tuple(elements) => elements.iter().any(|element| count(&element.element_type, budget)),
             PropType::LiteralUnion { members, .. } => {
                 *budget = budget.saturating_sub(members.len());
                 *budget == 0
             }
             PropType::Array(inner) | PropType::Readonly(inner) => count(inner, budget),
-            PropType::Object(fields) => fields.iter().any(|field| count(&field.prop_type, budget)),
-            PropType::Named { args, .. } => args.iter().any(|arg| count(arg, budget)),
-            _ => false,
+            PropType::Object(fields) | PropType::Callable { fields, .. } => {
+                fields.iter().any(|field| count(&field.prop_type, budget))
+            }
+            PropType::Named { args, .. } | PropType::Recursive { args, .. } => {
+                args.iter().any(|arg| count(arg, budget))
+            }
+            PropType::String
+            | PropType::Number
+            | PropType::Boolean
+            | PropType::Null
+            | PropType::Undefined
+            | PropType::Any
+            | PropType::Never
+            | PropType::Unknown
+            | PropType::Void
+            | PropType::StringLiteral(_)
+            | PropType::NumberLiteral(_)
+            | PropType::BoolLiteral(_)
+            | PropType::BigIntLiteral(_)
+            | PropType::UniqueSymbol { .. }
+            | PropType::EnumMember { .. }
+            | PropType::TemplateLiteral(_)
+            | PropType::Truncated { .. }
+            | PropType::ReactNode
+            | PropType::CssProperties
+            | PropType::Function { .. }
+            | PropType::Ref { .. }
+            | PropType::ElementType
+            | PropType::HtmlAttributes { .. }
+            | PropType::SxProps
+            | PropType::Opaque(_) => false,
         }
     }
     count(ty, &mut MAX_EXPANDED_NODES.clone())

@@ -63,7 +63,7 @@ props: { tuple?: readonly [number, string] }
 ```
 
 - RDT: `readonly [number, string]`.
-- Caliper: `{"kind":"readonly","element":{"kind":"tuple","elements":[{"kind":"number"},{"kind":"string"}]}}`.
+- Caliper: `{"kind":"readonly","element":{"kind":"tuple","elements":[{"type":{"kind":"number"}},{"type":{"kind":"string"}}]}}` (schema version 5 wraps each element to carry its marker and label).
 - Checker: `readonly [number, string] | undefined`.
 - Verdict on main: `less precise`.
 
@@ -112,7 +112,7 @@ props: { f?: Fn; w?: Watch<{ x: number }> }
 
 **Measured.** `wrong`, counted: 2 props (react-hook-form's `watch` and `getValues`). The comparator scored it right.
 
-**Accounted.** Unaccounted: silent, no marker, no diagnostic.
+**Accounted.** Unaccounted: silent, no marker, no diagnostic. Since schema version 5 a type literal with overloads, a construct signature, or a signature beside properties is a `callable` with every signature (`Watch<T>` here); before, it was `opaque` (`unsupportedExpression`).
 
 ### 5. `Partial`, `Required`, `Omit` and `Pick` inside a type alias lose their effect
 
@@ -204,7 +204,7 @@ props: { v?: React.ComponentProps<'input'>['value']; e?: E[keyof E]; tab?: 0 | -
 - Checker: `string | number | readonly string[] | undefined`, `string | number | undefined`, `0 | -1 | undefined`.
 - Verdict: all three `less precise`. Each prop carries `degradedBy` (`indexedAccess`, `indexedAccess`, `unsupportedExpression`), and the run reports an `INDEXED_ACCESS_OPAQUE` or `OPAQUE_TYPE` info diagnostic for each.
 
-**Why not better, but acceptable.** The checker and RDT evaluate these and Caliper does not (an indexed access on a generic, a `-1` literal). The type is flagged as a guess, so a reader or an agent knows. Fix direction: evaluate an indexed access on an interface and parse a negative number literal; the rest needs the checker backend.
+**Why not better, but acceptable.** The checker and RDT evaluate these and Caliper does not (an indexed access on a generic, a `-1` literal). The type is flagged as a guess, so a reader or an agent knows. Fix direction: evaluate an indexed access on an interface; the rest needs the checker backend. A negative number literal (`-1`) is a number literal since schema version 5.
 
 **Measured.** `less precise`, counted by the `degradedBy` marker: 547 props in the weekly run. The comparator scored it right. `stats.opaqueCount` is 0 in every corpus and is not a measure.
 

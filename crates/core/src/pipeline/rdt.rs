@@ -8,7 +8,8 @@ use crate::types::{ComponentEntry, ExtractionOutput, ParsedProp, PropType};
 /// prop-table renderers that pattern-match `type.name === "enum"` (a common
 /// Storybook addon integration point) show a `<select>` control for the most
 /// common, most curated props in any design system (variant, size, color…).
-/// A single string or number literal is a one-option enum, as Storybook's own docgen has it.
+/// A single string or number literal is a one-option enum, as Storybook's own docgen has it. An enum member's option is
+/// its value (`"small"` for `Size.Small`, `PropType::option_text`), which is what the control passes.
 ///
 /// Storybook unquotes each option's source text into a string or a number, so `true` in an enum would reach the control
 /// as the string "true". A union with a boolean member therefore stays a type name, which Storybook's converter splits
@@ -17,11 +18,11 @@ use crate::types::{ComponentEntry, ExtractionOutput, ParsedProp, PropType};
 pub fn type_json(prop_type: &PropType) -> serde_json::Value {
     if prop_type.is_literal_union() {
         let values: Vec<serde_json::Value> = match prop_type {
-            PropType::Union(members) => members.iter().map(|m| serde_json::json!({"value": m.raw_string()})).collect(),
+            PropType::Union(members) => members.iter().map(|m| serde_json::json!({"value": m.option_text()})).collect(),
             PropType::LiteralUnion { members, .. } => {
                 members.iter().map(|m| serde_json::json!({"value": format!("\"{m}\"")})).collect()
             }
-            single => vec![serde_json::json!({"value": single.raw_string()})],
+            single => vec![serde_json::json!({"value": single.option_text()})],
         };
         return serde_json::json!({ "name": "enum", "raw": prop_type.raw_string(), "value": values });
     }

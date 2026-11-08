@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! A type is never silently wrong. A utility type behind an alias keeps the wrapper it was written with, a type
-//! literal that declares a call signature never becomes an empty object, and a prop whose index key is opaque says so.
+//! literal that declares a call signature never becomes an empty object, and a template literal index key is kept.
 
 use caliper_docgen_core::pipeline::{PipelineOptions, extract, rdt};
 use camino::Utf8PathBuf;
@@ -89,19 +89,26 @@ fn a_type_literal_with_one_call_signature_is_that_function() {
 }
 
 #[test]
-fn a_type_literal_with_several_signatures_or_a_signature_and_members_degrades_instead_of_emptying() {
+fn a_type_literal_with_several_signatures_or_a_signature_and_members_keeps_every_signature() {
     let out = extracted();
-    for prop in ["overloads", "mixed", "constructor"] {
+    for (prop, signatures, fields) in [("overloads", 2, 0), ("mixed", 1, 1), ("constructor", 1, 0)] {
         let ty = &out.canonical[prop]["type"];
-        assert_eq!(ty["kind"], json!("opaque"), "{prop}: {ty}");
-        assert_eq!(ty["reason"], json!({"type": "unsupportedExpression"}), "{prop}");
-        assert_eq!(out.canonical[prop]["degradedBy"], json!(["unsupportedExpression"]), "{prop}");
+        assert_eq!(ty["kind"], json!("callable"), "{prop}: {ty}");
+        assert_eq!(ty["signatures"].as_array().unwrap().len(), signatures, "{prop}");
+        assert_eq!(ty["fields"].as_array().unwrap().len(), fields, "{prop}");
+        assert!(out.canonical[prop].get("degradedBy").is_none(), "{prop}");
     }
-    assert_eq!(out.canonical["overloads"]["type"]["raw"], json!("{ (a: string): number; (b: number): string }"));
+    assert_eq!(out.canonical["constructor"]["type"]["signatures"][0]["construct"], json!(true));
+    assert_eq!(out.rdt["overloads"]["name"], json!("{ (a: string): number; (b: number): string }"));
+    assert_eq!(out.rdt["mixed"]["name"], json!("{ (a: string): number; label: string }"));
+    assert_eq!(out.rdt["constructor"]["name"], json!("{ new (a: string): Base }"));
 }
 
 #[test]
-fn an_opaque_index_key_marks_the_prop_degraded() {
+fn a_template_literal_index_key_is_kept_as_its_pattern() {
     let out = extracted();
-    assert_eq!(out.canonical["dataKeys"]["degradedBy"], json!(["templateLiteral"]), "{}", out.canonical["dataKeys"]);
+    let key = &out.canonical["dataKeys"]["type"]["fields"][0]["indexKey"];
+    assert_eq!(key["kind"], json!("templateLiteral"), "{key}");
+    assert_eq!(key["parts"], json!([{ "text": "data-" }, { "type": { "kind": "string" } }]));
+    assert!(out.canonical["dataKeys"].get("degradedBy").is_none(), "{}", out.canonical["dataKeys"]);
 }

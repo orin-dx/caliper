@@ -432,6 +432,9 @@ pub(super) fn resolve_base_as_chain(
         | CollectedType::Void
         | CollectedType::BigInt
         | CollectedType::Symbol
+        | CollectedType::UniqueSymbol
+        | CollectedType::BigIntLiteral(_)
+        | CollectedType::Callable { .. }
         | CollectedType::StringLiteral(_)
         | CollectedType::NumberLiteral(_)
         | CollectedType::BoolLiteral(_)

@@ -4,7 +4,8 @@
 import { readFileSync, realpathSync } from 'node:fs'
 import { relative } from 'node:path'
 import { layerMembers } from './canonical.ts'
-import { caliperNorm, VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'
+import { caliperNorm } from './caliper-norm.ts'
+import { VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'
 import { rdgNorm, rdtNorm } from './tool-norm.ts'
 import {
   scoreReported,

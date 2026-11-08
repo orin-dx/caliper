@@ -39101,10 +39101,14 @@ expression: value
             "kind": "tuple",
             "elements": [
               {
-                "kind": "number"
+                "type": {
+                  "kind": "number"
+                }
               },
               {
-                "kind": "number"
+                "type": {
+                  "kind": "number"
+                }
               }
             ]
           },

@@ -130,7 +130,7 @@ Depth decides a result only through that limit and through `depth > 0` (collapse
 
 The cycle sets (`visited`, `named_in_progress`) and the recordings' read logs hold ids of the `file:name<arguments>` keys (`key_id` in `types/global.rs`), not the strings: copying a set or a log for a branch or an enclosing recording copies numbers, and no reference count is shared between the threads resolving components. Ids are process-wide and never reused, so equal ids are equal keys.
 
-A separate, unrelated cap exists in `template.rs`: `MAX_TEMPLATE_LITERAL_EXPANSIONS = 4096`, bounding the Cartesian product of a template literal's per-part alternatives (each part can be a union with many members, so the product is exponential in part count) — this is a _combinatorial_ guard, not a recursion-depth guard, and uses the same "cap, then degrade to Opaque with a diagnostic" shape as `MAX_DEPTH` without being the same mechanism.
+A separate, unrelated cap exists in `template.rs`: `MAX_TEMPLATE_LITERAL_EXPANSIONS = 4096`, bounding the Cartesian product of a template literal's per-part alternatives (each part can be a union with many members, so the product is exponential in part count) — this is a _combinatorial_ guard, not a recursion-depth guard, and past the cap the template is kept as its pattern (`PropType::TemplateLiteral`) with an info diagnostic, as any template that does not expand is; it is not the `MAX_DEPTH` mechanism.
 
 ## Generic substitution: what works, what's known-incomplete
 

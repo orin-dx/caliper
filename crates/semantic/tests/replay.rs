@@ -106,7 +106,13 @@ fn function_components_get_the_checkers_props_merged_over_the_structural_ones() 
             return_type: Box::new(PropType::Void),
         }
     );
-    assert_eq!(prop(&output, "Button", "pair").prop_type, PropType::Tuple(vec![PropType::String, PropType::Number]));
+    assert_eq!(
+        prop(&output, "Button", "pair").prop_type,
+        PropType::Tuple(vec![
+            caliper_docgen_core::types::TupleElement::required(PropType::String),
+            caliper_docgen_core::types::TupleElement::required(PropType::Number)
+        ])
+    );
     assert_eq!(prop(&output, "Button", "tags").prop_type, PropType::Array(Box::new(PropType::String)));
 
     // The checker orders union members by creation, not by source.

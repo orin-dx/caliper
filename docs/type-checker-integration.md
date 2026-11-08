@@ -213,7 +213,7 @@ The removed harness's `compare.ts`/`analyze.ts` (caliper-docgen vs RDT/react-doc
 
 ## Open decisions
 
-1. **Output type.** Checker types don't fit `PropType` losslessly: `Named` has no file or symbol, and `Tuple` has no optional or rest elements. Add a variant or map into existing ones. `ExtractionOutput` carries `SCHEMA_VERSION`; a new variant bumps it.
+1. **Output type.** Checker types don't fit `PropType` losslessly: `Named` has no file or symbol, and `Tuple` has no optional or rest elements (schema version 5 adds them, with labels and the other kinds ADR 0026's slice S1 lists). Add a variant or map into existing ones. `ExtractionOutput` carries `SCHEMA_VERSION`; a new variant bumps it.
 2. **`ref` and `key`.** RDT emits both, and nothing else records forwardRef metadata. Semantic mode must match whatever the structural path does.
 3. **Trigger.** Run on every exported component or only on files with degrade diagnostics. Bare generic parameters and TypeScript utility types resolve to `Named` with no diagnostic by design, so the second misses them.
 4. **Union order.** Sort in canonical output, or keep source order for structural results.
