@@ -1,0 +1,48 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M6W9S3CDBNSP0P8TNZEPMXV7",
+  "strategy": "manual-commit",
+  "branch": "feat/proptype-variants",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "apps/oracle/src/caliper-input.ts",
+    "apps/oracle/tests/caliper-input.test.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 12,
+    "cache_creation_tokens": 10819,
+    "cache_read_tokens": 2743672,
+    "output_tokens": 3427,
+    "api_call_count": 4,
+    "subagent_tokens": {
+      "input_tokens": 116,
+      "cache_creation_tokens": 87935,
+      "cache_read_tokens": 20224601,
+      "output_tokens": 55053,
+      "api_call_count": 58
+    }
+  },
+  "redaction": {
+    "replacements": 14,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 8,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
