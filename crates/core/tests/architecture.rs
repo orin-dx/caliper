@@ -249,6 +249,7 @@ fn opaque_detail_is_constructed_only_where_the_reason_is_known() {
             ("known.rs", "library shortcuts name their own opaque reason"),
             ("resolver/named.rs", "the depth guard names its own reason"),
             ("types/output.rs", "deserialization rebuilds the detail"),
+            ("types/semantic.rs", "the checker's error type is an unresolvable name"),
         ],
     );
     assert_eq!(violations, Vec::<String>::new());
