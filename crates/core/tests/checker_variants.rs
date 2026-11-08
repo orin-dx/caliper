@@ -45,6 +45,13 @@ export interface WidgetProps {
   getter?: { get size(): number };
   inlineAccessor?: { get value(): string; set value(next: string) };
   spreadOptional?: [...[string?], number];
+  twoOptionals?: [...[string?, number?], boolean];
+  afterRest?: [...number[], ...[string?]];
+  doubleRest?: [...number[], ...string[]];
+  restThenRequired?: [...number[], ...[string, boolean]];
+  betweenRests?: [...number[], ...[boolean], ...string[]];
+  labeledSpread?: [...[a?: string], b: number];
+  readonlySpread?: readonly [...[string?], number];
   optionalUnion?: [(string | number)?];
   get label(): string;
   set label(next: string | number);
@@ -123,6 +130,38 @@ fn a_spread_of_a_known_tuple_is_flattened() {
     }
     // An optional element spread in before a required one is required and admits `undefined`, as TypeScript has it.
     assert_eq!(prop(&out, "spreadOptional").0, &json!("[string | undefined, number]"));
+}
+
+/// TypeScript's `createNormalizedTupleType`, one row per rule, with the type the checker states for each (the same
+/// fixtures are in the construct suite, `tuples-arrays/33` to `40`, with goldens from the checker).
+#[test]
+fn a_flattened_tuple_is_normalized_as_the_checker_does() {
+    let out = extracted();
+    let cases = [
+        // An optional element before a required one is required and admits `undefined`.
+        ("spreadOptional", "[string | undefined, number]"),
+        ("twoOptionals", "[string | undefined, number | undefined, boolean]"),
+        // From the first rest element through the last optional or rest one is a single rest element.
+        ("afterRest", "(number | string | undefined)[]"),
+        ("doubleRest", "(number | string)[]"),
+        ("betweenRests", "(number | boolean | string)[]"),
+        // A rest element followed by required elements keeps its layout.
+        ("restThenRequired", "[...number[], string, boolean]"),
+        // The label of the spread tuple's element and `readonly` carry through.
+        ("labeledSpread", "[a: string | undefined, b: number]"),
+        ("readonlySpread", "readonly [string | undefined, number]"),
+    ];
+    for (name, printed) in cases {
+        let (rdt, _, degraded) = prop(&out, name);
+        assert_eq!(rdt, &json!(printed), "{name}");
+        assert_eq!(degraded, None, "{name}");
+    }
+    assert_eq!(
+        prop(&out, "afterRest").1,
+        &json!({ "kind": "array", "element": { "kind": "union", "members": [
+            { "kind": "number" }, { "kind": "string" }, { "kind": "undefined" },
+        ] } })
+    );
 }
 
 #[test]

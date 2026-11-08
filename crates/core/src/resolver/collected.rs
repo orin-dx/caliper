@@ -232,18 +232,56 @@ pub(super) fn tuple_of(
         };
         out.push(TupleElement { element_type: ty, kind, label });
     }
-    // TypeScript allows an optional element only after the last required one; one spread in before it
-    // (`[...[string?], number]`) becomes required and admits `undefined`: `[string | undefined, number]`.
-    if let Some(last_required) = out.iter().rposition(|e| e.kind == TupleElementKind::Required) {
-        for element in &mut out[..last_required] {
-            if element.kind == TupleElementKind::Optional {
+    let mut elements = normalize_tuple(out);
+    // A tuple of one rest element is the array type, as TypeScript's `getTupleTargetType` has it.
+    match elements.as_mut_slice() {
+        [only] if only.kind == TupleElementKind::Rest => {
+            PropType::Array(Box::new(std::mem::replace(&mut only.element_type, PropType::Never)))
+        }
+        _ => PropType::Tuple(elements),
+    }
+}
+
+/// A tuple's elements as TypeScript's `createNormalizedTupleType` leaves them (typescript-go
+/// `internal/checker/checker.go`), after a rest element was flattened in:
+///
+/// - an optional element before the last required one is required, its type admitting `undefined`
+///   (`[...[string?], number]` is `[string | undefined, number]`);
+/// - everything from the first rest element through the last optional or rest element is one rest element of the
+///   union of their types, an optional one adding `undefined` (`[...number[], ...string[]]` is
+///   `(number | string)[]`, `[...number[], ...[string?]]` is `(number | string | undefined)[]`). Required elements
+///   after the last rest stay (`[...number[], string]`), and one between two rests is swallowed by the union.
+///
+/// A variadic element inside that range is left as it is: the checker folds it in as `T[number]`, which has no
+/// [`PropType`], and a tuple with an unresolved spread is already generic. Labels and `readonly` need nothing here:
+/// a spread tuple's elements keep their own labels, the merged rest element keeps the first rest's, and `readonly` wraps the finished tuple.
+fn normalize_tuple(mut elements: Vec<TupleElement>) -> Vec<TupleElement> {
+    let last_required = elements.iter().rposition(|e| e.kind == TupleElementKind::Required);
+    for element in elements.iter_mut().take(last_required.unwrap_or(0)) {
+        match element.kind {
+            TupleElementKind::Optional => {
                 element.kind = TupleElementKind::Required;
                 let ty = std::mem::replace(&mut element.element_type, PropType::Undefined);
                 element.element_type = super::primitives::union_of([ty, PropType::Undefined]);
             }
+            TupleElementKind::Required | TupleElementKind::Rest | TupleElementKind::Variadic => {}
         }
     }
-    PropType::Tuple(out)
+    let first_rest = elements.iter().position(|e| e.kind == TupleElementKind::Rest);
+    let last_open =
+        elements.iter().rposition(|e| matches!(e.kind, TupleElementKind::Optional | TupleElementKind::Rest));
+    let (Some(first), Some(last)) = (first_rest, last_open) else { return elements };
+    if first >= last || elements[first..=last].iter().any(|e| e.kind == TupleElementKind::Variadic) {
+        return elements;
+    }
+    let label = elements[first].label.clone();
+    let merged = elements.drain(first..=last).map(|e| match e.kind {
+        TupleElementKind::Optional => super::primitives::union_of([e.element_type, PropType::Undefined]),
+        TupleElementKind::Required | TupleElementKind::Rest | TupleElementKind::Variadic => e.element_type,
+    });
+    let element_type = super::primitives::union_of(merged);
+    elements.insert(first, TupleElement { element_type, kind: TupleElementKind::Rest, label });
+    elements
 }
 
 /// Build the diagnostic explaining why a `CollectedType` degrades to
