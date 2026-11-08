@@ -1,0 +1,21 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "array",
+        "element": {
+          "k": "prim",
+          "name": "number"
+        },
+        "alias": "ReadonlyArray"
+      }
+    ],
+    "alias": "ReadonlyArray"
+  },
+  "text": "readonly number[] | undefined"
+}

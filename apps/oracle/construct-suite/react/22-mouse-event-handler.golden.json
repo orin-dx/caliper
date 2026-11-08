@@ -1,0 +1,67 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "function",
+        "params": [
+          {
+            "optional": false,
+            "rest": false,
+            "type": {
+              "k": "object",
+              "fields": [
+                "altKey",
+                "bubbles",
+                "button",
+                "buttons",
+                "cancelable",
+                "clientX",
+                "clientY",
+                "ctrlKey",
+                "currentTarget",
+                "defaultPrevented",
+                "detail",
+                "eventPhase",
+                "getModifierState",
+                "isDefaultPrevented",
+                "isPropagationStopped",
+                "isTrusted",
+                "metaKey",
+                "movementX",
+                "movementY",
+                "nativeEvent",
+                "pageX",
+                "pageY",
+                "persist",
+                "preventDefault",
+                "relatedTarget",
+                "screenX",
+                "screenY",
+                "shiftKey",
+                "stopPropagation",
+                "target",
+                "timeStamp",
+                "type",
+                "view"
+              ],
+              "index": false,
+              "alias": "MouseEvent"
+            }
+          }
+        ],
+        "returns": {
+          "k": "prim",
+          "name": "void"
+        },
+        "alias": "MouseEventHandler"
+      }
+    ],
+    "alias": "MouseEventHandler"
+  },
+  "text": "MouseEventHandler<HTMLButtonElement> | undefined"
+}

@@ -1,0 +1,8 @@
+{
+  "checker": {
+    "k": "lit",
+    "value": "false",
+    "of": "boolean"
+  },
+  "text": "false"
+}

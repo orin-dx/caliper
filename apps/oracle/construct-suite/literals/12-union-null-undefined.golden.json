@@ -1,0 +1,26 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "prim",
+        "name": "null"
+      },
+      {
+        "k": "lit",
+        "value": "off",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "on",
+        "of": "string"
+      }
+    ]
+  },
+  "text": "\"off\" | \"on\" | null | undefined"
+}

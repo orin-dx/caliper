@@ -1,0 +1,28 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "array",
+        "element": {
+          "k": "prim",
+          "name": "string"
+        },
+        "alias": "Array"
+      },
+      {
+        "k": "array",
+        "element": {
+          "k": "prim",
+          "name": "number"
+        },
+        "alias": "Array"
+      }
+    ]
+  },
+  "text": "string[] | number[] | undefined"
+}

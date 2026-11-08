@@ -1,0 +1,33 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "intersection",
+        "members": [
+          {
+            "k": "object",
+            "fields": [
+              "a"
+            ],
+            "index": false,
+            "alias": "A"
+          },
+          {
+            "k": "object",
+            "fields": [
+              "b"
+            ],
+            "index": false,
+            "alias": "B"
+          }
+        ]
+      }
+    ]
+  },
+  "text": "(A<string> & B<number>) | undefined"
+}

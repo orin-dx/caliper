@@ -1,0 +1,37 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "array",
+        "element": {
+          "k": "union",
+          "members": [
+            {
+              "k": "lit",
+              "value": "a",
+              "of": "string"
+            },
+            {
+              "k": "lit",
+              "value": "b",
+              "of": "string"
+            },
+            {
+              "k": "lit",
+              "value": "c",
+              "of": "string"
+            }
+          ]
+        },
+        "alias": "Array"
+      }
+    ],
+    "alias": "Array"
+  },
+  "text": "(\"a\" | \"b\" | \"c\")[] | undefined"
+}

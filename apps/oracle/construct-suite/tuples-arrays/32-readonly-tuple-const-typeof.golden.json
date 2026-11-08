@@ -1,0 +1,27 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "tuple",
+        "elements": [
+          {
+            "k": "lit",
+            "value": "sm",
+            "of": "string"
+          },
+          {
+            "k": "lit",
+            "value": "md",
+            "of": "string"
+          }
+        ]
+      }
+    ]
+  },
+  "text": "readonly [\"sm\", \"md\"] | undefined"
+}

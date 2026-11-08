@@ -1,0 +1,48 @@
+{
+  "checker": {
+    "k": "function",
+    "params": [
+      {
+        "optional": false,
+        "rest": false,
+        "type": {
+          "k": "union",
+          "members": [
+            {
+              "k": "array",
+              "element": {
+                "k": "prim",
+                "name": "string"
+              },
+              "alias": "Array"
+            },
+            {
+              "k": "function",
+              "params": [
+                {
+                  "optional": false,
+                  "rest": false,
+                  "type": {
+                    "k": "opaque",
+                    "alias": "Array"
+                  }
+                }
+              ],
+              "returns": {
+                "k": "opaque",
+                "alias": "Array"
+              }
+            }
+          ],
+          "alias": "SetStateAction"
+        }
+      }
+    ],
+    "returns": {
+      "k": "prim",
+      "name": "void"
+    },
+    "alias": "Dispatch"
+  },
+  "text": "Dispatch<SetStateAction<string[]>>"
+}

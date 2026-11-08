@@ -1,0 +1,21 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "current"
+        ],
+        "index": false,
+        "alias": "RefObject"
+      }
+    ],
+    "alias": "RefObject"
+  },
+  "text": "RefObject<HTMLInputElement | null> | undefined"
+}

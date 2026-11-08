@@ -1,0 +1,22 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "displayName",
+          "propTypes"
+        ],
+        "index": false,
+        "alias": "FunctionComponent"
+      }
+    ],
+    "alias": "FunctionComponent"
+  },
+  "text": "FunctionComponent<{ title: string; }> | undefined"
+}

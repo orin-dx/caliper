@@ -1,0 +1,28 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "a"
+        ],
+        "index": false,
+        "alias": "Item"
+      },
+      {
+        "k": "array",
+        "element": {
+          "k": "prim",
+          "name": "number"
+        },
+        "alias": "Wrap"
+      }
+    ]
+  },
+  "text": "Item | Wrap<number> | undefined"
+}

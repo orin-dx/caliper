@@ -1,0 +1,19 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "onClose"
+        ],
+        "index": false
+      }
+    ]
+  },
+  "text": "{ onClose?(reason: string): void; } | undefined"
+}

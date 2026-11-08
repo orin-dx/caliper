@@ -1,0 +1,22 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "label",
+          "value"
+        ],
+        "index": false,
+        "alias": "StringBox"
+      }
+    ],
+    "alias": "StringBox"
+  },
+  "text": "StringBox | undefined"
+}
