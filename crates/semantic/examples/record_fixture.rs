@@ -21,6 +21,11 @@ use caliper_docgen_core::pipeline::{PipelineOptions, extract};
 use caliper_docgen_semantic::{SemanticRequest, targets_of};
 use camino::Utf8PathBuf;
 
+// The same layout the replay tests give a fixture.
+#[path = "../tests/support/mod.rs"]
+mod support;
+use support::copy_fixture;
+
 fn main() {
     let checker = Utf8PathBuf::from(std::env::args().nth(1).expect("the typescript package directory or tsrs binary"));
     // A directory is a `typescript` package, whose version is pinned; a file is a `tsrs` build, whose version the
@@ -56,22 +61,6 @@ fn main() {
     let outcome = caliper_docgen_semantic::resolve(request);
     println!("{} resolved, {} fell back, {:?}", outcome.components.len(), outcome.fallbacks.len(), outcome.diagnostics);
     assert!(outcome.diagnostics.is_empty(), "the real checker was unavailable");
-    if std::env::var_os("DUMP").is_some() {
-        for component in &outcome.components {
-            println!("== {}", component.display_name);
-            for prop in &component.props {
-                println!(
-                    "{}{}: {}",
-                    prop.name,
-                    if prop.required { "" } else { "?" },
-                    serde_json::to_string(&prop.prop_type).unwrap()
-                );
-            }
-        }
-        for fallback in &outcome.fallbacks {
-            println!("fallback {}: {}", fallback.display_name, fallback.reason);
-        }
-    }
 
     let text = std::fs::read_to_string(&recording).unwrap();
     // The session logs every call after `initialize`; replay-tsc needs that first answer too.
@@ -95,19 +84,4 @@ fn main() {
     std::fs::write(&target, text).unwrap();
     std::fs::remove_dir_all(&root).unwrap();
     println!("wrote {target}");
-}
-
-/// `from` copied to `to`, with a `modules` directory named `node_modules`.
-fn copy_fixture(from: &Utf8PathBuf, to: &Utf8PathBuf) {
-    for entry in std::fs::read_dir(from).unwrap() {
-        let entry = entry.unwrap();
-        let name = entry.file_name().to_str().unwrap().to_string();
-        let target = to.join(if name == "modules" { "node_modules" } else { &name });
-        if entry.file_type().unwrap().is_dir() {
-            std::fs::create_dir_all(&target).unwrap();
-            copy_fixture(&Utf8PathBuf::from_path_buf(entry.path()).unwrap(), &target);
-        } else {
-            std::fs::copy(entry.path(), &target).unwrap();
-        }
-    }
 }

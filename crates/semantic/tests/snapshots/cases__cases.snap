@@ -876,2010 +876,898 @@ expression: rendered(&outcome)
         }
       },
       {
+        "name": "wideTop",
+        "required": true,
+        "type": {
+          "kind": "truncated",
+          "text": "WideTop",
+          "limit": {
+            "type": "members",
+            "total": 101
+          }
+        }
+      },
+      {
         "name": "many",
         "required": true,
         "type": {
-          "kind": "union",
-          "members": [
-            {
-              "kind": "stringLiteral",
-              "value": "000"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "001"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "002"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "003"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "004"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "010"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "011"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "012"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "013"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "014"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "020"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "021"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "022"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "023"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "024"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "030"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "031"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "032"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "033"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "034"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "040"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "041"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "042"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "043"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "044"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "050"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "051"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "052"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "053"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "054"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "060"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "061"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "062"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "063"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "064"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "070"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "071"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "072"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "073"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "074"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "080"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "081"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "082"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "083"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "084"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "090"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "091"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "092"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "093"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "094"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "100"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "101"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "102"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "103"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "104"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "110"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "111"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "112"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "113"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "114"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "120"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "121"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "122"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "123"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "124"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "130"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "131"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "132"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "133"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "134"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "140"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "141"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "142"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "143"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "144"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "150"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "151"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "152"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "153"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "154"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "160"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "161"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "162"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "163"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "164"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "170"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "171"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "172"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "173"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "174"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "180"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "181"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "182"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "183"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "184"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "190"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "191"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "192"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "193"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "194"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "200"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "201"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "202"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "203"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "204"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "210"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "211"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "212"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "213"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "214"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "220"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "221"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "222"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "223"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "224"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "230"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "231"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "232"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "233"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "234"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "240"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "241"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "242"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "243"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "244"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "250"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "251"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "252"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "253"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "254"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "260"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "261"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "262"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "263"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "264"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "270"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "271"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "272"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "273"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "274"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "280"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "281"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "282"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "283"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "284"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "290"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "291"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "292"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "293"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "294"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "300"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "301"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "302"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "303"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "304"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "310"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "311"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "312"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "313"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "314"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "320"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "321"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "322"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "323"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "324"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "330"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "331"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "332"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "333"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "334"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "340"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "341"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "342"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "343"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "344"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "350"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "351"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "352"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "353"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "354"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "360"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "361"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "362"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "363"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "364"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "370"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "371"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "372"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "373"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "374"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "380"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "381"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "382"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "383"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "384"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "390"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "391"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "392"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "393"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "394"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "400"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "401"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "402"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "403"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "404"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "410"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "411"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "412"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "413"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "414"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "420"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "421"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "422"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "423"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "424"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "430"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "431"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "432"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "433"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "434"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "440"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "441"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "442"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "443"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "444"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "450"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "451"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "452"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "453"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "454"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "460"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "461"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "462"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "463"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "464"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "470"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "471"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "472"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "473"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "474"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "480"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "481"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "482"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "483"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "484"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "490"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "491"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "492"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "493"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "494"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "500"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "501"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "502"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "503"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "504"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "510"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "511"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "512"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "513"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "514"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "520"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "521"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "522"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "523"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "524"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "530"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "531"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "532"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "533"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "534"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "540"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "541"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "542"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "543"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "544"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "550"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "551"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "552"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "553"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "554"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "560"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "561"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "562"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "563"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "564"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "570"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "571"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "572"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "573"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "574"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "580"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "581"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "582"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "583"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "584"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "590"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "591"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "592"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "593"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "594"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "600"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "601"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "602"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "603"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "604"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "610"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "611"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "612"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "613"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "614"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "620"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "621"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "622"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "623"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "624"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "630"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "631"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "632"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "633"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "634"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "640"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "641"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "642"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "643"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "644"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "650"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "651"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "652"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "653"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "654"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "660"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "661"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "662"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "663"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "664"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "670"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "671"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "672"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "673"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "674"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "680"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "681"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "682"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "683"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "684"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "690"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "691"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "692"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "693"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "694"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "700"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "701"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "702"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "703"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "704"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "710"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "711"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "712"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "713"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "714"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "720"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "721"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "722"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "723"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "724"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "730"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "731"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "732"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "733"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "734"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "740"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "741"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "742"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "743"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "744"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "750"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "751"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "752"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "753"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "754"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "760"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "761"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "762"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "763"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "764"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "770"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "771"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "772"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "773"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "774"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "780"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "781"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "782"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "783"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "784"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "790"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "791"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "792"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "793"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "794"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "800"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "801"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "802"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "803"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "804"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "810"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "811"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "812"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "813"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "814"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "820"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "821"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "822"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "823"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "824"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "830"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "831"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "832"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "833"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "834"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "840"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "841"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "842"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "843"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "844"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "850"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "851"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "852"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "853"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "854"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "860"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "861"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "862"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "863"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "864"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "870"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "871"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "872"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "873"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "874"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "880"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "881"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "882"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "883"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "884"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "890"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "891"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "892"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "893"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "894"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "900"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "901"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "902"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "903"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "904"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "910"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "911"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "912"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "913"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "914"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "920"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "921"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "922"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "923"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "924"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "930"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "931"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "932"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "933"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "934"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "940"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "941"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "942"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "943"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "944"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "950"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "951"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "952"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "953"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "954"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "960"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "961"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "962"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "963"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "964"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "970"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "971"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "972"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "973"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "974"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "980"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "981"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "982"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "983"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "984"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "990"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "991"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "992"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "993"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "994"
+          "kind": "truncated",
+          "text": "\"000\" | \"001\" | \"002\" | \"003\" | \"004\" | \"005\" | \"010\" | \"011\" | \"012\" | \"013\" | \"014\" | \"015\" | \"020\" | \"021\" | \"022\" | \"023\" | \"024\" | \"025\" | \"030\" | \"031\" | \"032\" | \"033\" | \"034\" | ... 576 more ... | \"995\"",
+          "limit": {
+            "type": "members",
+            "total": 600
+          }
+        }
+      },
+      {
+        "name": "nestedMany",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "inside",
+              "propType": {
+                "kind": "truncated",
+                "text": "\"000\" | \"001\" | \"010\" | \"011\" | \"020\" | \"021\" | \"030\" | \"031\" | \"040\" | \"041\" | \"050\" | \"051\" | \"060\" | \"061\" | \"070\" | \"071\" | \"080\" | \"081\" | \"090\" | \"091\" | \"100\" | \"101\" | \"110\" | ... 176 more ... | \"991\"",
+                "limit": {
+                  "type": "members",
+                  "total": 200
+                }
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "allOf",
+        "required": true,
+        "type": {
+          "kind": "truncated",
+          "text": "{ k1: 1; } & { k2: 2; } & { k3: 3; } & { k4: 4; } & { k5: 5; } & { k6: 6; } & { k7: 7; } & { k8: 8; } & { k9: 9; } & { k10: 10; } & { k11: 11; } & { k12: 12; } & { k13: 13; } & { k14: 14; } & { k15: 15; } & { k16: 16; } & { k17: 17; } & { k18: 18; } & ... 482 more ... & ...",
+          "limit": {
+            "type": "members",
+            "total": 501
+          }
+        }
+      },
+      {
+        "name": "nestedAllOf",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "inside",
+              "propType": {
+                "kind": "truncated",
+                "text": "{ k1: 1; } & { k2: 2; } & { k3: 3; } & { k4: 4; } & { k5: 5; } & { k6: 6; } & { k7: 7; } & { k8: 8; } & { k9: 9; } & { k10: 10; } & { k11: 11; } & { k12: 12; } & { k13: 13; } & { k14: 14; } & { k15: 15; } & { k16: 16; } & { k17: 17; } & { k18: 18; } & ... 102 more ... & ...",
+                "limit": {
+                  "type": "members",
+                  "total": 121
+                }
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "longTuple",
+        "required": true,
+        "type": {
+          "kind": "truncated",
+          "text": "[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, ... 457 more ..., 500]",
+          "limit": {
+            "type": "members",
+            "total": 501
+          }
+        }
+      },
+      {
+        "name": "nestedTuple",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "inside",
+              "propType": {
+                "kind": "truncated",
+                "text": "[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, ... 77 more ..., 120]",
+                "limit": {
+                  "type": "members",
+                  "total": 121
+                }
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "withinLimits",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "inside",
+              "propType": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "stringLiteral",
+                    "value": "00"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "01"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "02"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "03"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "04"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "05"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "06"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "07"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "08"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "09"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "10"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "11"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "12"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "13"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "14"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "15"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "16"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "17"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "18"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "19"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "20"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "21"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "22"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "23"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "24"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "25"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "26"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "27"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "28"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "29"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "30"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "31"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "32"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "33"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "34"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "35"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "36"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "37"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "38"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "39"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "40"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "41"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "42"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "43"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "44"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "45"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "46"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "47"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "48"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "49"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "50"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "51"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "52"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "53"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "54"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "55"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "56"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "57"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "58"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "59"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "60"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "61"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "62"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "63"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "64"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "65"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "66"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "67"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "68"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "69"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "70"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "71"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "72"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "73"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "74"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "75"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "76"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "77"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "78"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "79"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "80"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "81"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "82"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "83"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "84"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "85"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "86"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "87"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "88"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "89"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "90"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "91"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "92"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "93"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "94"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "95"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "96"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "97"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "98"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "99"
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      }
+    ],
+    "DeepKinds": [
+      {
+        "name": "union",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "a",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "b",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "c",
+                          "propType": {
+                            "kind": "object",
+                            "fields": [
+                              {
+                                "name": "d",
+                                "propType": {
+                                  "kind": "object",
+                                  "fields": [
+                                    {
+                                      "name": "e",
+                                      "propType": {
+                                        "kind": "truncated",
+                                        "text": "\"x\" | \"y\"",
+                                        "limit": {
+                                          "type": "depth"
+                                        }
+                                      },
+                                      "required": true,
+                                      "description": ""
+                                    }
+                                  ]
+                                },
+                                "required": true,
+                                "description": ""
+                              }
+                            ]
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "intersection",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "a",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "b",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "c",
+                          "propType": {
+                            "kind": "object",
+                            "fields": [
+                              {
+                                "name": "d",
+                                "propType": {
+                                  "kind": "object",
+                                  "fields": [
+                                    {
+                                      "name": "e",
+                                      "propType": {
+                                        "kind": "truncated",
+                                        "text": "{ p: 1; } & { q: 2; }",
+                                        "limit": {
+                                          "type": "depth"
+                                        }
+                                      },
+                                      "required": true,
+                                      "description": ""
+                                    }
+                                  ]
+                                },
+                                "required": true,
+                                "description": ""
+                              }
+                            ]
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "array",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "a",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "b",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "c",
+                          "propType": {
+                            "kind": "object",
+                            "fields": [
+                              {
+                                "name": "d",
+                                "propType": {
+                                  "kind": "object",
+                                  "fields": [
+                                    {
+                                      "name": "e",
+                                      "propType": {
+                                        "kind": "truncated",
+                                        "text": "string[]",
+                                        "limit": {
+                                          "type": "depth"
+                                        }
+                                      },
+                                      "required": true,
+                                      "description": ""
+                                    }
+                                  ]
+                                },
+                                "required": true,
+                                "description": ""
+                              }
+                            ]
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "tuple",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "a",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "b",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "c",
+                          "propType": {
+                            "kind": "object",
+                            "fields": [
+                              {
+                                "name": "d",
+                                "propType": {
+                                  "kind": "object",
+                                  "fields": [
+                                    {
+                                      "name": "e",
+                                      "propType": {
+                                        "kind": "truncated",
+                                        "text": "[1, 2]",
+                                        "limit": {
+                                          "type": "depth"
+                                        }
+                                      },
+                                      "required": true,
+                                      "description": ""
+                                    }
+                                  ]
+                                },
+                                "required": true,
+                                "description": ""
+                              }
+                            ]
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "template",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "a",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "b",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "c",
+                          "propType": {
+                            "kind": "object",
+                            "fields": [
+                              {
+                                "name": "d",
+                                "propType": {
+                                  "kind": "object",
+                                  "fields": [
+                                    {
+                                      "name": "e",
+                                      "propType": {
+                                        "kind": "truncated",
+                                        "text": "`${number}px`",
+                                        "limit": {
+                                          "type": "depth"
+                                        }
+                                      },
+                                      "required": true,
+                                      "description": ""
+                                    }
+                                  ]
+                                },
+                                "required": true,
+                                "description": ""
+                              }
+                            ]
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "scalar",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "a",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "b",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "c",
+                          "propType": {
+                            "kind": "object",
+                            "fields": [
+                              {
+                                "name": "d",
+                                "propType": {
+                                  "kind": "object",
+                                  "fields": [
+                                    {
+                                      "name": "e",
+                                      "propType": {
+                                        "kind": "string"
+                                      },
+                                      "required": true,
+                                      "description": ""
+                                    }
+                                  ]
+                                },
+                                "required": true,
+                                "description": ""
+                              }
+                            ]
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
             }
           ]
         }
@@ -2976,6 +1864,335 @@ expression: rendered(&outcome)
                 "kind": "numberLiteral",
                 "value": 5.0
               }
+            }
+          ]
+        }
+      }
+    ],
+    "Instances": [
+      {
+        "name": "loopArray",
+        "required": true,
+        "type": {
+          "kind": "array",
+          "element": {
+            "kind": "recursive",
+            "name": "LoopArray",
+            "args": []
+          }
+        }
+      },
+      {
+        "name": "loopTuple",
+        "required": true,
+        "type": {
+          "kind": "tuple",
+          "elements": [
+            {
+              "type": {
+                "kind": "recursive",
+                "name": "LoopTuple",
+                "args": []
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "readonlyLoop",
+        "required": true,
+        "type": {
+          "kind": "readonly",
+          "element": {
+            "kind": "array",
+            "element": {
+              "kind": "recursive",
+              "name": "ReadonlyLoop",
+              "args": []
+            }
+          }
+        }
+      },
+      {
+        "name": "boxed",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "value",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "value",
+                    "propType": {
+                      "kind": "string"
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "twice",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "first",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "x",
+                    "propType": {
+                      "kind": "number"
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "second",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "x",
+                    "propType": {
+                      "kind": "number"
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "nestedPair",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "first",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "first",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "x",
+                          "propType": {
+                            "kind": "number"
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "second",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "x",
+                          "propType": {
+                            "kind": "number"
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "second",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "x",
+                    "propType": {
+                      "kind": "number"
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "tree",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "value",
+              "propType": {
+                "kind": "string"
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "kids",
+              "propType": {
+                "kind": "array",
+                "element": {
+                  "kind": "recursive",
+                  "name": "Tree",
+                  "args": [
+                    {
+                      "kind": "string"
+                    }
+                  ]
+                }
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "mutual",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "pong",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "ping",
+                    "propType": {
+                      "kind": "recursive",
+                      "name": "Ping",
+                      "args": [
+                        {
+                          "kind": "number"
+                        }
+                      ]
+                    },
+                    "required": false,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": false,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "grow",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "next",
+              "propType": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "next",
+                    "propType": {
+                      "kind": "object",
+                      "fields": [
+                        {
+                          "name": "next",
+                          "propType": {
+                            "kind": "truncated",
+                            "text": "Grow<string[][][]> | undefined",
+                            "limit": {
+                              "type": "depth"
+                            }
+                          },
+                          "required": false,
+                          "description": ""
+                        },
+                        {
+                          "name": "item",
+                          "propType": {
+                            "kind": "truncated",
+                            "text": "string[][]",
+                            "limit": {
+                              "type": "depth"
+                            }
+                          },
+                          "required": true,
+                          "description": ""
+                        }
+                      ]
+                    },
+                    "required": false,
+                    "description": ""
+                  },
+                  {
+                    "name": "item",
+                    "propType": {
+                      "kind": "array",
+                      "element": {
+                        "kind": "string"
+                      }
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "item",
+              "propType": {
+                "kind": "string"
+              },
+              "required": true,
+              "description": ""
             }
           ]
         }

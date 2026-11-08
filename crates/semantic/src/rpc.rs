@@ -128,6 +128,9 @@ pub(crate) struct SignatureInfo {
     /// The signature's own type parameters (ids; `Rpc::type_parameters` fetches them).
     #[serde(default)]
     pub type_parameters: Vec<u64>,
+    /// One entry per declared parameter, `this` excluded; `Rpc::parameters` fetches them.
+    #[serde(default)]
+    pub parameters: Vec<serde::de::IgnoredAny>,
 }
 
 /// What an object type holds, as one batch answers it.
@@ -221,6 +224,9 @@ pub(crate) mod flag {
     pub(crate) const OBJECT_CLASS: u64 = 1;
     pub(crate) const OBJECT_INTERFACE: u64 = 2;
     pub(crate) const OBJECT_REFERENCE: u64 = 4;
+    /// `TypeFormatFlags` for `typeToString`: `NoTruncation`, `UseAliasDefinedOutsideCurrentScope`,
+    /// `AllowUniqueESSymbolType` (the last two are what the checker uses when no flags are given) and `InTypeAlias`.
+    pub(crate) const PRINT_EXPANDED: u64 = 1 | 16384 | 1_048_576 | 8_388_608;
     /// `TupleElementFlags`.
     pub(crate) const ELEMENT_OPTIONAL: u64 = 2;
     pub(crate) const ELEMENT_REST: u64 = 4;
@@ -488,6 +494,12 @@ impl Rpc {
 
     pub(crate) async fn type_to_string(&self, type_id: u64) -> Result<String, CallError> {
         self.scoped("typeToString", json!({ "type": type_id })).await
+    }
+
+    /// The type as written inside a type alias declaration, and never cut short: an alias at the top is printed as what
+    /// it stands for (`(value?: string) => void`, not `Handler`), and a long type is printed to its end.
+    pub(crate) async fn type_to_string_expanded(&self, type_id: u64) -> Result<String, CallError> {
+        self.scoped("typeToString", json!({ "type": type_id, "flags": flag::PRINT_EXPANDED })).await
     }
 
     pub(crate) async fn documentation(&self, symbol: &Value) -> Result<String, CallError> {

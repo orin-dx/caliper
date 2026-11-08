@@ -2,7 +2,8 @@
 //! optional (`name?: T`), and what a tuple element is labeled (`head: string`). Both are node-level facts that the API
 //! reaches only through a declaration handle, which names a node by its index in the source file and so cannot be
 //! read without decoding that file. The readers here take them out of the printed type, and refuse any text that does
-//! not read to its end (a long type is cut short with `...`), so a fact is missing rather than invented.
+//! not read to its end (a long type is cut short with `...`), so a fact is missing rather than invented. A caller that
+//! gets no fact back must not stand in for it: a parameter is not required because its marker could not be read.
 
 /// How the checker prints one parameter of a function type: `name?: T` is optional, `...name: T[]` is the rest
 /// parameter.
@@ -27,7 +28,72 @@ pub(crate) fn parameter_markers(text: &str) -> Option<Vec<Marker>> {
     if list.iter().all(|c| c.is_whitespace()) {
         return Some(Vec::new());
     }
-    top_level_segments(list)?.into_iter().map(parameter_marker).collect()
+    let mut segments = top_level_segments(list, ',')?;
+    // A `this` parameter is printed but is not one of the signature's parameters.
+    if segments.first().is_some_and(|first| is_this_parameter(first)) {
+        segments.remove(0);
+    }
+    segments.into_iter().map(parameter_marker).collect()
+}
+
+fn is_this_parameter(parameter: &[char]) -> bool {
+    let text: String = parameter.iter().collect();
+    text.trim_start().strip_prefix("this").is_some_and(|after| after.trim_start().starts_with(':'))
+}
+
+/// The markers of every signature in a printed function, constructor or object type, calls and constructs apart, each in
+/// the order the checker lists its signatures: `(a?: 1) => 2`, `new (a?: 1) => X`, `{ (a?: 1): 2; (b: 3): 4; x: 5 }`.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct SignatureMarkers {
+    pub calls: Vec<Vec<Marker>>,
+    pub constructs: Vec<Vec<Marker>>,
+}
+
+/// `None` when the text is not a type that states its signatures to the end (a signature it cannot read, or text cut
+/// short with `...`).
+pub(crate) fn signature_markers(text: &str) -> Option<SignatureMarkers> {
+    let text = text.trim();
+    let mut found = SignatureMarkers::default();
+    if !text.starts_with('{') {
+        let (construct, markers) = signature_of(text)??;
+        found.push(construct, markers);
+        return Some(found);
+    }
+    let chars: Vec<char> = text.chars().collect();
+    if matching_close(&chars, 0)? + 1 != chars.len() {
+        return None;
+    }
+    let body = chars.get(1..chars.len() - 1)?;
+    if body.iter().all(|c| c.is_whitespace()) {
+        return Some(found);
+    }
+    for member in top_level_segments(body, ';')? {
+        let member: String = member.iter().collect();
+        // A property, method or index signature is not a signature of the type.
+        let Some(signature) = signature_of(member.trim()) else { continue };
+        let (construct, markers) = signature?;
+        found.push(construct, markers);
+    }
+    Some(found)
+}
+
+impl SignatureMarkers {
+    fn push(&mut self, construct: bool, markers: Vec<Marker>) {
+        if construct { self.constructs.push(markers) } else { self.calls.push(markers) }
+    }
+}
+
+/// `None` for text that does not start a signature, `Some(None)` for one whose parameters cannot be read; otherwise
+/// whether it is a construct signature, and its markers.
+fn signature_of(text: &str) -> Option<Option<(bool, Vec<Marker>)>> {
+    let (construct, rest) = match text.strip_prefix("new ") {
+        Some(rest) => (true, rest.trim_start()),
+        None => (false, text),
+    };
+    if !rest.starts_with(['(', '<']) {
+        return None;
+    }
+    Some(parameter_markers(rest).map(|markers| (construct, markers)))
 }
 
 fn parameter_marker(parameter: &[char]) -> Option<Marker> {
@@ -55,7 +121,7 @@ pub(crate) fn tuple_labels(text: &str, count: usize) -> Option<Vec<String>> {
         return None;
     }
     let list = chars.get(1..chars.len() - 1)?;
-    let labels: Vec<String> = top_level_segments(list)?.into_iter().map(tuple_label).collect::<Option<_>>()?;
+    let labels: Vec<String> = top_level_segments(list, ',')?.into_iter().map(tuple_label).collect::<Option<_>>()?;
     (labels.len() == count).then_some(labels)
 }
 
@@ -70,8 +136,8 @@ fn tuple_label(element: &[char]) -> Option<String> {
     (!name.is_empty() && after.starts_with(':')).then(|| name.to_string())
 }
 
-/// The parts of a parameter list between its top-level commas.
-fn top_level_segments(list: &[char]) -> Option<Vec<&[char]>> {
+/// The parts of a list between its top-level `separator`s.
+fn top_level_segments(list: &[char], separator: char) -> Option<Vec<&[char]>> {
     let mut segments = Vec::new();
     let (mut start, mut i) = (0, 0);
     while i < list.len() {
@@ -79,7 +145,7 @@ fn top_level_segments(list: &[char]) -> Option<Vec<&[char]>> {
             '"' | '\'' | '`' => i = skip_string(list, i)?,
             '(' | '[' | '{' | '<' => i = matching_close(list, i)?,
             '=' if list.get(i + 1) == Some(&'>') => i += 1,
-            ',' => {
+            c if *c == separator => {
                 segments.push(list.get(start..i)?);
                 start = i + 1;
             }
@@ -181,6 +247,50 @@ mod tests {
             ["(a: number, b?: Very.Long.Type<With, Many...", "{ a: number }", "", "(a: number", "new (a?: 1) => X"]
         {
             assert_eq!(parameter_markers(text), None, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_this_parameter_is_printed_but_is_not_a_parameter() {
+        assert_eq!(parameter_markers("(this: Window, a?: number) => void"), Some(vec![OPTIONAL]));
+        assert_eq!(parameter_markers("(this: Window) => void"), Some(vec![]));
+        // Only a first parameter named `this` is the `this` parameter.
+        assert_eq!(parameter_markers("(thisArg?: number) => void"), Some(vec![OPTIONAL]));
+    }
+
+    #[test]
+    fn every_signature_of_a_printed_type_has_its_own_markers() {
+        let one = |construct: bool, markers: Vec<Marker>| {
+            if construct {
+                SignatureMarkers { calls: vec![], constructs: vec![markers] }
+            } else {
+                SignatureMarkers { calls: vec![markers], constructs: vec![] }
+            }
+        };
+        assert_eq!(signature_markers("(a?: number) => void"), Some(one(false, vec![OPTIONAL])));
+        assert_eq!(signature_markers("new (a: number, b?: string) => Date"), Some(one(true, vec![REQUIRED, OPTIONAL])));
+        assert_eq!(
+            signature_markers("{ (a?: string): string; (a: number, b?: number): number; }"),
+            Some(SignatureMarkers { calls: vec![vec![OPTIONAL], vec![REQUIRED, OPTIONAL]], constructs: vec![] })
+        );
+        // Properties, methods and index signatures are not signatures of the type.
+        assert_eq!(
+            signature_markers(
+                "{ <T>(v: T, w?: T): T; new (x?: 1): Date; displayName: string; m(y?: 1): void; [k: string]: (z?: 1) => void; }"
+            ),
+            Some(SignatureMarkers { calls: vec![vec![REQUIRED, OPTIONAL]], constructs: vec![vec![OPTIONAL]] })
+        );
+        assert_eq!(signature_markers("{ a: string; }"), Some(SignatureMarkers::default()));
+        assert_eq!(signature_markers("{ }"), Some(SignatureMarkers::default()));
+    }
+
+    #[test]
+    fn text_that_does_not_state_its_signatures_to_the_end_has_no_markers() {
+        // A name, an alias that was not expanded, text cut short, a signature that cannot be read.
+        for text in
+            ["Handler", "Overloaded", "{ (a?: string): void; ...", "{ (a?: string", "abstract new (a?: 1) => X", ""]
+        {
+            assert_eq!(signature_markers(text), None, "{text:?}");
         }
     }
 

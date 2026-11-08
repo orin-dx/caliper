@@ -3,10 +3,16 @@
 //! symbol and arguments. The printed type (`typeToString`) names things for display and for the two facts the
 //! structure does not state (see [`crate::printed`]); no shape is read from it.
 //!
-//! The conversion of a type is a function of the type, how deep it sits and which declarations enclose it, never of
+//! The conversion of a type is a function of the type, how deep it sits and which instantiations enclose it, never of
 //! the order the checker was asked in, so the memo can be keyed by the checker's type handle (valid inside one
-//! snapshot) without making the output depend on query order. Nothing here keys on a type id except that memo: a
-//! recursion marker is keyed by the declaration (the alias or interface), not the id.
+//! snapshot) without making the output depend on query order. A handle is also what tells one instantiation from
+//! another while a type is being expanded (`Box<Box<string>>` is two instantiations of one declaration): only its
+//! equality is read, inside one conversion, so the answer does not depend on the numbers. The recursion marker that
+//! results is named by the declaration (the alias or interface) and holds no handle.
+//!
+//! Every descent into the parts of a type (members, properties, elements, holes) passes [`Converter::enter`], which
+//! decides before anything is fetched or converted whether the type is an enclosing instantiation (a back-reference),
+//! sits too deep, or is too wide.
 //!
 //! What stays a name instead of an expansion, the named boundary: an object type declared in a dependency
 //! (`node_modules`) or an interface or class of the TypeScript lib (`Date`, `HTMLElement`, `Promise<T>`), with its type
@@ -28,7 +34,7 @@ use caliper_docgen_core::types::{
 };
 use rustc_hash::{FxHashMap, FxHasher};
 
-use crate::printed::{Marker, parameter_markers, tuple_labels};
+use crate::printed::{Marker, SignatureMarkers, signature_markers, tuple_labels};
 use crate::rpc::{
     CallError, CompactSymbol, ObjectMembers, Rpc, SignatureInfo, SignatureKind, SymbolInfo, TypeInfo, flag,
 };
@@ -40,24 +46,47 @@ const MAX_FIELDS: [usize; 2] = [100, 40];
 /// The most members a union or intersection lists at the top and below it.
 const MAX_MEMBERS: [usize; 2] = [500, 120];
 
+/// What a descent found at [`Converter::enter`].
+enum Gate<T> {
+    /// The type is not expanded: it is a back-reference, or a cap cut it.
+    Stop(PropType),
+    /// The parts of the type, and the context to convert them in.
+    Open { parts: T, inner: Cx },
+}
+
 type Converted<'a> = Pin<Box<dyn Future<Output = Result<PropType, CallError>> + Send + 'a>>;
 
-/// Where a type sits: how deep, and which declarations (aliases, interfaces) enclose it, outermost first.
+/// Where a type sits: how deep, and which named instantiations (an alias or interface with its type arguments, as the
+/// checker's type handle) enclose it, sorted so that the same set is the same key whatever path led to it.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Cx {
     depth: u8,
-    enclosing: Arc<Vec<String>>,
+    enclosing: Arc<Vec<u64>>,
 }
 
 impl Cx {
-    fn deeper(&self) -> Cx {
+    /// The context of what a name carries, its type arguments: one level down. Each argument is converted on its own
+    /// and passes [`Converter::enter`] if it has parts.
+    fn argument(&self) -> Cx {
         Cx { depth: self.depth.saturating_add(1), enclosing: self.enclosing.clone() }
     }
 
-    fn inside(&self, identity: &str) -> Cx {
-        let mut enclosing = (*self.enclosing).clone();
-        enclosing.push(identity.to_string());
-        Cx { depth: self.depth, enclosing: Arc::new(enclosing) }
+    /// The context of the parts of a type that [`Converter::enter`] has admitted. Only a named instance is kept, since
+    /// only a name can be pointed back to.
+    fn below(&self, instance: Option<u64>) -> Cx {
+        let mut enclosing = self.enclosing.clone();
+        if let Some(id) = instance
+            && let Err(at) = enclosing.binary_search(&id)
+        {
+            let mut grown = (*enclosing).clone();
+            grown.insert(at, id);
+            enclosing = Arc::new(grown);
+        }
+        Cx { depth: self.depth.saturating_add(1), enclosing }
+    }
+
+    fn encloses(&self, id: u64) -> bool {
+        self.enclosing.binary_search(&id).is_ok()
     }
 
     fn limit<const N: usize>(&self, limits: [usize; N]) -> usize {
@@ -75,8 +104,6 @@ impl Cx {
 #[derive(Debug, Clone)]
 struct Origin {
     name: String,
-    /// The first declaration's handle: stable for the same declaration whatever order the checker is asked in.
-    identity: String,
     /// The declaring file as the checker keys it (lower-cased path).
     file: String,
     alias: bool,
@@ -87,7 +114,6 @@ impl Origin {
         let declaration = symbol.declarations.first().map(String::as_str);
         Origin {
             name: symbol.name.clone(),
-            identity: declaration.map_or_else(|| format!("{}:{alias}", symbol.name), str::to_string),
             file: declaration.map(|declaration| declared_in(declaration).to_string()).unwrap_or_default(),
             alias,
         }
@@ -136,10 +162,11 @@ type Memo = Mutex<FxHashMap<(u64, u8, u64), PropType>>;
 
 #[derive(Default)]
 struct State {
-    /// Conversions by (type handle, depth, enclosing declarations). The handle is valid inside this snapshot only.
+    /// Conversions by (type handle, depth, enclosing instantiations). The handles are valid inside this snapshot only.
     memo: Memo,
     origins: Mutex<FxHashMap<(bool, CompactSymbol), Option<Origin>>>,
-    printed: Mutex<FxHashMap<u64, String>>,
+    /// By (type handle, whether printed expanded: see [`Rpc::type_to_string_expanded`]).
+    printed: Mutex<FxHashMap<(u64, bool), String>>,
     hits: AtomicU64,
     misses: AtomicU64,
 }
@@ -223,10 +250,11 @@ impl Converter {
         if flags & flag::TEMPLATE_LITERAL != 0 {
             return self.template(info, cx).await;
         }
-        // Types the checker could not resolve because a type parameter is still open, and `Uppercase<…>`.
+        // `Uppercase<string>` and its siblings: a name, since there is no shape to expand.
         if flags & flag::STRING_MAPPING != 0 {
             return Ok(named(self.display(info.id).await?, Vec::new()));
         }
+        // Types the checker could not resolve because a type parameter is still open.
         if flags & (flag::CONDITIONAL | flag::INDEXED_ACCESS | flag::INDEX | flag::SUBSTITUTION) != 0 {
             let text = self.display(info.id).await?;
             let reason = if flags & flag::CONDITIONAL != 0 {
@@ -253,20 +281,40 @@ impl Converter {
     /// How the checker prints the type; only ever a name for display, a truncated type's text, or the source of the two
     /// facts in [`crate::printed`].
     async fn display(&self, id: u64) -> Result<String, CallError> {
-        if let Some(text) = self.state.printed.lock().ok().and_then(|printed| printed.get(&id).cloned()) {
+        self.printed(id, false).await
+    }
+
+    /// How the checker prints the type with an alias at the top expanded and nothing cut short: the text a signature's
+    /// parameter markers are read from, since the alias's name states no parameter list.
+    async fn display_expanded(&self, id: u64) -> Result<String, CallError> {
+        self.printed(id, true).await
+    }
+
+    async fn printed(&self, id: u64, expanded: bool) -> Result<String, CallError> {
+        let key = (id, expanded);
+        if let Some(text) = self.state.printed.lock().ok().and_then(|printed| printed.get(&key).cloned()) {
             return Ok(text);
         }
-        let text = self.rpc.type_to_string(id).await?;
+        let text =
+            if expanded { self.rpc.type_to_string_expanded(id).await? } else { self.rpc.type_to_string(id).await? };
         if let Ok(mut printed) = self.state.printed.lock() {
-            printed.insert(id, text.clone());
+            printed.insert(key, text.clone());
         }
         Ok(text)
     }
 
+    /// The alias a type was written through, when it has one.
+    async fn alias_origin(&self, info: &TypeInfo) -> Result<Option<Origin>, CallError> {
+        match &info.alias_symbol {
+            Some(alias) => self.origin_of(alias, true, info.id).await,
+            None => Ok(None),
+        }
+    }
+
     /// What declares the type, when it has a name of its own: an alias, or an interface, class or instantiation of one.
     async fn origin(&self, info: &TypeInfo) -> Result<Option<Origin>, CallError> {
-        if let Some(alias) = &info.alias_symbol {
-            return self.origin_of(alias, true, info.id).await;
+        if info.alias_symbol.is_some() {
+            return self.alias_origin(info).await;
         }
         if info.object_flags & (flag::OBJECT_CLASS | flag::OBJECT_INTERFACE | flag::OBJECT_REFERENCE) != 0 {
             return self.symbol_origin(info).await;
@@ -346,8 +394,13 @@ impl Converter {
     }
 
     async fn template(&self, info: &TypeInfo, cx: &Cx) -> Result<PropType, CallError> {
-        let holes = self.rpc.members(info.id).await?;
-        let mut types = self.convert_all(&holes, &cx.deeper()).await?.into_iter();
+        let origin = self.alias_origin(info).await?;
+        let gate = self.enter(info, origin.as_ref(), cx, MAX_MEMBERS, || self.members_of(info)).await?;
+        let (holes, inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
+        let mut types = self.convert_all(&holes, &inner).await?.into_iter();
         let mut parts = Vec::new();
         for text in &info.texts {
             if !text.is_empty() {
@@ -398,7 +451,7 @@ impl Converter {
         } else {
             Vec::new()
         };
-        self.convert_all(&arguments, &cx.deeper()).await
+        self.convert_all(&arguments, &cx.argument()).await
     }
 
     async fn named_type(&self, info: &TypeInfo, origin: &Origin, cx: &Cx) -> Result<PropType, CallError> {
@@ -406,49 +459,75 @@ impl Converter {
         Ok(PropType::Named { name: origin.name.clone().into(), args })
     }
 
+    /// The one gate every descent into the parts of a type passes, before the parts are converted. It stops, in this
+    /// order, a type that is an instantiation already being expanded around it (a back-reference to its declaration,
+    /// whose arguments are the instantiation's), a type past [`MAX_DEPTH`], and a type whose `measure`d parts exceed the
+    /// `limits`. `measure` fetches the parts and says how many there are; it is not called for a type stopped before.
+    /// Otherwise the parts come back with the context to convert them in.
+    async fn enter<T, F, Fut>(
+        &self,
+        info: &TypeInfo,
+        origin: Option<&Origin>,
+        cx: &Cx,
+        limits: [usize; 2],
+        measure: F,
+    ) -> Result<Gate<T>, CallError>
+    where
+        T: Send,
+        F: FnOnce() -> Fut + Send,
+        Fut: Future<Output = Result<(T, usize), CallError>> + Send,
+    {
+        // The handle is the instantiation: `Box<string>` inside `Box<Box<string>>` is another type from the one around it.
+        if let Some(origin) = origin
+            && cx.encloses(info.id)
+        {
+            return Ok(Gate::Stop(self.recursive(info, origin, cx).await?));
+        }
+        if cx.depth >= MAX_DEPTH {
+            return Ok(Gate::Stop(self.truncated(info, origin, TruncationLimit::Depth).await?));
+        }
+        let (parts, total) = measure().await?;
+        if total > cx.limit(limits) {
+            let limit = TruncationLimit::Members { total: to_u32(total) };
+            return Ok(Gate::Stop(self.truncated(info, origin, limit).await?));
+        }
+        Ok(Gate::Open { parts, inner: cx.below(origin.map(|_| info.id)) })
+    }
+
     async fn union(&self, info: &TypeInfo, cx: &Cx) -> Result<PropType, CallError> {
         let origin = self.origin(info).await?;
         if let Some(terminal) = origin.as_ref().and_then(Origin::react_terminal) {
             return Ok(terminal);
         }
-        if let Some(origin) = &origin
-            && cx.enclosing.contains(&origin.identity)
-        {
-            return self.recursive(info, origin, cx).await;
-        }
+        let gate = self.enter(info, origin.as_ref(), cx, MAX_MEMBERS, || self.members_of(info)).await?;
+        let (members, inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
+        Ok(union_of(self.convert_all(&members, &inner).await?))
+    }
+
+    /// The members of a union, intersection or template literal, and how many there are.
+    async fn members_of(&self, info: &TypeInfo) -> Result<(Vec<TypeInfo>, usize), CallError> {
         let members = self.rpc.members(info.id).await?;
         let total = members.len();
-        if total > cx.limit(MAX_MEMBERS) {
-            return self.truncated(info, origin.as_ref(), TruncationLimit::Members { total: to_u32(total) }).await;
-        }
-        if cx.depth >= MAX_DEPTH {
-            return self.truncated(info, origin.as_ref(), TruncationLimit::Depth).await;
-        }
-        let inner = origin.as_ref().map_or_else(|| cx.deeper(), |origin| cx.inside(&origin.identity).deeper());
-        Ok(union_of(self.convert_all(&members, &inner).await?))
+        Ok((members, total))
     }
 
     async fn intersection(&self, info: &TypeInfo, cx: &Cx) -> Result<PropType, CallError> {
         let origin = self.origin(info).await?;
-        if let Some(origin) = &origin {
-            if cx.enclosing.contains(&origin.identity) {
-                return self.recursive(info, origin, cx).await;
-            }
-            // A dependency's `Nested<Style>`-like alias is a name, as its interface would be.
-            if origin.is_boundary() {
-                return self.named_type(info, origin, cx).await;
-            }
+        // A dependency's `Nested<Style>`-like alias is a name, as its interface would be.
+        if let Some(origin) = &origin
+            && origin.is_boundary()
+        {
+            return self.named_type(info, origin, cx).await;
         }
-        let members = self.rpc.members(info.id).await?;
-        let total = members.len();
-        if total > cx.limit(MAX_MEMBERS) {
-            return self.truncated(info, origin.as_ref(), TruncationLimit::Members { total: to_u32(total) }).await;
-        }
-        if cx.depth >= MAX_DEPTH {
-            return self.truncated(info, origin.as_ref(), TruncationLimit::Depth).await;
-        }
-        let inner = origin.as_ref().map_or_else(|| cx.deeper(), |origin| cx.inside(&origin.identity).deeper());
-        let mut converted: Vec<PropType> = Vec::with_capacity(total);
+        let gate = self.enter(info, origin.as_ref(), cx, MAX_MEMBERS, || self.members_of(info)).await?;
+        let (members, inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
+        let mut converted: Vec<PropType> = Vec::with_capacity(members.len());
         for member in self.convert_all(&members, &inner).await? {
             if !converted.contains(&member) {
                 converted.push(member);
@@ -480,68 +559,97 @@ impl Converter {
         {
             return self.named_type(info, origin, cx).await;
         }
-        if let Some(origin) = &origin
-            && cx.enclosing.contains(&origin.identity)
-        {
-            return self.recursive(info, origin, cx).await;
-        }
-        if cx.depth >= MAX_DEPTH {
-            return self.truncated(info, origin.as_ref(), TruncationLimit::Depth).await;
-        }
-
-        let ObjectMembers { calls, constructs, properties, indexes } = self.rpc.object_members(info.id).await?;
-        // A dependency's function with properties of its own (a component, a hook) is a name.
+        let gate = self
+            .enter(info, origin.as_ref(), cx, MAX_FIELDS, || async {
+                let members = self.rpc.object_members(info.id).await?;
+                // A dependency's function with properties of its own (a component, a hook) is a name, however many.
+                let named = boundary.is_some() && !members.properties.is_empty();
+                let total = if named { 0 } else { members.properties.len() + members.indexes.len() };
+                Ok((members, total))
+            })
+            .await?;
+        let (members, inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
+        let ObjectMembers { calls, constructs, properties, indexes } = members;
         if let Some(origin) = boundary
             && !properties.is_empty()
         {
             return self.named_type(info, origin, cx).await;
         }
-        let total = properties.len() + indexes.len();
-        if total > cx.limit(MAX_FIELDS) {
-            return self.truncated(info, origin.as_ref(), TruncationLimit::Members { total: to_u32(total) }).await;
-        }
 
-        let inner = origin.as_ref().map_or_else(|| cx.deeper(), |origin| cx.inside(&origin.identity).deeper());
-        if let [call] = calls.as_slice()
-            && constructs.is_empty()
-            && properties.is_empty()
-            && indexes.is_empty()
+        // Which of a signature's parameters are optional is read from the printed type here, and nowhere else.
+        let Some(markers) = self.printed_markers(info.id, &calls, &constructs).await? else {
+            return self.unreadable_signatures(info.id).await;
+        };
+        let mut signatures = Vec::with_capacity(calls.len() + constructs.len());
+        for (kind, group, printed) in
+            [(Kind::Call, &calls, &markers.calls), (Kind::Construct, &constructs, &markers.constructs)]
         {
-            return self.function(call, Some(info.id), &inner).await;
+            for (index, signature) in group.iter().enumerate() {
+                let printed = printed.get(index).map(Vec::as_slice);
+                let Some((type_params, params, return_type)) = self.signature_parts(signature, printed, &inner).await?
+                else {
+                    return self.unreadable_signatures(info.id).await;
+                };
+                signatures.push(CallSignature { kind, type_params, params, return_type });
+            }
+        }
+        if signatures.len() == 1 && calls.len() == 1 && properties.is_empty() && indexes.is_empty() {
+            let CallSignature { type_params, params, return_type, .. } = signatures.swap_remove(0);
+            return Ok(PropType::Function { type_params, params, return_type: Box::new(return_type) });
         }
         let fields = self.fields(&properties, &indexes, &inner).await?;
-        if calls.is_empty() && constructs.is_empty() {
+        if signatures.is_empty() {
             return Ok(PropType::Object(fields));
-        }
-        let mut signatures = Vec::with_capacity(calls.len() + constructs.len());
-        for (kind, group) in [(Kind::Call, &calls), (Kind::Construct, &constructs)] {
-            for signature in group {
-                signatures.push(self.call_signature(kind, signature, &inner).await?);
-            }
         }
         Ok(PropType::Callable { signatures, fields })
     }
 
     async fn array(&self, info: &TypeInfo, readonly: bool, cx: &Cx) -> Result<PropType, CallError> {
-        let arguments = self.rpc.type_arguments(info.id).await?;
+        // Only an alias can name an array that contains itself (`type Loop = Loop[]`); `Array` is the lib's.
+        let origin = self.alias_origin(info).await?;
+        let gate = self
+            .enter(info, origin.as_ref(), cx, MAX_MEMBERS, || async {
+                let arguments = self.rpc.type_arguments(info.id).await?;
+                let total = arguments.len();
+                Ok((arguments, total))
+            })
+            .await?;
+        let (arguments, inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
         let Some(element) = arguments.first() else {
             return Ok(named(self.display(info.id).await?, Vec::new()));
         };
-        let element = PropType::Array(Box::new(self.convert(element, &cx.deeper()).await?));
+        let element = PropType::Array(Box::new(self.convert(element, &inner).await?));
         // `readonly T[]` is `ReadonlyArray<T>`: the same reference through another declaration.
         Ok(if readonly { PropType::Readonly(Box::new(element)) } else { element })
     }
 
     async fn tuple(&self, info: &TypeInfo, cx: &Cx) -> Result<PropType, CallError> {
-        let arguments = self.rpc.type_arguments(info.id).await?;
-        // The reference carries the arguments; the tuple type it instantiates carries how each element is declared.
-        let target = self.rpc.target_of_type(info.id).await?;
+        let origin = self.alias_origin(info).await?;
+        let gate = self
+            .enter(info, origin.as_ref(), cx, MAX_MEMBERS, || async {
+                // The reference carries the arguments; the tuple type it instantiates carries how each element is declared.
+                let arguments = self.rpc.type_arguments(info.id).await?;
+                let target = self.rpc.target_of_type(info.id).await?;
+                let total = arguments.len();
+                Ok(((arguments, target), total))
+            })
+            .await?;
+        let ((arguments, target), inner) = match gate {
+            Gate::Stop(stopped) => return Ok(stopped),
+            Gate::Open { parts, inner } => (parts, inner),
+        };
         let labels = if target.labeled_element_declarations.is_empty() {
             None
         } else {
             tuple_labels(&self.display(info.id).await?, arguments.len())
         };
-        let element_types = self.convert_all(&arguments, &cx.deeper()).await?;
+        let element_types = self.convert_all(&arguments, &inner).await?;
         let mut elements = Vec::with_capacity(arguments.len());
         for (index, element_type) in element_types.into_iter().enumerate() {
             let element_flags = target.element_flags.get(index).copied().unwrap_or(1);
@@ -597,38 +705,51 @@ impl Converter {
         Ok(fields)
     }
 
-    async fn function(&self, signature: &SignatureInfo, printed: Option<u64>, cx: &Cx) -> Result<PropType, CallError> {
-        let (type_params, params, return_type) = self.signature_parts(signature, printed, cx).await?;
-        Ok(PropType::Function { type_params, params, return_type: Box::new(return_type) })
+    /// The parameter markers of the signatures of an object type, as the checker prints the type (see
+    /// [`crate::printed`]): the only source of which parameters are optional, since the API's parameter symbols do not
+    /// say. `None` when some signature has a parameter and the printed type does not state one entry per signature.
+    async fn printed_markers(
+        &self,
+        id: u64,
+        calls: &[SignatureInfo],
+        constructs: &[SignatureInfo],
+    ) -> Result<Option<SignatureMarkers>, CallError> {
+        if !calls.iter().chain(constructs).any(|signature| !signature.parameters.is_empty()) {
+            let none = |count: usize| vec![Vec::new(); count];
+            return Ok(Some(SignatureMarkers { calls: none(calls.len()), constructs: none(constructs.len()) }));
+        }
+        let stated = signature_markers(&self.display_expanded(id).await?);
+        Ok(stated.filter(|stated| stated.calls.len() == calls.len() && stated.constructs.len() == constructs.len()))
     }
 
-    async fn call_signature(&self, kind: Kind, signature: &SignatureInfo, cx: &Cx) -> Result<CallSignature, CallError> {
-        // The printed type of an overload set is not one parameter list: which parameters are optional is not stated.
-        let (type_params, params, return_type) = self.signature_parts(signature, None, cx).await?;
-        Ok(CallSignature { kind, type_params, params, return_type })
+    /// A type whose signatures state parameters that cannot be told optional from required is not given a shape that
+    /// would assert one of them: it is opaque, with how the checker prints it.
+    async fn unreadable_signatures(&self, id: u64) -> Result<PropType, CallError> {
+        Ok(degraded_type(self.display_expanded(id).await?, OpaqueReason::UnsupportedExpression))
     }
 
+    /// One signature's type parameters, parameters and return type; `None` when a parameter that is not the rest
+    /// parameter has no marker, since whether it is optional is then unknown and is not guessed.
     async fn signature_parts(
         &self,
         signature: &SignatureInfo,
-        printed: Option<u64>,
+        printed: Option<&[Marker]>,
         cx: &Cx,
-    ) -> Result<(Vec<String>, Vec<FunctionParam>, PropType), CallError> {
+    ) -> Result<Option<(Vec<String>, Vec<FunctionParam>, PropType)>, CallError> {
         let parameters = self.rpc.parameters(signature.id).await?;
+        let has_rest = signature.flags & flag::SIGNATURE_HAS_REST_PARAMETER != 0;
+        // A printed signature that does not give one entry per parameter states none of them.
+        let markers = printed.filter(|markers| markers.len() == parameters.len());
+        let known_without_markers = usize::from(has_rest);
+        if markers.is_none() && parameters.len() > known_without_markers {
+            return Ok(None);
+        }
         let references: Vec<_> = parameters.iter().map(|parameter| &parameter.reference).collect();
         let types = if references.is_empty() { Vec::new() } else { self.rpc.types_of_symbols(&references).await? };
-        // The printed type of the function states which parameters are optional; it is only asked for when there is one.
-        let markers: Option<Vec<Marker>> = match printed {
-            Some(id) if !parameters.is_empty() => parameter_markers(&self.display(id).await?),
-            _ => None,
-        };
-        // A printed signature that does not parse into one entry per parameter leaves the markers off.
-        let markers = markers.filter(|markers| markers.len() == parameters.len());
-        let has_rest = signature.flags & flag::SIGNATURE_HAS_REST_PARAMETER != 0;
         let converted = self.convert_all(&types, cx).await?;
         let mut params = Vec::with_capacity(parameters.len());
         for (index, (parameter, param_type)) in parameters.iter().zip(converted).enumerate() {
-            let marker = markers.as_ref().and_then(|markers| markers.get(index)).copied().unwrap_or_default();
+            let marker = markers.and_then(|markers| markers.get(index)).copied().unwrap_or_default();
             let rest = marker.rest || (has_rest && index + 1 == parameters.len());
             let optional = marker.optional && !rest;
             let param_type = without_undefined(param_type, optional);
@@ -647,7 +768,7 @@ impl Converter {
                 }
             }
         }
-        Ok((type_params, params, return_type))
+        Ok(Some((type_params, params, return_type)))
     }
 }
 

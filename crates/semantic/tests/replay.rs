@@ -209,6 +209,48 @@ fn function_parameters_keep_their_optional_and_rest_markers() {
     );
 }
 
+/// Which parameters are optional is stated only by the printed type, so the printed type has to be one that states it:
+/// an alias is printed as what it stands for, a long type is not cut short, a `this` parameter is not counted, and each
+/// signature of an overload set has its own markers. Where nothing can be read, no parameter is made required.
+#[test]
+fn optional_parameters_are_read_through_an_alias_a_long_type_a_this_parameter_and_overloads() {
+    let project = project_of("markers", &["Markers.tsx", "tsconfig.json"], true);
+    let output = structural(&project);
+
+    let outcome = resolve(request_replaying(&project, &output, None, "markers.recording.json"));
+    assert!(outcome.diagnostics.is_empty(), "{:?} / {:?}", outcome.diagnostics, outcome.fallbacks);
+
+    let aliased = &outcome.components.iter().find(|component| component.display_name == "Aliased").unwrap().props;
+    let prop_type = |name: &str| aliased.iter().find(|prop| prop.name == name).unwrap().prop_type.clone();
+    let text = |name: &str| prop_type(name).raw_string();
+
+    // `onChange: Handler` with `type Handler = (value?: string) => void`: the callback may be called with no argument.
+    assert_eq!(
+        prop_type("onChange"),
+        PropType::Function {
+            type_params: vec![],
+            params: vec![FunctionParam {
+                name: Some("value".to_string()),
+                param_type: PropType::String,
+                optional: true,
+                rest: false
+            }],
+            return_type: Box::new(PropType::Void),
+        }
+    );
+    // Parameters after a long one are still read: the checker cuts the printed type short unless it is told not to.
+    assert!(text("long").ends_with(", c?: number, d?: string) => void"), "{}", text("long"));
+    assert_eq!(text("withThis"), "(a?: number) => void");
+    assert_eq!(text("overloaded"), "{ (a?: string): string; (a: number, b?: number): number }");
+    assert_eq!(text("withCall"), "{ (a?: string): number; displayName: string }");
+    assert_eq!(text("ctor"), "{ new (a?: string): Date }");
+
+    // A callable interface is printed as its name whatever the flags: nothing states `a?`, so it is not a function
+    // with a required `a`; it is opaque, and the prop is degraded.
+    assert!(matches!(prop_type("named"), PropType::Opaque(_)), "{:?}", prop_type("named"));
+    assert_eq!(serde_json::to_value(prop_type("named")).unwrap()["reason"]["type"], "unsupportedExpression");
+}
+
 #[test]
 fn provenance_lists_the_resolved_components_and_the_one_the_module_does_not_export() {
     let project = project(true);
