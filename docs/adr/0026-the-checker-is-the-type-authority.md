@@ -1,6 +1,6 @@
 # 0026. The checker is the type authority; oxc supplies syntax
 
-**Status:** Proposed **Date:** 2026-11-07
+**Status:** Accepted (2026-11-08) **Date:** 2026-11-07
 
 ## Context
 
@@ -18,22 +18,23 @@ The checker decides types and oxc decides syntax.
 - **Opt-out.** The checker runs unless `--no-checker` or a config option turns it off; `--experimental-semantic-types` and `semanticTypes` give way to it.
 - **Per surface.** The Storybook addon keeps ADR 0022: the structural answer first, the checker's within `semanticWaitMs`. Its premise that the checker is too slow for first paint is re-measured with tsrs in S4. The CLI and agents wait for the checker, all candidates in one snapshot, with a timeout (10 s proposed).
 - **Pin.** We pin an exact tsrs build (`0.23.0-ts7.1.0-beta` today) and bump it on purpose. A bump passes the deterministic construct suite (`apps/oracle/construct-suite`, being built on `feat/construct-suite`) and a tsrs-against-Go parity run of it. The weekly oracle keeps the Go `typescript` checker: an oracle running the checker that produced the answer agrees with it by construction.
-- **Process.** The checker process is replaced above an RSS threshold, as `OnDemandConfig::max_rss_mib` does for `tsc`. Its binaries arrive as optional npm dependencies (`@tsrs/<platform>`).
+- **Process.** The checker process is replaced above an RSS threshold, as `OnDemandConfig::max_rss_mib` does for `tsc`. `tsrs` stays user-installed (or `--tsc-path`) while the checker is opt-in. It becomes an optional dependency of the npm packages (`@tsrs/<platform>`) at S8, with the default flip, after the install smoke tests measure its size (23 to 50 MB per platform).
+- **Collapsed React types.** `ReactElement`, `JSX.Element` and `ReactChild` stay collapsed to the `reactNode` terminal. No evaluation showed it hurting Storybook controls.
 
-Not decided: linking tsrs in-process through `tsrs_api::Session` from a git tag. Its crates are `publish = false` (crates.io request #858 has no maintainer answer) and need Rust 1.99 and edition 2024, where caliper is on 1.97 and 2021 (a separate change, trail 257). It is a follow-up gated on the spike.
+Not pursued: linking tsrs in-process through `tsrs_api::Session`. The crates are `publish = false` (crates.io request #858 has no maintainer answer), process isolation is lost (a checker abort would take down the Storybook dev server), and the memory growth would live inside the addon with no restart lever. It can be revisited if the crates are published and an isolation story exists.
 
 ## Consequences
 
-- Supersedes, when accepted, "structural stays the default" in ADR 0006 and 0007 and 0007's "never a silent default" trigger. The rest of both stands.
+- Supersedes "structural stays the default" in ADR 0006 and 0007 and 0007's "never a silent default" trigger. The rest of both stands.
 - Deletable or shrinkable with a thin fallback, estimated from each file's header: in `crates/core/src/resolver`, `alias`, `chain`, `evaluate`, `substitute`, `named`, `primitives`, `extends`, `func`, `template`, `import`, `callee`, `memo`, `deps`, `collected` and `precedence` shrink to a no-generics subset and `mod.rs` by half; `dependency_types.rs` and `import_map.rs` go (the checker resolves modules; ADR 0010 and 0025 narrow to the fallback); in `extractor`, `interface` (but cva), `alias`, `values`, `reexports`, `asserted` and most of `visit` go, and `component`, `wrapper` and `mod.rs` shrink to candidate detection. About 7,600 of 25,300 non-test lines, 9,400 with no fallback, which Windows ARM64 rules out. `html`, `react`, `ambient`, `evidence`, `uses`, `defaults` and `jsdoc` stay; `crates/semantic` and `crates/tsc-client` grow and `convert.rs` is rewritten.
 - Contract: `PropType` gains what the checker knows and it cannot hold: tuple element optional, rest and labels, `bigint`, `unique symbol`, enum identity, template literals, overload sets, call signatures on objects, a recursion marker, and a typed truncation in place of `Named` with checker text. React terminals (`ReactNode`, `CSSProperties`, `Ref`, `ElementType`, HTML attributes) are recognized by declaring path, as `is_react_declared` (`crates/semantic/src/component.rs`) does. `SCHEMA_VERSION` and `CACHE_SCHEMA_VERSION` bump (ADR 0017).
 - No cache is keyed on a type id: ids are per checker and change with query order. Keys are file content, export name, instantiation and the tsrs pin. The checker does not see an edit it is not told about, so watch forwards every change.
 - Unsolved: a per-component dependency closure from the checker (invalidation stays conservative), and the structural answer's gaps wherever the fallback runs.
 - Risks: tsrs is pre-1.0, four releases in twelve days, and closed to pull requests (its README). Memory grew from 98 to 246 MB over 150 Chakra edits with each old snapshot disposed (#920 and #646 open). Determinism across checker counts is shown only on a 72-file program. There is no `@tsrs/win32-arm64` package, so those users get the fallback. Binaries are 23 to 50 MB unpacked per platform.
 
-Migration, each slice behind a deterministic gate, none on the oracle:
+Migration, each slice behind a deterministic gate, none on the oracle. The tsrs backend (the Rust client running on tsrs, PR 390) is done.
 
-1. **S1** Shared projection model and the new `PropType` variants, filled by the structural path where it knows them. Gate: a unit test per variant, golden JSON diff, cache schema test.
+1. **S1** (done) Shared projection model and the new `PropType` variants, filled by the structural path where it knows them. Gate: a unit test per variant, golden JSON diff, cache schema test.
 2. **S2** Flag-based converter in `convert.rs`, memoized by type id within one snapshot, with a named-boundary policy and caps. Gate: the construct suite's expected JSON; reversed query order gives identical bytes.
 3. **S3** React terminals by declaring path. Gate: no regression against today's Chakra `Button` terminals.
 4. **S4** The checker's answer wins when it runs: the addon inside ADR 0022's window, the CLI waiting. Gate: checker-on output equals structural on the suite except a listed set of improvements; Chakra first answer at most 150 ms through the Rust client; the Storybook harness re-run.
@@ -42,7 +43,15 @@ Migration, each slice behind a deterministic gate, none on the oracle:
 7. **S7** Delete the structural resolver for what the suite covers. Gate: every suite row passes with the fallback off on supported platforms; a Windows ARM64 job runs the fallback.
 8. **S8** Make the checker the default (`--no-checker`), and the docs. Gate: `just lint doc-check machete typos`.
 
-Open gates the spike is still measuring: the Rust `tsc-client` against tsrs (every figure above is the Node client), memory past 150 edits, determinism on a large program and other CPU counts, the Storybook harness, in-process linking.
+### Gates before the default flips
+
+S8 stays behind these gates:
+
+- The checker lane of the construct suite (caliper's checker path over `apps/oracle/construct-suite`) shows no regression against the structural path except listed improvements.
+- Output is deterministic across checker counts on a large program.
+- A Linux CI run of the checker path is green.
+- Memory behaviour past 600 edits in a watch session, with the recycle threshold (768 MiB `max_rss_mib`) exercised.
+- The tsrs-against-Go parity check (`pnpm --filter caliper-docgen-oracle construct:parity`, PR 392) passes on the pinned version, and runs on every pin change.
 
 ## Alternatives considered
 
