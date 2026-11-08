@@ -89,8 +89,9 @@ Options:
           the checker cannot answer (off by default)
 
       --tsc-path <TSC_PATH>
-          The `tsc` binary `--experimental-semantic-types` runs, instead of
-          `node_modules/typescript/bin/tsc`
+          The checker binary `--experimental-semantic-types` runs (`tsc` or
+          `tsrs`), instead of the nearest `node_modules/typescript/bin/tsc` or
+          `node_modules/tsrs/bin/tsrs`
 
   -h, --help
           Print help (see a summary with '-h')

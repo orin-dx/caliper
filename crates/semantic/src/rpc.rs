@@ -72,6 +72,17 @@ pub(crate) struct TypeInfo {
     pub value: Option<Value>,
     #[serde(default)]
     pub is_tuple_type: bool,
+    /// The checker's name for an intrinsic type (`"any"`, `"string"`, `"error"`). It alone tells a written `any` from
+    /// the error type of an unresolved name: both carry the `Any` flag, and the error type has an id per site.
+    #[serde(default)]
+    pub intrinsic_name: Option<String>,
+}
+
+impl TypeInfo {
+    /// The checker's error type: what a name that does not resolve is typed as.
+    pub(crate) fn is_error(&self) -> bool {
+        self.flags & flag::ANY != 0 && self.intrinsic_name.as_deref() == Some("error")
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

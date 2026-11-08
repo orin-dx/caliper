@@ -5,6 +5,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
+use caliper_docgen_core::types::semantic::unresolved_type;
 use caliper_docgen_core::types::{FunctionParam, ObjectField, PropType};
 use rustc_hash::FxHashMap;
 
@@ -45,6 +46,9 @@ impl Converter {
 
     async fn uncached(&self, info: &TypeInfo, depth: u8) -> Result<PropType, CallError> {
         let flags = info.flags;
+        if info.is_error() {
+            return Ok(unresolved_type(self.rpc.type_to_string(info.id).await?));
+        }
         let simple = [
             (flag::ANY, PropType::Any),
             (flag::UNKNOWN, PropType::Unknown),
