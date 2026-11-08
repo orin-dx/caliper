@@ -1,0 +1,20 @@
+{
+  "tool_use_id": "toolu_011ieCGcbm447DheNoUFVnqy",
+  "agent_id": "a91f64ace429b972e",
+  "subagent_type": "general-purpose",
+  "task_description": "Verify and fix PR 394 review findings by pattern",
+  "files": [
+    "crates/semantic/tests/fixtures/tmp_inst/Handler.tsx",
+    "crates/semantic/tests/fixtures/tmp_inst/Inst.tsx",
+    "crates/semantic/tests/tmp_inst.rs"
+  ],
+  "token_usage": {
+    "input_tokens": 282,
+    "cache_creation_tokens": 330085,
+    "cache_read_tokens": 32324068,
+    "output_tokens": 141154,
+    "api_call_count": 138
+  },
+  "started_at": "2026-11-07T21:21:08.046955-08:00",
+  "completed_at": "2026-11-07T21:46:14.279892-08:00"
+}
