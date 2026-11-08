@@ -8,7 +8,8 @@
 //! snapshot) without making the output depend on query order. A handle is also what tells one instantiation from
 //! another while a type is being expanded (`Box<Box<string>>` is two instantiations of one declaration): only its
 //! equality is read, inside one conversion, so the answer does not depend on the numbers. The recursion marker that
-//! results is named by the declaration (the alias or interface) and holds no handle.
+//! results is named by the declaration (the alias or interface) and holds no handle. The memo is keyed by the enclosing
+//! instantiations a conversion actually asked about, not by all of them (see [`State::memo`]).
 //!
 //! Every descent into the parts of a type (members, properties, elements, holes) passes [`Converter::enter`], which
 //! decides before anything is fetched or converted whether the type is an enclosing instantiation (a back-reference),
@@ -22,7 +23,6 @@
 //! [`PropType::Truncated`], never the checker's text standing in as a name.
 
 use std::future::Future;
-use std::hash::{Hash, Hasher};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -32,7 +32,7 @@ use caliper_docgen_core::types::{
     BigIntValue, CallSignature, EnumMemberValue, FunctionParam, ObjectField, OpaqueReason, PropType,
     SignatureKind as Kind, TemplatePart, TruncationLimit, TupleElement, TupleElementKind, TupleLabel,
 };
-use rustc_hash::{FxHashMap, FxHasher};
+use rustc_hash::FxHashMap;
 
 use crate::printed::{Marker, SignatureMarkers, signature_markers, tuple_labels};
 use crate::rpc::{
@@ -57,18 +57,73 @@ enum Gate<T> {
 type Converted<'a> = Pin<Box<dyn Future<Output = Result<PropType, CallError>> + Send + 'a>>;
 
 /// Where a type sits: how deep, and which named instantiations (an alias or interface with its type arguments, as the
-/// checker's type handle) enclose it, sorted so that the same set is the same key whatever path led to it.
+/// checker's type handle) enclose it, outermost first.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Cx {
     depth: u8,
     enclosing: Arc<Vec<u64>>,
+    /// The conversion this context belongs to, which records which enclosing instantiations it asks about. `None` at
+    /// the roots.
+    frame: Option<Arc<Frame>>,
+}
+
+/// What one conversion has asked of the instantiations enclosing it, kept to build its memo entry (see
+/// [`State::memo`]).
+#[derive(Debug)]
+struct Frame {
+    /// How many instantiations enclosed the type when its conversion began: those below this are the outer context, the
+    /// rest were opened by the conversion itself.
+    base: usize,
+    asked: Mutex<Asked>,
+}
+
+#[derive(Debug, Default)]
+struct Asked {
+    /// The handles this conversion's own gate compared against its enclosing instantiations.
+    ids: Vec<u64>,
+    /// The sets asked by the conversions of its parts, each with the instantiations this conversion had opened by then:
+    /// those were answered inside it and do not depend on its outer context.
+    parts: Vec<(Arc<[u64]>, Vec<u64>)>,
+}
+
+impl Frame {
+    fn new(base: usize) -> Self {
+        Frame { base, asked: Mutex::default() }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Asked> {
+        self.asked.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn ask(&self, id: u64) {
+        self.lock().ids.push(id);
+    }
+
+    /// A part of this conversion was converted (or recalled) under `enclosing`, having asked about `asked`.
+    fn absorb(&self, asked: &Arc<[u64]>, enclosing: &[u64]) {
+        if !asked.is_empty() {
+            self.lock().parts.push((asked.clone(), enclosing.get(self.base..).unwrap_or_default().to_vec()));
+        }
+    }
+
+    /// Every handle the conversion asked about whose answer came from outside it: sorted, once each.
+    fn finish(&self) -> Arc<[u64]> {
+        let asked = self.lock();
+        let mut ids = asked.ids.clone();
+        for (part, opened) in &asked.parts {
+            ids.extend(part.iter().copied().filter(|id| !opened.contains(id)));
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        ids.into()
+    }
 }
 
 impl Cx {
     /// The context of what a name carries, its type arguments: one level down. Each argument is converted on its own
     /// and passes [`Converter::enter`] if it has parts.
     fn argument(&self) -> Cx {
-        Cx { depth: self.depth.saturating_add(1), enclosing: self.enclosing.clone() }
+        Cx { depth: self.depth.saturating_add(1), enclosing: self.enclosing.clone(), frame: self.frame.clone() }
     }
 
     /// The context of the parts of a type that [`Converter::enter`] has admitted. Only a named instance is kept, since
@@ -76,27 +131,26 @@ impl Cx {
     fn below(&self, instance: Option<u64>) -> Cx {
         let mut enclosing = self.enclosing.clone();
         if let Some(id) = instance
-            && let Err(at) = enclosing.binary_search(&id)
+            && !enclosing.contains(&id)
         {
             let mut grown = (*enclosing).clone();
-            grown.insert(at, id);
+            grown.push(id);
             enclosing = Arc::new(grown);
         }
-        Cx { depth: self.depth.saturating_add(1), enclosing }
+        Cx { depth: self.depth.saturating_add(1), enclosing, frame: self.frame.clone() }
     }
 
+    /// Whether `id` is an instantiation being expanded around the type. The conversion in progress is recorded to have
+    /// asked, whichever the answer.
     fn encloses(&self, id: u64) -> bool {
-        self.enclosing.binary_search(&id).is_ok()
+        if let Some(frame) = &self.frame {
+            frame.ask(id);
+        }
+        self.enclosing.contains(&id)
     }
 
     fn limit<const N: usize>(&self, limits: [usize; N]) -> usize {
         limits[usize::from(self.depth > 0).min(N - 1)]
-    }
-
-    fn fingerprint(&self) -> u64 {
-        let mut hasher = FxHasher::default();
-        self.enclosing.hash(&mut hasher);
-        hasher.finish()
     }
 }
 
@@ -158,11 +212,43 @@ pub(crate) fn declared_in(declaration: &str) -> &str {
     declaration.splitn(3, '.').nth(2).unwrap_or("")
 }
 
-type Memo = Mutex<FxHashMap<(u64, u8, u64), PropType>>;
+/// A converted type, with the enclosing instantiations its conversion depended on.
+#[derive(Debug)]
+struct Entry {
+    /// Every handle the conversion compared against the instantiations enclosing it, sorted.
+    asked: Arc<[u64]>,
+    /// Those of `asked` that did enclose it.
+    enclosed_by: Vec<u64>,
+    converted: PropType,
+}
+
+impl Entry {
+    /// Whether the conversion would go the same way inside `enclosing`: among the handles it asked about, the ones
+    /// that enclose the type there are exactly `enclosed_by`.
+    fn holds_in(&self, enclosing: &[u64]) -> bool {
+        self.enclosed_by.iter().all(|id| enclosing.contains(id))
+            && enclosing.iter().all(|id| self.enclosed_by.contains(id) || self.asked.binary_search(id).is_err())
+    }
+}
+
+type Memo = Mutex<FxHashMap<(u64, u8), Vec<Arc<Entry>>>>;
 
 #[derive(Default)]
 struct State {
-    /// Conversions by (type handle, depth, enclosing instantiations). The handles are valid inside this snapshot only.
+    /// Conversions by (type handle, depth), each entry with the enclosing instantiations it depended on. The handles
+    /// are valid inside this snapshot only.
+    ///
+    /// Why an entry may be reused where [`Entry::holds_in`] says. A conversion reads its context in two ways only: the
+    /// depth, which is in the key, and [`Cx::encloses`], the question whether a handle is an instantiation being
+    /// expanded around the type. Everything else it reads is the checker's answer about the type, which does not change
+    /// inside a snapshot. So a conversion is a deterministic walk whose every step is fixed by the type, the depth and
+    /// the answers to those questions, in the order they are asked. Run it again where each handle it asked about has
+    /// the same answer, and it asks the same questions in the same order and returns the same type. A handle that the
+    /// conversion opened itself is settled inside it (it was found not to enclose the type at its own gate, which is
+    /// recorded), so only the handles asked of the outer context are kept. A type in no cycle with its context asks
+    /// nothing that encloses it and holds everywhere; one in a cycle holds where the same part of the cycle encloses
+    /// it. Entries that hold in a context all agree, so which of them is found first, and so the order in which
+    /// types were first reached, cannot show in the output.
     memo: Memo,
     origins: Mutex<FxHashMap<(bool, CompactSymbol), Option<Origin>>>,
     /// By (type handle, whether printed expanded: see [`Rpc::type_to_string_expanded`]).
@@ -209,18 +295,34 @@ impl Converter {
 
     fn convert<'a>(&'a self, info: &'a TypeInfo, cx: &'a Cx) -> Converted<'a> {
         Box::pin(async move {
-            let key = (info.id, cx.depth, cx.fingerprint());
-            if let Some(hit) = self.state.memo.lock().ok().and_then(|memo| memo.get(&key).cloned()) {
+            if let Some(entry) = self.recall(info.id, cx) {
                 self.state.hits.fetch_add(1, Ordering::Relaxed);
-                return Ok(hit);
+                if let Some(frame) = &cx.frame {
+                    frame.absorb(&entry.asked, &cx.enclosing);
+                }
+                return Ok(entry.converted.clone());
             }
             self.state.misses.fetch_add(1, Ordering::Relaxed);
-            let converted = self.uncached(info, cx).await?;
+            let frame = Arc::new(Frame::new(cx.enclosing.len()));
+            let own = Cx { depth: cx.depth, enclosing: cx.enclosing.clone(), frame: Some(frame.clone()) };
+            let converted = self.uncached(info, &own).await?;
+            let asked = frame.finish();
+            if let Some(parent) = &cx.frame {
+                parent.absorb(&asked, &cx.enclosing);
+            }
+            let enclosed_by = cx.enclosing.iter().copied().filter(|id| asked.binary_search(id).is_ok()).collect();
+            let entry = Arc::new(Entry { asked, enclosed_by, converted: converted.clone() });
             if let Ok(mut memo) = self.state.memo.lock() {
-                memo.insert(key, converted.clone());
+                memo.entry((info.id, cx.depth)).or_default().push(entry);
             }
             Ok(converted)
         })
+    }
+
+    /// The entry for the type at this depth that holds inside the instantiations enclosing it, if there is one.
+    fn recall(&self, id: u64, cx: &Cx) -> Option<Arc<Entry>> {
+        let memo = self.state.memo.lock().ok()?;
+        memo.get(&(id, cx.depth))?.iter().find(|entry| entry.holds_in(&cx.enclosing)).cloned()
     }
 
     async fn uncached(&self, info: &TypeInfo, cx: &Cx) -> Result<PropType, CallError> {
