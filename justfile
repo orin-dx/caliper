@@ -79,6 +79,22 @@ test-ts:
 test-parity:
     pnpm --filter caliper-docgen-oracle construct:parity
 
+# The checker gates of ADR 0026, with nothing allowed to skip: the golden check, tsrs-against-Go parity, and the construct
+# suite through the checker path held to checker-expectations.json. The pinned tsrs binary is the one the `tsrs` package
+# itself selects for this platform (@tsrs/<os>-<arch>[-gnu|-musl]); see apps/oracle/construct-suite/README.md.
+test-checker-lane:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release --locked -p caliper-docgen
+    export REQUIRE_TSRS=1 REQUIRE_CALIPER_BIN=1 CALIPER_BIN="$PWD/target/release/caliper-docgen"
+    TSRS_BIN="$(pnpm --silent --filter caliper-docgen-oracle exec tsx src/tsrs-bin.ts)"
+    export TSRS_BIN
+    echo "tsrs: $TSRS_BIN"
+    pnpm --filter caliper-docgen-oracle construct:check
+    pnpm --filter caliper-docgen-oracle construct:parity
+    CALIPER_SEMANTIC=1 pnpm --filter caliper-docgen-oracle construct:checker
+    pnpm --filter caliper-docgen-oracle exec vitest run tests/construct-checker-lane.test.ts
+
 # Build the native binding and run the Vite plugin against it
 test-integration:
     pnpm --filter caliper-docgen-napi build:napi
