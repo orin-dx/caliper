@@ -2,7 +2,8 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { caliperNorm, compare, prim, type Norm } from '../src/oracle-compare.ts'
+import { caliperNorm } from '../src/caliper-norm.ts'
+import { compare, prim, type Norm } from '../src/oracle-compare.ts'
 import { lit } from './lit.ts'
 
 const union = (...members: Norm[]): Norm => ({ k: 'union', members })
@@ -173,9 +174,58 @@ describe('the oracle comparison', () => {
       expect(compare(readonlyStrings, { k: 'array', element: prim('string') })).toBe('identical')
       const readonlyTuple = caliperNorm({
         kind: 'readonly',
-        element: { kind: 'tuple', elements: [{ kind: 'string' }, { kind: 'number' }] },
+        element: { kind: 'tuple', elements: [{ type: { kind: 'string' } }, { type: { kind: 'number' } }] },
       })
       expect(compare(readonlyTuple, { k: 'tuple', elements: [prim('string'), prim('number')] })).toBe('identical')
+    })
+
+    it('the kinds schema version 5 adds read as the checker states them', () => {
+      expect.hasAssertions()
+      const string = { kind: 'string' }
+      const number = { kind: 'number' }
+      // A rest element is its element type, as the checker's tuple type arguments are.
+      const rest = caliperNorm({
+        kind: 'tuple',
+        elements: [
+          { type: string, label: 'head' },
+          { type: number, label: 'tail', modifier: 'rest' },
+        ],
+      })
+      expect(rest).toStrictEqual({ k: 'tuple', elements: [prim('string'), prim('number')] })
+      expect(caliperNorm({ kind: 'bigintLiteral', value: '-10' })).toStrictEqual(lit('-10', 'bigint'))
+      expect(
+        caliperNorm({
+          kind: 'enumMember',
+          enum: 'Size',
+          member: 'Small',
+          value: { kind: 'stringLiteral', value: 'small' },
+        }),
+      ).toStrictEqual(lit('small', 'string'))
+      expect(caliperNorm({ kind: 'templateLiteral', parts: [{ type: number }, { text: 'px' }] })).toStrictEqual(
+        prim('string'),
+      )
+      expect(caliperNorm({ kind: 'recursive', name: 'Json', args: [] })).toStrictEqual({ k: 'name', name: 'Json' })
+      expect(caliperNorm({ kind: 'truncated', text: 'A', limit: { type: 'depth' } })).toStrictEqual({ k: 'opaque' })
+      const call = { typeParams: [], params: [{ name: 'value', type: string }], returnType: string }
+      const construct = { construct: true, typeParams: [], params: [], returnType: string }
+      // Overloads read as the first call signature, a callable with properties as its properties, and construct
+      // signatures alone as an empty object: what the checker side makes of each.
+      expect(caliperNorm({ kind: 'callable', signatures: [construct, call, call], fields: [] })).toStrictEqual({
+        k: 'function',
+        params: [{ optional: false, rest: false, type: prim('string') }],
+        returns: prim('string'),
+      })
+      const field = { name: 'displayName', propType: string, required: false, description: '' }
+      expect(caliperNorm({ kind: 'callable', signatures: [call], fields: [field] })).toStrictEqual({
+        k: 'object',
+        fields: ['displayName'],
+        index: false,
+      })
+      expect(caliperNorm({ kind: 'callable', signatures: [construct], fields: [] })).toStrictEqual({
+        k: 'object',
+        fields: [],
+        index: false,
+      })
     })
 
     it('a readonly array of another element type is still wrong', () => {

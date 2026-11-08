@@ -142,18 +142,22 @@ fn type_refs(ty: &CollectedType, out: &mut FxHashSet<CompactString>) {
         }
         CollectedType::Union(members)
         | CollectedType::Intersection(members)
-        | CollectedType::Tuple(members)
         | CollectedType::TemplateLiteral(members) => members.iter().for_each(|member| type_refs(member, out)),
+        CollectedType::Tuple(elements) => elements.iter().for_each(|element| type_refs(&element.element_type, out)),
         CollectedType::Array(inner) | CollectedType::Readonly(inner) | CollectedType::KeyOf(inner) => {
             type_refs(inner, out)
         }
         CollectedType::AtFile { inner, .. } => type_refs(inner, out),
-        CollectedType::Object(fields) => fields.iter().for_each(|field| {
-            type_refs(&field.collected_type, out);
-            if let Some(key) = &field.index_key {
-                type_refs(key, out);
+        CollectedType::Object(fields) => field_refs(fields, out),
+        CollectedType::Callable { signatures, fields } => {
+            for signature in signatures {
+                let mut inner = FxHashSet::default();
+                signature.params.iter().for_each(|param| type_refs(param, &mut inner));
+                type_refs(&signature.return_type, &mut inner);
+                out.extend(inner.into_iter().filter(|name| !signature.type_params.contains(name)));
             }
-        }),
+            field_refs(fields, out);
+        }
         CollectedType::IndexedAccess { obj, key } => {
             type_refs(obj, out);
             type_refs(key, out);
@@ -189,8 +193,19 @@ fn type_refs(ty: &CollectedType, out: &mut FxHashSet<CompactString>) {
         | CollectedType::StringLiteral(_)
         | CollectedType::NumberLiteral(_)
         | CollectedType::BoolLiteral(_)
+        | CollectedType::BigIntLiteral(_)
+        | CollectedType::UniqueSymbol
         | CollectedType::Raw(_) => {}
     }
+}
+
+fn field_refs(fields: &[crate::types::CollectedObjectField], out: &mut FxHashSet<CompactString>) {
+    fields.iter().for_each(|field| {
+        type_refs(&field.collected_type, out);
+        if let Some(key) = &field.index_key {
+            type_refs(key, out);
+        }
+    })
 }
 
 /// The module and exported name path `reference` (as written in `file`) reaches through one of `imports`, if it is

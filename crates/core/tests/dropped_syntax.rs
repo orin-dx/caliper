@@ -1,11 +1,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! `readonly`, index signatures and the name of a ref type reach the output (schema version 4), and an index
+//! `readonly`, index signatures and the name of a ref type reach the output (schema version 4 and on), and an index
 //! signature is never mistaken for a prop.
 
 use std::collections::BTreeSet;
 
 use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, extract};
-use caliper_docgen_core::types::{ExtractionOutput, ObjectField, PropType, SCHEMA_VERSION};
+use caliper_docgen_core::types::{ExtractionOutput, ObjectField, PropType, SCHEMA_VERSION, TupleElement};
 use camino::Utf8PathBuf;
 use serde_json::json;
 use tempfile::TempDir;
@@ -60,8 +60,8 @@ fn wire(output: &ExtractionOutput, component: &str, prop: &str) -> serde_json::V
 }
 
 #[test]
-fn the_output_is_schema_version_4() {
-    assert_eq!(SCHEMA_VERSION, 4);
+fn the_output_is_schema_version_5() {
+    assert_eq!(SCHEMA_VERSION, 5);
 }
 
 #[test]
@@ -81,7 +81,10 @@ fn readonly_arrays_and_tuples_keep_the_operator() {
     assert_eq!(props["tags"].prop_type, PropType::Readonly(Box::new(strings.clone())));
     assert_eq!(
         props["pair"].prop_type,
-        PropType::Readonly(Box::new(PropType::Tuple(vec![PropType::Number, PropType::Number])))
+        PropType::Readonly(Box::new(PropType::Tuple(vec![
+            TupleElement::required(PropType::Number),
+            TupleElement::required(PropType::Number)
+        ])))
     );
     assert_eq!(props["mixed"].prop_type, PropType::Union(vec![strings.clone(), PropType::Readonly(Box::new(strings))]));
     assert_eq!(props["tags"].prop_type.raw_string(), "readonly string[]");

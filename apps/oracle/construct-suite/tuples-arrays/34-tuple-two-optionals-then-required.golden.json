@@ -1,0 +1,47 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "tuple",
+        "elements": [
+          {
+            "k": "union",
+            "members": [
+              {
+                "k": "prim",
+                "name": "undefined"
+              },
+              {
+                "k": "prim",
+                "name": "string"
+              }
+            ]
+          },
+          {
+            "k": "union",
+            "members": [
+              {
+                "k": "prim",
+                "name": "undefined"
+              },
+              {
+                "k": "prim",
+                "name": "number"
+              }
+            ]
+          },
+          {
+            "k": "prim",
+            "name": "boolean"
+          }
+        ]
+      }
+    ]
+  },
+  "text": "[string | undefined, number | undefined, boolean] | undefined"
+}

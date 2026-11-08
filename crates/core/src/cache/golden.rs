@@ -32,7 +32,12 @@ export interface ButtonProps<TValue = string> extends Base {
   onPress?: (event: MouseEvent) => void;
   tags?: readonly string[];
   slots: { readonly id: string; [key: string]: number };
+  pair?: [head: string, count?: number, ...tail: number[]];
+  big?: 10n | -1n;
+  call?: { (a: string): number; new (a: number): Base; get size(): number };
 }
+
+declare const brand: unique symbol;
 
 export type Alias = Pick2<ButtonProps, "tone"> & { extra?: number };
 

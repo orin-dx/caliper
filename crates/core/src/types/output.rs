@@ -14,8 +14,9 @@ pub(crate) mod interned;
 /// The version of the canonical JSON shape (ADR 0017): `schemaVersion` in an [`ExtractionOutput`], an
 /// [`IncrementalUpdate`](crate::pipeline::IncrementalUpdate) and a session index. Bumped whenever a reader of the
 /// previous shape would misread or lose data from the new one; never by an addition it can ignore. Version 2 writes a
-/// component's props as prop set ids and an inheritance layer's `omitted` as a name list id (ADR 0018).
-pub const SCHEMA_VERSION: u32 = 4;
+/// component's props as prop set ids and an inheritance layer's `omitted` as a name list id (ADR 0018). Version 5 writes
+/// a tuple's elements as `{ type, label?, modifier? }` and adds the kinds the checker states (ADR 0026, slice S1).
+pub const SCHEMA_VERSION: u32 = 5;
 
 // ─── Top-level output ─────────────────────────────────────────────────────────
 
@@ -358,6 +359,26 @@ pub enum PropType {
     NumberLiteral(f64),
     /// `true` or `false` as a type.
     BoolLiteral(bool),
+    /// A bigint literal type such as `10n` or `-1n`.
+    BigIntLiteral(BigIntValue),
+    /// `typeof name` where the value `name` is declared `unique symbol`: a symbol type of its own, unlike `symbol`.
+    UniqueSymbol {
+        /// The name of the value declared `unique symbol` (`brand` in `declare const brand: unique symbol`).
+        name: TypeName,
+    },
+    /// One member of an enum, as a type: `Size.Small` in `enum Size { Small = "small" }`. It is that member's value
+    /// and keeps the enum's identity, which a plain literal loses.
+    EnumMember {
+        /// The enum's name as written (`Size`).
+        enum_name: TypeName,
+        /// The member's name (`Small`).
+        member: TypeName,
+        /// The member's value.
+        value: EnumMemberValue,
+    },
+    /// A template literal type that stays a pattern, `` `${number}px` ``: its text pieces and `${…}` holes in order.
+    /// A template whose holes are all finite literal unions is expanded to its strings instead.
+    TemplateLiteral(Vec<TemplatePart>),
 
     // ── Composites
     /// `A | B`: the members in declaration order.
@@ -366,12 +387,24 @@ pub enum PropType {
     Intersection(Vec<PropType>),
     /// `T[]` or `Array<T>`: the element type.
     Array(Box<PropType>),
-    /// `[A, B]`: the element types in order.
-    Tuple(Vec<PropType>),
+    /// `[A, B?, ...C[]]`: the elements in order, each with its optional, rest or variadic marker and its label. A
+    /// spread of a tuple the resolver knows (`[A, ...Tail]`) is flattened into its elements, as TypeScript does.
+    Tuple(Vec<TupleElement>),
     /// `readonly string[]` or `readonly [a, b]`: the array or tuple under the `readonly` operator.
     Readonly(Box<PropType>),
     /// An object type `{ a: string; b?: number }`: its members and index signatures, in declaration order.
     Object(Vec<ObjectField>),
+    /// An object type with call or construct signatures that is not one plain function: overloads
+    /// `{ (a: string): string; (a: number): number }`, a constructor `{ new (a: string): Date }`, or a function with
+    /// properties `{ (): void; displayName?: string }`. A single call signature with nothing else is a [`Function`].
+    ///
+    /// [`Function`]: PropType::Function
+    Callable {
+        /// The call and construct signatures, in declaration order.
+        signatures: Vec<CallSignature>,
+        /// The properties and index signatures beside them, in declaration order.
+        fields: Vec<ObjectField>,
+    },
 
     // ── Named reference (post-resolution)
     /// A reference to a type by name that the resolver kept rather than expanding (a type from a dependency that was
@@ -381,6 +414,24 @@ pub enum PropType {
         name: TypeName,
         /// Generic args, already resolved to PropType
         args: Vec<PropType>,
+    },
+    /// A reference back to a type whose expansion encloses it: the nested `Json` in
+    /// `type Json = string | Json[] | { [key: string]: Json }`. Not a loss: the enclosing expansion is the type.
+    Recursive {
+        /// The name of the enclosing type.
+        name: TypeName,
+        /// Its type arguments as written at the reference.
+        args: Vec<PropType>,
+    },
+    /// A type cut short at a depth or size limit, kept as its text. Unlike [`Opaque`] it is not a construct the
+    /// resolver cannot read: it chose not to expand further. It counts in `degradedBy` as `truncated`.
+    ///
+    /// [`Opaque`]: PropType::Opaque
+    Truncated {
+        /// The type's text where it was cut: its name, or how the checker prints it.
+        text: std::string::String,
+        /// Which limit cut it.
+        limit: TruncationLimit,
     },
 
     // ── React-specific terminals
@@ -508,37 +559,54 @@ impl PropType {
             PropType::StringLiteral(s) => s.hash(hasher),
             PropType::NumberLiteral(n) => n.to_bits().hash(hasher),
             PropType::BoolLiteral(b) => b.hash(hasher),
-            PropType::Union(members) | PropType::Intersection(members) | PropType::Tuple(members) => {
-                all(hasher, members)
-            }
-            PropType::Array(inner) | PropType::Readonly(inner) => inner.structural_hash(hasher),
-            PropType::Object(fields) => {
-                fields.len().hash(hasher);
-                for field in fields {
-                    field.name.hash(hasher);
-                    field.required.hash(hasher);
-                    field.readonly.hash(hasher);
-                    if let Some(key) = &field.index_key {
-                        key.structural_hash(hasher);
-                    }
-                    field.description.hash(hasher);
-                    field.prop_type.structural_hash(hasher);
+            PropType::BigIntLiteral(value) => value.as_str().hash(hasher),
+            PropType::UniqueSymbol { name } => name.hash(hasher),
+            PropType::EnumMember { enum_name, member, value } => {
+                enum_name.hash(hasher);
+                member.hash(hasher);
+                match value {
+                    EnumMemberValue::String(s) => s.hash(hasher),
+                    EnumMemberValue::Number(n) => n.to_bits().hash(hasher),
                 }
             }
-            PropType::Named { name, args } => {
+            PropType::TemplateLiteral(parts) => {
+                parts.len().hash(hasher);
+                for part in parts {
+                    match part {
+                        TemplatePart::Text(text) => text.hash(hasher),
+                        TemplatePart::Type(ty) => ty.structural_hash(hasher),
+                    }
+                }
+            }
+            PropType::Union(members) | PropType::Intersection(members) => all(hasher, members),
+            PropType::Tuple(elements) => {
+                elements.len().hash(hasher);
+                for element in elements {
+                    element.kind.hash(hasher);
+                    element.label.hash(hasher);
+                    element.element_type.structural_hash(hasher);
+                }
+            }
+            PropType::Array(inner) | PropType::Readonly(inner) => inner.structural_hash(hasher),
+            PropType::Object(fields) => hash_fields(fields, hasher),
+            PropType::Callable { signatures, fields } => {
+                signatures.len().hash(hasher);
+                for signature in signatures {
+                    signature.kind.hash(hasher);
+                    hash_signature(&signature.type_params, &signature.params, &signature.return_type, hasher);
+                }
+                hash_fields(fields, hasher);
+            }
+            PropType::Named { name, args } | PropType::Recursive { name, args } => {
                 name.hash(hasher);
                 all(hasher, args);
             }
+            PropType::Truncated { text, limit } => {
+                text.hash(hasher);
+                limit.hash(hasher);
+            }
             PropType::Function { type_params, params, return_type } => {
-                type_params.hash(hasher);
-                params.len().hash(hasher);
-                for param in params {
-                    param.name.hash(hasher);
-                    param.optional.hash(hasher);
-                    param.rest.hash(hasher);
-                    param.param_type.structural_hash(hasher);
-                }
-                return_type.structural_hash(hasher);
+                hash_signature(type_params, params, return_type, hasher)
             }
             PropType::Ref { name, element } => {
                 name.hash(hasher);
@@ -571,25 +639,44 @@ impl PropType {
         })
     }
 
-    /// Whether any opaque type, whatever the reason, appears anywhere in this type.
+    /// Whether any opaque or truncated type, whatever the reason, appears anywhere in this type: whether the checker
+    /// could give a better answer for it.
     pub(crate) fn holds_opaque(&self) -> bool {
-        self.holds_opaque_where(&|_| true)
+        let mut found = false;
+        self.visit(&mut |ty| found |= matches!(ty, PropType::Opaque(_) | PropType::Truncated { .. }));
+        found
     }
 
     fn holds_opaque_where(&self, test: &dyn Fn(&OpaqueDetail) -> bool) -> bool {
+        let mut found = false;
+        self.visit(&mut |ty| found |= matches!(ty, PropType::Opaque(detail) if test(detail)));
+        found
+    }
+
+    /// Call `f` on this type, then on every type inside it, depth first and in the order the type holds them (an
+    /// index signature's key before its value).
+    fn visit(&self, f: &mut dyn FnMut(&PropType)) {
+        f(self);
         match self {
-            PropType::Opaque(detail) => test(detail),
-            PropType::Union(members) | PropType::Intersection(members) | PropType::Tuple(members) => {
-                members.iter().any(|member| member.holds_opaque_where(test))
+            PropType::Union(members) | PropType::Intersection(members) => members.iter().for_each(|m| m.visit(f)),
+            PropType::Tuple(elements) => elements.iter().for_each(|e| e.element_type.visit(f)),
+            PropType::Array(inner) | PropType::Readonly(inner) => inner.visit(f),
+            PropType::Object(fields) => visit_fields(fields, f),
+            PropType::Callable { signatures, fields } => {
+                for signature in signatures {
+                    signature.params.iter().for_each(|p| p.param_type.visit(f));
+                    signature.return_type.visit(f);
+                }
+                visit_fields(fields, f);
             }
-            PropType::Array(inner) | PropType::Readonly(inner) => inner.holds_opaque_where(test),
-            PropType::Object(fields) => fields.iter().any(|f| {
-                f.prop_type.holds_opaque_where(test)
-                    || f.index_key.as_ref().is_some_and(|key| key.holds_opaque_where(test))
+            PropType::TemplateLiteral(parts) => parts.iter().for_each(|part| match part {
+                TemplatePart::Text(_) => {}
+                TemplatePart::Type(ty) => ty.visit(f),
             }),
-            PropType::Named { args, .. } => args.iter().any(|arg| arg.holds_opaque_where(test)),
+            PropType::Named { args, .. } | PropType::Recursive { args, .. } => args.iter().for_each(|a| a.visit(f)),
             PropType::Function { params, return_type, .. } => {
-                params.iter().any(|p| p.param_type.holds_opaque_where(test)) || return_type.holds_opaque_where(test)
+                params.iter().for_each(|p| p.param_type.visit(f));
+                return_type.visit(f);
             }
             PropType::String
             | PropType::Number
@@ -603,26 +690,88 @@ impl PropType {
             | PropType::StringLiteral(_)
             | PropType::NumberLiteral(_)
             | PropType::BoolLiteral(_)
+            | PropType::BigIntLiteral(_)
+            | PropType::UniqueSymbol { .. }
+            | PropType::EnumMember { .. }
+            | PropType::Truncated { .. }
             | PropType::ReactNode
             | PropType::CssProperties
             | PropType::Ref { .. }
             | PropType::ElementType
             | PropType::HtmlAttributes { .. }
             | PropType::LiteralUnion { .. }
-            | PropType::SxProps => false,
+            | PropType::SxProps
+            | PropType::Opaque(_) => {}
+        }
+    }
+
+    /// The primitive this type is one literal value of, or `None` for a type that is not a single literal. An enum
+    /// member is a literal of its value's primitive. Every projection that decides whether a type is a value to offer
+    /// (RDT's `enum`, TOON's uncut unions) asks this, so they agree on what a literal is.
+    pub(crate) fn literal_kind(&self) -> Option<LiteralKind> {
+        match self {
+            PropType::StringLiteral(_) | PropType::EnumMember { value: EnumMemberValue::String(_), .. } => {
+                Some(LiteralKind::String)
+            }
+            PropType::NumberLiteral(_) | PropType::EnumMember { value: EnumMemberValue::Number(_), .. } => {
+                Some(LiteralKind::Number)
+            }
+            PropType::BoolLiteral(_) => Some(LiteralKind::Boolean),
+            PropType::BigIntLiteral(_) => Some(LiteralKind::BigInt),
+            PropType::String
+            | PropType::Number
+            | PropType::Boolean
+            | PropType::Null
+            | PropType::Undefined
+            | PropType::Any
+            | PropType::Never
+            | PropType::Unknown
+            | PropType::Void
+            | PropType::UniqueSymbol { .. }
+            | PropType::TemplateLiteral(_)
+            | PropType::Union(_)
+            | PropType::Intersection(_)
+            | PropType::Array(_)
+            | PropType::Tuple(_)
+            | PropType::Readonly(_)
+            | PropType::Object(_)
+            | PropType::Callable { .. }
+            | PropType::Named { .. }
+            | PropType::Recursive { .. }
+            | PropType::Truncated { .. }
+            | PropType::ReactNode
+            | PropType::CssProperties
+            | PropType::Function { .. }
+            | PropType::Ref { .. }
+            | PropType::ElementType
+            | PropType::HtmlAttributes { .. }
+            | PropType::LiteralUnion { .. }
+            | PropType::SxProps
+            | PropType::Opaque(_) => None,
+        }
+    }
+
+    /// The source text of this type as one option of a control: the literal's own text, and for an enum member its
+    /// value's (`"small"` for `Size.Small`), which is what the control passes at runtime. Every other type is its
+    /// `raw_string`.
+    pub fn option_text(&self) -> std::string::String {
+        let PropType::EnumMember { value, .. } = self else { return self.raw_string() };
+        match value {
+            EnumMemberValue::String(s) => PropType::StringLiteral(s.clone()).raw_string(),
+            EnumMemberValue::Number(n) => PropType::NumberLiteral(*n).raw_string(),
         }
     }
 
     /// True if this type offers string or number options, which RDT output writes as an `enum` so Storybook shows the
-    /// options as a radio: a union of string and number literals, or a single one. A union that also has a boolean
-    /// member is an enum only when Storybook cannot read it from its type name (see `reads_as_json_options`), because
-    /// the enum shape turns `true` into the string "true". A union with no members, or only booleans, has nothing to
-    /// offer.
+    /// options as a radio: a union of string and number literals (enum members included), or a single one. A union
+    /// that also has a boolean member is an enum only when Storybook cannot read it from its type name (see
+    /// `reads_as_json_options`), because the enum shape turns `true` into the string "true". A union with no members,
+    /// or only booleans, has nothing to offer; a bigint literal is not an option Storybook can pass.
     pub fn is_literal_union(&self) -> bool {
-        let is_option = |m: &PropType| matches!(m, PropType::StringLiteral(_) | PropType::NumberLiteral(_));
+        let is_option = |m: &PropType| matches!(m.literal_kind(), Some(LiteralKind::String | LiteralKind::Number));
         match self {
             PropType::Union(members) => {
-                let is_literal = |m: &PropType| is_option(m) || matches!(m, PropType::BoolLiteral(_));
+                let is_literal = |m: &PropType| is_option(m) || m.literal_kind() == Some(LiteralKind::Boolean);
                 members.iter().any(is_option) && members.iter().all(is_literal) && !self.reads_as_json_options()
             }
             PropType::LiteralUnion { members, .. } => !members.is_empty(),
@@ -633,17 +782,24 @@ impl PropType {
     /// True for a union with a boolean member whose type name Storybook reads whole: it splits the name at each `|` and
     /// parses every part as JSON, which gives `true` as a real boolean. That holds only while every member's source
     /// text is one JSON value that parses back to the member and holds no `|`. A string with a `|`, a `"` or a `\`
-    /// does not, and the union is then an `enum` so that no option is lost.
+    /// does not, and the union is then an `enum` so that no option is lost. An enum member's name is not JSON either.
     fn reads_as_json_options(&self) -> bool {
         let PropType::Union(members) = self else { return false };
-        members.iter().any(|m| matches!(m, PropType::BoolLiteral(_)))
-            && members.iter().all(|m| match m {
-                PropType::StringLiteral(s) => {
-                    !s.contains('|')
-                        && serde_json::from_str::<std::string::String>(&m.raw_string()).is_ok_and(|parsed| parsed == *s)
+        members.iter().any(|m| m.literal_kind() == Some(LiteralKind::Boolean))
+            && members.iter().all(|m| {
+                // An enum member's text is its name, not a value.
+                let named = matches!(m, PropType::EnumMember { .. });
+                match m.literal_kind() {
+                    Some(LiteralKind::String) => {
+                        let raw = m.raw_string();
+                        !named
+                            && !raw.contains('|')
+                            && serde_json::from_str::<std::string::String>(&raw)
+                                .is_ok_and(|parsed| m == &PropType::StringLiteral(parsed))
+                    }
+                    Some(LiteralKind::Number | LiteralKind::Boolean) => !named,
+                    Some(LiteralKind::BigInt) | None => false,
                 }
-                PropType::NumberLiteral(_) | PropType::BoolLiteral(_) => true,
-                _ => false,
             })
     }
 
@@ -662,6 +818,19 @@ impl PropType {
             PropType::StringLiteral(s) => format!("\"{}\"", s),
             PropType::NumberLiteral(n) => n.to_string(),
             PropType::BoolLiteral(b) => b.to_string(),
+            PropType::BigIntLiteral(value) => format!("{}n", value.as_str()),
+            PropType::UniqueSymbol { name } => format!("typeof {name}"),
+            PropType::EnumMember { enum_name, member, .. } => format!("{enum_name}.{member}"),
+            PropType::TemplateLiteral(parts) => {
+                let body: std::string::String = parts
+                    .iter()
+                    .map(|part| match part {
+                        TemplatePart::Text(text) => text.clone(),
+                        TemplatePart::Type(ty) => format!("${{{}}}", ty.raw_string()),
+                    })
+                    .collect();
+                format!("`{body}`")
+            }
             PropType::Union(members) => {
                 members.iter().map(|m| m.operand_string(Precedence::Union)).collect::<Vec<_>>().join(" | ")
             }
@@ -670,48 +839,30 @@ impl PropType {
             }
             PropType::Array(inner) => format!("{}[]", inner.operand_string(Precedence::Array)),
             PropType::Readonly(inner) => format!("readonly {}", inner.operand_string(Precedence::Array)),
-            PropType::Tuple(members) => {
-                format!("[{}]", members.iter().map(|m| m.raw_string()).collect::<Vec<_>>().join(", "))
+            PropType::Tuple(elements) => {
+                format!("[{}]", elements.iter().map(TupleElement::source).collect::<Vec<_>>().join(", "))
             }
             PropType::Object(fields) => {
-                let fields_str = fields
-                    .iter()
-                    .map(|f| {
-                        let readonly = if f.readonly { "readonly " } else { "" };
-                        if let Some(key) = &f.index_key {
-                            return format!(
-                                "{readonly}[{}: {}]: {}",
-                                f.name,
-                                key.raw_string(),
-                                f.prop_type.raw_string()
-                            );
-                        }
-                        let name = if is_valid_identifier(&f.name) { f.name.clone() } else { format!("'{}'", f.name) };
-                        let optional = if f.required { "" } else { "?" };
-                        format!("{readonly}{}{}: {}", name, optional, f.prop_type.raw_string())
-                    })
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                format!("{{ {} }}", fields_str)
+                format!("{{ {} }}", fields.iter().map(ObjectField::source).collect::<Vec<_>>().join("; "))
+            }
+            PropType::Callable { signatures, fields } => {
+                let members =
+                    signatures.iter().map(CallSignature::source).chain(fields.iter().map(ObjectField::source));
+                format!("{{ {} }}", members.collect::<Vec<_>>().join("; "))
             }
             PropType::LiteralUnion { members, .. } => {
                 members.iter().map(|m| format!(r#""{}""#, m)).collect::<Vec<_>>().join(" | ")
             }
-            PropType::Named { name, args } if args.is_empty() => name.to_string(),
-            PropType::Named { name, args } => {
+            PropType::Named { name, args } | PropType::Recursive { name, args } if args.is_empty() => name.to_string(),
+            PropType::Named { name, args } | PropType::Recursive { name, args } => {
                 let args_str = args.iter().map(|a| a.raw_string()).collect::<Vec<_>>().join(", ");
                 format!("{}<{}>", name, args_str)
             }
+            PropType::Truncated { text, .. } => text.clone(),
             PropType::ReactNode => "ReactNode".into(),
             PropType::CssProperties => "CSSProperties".into(),
             PropType::Function { type_params, params, return_type } => {
-                let type_params = if type_params.is_empty() {
-                    std::string::String::new()
-                } else {
-                    format!("<{}>", type_params.join(", "))
-                };
-                let params = params.iter().enumerate().map(|(i, p)| p.signature(i)).collect::<Vec<_>>().join(", ");
-                format!("{type_params}({params}) => {}", return_type.raw_string())
+                format!("{} => {}", signature_head(type_params, params), return_type.raw_string())
             }
             PropType::Ref { name, element: Some(e) } => format!("{name}<{e}>"),
             PropType::Ref { name, element: None } => format!("{name}<unknown>"),
@@ -731,7 +882,37 @@ impl PropType {
             PropType::Function { .. } => Precedence::Function,
             PropType::Union(_) | PropType::LiteralUnion { .. } => Precedence::Union,
             PropType::Intersection(_) => Precedence::Intersection,
-            _ => Precedence::Array,
+            PropType::String
+            | PropType::Number
+            | PropType::Boolean
+            | PropType::Null
+            | PropType::Undefined
+            | PropType::Any
+            | PropType::Never
+            | PropType::Unknown
+            | PropType::Void
+            | PropType::StringLiteral(_)
+            | PropType::NumberLiteral(_)
+            | PropType::BoolLiteral(_)
+            | PropType::BigIntLiteral(_)
+            | PropType::UniqueSymbol { .. }
+            | PropType::EnumMember { .. }
+            | PropType::TemplateLiteral(_)
+            | PropType::Array(_)
+            | PropType::Tuple(_)
+            | PropType::Readonly(_)
+            | PropType::Object(_)
+            | PropType::Callable { .. }
+            | PropType::Named { .. }
+            | PropType::Recursive { .. }
+            | PropType::Truncated { .. }
+            | PropType::ReactNode
+            | PropType::CssProperties
+            | PropType::Ref { .. }
+            | PropType::ElementType
+            | PropType::HtmlAttributes { .. }
+            | PropType::SxProps
+            | PropType::Opaque(_) => Precedence::Array,
         };
         if own < context { format!("({})", self.raw_string()) } else { self.raw_string() }
     }
@@ -754,27 +935,20 @@ impl serde::Serialize for PropType {
         use serde::ser::SerializeMap;
 
         let mut map = serializer.serialize_map(None)?;
-        let unit_kind: Option<&str> = match self {
-            PropType::String => Some("string"),
-            PropType::Number => Some("number"),
-            PropType::Boolean => Some("boolean"),
-            PropType::Null => Some("null"),
-            PropType::Undefined => Some("undefined"),
-            PropType::Any => Some("any"),
-            PropType::Never => Some("never"),
-            PropType::Unknown => Some("unknown"),
-            PropType::Void => Some("void"),
-            PropType::ReactNode => Some("reactNode"),
-            PropType::CssProperties => Some("cssProperties"),
-            PropType::ElementType => Some("elementType"),
-            PropType::SxProps => Some("sxProps"),
-            _ => None,
-        };
-        if let Some(kind) = unit_kind {
-            map.serialize_entry("kind", kind)?;
-            return map.end();
-        }
         match self {
+            PropType::String => map.serialize_entry("kind", "string")?,
+            PropType::Number => map.serialize_entry("kind", "number")?,
+            PropType::Boolean => map.serialize_entry("kind", "boolean")?,
+            PropType::Null => map.serialize_entry("kind", "null")?,
+            PropType::Undefined => map.serialize_entry("kind", "undefined")?,
+            PropType::Any => map.serialize_entry("kind", "any")?,
+            PropType::Never => map.serialize_entry("kind", "never")?,
+            PropType::Unknown => map.serialize_entry("kind", "unknown")?,
+            PropType::Void => map.serialize_entry("kind", "void")?,
+            PropType::ReactNode => map.serialize_entry("kind", "reactNode")?,
+            PropType::CssProperties => map.serialize_entry("kind", "cssProperties")?,
+            PropType::ElementType => map.serialize_entry("kind", "elementType")?,
+            PropType::SxProps => map.serialize_entry("kind", "sxProps")?,
             // Newtype/tuple variants get a real field name instead of a positional "0" key.
             PropType::StringLiteral(value) => {
                 map.serialize_entry("kind", "stringLiteral")?;
@@ -782,21 +956,34 @@ impl serde::Serialize for PropType {
             }
             PropType::NumberLiteral(n) => {
                 map.serialize_entry("kind", "numberLiteral")?;
-                // JSON numbers cannot hold NaN or Infinity (serde_json would write `null`, which reads back as 0), so
-                // those are tagged as strings; see `from_tagged_value`.
-                if n.is_finite() {
-                    map.serialize_entry("value", n)?;
-                } else if n.is_nan() {
-                    map.serialize_entry("value", "NaN")?;
-                } else if *n > 0.0 {
-                    map.serialize_entry("value", "Infinity")?;
-                } else {
-                    map.serialize_entry("value", "-Infinity")?;
-                }
+                map.serialize_entry("value", &WireNumber(*n))?;
             }
             PropType::BoolLiteral(value) => {
                 map.serialize_entry("kind", "boolLiteral")?;
                 map.serialize_entry("value", value)?;
+            }
+            PropType::BigIntLiteral(value) => {
+                map.serialize_entry("kind", "bigintLiteral")?;
+                map.serialize_entry("value", value.as_str())?;
+            }
+            PropType::UniqueSymbol { name } => {
+                map.serialize_entry("kind", "uniqueSymbol")?;
+                map.serialize_entry("name", name.as_str())?;
+            }
+            PropType::EnumMember { enum_name, member, value } => {
+                map.serialize_entry("kind", "enumMember")?;
+                map.serialize_entry("enum", enum_name.as_str())?;
+                map.serialize_entry("member", member.as_str())?;
+                // The value as the literal type it is, so a reader reuses its literal reading.
+                let literal = match value {
+                    EnumMemberValue::String(s) => PropType::StringLiteral(s.clone()),
+                    EnumMemberValue::Number(n) => PropType::NumberLiteral(*n),
+                };
+                map.serialize_entry("value", &literal)?;
+            }
+            PropType::TemplateLiteral(parts) => {
+                map.serialize_entry("kind", "templateLiteral")?;
+                map.serialize_entry("parts", &WireTemplate(parts))?;
             }
             PropType::Union(members) => {
                 map.serialize_entry("kind", "union")?;
@@ -810,9 +997,9 @@ impl serde::Serialize for PropType {
                 map.serialize_entry("kind", "array")?;
                 map.serialize_entry("element", inner)?;
             }
-            PropType::Tuple(members) => {
+            PropType::Tuple(elements) => {
                 map.serialize_entry("kind", "tuple")?;
-                map.serialize_entry("elements", members)?;
+                map.serialize_entry("elements", &WireTuple(elements))?;
             }
             PropType::Readonly(inner) => {
                 map.serialize_entry("kind", "readonly")?;
@@ -822,11 +1009,26 @@ impl serde::Serialize for PropType {
                 map.serialize_entry("kind", "object")?;
                 map.serialize_entry("fields", &WireFields(fields))?;
             }
+            PropType::Callable { signatures, fields } => {
+                map.serialize_entry("kind", "callable")?;
+                map.serialize_entry("signatures", &WireSignatures(signatures))?;
+                map.serialize_entry("fields", &WireFields(fields))?;
+            }
             // Struct variants: fields merge directly with kind.
             PropType::Named { name, args } => {
                 map.serialize_entry("kind", "named")?;
                 map.serialize_entry("name", name.as_str())?;
                 map.serialize_entry("args", args)?;
+            }
+            PropType::Recursive { name, args } => {
+                map.serialize_entry("kind", "recursive")?;
+                map.serialize_entry("name", name.as_str())?;
+                map.serialize_entry("args", args)?;
+            }
+            PropType::Truncated { text, limit } => {
+                map.serialize_entry("kind", "truncated")?;
+                map.serialize_entry("text", text)?;
+                map.serialize_entry("limit", &WireLimit(limit))?;
             }
             PropType::Function { type_params, params, return_type } => {
                 map.serialize_entry("kind", "function")?;
@@ -854,7 +1056,133 @@ impl serde::Serialize for PropType {
                 map.serialize_entry("raw", raw)?;
                 map.serialize_entry("reason", &WireReason(reason))?;
             }
-            _ => {}
+        }
+        map.end()
+    }
+}
+
+/// A number, with NaN and the infinities as the strings `"NaN"`, `"Infinity"` and `"-Infinity"`: JSON numbers cannot
+/// hold them (serde_json would write `null`, which reads back as 0). `read_number` reads it back.
+struct WireNumber(f64);
+
+impl serde::Serialize for WireNumber {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let n = self.0;
+        if n.is_finite() {
+            serializer.serialize_f64(n)
+        } else if n.is_nan() {
+            serializer.serialize_str("NaN")
+        } else if n > 0.0 {
+            serializer.serialize_str("Infinity")
+        } else {
+            serializer.serialize_str("-Infinity")
+        }
+    }
+}
+
+/// A tuple's elements as `{ type }`, plus `label` when it has one and `modifier` (`optional`, `rest`, `variadic`) when
+/// it is not a plain required element.
+struct WireTuple<'a>(&'a [TupleElement]);
+
+impl serde::Serialize for WireTuple<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::{SerializeMap, SerializeSeq};
+
+        struct Element<'a>(&'a TupleElement);
+        impl serde::Serialize for Element<'_> {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", &self.0.element_type)?;
+                if let Some(label) = &self.0.label {
+                    map.serialize_entry("label", label.as_str())?;
+                }
+                if let Some(modifier) = self.0.kind.modifier() {
+                    map.serialize_entry("modifier", modifier)?;
+                }
+                map.end()
+            }
+        }
+
+        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+        for element in self.0 {
+            seq.serialize_element(&Element(element))?;
+        }
+        seq.end()
+    }
+}
+
+/// A template literal's parts, each `{ text }` or `{ type }`.
+struct WireTemplate<'a>(&'a [TemplatePart]);
+
+impl serde::Serialize for WireTemplate<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::{SerializeMap, SerializeSeq};
+
+        struct Part<'a>(&'a TemplatePart);
+        impl serde::Serialize for Part<'_> {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                let mut map = serializer.serialize_map(Some(1))?;
+                match self.0 {
+                    TemplatePart::Text(text) => map.serialize_entry("text", text)?,
+                    TemplatePart::Type(ty) => map.serialize_entry("type", ty)?,
+                }
+                map.end()
+            }
+        }
+
+        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+        for part in self.0 {
+            seq.serialize_element(&Part(part))?;
+        }
+        seq.end()
+    }
+}
+
+/// Call and construct signatures as `{ typeParams, params, returnType }`, plus `construct: true` for a construct
+/// signature.
+struct WireSignatures<'a>(&'a [CallSignature]);
+
+impl serde::Serialize for WireSignatures<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::{SerializeMap, SerializeSeq};
+
+        struct Signature<'a>(&'a CallSignature);
+        impl serde::Serialize for Signature<'_> {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                let mut map = serializer.serialize_map(None)?;
+                match self.0.kind {
+                    SignatureKind::Call => {}
+                    SignatureKind::Construct => map.serialize_entry("construct", &true)?,
+                }
+                map.serialize_entry("typeParams", &self.0.type_params)?;
+                map.serialize_entry("params", &self.0.params)?;
+                map.serialize_entry("returnType", &self.0.return_type)?;
+                map.end()
+            }
+        }
+
+        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+        for signature in self.0 {
+            seq.serialize_element(&Signature(signature))?;
+        }
+        seq.end()
+    }
+}
+
+/// A truncation's limit as `{ type: "depth" }` or `{ type: "members", total }`.
+struct WireLimit<'a>(&'a TruncationLimit);
+
+impl serde::Serialize for WireLimit<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+
+        let mut map = serializer.serialize_map(None)?;
+        match self.0 {
+            TruncationLimit::Depth => map.serialize_entry("type", "depth")?,
+            TruncationLimit::Members { total } => {
+                map.serialize_entry("type", "members")?;
+                map.serialize_entry("total", total)?;
+            }
         }
         map.end()
     }
@@ -919,10 +1247,6 @@ impl serde::Serialize for WireReason<'_> {
                 map.serialize_entry("type", "indexedAccess")?;
                 map.serialize_entry("expression", expression)?;
             }
-            OpaqueReason::TemplateLiteral { expression } => {
-                map.serialize_entry("type", "templateLiteral")?;
-                map.serialize_entry("expression", expression)?;
-            }
             OpaqueReason::UnsupportedExpression => map.serialize_entry("type", "unsupportedExpression")?,
         }
         map.end()
@@ -961,22 +1285,82 @@ impl PropType {
                 let s = v["value"].as_str().unwrap_or("").to_owned();
                 Ok(PropType::StringLiteral(s))
             }
-            "numberLiteral" | "number_literal" => {
-                let n = match v.get("value") {
-                    Some(val) if val.is_string() => match val.as_str().unwrap_or("") {
-                        "NaN" => f64::NAN,
-                        "Infinity" => f64::INFINITY,
-                        "-Infinity" => f64::NEG_INFINITY,
-                        _ => 0.0,
-                    },
-                    Some(val) => val.as_f64().unwrap_or(0.0),
-                    None => 0.0,
-                };
-                Ok(PropType::NumberLiteral(n))
-            }
+            "numberLiteral" | "number_literal" => Ok(PropType::NumberLiteral(read_number(v.get("value")))),
             "boolLiteral" | "bool_literal" => {
                 let b = v["value"].as_bool().unwrap_or(false);
                 Ok(PropType::BoolLiteral(b))
+            }
+            "bigintLiteral" => {
+                let text = v["value"].as_str().unwrap_or("");
+                let value =
+                    BigIntValue::parse(text).ok_or_else(|| format!("'{text}' is not a bigint literal's value"))?;
+                Ok(PropType::BigIntLiteral(value))
+            }
+            "uniqueSymbol" => Ok(PropType::UniqueSymbol { name: v["name"].as_str().unwrap_or("").into() }),
+            "enumMember" => {
+                let value = match Self::from_tagged_value(&v["value"])? {
+                    PropType::StringLiteral(s) => EnumMemberValue::String(s),
+                    PropType::NumberLiteral(n) => EnumMemberValue::Number(n),
+                    other => {
+                        return Err(format!("an enum member's value is a string or number literal, not {other:?}"));
+                    }
+                };
+                Ok(PropType::EnumMember {
+                    enum_name: v["enum"].as_str().unwrap_or("").into(),
+                    member: v["member"].as_str().unwrap_or("").into(),
+                    value,
+                })
+            }
+            "templateLiteral" => {
+                let parts = v["parts"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .map(|part| match (part.get("text").and_then(|t| t.as_str()), part.get("type")) {
+                                (Some(text), _) => Ok(TemplatePart::Text(text.to_owned())),
+                                (None, Some(ty)) => Ok(TemplatePart::Type(Self::from_tagged_value(ty)?)),
+                                (None, None) => Err("a template literal part has neither 'text' nor 'type'".to_owned()),
+                            })
+                            .collect::<Result<Vec<_>, std::string::String>>()
+                    })
+                    .unwrap_or(Ok(vec![]))?;
+                Ok(PropType::TemplateLiteral(parts))
+            }
+            "callable" => {
+                let signatures = v["signatures"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .map(|s| {
+                                Ok(CallSignature {
+                                    kind: if s["construct"].as_bool().unwrap_or(false) {
+                                        SignatureKind::Construct
+                                    } else {
+                                        SignatureKind::Call
+                                    },
+                                    type_params: read_type_params(&s["typeParams"]),
+                                    params: Self::read_params(&s["params"])?,
+                                    return_type: Self::from_tagged_value(&s["returnType"])?,
+                                })
+                            })
+                            .collect::<Result<Vec<_>, std::string::String>>()
+                    })
+                    .unwrap_or(Ok(vec![]))?;
+                Ok(PropType::Callable { signatures, fields: Self::read_fields(&v["fields"])? })
+            }
+            "recursive" => Ok(PropType::Recursive {
+                name: v["name"].as_str().unwrap_or("").into(),
+                args: Self::read_list(&v["args"])?,
+            }),
+            "truncated" => {
+                let limit = match v["limit"]["type"].as_str() {
+                    Some("members") => TruncationLimit::Members {
+                        total: v["limit"]["total"].as_u64().and_then(|n| u32::try_from(n).ok()).unwrap_or(0),
+                    },
+                    Some("depth") => TruncationLimit::Depth,
+                    other => return Err(format!("unknown truncation limit {other:?}")),
+                };
+                Ok(PropType::Truncated { text: v["text"].as_str().unwrap_or("").to_owned(), limit })
             }
             "union" => {
                 let members = v["members"]
@@ -997,67 +1381,40 @@ impl PropType {
                 Ok(PropType::Array(Box::new(inner)))
             }
             "tuple" => {
-                let members = v["elements"]
+                let elements = v["elements"]
                     .as_array()
-                    .map(|a| a.iter().map(Self::from_tagged_value).collect::<Result<Vec<_>, _>>())
+                    .map(|a| {
+                        a.iter()
+                            .map(|e| {
+                                let modifier = e["modifier"].as_str();
+                                let kind = TupleElementKind::from_modifier(modifier)
+                                    .ok_or_else(|| format!("unknown tuple element modifier {modifier:?}"))?;
+                                let label = match e["label"].as_str() {
+                                    Some(label) => Some(
+                                        TupleLabel::new(label)
+                                            .ok_or_else(|| format!("'{label}' is not a tuple element label"))?,
+                                    ),
+                                    None => None,
+                                };
+                                Ok(TupleElement { element_type: Self::from_tagged_value(&e["type"])?, kind, label })
+                            })
+                            .collect::<Result<Vec<_>, std::string::String>>()
+                    })
                     .unwrap_or(Ok(vec![]))?;
-                Ok(PropType::Tuple(members))
+                Ok(PropType::Tuple(elements))
             }
             "readonly" => {
                 let inner = Self::from_tagged_value(&v["element"])?;
                 Ok(PropType::Readonly(Box::new(inner)))
             }
-            "object" => {
-                let fields = v["fields"]
-                    .as_array()
-                    .map(|a| {
-                        a.iter()
-                            .map(|f| {
-                                Ok(ObjectField {
-                                    name: f["name"].as_str().unwrap_or("").to_owned(),
-                                    prop_type: Self::from_tagged_value(&f["propType"])?,
-                                    required: f["required"].as_bool().unwrap_or(false),
-                                    description: f["description"].as_str().unwrap_or("").to_owned(),
-                                    readonly: f["readonly"].as_bool().unwrap_or(false),
-                                    index_key: match f.get("indexKey") {
-                                        Some(key) => Some(Box::new(Self::from_tagged_value(key)?)),
-                                        None => None,
-                                    },
-                                })
-                            })
-                            .collect::<Result<Vec<_>, std::string::String>>()
-                    })
-                    .unwrap_or(Ok(vec![]))?;
-                Ok(PropType::Object(fields))
-            }
+            "object" => Ok(PropType::Object(Self::read_fields(&v["fields"])?)),
             "named" => {
                 let name = v["name"].as_str().unwrap_or("").into();
-                let args = v["args"]
-                    .as_array()
-                    .map(|a| a.iter().map(Self::from_tagged_value).collect::<Result<Vec<_>, _>>())
-                    .unwrap_or(Ok(vec![]))?;
-                Ok(PropType::Named { name, args })
+                Ok(PropType::Named { name, args: Self::read_list(&v["args"])? })
             }
             "function" => {
-                let type_params = v["typeParams"]
-                    .as_array()
-                    .map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect())
-                    .unwrap_or_default();
-                let params = v["params"]
-                    .as_array()
-                    .map(|a| {
-                        a.iter()
-                            .map(|p| {
-                                Ok(FunctionParam {
-                                    name: p["name"].as_str().map(str::to_owned),
-                                    param_type: Self::from_tagged_value(&p["type"])?,
-                                    optional: p["optional"].as_bool().unwrap_or(false),
-                                    rest: p["rest"].as_bool().unwrap_or(false),
-                                })
-                            })
-                            .collect::<Result<Vec<_>, std::string::String>>()
-                    })
-                    .unwrap_or(Ok(vec![]))?;
+                let type_params = read_type_params(&v["typeParams"]);
+                let params = Self::read_params(&v["params"])?;
                 let return_type = Box::new(Self::from_tagged_value(&v["returnType"])?);
                 Ok(PropType::Function { type_params, params, return_type })
             }
@@ -1098,9 +1455,6 @@ impl PropType {
                     "indexedAccess" => OpaqueReason::IndexedAccess {
                         expression: v["reason"]["expression"].as_str().unwrap_or("").to_owned(),
                     },
-                    "templateLiteral" => OpaqueReason::TemplateLiteral {
-                        expression: v["reason"]["expression"].as_str().unwrap_or("").to_owned(),
-                    },
                     "unsupportedExpression" => OpaqueReason::UnsupportedExpression,
                     _ => OpaqueReason::DepthExceeded,
                 };
@@ -1109,6 +1463,124 @@ impl PropType {
             other => Ok(OpaqueDetail::new(format!("unknown PropType kind: {}", other), OpaqueReason::DepthExceeded)),
         }
     }
+
+    /// A JSON array of types; a missing one is empty.
+    fn read_list(v: &serde_json::Value) -> Result<Vec<PropType>, std::string::String> {
+        v.as_array().map(|a| a.iter().map(Self::from_tagged_value).collect()).unwrap_or(Ok(vec![]))
+    }
+
+    /// An object type's fields, as `WireFields` writes them.
+    fn read_fields(v: &serde_json::Value) -> Result<Vec<ObjectField>, std::string::String> {
+        v.as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|f| {
+                        Ok(ObjectField {
+                            name: f["name"].as_str().unwrap_or("").to_owned(),
+                            prop_type: Self::from_tagged_value(&f["propType"])?,
+                            required: f["required"].as_bool().unwrap_or(false),
+                            description: f["description"].as_str().unwrap_or("").to_owned(),
+                            readonly: f["readonly"].as_bool().unwrap_or(false),
+                            index_key: match f.get("indexKey") {
+                                Some(key) => Some(Box::new(Self::from_tagged_value(key)?)),
+                                None => None,
+                            },
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or(Ok(vec![]))
+    }
+
+    /// A signature's parameters.
+    fn read_params(v: &serde_json::Value) -> Result<Vec<FunctionParam>, std::string::String> {
+        v.as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|p| {
+                        Ok(FunctionParam {
+                            name: p["name"].as_str().map(str::to_owned),
+                            param_type: Self::from_tagged_value(&p["type"])?,
+                            optional: p["optional"].as_bool().unwrap_or(false),
+                            rest: p["rest"].as_bool().unwrap_or(false),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or(Ok(vec![]))
+    }
+}
+
+/// A signature's type parameter names.
+fn read_type_params(v: &serde_json::Value) -> Vec<std::string::String> {
+    v.as_array().map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect()).unwrap_or_default()
+}
+
+/// A number as `WireNumber` writes it; a missing or unreadable one is 0.
+fn read_number(v: Option<&serde_json::Value>) -> f64 {
+    match v {
+        Some(val) if val.is_string() => match val.as_str().unwrap_or("") {
+            "NaN" => f64::NAN,
+            "Infinity" => f64::INFINITY,
+            "-Infinity" => f64::NEG_INFINITY,
+            _ => 0.0,
+        },
+        Some(val) => val.as_f64().unwrap_or(0.0),
+        None => 0.0,
+    }
+}
+
+/// Feed `hasher` an object type's fields.
+fn hash_fields<H: std::hash::Hasher>(fields: &[ObjectField], hasher: &mut H) {
+    use std::hash::Hash;
+    fields.len().hash(hasher);
+    for field in fields {
+        field.name.hash(hasher);
+        field.required.hash(hasher);
+        field.readonly.hash(hasher);
+        if let Some(key) = &field.index_key {
+            key.structural_hash(hasher);
+        }
+        field.description.hash(hasher);
+        field.prop_type.structural_hash(hasher);
+    }
+}
+
+/// Feed `hasher` a signature: its type parameters, parameters and return type.
+fn hash_signature<H: std::hash::Hasher>(
+    type_params: &[std::string::String],
+    params: &[FunctionParam],
+    return_type: &PropType,
+    hasher: &mut H,
+) {
+    use std::hash::Hash;
+    type_params.hash(hasher);
+    params.len().hash(hasher);
+    for param in params {
+        param.name.hash(hasher);
+        param.optional.hash(hasher);
+        param.rest.hash(hasher);
+        param.param_type.structural_hash(hasher);
+    }
+    return_type.structural_hash(hasher);
+}
+
+/// `visit` over an object type's fields: an index signature's key, then each field's type.
+fn visit_fields(fields: &[ObjectField], f: &mut dyn FnMut(&PropType)) {
+    for field in fields {
+        if let Some(key) = &field.index_key {
+            key.visit(f);
+        }
+        field.prop_type.visit(f);
+    }
+}
+
+/// A signature's `<T>(a: A, b?: B)`, as TypeScript prints it before `=>` or `:`.
+fn signature_head(type_params: &[std::string::String], params: &[FunctionParam]) -> std::string::String {
+    let type_params =
+        if type_params.is_empty() { std::string::String::new() } else { format!("<{}>", type_params.join(", ")) };
+    let params = params.iter().enumerate().map(|(i, p)| p.signature(i)).collect::<Vec<_>>().join(", ");
+    format!("{type_params}({params})")
 }
 
 fn element_to_type_name(element: &str) -> &'static str {
@@ -1164,11 +1636,6 @@ pub enum OpaqueReason {
         /// The indexed access type as written: `Props["variant"]`.
         expression: std::string::String,
     },
-    /// Template literal type — partially or fully unresolvable.
-    TemplateLiteral {
-        /// The template literal type as written: `` `${Size}-${Tone}` ``.
-        expression: std::string::String,
-    },
     /// A raw type expression the extractor couldn't parse into any recognized
     /// structural shape (not a depth or circularity problem — see
     /// DepthExceeded for that).
@@ -1178,7 +1645,7 @@ pub enum OpaqueReason {
 impl OpaqueReason {
     /// Every reason's name in the canonical JSON, in declaration order, so a consumer such as the `schema` command can
     /// list them without a copy of its own. A test keeps it equal to [`OpaqueReason::kind`] over every variant.
-    pub const KINDS: [&'static str; 10] = [
+    pub const KINDS: [&'static str; 9] = [
         "conditionalType",
         "mappedType",
         "moduleAugmentation",
@@ -1187,7 +1654,6 @@ impl OpaqueReason {
         "pandaCodegenMissing",
         "depthExceeded",
         "indexedAccess",
-        "templateLiteral",
         "unsupportedExpression",
     ];
 
@@ -1202,67 +1668,36 @@ impl OpaqueReason {
             OpaqueReason::PandaCodegenMissing => "pandaCodegenMissing",
             OpaqueReason::DepthExceeded => "depthExceeded",
             OpaqueReason::IndexedAccess { .. } => "indexedAccess",
-            OpaqueReason::TemplateLiteral { .. } => "templateLiteral",
             OpaqueReason::UnsupportedExpression => "unsupportedExpression",
         }
     }
 }
 
 impl PropType {
-    /// The kinds of reason behind the `opaque` members of this type, each once, in the order they occur: what the
-    /// resolver could not evaluate. Empty when nothing in the type is `opaque`. A name left as an unexpanded
-    /// reference is not `opaque` and is not listed; its diagnostic says so.
+    /// The kinds of reason behind the `opaque` members of this type, and `truncated` for a member cut at a limit, each
+    /// once, in the order they occur (an index signature's key before its value): what the resolver could not
+    /// evaluate or did not expand. Empty when nothing in the type is `opaque` or `truncated`. A name left as an
+    /// unexpanded reference is not listed, nor is a `recursive` reference; a name's diagnostic says so.
     pub fn degraded_by(&self) -> Vec<&'static str> {
-        fn collect(ty: &PropType, kinds: &mut Vec<&'static str>) {
-            match ty {
-                PropType::Opaque(detail) => {
-                    let kind = detail.reason().kind();
-                    if !kinds.contains(&kind) {
-                        kinds.push(kind);
-                    }
-                }
-                PropType::Union(members) | PropType::Intersection(members) | PropType::Tuple(members) => {
-                    members.iter().for_each(|member| collect(member, kinds));
-                }
-                PropType::Array(inner) | PropType::Readonly(inner) => collect(inner, kinds),
-                PropType::Object(fields) => fields.iter().for_each(|field| {
-                    // The key of an index signature (`[k: `data-${string}`]: T`) is part of the type too.
-                    if let Some(key) = &field.index_key {
-                        collect(key, kinds);
-                    }
-                    collect(&field.prop_type, kinds);
-                }),
-                PropType::Named { args, .. } => args.iter().for_each(|arg| collect(arg, kinds)),
-                PropType::Function { params, return_type, .. } => {
-                    params.iter().for_each(|param| collect(&param.param_type, kinds));
-                    collect(return_type, kinds);
-                }
-                PropType::String
-                | PropType::Number
-                | PropType::Boolean
-                | PropType::Null
-                | PropType::Undefined
-                | PropType::Any
-                | PropType::Never
-                | PropType::Unknown
-                | PropType::Void
-                | PropType::StringLiteral(_)
-                | PropType::NumberLiteral(_)
-                | PropType::BoolLiteral(_)
-                | PropType::ReactNode
-                | PropType::CssProperties
-                | PropType::Ref { .. }
-                | PropType::ElementType
-                | PropType::HtmlAttributes { .. }
-                | PropType::LiteralUnion { .. }
-                | PropType::SxProps => {}
-            }
-        }
         let mut kinds = Vec::new();
-        collect(self, &mut kinds);
+        self.visit(&mut |ty| {
+            let kind = if let PropType::Opaque(detail) = ty {
+                detail.reason().kind()
+            } else if let PropType::Truncated { .. } = ty {
+                TRUNCATED_KIND
+            } else {
+                return;
+            };
+            if !kinds.contains(&kind) {
+                kinds.push(kind);
+            }
+        });
         kinds
     }
 }
+
+/// The `degradedBy` entry of a [`PropType::Truncated`] member.
+const TRUNCATED_KIND: &str = "truncated";
 
 /// One parameter of a [`PropType::Function`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1297,6 +1732,195 @@ impl FunctionParam {
     }
 }
 
+/// The primitive a literal type is a value of (see [`PropType::literal_kind`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LiteralKind {
+    String,
+    Number,
+    Boolean,
+    BigInt,
+}
+
+/// One element of a [`PropType::Tuple`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct TupleElement {
+    /// The element's type. For a rest element, the type of each element it collects: `number` in `...number[]`, as
+    /// TypeScript's checker states it; for a variadic one, the spread type as written (`T` in `...T`).
+    pub element_type: PropType,
+    /// Whether it is required, optional, a rest element or a variadic spread.
+    pub kind: TupleElementKind,
+    /// The element's label, `head` in `[head: string]`.
+    pub label: Option<TupleLabel>,
+}
+
+impl TupleElement {
+    /// A required, unlabeled element.
+    pub fn required(element_type: PropType) -> Self {
+        Self { element_type, kind: TupleElementKind::Required, label: None }
+    }
+
+    /// The element as TypeScript prints it: `string`, `string?`, `...number[]`, `...T`, `head: string`,
+    /// `tail?: number`, `...rest: number[]`.
+    fn source(&self) -> std::string::String {
+        // Without a label, `?` and `...` bind to the type itself: `(string | number)?`, `...(A | B)`.
+        let operand = || match self.label {
+            Some(_) => self.element_type.raw_string(),
+            None => self.element_type.operand_string(Precedence::Array),
+        };
+        let ty = match self.kind {
+            TupleElementKind::Rest => format!("{}[]", self.element_type.operand_string(Precedence::Array)),
+            TupleElementKind::Optional | TupleElementKind::Variadic => operand(),
+            TupleElementKind::Required => self.element_type.raw_string(),
+        };
+        let spread = match self.kind {
+            TupleElementKind::Rest | TupleElementKind::Variadic => "...",
+            TupleElementKind::Required | TupleElementKind::Optional => "",
+        };
+        let optional = match self.kind {
+            TupleElementKind::Optional => "?",
+            TupleElementKind::Required | TupleElementKind::Rest | TupleElementKind::Variadic => "",
+        };
+        match &self.label {
+            Some(label) => format!("{spread}{}{optional}: {ty}", label.as_str()),
+            None => format!("{spread}{ty}{optional}"),
+        }
+    }
+}
+
+/// How a tuple element is declared, TypeScript's element flags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TupleElementKind {
+    /// `T`: always present.
+    #[default]
+    Required,
+    /// `T?`: may be left out.
+    Optional,
+    /// `...T[]`: any number of elements of type `T`.
+    Rest,
+    /// `...T` where `T` is not a known array or tuple (a type parameter, an unresolved name): its elements are spread
+    /// in, whatever they turn out to be.
+    Variadic,
+}
+
+impl TupleElementKind {
+    /// The `modifier` the canonical JSON writes for it; `None` for a required element, which writes none.
+    fn modifier(self) -> Option<&'static str> {
+        match self {
+            Self::Required => None,
+            Self::Optional => Some("optional"),
+            Self::Rest => Some("rest"),
+            Self::Variadic => Some("variadic"),
+        }
+    }
+
+    /// The kind a `modifier` names; `None` for an unknown one.
+    fn from_modifier(modifier: Option<&str>) -> Option<Self> {
+        match modifier {
+            None => Some(Self::Required),
+            Some("optional") => Some(Self::Optional),
+            Some("rest") => Some(Self::Rest),
+            Some("variadic") => Some(Self::Variadic),
+            Some(_) => None,
+        }
+    }
+}
+
+/// A tuple element's label: an identifier, as TypeScript requires (`[head: string]`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TupleLabel(TypeName);
+
+impl TupleLabel {
+    /// `label` as a tuple label, or `None` when it is not an identifier.
+    pub fn new(label: &str) -> Option<Self> {
+        is_valid_identifier(label).then(|| Self(label.into()))
+    }
+
+    /// The label's text.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A bigint literal's value in base 10, with a leading `-` when negative and no `n` suffix: `10`, `-1`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BigIntValue(std::string::String);
+
+impl BigIntValue {
+    /// `text` as a bigint value: decimal digits, optionally after a `-`; `None` for anything else.
+    pub fn parse(text: &str) -> Option<Self> {
+        let digits = text.strip_prefix('-').unwrap_or(text);
+        (!digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())).then(|| Self(text.to_owned()))
+    }
+
+    /// The value's decimal text.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// The value of a [`PropType::EnumMember`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum EnumMemberValue {
+    /// A string member's value.
+    String(std::string::String),
+    /// A numeric member's value.
+    Number(f64),
+}
+
+/// One piece of a [`PropType::TemplateLiteral`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum TemplatePart {
+    /// Text between holes, as written in the source (escapes included).
+    Text(std::string::String),
+    /// The type in a `${…}` hole.
+    Type(PropType),
+}
+
+/// One call or construct signature of a [`PropType::Callable`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct CallSignature {
+    /// Whether it is a call signature `(a: A): R` or a construct signature `new (a: A): R`.
+    pub kind: SignatureKind,
+    /// The signature's own type parameters.
+    pub type_params: Vec<std::string::String>,
+    /// The parameters in order.
+    pub params: Vec<FunctionParam>,
+    /// What a call returns, or what `new` creates.
+    pub return_type: PropType,
+}
+
+impl CallSignature {
+    /// The signature as an object type member: `(value: string): string`, `new (value: string): Date`.
+    fn source(&self) -> std::string::String {
+        let new = match self.kind {
+            SignatureKind::Call => "",
+            SignatureKind::Construct => "new ",
+        };
+        format!("{new}{}: {}", signature_head(&self.type_params, &self.params), self.return_type.raw_string())
+    }
+}
+
+/// Which signature a [`CallSignature`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SignatureKind {
+    /// `(a: A): R`: called as a function.
+    Call,
+    /// `new (a: A): R`: called with `new`.
+    Construct,
+}
+
+/// The limit a [`PropType::Truncated`] type was cut at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TruncationLimit {
+    /// The type is nested deeper than the converter expands.
+    Depth,
+    /// The type has more members than the converter lists.
+    Members {
+        /// How many members it has.
+        total: u32,
+    },
+}
+
 /// A field in an object type.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1321,6 +1945,17 @@ impl ObjectField {
     /// A named member, as opposed to an index signature.
     pub(crate) fn is_member(&self) -> bool {
         self.index_key.is_none()
+    }
+
+    /// The field as an object type member: `readonly name?: T`, `[key: K]: T`.
+    fn source(&self) -> std::string::String {
+        let readonly = if self.readonly { "readonly " } else { "" };
+        if let Some(key) = &self.index_key {
+            return format!("{readonly}[{}: {}]: {}", self.name, key.raw_string(), self.prop_type.raw_string());
+        }
+        let name = if is_valid_identifier(&self.name) { self.name.clone() } else { format!("'{}'", self.name) };
+        let optional = if self.required { "" } else { "?" };
+        format!("{readonly}{name}{optional}: {}", self.prop_type.raw_string())
     }
 
     /// A named field that isn't `readonly`.

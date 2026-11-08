@@ -144,7 +144,8 @@ pub enum DiagnosticCode {
     JsDocDefaultMismatch,
     /// Indexed access type (Type["key"]) that could not be resolved from known tables.
     IndexedAccessOpaque,
-    /// Template literal type that could not be statically expanded.
+    /// Template literal type that could not be statically expanded to its strings: it is kept as a pattern
+    /// (`PropType::TemplateLiteral`), which lists no values. The name predates the pattern, which is not opaque.
     TemplateLiteralOpaque,
     /// Discriminated union detected — props merged with discriminant surfaced.
     DiscriminatedUnion,

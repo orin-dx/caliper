@@ -43,7 +43,6 @@ export type OpaqueReason =
   | { type: 'pandaCodegenMissing' }
   | { type: 'depthExceeded' }
   | { type: 'indexedAccess'; expression: string }
-  | { type: 'templateLiteral'; expression: string }
   | { type: 'unsupportedExpression' }
 
 export interface FunctionParam {
@@ -67,6 +66,26 @@ export interface ObjectField {
   indexKey?: PropType
 }
 
+/** One element of a tuple: `modifier` is absent for a required element. A `rest` element's `type` is the type of each
+ * element it collects (`number` in `...number[]`); a `variadic` one's is the spread type as written (`T` in `...T`). */
+export interface TupleElement {
+  type: PropType
+  /** The element's label, `head` in `[head: string]`. */
+  label?: string
+  modifier?: 'optional' | 'rest' | 'variadic'
+}
+
+/** One part of a template literal pattern: text as written, or the type in a `${…}` hole. */
+export type TemplatePart = { text: string } | { type: PropType }
+
+/** A call signature, or with `construct: true` a construct signature `new (…): T`. */
+export interface CallSignature {
+  construct?: true
+  typeParams: string[]
+  params: FunctionParam[]
+  returnType: PropType
+}
+
 export type PropType =
   | { kind: 'string' }
   | { kind: 'number' }
@@ -84,13 +103,30 @@ export type PropType =
   | { kind: 'stringLiteral'; value: string }
   | { kind: 'numberLiteral'; value: number }
   | { kind: 'boolLiteral'; value: boolean }
+  /** `value` in base 10, with a leading `-` when negative and no `n`. */
+  | { kind: 'bigintLiteral'; value: string }
+  /** `typeof name` for a value declared `unique symbol`. */
+  | { kind: 'uniqueSymbol'; name: string }
+  | {
+      kind: 'enumMember'
+      enum: string
+      member: string
+      value: { kind: 'stringLiteral'; value: string } | { kind: 'numberLiteral'; value: number }
+    }
+  | { kind: 'templateLiteral'; parts: TemplatePart[] }
   | { kind: 'union'; members: PropType[] }
   | { kind: 'intersection'; members: PropType[] }
   | { kind: 'array'; element: PropType }
-  | { kind: 'tuple'; elements: PropType[] }
+  | { kind: 'tuple'; elements: TupleElement[] }
   | { kind: 'readonly'; element: PropType }
   | { kind: 'object'; fields: ObjectField[] }
+  /** An object type with call or construct signatures that is not one plain function. */
+  | { kind: 'callable'; signatures: CallSignature[]; fields: ObjectField[] }
   | { kind: 'named'; name: string; args: PropType[] }
+  /** A reference back to the type `name` whose expansion encloses it. */
+  | { kind: 'recursive'; name: string; args: PropType[] }
+  /** A type cut at a depth or member limit, kept as its text; listed in `degradedBy` as `truncated`. */
+  | { kind: 'truncated'; text: string; limit: { type: 'depth' } | { type: 'members'; total: number } }
   | { kind: 'function'; typeParams: string[]; params: FunctionParam[]; returnType: PropType }
   | { kind: 'ref'; name: string; element: string | null }
   | { kind: 'htmlAttributes'; element: string; omitted: string[] }
@@ -108,8 +144,8 @@ export interface ParsedProp {
   declarations: PropParent[]
   /**
    * Why part of this prop's type is `opaque`: the kinds of reason (`conditionalType`, `mappedType`, `indexedAccess`, …),
-   * each once, in the order the type holds them. Absent when the resolver evaluated the type in full. A name left as an
-   * unexpanded reference is not listed; its diagnostic says so.
+   * and `truncated` for a part cut at a limit, each once, in the order the type holds them. Absent when the resolver
+   * evaluated the type in full. A name left as an unexpanded reference is not listed; its diagnostic says so.
    */
   degradedBy?: string[]
 }

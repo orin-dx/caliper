@@ -26,8 +26,11 @@ pub(super) fn resolve_template_literal(
         return PropType::LiteralUnion { members: values, has_default: false };
     }
 
+    // A pattern such as `${number}px`: kept as one. It is the exact type, but it lists no values. Its holes stay as
+    // written, names and all, as a function signature's types do: resolving them spelled `HTMLInputAutoCompleteAttribute`
+    // out as a cross product of every token union.
     let raw = CollectedType::TemplateLiteral(parts.to_vec()).to_raw_string();
-    let diagnostic = Diagnostic {
+    state.diagnostics.push(Diagnostic {
         severity: DiagnosticSeverity::Info,
         message: format!("Template literal type '{}' could not be statically expanded", raw),
         file: Some(consuming_file.to_string()),
@@ -36,8 +39,35 @@ pub(super) fn resolve_template_literal(
         help: Some("Declare the prop as an explicit string-literal union to document its values.".into()),
         code: DiagnosticCode::TemplateLiteralOpaque,
         affects: Vec::new(),
-    };
-    OpaqueDetail::give_up(state, raw.clone(), OpaqueReason::TemplateLiteral { expression: raw }, diagnostic)
+    });
+    template_of(parts, super::func::as_written)
+}
+
+/// A template literal's parts as a pattern: its text pieces, and each hole's type read by `read`.
+pub(super) fn template_of(parts: &[CollectedType], mut read: impl FnMut(&CollectedType) -> PropType) -> PropType {
+    PropType::TemplateLiteral(
+        parts
+            .iter()
+            .map(|part| match part {
+                CollectedType::StringLiteral(text) => TemplatePart::Text(text.to_string()),
+                hole => TemplatePart::Type(read(hole)),
+            })
+            .collect(),
+    )
+}
+
+/// TypeScript's intrinsic string mappings, `Capitalize<'click'>` is `'Click'`, applied to one value.
+fn string_mapping(name: &str, value: &str) -> Option<String> {
+    let mut chars = value.chars();
+    match name {
+        "Uppercase" => Some(value.to_uppercase()),
+        "Lowercase" => Some(value.to_lowercase()),
+        "Capitalize" => Some(chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or_default()),
+        "Uncapitalize" => {
+            Some(chars.next().map(|first| first.to_lowercase().chain(chars).collect()).unwrap_or_default())
+        }
+        _ => None,
+    }
 }
 
 /// Cap on the Cartesian product `try_expand_template_literal` accumulates
@@ -68,6 +98,16 @@ pub(super) fn try_expand_template_literal(
             }
             CollectedType::NumberLiteral(n) => per_part.push(vec![n.to_string()]),
             CollectedType::BoolLiteral(b) => per_part.push(vec![b.to_string()]),
+            // `${Capitalize<Ev>}` over a literal union `Ev`: each value mapped.
+            CollectedType::Named { name, args }
+                if let [arg] = args.as_slice()
+                    && matches!(name.as_str(), "Uppercase" | "Lowercase" | "Capitalize" | "Uncapitalize")
+                    && super::may_be_ts_lib_type(name, consuming_file, ctx) =>
+            {
+                let values =
+                    try_expand_template_literal(std::slice::from_ref(arg), consuming_file, ctx, state, depth + 1)?;
+                per_part.push(values.iter().map(|value| string_mapping(name, value)).collect::<Option<_>>()?);
+            }
             CollectedType::Named { name, .. } => {
                 // Look up in global type aliases for a LiteralUnion.
                 // `None`: this template literal has no finite string expansion.
@@ -191,17 +231,19 @@ mod tests {
     }
 
     #[test]
-    fn test_template_literal_expansion_caps_and_degrades_to_opaque() {
+    fn test_template_literal_expansion_caps_and_keeps_the_pattern() {
         let ctx = empty_ctx();
         let mut state = ResolveState::default();
         let file = Utf8PathBuf::from("/test/button.tsx");
 
         let result = resolve_template_literal(&oversized_parts(), &file, &ctx, &mut state, 0);
 
-        match &result {
-            PropType::Opaque(detail) if matches!(detail.reason(), OpaqueReason::TemplateLiteral { .. }) => {}
-            other => panic!("expected capped expansion to degrade to Opaque(TemplateLiteral), got {other:?}"),
-        }
+        // Past the cap the template stays a pattern of its five holes, not 100,000 strings.
+        let PropType::TemplateLiteral(parts) = &result else {
+            panic!("expected capped expansion to stay a template literal, got {result:?}")
+        };
+        assert_eq!(parts.len(), 5);
+        assert!(result.degraded_by().is_empty(), "the pattern is the exact type");
         // Exact contract: AC-6 specifies Info severity, DiagnosticCode::TemplateLiteralOpaque,
         // AND a message containing "could not be statically expanded" — checking the
         // code alone wouldn't catch a wrong severity or a reworded/missing message.

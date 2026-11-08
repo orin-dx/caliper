@@ -164,7 +164,9 @@ impl Converter {
             for element in self.rpc.type_arguments(info.id).await? {
                 elements.push(self.convert(&element, depth + 1).await?);
             }
-            return Ok(PropType::Tuple(elements));
+            return Ok(PropType::Tuple(
+                elements.into_iter().map(caliper_docgen_core::types::TupleElement::required).collect(),
+            ));
         }
         if info.object_flags & flag::OBJECT_REFERENCE != 0 && self.rpc.is_array(info.id).await? {
             let arguments = self.rpc.type_arguments(info.id).await?;

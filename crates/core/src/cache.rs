@@ -43,7 +43,9 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 ///     and `class_scopes` record where the other declarations sit.
 /// 32: `CollectedInterface::scope` replaces `SourceData::interface_scopes`, an interface in a function body, block or
 ///     `switch` case has the scope in its key, and `FunctionResult` records the scope its names are written in.
-const CACHE_SCHEMA_VERSION: u32 = 32;
+/// 33: tuple elements record their kind and label, and the types gain bigint literals, `unique symbol` and object
+///     types with call or construct signatures (`CollectedType::Callable`).
+const CACHE_SCHEMA_VERSION: u32 = 33;
 
 const DATA_FILE: &str = "dts.msgpack";
 

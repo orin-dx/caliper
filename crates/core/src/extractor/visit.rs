@@ -188,8 +188,14 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         // find_jsdoc's proximity match, leaving the interface's own description empty.
         let (description, tags) = self.find_jsdoc_with_tags(node.span.start);
 
-        let props: Vec<RawProp> =
-            node.body.body.iter().filter_map(|sig| self.collect_property_signature(sig)).collect();
+        let accessors = super::Accessors::of(&node.body.body);
+        let props: Vec<RawProp> = node
+            .body
+            .body
+            .iter()
+            .filter(|sig| !accessors.is_shadowed_setter(sig))
+            .filter_map(|sig| self.collect_property_signature(sig))
+            .collect();
 
         // Declarations of one name in one scope merge, as TypeScript merges them: members and `extends` accumulate,
         // and the first description stands. The key carries the scope, so a declaration in another scope is an entry
