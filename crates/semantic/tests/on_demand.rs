@@ -4,10 +4,10 @@
 
 use std::time::Duration;
 
-use caliper_docgen_core::pipeline::{extract, HtmlAttributeMode, PipelineOptions, WatchSession};
+use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, WatchSession, extract};
 use caliper_docgen_core::types::semantic::{SemanticOutcome, SemanticProvider, SemanticTarget};
 use caliper_docgen_core::types::{DiagnosticSeverity, ExtractionOutput, PropType};
-use caliper_docgen_semantic::{targets_of, OnDemand, OnDemandConfig};
+use caliper_docgen_semantic::{OnDemand, OnDemandConfig, targets_of};
 use camino::Utf8PathBuf;
 
 const FAKE_VERSION: &str = "7.1.0-test";
@@ -223,9 +223,18 @@ fn the_real_checker_lists_the_same_prop_names_as_the_structural_pass_in_every_ht
     )
     .unwrap();
     let sources = [
-        ("WithChildren.tsx", "import type { PropsWithChildren } from \"react\";\nexport function WithChildren(props: PropsWithChildren<{ label: string }>) { return null; }\n"),
-        ("OwnChildren.tsx", "import type { ReactNode } from \"react\";\nexport function OwnChildren(props: { label: string; children?: ReactNode }) { return null; }\n"),
-        ("Div.tsx", "import type { HTMLAttributes } from \"react\";\nexport interface DivProps extends HTMLAttributes<HTMLDivElement> { label: string }\nexport function Div(props: DivProps) { return null; }\n"),
+        (
+            "WithChildren.tsx",
+            "import type { PropsWithChildren } from \"react\";\nexport function WithChildren(props: PropsWithChildren<{ label: string }>) { return null; }\n",
+        ),
+        (
+            "OwnChildren.tsx",
+            "import type { ReactNode } from \"react\";\nexport function OwnChildren(props: { label: string; children?: ReactNode }) { return null; }\n",
+        ),
+        (
+            "Div.tsx",
+            "import type { HTMLAttributes } from \"react\";\nexport interface DivProps extends HTMLAttributes<HTMLDivElement> { label: string }\nexport function Div(props: DivProps) { return null; }\n",
+        ),
     ];
     for (name, source) in sources {
         std::fs::write(root.join(name), source).unwrap();

@@ -640,8 +640,8 @@ fn typescript_7_without_its_platform_package_is_reported_once_by_extract_and_ini
 #[test]
 fn initialize_called_twice_does_not_rerun_extraction_or_replay_diagnostics() {
     use crate::plugin::{DocgenPlugin, PluginRegistry};
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc as StdArc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct CountingPlugin(StdArc<AtomicUsize>);
     impl DocgenPlugin for CountingPlugin {
@@ -1178,7 +1178,10 @@ fn every_kind_of_change_leaves_the_snapshot_equal_to_a_cold_extract() {
     let files: &[(&str, &str)] = &[
         ("shared.ts", "export interface SharedProps { size: 'sm' | 'lg'; }\n"),
         ("index.ts", "export type { SharedProps } from './shared';\n"),
-        ("button/Button.tsx", "import type { SharedProps } from '../index';\nexport function Button(props: SharedProps) { return null; }\n"),
+        (
+            "button/Button.tsx",
+            "import type { SharedProps } from '../index';\nexport function Button(props: SharedProps) { return null; }\n",
+        ),
         ("Card.tsx", "export function Card(props: { title: string }) { return null; }\n"),
         ("sizes.ts", "export const SIZES = ['sm', 'lg'] as const;\n"),
         (

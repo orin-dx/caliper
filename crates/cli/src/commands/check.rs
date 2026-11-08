@@ -1,6 +1,6 @@
 use miette::{IntoDiagnostic, Result};
 
-use crate::config::{build_options, warn_ignored_semantic_config, BuildOptionsArgs};
+use crate::config::{BuildOptionsArgs, build_options, warn_ignored_semantic_config};
 use crate::output::{print_diagnostics, print_summary};
 
 /// Returns the process exit code (0 = clean, 1 = --strict and warnings found,

@@ -6,7 +6,7 @@
     clippy::print_stderr,
     clippy::let_underscore_must_use
 )]
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 fn fixture_dir(fixture: &str) -> camino::Utf8PathBuf {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));

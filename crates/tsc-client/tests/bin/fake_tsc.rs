@@ -24,7 +24,7 @@
 
 use std::time::Duration;
 
-use caliper_docgen_tsc_client::transport::{write_frame, ContentLengthDecoder, DEFAULT_MAX_FRAME_BYTES};
+use caliper_docgen_tsc_client::transport::{ContentLengthDecoder, DEFAULT_MAX_FRAME_BYTES, write_frame};
 use tokio::io::AsyncWriteExt;
 use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;

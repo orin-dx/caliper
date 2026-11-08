@@ -41,9 +41,9 @@ mod react;
 mod substitute;
 mod template;
 
+pub(crate) use import::{ModuleResolution, resolve_module_with};
 #[cfg(test)]
 pub(crate) use import::{follow_reexports_call_count, reset_follow_reexports_call_count};
-pub(crate) use import::{resolve_module_with, ModuleResolution};
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -95,11 +95,7 @@ pub(super) fn unresolved_location_note(
     canonical_name: &str,
 ) -> String {
     let resolved_elsewhere = canonical_file != consuming_file || canonical_name != original_name;
-    if resolved_elsewhere {
-        format!(" (resolved to '{canonical_name}' in '{canonical_file}')")
-    } else {
-        String::new()
-    }
+    if resolved_elsewhere { format!(" (resolved to '{canonical_name}' in '{canonical_file}')") } else { String::new() }
 }
 
 /// The help for an unresolvable type: why the dependency loader found no declaration for it, when it tried, or
@@ -482,10 +478,10 @@ impl ResolutionContext {
         prop.structural_hash(&mut hasher);
         let key = hasher.finish();
         // Nearly every call finds the prop already built, so look under the shard's shared lock first.
-        if let Some(bucket) = self.shared_props.get(&key) {
-            if let Some(found) = bucket.iter().find(|shared| ***shared == prop) {
-                return Arc::clone(found);
-            }
+        if let Some(bucket) = self.shared_props.get(&key)
+            && let Some(found) = bucket.iter().find(|shared| ***shared == prop)
+        {
+            return Arc::clone(found);
         }
         let mut bucket = self.shared_props.entry(key).or_default();
         // Another thread may have added it between the two locks.

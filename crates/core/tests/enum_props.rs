@@ -11,9 +11,9 @@
 
 use std::collections::BTreeMap;
 
-use caliper_docgen_core::pipeline::{extract, PipelineOptions};
+use caliper_docgen_core::pipeline::{PipelineOptions, extract};
 use camino::Utf8PathBuf;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Prop name to type of the only component in the project, with the messages of every diagnostic.
 fn props_of(files: &[(&str, &str)]) -> (BTreeMap<String, Value>, Vec<String>) {

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::*;
 use crate::types::{DefaultValue, DetectionRule, DiagnosticCode, DiagnosticSeverity, PropParent, PropType};

@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 
-use caliper_docgen_core::pipeline::{extract, HtmlAttributeMode, PipelineOptions};
+use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, extract};
 use camino::Utf8PathBuf;
 
 struct Case {

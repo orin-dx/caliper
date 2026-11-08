@@ -258,10 +258,9 @@ pub(super) fn resolve_base_as_chain(
         CollectedType::Named { name, args } => {
             if name.strip_prefix("React.").unwrap_or(name) == "PropsWithoutRef"
                 && super::may_be_react_builtin(name, file_path, ctx)
+                && let Some(alias) = react_props_without_ref_alias(args, file_path)
             {
-                if let Some(alias) = react_props_without_ref_alias(args, file_path) {
-                    return resolve_type_alias_chain(&alias, file_path, mapping, ctx, state, depth);
-                }
+                return resolve_type_alias_chain(&alias, file_path, mapping, ctx, state, depth);
             }
             // Omit/Pick/Partial/Readonly applied to a *structured* reference — e.g. a
             // member of `Omit<T, keyof U> & U` after `T`/`U` were substituted with real
@@ -269,10 +268,10 @@ pub(super) fn resolve_base_as_chain(
             // the string-based `resolve_props_chain` path below, so nested generics and
             // `keyof` operands survive structurally instead of being flattened to a
             // single opaque display string first.
-            if super::may_be_utility(name.as_str(), file_path, ctx) {
-                if let Some(alias) = super::substitute::synthesize_utility_alias(name.as_str(), args, file_path) {
-                    return resolve_type_alias_chain(&alias, file_path, mapping, ctx, state, depth);
-                }
+            if super::may_be_utility(name.as_str(), file_path, ctx)
+                && let Some(alias) = super::substitute::synthesize_utility_alias(name.as_str(), args, file_path)
+            {
+                return resolve_type_alias_chain(&alias, file_path, mapping, ctx, state, depth);
             }
 
             // A user-defined generic alias referenced with structured (possibly

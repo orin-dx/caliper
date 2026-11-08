@@ -342,8 +342,7 @@ fn test_discover_files_reports_diagnostic_for_non_utf8_filename() {
 
 /// The help for an undeclared, unimported name when TypeScript's lib files were not found: it does not claim the name
 /// is a global, and it fits a missing package and a missing platform package alike.
-const DATE_WITHOUT_LIB_HELP: &str =
-    "'Date' is not declared or imported in this file. If it is a TypeScript global type, \
+const DATE_WITHOUT_LIB_HELP: &str = "'Date' is not declared or imported in this file. If it is a TypeScript global type, \
 TypeScript's lib files were not found; the warning about TypeScript for this run says what to install.";
 
 fn help_of_unresolved_types(tmp: &TempDir, component: &str) -> Vec<String> {
@@ -637,10 +636,10 @@ impl crate::plugin::DocgenPlugin for RedescribeButtonTone {
     }
 
     fn on_component_resolved(&self, entry: &mut ComponentEntry) {
-        if entry.display_name == "Button" {
-            if let Some(tone) = entry.props.get_mut("tone") {
-                std::sync::Arc::make_mut(tone).description = "Button's tone".into();
-            }
+        if entry.display_name == "Button"
+            && let Some(tone) = entry.props.get_mut("tone")
+        {
+            std::sync::Arc::make_mut(tone).description = "Button's tone".into();
         }
     }
 }
@@ -3104,7 +3103,10 @@ fn react_builtins_keep_their_meaning_when_imported_from_react_or_unbound() {
 fn a_builtin_name_whose_binding_does_not_resolve_falls_back_to_react_with_a_report() {
     let output = extract_one(&[
         ("types.ts", "export type { ReactNode } from 'react';\n"),
-        ("Card.tsx", "import type { ReactNode } from './types';\nexport function Card(props: { a: ReactNode }) { return null; }\n"),
+        (
+            "Card.tsx",
+            "import type { ReactNode } from './types';\nexport function Card(props: { a: ReactNode }) { return null; }\n",
+        ),
     ]);
 
     assert_eq!(output.components["Card"].props["a"].prop_type, PropType::ReactNode);
@@ -3269,8 +3271,7 @@ fn an_import_written_with_a_javascript_extension_finds_its_typescript_source() {
 /// `node_modules` the way a package manager links workspace packages.
 #[cfg(unix)]
 fn workspace_package_project(tsconfigs: &[(&str, &str)]) -> (TempDir, PipelineOptions) {
-    let package =
-        "{ \"name\": \"@acme/ui\", \"exports\": { \".\": { \"source\": \"./index.ts\", \"types\": \"./dist/index.d.ts\" } } }";
+    let package = "{ \"name\": \"@acme/ui\", \"exports\": { \".\": { \"source\": \"./index.ts\", \"types\": \"./dist/index.d.ts\" } } }";
     let card = "import type { CardProps } from '@acme/ui';\nexport function Card(props: CardProps) { return null; }\n";
     let mut files = vec![
         ("src/ui/package.json", package),
@@ -4568,10 +4569,7 @@ fn a_signature_parameter_of_a_factory_result_does_not_capture_an_argument_named_
             "import * as React from 'react';\n\
              export function make<P>(): <C>(p: { value: P; tag?: C }) => React.ReactElement { return null as never; }\n",
         ),
-        (
-            "Field.tsx",
-            "import { make } from './factory';\ntype C = number;\nexport const Field = make<C>();\n",
-        ),
+        ("Field.tsx", "import { make } from './factory';\ntype C = number;\nexport const Field = make<C>();\n"),
     ]);
     let props = &output.components["Field"].props;
     assert_eq!(props["value"].prop_type.raw_string(), "number");

@@ -2,9 +2,9 @@
 //! A type is never silently wrong. A utility type behind an alias keeps the wrapper it was written with, a type
 //! literal that declares a call signature never becomes an empty object, and a prop whose index key is opaque says so.
 
-use caliper_docgen_core::pipeline::{extract, rdt, PipelineOptions};
+use caliper_docgen_core::pipeline::{PipelineOptions, extract, rdt};
 use camino::Utf8PathBuf;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const SOURCE: &str = r#"
 import * as React from 'react';

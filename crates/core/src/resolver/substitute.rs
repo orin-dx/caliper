@@ -18,12 +18,12 @@ use compact_str::CompactString;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::types::{
-    mark_placeholder, unmarked, CollectedObjectField, CollectedType, CollectedTypeAlias, Diagnostic, DiagnosticCode,
-    DiagnosticSeverity, ResolveState,
+    CollectedObjectField, CollectedType, CollectedTypeAlias, Diagnostic, DiagnosticCode, DiagnosticSeverity,
+    ResolveState, mark_placeholder, unmarked,
 };
 
-use super::import::resolve_to_canonical;
 use super::ResolutionContext;
+use super::import::resolve_to_canonical;
 
 /// Map from a generic alias's declared parameter name to the caller-supplied
 /// argument, each pre-wrapped in `CollectedType::AtFile` pinned to the file the
@@ -73,10 +73,10 @@ pub(super) fn mark_args<'a>(
     let args = &*pinned;
     if state.binds_nothing() {
         // Whether a name is bound here is not looked up name by name: a state that binds any name marks differently.
-        if let Some(reads) = state.reads.as_mut() {
-            if reads.entered_scopes == 0 {
-                reads.needs_empty_scope = true;
-            }
+        if let Some(reads) = state.reads.as_mut()
+            && reads.entered_scopes == 0
+        {
+            reads.needs_empty_scope = true;
         }
         return pinned;
     }

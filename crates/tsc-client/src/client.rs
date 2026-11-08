@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use dashmap::DashMap;
 use tokio::process::{ChildStdin, ChildStdout};
-use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex, Notify};
+use tokio::sync::{Mutex as AsyncMutex, Notify, mpsc, oneshot};
 use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
 

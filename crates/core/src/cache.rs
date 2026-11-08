@@ -208,18 +208,18 @@ impl DtsCache {
 
         // Checked before reading, so a cache file that isn't ours (or a corrupt one) can't make a run allocate it all.
         let path = dir.join(DATA_FILE);
-        if let Ok(meta) = std::fs::metadata(path.as_std_path()) {
-            if meta.len() > MAX_CACHE_FILE_BYTES {
-                return Err(LoadFailure::Unreadable(format!(
-                    "it is {} bytes, over the {MAX_CACHE_FILE_BYTES}-byte limit",
-                    meta.len()
-                )));
-            }
+        if let Ok(meta) = std::fs::metadata(path.as_std_path())
+            && meta.len() > MAX_CACHE_FILE_BYTES
+        {
+            return Err(LoadFailure::Unreadable(format!(
+                "it is {} bytes, over the {MAX_CACHE_FILE_BYTES}-byte limit",
+                meta.len()
+            )));
         }
         let bytes = match std::fs::read(path.as_std_path()) {
             Ok(bytes) => bytes,
             Err(error) if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => {
-                return Err(LoadFailure::Absent)
+                return Err(LoadFailure::Absent);
             }
             Err(error) => return Err(LoadFailure::Unreadable(error.to_string())),
         };

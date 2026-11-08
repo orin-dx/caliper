@@ -9,9 +9,9 @@
 //! components the checker answered and the props it found against the structural pass.
 use std::time::{Duration, Instant};
 
-use caliper_docgen_core::pipeline::{extract, HtmlAttributeMode, PipelineOptions};
+use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, extract};
 use caliper_docgen_core::types::semantic::SemanticProvider;
-use caliper_docgen_semantic::{resolve, targets_of, OnDemand, OnDemandConfig, SemanticRequest};
+use caliper_docgen_semantic::{OnDemand, OnDemandConfig, SemanticRequest, resolve, targets_of};
 use camino::Utf8PathBuf;
 
 fn arg(args: &[String], name: &str) -> Option<String> {

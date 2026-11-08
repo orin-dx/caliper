@@ -1,7 +1,7 @@
 use std::io::IsTerminal;
 use std::path::Path;
-use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI32, Ordering};
 
 use caliper_docgen_core::pipeline::{PipelineOptions, WatchSession};
 use caliper_docgen_core::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, ExtractionOutput};
@@ -10,7 +10,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use miette::{IntoDiagnostic, Result};
 use watchexec_signals::Signal;
 
-use crate::config::{build_options, warn_ignored_semantic_config, BuildOptionsArgs};
+use crate::config::{BuildOptionsArgs, build_options, warn_ignored_semantic_config};
 use crate::output::{print_diagnostics, print_summary, write_atomic};
 
 /// Watch mode never runs `--strict` — there's no CLI flag for it — so this is always `exit_code(false)`.
@@ -120,10 +120,10 @@ fn read_keys(
     mut on_key: impl FnMut(KeyEvent) -> Option<i32>,
 ) -> std::io::Result<i32> {
     loop {
-        if let Event::Key(key) = next()? {
-            if let Some(code) = on_key(key) {
-                return Ok(code);
-            }
+        if let Event::Key(key) = next()?
+            && let Some(code) = on_key(key)
+        {
+            return Ok(code);
         }
     }
 }
@@ -132,7 +132,7 @@ fn read_keys(
 /// session would leave the cursor in its column. Turn output processing back on; input stays raw.
 #[cfg(unix)]
 fn keep_output_processing() -> std::io::Result<()> {
-    use rustix::termios::{tcgetattr, tcsetattr, OptionalActions, OutputModes};
+    use rustix::termios::{OptionalActions, OutputModes, tcgetattr, tcsetattr};
 
     let stdin = std::io::stdin();
     let mut termios = tcgetattr(&stdin)?;
@@ -181,8 +181,8 @@ fn ends_session(signal: Signal) -> bool {
 /// inotify reports opening and reading a file, and applying a change reads it: acting on those reads would apply the
 /// file again, endlessly.
 fn is_read(event: &watchexec_events::Event) -> bool {
-    use watchexec_events::filekind::FileEventKind;
     use watchexec_events::Tag;
+    use watchexec_events::filekind::FileEventKind;
 
     event.tags.iter().any(|tag| matches!(tag, Tag::FileEventKind(FileEventKind::Access(_))))
 }

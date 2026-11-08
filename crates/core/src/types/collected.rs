@@ -56,20 +56,12 @@ impl ParamKind {
 
     /// Source text before the name: `...` for a rest parameter.
     pub(crate) fn prefix(self) -> &'static str {
-        if self == Self::Rest {
-            "..."
-        } else {
-            ""
-        }
+        if self == Self::Rest { "..." } else { "" }
     }
 
     /// Source text after the name: `?` for an optional parameter.
     pub(crate) fn marker(self) -> &'static str {
-        if self == Self::Optional {
-            "?"
-        } else {
-            ""
-        }
+        if self == Self::Optional { "?" } else { "" }
     }
 
     pub(crate) fn code(self) -> u8 {

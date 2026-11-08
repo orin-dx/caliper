@@ -3,16 +3,16 @@
 use camino::Utf8Path;
 use compact_str::CompactString;
 
-use crate::known::{push_known_opaque_diagnostic, resolve_known, KnownPatternResult};
+use crate::known::{KnownPatternResult, push_known_opaque_diagnostic, resolve_known};
 use crate::react_types;
 use crate::types::*;
 
 use super::alias::resolve_type_alias_type;
 use super::collected::resolve_collected_type;
-use super::import::{lookup_ambient_global, AmbientGlobalLookup};
+use super::import::{AmbientGlobalLookup, lookup_ambient_global};
 use super::precedence::Declared;
 use super::react::react_type_to_prop_type;
-use super::{ResolutionContext, MAX_NAMED_NESTING};
+use super::{MAX_NAMED_NESTING, ResolutionContext};
 
 /// Cycle-detecting entry point — see `ResolveState::named_in_progress`'s doc
 /// comment for why this can't reuse chain.rs's permanent `visited` set or
@@ -213,10 +213,10 @@ fn resolve_named_uncycled(
     // cannot be expanded without a type-checker. Return Named silently.
     let bare = name.strip_prefix("React.").unwrap_or(name.as_str());
     // A lib alias that evaluates (`Exclude`, `Extract`, `NonNullable`) is read from TypeScript's own definition.
-    if !args.is_empty() {
-        if let Some(evaluated) = evaluate_lib_alias(bare, args, consuming_file, ctx, state, depth) {
-            return evaluated;
-        }
+    if !args.is_empty()
+        && let Some(evaluated) = evaluate_lib_alias(bare, args, consuming_file, ctx, state, depth)
+    {
+        return evaluated;
     }
     if super::is_ts_utility_type(bare)
         || matches!(
@@ -327,23 +327,23 @@ fn expand_alias(
     let args = &*super::substitute::mark_args(ctx, state, args_file, args);
     let subst =
         super::substitute::bind_declared(params, defaults, args, args_file, declared_file, &mut state.diagnostics);
-    if let Some(param) = super::evaluate::distributive_param(alias) {
-        if let Some(bound) = subst.get(param) {
-            let members = literal_members(super::evaluate::union_members(bound, args_file, ctx, 0), ctx, state, depth);
-            if members.len() != 1 {
-                let caller = state.enter_scope(TypeScope::default());
-                let results: Vec<PropType> = members
-                    .into_iter()
-                    .map(|(member, member_file)| {
-                        let mut one = subst.clone();
-                        let member = CollectedType::AtFile { file: member_file, inner: Box::new(member) };
-                        one.insert(param, member);
-                        resolve_type_alias_type(&super::substitute::substitute_alias(alias, &one), ctx, state, depth)
-                    })
-                    .collect();
-                state.leave_scope(caller);
-                return super::primitives::union_of(results);
-            }
+    if let Some(param) = super::evaluate::distributive_param(alias)
+        && let Some(bound) = subst.get(param)
+    {
+        let members = literal_members(super::evaluate::union_members(bound, args_file, ctx, 0), ctx, state, depth);
+        if members.len() != 1 {
+            let caller = state.enter_scope(TypeScope::default());
+            let results: Vec<PropType> = members
+                .into_iter()
+                .map(|(member, member_file)| {
+                    let mut one = subst.clone();
+                    let member = CollectedType::AtFile { file: member_file, inner: Box::new(member) };
+                    one.insert(param, member);
+                    resolve_type_alias_type(&super::substitute::substitute_alias(alias, &one), ctx, state, depth)
+                })
+                .collect();
+            state.leave_scope(caller);
+            return super::primitives::union_of(results);
         }
     }
     let caller = state.enter_scope(TypeScope::default());

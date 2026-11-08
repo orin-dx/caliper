@@ -16,7 +16,9 @@ use camino::Utf8PathBuf;
 #[non_exhaustive]
 pub enum TscClientError {
     /// The `tsc` process could not be started: the binary is missing or not executable.
-    #[error("tsc binary not found at {path} — install `typescript@next` (npm i typescript@next) or pass an explicit path ({source})")]
+    #[error(
+        "tsc binary not found at {path} — install `typescript@next` (npm i typescript@next) or pass an explicit path ({source})"
+    )]
     SpawnFailed {
         /// The path that was tried.
         path: Utf8PathBuf,

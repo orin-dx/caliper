@@ -6,9 +6,9 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use caliper_docgen_tsc_client::{Client, TscClientError};
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde::de::DeserializeOwned;
+use serde_json::{Value, json};
 
 /// Why a call failed, split by whether the rest of the run can go on.
 #[derive(Debug)]
@@ -53,11 +53,7 @@ pub(crate) struct SymbolInfo {
 /// writes `__size`, the checker answers `___size`. A name with fewer than three leading underscores is unchanged, and
 /// so are the internal names, which start with exactly two.
 pub(crate) fn unescape_leading_underscores(name: &str) -> &str {
-    if name.starts_with("___") {
-        name.strip_prefix('_').unwrap_or(name)
-    } else {
-        name
-    }
+    if name.starts_with("___") { name.strip_prefix('_').unwrap_or(name) } else { name }
 }
 
 fn unescaped_name<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
@@ -228,10 +224,10 @@ impl Rpc {
             *calls.entry(method.to_string()).or_default() += 1;
         }
         let answer = self.client.request(method, params.clone(), self.deadline).await.map_err(classify)?;
-        if let Some(log) = &self.recording {
-            if let Ok(mut log) = log.lock() {
-                log.push(json!({ "method": method, "params": params, "result": answer.value }));
-            }
+        if let Some(log) = &self.recording
+            && let Ok(mut log) = log.lock()
+        {
+            log.push(json!({ "method": method, "params": params, "result": answer.value }));
         }
         Ok(answer.value)
     }

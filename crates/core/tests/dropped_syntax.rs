@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 
-use caliper_docgen_core::pipeline::{extract, HtmlAttributeMode, PipelineOptions};
+use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, extract};
 use caliper_docgen_core::types::{ExtractionOutput, ObjectField, PropType, SCHEMA_VERSION};
 use camino::Utf8PathBuf;
 use serde_json::json;

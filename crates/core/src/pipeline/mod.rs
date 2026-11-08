@@ -64,7 +64,7 @@ pub struct IncrementalUpdate {
 
 impl Serialize for IncrementalUpdate {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use crate::types::output::interned::{intern, InternedComponent, Tables};
+        use crate::types::output::interned::{InternedComponent, Tables, intern};
         use serde::ser::SerializeStruct;
 
         let IncrementalUpdate {

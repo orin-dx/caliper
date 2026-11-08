@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use caliper_docgen_core::types::{FunctionParam, ObjectField, PropType};
 use rustc_hash::FxHashMap;
 
-use crate::rpc::{flag, CallError, Rpc, SymbolInfo, TypeInfo};
+use crate::rpc::{CallError, Rpc, SymbolInfo, TypeInfo, flag};
 
 /// Nesting past which a type is written as the checker prints it.
 const MAX_DEPTH: u8 = 4;
@@ -339,11 +339,7 @@ pub(crate) fn without_undefined(prop_type: PropType, optional: bool) -> PropType
     match prop_type {
         PropType::Union(members) if optional => {
             let mut kept: Vec<PropType> = members.into_iter().filter(|m| *m != PropType::Undefined).collect();
-            if kept.len() == 1 {
-                kept.swap_remove(0)
-            } else {
-                PropType::Union(kept)
-            }
+            if kept.len() == 1 { kept.swap_remove(0) } else { PropType::Union(kept) }
         }
         other => other,
     }

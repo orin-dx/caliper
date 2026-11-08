@@ -787,10 +787,10 @@ impl Loader<'_> {
             let mut names: Vec<&String> = data.interfaces.keys().collect();
             names.sort();
             for key in names {
-                if let Some(name) = key.strip_prefix(file.as_str()).and_then(|rest| rest.strip_prefix(':')) {
-                    if name.starts_with("React.") {
-                        self.load_declaration(scope, file.clone(), CompactString::from(name));
-                    }
+                if let Some(name) = key.strip_prefix(file.as_str()).and_then(|rest| rest.strip_prefix(':'))
+                    && name.starts_with("React.")
+                {
+                    self.load_declaration(scope, file.clone(), CompactString::from(name));
                 }
             }
         }
@@ -808,10 +808,10 @@ impl Loader<'_> {
         if let Some(parsed) = parsed {
             return parsed.map(|data| scan_of(&data, file));
         }
-        if let Some(cell) = self.re_exports.get(file.as_str()) {
-            if let Some(found) = cell.get() {
-                return Some((false, found.clone()));
-            }
+        if let Some(cell) = self.re_exports.get(file.as_str())
+            && let Some(found) = cell.get()
+        {
+            return Some((false, found.clone()));
         }
         let source = self.read(file)?;
         if entry || may_declare_into_react(&source) {
@@ -1107,10 +1107,10 @@ pub(crate) fn load(
             loader.spawn_demand(scope, demand);
         }
     });
-    if let (None, Some(path)) = (previous, &index_path) {
-        if loader.learned.load(Ordering::Relaxed) {
-            write_index(path, &loader);
-        }
+    if let (None, Some(path)) = (previous, &index_path)
+        && loader.learned.load(Ordering::Relaxed)
+    {
+        write_index(path, &loader);
     }
 
     let mut files: Vec<PathKey> = loader.declaring.iter().map(|f| f.clone()).collect();

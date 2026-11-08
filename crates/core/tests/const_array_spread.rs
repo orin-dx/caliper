@@ -10,10 +10,10 @@
 //! spreads deep. antd's `ButtonColorType` is `['default', 'primary', 'danger', ...PresetColors]` with `PresetColors`
 //! in another file.
 
-use caliper_docgen_core::pipeline::{extract, PipelineOptions};
+use caliper_docgen_core::pipeline::{PipelineOptions, extract};
 use caliper_docgen_core::types::DiagnosticSeverity;
 use camino::Utf8PathBuf;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// The `color` prop's type of the only component, and the messages of the warnings.
 fn color_of(files: &[(&str, &str)]) -> (Value, Vec<String>) {
