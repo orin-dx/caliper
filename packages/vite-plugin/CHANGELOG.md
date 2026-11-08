@@ -1,5 +1,13 @@
 # caliper-docgen-vite-plugin
 
+## 0.10.0
+
+- An invalid option value now fails at startup with a message naming the choices, such as `fallback: 'degrade'` in the addon or `logLevel: 'verbose'` in the Vite plugin; a typo used to log everything or act as `fallback: 'never'`. Check your options if the build now stops with a `[caliper-docgen]` message.
+- Prop types now keep more of what TypeScript says about them. Tuples keep their optional and rest elements and their labels: `[string, ...number[]]` used to print as `[string, number[][]]`, and `[head: string, ...tail: number[]]` used to come out partly unreadable. A spread of a known tuple, `[string, ...Tail]`, is flattened as TypeScript does. Bigint literals (`10n`), negative number literals (`-1`), `unique symbol`, enum members (`Size.Small`, offered to Storybook as its value `"small"`) and template literal patterns (`` `${number}px` ``) are represented instead of being marked opaque. An object type with several call signatures, a `new` signature, or a call signature beside properties keeps them all, and a recursive alias such as `type Json = string | Json[]` refers back to itself by name instead of being cut off. A getter is read as a property (`get size(): number` is `readonly size: number`), not as a method.
+
+  The JSON output moves to schema version 5. A tuple's elements are now `{ "type", "label"?, "modifier"? }` objects, the type kinds `bigintLiteral`, `uniqueSymbol`, `enumMember`, `templateLiteral`, `callable`, `recursive` and `truncated` are new, and the `templateLiteral` reason of an `opaque` type is gone. Update `caliper-docgen`, the Vite plugin and the Storybook addon together; a mismatched install stops with a message naming both versions.
+- The Vite plugin now reports an update it could not apply as a warning in dev and as a failed rebuild under `vite build --watch`, instead of logging to the console and carrying on with stale docs. No action needed.
+
 ## 0.9.0
 
 - Prop types now keep `readonly` on arrays, tuples and object fields, index signatures such as `{ [key: string]: number }`, and the ref type a prop was written with (`RefObject<T>`, `ForwardedRef<T>`, `RefCallback<T>`) instead of printing them as `string[]`, `{}` and `Ref<T>`. The JSON output moves to schema version 4, which adds a `readonly` type kind, a `name` on `ref` types, and `readonly` and `indexKey` on object fields: update `caliper-docgen`, the Vite plugin and the Storybook addon together, and a mismatched install stops with a message naming both versions. A union such as `string[] | readonly string[]` now lists both members.
