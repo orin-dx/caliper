@@ -1,5 +1,15 @@
 # npm/caliper-docgen-napi
 
+## 0.10.0
+
+- An editor now shows what each `JsExtractOptions` field and `sessionStats` do when you hover them in the Node binding's types, and `caliper-docgen completions --help` says what its `SHELL` argument is.
+- The Linux x64 binaries now run on systems with glibc 2.28 or newer, such as Debian 12, Ubuntu 22.04 and RHEL 9; they previously needed glibc 2.39 and failed to start on those systems. No action needed.
+- A prop now says why its type is partly a guess: the canonical JSON gains `degradedBy` on a prop whose type holds an opaque member, and the TOON output (`--format toon`) lists each prop's declaring type, quotes string literals in single quotes, shows the names a collapsed inherited layer declares, and adds a `degradedBy` column when a prop has one. A host that works in process can ask the session for one component as TOON with `sessionComponentToon(sessionId, key)` instead of rendering a whole project.
+- Real `extract` output now validates against the schema that `caliper-docgen schema` prints; components found by four of the detection rules, such as `taggedFactory`, used to fail validation because the schema did not list them. No action needed.
+- Prop types now keep more of what TypeScript says about them. Tuples keep their optional and rest elements and their labels: `[string, ...number[]]` used to print as `[string, number[][]]`, and `[head: string, ...tail: number[]]` used to come out partly unreadable. A spread of a known tuple, `[string, ...Tail]`, is flattened as TypeScript does. Bigint literals (`10n`), negative number literals (`-1`), `unique symbol`, enum members (`Size.Small`, offered to Storybook as its value `"small"`) and template literal patterns (`` `${number}px` ``) are represented instead of being marked opaque. An object type with several call signatures, a `new` signature, or a call signature beside properties keeps them all, and a recursive alias such as `type Json = string | Json[]` refers back to itself by name instead of being cut off. A getter is read as a property (`get size(): number` is `readonly size: number`), not as a method.
+
+  The JSON output moves to schema version 5. A tuple's elements are now `{ "type", "label"?, "modifier"? }` objects, the type kinds `bigintLiteral`, `uniqueSymbol`, `enumMember`, `templateLiteral`, `callable`, `recursive` and `truncated` are new, and the `templateLiteral` reason of an `opaque` type is gone. Update `caliper-docgen`, the Vite plugin and the Storybook addon together; a mismatched install stops with a message naming both versions.
+
 ## 0.9.0
 
 - Released together with the `napi-and-binding` fixed group.
