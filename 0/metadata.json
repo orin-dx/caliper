@@ -1,0 +1,129 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M70S7Q5FGKT1QZ36Q9HQQERD",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-09T18:31:08.485047Z",
+  "branch": "fix-400-lane",
+  "checkpoints_count": 5,
+  "save_step_count": 67,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "2aafe3f8559a",
+  "checkpoint_transcript_start": 17217,
+  "transcript_lines_at_start": 17217,
+  "compact_transcript_start": 1471,
+  "token_usage": {
+    "input_tokens": 32,
+    "cache_creation_tokens": 23229,
+    "cache_read_tokens": 2045571,
+    "output_tokens": 7288,
+    "api_call_count": 15,
+    "subagent_tokens": {
+      "input_tokens": 38,
+      "cache_creation_tokens": 60402,
+      "cache_read_tokens": 3677928,
+      "output_tokens": 10051,
+      "api_call_count": 19
+    }
+  },
+  "redaction": {
+    "replacements": 18,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 12,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 391
+  },
+  "summary": {
+    "intent": "Review a subagent's gate-measurement report for the caliper semantic checker (memory and determinism gates), decide what's next, then diagnose a failing CI check the user referred to as '#197' and prevent recurrence.",
+    "outcome": "Gate harness work was reported as PR #401 (memory gate PASS, determinism PASS only in nearest form). The '#197' reference matched no failing PR; it was assumed to be the failed Checker lane on #400, caused by stale checker-expectations.json (react/13 improved, react/34 regressed), and a worker was dispatched to fix it after user approval.",
+    "learnings": {
+      "repo": [
+        "tsrs `--api` mode has no checker-count flag (`--checkers` is compile-mode only), so ADR 0026's determinism gate cannot be measured as worded; RAYON_NUM_THREADS is the nearest proxy.",
+        "`OnDemand` recycles the checker process on a 64-program limit ('worn') or an RSS bound ('bloated'); at the shipped 768 MiB bound the program limit does all the recycling.",
+        "The `Test / Checker lane` is a required CI gate that compares rows against `checker-expectations.json`; it fails both on regressions and on 'better than expected' rows, so expectations must be updated in the same PR as checker-output changes.",
+        "Construct parity (`construct:parity`) covers tsrs-vs-Go parity; `just test-checker-lane` runs the lane locally.",
+        "Caliper repo is in orin-dx org; trail items (e.g. #197 'Names and values live in one place') are separate from PR numbers, so '#NNN' can be ambiguous between PRs and trail tasks.",
+        "Stacked-PR rule: wait for the base PR to merge before starting dependent slices (S5 waits on #400).",
+        "MuiPopoverRoot and MuiSliderMark are declined by the checker and keep structural answers; the cause was not investigated."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/examples/gate_harness.rs",
+          "finding": "Harness holding both gates, about 170 lines; run via `just gate-measure` (~17 min) against fixtures from scripts/gate_fixtures.mjs."
+        },
+        {
+          "path": "checker-expectations.json",
+          "finding": "Must be updated for react/13 (now `spelled`) and react/34 (now less precise, emits bare `BoxProps`) in the same PR as the checker change."
+        }
+      ],
+      "workflow": [
+        "Treat a subagent's hand-back as a report, not authority; verify branch, signatures and PR state yourself before relaying it, and state what was not re-measured.",
+        "Run the relevant CI lane locally and treat its exit code as part of the done check before pushing.",
+        "When a user reference like '#197' matches nothing, check across PRs, other repos and trail items, then ask rather than guess; state any assumption explicitly.",
+        "Don't hide regressions by recording them as gaps without a reason and a tracking item."
+      ]
+    },
+    "friction": [
+      "User's '#197' was ambiguous: it matched a merged caliper PR, a nonexistent callisto PR and a trail task, costing several lookups before an assumption was made.",
+      "The earlier plan to update checker-expectations.json after #400 merged was wrong and led to a failing required check.",
+      "An earlier claim that slice 3 would turn react/13, 34 and 07 green was only true for react/13.",
+      "The harness came in over the requested 60 to 100 lines (about 170) because it holds both gates."
+    ],
+    "open_items": [
+      "Fix or document react/34 (`BoxProps` bare regression) on #400; worker dispatched.",
+      "Fix remaining no-regression cases: react/29 comparator, react/34 rank, objects/23 internal name.",
+      "Reword ADR 0026's determinism bullet to 'deterministic across repeated runs, thread counts, restarts and query order' (user decision pending).",
+      "Review and merge #398, #400, #401; check whether #396 duplicates 0.10.0; delete old remote branches feat/construct-suite and perf/cycles-by-structure after #398 merges.",
+      "Start S5 (instantiation probe) after #400 merges, then S6 watch mode, S7 delete-resolver, S8 default flip plus @tsrs/<platform> optionalDependency.",
+      "Still-open default-flip gates: Linux CI run of the checker path and the no-regression gate.",
+      "Unverified: single process passing 768 MiB, real Storybook plus Node session, Linux/Windows, compile-mode --checkers, full `just test` suite.",
+      "Investigate why the checker declines MuiPopoverRoot and MuiSliderMark."
+    ]
+  }
+}
