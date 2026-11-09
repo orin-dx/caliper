@@ -101,6 +101,20 @@ test-integration:
     NAPI_BINARY_REQUIRED=true pnpm --filter caliper-docgen-vite-plugin test:integration
     NAPI_BINARY_REQUIRED=true pnpm --filter caliper-docgen-storybook test:integration
 
+# Measure ADR 0026's memory and determinism gates against the pinned tsrs (docs/gate-measurements.md). Builds the large
+# project outside the repository (GATE_FIXTURES, default ~/Projects/caliper-fixtures/gate-large), so it needs the network
+# or a warm pnpm store; `just gate-measure --edits 650 --runs 3` passes options to the harness. Takes minutes.
+gate-measure *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fixtures="${GATE_FIXTURES:-$HOME/Projects/caliper-fixtures/gate-large}"
+    node scripts/gate_fixtures.mjs "$fixtures"
+    cargo build --release --locked -p caliper-docgen-semantic --example gate_harness
+    TSRS_BIN="$(pnpm --silent --filter caliper-docgen-oracle exec tsx src/tsrs-bin.ts)"
+    for gate in memory determinism; do
+        target/release/examples/gate_harness "$gate" --src "$fixtures/src" --tsc "$TSRS_BIN" {{ args }}
+    done
+
 # Pack the npm packages and check napi arrives only as vite-plugin's transitive dependency (pm: npm or pnpm)
 verify-install pm="pnpm":
     scripts/verify-install.sh {{ pm }}
