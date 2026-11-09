@@ -1,0 +1,61 @@
+We've learned a lot out about positioning and where we are right? Can we repurpose this work for preparing an article about writing caliper?
+
+---
+
+The problem was RDT is slow and react-doctype is not accurage for storybook and we wanted something more performant. Also wanted to explore what we can provide to agents.
+
+The best is oxc + tsgo in ts 7.1 would provide the performance and accuracy we needed
+
+---
+
+We started with the naive OXC work, slowly ramping up what we supported.
+
+---
+
+From the git history and the entire session history what kind of patterns and insights did we learn along with eway?
+
+---
+
+ADRs are just part of our workflow, not necessarily a learning for caliper right?
+
+---
+
+The PR gates with weekly record might be worthy contender to be included as it's helping us track and move forward right? And reproduce results in CI more consistently
+
+---
+
+How do we set the benchmark for tools collecting TS types for react docgen? and maybe later react-agent-docgen?
+
+---
+
+We can provide a library that our caliper CLI uses but other tools can too right? That's a huge learning
+
+---
+
+What kind of diagrams can add to our work?
+
+---
+
+https://techworx.dev/writing/building-design-systems-agentic-era/
+
+---
+
+This was one of my previous articles
+
+---
+
+It’s in ~/projects/pages
+
+---
+
+What can we base this on for examples? Oxc, oxlint? Other tools being presented as new, better alternartives?
+
+---
+
+Research on the space, the work going on in oxc and TS 7.1.
+
+Oxc is working in a built in parser too right?
+
+---
+
+We’re doing a lot of adjustments to our architecture with tsrs coming. Check the current caliper session with entire

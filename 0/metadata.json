@@ -1,0 +1,112 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M70HH9S8N32G28BRMR6KSCKP",
+  "session_id": "4c72440d-a6e2-4bf8-9c73-6f5da1acdec2",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-09T16:16:38.461463Z",
+  "branch": "main",
+  "checkpoints_count": 17,
+  "save_step_count": 4,
+  "files_touched": [
+    ".playwright-mcp/page-2026-11-02T19-02-42-164Z.yml",
+    "apps/validate/baselines/oxc-react-docgen-none.json",
+    "apps/validate/baselines/oxc-react-docgen.json",
+    "apps/validate/baselines/react-docgen-typescript.json",
+    "apps/validate/baselines/react-docgen.json",
+    "apps/validate/baselines/semantic.json"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "7f3ca6181b65",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 516,
+    "cache_creation_tokens": 1777815,
+    "cache_read_tokens": 77873159,
+    "output_tokens": 216031,
+    "api_call_count": 230,
+    "subagent_tokens": {
+      "input_tokens": 56,
+      "cache_creation_tokens": 153537,
+      "cache_read_tokens": 2737845,
+      "output_tokens": 26418,
+      "api_call_count": 28
+    }
+  },
+  "redaction": {
+    "replacements": 23,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 17,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 17
+  },
+  "summary": {
+    "intent": "Push caliper toward a v1 alpha by creating and executing six planned Entire trails (benchmarking, perf, detection, release flow), then explore the benchmark library, article and diagram ideas, and the Oxc/TS 7.1/tsrs landscape for caliper's architecture.",
+    "outcome": "Created trails #153-#158, ran parallel workers, and pushed stacked draft PRs #280-#283 for oracle and weekly-pairing work; perf and release-flow branches were built locally by workers. Diagnosed a release race, confirmed Callisto 0.16.0 is current, and found Oxc's tsrs checker plus ADR 0026, which is still Proposed and awaiting the user's decision.",
+    "learnings": {
+      "repo": [
+        "Nothing in the repo defined 'v1 alpha'; the plan lives outside the repo at ~/.claude/projects/-Users-gabe-Projects-caliper/plan/next-trails-2026-11-02.md so any session can read it without a branch.",
+        "Entire auto-opens PRs when a branch is pushed and linked to a trail; PR bodies must keep the Entire marker when edited. Stacked branches need to be linked with --base <parent> before any PR exists.",
+        "Stacked PRs auto-close or strand content when a parent merges and its branch is deleted, so merge bottom-up and check bases before opening.",
+        "Release failure E148 ('release PR snapshot changed') is a race in the Callisto release-PR step. A re-run or the next push fixes it. Callisto does not recommend a retry step.",
+        "Callisto 0.16.0 attestation checks expect a signer workflow named callisto-release.yml, so release.yml would need renaming. This is unconfirmed in source. GitHub Releases attach to the product package's own tag (cargo/caliper-docgen@x.y.z), and the product package must be Cargo (E304).",
+        "The Homebrew tap reads tags like npm/caliper-docgen@x.y.z, so tag-template must stay unset.",
+        "The Storybook addon defaults to collapseInheritedProps 'none' (packages/storybook/src/provider.ts:69), but measurements used the CLI default. Storybook-specific claims and trail 192's premise are unverified.",
+        "Oracle numbers are unreliable until fixed: PRs #318/#320 have a verdict key mismatch (less_precise vs 'less precise'), a sample clamped under 50 reported as 50, and dropped --list entries.",
+        "The weekly record uses pinned corpora and a versioned reference (reference_version) so results are reproducible. Local runs on unpinned checkouts differ (Spectrum wrong-rate 11.79% locally vs 1.09% in CI).",
+        "react-docgen's default importer follows imports (fsImporter); the old 'reads each file alone' claim in docs was wrong. react-docgen throws on 17-21% of files.",
+        "Under the sandbox, tsx fails on its IPC socket (EPERM); `node src/oracle.ts` works because Node 26 strips types. The job tmp dir is write-denied, so use $TMPDIR.",
+        "Oxc has a Rust TypeScript 7 checker, oxc-project/tsrs. ADR 0026 (Proposed) makes the checker the type authority with structural as fallback, in slices S1-S8; S4 and later must not start until the user accepts it."
+      ],
+      "code": [
+        {
+          "path": "packages/storybook/src/provider.ts",
+          "line": 69,
+          "end_line": 69,
+          "finding": "Storybook addon defaults collapseInheritedProps to 'none', unlike the CLI default, so benchmarks must use the addon's real config."
+        },
+        {
+          "path": "apps/oracle/src/oracle-compare.ts",
+          "finding": "Function-marker rule now caps only a parameter marker (optional/rest) that the tool lost: (kp.optional && !cp.optional) || (kp.rest && !cp.rest)."
+        },
+        {
+          "path": "scripts/weekly.py",
+          "line": 7,
+          "end_line": 7,
+          "finding": "Repeats the incorrect 'reads each file alone' wording about react-docgen."
+        }
+      ],
+      "workflow": null
+    },
+    "friction": [
+      "`entire brain brief` failed on a sandbox write-lock denial under ~/.local/share/entire/ and was never retried.",
+      "Reports from the callisto-gap and mine-entire agents were truncated and needed resends.",
+      "My earlier searches missed tsrs and I wrongly said Oxc had no checker until the user pushed back.",
+      "Machine load of 9-15 made uncontended perf measurement impossible, so the perf branches don't show they reach the 141 ms / 275 MiB baseline.",
+      "Weekly pairing reached 92.1% antd recall, not the ~95% target, and the fix/weekly-caliper-key-collisions branch was skipped.",
+      "Trail bodies did not render tables, and stacked merges stranded content in #281 and #283."
+    ],
+    "open_items": [
+      "User decision: accept ADR 0026 so slices S4-S8 can start; review #392 and the spike's time-to-first-answer and memory figures first.",
+      "Trail 158 release flow: decide on renaming release.yml to callisto-release.yml, whether to add an E148 retry, and ask the Homebrew tap owner before merging. Rehearse on a scratch repo or fork.",
+      "Trail 154 perf: only two of three branches were built (the cache-react-augmentations branch was deleted). The 141 ms / 275 MiB baseline is not reached.",
+      "oracle/three-tools-report is on hold until PRs #280-#283 merge; trails 155 then 156 are a serial stack that hasn't started, and trail 157 hasn't started either.",
+      "Spectrum's 1.09% oracle wrong-rate is uninvestigated, and Mantine, Chakra and Spectrum need a CI weekly run to validate the new pairing and oracle rules.",
+      "Fix the #318/#320 defects, then redo the collapse and checker-mode measurements with the addon's real configuration; tell the owner of trail 192 that its premise needs re-checking.",
+      "Write the techworx article in ~/projects/pages (MDX, draft: true) with a claims ledger and diagrams (hybrid architecture, ramp timeline, data flow). Its thesis may shift given tsrs. Awaiting a go-ahead and title.",
+      "Plan the shared benchmark library (a packages/bench trail): harden the reference sample, define adapter and report schemas, consolidate weekly.py into TypeScript, and decide the licence.",
+      "Read the TS 7.1 Beta post and typescript-go API PRs (#4699, #4712), and search Oxc's GitHub for checker discussion.",
+      "apps/validate/ remains untracked and its baselines were modified."
+    ]
+  }
+}
