@@ -53,7 +53,14 @@ export function Wrappers(props: {
  * `ElementType` below the top of a prop is the union of over a hundred tag names and the component types, written with
  * `undefined` by its optional property: wider than the budget, it is the terminal and not a cut.
  */
-export function Polymorphic(props: { at: { as?: React.ElementType }; top?: React.ElementType; few: { as?: 'a' | 'b' | React.ComponentType } }) { return null; }
+export function Polymorphic(props: {
+  at: { as?: React.ElementType };
+  top?: React.ElementType;
+  few: { as?: 'a' | 'b' | React.ComponentType };
+  // A literal that is not a tag of `JSX.IntrinsicElements` is the author's own alternative: the terminal does not stand for it.
+  custom: { as?: React.ElementType | 'custom-widget' };
+  both: { as?: React.ElementType | 'div' | 'custom-widget' | 'another-one' };
+}) { return null; }
 
 /** ReactNode inside a union arrives as its members: it is the terminal again, and what else is in the union stays. */
 export function Terminals(props: {
@@ -61,3 +68,22 @@ export function Terminals(props: {
   portal?: React.ReactPortal | string;
   mixed?: React.ReactNode | Promise<number> | { id: string };
 }) { return null; }
+
+/**
+ * A project interface that extends a generic one of the project, which inherits over a hundred fields from a package,
+ * and another package interface. A generic instantiation does not state its bases in terms of its arguments, so what the
+ * first one inherits is cut with its count, never dropped because the second one is named.
+ */
+interface GenericOverDep<T> extends DepWide {
+  value: T;
+}
+interface MixedBases extends GenericOverDep<string>, DepSmall {
+  extra: number;
+}
+interface PlainOverDep extends DepWide {
+  value: number;
+}
+interface MixedPlain extends PlainOverDep, DepSmall {
+  extra: number;
+}
+export function Generics(props: { mixed?: MixedBases; plain?: MixedPlain }) { return null; }

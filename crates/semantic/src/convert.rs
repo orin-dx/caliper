@@ -29,7 +29,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use caliper_docgen_core::react_types::{html_element_for, html_element_from_type_arg};
+use caliper_docgen_core::react_types::{html_element_for, html_element_from_type_arg, is_intrinsic_tag};
 use caliper_docgen_core::types::semantic::{degraded_type, unresolved_type};
 use caliper_docgen_core::types::{
     BigIntValue, CallSignature, EnumMemberValue, FunctionParam, ObjectField, OpaqueReason, PropType,
@@ -49,8 +49,8 @@ const MAX_DEPTH: u8 = 5;
 const MAX_FIELDS: [usize; 2] = [100, 40];
 /// The most members a union or intersection lists at the top and below it.
 const MAX_MEMBERS: [usize; 2] = [500, 120];
-/// How many tag names a union of string literals has to list to be React's `ElementType` (`JSX.IntrinsicElements` has
-/// over 170): the tag names are the one part of it that no declaration identifies.
+/// How many of React's tag names (see [`is_tag`]) a union has to list to be React's `ElementType` (`JSX.IntrinsicElements`
+/// has over 170): the tag names are the one part of it that no declaration identifies.
 const MIN_INTRINSIC_TAGS: usize = 100;
 /// The lib's utility aliases that keep the properties of the type they are applied to, and so can stand for it.
 const UTILITIES: [&str; 5] = ["Omit", "Pick", "Partial", "Required", "Readonly"];
@@ -213,6 +213,21 @@ impl Origin {
             _ => None,
         }
     }
+}
+
+/// Whether a union member is a tag of React's `JSX.IntrinsicElements`: a string literal (not an enum member) whose value
+/// that table lists. A literal the checker gave no value for is not one, so it is kept beside the terminal.
+fn is_tag(member: &TypeInfo) -> bool {
+    member.flags & flag::STRING_LITERAL != 0
+        && member.flags & flag::ENUM_LITERAL == 0
+        && member.value.as_ref().and_then(|value| value.as_str()).is_some_and(is_intrinsic_tag)
+}
+
+/// Whether the checker states the base types of this type: the declaration of a class or interface does, in its own
+/// terms. An instantiation of a generic one (`Box<string>`, only a reference) does not state them in terms of its
+/// arguments, so what it inherits cannot be listed from its bases.
+fn states_bases(info: &TypeInfo) -> bool {
+    info.object_flags & (flag::OBJECT_CLASS | flag::OBJECT_INTERFACE) != 0
 }
 
 fn file_in_dependency(file: &str) -> bool {
@@ -680,16 +695,18 @@ impl Converter {
 
     /// Which members of a union are those of React's `ElementType`: the tag names of `JSX.IntrinsicElements` as string
     /// literals and `ComponentType`'s two arms, `ComponentClass` and `FunctionComponent`. The tag names are many
-    /// ([`MIN_INTRINSIC_TAGS`]), which keeps a union of a few tags and a component type the author's own.
+    /// ([`MIN_INTRINSIC_TAGS`]), which keeps a union of a few tags and a component type the author's own. Only a literal
+    /// that [`is_tag`] is taken: any other string literal is an alternative the author wrote beside `ElementType`, and
+    /// the terminal does not stand for it.
     async fn element_type_members(&self, members: &[TypeInfo]) -> Result<Option<Vec<bool>>, CallError> {
-        let tags = members.iter().filter(|member| member.flags & flag::STRING_LITERAL != 0).count();
+        let tags = members.iter().filter(|member| is_tag(member)).count();
         if tags < MIN_INTRINSIC_TAGS {
             return Ok(None);
         }
         let (mut class, mut function) = (false, false);
         let mut absorbed = Vec::with_capacity(members.len());
         for member in members {
-            let mut takes = member.flags & flag::STRING_LITERAL != 0;
+            let mut takes = is_tag(member);
             if member.flags & flag::OBJECT != 0
                 && member.object_flags & (flag::OBJECT_CLASS | flag::OBJECT_INTERFACE | flag::OBJECT_REFERENCE) != 0
                 && let Some(origin) = self.symbol_origin(member).await?
@@ -891,9 +908,7 @@ impl Converter {
         }
         // The declaration of a class or interface has base types; an instantiation of a generic one (`Box<string>`, only a
         // reference) does not state them in terms of its arguments, so it is cut.
-        let layers = if origin.is_some_and(|origin| !origin.alias)
-            && info.object_flags & (flag::OBJECT_CLASS | flag::OBJECT_INTERFACE) != 0
-        {
+        let layers = if origin.is_some_and(|origin| !origin.alias) && states_bases(info) {
             self.base_layers(info, cx).await?
         } else {
             None
@@ -924,12 +939,14 @@ impl Converter {
                 }
                 continue;
             }
-            // A base declared in the project: its members are already among the type's own.
+            // A base declared in the project: its members are already among the type's own, and what it inherits is
+            // seen through to its own bases. An instantiation of a generic one does not state them, so what it
+            // inherits would be missing from the answer: the type is cut instead, with its count.
             let declared_here = match self.origin(&base).await? {
                 Some(origin) => !origin.alias && !origin.in_dependency() && !origin.in_lib(),
                 None => false,
             };
-            if !declared_here {
+            if !declared_here || !states_bases(&base) {
                 return Ok(None);
             }
             let mut inherited = self.rpc.base_types(base.id).await?;

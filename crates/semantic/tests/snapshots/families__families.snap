@@ -222,6 +222,86 @@ expression: "answer(&project(true), None)"
         }
       }
     ],
+    "Generics": [
+      {
+        "name": "mixed",
+        "required": false,
+        "type": {
+          "kind": "intersection",
+          "members": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "extra",
+                  "propType": {
+                    "kind": "number"
+                  },
+                  "required": true,
+                  "description": ""
+                },
+                {
+                  "name": "value",
+                  "propType": {
+                    "kind": "string"
+                  },
+                  "required": true,
+                  "description": ""
+                }
+              ]
+            },
+            {
+              "kind": "truncated",
+              "text": "MixedBases",
+              "limit": {
+                "type": "members",
+                "total": 152
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "plain",
+        "required": false,
+        "type": {
+          "kind": "intersection",
+          "members": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "extra",
+                  "propType": {
+                    "kind": "number"
+                  },
+                  "required": true,
+                  "description": ""
+                },
+                {
+                  "name": "value",
+                  "propType": {
+                    "kind": "number"
+                  },
+                  "required": true,
+                  "description": ""
+                }
+              ]
+            },
+            {
+              "kind": "named",
+              "name": "DepWide",
+              "args": []
+            },
+            {
+              "kind": "named",
+              "name": "DepSmall",
+              "args": []
+            }
+          ]
+        }
+      }
+    ],
     "Own": [
       {
         "name": "wide",
@@ -2982,7 +3062,147 @@ expression: "answer(&project(true), None)"
             },
             {
               "kind": "stringLiteral",
+              "value": "abbr"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "address"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "animate"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "animateMotion"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "animateTransform"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "area"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "article"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "aside"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "audio"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "b"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "base"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "bdi"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "bdo"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "big"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "blockquote"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "body"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "br"
+            },
+            {
+              "kind": "stringLiteral",
               "value": "button"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "canvas"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "caption"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "center"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "circle"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "cite"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "clipPath"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "code"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "col"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "colgroup"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "data"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "datalist"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "dd"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "defs"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "del"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "desc"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "details"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "dfn"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "dialog"
             },
             {
               "kind": "stringLiteral",
@@ -2990,487 +3210,563 @@ expression: "answer(&project(true), None)"
             },
             {
               "kind": "stringLiteral",
+              "value": "dl"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "dt"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "ellipse"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "em"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "embed"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feBlend"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feColorMatrix"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feComponentTransfer"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feComposite"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feConvolveMatrix"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feDiffuseLighting"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feDisplacementMap"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feDistantLight"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feDropShadow"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feFlood"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feFuncA"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feFuncB"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feFuncG"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feFuncR"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feGaussianBlur"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feImage"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feMerge"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feMergeNode"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feMorphology"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feOffset"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "fePointLight"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feSpecularLighting"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feSpotLight"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feTile"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "feTurbulence"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "fieldset"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "figcaption"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "figure"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "filter"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "footer"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "foreignObject"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "form"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "g"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "h1"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "h2"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "h3"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "h4"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "h5"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "h6"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "head"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "header"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "hgroup"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "hr"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "html"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "i"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "iframe"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "image"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "img"
+            },
+            {
+              "kind": "stringLiteral",
               "value": "input"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag001"
+              "value": "ins"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag002"
+              "value": "kbd"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag003"
+              "value": "keygen"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag004"
+              "value": "label"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag005"
+              "value": "legend"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag006"
+              "value": "li"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag007"
+              "value": "line"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag008"
+              "value": "linearGradient"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag009"
+              "value": "link"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag010"
+              "value": "main"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag011"
+              "value": "map"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag012"
+              "value": "mark"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag013"
+              "value": "marker"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag014"
+              "value": "mask"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag015"
+              "value": "menu"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag016"
+              "value": "menuitem"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag017"
+              "value": "meta"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag018"
+              "value": "metadata"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag019"
+              "value": "meter"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag020"
+              "value": "mpath"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag021"
+              "value": "nav"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag022"
+              "value": "noindex"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag023"
+              "value": "noscript"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag024"
+              "value": "object"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag025"
+              "value": "ol"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag026"
+              "value": "optgroup"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag027"
+              "value": "option"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag028"
+              "value": "output"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag029"
+              "value": "p"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag030"
+              "value": "param"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag031"
+              "value": "path"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag032"
+              "value": "pattern"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag033"
+              "value": "picture"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag034"
+              "value": "polygon"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag035"
+              "value": "polyline"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag036"
+              "value": "pre"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag037"
+              "value": "progress"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag038"
+              "value": "q"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag039"
+              "value": "radialGradient"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag040"
+              "value": "rect"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag041"
+              "value": "rp"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag042"
+              "value": "rt"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag043"
+              "value": "ruby"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag044"
+              "value": "s"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag045"
+              "value": "samp"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag046"
+              "value": "script"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag047"
+              "value": "search"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag048"
+              "value": "section"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag049"
+              "value": "select"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag050"
+              "value": "set"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag051"
+              "value": "slot"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag052"
+              "value": "small"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag053"
+              "value": "source"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag054"
+              "value": "span"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag055"
+              "value": "stop"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag056"
+              "value": "strong"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag057"
+              "value": "style"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag058"
+              "value": "sub"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag059"
+              "value": "summary"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag060"
+              "value": "sup"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag061"
+              "value": "svg"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag062"
+              "value": "switch"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag063"
+              "value": "symbol"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag064"
+              "value": "table"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag065"
+              "value": "tbody"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag066"
+              "value": "td"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag067"
+              "value": "template"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag068"
+              "value": "text"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag069"
+              "value": "textPath"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag070"
+              "value": "textarea"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag071"
+              "value": "tfoot"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag072"
+              "value": "th"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag073"
+              "value": "thead"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag074"
+              "value": "time"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag075"
+              "value": "title"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag076"
+              "value": "tr"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag077"
+              "value": "track"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag078"
+              "value": "tspan"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag079"
+              "value": "u"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag080"
+              "value": "ul"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag081"
+              "value": "use"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag082"
+              "value": "var"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag083"
+              "value": "video"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag084"
+              "value": "view"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag085"
+              "value": "wbr"
             },
             {
               "kind": "stringLiteral",
-              "value": "tag086"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag087"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag088"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag089"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag090"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag091"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag092"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag093"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag094"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag095"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag096"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag097"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag098"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag099"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag100"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag101"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag102"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag103"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag104"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag105"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag106"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag107"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag108"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag109"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag110"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag111"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag112"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag113"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag114"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag115"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag116"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag117"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag118"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag119"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "tag120"
+              "value": "webview"
             },
             {
               "kind": "named",
@@ -3531,6 +3827,62 @@ expression: "answer(&project(true), None)"
                         "fields": []
                       }
                     ]
+                  }
+                ]
+              },
+              "required": false,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "custom",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "as",
+              "propType": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "elementType"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "custom-widget"
+                  }
+                ]
+              },
+              "required": false,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "both",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "as",
+              "propType": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "elementType"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "another-one"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "custom-widget"
                   }
                 ]
               },

@@ -265,3 +265,55 @@ fn element_type_wider_than_the_budget_is_the_terminal() {
         assert_eq!(few["fields"][0]["propType"]["kind"], "union");
     });
 }
+
+/// A string literal beside `ElementType` that is not a tag of `JSX.IntrinsicElements` is the author's own alternative:
+/// it stays beside the terminal. A literal that is a tag is the terminal's, and goes into it.
+#[test]
+fn an_alternative_beside_element_type_is_kept_and_only_its_tags_are_absorbed() {
+    answers(|rendered| {
+        let members_of = |prop: &str| -> Vec<Value> {
+            let ty = prop_type(rendered, "Polymorphic", prop);
+            assert_eq!(ty["fields"][0]["name"], "as");
+            let inner = ty["fields"][0]["propType"].clone();
+            assert_eq!(inner["kind"], "union", "{prop} is the terminal and its literals: {inner}");
+            inner["members"].as_array().unwrap().clone()
+        };
+        let terminal = json!({ "kind": "elementType" });
+        let custom = members_of("custom");
+        assert_eq!(custom.len(), 2, "{custom:?}");
+        assert!(custom.contains(&terminal), "{custom:?}");
+        assert!(custom.contains(&literal("custom-widget")), "{custom:?}");
+
+        let both = members_of("both");
+        assert_eq!(both.len(), 3, "{both:?}");
+        assert!(both.contains(&terminal), "{both:?}");
+        assert!(both.contains(&literal("custom-widget")), "{both:?}");
+        assert!(both.contains(&literal("another-one")), "{both:?}");
+        assert!(!both.contains(&literal("div")), "{both:?}");
+        assert!(!serde_json::to_string(&both).unwrap().contains("\"truncated\""));
+    });
+}
+
+/// An interface that extends a generic one of the project and another base: the generic instantiation does not state
+/// its bases, so what it inherits is a cut with its count beside the project's own fields, however the other base is
+/// named. The same interfaces over a non-generic base are seen through to the package.
+#[test]
+fn a_generic_base_beside_a_named_one_is_cut_and_never_dropped() {
+    answers(|rendered| {
+        let mixed = prop_type(rendered, "Generics", "mixed");
+        let text = mixed.to_string();
+        assert!(text.contains("\"truncated\""), "the inherited fields of the generic base are accounted for: {text}");
+        assert_eq!(mixed["kind"], "intersection", "{text}");
+        assert_eq!(field_names(&mixed["members"][0]), ["extra", "value"]);
+        let cut = mixed["members"].as_array().unwrap().last().unwrap().clone();
+        assert_eq!(cut["kind"], "truncated");
+        assert_eq!(cut["limit"]["type"], "members");
+        assert!(cut["limit"]["total"].as_u64().unwrap() > 100, "{text}");
+
+        let plain = prop_type(rendered, "Generics", "plain");
+        assert_eq!(plain["kind"], "intersection");
+        assert_eq!(field_names(&plain["members"][0]), ["extra", "value"]);
+        assert_eq!(plain["members"][1], named("DepWide", vec![]));
+        assert_eq!(plain["members"][2], named("DepSmall", vec![]));
+    });
+}
