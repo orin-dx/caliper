@@ -18,7 +18,7 @@ mod on_demand;
 mod printed;
 mod rpc;
 
-pub use on_demand::{OnDemand, OnDemandConfig};
+pub use on_demand::{OnDemand, OnDemandConfig, Recycles};
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
