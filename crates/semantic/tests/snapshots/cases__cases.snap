@@ -862,12 +862,387 @@ expression: rendered(&outcome)
             {
               "name": "inside",
               "propType": {
-                "kind": "truncated",
-                "text": "Wide",
-                "limit": {
-                  "type": "members",
-                  "total": 42
-                }
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "f001",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 1.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f002",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 2.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f003",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 3.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f004",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 4.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f005",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 5.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f006",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 6.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f007",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 7.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f008",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 8.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f009",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 9.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f010",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 10.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f011",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 11.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f012",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 12.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f013",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 13.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f014",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 14.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f015",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 15.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f016",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 16.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f017",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 17.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f018",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 18.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f019",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 19.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f020",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 20.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f021",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 21.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f022",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 22.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f023",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 23.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f024",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 24.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f025",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 25.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f026",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 26.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f027",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 27.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f028",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 28.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f029",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 29.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f030",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 30.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f031",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 31.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f032",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 32.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f033",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 33.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f034",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 34.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f035",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 35.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f036",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 36.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f037",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 37.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f038",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 38.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f039",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 39.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f040",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 40.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f041",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 41.0
+                    },
+                    "required": true,
+                    "description": ""
+                  },
+                  {
+                    "name": "f042",
+                    "propType": {
+                      "kind": "numberLiteral",
+                      "value": 42.0
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
               },
               "required": true,
               "description": ""
@@ -879,12 +1254,918 @@ expression: rendered(&outcome)
         "name": "wideTop",
         "required": true,
         "type": {
-          "kind": "truncated",
-          "text": "WideTop",
-          "limit": {
-            "type": "members",
-            "total": 101
-          }
+          "kind": "object",
+          "fields": [
+            {
+              "name": "f001",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 1.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f002",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 2.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f003",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 3.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f004",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 4.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f005",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 5.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f006",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 6.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f007",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 7.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f008",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 8.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f009",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 9.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f010",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 10.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f011",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 11.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f012",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 12.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f013",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 13.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f014",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 14.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f015",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 15.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f016",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 16.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f017",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 17.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f018",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 18.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f019",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 19.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f020",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 20.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f021",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 21.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f022",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 22.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f023",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 23.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f024",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 24.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f025",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 25.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f026",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 26.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f027",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 27.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f028",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 28.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f029",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 29.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f030",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 30.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f031",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 31.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f032",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 32.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f033",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 33.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f034",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 34.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f035",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 35.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f036",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 36.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f037",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 37.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f038",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 38.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f039",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 39.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f040",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 40.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f041",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 41.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f042",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 42.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f043",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 43.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f044",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 44.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f045",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 45.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f046",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 46.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f047",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 47.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f048",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 48.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f049",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 49.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f050",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 50.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f051",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 51.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f052",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 52.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f053",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 53.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f054",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 54.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f055",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 55.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f056",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 56.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f057",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 57.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f058",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 58.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f059",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 59.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f060",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 60.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f061",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 61.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f062",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 62.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f063",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 63.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f064",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 64.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f065",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 65.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f066",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 66.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f067",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 67.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f068",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 68.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f069",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 69.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f070",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 70.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f071",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 71.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f072",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 72.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f073",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 73.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f074",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 74.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f075",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 75.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f076",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 76.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f077",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 77.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f078",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 78.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f079",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 79.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f080",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 80.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f081",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 81.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f082",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 82.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f083",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 83.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f084",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 84.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f085",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 85.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f086",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 86.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f087",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 87.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f088",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 88.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f089",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 89.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f090",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 90.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f091",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 91.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f092",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 92.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f093",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 93.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f094",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 94.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f095",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 95.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f096",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 96.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f097",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 97.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f098",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 98.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f099",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 99.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f100",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 100.0
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "f101",
+              "propType": {
+                "kind": "numberLiteral",
+                "value": 101.0
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
         }
       },
       {

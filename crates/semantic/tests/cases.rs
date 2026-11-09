@@ -330,9 +330,13 @@ fn every_cap_cuts_where_it_is_set() {
     let members = |total: u32| json!({ "type": "members", "total": total });
     let depth = json!({ "type": "depth" });
 
-    // Fields: 100 at the top of a prop's type, 40 below it.
-    assert_eq!(cut("Caps", "wideTop", ""), members(101));
-    assert_eq!(cut("Caps", "wide", "/fields/0/propType"), members(42));
+    // Fields are cut only past the budget of members that are not the project's own (see `families.rs`): the project's
+    // interfaces of 101 and 42 fields are listed whole, at the top and below it.
+    assert_eq!(prop_type(&rendered, "Caps", "wideTop")["fields"].as_array().unwrap().len(), 101);
+    assert_eq!(
+        within(&prop_type(&rendered, "Caps", "wide"), "/fields/0/propType")["fields"].as_array().unwrap().len(),
+        42
+    );
     // Members, at the top (500) and below (120), of a union, an intersection and a tuple.
     assert_eq!(cut("Caps", "many", ""), members(600));
     assert_eq!(cut("Caps", "nestedMany", "/fields/0/propType"), members(200));

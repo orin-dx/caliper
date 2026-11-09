@@ -18,15 +18,18 @@
 //! What stays a name instead of an expansion, the named boundary: an object type declared in a dependency
 //! (`node_modules`) or an interface or class of the TypeScript lib (`Date`, `HTMLElement`, `Promise<T>`), with its type
 //! arguments; a function type is always expanded, since its parameters are what a reader wants. The lib's type-level
-//! utilities (`Partial`, `Pick`, `Omit`, `Record`) are evaluated, not named: their result is the type. A dependency's
-//! union of literals is expanded too, since its members are the values a control offers. What the caps cut is a typed
-//! [`PropType::Truncated`], never the checker's text standing in as a name.
+//! utilities (`Partial`, `Pick`, `Omit`, `Record`) are evaluated, not named: their result is the type, unless it is
+//! wider than the budget and what it applies to has a name (see [`Converter::over_budget`]). A dependency's union of
+//! literals is expanded too, since its members are the values a control offers. What the caps cut is a typed
+//! [`PropType::Truncated`], never the checker's text standing in as a name. The width of an object counts only the
+//! members the project did not declare: its own are listed whole.
 
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use caliper_docgen_core::react_types::{html_element_for, html_element_from_type_arg, is_intrinsic_tag};
 use caliper_docgen_core::types::semantic::{degraded_type, unresolved_type};
 use caliper_docgen_core::types::{
     BigIntValue, CallSignature, EnumMemberValue, FunctionParam, ObjectField, OpaqueReason, PropType,
@@ -41,10 +44,16 @@ use crate::rpc::{
 
 /// Nesting past which an object, union or intersection is cut with [`TruncationLimit::Depth`].
 const MAX_DEPTH: u8 = 5;
-/// The most properties an object type lists at the top (a prop's own type) and below it.
+/// The most properties an object type lists at the top (a prop's own type) and below it that the project did not declare
+/// itself (see [`is_own`]): what it declared is never cut.
 const MAX_FIELDS: [usize; 2] = [100, 40];
 /// The most members a union or intersection lists at the top and below it.
 const MAX_MEMBERS: [usize; 2] = [500, 120];
+/// How many of React's tag names (see [`is_tag`]) a union has to list to be React's `ElementType` (`JSX.IntrinsicElements`
+/// has over 170): the tag names are the one part of it that no declaration identifies.
+const MIN_INTRINSIC_TAGS: usize = 100;
+/// The lib's utility aliases that keep the properties of the type they are applied to, and so can stand for it.
+const UTILITIES: [&str; 5] = ["Omit", "Pick", "Partial", "Required", "Readonly"];
 
 /// What a descent found at [`Converter::enter`].
 enum Gate<T> {
@@ -174,12 +183,11 @@ impl Origin {
     }
 
     fn in_dependency(&self) -> bool {
-        self.file.contains("/node_modules/")
+        file_in_dependency(&self.file)
     }
 
     fn in_lib(&self) -> bool {
-        let name = self.file.rsplit('/').next().unwrap_or("");
-        name.starts_with("lib.") && name.ends_with(".d.ts")
+        file_in_lib(&self.file)
     }
 
     fn in_react(&self) -> bool {
@@ -205,6 +213,39 @@ impl Origin {
             _ => None,
         }
     }
+}
+
+/// Whether a union member is a tag of React's `JSX.IntrinsicElements`: a string literal (not an enum member) whose value
+/// that table lists. A literal the checker gave no value for is not one, so it is kept beside the terminal.
+fn is_tag(member: &TypeInfo) -> bool {
+    member.flags & flag::STRING_LITERAL != 0
+        && member.flags & flag::ENUM_LITERAL == 0
+        && member.value.as_ref().and_then(|value| value.as_str()).is_some_and(is_intrinsic_tag)
+}
+
+/// Whether the checker states the base types of this type: the declaration of a class or interface does, in its own
+/// terms. An instantiation of a generic one (`Box<string>`, only a reference) does not state them in terms of its
+/// arguments, so what it inherits cannot be listed from its bases.
+fn states_bases(info: &TypeInfo) -> bool {
+    info.object_flags & (flag::OBJECT_CLASS | flag::OBJECT_INTERFACE) != 0
+}
+
+fn file_in_dependency(file: &str) -> bool {
+    file.contains("/node_modules/")
+}
+
+fn file_in_lib(file: &str) -> bool {
+    let name = file.rsplit('/').next().unwrap_or("");
+    name.starts_with("lib.") && name.ends_with(".d.ts")
+}
+
+/// Whether a property is the project's own: its first declaration is in a file of the project, not a dependency or the
+/// lib. A property with no declaration (a mapped type's synthetic one) is not, so a wide mapped type is still cut.
+fn is_own(property: &SymbolInfo) -> bool {
+    property.declarations.first().is_some_and(|declaration| {
+        let file = declared_in(declaration);
+        !file_in_dependency(file) && !file_in_lib(file)
+    })
 }
 
 /// `declarations` entries read `"<node index>.<kind>.<path>"`: the path is lower-cased, as the checker keys files.
@@ -601,12 +642,142 @@ impl Converter {
         if let Some(terminal) = origin.as_ref().and_then(Origin::react_terminal) {
             return Ok(terminal);
         }
-        let gate = self.enter(info, origin.as_ref(), cx, MAX_MEMBERS, || self.members_of(info)).await?;
+        // The width is checked below, after React's aliases flattened into the union are recognized: they are wide.
+        let gate = self.enter(info, origin.as_ref(), cx, [usize::MAX; 2], || self.members_of(info)).await?;
         let (members, inner) = match gate {
             Gate::Stop(stopped) => return Ok(stopped),
             Gate::Open { parts, inner } => (parts, inner),
         };
-        Ok(union_of(self.convert_all(&members, &inner).await?))
+        // `ReactNode | (() => void)` arrives with the alias flattened into its members: they are the terminal again.
+        let over = members.len() > cx.limit(MAX_MEMBERS);
+        let Some((terminal, absorbed)) = self.react_alias_members(&members, over).await? else {
+            if over {
+                let limit = TruncationLimit::Members { total: to_u32(members.len()) };
+                return self.truncated(info, origin.as_ref(), limit).await;
+            }
+            return Ok(union_of(self.convert_all(&members, &inner).await?));
+        };
+        let kept: Vec<TypeInfo> = members
+            .iter()
+            .zip(&absorbed)
+            .filter(|(_, absorbed)| !**absorbed)
+            .map(|(member, _)| member.clone())
+            .collect();
+        if kept.len() + 1 > cx.limit(MAX_MEMBERS) {
+            let limit = TruncationLimit::Members { total: to_u32(kept.len() + 1) };
+            return self.truncated(info, origin.as_ref(), limit).await;
+        }
+        let mut converted = self.convert_all(&kept, &inner).await?;
+        let first = absorbed.iter().position(|absorbed| *absorbed).unwrap_or_default();
+        let before = absorbed.iter().take(first).filter(|absorbed| !**absorbed).count();
+        converted.insert(before, terminal);
+        Ok(union_of(converted))
+    }
+
+    /// The members of a union that are a React alias the checker flattened into it, with the terminal they stand for,
+    /// when the union holds all of that alias's members. `ReactNode | Fn` and `ElementType | undefined` arrive without
+    /// the alias, so what is left to recognize it by is React's own declarations, never the printed text. `ElementType`
+    /// is recognized only where the union is wider than the budget: below it the members are listed, which keeps the
+    /// props of a constrained `ElementType<P>` in its component types' arguments, as it does at the top of a prop.
+    async fn react_alias_members(
+        &self,
+        members: &[TypeInfo],
+        over: bool,
+    ) -> Result<Option<(PropType, Vec<bool>)>, CallError> {
+        if let Some(absorbed) = self.react_node_members(members).await? {
+            return Ok(Some((PropType::ReactNode, absorbed)));
+        }
+        if !over {
+            return Ok(None);
+        }
+        Ok(self.element_type_members(members).await?.map(|absorbed| (PropType::ElementType, absorbed)))
+    }
+
+    /// Which members of a union are those of React's `ElementType`: the tag names of `JSX.IntrinsicElements` as string
+    /// literals and `ComponentType`'s two arms, `ComponentClass` and `FunctionComponent`. The tag names are many
+    /// ([`MIN_INTRINSIC_TAGS`]), which keeps a union of a few tags and a component type the author's own. Only a literal
+    /// that [`is_tag`] is taken: any other string literal is an alternative the author wrote beside `ElementType`, and
+    /// the terminal does not stand for it.
+    async fn element_type_members(&self, members: &[TypeInfo]) -> Result<Option<Vec<bool>>, CallError> {
+        let tags = members.iter().filter(|member| is_tag(member)).count();
+        if tags < MIN_INTRINSIC_TAGS {
+            return Ok(None);
+        }
+        let (mut class, mut function) = (false, false);
+        let mut absorbed = Vec::with_capacity(members.len());
+        for member in members {
+            let mut takes = is_tag(member);
+            if member.flags & flag::OBJECT != 0
+                && member.object_flags & (flag::OBJECT_CLASS | flag::OBJECT_INTERFACE | flag::OBJECT_REFERENCE) != 0
+                && let Some(origin) = self.symbol_origin(member).await?
+                && origin.in_react()
+            {
+                match origin.name.as_str() {
+                    "ComponentClass" => (class, takes) = (true, true),
+                    "FunctionComponent" => (function, takes) = (true, true),
+                    _ => {}
+                }
+            }
+            absorbed.push(takes);
+        }
+        Ok((class && function).then_some(absorbed))
+    }
+
+    /// Which members of a union are the members of React's `ReactNode`, when the union holds all of them. The union has
+    /// `ReactElement`, `ReactPortal` and an `Iterable` of `ReactNode` (found by its argument's alias) and the primitives
+    /// `ReactNode` lists. It then also takes the other members `ReactNode` has (`bigint`, `Promise<AwaitedReactNode>`),
+    /// and leaves the rest. A union that has only some of them is the author's own and is expanded.
+    async fn react_node_members(&self, members: &[TypeInfo]) -> Result<Option<Vec<bool>>, CallError> {
+        let primitive = |flags: u64| flags & (flag::STRING | flag::NUMBER | flag::BOOLEAN | flag::BOOLEAN_LITERAL) != 0;
+        let has = |flags: u64| members.iter().any(|member| member.flags & flags != 0);
+        let listed = has(flag::STRING)
+            && has(flag::NUMBER)
+            && has(flag::BOOLEAN | flag::BOOLEAN_LITERAL)
+            && has(flag::NULL)
+            && has(flag::UNDEFINED);
+        if !listed {
+            return Ok(None);
+        }
+        let (mut element, mut portal, mut iterable) = (false, false, false);
+        let mut absorbed = Vec::with_capacity(members.len());
+        for member in members {
+            let flags = member.flags;
+            let takes = if primitive(flags) || flags & (flag::BIG_INT | flag::NULL | flag::UNDEFINED) != 0 {
+                true
+            } else if flags & flag::OBJECT != 0
+                && member.object_flags & (flag::OBJECT_CLASS | flag::OBJECT_INTERFACE | flag::OBJECT_REFERENCE) != 0
+                && let Some(origin) = self.symbol_origin(member).await?
+            {
+                let react = origin.in_react() && !origin.alias;
+                let lib = origin.in_lib() && !origin.alias;
+                if react && origin.name == "ReactElement" {
+                    element = true;
+                    true
+                } else if react && origin.name == "ReactPortal" {
+                    portal = true;
+                    true
+                } else if lib && origin.name == "Iterable" && self.argument_is_alias(member, "ReactNode").await? {
+                    iterable = true;
+                    true
+                } else {
+                    lib && origin.name == "Promise" && self.argument_is_alias(member, "AwaitedReactNode").await?
+                }
+            } else {
+                false
+            };
+            absorbed.push(takes);
+        }
+        Ok((element && portal && iterable).then_some(absorbed))
+    }
+
+    /// Whether the first type argument of an instantiation is React's alias `name`.
+    async fn argument_is_alias(&self, info: &TypeInfo, name: &str) -> Result<bool, CallError> {
+        let arguments = self.rpc.type_arguments(info.id).await?;
+        let Some(first) = arguments.first() else { return Ok(false) };
+        Ok(self
+            .alias_origin(first)
+            .await?
+            .is_some_and(|origin| origin.in_react() && origin.alias && origin.name == name))
     }
 
     /// The members of a union, intersection or template literal, and how many there are.
@@ -661,25 +832,26 @@ impl Converter {
         {
             return self.named_type(info, origin, cx).await;
         }
+        // The width is not counted at the gate: only the members that are not the project's own are, below.
         let gate = self
-            .enter(info, origin.as_ref(), cx, MAX_FIELDS, || async {
-                let members = self.rpc.object_members(info.id).await?;
-                // A dependency's function with properties of its own (a component, a hook) is a name, however many.
-                let named = boundary.is_some() && !members.properties.is_empty();
-                let total = if named { 0 } else { members.properties.len() + members.indexes.len() };
-                Ok((members, total))
+            .enter(info, origin.as_ref(), cx, [usize::MAX; 2], || async {
+                Ok((self.rpc.object_members(info.id).await?, 0))
             })
             .await?;
         let (members, inner) = match gate {
             Gate::Stop(stopped) => return Ok(stopped),
             Gate::Open { parts, inner } => (parts, inner),
         };
-        let ObjectMembers { calls, constructs, properties, indexes } = members;
         if let Some(origin) = boundary
-            && !properties.is_empty()
+            && !members.properties.is_empty()
         {
             return self.named_type(info, origin, cx).await;
         }
+        let outside = members.properties.iter().filter(|property| !is_own(property)).count();
+        if outside > cx.limit(MAX_FIELDS) {
+            return self.over_budget(info, origin.as_ref(), members, cx, &inner).await;
+        }
+        let ObjectMembers { calls, constructs, properties, indexes } = members;
 
         // Which of a signature's parameters are optional is read from the printed type here, and nowhere else.
         let Some(markers) = self.printed_markers(info.id, &calls, &constructs).await? else {
@@ -707,6 +879,151 @@ impl Converter {
             return Ok(PropType::Object(fields));
         }
         Ok(PropType::Callable { signatures, fields })
+    }
+
+    /// An object with more members from outside the project (inherited from a dependency or the lib) than the budget
+    /// lists. What the project declared itself is never cut. The rest stands as what it is named through: the utility
+    /// wrapper that built the type (`Omit<HTMLAttributes<HTMLDivElement>, "color">`), or the base types of the interface
+    /// or class that inherits it. When neither can be named, the rest is a [`PropType::Truncated`] with the real count.
+    async fn over_budget(
+        &self,
+        info: &TypeInfo,
+        origin: Option<&Origin>,
+        members: ObjectMembers,
+        cx: &Cx,
+        inner: &Cx,
+    ) -> Result<PropType, CallError> {
+        let ObjectMembers { calls, constructs, properties, indexes } = members;
+        let cut =
+            TruncationLimit::Members { total: to_u32(properties.iter().filter(|property| !is_own(property)).count()) };
+        // A type with signatures is a function with properties: its shape is not a set of fields to split.
+        if !calls.is_empty() || !constructs.is_empty() {
+            return self.truncated(info, origin, cut).await;
+        }
+        if let Some(origin) = origin
+            && origin.alias
+            && let Some(wrapper) = self.wrapper(info, origin, cx).await?
+        {
+            return Ok(wrapper);
+        }
+        // The declaration of a class or interface has base types; an instantiation of a generic one (`Box<string>`, only a
+        // reference) does not state them in terms of its arguments, so it is cut.
+        let layers = if origin.is_some_and(|origin| !origin.alias) && states_bases(info) {
+            self.base_layers(info, cx).await?
+        } else {
+            None
+        };
+        let own: Vec<SymbolInfo> = properties.into_iter().filter(is_own).collect();
+        let mut parts = Vec::new();
+        if !own.is_empty() || !indexes.is_empty() {
+            parts.push(PropType::Object(self.fields(&own, &indexes, inner).await?));
+        }
+        match layers {
+            Some(layers) => parts.extend(layers),
+            None => parts.push(self.truncated(info, origin, cut).await?),
+        }
+        Ok(if parts.len() == 1 { parts.swap_remove(0) } else { PropType::Intersection(parts) })
+    }
+
+    /// What a type declared as `interface A extends B, C` stands on: each base type named (see [`Self::layer`]), a base
+    /// the project declares seen through to its own bases (its members are the project's own and are listed). `None`
+    /// when a base is neither.
+    async fn base_layers(&self, info: &TypeInfo, cx: &Cx) -> Result<Option<Vec<PropType>>, CallError> {
+        let mut layers: Vec<PropType> = Vec::new();
+        let mut pending: Vec<TypeInfo> = self.rpc.base_types(info.id).await?;
+        pending.reverse();
+        while let Some(base) = pending.pop() {
+            if let Some(layer) = self.layer(&base, cx).await? {
+                if !layers.contains(&layer) {
+                    layers.push(layer);
+                }
+                continue;
+            }
+            // A base declared in the project: its members are already among the type's own, and what it inherits is
+            // seen through to its own bases. An instantiation of a generic one does not state them, so what it
+            // inherits would be missing from the answer: the type is cut instead, with its count.
+            let declared_here = match self.origin(&base).await? {
+                Some(origin) => !origin.alias && !origin.in_dependency() && !origin.in_lib(),
+                None => false,
+            };
+            if !declared_here || !states_bases(&base) {
+                return Ok(None);
+            }
+            let mut inherited = self.rpc.base_types(base.id).await?;
+            inherited.reverse();
+            pending.extend(inherited);
+        }
+        // Members came from somewhere: bases that account for none of them are not an answer.
+        Ok((!layers.is_empty()).then_some(layers))
+    }
+
+    /// The lib's utility alias (`Omit`, `Pick`, `Partial`, `Required`, `Readonly`) a type was written through, kept as a
+    /// name with its arguments when what it applies to has a name of its own (see [`Self::layer`]).
+    async fn wrapper(&self, info: &TypeInfo, origin: &Origin, cx: &Cx) -> Result<Option<PropType>, CallError> {
+        if !origin.in_lib() || !UTILITIES.contains(&origin.name.as_str()) || info.alias_type_arguments.is_empty() {
+            return Ok(None);
+        }
+        let arguments = self.rpc.alias_type_arguments(info.id).await?;
+        let Some((first, keys)) = arguments.split_first() else { return Ok(None) };
+        let Some(applied) = Box::pin(self.layer(first, cx)).await? else { return Ok(None) };
+        let mut args = vec![applied];
+        args.extend(self.convert_all(keys, &cx.argument()).await?);
+        Ok(Some(PropType::Named { name: origin.name.clone().into(), args }))
+    }
+
+    /// A type that is named instead of expanded because the name says more than its members would: a React DOM
+    /// attribute type as [`PropType::HtmlAttributes`] (recognized by the declaring file and the interface's name, and the
+    /// element read from its type argument, never from the printed text), a utility wrapper over one (see
+    /// [`Self::wrapper`]), or an object a dependency or the lib declares, with its arguments. `None` for any other type.
+    async fn layer(&self, info: &TypeInfo, cx: &Cx) -> Result<Option<PropType>, CallError> {
+        let Some(origin) = self.origin(info).await? else { return Ok(None) };
+        if let Some(family) = self.html_family(info, &origin).await? {
+            return Ok(Some(family));
+        }
+        if origin.alias
+            && let Some(wrapper) = self.wrapper(info, &origin, cx).await?
+        {
+            return Ok(Some(wrapper));
+        }
+        if origin.is_boundary() {
+            return Ok(Some(self.named_type(info, &origin, cx).await?));
+        }
+        Ok(None)
+    }
+
+    /// The attributes of a DOM element, when `info` is one of React's attribute types for it: `HTMLAttributes<T>` and
+    /// the element-specific `*HTMLAttributes<T>`, `HTMLProps<T>`, `SVGAttributes<T>`, and `DetailedHTMLProps<A, T>`
+    /// through its first argument. The element comes from the interface's name where it names one (`AnchorHTMLAttributes`
+    /// is `a`), else from its type argument (`HTMLAttributes<HTMLSpanElement>` is `span`); a type argument that names no
+    /// known element leaves the type unrecognized, since `div` would be a guess.
+    async fn html_family(&self, info: &TypeInfo, origin: &Origin) -> Result<Option<PropType>, CallError> {
+        if !origin.in_react() {
+            return Ok(None);
+        }
+        if origin.alias {
+            if origin.name != "DetailedHTMLProps" || info.alias_type_arguments.is_empty() {
+                return Ok(None);
+            }
+            let arguments = self.rpc.alias_type_arguments(info.id).await?;
+            let Some(attributes) = arguments.first() else { return Ok(None) };
+            return match self.origin(attributes).await? {
+                Some(inner) if !inner.alias => Box::pin(self.html_family(attributes, &inner)).await,
+                _ => Ok(None),
+            };
+        }
+        let element = match origin.name.as_str() {
+            "HTMLAttributes" | "DOMAttributes" | "HTMLProps" | "AllHTMLAttributes" | "SVGAttributes" | "SVGProps" => {
+                let mut arguments = self.rpc.type_arguments(info.id).await?;
+                while arguments.last().is_some_and(|argument| argument.is_this_type) {
+                    arguments.pop();
+                }
+                let Some(element) = arguments.first() else { return Ok(None) };
+                let Some(declared) = self.symbol_origin(element).await? else { return Ok(None) };
+                html_element_from_type_arg(&declared.name)
+            }
+            name => html_element_for(name),
+        };
+        Ok(element.map(|element| PropType::HtmlAttributes { element: element.to_string(), omitted: Vec::new() }))
     }
 
     async fn array(&self, info: &TypeInfo, readonly: bool, cx: &Cx) -> Result<PropType, CallError> {

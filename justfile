@@ -115,6 +115,12 @@ gate-measure *args:
         target/release/examples/gate_harness "$gate" --src "$fixtures/src" --tsc "$TSRS_BIN" {{ args }}
     done
 
+# The deterministic construct suite on the release binary: goldens current, then the suite, which must not skip
+test-construct:
+    cargo build --release -p caliper-docgen --locked
+    CALIPER_BIN="$PWD/target/release/caliper-docgen" pnpm --filter caliper-docgen-oracle construct:check
+    CALIPER_BIN="$PWD/target/release/caliper-docgen" REQUIRE_CALIPER_BIN=1 pnpm --filter caliper-docgen-oracle test
+
 # Pack the npm packages and check napi arrives only as vite-plugin's transitive dependency (pm: npm or pnpm)
 verify-install pm="pnpm":
     scripts/verify-install.sh {{ pm }}
