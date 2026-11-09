@@ -13,7 +13,9 @@ use rustc_hash::{FxHashMap, FxHasher};
 mod order;
 
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
-use crate::types::output::{ComponentEntry, ExtractionOutput, OpaqueDetail, OpaqueReason, ParsedProp, PropType};
+use crate::types::output::{
+    ComponentEntry, ExtractionOutput, OpaqueDetail, OpaqueReason, ParsedProp, PropType, TRUNCATED_KIND,
+};
 
 /// The type of a name the checker could not resolve (an import that does not resolve, a name declared nowhere), which
 /// the checker answers with its error type: an `any` that is not a written `any`. It is `opaque` with the reason
@@ -160,26 +162,66 @@ impl SemanticOutcome {
 }
 
 /// Replaces `entry`'s props with the checker's, keeping what only the structural pass has (a default value, tags,
-/// `parent`, `declarations`, and a description when the checker has none). `shared` interns identical props across
-/// the components of one merge.
+/// `parent`, `declarations`, and a description when the checker has none). A prop whose type the checker could not
+/// read keeps its structural type, marked (see [`merge_semantic_props`]). `shared` interns identical props across the
+/// components of one merge. Returns how many props kept their structural type that way.
 pub fn apply_semantic_props(
     entry: &mut ComponentEntry,
     semantic: &SemanticComponent,
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
-) {
+) -> usize {
     // The whole-project merge replaces the props and leaves `@types/react`'s to the inheritance layers.
-    replace_props(entry, semantic.props.iter().filter(|prop| !prop.react_declared), Unanswered::Drop, shared);
+    replace_props(entry, semantic.props.iter().filter(|prop| !prop.react_declared), Unanswered::Drop, shared).unread
+}
+
+/// How a merge went for one component.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MergedProps {
+    /// Structural props the checker did not return, kept as the structural pass resolved them.
+    pub kept: usize,
+    /// Props the checker returned with a type it could not read (an `opaque` part: an import that does not resolve, a
+    /// conditional type it left open), where the structural pass read the type in full. They keep the structural type,
+    /// and their `degradedBy` also lists what the checker could not read.
+    pub unread: usize,
 }
 
 /// Merges the checker's `props` into `entry` by name: the checker's type, optionality and description win where both
-/// have a prop, and every structural prop the checker did not return stays as the structural pass resolved it. Returns
-/// how many were kept.
+/// have a prop, and every structural prop the checker did not return stays as the structural pass resolved it. A prop
+/// whose checker type holds an `opaque` part, where the structural type holds none, keeps the structural type and adds
+/// the checker's reasons to its `degradedBy`: the checker's answer there is a placeholder, and the structural one is
+/// not confirmed, so it is marked. A type the checker only cut at a limit (`truncated`) is still its answer.
 pub fn merge_semantic_props<'a>(
     entry: &mut ComponentEntry,
     props: impl Iterator<Item = &'a Arc<SemanticProp>>,
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
-) -> usize {
+) -> MergedProps {
     replace_props(entry, props, Unanswered::Keep, shared)
+}
+
+/// The kinds of what the checker could not read in `checker`, when the structural type `structural` read everything:
+/// then the structural type is kept and marked with them. Empty when the checker's type is its answer.
+fn unread_by_checker(checker: &PropType, structural: &PropType) -> Vec<&'static str> {
+    let unread: Vec<&'static str> = checker.degraded_by().into_iter().filter(|kind| *kind != TRUNCATED_KIND).collect();
+    if unread.is_empty() || structural.degraded_by().iter().any(|kind| *kind != TRUNCATED_KIND) {
+        return Vec::new();
+    }
+    unread
+}
+
+/// The one diagnostic for the props of `affects` that kept their structural type because the checker could not read it
+/// ([`MergedProps::unread`]); each such prop says why in its `degradedBy`.
+pub(crate) fn unread_diagnostic(props: usize, affects: Vec<String>) -> Diagnostic {
+    let mut diagnostic = Diagnostic::new(
+        DiagnosticSeverity::Info,
+        DiagnosticCode::SemanticBackend,
+        format!(
+            "{props} prop(s) of {} component(s) keep their structural type: the TypeScript checker could not read it, \
+             and their degradedBy says what it could not read",
+            affects.len()
+        ),
+    );
+    diagnostic.affects = affects;
+    diagnostic
 }
 
 /// What a merge does with a structural prop the checker did not return.
@@ -196,8 +238,9 @@ fn replace_props<'a>(
     props_in: impl Iterator<Item = &'a Arc<SemanticProp>>,
     unanswered: Unanswered,
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
-) -> usize {
+) -> MergedProps {
     let mut props: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
+    let mut unread = 0;
     for prop in props_in {
         let structural = entry.props.get(&prop.name);
         let description = if prop.description.is_empty() {
@@ -205,12 +248,15 @@ fn replace_props<'a>(
         } else {
             prop.description.clone()
         };
+        let unread_kinds = structural.map(|s| unread_by_checker(&prop.prop_type, &s.prop_type)).unwrap_or_default();
         // The checker sorts a union's members; where the structural pass resolved the same union, its order is the
         // declared one.
         let prop_type = match structural {
+            Some(structural) if !unread_kinds.is_empty() => structural.prop_type.clone(),
             Some(structural) => order::in_declared_order(prop.prop_type.clone(), &structural.prop_type),
             None => prop.prop_type.clone(),
         };
+        unread += usize::from(!unread_kinds.is_empty());
         let merged = ParsedProp::new(
             prop.name.clone(),
             prop_type,
@@ -220,7 +266,8 @@ fn replace_props<'a>(
             structural.map(|s| s.tags.clone()).unwrap_or_default(),
             structural.and_then(|s| s.parent.clone()),
             structural.map(|s| s.declarations.clone()).unwrap_or_default(),
-        );
+        )
+        .degraded_also_by(&unread_kinds);
         let mut hasher = FxHasher::default();
         merged.structural_hash(&mut hasher);
         let bucket = shared.entry(hasher.finish()).or_default();
@@ -244,7 +291,7 @@ fn replace_props<'a>(
         }
     }
     entry.props = props;
-    kept
+    MergedProps { kept, unread }
 }
 
 /// Merge the checker's props over `output`, component by component.
@@ -260,6 +307,7 @@ fn replace_props<'a>(
 pub fn merge_semantic(output: &mut ExtractionOutput, outcome: SemanticOutcome) {
     let SemanticOutcome { components, fallbacks, diagnostics } = outcome;
     let mut merged_keys = Vec::new();
+    let (mut unread_keys, mut unread_props) = (Vec::new(), 0);
     let mut shared: FxHashMap<u64, Vec<Arc<ParsedProp>>> = FxHashMap::default();
     for semantic in components {
         let Some((key, entry)) = output
@@ -269,7 +317,11 @@ pub fn merge_semantic(output: &mut ExtractionOutput, outcome: SemanticOutcome) {
         else {
             continue;
         };
-        apply_semantic_props(entry, &semantic, &mut shared);
+        let unread = apply_semantic_props(entry, &semantic, &mut shared);
+        if unread > 0 {
+            unread_props += unread;
+            unread_keys.push(key.clone());
+        }
         merged_keys.push(key.clone());
     }
     output.diagnostics.extend(diagnostics);
@@ -294,6 +346,10 @@ pub fn merge_semantic(output: &mut ExtractionOutput, outcome: SemanticOutcome) {
         );
         provenance.affects = merged_keys;
         output.diagnostics.push(provenance);
+    }
+    if !unread_keys.is_empty() {
+        unread_keys.sort();
+        output.diagnostics.push(unread_diagnostic(unread_props, unread_keys));
     }
 
     let mut by_reason: BTreeMap<String, Vec<String>> = BTreeMap::new();

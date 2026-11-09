@@ -166,6 +166,38 @@ fn a_checker_that_answers_in_time_replaces_the_structural_props_and_says_so() {
     assert_eq!(provenance[0].affects, ["Button"]);
 }
 
+/// The checker could not read `label` (an import it did not resolve): its answer there is a placeholder.
+fn cannot_read_label(target: &SemanticTarget) -> SemanticOutcome {
+    SemanticOutcome {
+        components: vec![SemanticComponent {
+            file_path: target.file_path.clone(),
+            display_name: target.display_name.clone(),
+            props: vec![Arc::new(SemanticProp {
+                name: "label".to_string(),
+                prop_type: caliper_docgen_core::types::semantic::unresolved_type("Label"),
+                required: true,
+                description: String::new(),
+                react_declared: false,
+            })],
+        }],
+        ..SemanticOutcome::default()
+    }
+}
+
+#[test]
+fn a_prop_the_checker_could_not_read_keeps_its_structural_type_marked_in_a_session() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let session = session(&project, Fake::new(Duration::ZERO, cannot_read_label), Duration::from_secs(5));
+
+    let answer = session.component("Button").unwrap();
+
+    assert_eq!(answer.entry.props["label"].prop_type, PropType::String);
+    assert_eq!(answer.entry.props["label"].degraded_by, ["unresolvableImport"]);
+    let unread: Vec<_> = answer.diagnostics.iter().filter(|d| d.message.contains("could not read")).collect();
+    assert_eq!(unread.len(), 1, "{:?}", answer.diagnostics);
+    assert_eq!(unread[0].affects, ["Button"]);
+}
+
 #[test]
 fn the_checker_is_asked_once_per_version_of_the_file() {
     let project = project(&[("Button.tsx", BUTTON)]);

@@ -22,7 +22,8 @@ use crate::pipeline::HtmlAttributeMode;
 use crate::react_types::{checker_prop_used, react_props_wanted};
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use crate::types::semantic::{
-    SemanticComponent, SemanticOutcome, SemanticProp, SemanticProvider, SemanticTarget, merge_semantic_props,
+    MergedProps, SemanticComponent, SemanticOutcome, SemanticProp, SemanticProvider, SemanticTarget,
+    merge_semantic_props, unread_diagnostic,
 };
 
 /// What the checker said about one component at one version of its file, and the generation they belong to.
@@ -191,7 +192,8 @@ impl SemanticHook {
         let still_degraded = structural
             .iter()
             .any(|(name, prop)| prop.prop_type.holds_opaque() && !used.iter().any(|answered| answered.name == *name));
-        let kept = merge_semantic_props(&mut answer.entry, used.into_iter(), &mut FxHashMap::default());
+        let MergedProps { kept, unread } =
+            merge_semantic_props(&mut answer.entry, used.into_iter(), &mut FxHashMap::default());
         if !still_degraded {
             // A structural diagnostic about a prop the checker now answers for would be stale.
             answer.diagnostics.retain(|diagnostic| {
@@ -214,6 +216,9 @@ impl SemanticHook {
         );
         provenance.affects = vec![answer.key.clone()];
         answer.diagnostics.push(provenance);
+        if unread > 0 {
+            answer.diagnostics.push(unread_diagnostic(unread, vec![answer.key.clone()]));
+        }
     }
 }
 
