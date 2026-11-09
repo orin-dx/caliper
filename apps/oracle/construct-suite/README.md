@@ -87,6 +87,18 @@ A reported difference is a row where tsrs gives a different answer than the Go c
 
 `tests/construct-parity.test.ts` runs the same comparison in-process. It skips with a warning when `tsrs` is not installed; set `REQUIRE_TSRS=1` to fail instead.
 
+## The checker lane
+
+ADR 0026's gate before the default flips: the suite through the checker path (`--experimental-semantic-types` with the pinned `tsrs`), held to `checker-expectations.json`, which has the shape of `expectations.json`. Green rows must stay green; every other row is a documented gap with a one-line reason. The lane fails when a row is better or worse than its entry (an improvement means the gap closed: update the entry and drop the `gap`), when the checker did not answer for a row, or when the backend was unavailable.
+
+```sh
+just test-checker-lane   # CI job "Test / Checker lane"
+```
+
+The recipe builds the release binary, then runs `construct:check`, `construct:parity`, the lane (`construct:checker`) and `tests/construct-checker-lane.test.ts` with `REQUIRE_TSRS=1 REQUIRE_CALIPER_BIN=1`, so a missing binary fails instead of skipping. `TSRS_BIN` is the native binary the `tsrs` package itself selects (`src/tsrs-bin.ts` calls its `lib/getExePath.js`): `node_modules/@tsrs/<os>-<arch>[-gnu|-musl]/tsrs`. The `bin/tsrs` shim is a Node launcher and is not used. Regenerate an entry by running `CALIPER_SEMANTIC=1 TSRS_BIN=<path> pnpm --filter caliper-docgen-oracle construct:checker` and reading the report.
+
+A gap here that is green in `expectations.json` is a checker regression against the structural path (today: `react/13`, `react/29`, `react/34`); ADR 0026 allows only listed improvements, so each needs a fix or a decision before the default flips.
+
 ## Not covered
 
 Constructs the fixture format (one self-contained file, one prop `p`, no runtime code) cannot express, or that were left out:
