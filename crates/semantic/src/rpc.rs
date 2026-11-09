@@ -392,6 +392,13 @@ impl Rpc {
         self.scoped("getSymbolOfType", json!({ "objectId": type_id })).await
     }
 
+    /// The types a class or interface extends, instantiated as it names them (`Omit<HTMLAttributes<HTMLDivElement>, "color">`);
+    /// none for a type that is not a class or interface.
+    pub(crate) async fn base_types(&self, type_id: u64) -> Result<Vec<TypeInfo>, CallError> {
+        let bases: Option<Vec<TypeInfo>> = self.scoped("getBaseTypes", json!({ "type": type_id })).await?;
+        Ok(bases.unwrap_or_default())
+    }
+
     pub(crate) async fn alias_type_arguments(&self, type_id: u64) -> Result<Vec<TypeInfo>, CallError> {
         self.scoped("getAliasTypeArgumentsOfType", json!({ "objectId": type_id })).await
     }

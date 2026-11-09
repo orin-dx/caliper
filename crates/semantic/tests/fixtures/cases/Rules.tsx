@@ -89,8 +89,9 @@ export function Instances(props: {
 
 /**
  * The caps, one prop for each place a type is cut. A cut type is `truncated` with the limit and, for a width, how many
- * there were: depth 5 (an object, union, intersection, array, tuple, template literal), 100 fields at the top and 40
- * below it, 500 members at the top and 120 below it (a union, an intersection, a tuple).
+ * there were: depth 5 (an object, union, intersection, array, tuple, template literal), 500 members at the top and 120
+ * below it (a union, an intersection, a tuple). Fields are not cut here: the interfaces below are the project's own, so
+ * they are listed whole (the budget of 100 and 40 fields counts members from dependencies: see Families.tsx).
  */
 type Deep = { a: { b: { c: { d: { e: { f: { g: string } } } } } } };
 interface Wide {
