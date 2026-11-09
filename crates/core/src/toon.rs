@@ -227,6 +227,12 @@ fn format_type_compact(prop_type: &PropType) -> String {
         PropType::StringLiteral(s) => quote_literal(s),
         PropType::NumberLiteral(n) => n.to_string(),
         PropType::BoolLiteral(b) => b.to_string(),
+        // A bigint `10n`, `typeof brand`, an enum member `Size.Small` and a template `` `${number}px` `` print as
+        // TypeScript writes them, which is short already.
+        PropType::BigIntLiteral(_)
+        | PropType::UniqueSymbol { .. }
+        | PropType::EnumMember { .. }
+        | PropType::TemplateLiteral(_) => prop_type.raw_string(),
         PropType::LiteralUnion { members, .. } => {
             // Every value: it is what an agent writes a valid call from.
             members.iter().map(|member| quote_literal(member)).collect::<Vec<_>>().join("|")
@@ -256,33 +262,24 @@ fn format_type_compact(prop_type: &PropType) -> String {
             PropType::Array(element_type) => format!("ReadonlyArray<{}>", format_type_compact(element_type)),
             other => format!("readonly {}", format_type_compact(other)),
         },
-        PropType::Object(_) => prop_type.raw_string(),
+        PropType::Object(_) | PropType::Callable { .. } => prop_type.raw_string(),
         PropType::Array(element_type) => format!("Array<{}>", format_type_compact(element_type)),
         PropType::Tuple(_) => prop_type.raw_string(),
         PropType::Union(members) => {
             let formatted: Vec<String> = members.iter().map(format_type_compact).collect();
             // A literal among the members is a value an agent may write: show every one. Only a union of types is cut.
-            let has_literal = members.iter().any(|member| {
-                matches!(
-                    member,
-                    PropType::StringLiteral(_)
-                        | PropType::NumberLiteral(_)
-                        | PropType::BoolLiteral(_)
-                        | PropType::LiteralUnion { .. }
-                )
-            });
-            if has_literal {
-                formatted.join("|")
-            } else {
-                truncate_with_indicator(&formatted, UNION_LIMIT, "|")
-            }
+            let has_literal = members
+                .iter()
+                .any(|member| member.literal_kind().is_some() || matches!(member, PropType::LiteralUnion { .. }));
+            if has_literal { formatted.join("|") } else { truncate_with_indicator(&formatted, UNION_LIMIT, "|") }
         }
         PropType::Intersection(members) => {
             let formatted: Vec<String> = members.iter().map(format_type_compact).collect();
             truncate_with_indicator(&formatted, INTERSECTION_LIMIT, "&")
         }
         PropType::HtmlAttributes { element, .. } => format!("HTMLAttributes<{element}>"),
-        PropType::Named { name, args } => {
+        // A recursive reference is the name of the type it is inside.
+        PropType::Named { name, args } | PropType::Recursive { name, args } => {
             if args.is_empty() {
                 name.to_string()
             } else {
@@ -292,6 +289,7 @@ fn format_type_compact(prop_type: &PropType) -> String {
         }
         PropType::SxProps => "SxProps".into(),
         PropType::Opaque(detail) => format!("opaque({})", detail.raw()),
+        PropType::Truncated { text, .. } => format!("truncated({text})"),
     }
 }
 
@@ -384,6 +382,53 @@ mod tests {
         assert!(toon.contains("Missing export (src/Card.tsx)"));
         assert!(toon.contains("help: Check import path"));
         assert!(toon.contains("stats: extracted=1, parsed=2, cacheHits=1, durationMs=42"));
+    }
+
+    #[test]
+    fn the_kinds_the_checker_states_print_as_typescript_writes_them() {
+        use crate::types::{
+            BigIntValue, CallSignature, EnumMemberValue, FunctionParam, SignatureKind, TemplatePart, TruncationLimit,
+            TupleElement, TupleElementKind, TupleLabel,
+        };
+        let rest = PropType::Tuple(vec![
+            TupleElement { label: TupleLabel::new("head"), ..TupleElement::required(PropType::String) },
+            TupleElement {
+                kind: TupleElementKind::Rest,
+                label: TupleLabel::new("tail"),
+                ..TupleElement::required(PropType::Number)
+            },
+        ]);
+        assert_eq!(format_type_compact(&rest), "[head: string, ...tail: number[]]");
+        let big = |v: &str| PropType::BigIntLiteral(BigIntValue::parse(v).unwrap());
+        assert_eq!(format_type_compact(&PropType::Union(vec![big("10"), big("-1")])), "10n|-1n");
+        assert_eq!(format_type_compact(&PropType::UniqueSymbol { name: "brand".into() }), "typeof brand");
+        let template =
+            PropType::TemplateLiteral(vec![TemplatePart::Type(PropType::Number), TemplatePart::Text("px".into())]);
+        assert_eq!(format_type_compact(&template), "`${number}px`");
+        let callable = PropType::Callable {
+            signatures: vec![CallSignature {
+                kind: SignatureKind::Construct,
+                type_params: vec![],
+                params: vec![FunctionParam::new(Some("value".into()), PropType::String)],
+                return_type: PropType::Named { name: "Date".into(), args: vec![] },
+            }],
+            fields: vec![],
+        };
+        assert_eq!(format_type_compact(&callable), "{ new (value: string): Date }");
+        let recursive = PropType::Recursive { name: "Tree".into(), args: vec![PropType::String] };
+        assert_eq!(format_type_compact(&recursive), "Tree<string>");
+        let truncated = PropType::Truncated { text: "SystemStyleObject".into(), limit: TruncationLimit::Depth };
+        assert_eq!(format_type_compact(&truncated), "truncated(SystemStyleObject)");
+        // A union of enum members is a union of values: never cut, however long.
+        let members: Vec<PropType> = (0..10)
+            .map(|i| PropType::EnumMember {
+                enum_name: "Step".into(),
+                member: format!("S{i}").into(),
+                value: EnumMemberValue::Number(f64::from(i)),
+            })
+            .collect();
+        let printed = format_type_compact(&PropType::Union(members));
+        assert!(printed.ends_with("Step.S9") && !printed.contains("...(+"), "{printed}");
     }
 
     #[test]

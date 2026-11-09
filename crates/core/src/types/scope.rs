@@ -54,11 +54,7 @@ impl TypeScope {
         let mut names: Vec<CompactString> = names.into_iter().cloned().collect();
         names.sort_unstable();
         names.dedup();
-        if names.is_empty() {
-            Self(None)
-        } else {
-            Self(Some(names.into()))
-        }
+        if names.is_empty() { Self(None) } else { Self(Some(names.into())) }
     }
 
     /// Whether `name` is a type parameter in this scope.

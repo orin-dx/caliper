@@ -1,7 +1,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 
 use super::*;
-use crate::pipeline::{extract, PipelineOptions};
+use crate::pipeline::{PipelineOptions, extract};
 
 /// A project with an installed package `ui-kit` whose types re-export through `export *`, a namespace re-export, a
 /// star-export cycle, an enum and a component; a Radix-shaped `dialog-kit` exporting components under local aliases;
@@ -332,10 +332,7 @@ fn component_props_reads_members_of_a_declared_component_namespace() {
 #[test]
 fn component_props_reads_forward_ref_with_renamed_react_namespace() {
     let (_tmp, root) = project(&[
-        (
-            "node_modules/otp-kit/package.json",
-            r#"{ "name": "otp-kit", "version": "1.0.0", "types": "index.d.ts" }"#,
-        ),
+        ("node_modules/otp-kit/package.json", r#"{ "name": "otp-kit", "version": "1.0.0", "types": "index.d.ts" }"#),
         (
             "node_modules/otp-kit/index.d.ts",
             "import * as React$1 from 'react';\n\

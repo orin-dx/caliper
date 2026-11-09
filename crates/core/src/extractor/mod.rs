@@ -18,8 +18,9 @@ use rustc_hash::FxHashSet;
 #[cfg(test)]
 use crate::types::LexedExport;
 use crate::types::{
-    CollectedObjectField, CollectedType, CollectedTypeAlias, DeclarationScope, Diagnostic, DiagnosticCode,
-    DiagnosticSeverity, ExtendsRef, ParamKind, RawProp, ScopeKind, ScopeStep, SourceData,
+    CollectedObjectField, CollectedSignature, CollectedTupleElement, CollectedType, CollectedTypeAlias,
+    DeclarationScope, Diagnostic, DiagnosticCode, DiagnosticSeverity, ExtendsRef, ParamKind, RawProp, ScopeKind,
+    ScopeStep, SignatureKind, SourceData,
 };
 
 mod alias;
@@ -457,7 +458,8 @@ impl<'src> SourceDataCollector<'src> {
             crate::types::CollectedType::Object(fields) => has_component_member(fields),
             _ => false,
         };
-        // A literal is the type of `declare const SHOW_PARENT: "SHOW_PARENT"`, which `typeof SHOW_PARENT` names.
+        // A literal is the type of `declare const SHOW_PARENT: "SHOW_PARENT"`, which `typeof SHOW_PARENT` names, and
+        // `unique symbol` that of `declare const brand: unique symbol`.
         if !matches!(
             target,
             crate::types::CollectedType::Named { .. }
@@ -465,6 +467,7 @@ impl<'src> SourceDataCollector<'src> {
                 | crate::types::CollectedType::StringLiteral(_)
                 | crate::types::CollectedType::NumberLiteral(_)
                 | crate::types::CollectedType::BoolLiteral(_)
+                | crate::types::CollectedType::UniqueSymbol
         ) && !static_components
         {
             return;
@@ -549,10 +552,10 @@ impl<'src> SourceDataCollector<'src> {
             }
             for extends in &mut interface.extends {
                 *extends = extends.map_type_args(|arg| arg.rename_named(&rename));
-                if let ExtendsRef::SameFile { name, .. } = extends {
-                    if let Some(renamed) = rename(name) {
-                        *name = renamed;
-                    }
+                if let ExtendsRef::SameFile { name, .. } = extends
+                    && let Some(renamed) = rename(name)
+                {
+                    *name = renamed;
                 }
             }
         }
@@ -754,10 +757,10 @@ impl<'src> SourceDataCollector<'src> {
         // the element from that instead of falling through to html_element_for's
         // static result (None for SVGAttributes/SVGProps, a generic "div"
         // fallback for HTMLProps) whenever it's one this crate recognizes.
-        if matches!(lookup_name, "SVGAttributes" | "SVGProps" | "HTMLProps") {
-            if let Some(element) = type_args.first().and_then(crate::react_types::html_element_from_collected) {
-                return ExtendsRef::Builtin { name: name.into(), element: Some(element.to_owned()), type_args };
-            }
+        if matches!(lookup_name, "SVGAttributes" | "SVGProps" | "HTMLProps")
+            && let Some(element) = type_args.first().and_then(crate::react_types::html_element_from_collected)
+        {
+            return ExtendsRef::Builtin { name: name.into(), element: Some(element.to_owned()), type_args };
         }
 
         if let Some(element) = crate::react_types::html_element_for(lookup_name) {
@@ -853,11 +856,17 @@ impl<'src> SourceDataCollector<'src> {
                 TSLiteral::StringLiteral(s) => CollectedType::StringLiteral(js_text::lossy(s.value).as_ref().into()),
                 TSLiteral::NumericLiteral(n) => CollectedType::NumberLiteral(n.value),
                 TSLiteral::BooleanLiteral(b) => CollectedType::BoolLiteral(b.value),
-                TSLiteral::UnaryExpression(u) => {
-                    // Handle negative numbers: -1
-                    let raw = self.source[u.span.start as usize..u.span.end as usize].to_owned();
-                    CollectedType::Raw(raw)
-                }
+                TSLiteral::BigIntLiteral(b) => CollectedType::BigIntLiteral(b.value.as_str().into()),
+                // `-1` and `-1n`, the only prefix expressions a literal type allows.
+                TSLiteral::UnaryExpression(u) => match (&u.operator, &u.argument) {
+                    (UnaryOperator::UnaryNegation, Expression::NumericLiteral(n)) => {
+                        CollectedType::NumberLiteral(-n.value)
+                    }
+                    (UnaryOperator::UnaryNegation, Expression::BigIntLiteral(b)) => {
+                        CollectedType::BigIntLiteral(format!("-{}", b.value.as_str()).into())
+                    }
+                    _ => CollectedType::Raw(self.source[u.span.start as usize..u.span.end as usize].to_owned()),
+                },
                 _ => CollectedType::Raw(self.source[lit.span.start as usize..lit.span.end as usize].to_owned()),
             },
 
@@ -892,11 +901,9 @@ impl<'src> SourceDataCollector<'src> {
                 CollectedType::Array(Box::new(self.ts_type_to_collected_at_depth(&a.element_type, depth + 1)))
             }
 
-            TSType::TSTupleType(t) => {
-                let members: Vec<CollectedType> =
-                    t.element_types.iter().map(|el| self.ts_tuple_element_to_collected(el, depth + 1)).collect();
-                CollectedType::Tuple(members)
-            }
+            TSType::TSTupleType(t) => CollectedType::Tuple(
+                t.element_types.iter().map(|el| self.ts_tuple_element_to_collected(el, depth + 1)).collect(),
+            ),
 
             TSType::TSTypeLiteral(lit) => {
                 let callables = lit
@@ -910,37 +917,65 @@ impl<'src> SourceDataCollector<'src> {
                         )
                     })
                     .count();
-                if callables > 0 {
-                    // `{ (a: string): number }` is a function type. Anything else with a call or construct signature
-                    // (overloads, a callable that also has properties) has no `Function` form, and an object of its
-                    // fields would drop the signatures without a word, so it is kept as written and degrades.
-                    match lit.members.as_slice() {
-                        [TSSignature::TSCallSignatureDeclaration(call)] => {
-                            let (params, param_names, param_kinds) =
-                                collect_params(&call.params, |t| self.ts_type_to_collected_at_depth(t, depth + 1));
-                            let return_type = call
-                                .return_type
-                                .as_ref()
-                                .map(|rt| self.ts_type_to_collected_at_depth(&rt.type_annotation, depth + 1))
-                                .unwrap_or(CollectedType::Any);
-                            CollectedType::Function {
-                                type_params: type_param_names(call.type_parameters.as_deref()),
-                                params,
-                                param_names,
-                                param_kinds,
-                                return_type: Box::new(return_type),
-                            }
-                        }
-                        _ => CollectedType::Raw(self.source[lit.span.start as usize..lit.span.end as usize].to_owned()),
-                    }
-                } else {
-                    let fields: Vec<CollectedObjectField> = lit
-                        .members
-                        .iter()
-                        .filter_map(|member| self.ts_signature_to_object_field(member, depth + 1))
-                        .collect();
-                    CollectedType::Object(fields)
+                let accessors = Accessors::of(&lit.members);
+                let fields: Vec<CollectedObjectField> = lit
+                    .members
+                    .iter()
+                    .filter(|member| !accessors.is_shadowed_setter(member))
+                    .filter_map(|member| {
+                        let field = self.ts_signature_to_object_field(member, depth + 1)?;
+                        Some(CollectedObjectField {
+                            readonly: field.readonly || accessors.is_lone_getter(member),
+                            ..field
+                        })
+                    })
+                    .collect();
+                if callables == 0 {
+                    return CollectedType::Object(fields);
                 }
+                let mut signatures: Vec<CollectedSignature> = lit
+                    .members
+                    .iter()
+                    .filter_map(|member| {
+                        let (kind, type_parameters, params, return_type) = match member {
+                            TSSignature::TSCallSignatureDeclaration(call) => {
+                                (SignatureKind::Call, &call.type_parameters, &call.params, &call.return_type)
+                            }
+                            TSSignature::TSConstructSignatureDeclaration(new) => {
+                                (SignatureKind::Construct, &new.type_parameters, &new.params, &new.return_type)
+                            }
+                            TSSignature::TSIndexSignature(_)
+                            | TSSignature::TSPropertySignature(_)
+                            | TSSignature::TSMethodSignature(_) => return None,
+                        };
+                        let (params, param_names, param_kinds) =
+                            collect_params(params, |t| self.ts_type_to_collected_at_depth(t, depth + 1));
+                        let return_type = return_type
+                            .as_ref()
+                            .map(|rt| self.ts_type_to_collected_at_depth(&rt.type_annotation, depth + 1))
+                            .unwrap_or(CollectedType::Any);
+                        Some(CollectedSignature {
+                            kind,
+                            type_params: type_param_names(type_parameters.as_deref()),
+                            params,
+                            param_names,
+                            param_kinds,
+                            return_type,
+                        })
+                    })
+                    .collect();
+                // `{ (a: string): number }` alone is a function type.
+                if fields.is_empty() && signatures.len() == 1 && signatures[0].kind == SignatureKind::Call {
+                    let only = signatures.swap_remove(0);
+                    return CollectedType::Function {
+                        type_params: only.type_params,
+                        params: only.params,
+                        param_names: only.param_names,
+                        param_kinds: only.param_kinds,
+                        return_type: Box::new(only.return_type),
+                    };
+                }
+                CollectedType::Callable { signatures, fields }
             }
 
             TSType::TSFunctionType(f) => {
@@ -1008,10 +1043,11 @@ impl<'src> SourceDataCollector<'src> {
 
             // TSTypeOperatorType covers keyof, unique, readonly. `keyof` is kept
             // structured (its operand may itself need substitution or resolution —
-            // see `CollectedType::KeyOf`), and so does `readonly`. `unique` is peeled to its operand,
-            // since docgen doesn't track symbol uniqueness. Neither is captured as raw source text, which made
-            // `readonly string[]` (real @types/react's ButtonHTMLAttributes `defaultValue`/`value`
-            // shape) degrade to Opaque even though the element type is fully knowable.
+            // see `CollectedType::KeyOf`), and so does `readonly`. `unique symbol` is its own type, which
+            // `typeof` the value declared with it names; `unique` on anything else (an error) is peeled. Neither is
+            // captured as raw source text, which made `readonly string[]` (real @types/react's
+            // ButtonHTMLAttributes `defaultValue`/`value` shape) degrade to Opaque even though the element type is
+            // fully knowable.
             TSType::TSTypeOperatorType(op) => match op.operator {
                 TSTypeOperatorOperator::Keyof => {
                     CollectedType::KeyOf(Box::new(self.ts_type_to_collected_at_depth(&op.type_annotation, depth + 1)))
@@ -1019,7 +1055,10 @@ impl<'src> SourceDataCollector<'src> {
                 TSTypeOperatorOperator::Readonly => CollectedType::Readonly(Box::new(
                     self.ts_type_to_collected_at_depth(&op.type_annotation, depth + 1),
                 )),
-                TSTypeOperatorOperator::Unique => self.ts_type_to_collected_at_depth(&op.type_annotation, depth + 1),
+                TSTypeOperatorOperator::Unique => match &op.type_annotation {
+                    TSType::TSSymbolKeyword(_) => CollectedType::UniqueSymbol,
+                    other => self.ts_type_to_collected_at_depth(other, depth + 1),
+                },
             },
 
             TSType::TSInferType(i) => {
@@ -1037,33 +1076,43 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
-    /// Convert a `TSTupleElement` (which is a superset of `TSType`) to a `CollectedType`.
-    ///
-    /// TSTupleElement inherits all TSType variants and adds TSOptionalType and TSRestType.
-    pub(super) fn ts_tuple_element_to_collected<'a>(&mut self, el: &TSTupleElement<'a>, depth: u8) -> CollectedType {
+    /// Convert a `TSTupleElement` (which is a superset of `TSType`) to a [`CollectedTupleElement`]: its type as
+    /// written, its label, and whether it is optional (`T?`, `name?: T`) or a rest element (`...T`, `...name: T`).
+    pub(super) fn ts_tuple_element_to_collected<'a>(
+        &mut self,
+        el: &TSTupleElement<'a>,
+        depth: u8,
+    ) -> CollectedTupleElement {
         match el {
-            TSTupleElement::TSOptionalType(o) => {
-                // T? in tuple → Union([T, Undefined])
-                let inner = self.ts_type_to_collected_at_depth(&o.type_annotation, depth + 1);
-                CollectedType::Union(vec![inner, CollectedType::Undefined])
-            }
+            TSTupleElement::TSOptionalType(o) => CollectedTupleElement {
+                kind: ParamKind::Optional,
+                ..CollectedTupleElement::required(self.ts_type_to_collected_at_depth(&o.type_annotation, depth + 1))
+            },
+            // `...name: T` is a rest element around a labelled member.
             TSTupleElement::TSRestType(r) => {
-                // ...T[] in tuple → Array(T)
-                CollectedType::Array(Box::new(self.ts_type_to_collected_at_depth(&r.type_annotation, depth + 1)))
+                let (label, ty) = match &r.type_annotation {
+                    TSType::TSNamedTupleMember(named) => {
+                        let inner = self.ts_tuple_element_to_collected(&named.element_type, depth + 1);
+                        (Some(CompactString::from(named.label.name.as_str())), inner.element_type)
+                    }
+                    other => (None, self.ts_type_to_collected_at_depth(other, depth + 1)),
+                };
+                CollectedTupleElement { element_type: ty, kind: ParamKind::Rest, label }
             }
-            // A labelled member `name: T` or `name?: T` is its type; an optional marker is not preserved.
             TSTupleElement::TSNamedTupleMember(named) => {
-                self.ts_tuple_element_to_collected(&named.element_type, depth + 1)
+                let inner = self.ts_tuple_element_to_collected(&named.element_type, depth + 1);
+                let kind = if named.optional { ParamKind::Optional } else { inner.kind };
+                CollectedTupleElement { kind, label: Some(named.label.name.as_str().into()), ..inner }
             }
             // The remaining variants are the plain `TSType`s the element inherits.
-            other => match other.as_ts_type() {
+            other => CollectedTupleElement::required(match other.as_ts_type() {
                 Some(ty) => self.ts_type_to_collected_at_depth(ty, depth + 1),
                 None => {
                     use oxc_span::GetSpan;
                     let span = other.span();
                     CollectedType::Raw(self.source[span.start as usize..span.end as usize].to_owned())
                 }
-            },
+            }),
         }
     }
 
@@ -1113,23 +1162,12 @@ impl<'src> SourceDataCollector<'src> {
             }
             TSSignature::TSMethodSignature(sig) => {
                 let name = js_text::property_name(&sig.key.static_name()?);
-                let (params, param_names, param_kinds) =
-                    collect_params(&sig.params, |t| self.ts_type_to_collected_at_depth(t, depth + 1));
-                let return_type = sig
-                    .return_type
-                    .as_ref()
-                    .map(|rt| self.ts_type_to_collected_at_depth(&rt.type_annotation, depth + 1))
-                    .unwrap_or(CollectedType::Void);
+                let collected_type =
+                    self.method_signature_type(sig, |this, t| this.ts_type_to_collected_at_depth(t, depth + 1));
                 let (description, tags) = self.find_jsdoc_with_tags(sig.span.start);
                 Some(CollectedObjectField {
                     name,
-                    collected_type: CollectedType::Function {
-                        type_params: type_param_names(sig.type_parameters.as_deref()),
-                        params,
-                        param_names,
-                        param_kinds,
-                        return_type: Box::new(return_type),
-                    },
+                    collected_type,
                     required: !sig.optional,
                     description,
                     readonly: false,
@@ -1258,21 +1296,10 @@ impl<'src> SourceDataCollector<'src> {
             TSSignature::TSMethodSignature(ms) => {
                 let name = js_text::property_name(&ms.key.static_name()?);
                 let (description, tags) = self.find_jsdoc_with_tags(ms.span.start);
-                let (params, param_names, param_kinds) = collect_params(&ms.params, |t| self.ts_type_to_collected(t));
-                let return_type = ms
-                    .return_type
-                    .as_ref()
-                    .map(|rt| self.ts_type_to_collected(&rt.type_annotation))
-                    .unwrap_or(CollectedType::Void);
+                let collected_type = self.method_signature_type(ms, |this, t| this.ts_type_to_collected(t));
                 Some(RawProp {
                     name,
-                    collected_type: CollectedType::Function {
-                        type_params: type_param_names(ms.type_parameters.as_deref()),
-                        params,
-                        param_names,
-                        param_kinds,
-                        return_type: Box::new(return_type),
-                    },
+                    collected_type,
                     required: !ms.optional,
                     description,
                     tags,
@@ -1282,6 +1309,88 @@ impl<'src> SourceDataCollector<'src> {
             }
             _ => None,
         }
+    }
+}
+
+impl SourceDataCollector<'_> {
+    /// The type of the property a method signature declares: a method's function type, a getter's return type, a
+    /// setter's parameter type. A getter is a property, not a method: `get size(): number` is `size: number`.
+    fn method_signature_type(
+        &mut self,
+        sig: &TSMethodSignature<'_>,
+        mut convert: impl FnMut(&mut Self, &TSType) -> CollectedType,
+    ) -> CollectedType {
+        match sig.kind {
+            TSMethodSignatureKind::Method => {
+                let (params, param_names, param_kinds) = collect_params(&sig.params, |t| convert(self, t));
+                let return_type = sig
+                    .return_type
+                    .as_ref()
+                    .map(|rt| convert(self, &rt.type_annotation))
+                    .unwrap_or(CollectedType::Void);
+                CollectedType::Function {
+                    type_params: type_param_names(sig.type_parameters.as_deref()),
+                    params,
+                    param_names,
+                    param_kinds,
+                    return_type: Box::new(return_type),
+                }
+            }
+            TSMethodSignatureKind::Get => {
+                sig.return_type.as_ref().map(|rt| convert(self, &rt.type_annotation)).unwrap_or(CollectedType::Any)
+            }
+            TSMethodSignatureKind::Set => sig
+                .params
+                .items
+                .first()
+                .and_then(|p| p.type_annotation.as_ref())
+                .map(|ta| convert(self, &ta.type_annotation))
+                .unwrap_or(CollectedType::Any),
+        }
+    }
+}
+
+/// The get and set accessors among an object type's or an interface's members, by property name. A getter and a
+/// setter of one name declare one property, typed by the getter; a getter alone makes it `readonly`.
+pub(super) struct Accessors {
+    getters: FxHashSet<String>,
+    setters: FxHashSet<String>,
+}
+
+impl Accessors {
+    pub(super) fn of(members: &[TSSignature<'_>]) -> Self {
+        let mut accessors = Self { getters: FxHashSet::default(), setters: FxHashSet::default() };
+        for member in members {
+            if let Some((kind, name)) = accessor(member) {
+                match kind {
+                    TSMethodSignatureKind::Get => accessors.getters.insert(name),
+                    TSMethodSignatureKind::Set => accessors.setters.insert(name),
+                    TSMethodSignatureKind::Method => false,
+                };
+            }
+        }
+        accessors
+    }
+
+    /// A setter whose property a getter of the same name declares.
+    pub(super) fn is_shadowed_setter(&self, member: &TSSignature<'_>) -> bool {
+        matches!(accessor(member), Some((TSMethodSignatureKind::Set, name)) if self.getters.contains(&name))
+    }
+
+    /// A getter with no setter of the same name: its property is `readonly`.
+    pub(super) fn is_lone_getter(&self, member: &TSSignature<'_>) -> bool {
+        matches!(accessor(member), Some((TSMethodSignatureKind::Get, name)) if !self.setters.contains(&name))
+    }
+}
+
+/// A getter's or setter's kind and property name; `None` for any other member.
+fn accessor(member: &TSSignature<'_>) -> Option<(TSMethodSignatureKind, String)> {
+    let TSSignature::TSMethodSignature(sig) = member else { return None };
+    match sig.kind {
+        TSMethodSignatureKind::Get | TSMethodSignatureKind::Set => {
+            Some((sig.kind, js_text::property_name(&sig.key.static_name()?)))
+        }
+        TSMethodSignatureKind::Method => None,
     }
 }
 

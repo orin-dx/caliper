@@ -3,7 +3,8 @@
 // or Caliper, so tests/construct-suite.test.ts can pin it without either.
 import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { caliperNorm, compare, type Norm, type Verdict } from './oracle-compare.ts'
+import { caliperNorm } from './caliper-norm.ts'
+import { compare, type Norm, type Verdict } from './oracle-compare.ts'
 
 /** The prop every fixture states its type through. */
 export const PROP = 'p'

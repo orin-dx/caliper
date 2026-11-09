@@ -18,12 +18,12 @@ use compact_str::CompactString;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::types::{
-    mark_placeholder, unmarked, CollectedObjectField, CollectedType, CollectedTypeAlias, Diagnostic, DiagnosticCode,
-    DiagnosticSeverity, ResolveState,
+    CollectedObjectField, CollectedSignature, CollectedTupleElement, CollectedType, CollectedTypeAlias, Diagnostic,
+    DiagnosticCode, DiagnosticSeverity, ResolveState, mark_placeholder, unmarked,
 };
 
-use super::import::resolve_to_canonical;
 use super::ResolutionContext;
+use super::import::resolve_to_canonical;
 
 /// Map from a generic alias's declared parameter name to the caller-supplied
 /// argument, each pre-wrapped in `CollectedType::AtFile` pinned to the file the
@@ -73,10 +73,10 @@ pub(super) fn mark_args<'a>(
     let args = &*pinned;
     if state.binds_nothing() {
         // Whether a name is bound here is not looked up name by name: a state that binds any name marks differently.
-        if let Some(reads) = state.reads.as_mut() {
-            if reads.entered_scopes == 0 {
-                reads.needs_empty_scope = true;
-            }
+        if let Some(reads) = state.reads.as_mut()
+            && reads.entered_scopes == 0
+        {
+            reads.needs_empty_scope = true;
         }
         return pinned;
     }
@@ -270,23 +270,28 @@ pub(super) fn substitute_type(ct: &CollectedType, subst: &Substitution) -> Colle
         }
         CollectedType::Array(inner) => CollectedType::Array(Box::new(substitute_type(inner, subst))),
         CollectedType::Readonly(inner) => CollectedType::Readonly(Box::new(substitute_type(inner, subst))),
-        CollectedType::Tuple(members) => {
-            CollectedType::Tuple(members.iter().map(|m| substitute_type(m, subst)).collect())
-        }
-        CollectedType::Object(fields) => CollectedType::Object(
-            fields
+        CollectedType::Tuple(elements) => CollectedType::Tuple(
+            elements
                 .iter()
-                .map(|f| CollectedObjectField {
-                    name: f.name.clone(),
-                    collected_type: substitute_type(&f.collected_type, subst),
-                    required: f.required,
-                    description: f.description.clone(),
-                    readonly: f.readonly,
-                    index_key: f.index_key.as_deref().map(|key| Box::new(substitute_type(key, subst))),
-                    tags: f.tags.clone(),
-                })
+                .map(|e| CollectedTupleElement { element_type: substitute_type(&e.element_type, subst), ..e.clone() })
                 .collect(),
         ),
+        CollectedType::Object(fields) => CollectedType::Object(substitute_fields(fields, subst)),
+        CollectedType::Callable { signatures, fields } => CollectedType::Callable {
+            signatures: signatures
+                .iter()
+                .map(|s| {
+                    let shadowed = shadow(subst, &s.type_params);
+                    let subst = shadowed.as_ref().unwrap_or(subst);
+                    CollectedSignature {
+                        params: s.params.iter().map(|p| substitute_type(p, subst)).collect(),
+                        return_type: substitute_type(&s.return_type, subst),
+                        ..s.clone()
+                    }
+                })
+                .collect(),
+            fields: substitute_fields(fields, subst),
+        },
         CollectedType::KeyOf(inner) => CollectedType::KeyOf(Box::new(substitute_type(inner, subst))),
         // Already resolved to a caller-supplied argument by an earlier substitution
         // pass — `file` is authoritative for `inner` and must not be disturbed, but
@@ -303,18 +308,8 @@ pub(super) fn substitute_type(ct: &CollectedType, subst: &Substitution) -> Colle
             CollectedType::TemplateLiteral(parts.iter().map(|p| substitute_type(p, subst)).collect())
         }
         CollectedType::Function { type_params, params, param_names, param_kinds, return_type } => {
-            // The function's own type parameters shadow the outer ones of the same name.
-            let shadowed;
-            let subst = if type_params.iter().any(|p| subst.contains_key(p.as_str())) {
-                shadowed = subst
-                    .iter()
-                    .filter(|(k, _)| !type_params.iter().any(|p| p == **k))
-                    .map(|(k, v)| (*k, v.clone()))
-                    .collect();
-                &shadowed
-            } else {
-                subst
-            };
+            let shadowed = shadow(subst, type_params);
+            let subst = shadowed.as_ref().unwrap_or(subst);
             CollectedType::Function {
                 type_params: type_params.clone(),
                 params: params.iter().map(|p| substitute_type(p, subst)).collect(),
@@ -358,12 +353,38 @@ pub(super) fn substitute_type(ct: &CollectedType, subst: &Substitution) -> Colle
         | CollectedType::Void
         | CollectedType::BigInt
         | CollectedType::Symbol
+        | CollectedType::UniqueSymbol
         | CollectedType::StringLiteral(_)
         | CollectedType::NumberLiteral(_)
         | CollectedType::BoolLiteral(_)
+        | CollectedType::BigIntLiteral(_)
         | CollectedType::TypeOf(_)
         | CollectedType::Raw(_) => ct.clone(),
     }
+}
+
+/// `subst` without the parameters a signature declares itself, which shadow the outer ones of the same name; `None`
+/// when it declares none of them.
+fn shadow<'s>(subst: &Substitution<'s>, type_params: &[CompactString]) -> Option<Substitution<'s>> {
+    type_params.iter().any(|p| subst.contains_key(p.as_str())).then(|| {
+        subst.iter().filter(|(k, _)| !type_params.iter().any(|p| p == **k)).map(|(k, v)| (*k, v.clone())).collect()
+    })
+}
+
+/// An object type's fields with parameter references replaced.
+fn substitute_fields(fields: &[CollectedObjectField], subst: &Substitution) -> Vec<CollectedObjectField> {
+    fields
+        .iter()
+        .map(|f| CollectedObjectField {
+            name: f.name.clone(),
+            collected_type: substitute_type(&f.collected_type, subst),
+            required: f.required,
+            description: f.description.clone(),
+            readonly: f.readonly,
+            index_key: f.index_key.as_deref().map(|key| Box::new(substitute_type(key, subst))),
+            tags: f.tags.clone(),
+        })
+        .collect()
 }
 
 /// Recursively replace parameter references inside a `CollectedTypeAlias` body.

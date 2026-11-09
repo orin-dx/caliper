@@ -15,15 +15,17 @@ mod component;
 mod convert;
 mod locate;
 mod on_demand;
+mod printed;
 mod rpc;
 
 pub use on_demand::{OnDemand, OnDemandConfig};
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use caliper_docgen_core::types::semantic::{PropInterner, SemanticComponent, SemanticFallback, SemanticOutcome};
 use caliper_docgen_core::types::ExtractionOutput;
+use caliper_docgen_core::types::semantic::{PropInterner, SemanticComponent, SemanticFallback, SemanticOutcome};
 use caliper_docgen_tsc_client::{Supervisor, SupervisorConfig};
 use camino::{Utf8Path, Utf8PathBuf};
 use rustc_hash::FxHashMap;
@@ -32,12 +34,14 @@ use tokio::task::JoinSet;
 
 use crate::component::Answer;
 use crate::convert::Converter;
-use crate::rpc::{CallError, Rpc};
+use crate::rpc::{CallError, REQUESTS, Rpc};
 
-/// The `typescript` releases whose protocol this backend was traced against: the 7.1 series, from `7.1.0-beta` on. The
-/// protocol has no version handshake, so the package's `package.json` version and the initialize call that follows
-/// the spawn are the whole check; a build that fails either takes the structural result with one warning.
-pub const SUPPORTED_VERSIONS: &[&str] = &["7.1"];
+/// The builds whose protocol this backend was traced against: the `typescript` 7.1 series, from `7.1.0-beta` on, and
+/// the `tsrs` builds listed exactly (`<tsrs version>-ts<typescript version>`), each only while its TypeScript part is
+/// in the series above. The protocol has no version handshake, so the package's `package.json` version and the
+/// initialize call that follows the spawn are the whole check; a build that fails either takes the structural result
+/// with one warning.
+pub const SUPPORTED_VERSIONS: &[&str] = &["7.1", "0.23.0-ts7.1.0-beta"];
 
 /// How many files are asked about at once. `tsc` answers requests one at a time; this keeps it from idling on round
 /// trips.
@@ -87,6 +91,9 @@ pub struct SemanticRequest {
     pub record_to: Option<Utf8PathBuf>,
     /// Environment for the `tsc` process; the tests use it to pick a replay scenario.
     pub extra_env: Vec<(String, String)>,
+    /// Ask the checker about a component's props, and about the members of each type, last to first. The answer must
+    /// not change: no id the checker hands out, and so no order of queries, may show in it. The tests set this.
+    pub reverse_queries: bool,
     /// Compiler options of a `tsc` session that is already initialized. A warm checker sets this once so a request
     /// only builds its program.
     pub(crate) prepared_options: Option<serde_json::Value>,
@@ -105,6 +112,7 @@ impl SemanticRequest {
             expected_versions: SUPPORTED_VERSIONS,
             record_to: None,
             extra_env: Vec::new(),
+            reverse_queries: false,
             prepared_options: None,
         }
     }
@@ -208,7 +216,7 @@ async fn session(
     };
     let rpc = Arc::new(opened?);
     let opened = started.elapsed();
-    let converter = Converter::new(rpc.clone());
+    let converter = Converter::new(rpc.clone(), request.reverse_queries);
     let limit = Arc::new(Semaphore::new(FILES_IN_FLIGHT));
     let interner = Arc::new(PropInterner::default());
 
@@ -247,16 +255,16 @@ async fn session(
         return Err(error);
     }
 
-    if let (Some(path), Some(recording)) = (&request.record_to, rpc.recording()) {
-        if let Ok(json) = serde_json::to_string_pretty(&recording) {
-            if let Err(error) = std::fs::write(path, json) {
-                tracing::warn!("could not write the recording to {path}: {error}");
-            }
-        }
+    if let (Some(path), Some(recording)) = (&request.record_to, rpc.recording())
+        && let Ok(json) = serde_json::to_string_pretty(&recording)
+        && let Err(error) = std::fs::write(path, json)
+    {
+        tracing::warn!("could not write the recording to {path}: {error}");
     }
     tracing::debug!(
         requests = ?rpc.calls(),
         files = files.len(),
+        type_memo = ?converter.memo_stats(),
         program_ms = opened.as_millis() as u64,
         total_ms = started.elapsed().as_millis() as u64,
         "semantic backend finished"
@@ -296,7 +304,17 @@ async fn answer_file(
     };
 
     for target in &targets {
-        match component::props_of(rpc, converter, interner, &exports, target).await {
+        let requests = Arc::new(AtomicU64::new(0));
+        let started = std::time::Instant::now();
+        let answered =
+            REQUESTS.scope(requests.clone(), component::props_of(rpc, converter, interner, &exports, target)).await;
+        tracing::debug!(
+            component = %target.display_name,
+            requests = requests.load(Ordering::Relaxed),
+            ms = started.elapsed().as_millis() as u64,
+            "semantic component answered"
+        );
+        match answered {
             Ok(Answer::Props(props)) => outcome.components.push(SemanticComponent {
                 file_path: target.file_path.clone(),
                 display_name: target.display_name.clone(),

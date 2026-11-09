@@ -3,4 +3,4 @@
 
 mod framing;
 
-pub use framing::{check_frame_len, write_frame, ContentLengthDecoder, DEFAULT_MAX_FRAME_BYTES};
+pub use framing::{ContentLengthDecoder, DEFAULT_MAX_FRAME_BYTES, check_frame_len, write_frame};

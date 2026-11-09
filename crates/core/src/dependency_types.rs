@@ -142,18 +142,22 @@ fn type_refs(ty: &CollectedType, out: &mut FxHashSet<CompactString>) {
         }
         CollectedType::Union(members)
         | CollectedType::Intersection(members)
-        | CollectedType::Tuple(members)
         | CollectedType::TemplateLiteral(members) => members.iter().for_each(|member| type_refs(member, out)),
+        CollectedType::Tuple(elements) => elements.iter().for_each(|element| type_refs(&element.element_type, out)),
         CollectedType::Array(inner) | CollectedType::Readonly(inner) | CollectedType::KeyOf(inner) => {
             type_refs(inner, out)
         }
         CollectedType::AtFile { inner, .. } => type_refs(inner, out),
-        CollectedType::Object(fields) => fields.iter().for_each(|field| {
-            type_refs(&field.collected_type, out);
-            if let Some(key) = &field.index_key {
-                type_refs(key, out);
+        CollectedType::Object(fields) => field_refs(fields, out),
+        CollectedType::Callable { signatures, fields } => {
+            for signature in signatures {
+                let mut inner = FxHashSet::default();
+                signature.params.iter().for_each(|param| type_refs(param, &mut inner));
+                type_refs(&signature.return_type, &mut inner);
+                out.extend(inner.into_iter().filter(|name| !signature.type_params.contains(name)));
             }
-        }),
+            field_refs(fields, out);
+        }
         CollectedType::IndexedAccess { obj, key } => {
             type_refs(obj, out);
             type_refs(key, out);
@@ -189,8 +193,19 @@ fn type_refs(ty: &CollectedType, out: &mut FxHashSet<CompactString>) {
         | CollectedType::StringLiteral(_)
         | CollectedType::NumberLiteral(_)
         | CollectedType::BoolLiteral(_)
+        | CollectedType::BigIntLiteral(_)
+        | CollectedType::UniqueSymbol
         | CollectedType::Raw(_) => {}
     }
+}
+
+fn field_refs(fields: &[crate::types::CollectedObjectField], out: &mut FxHashSet<CompactString>) {
+    fields.iter().for_each(|field| {
+        type_refs(&field.collected_type, out);
+        if let Some(key) = &field.index_key {
+            type_refs(key, out);
+        }
+    })
 }
 
 /// The module and exported name path `reference` (as written in `file`) reaches through one of `imports`, if it is
@@ -787,10 +802,10 @@ impl Loader<'_> {
             let mut names: Vec<&String> = data.interfaces.keys().collect();
             names.sort();
             for key in names {
-                if let Some(name) = key.strip_prefix(file.as_str()).and_then(|rest| rest.strip_prefix(':')) {
-                    if name.starts_with("React.") {
-                        self.load_declaration(scope, file.clone(), CompactString::from(name));
-                    }
+                if let Some(name) = key.strip_prefix(file.as_str()).and_then(|rest| rest.strip_prefix(':'))
+                    && name.starts_with("React.")
+                {
+                    self.load_declaration(scope, file.clone(), CompactString::from(name));
                 }
             }
         }
@@ -808,10 +823,10 @@ impl Loader<'_> {
         if let Some(parsed) = parsed {
             return parsed.map(|data| scan_of(&data, file));
         }
-        if let Some(cell) = self.re_exports.get(file.as_str()) {
-            if let Some(found) = cell.get() {
-                return Some((false, found.clone()));
-            }
+        if let Some(cell) = self.re_exports.get(file.as_str())
+            && let Some(found) = cell.get()
+        {
+            return Some((false, found.clone()));
         }
         let source = self.read(file)?;
         if entry || may_declare_into_react(&source) {
@@ -1107,10 +1122,10 @@ pub(crate) fn load(
             loader.spawn_demand(scope, demand);
         }
     });
-    if let (None, Some(path)) = (previous, &index_path) {
-        if loader.learned.load(Ordering::Relaxed) {
-            write_index(path, &loader);
-        }
+    if let (None, Some(path)) = (previous, &index_path)
+        && loader.learned.load(Ordering::Relaxed)
+    {
+        write_index(path, &loader);
     }
 
     let mut files: Vec<PathKey> = loader.declaring.iter().map(|f| f.clone()).collect();

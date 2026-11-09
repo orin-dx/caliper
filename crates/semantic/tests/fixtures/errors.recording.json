@@ -1,0 +1,500 @@
+[
+  {
+    "method": "initialize",
+    "params": null,
+    "result": {
+      "caseSensitivity": 0,
+      "currentDirectory": "<ROOT>"
+    }
+  },
+  {
+    "method": "createSnapshot",
+    "params": {
+      "createPrograms": [
+        {
+          "rootFiles": [
+            "<ROOT>/Errors.tsx"
+          ],
+          "compilerOptions": {
+            "jsx": 1,
+            "module": 99,
+            "moduleResolution": 100,
+            "target": 9,
+            "strict": true,
+            "skipLibCheck": true,
+            "noEmit": true
+          }
+        }
+      ]
+    },
+    "result": {
+      "snapshot": 1,
+      "projects": [
+        {
+          "id": "/dev/null/synthetic/1",
+          "currentDirectory": "<ROOT>",
+          "dirty": false,
+          "parsedCommandLine": {
+            "fileNames": [
+              "<ROOT>/Errors.tsx"
+            ],
+            "options": {
+              "jsx": 1,
+              "module": 99,
+              "moduleResolution": 100,
+              "noEmit": true,
+              "skipLibCheck": true,
+              "strict": true,
+              "target": 9
+            },
+            "errors": []
+          }
+        }
+      ],
+      "operation": {
+        "createdPrograms": [
+          "/dev/null/synthetic/1"
+        ]
+      }
+    }
+  },
+  {
+    "method": "getSymbolOfSourceFile",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "file": "<ROOT>/Errors.tsx"
+    },
+    "result": {
+      "reference": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Errors.tsx",
+          "path": "<root>/errors.tsx",
+          "contentHash": "7f1c195aac0f78c745105f8506cb660e",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 1
+      },
+      "name": "\"<ROOT>/Errors\"",
+      "flags": 512,
+      "checkFlags": 0,
+      "declarations": [
+        "1.308.<root>/errors.tsx"
+      ],
+      "valueDeclaration": "1.308.<root>/errors.tsx"
+    }
+  },
+  {
+    "method": "getExportsOfModule",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Errors.tsx",
+          "path": "<root>/errors.tsx",
+          "contentHash": "7f1c195aac0f78c745105f8506cb660e",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 1
+      }
+    },
+    "result": [
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Errors.tsx",
+            "path": "<root>/errors.tsx",
+            "contentHash": "7f1c195aac0f78c745105f8506cb660e",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 2
+        },
+        "name": "Errors",
+        "flags": 16,
+        "checkFlags": 0,
+        "declarations": [
+          "36.264.<root>/errors.tsx"
+        ],
+        "valueDeclaration": "36.264.<root>/errors.tsx",
+        "parent": {
+          "id": 1,
+          "file": "77"
+        }
+      }
+    ]
+  },
+  {
+    "method": "getTypeOfSymbol",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Errors.tsx",
+          "path": "<root>/errors.tsx",
+          "contentHash": "7f1c195aac0f78c745105f8506cb660e",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 2
+      }
+    },
+    "result": {
+      "id": 86,
+      "flags": 1048576,
+      "objectFlags": 16,
+      "isTupleType": false,
+      "value": null,
+      "isThisType": false,
+      "symbol": {
+        "id": 2,
+        "file": "77"
+      }
+    }
+  },
+  {
+    "method": "getSignaturesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 86,
+      "kind": 0
+    },
+    "result": [
+      {
+        "id": 5,
+        "flags": 0,
+        "declaration": "36.264.<root>/errors.tsx",
+        "parameters": [
+          {
+            "id": 10,
+            "file": "77"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "method": "getParametersOfSignature",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "objectId": 5
+    },
+    "result": [
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Errors.tsx",
+            "path": "<root>/errors.tsx",
+            "contentHash": "7f1c195aac0f78c745105f8506cb660e",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 10
+        },
+        "name": "props",
+        "flags": 1,
+        "checkFlags": 0,
+        "declarations": [
+          "41.171.<root>/errors.tsx"
+        ],
+        "valueDeclaration": "41.171.<root>/errors.tsx"
+      }
+    ]
+  },
+  {
+    "method": "getTypeOfSymbol",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Errors.tsx",
+          "path": "<root>/errors.tsx",
+          "contentHash": "7f1c195aac0f78c745105f8506cb660e",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 10
+      }
+    },
+    "result": {
+      "id": 87,
+      "flags": 1048576,
+      "objectFlags": 2,
+      "isTupleType": false,
+      "value": null,
+      "isThisType": false,
+      "symbol": {
+        "id": 5,
+        "file": "77"
+      }
+    }
+  },
+  {
+    "method": "getPropertiesOfType",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 87
+    },
+    "result": [
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Errors.tsx",
+            "path": "<root>/errors.tsx",
+            "contentHash": "7f1c195aac0f78c745105f8506cb660e",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 6
+        },
+        "name": "explicitAny",
+        "flags": 4,
+        "checkFlags": 0,
+        "declarations": [
+          "13.173.<root>/errors.tsx"
+        ],
+        "valueDeclaration": "13.173.<root>/errors.tsx",
+        "parent": {
+          "id": 5,
+          "file": "77"
+        }
+      },
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Errors.tsx",
+            "path": "<root>/errors.tsx",
+            "contentHash": "7f1c195aac0f78c745105f8506cb660e",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 7
+        },
+        "name": "fromImport",
+        "flags": 4,
+        "checkFlags": 0,
+        "declarations": [
+          "19.173.<root>/errors.tsx"
+        ],
+        "valueDeclaration": "19.173.<root>/errors.tsx",
+        "parent": {
+          "id": 5,
+          "file": "77"
+        }
+      },
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Errors.tsx",
+            "path": "<root>/errors.tsx",
+            "contentHash": "7f1c195aac0f78c745105f8506cb660e",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 8
+        },
+        "name": "undeclared",
+        "flags": 4,
+        "checkFlags": 0,
+        "declarations": [
+          "26.173.<root>/errors.tsx"
+        ],
+        "valueDeclaration": "26.173.<root>/errors.tsx",
+        "parent": {
+          "id": 5,
+          "file": "77"
+        }
+      },
+      {
+        "reference": {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Errors.tsx",
+            "path": "<root>/errors.tsx",
+            "contentHash": "7f1c195aac0f78c745105f8506cb660e",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 9
+        },
+        "name": "label",
+        "flags": 4,
+        "checkFlags": 0,
+        "declarations": [
+          "33.173.<root>/errors.tsx"
+        ],
+        "valueDeclaration": "33.173.<root>/errors.tsx",
+        "parent": {
+          "id": 5,
+          "file": "77"
+        }
+      }
+    ]
+  },
+  {
+    "method": "getTypesOfSymbols",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbols": [
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Errors.tsx",
+            "path": "<root>/errors.tsx",
+            "contentHash": "7f1c195aac0f78c745105f8506cb660e",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 6
+        },
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Errors.tsx",
+            "path": "<root>/errors.tsx",
+            "contentHash": "7f1c195aac0f78c745105f8506cb660e",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 7
+        },
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Errors.tsx",
+            "path": "<root>/errors.tsx",
+            "contentHash": "7f1c195aac0f78c745105f8506cb660e",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 8
+        },
+        {
+          "kind": 0,
+          "file": {
+            "fileName": "<ROOT>/Errors.tsx",
+            "path": "<root>/errors.tsx",
+            "contentHash": "7f1c195aac0f78c745105f8506cb660e",
+            "parseOptionsKey": "0",
+            "scriptKind": 4,
+            "nodeId": "77"
+          },
+          "id": 9
+        }
+      ]
+    },
+    "result": [
+      {
+        "id": 1,
+        "flags": 1,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "any"
+      },
+      {
+        "id": 88,
+        "flags": 1,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "error",
+        "aliasSymbol": {
+          "id": 11
+        }
+      },
+      {
+        "id": 89,
+        "flags": 1,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "error",
+        "aliasSymbol": {
+          "id": 12
+        }
+      },
+      {
+        "id": 14,
+        "flags": 32,
+        "objectFlags": 0,
+        "isTupleType": false,
+        "value": null,
+        "isThisType": false,
+        "intrinsicName": "string"
+      }
+    ]
+  },
+  {
+    "method": "typeToString",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 88
+    },
+    "result": "Missing"
+  },
+  {
+    "method": "typeToString",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "type": 89
+    },
+    "result": "NotDeclaredAnywhere"
+  },
+  {
+    "method": "getDocumentationComment",
+    "params": {
+      "snapshot": 1,
+      "project": "/dev/null/synthetic/1",
+      "symbol": {
+        "kind": 0,
+        "file": {
+          "fileName": "<ROOT>/Errors.tsx",
+          "path": "<root>/errors.tsx",
+          "contentHash": "7f1c195aac0f78c745105f8506cb660e",
+          "parseOptionsKey": "0",
+          "scriptKind": 4,
+          "nodeId": "77"
+        },
+        "id": 9
+      }
+    },
+    "result": ""
+  }
+]

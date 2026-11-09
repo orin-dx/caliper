@@ -1,5 +1,5 @@
 /** The canonical JSON schema version the oracle reads (ADR 0017). A Rust test compares it with `SCHEMA_VERSION`. */
-export const SUPPORTED_SCHEMA_VERSION = 4
+export const SUPPORTED_SCHEMA_VERSION = 5
 
 /** Returns `output` once its `schemaVersion` is the supported one and throws otherwise. Output without a version predates it. */
 export function assertSchemaVersion<T extends { schemaVersion?: number }>(output: T, what: string): T {

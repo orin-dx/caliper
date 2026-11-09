@@ -1,6 +1,6 @@
 use miette::Result;
 
-use crate::config::{build_options, warn_ignored_semantic_config, BuildOptionsArgs};
+use crate::config::{BuildOptionsArgs, build_options, warn_ignored_semantic_config};
 use crate::output::print_component;
 
 pub fn cmd_inspect(args: crate::InspectArgs, config_path: Option<&str>) -> Result<i32> {

@@ -49,11 +49,7 @@ fn index_of<'a>(
     react_file: &Utf8Path,
     ctx: &'a ResolutionContext,
 ) -> &'a crate::named_type_index::NamedTypeIndex {
-    if iface.file_path == react_file {
-        ctx.react_index()
-    } else {
-        &ctx.named_types
-    }
+    if iface.file_path == react_file { ctx.react_index() } else { &ctx.named_types }
 }
 
 /// The declaration of attribute `name` on intrinsic element `element`, read as TypeScript reads

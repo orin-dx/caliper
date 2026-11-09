@@ -3,7 +3,7 @@
 //! one: a generic factory that returns a local asserted to a component type, or a function that returns a rendering
 //! function. A call to a function that returns anything else is not, and is not reported either.
 
-use caliper_docgen_core::pipeline::{extract, HtmlAttributeMode, PipelineOptions};
+use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, extract};
 use caliper_docgen_core::types::{DetectionRule, DiagnosticCode, ExtractionOutput};
 use camino::Utf8PathBuf;
 use tempfile::TempDir;

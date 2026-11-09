@@ -11,7 +11,7 @@ use super::collected::{
     FunctionResult, ImportBinding, LexedExport, RawDefault, SourceData, TypeName,
 };
 use super::diagnostic::Diagnostic;
-use super::scope::{is_marked_placeholder, TypeScope};
+use super::scope::{TypeScope, is_marked_placeholder};
 
 // ─── ResolveState ─────────────────────────────────────────────────────────────
 
@@ -268,10 +268,10 @@ impl ResolveState {
             return true;
         }
         let found = self.binds(name);
-        if let Some(reads) = self.reads.as_mut() {
-            if reads.entered_scopes == 0 {
-                reads.in_scope.push((CompactString::from(name), found));
-            }
+        if let Some(reads) = self.reads.as_mut()
+            && reads.entered_scopes == 0
+        {
+            reads.in_scope.push((CompactString::from(name), found));
         }
         found
     }

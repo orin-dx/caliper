@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use super::diagnostic::Diagnostic;
+use super::output::SignatureKind;
 
 // ─── Type Aliases ─────────────────────────────────────────────────────────────
 
@@ -32,7 +33,7 @@ pub const MADE_UP_KEY_VARIABLE: &str = "Record key";
 
 // ─── ParamKind ────────────────────────────────────────────────────────────────
 
-/// How a function parameter is declared: `a`, `a?` or `...a`.
+/// How a function parameter or a tuple element is declared: `a`, `a?` or `...a`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ParamKind {
     /// `a`: the caller must pass it.
@@ -56,20 +57,12 @@ impl ParamKind {
 
     /// Source text before the name: `...` for a rest parameter.
     pub(crate) fn prefix(self) -> &'static str {
-        if self == Self::Rest {
-            "..."
-        } else {
-            ""
-        }
+        if self == Self::Rest { "..." } else { "" }
     }
 
     /// Source text after the name: `?` for an optional parameter.
     pub(crate) fn marker(self) -> &'static str {
-        if self == Self::Optional {
-            "?"
-        } else {
-            ""
-        }
+        if self == Self::Optional { "?" } else { "" }
     }
 
     pub(crate) fn code(self) -> u8 {
@@ -127,6 +120,10 @@ pub enum CollectedType {
     NumberLiteral(f64),
     /// `true` or `false` as a type.
     BoolLiteral(bool),
+    /// A bigint literal type: its value in base 10 with an optional leading `-`, without the `n` (`10n` is `10`).
+    BigIntLiteral(CompactString),
+    /// `unique symbol`, the declared type of a `declare const brand: unique symbol`.
+    UniqueSymbol,
 
     // ── Structural
     /// `A | B`: the members in declaration order.
@@ -135,12 +132,20 @@ pub enum CollectedType {
     Intersection(Vec<CollectedType>),
     /// `T[]` or `Array<T>`: the element type.
     Array(Box<CollectedType>),
-    /// `[A, B]`: the element types in order.
-    Tuple(Vec<CollectedType>),
+    /// `[A, B?, ...C]`: the elements in order, as written.
+    Tuple(Vec<CollectedTupleElement>),
     /// `readonly T[]` or `readonly [A, B]`: the operand under the `readonly` operator.
     Readonly(Box<CollectedType>),
     /// An object type `{ a: string }`: its members and index signatures.
     Object(Vec<CollectedObjectField>),
+    /// An object type with call or construct signatures that is not one call signature alone (that is a
+    /// [`Function`](CollectedType::Function)): overloads, a construct signature, or a signature beside properties.
+    Callable {
+        /// The call and construct signatures, in declaration order.
+        signatures: Vec<CollectedSignature>,
+        /// The properties and index signatures beside them.
+        fields: Vec<CollectedObjectField>,
+    },
 
     // ── Named type reference (possibly generic, possibly not yet resolved)
     /// A reference to a type by name, with its type arguments. The resolver looks the name up; until then it is only
@@ -267,28 +272,39 @@ impl CollectedType {
             | CollectedType::Unknown
             | CollectedType::Void
             | CollectedType::BigInt
-            | CollectedType::Symbol => {}
-            CollectedType::StringLiteral(s) | CollectedType::TypeOf(s) => s.hash(hasher),
+            | CollectedType::Symbol
+            | CollectedType::UniqueSymbol => {}
+            CollectedType::StringLiteral(s) | CollectedType::TypeOf(s) | CollectedType::BigIntLiteral(s) => {
+                s.hash(hasher)
+            }
             CollectedType::NumberLiteral(n) => n.to_bits().hash(hasher),
             CollectedType::BoolLiteral(b) => b.hash(hasher),
             CollectedType::Union(members)
             | CollectedType::Intersection(members)
-            | CollectedType::Tuple(members)
             | CollectedType::TemplateLiteral(members) => all(hasher, members),
+            CollectedType::Tuple(elements) => {
+                elements.len().hash(hasher);
+                for element in elements {
+                    element.kind.hash(hasher);
+                    element.label.hash(hasher);
+                    element.element_type.structural_hash(hasher);
+                }
+            }
             CollectedType::Array(inner) | CollectedType::Readonly(inner) | CollectedType::KeyOf(inner) => {
                 inner.structural_hash(hasher)
             }
-            CollectedType::Object(fields) => {
-                fields.len().hash(hasher);
-                for field in fields {
-                    field.name.hash(hasher);
-                    field.required.hash(hasher);
-                    field.readonly.hash(hasher);
-                    if let Some(key) = &field.index_key {
-                        key.structural_hash(hasher);
-                    }
-                    field.collected_type.structural_hash(hasher);
+            CollectedType::Object(fields) => hash_fields(fields, hasher),
+            CollectedType::Callable { signatures, fields } => {
+                signatures.len().hash(hasher);
+                for signature in signatures {
+                    signature.kind.hash(hasher);
+                    signature.type_params.hash(hasher);
+                    all(hasher, &signature.params);
+                    signature.param_names.hash(hasher);
+                    signature.param_kinds.hash(hasher);
+                    signature.return_type.structural_hash(hasher);
                 }
+                hash_fields(fields, hasher);
             }
             CollectedType::Named { name, args } => {
                 name.hash(hasher);
@@ -341,6 +357,8 @@ impl CollectedType {
             CollectedType::StringLiteral(s) => format!("\"{}\"", s),
             CollectedType::NumberLiteral(n) => n.to_string(),
             CollectedType::BoolLiteral(b) => b.to_string(),
+            CollectedType::BigIntLiteral(value) => format!("{value}n"),
+            CollectedType::UniqueSymbol => "unique symbol".into(),
             CollectedType::Union(members) => members.iter().map(|m| m.to_raw_string()).collect::<Vec<_>>().join(" | "),
             CollectedType::Intersection(members) => {
                 members.iter().map(|m| m.to_raw_string()).collect::<Vec<_>>().join(" & ")
@@ -373,22 +391,22 @@ impl CollectedType {
                     .join("")
             ),
             CollectedType::Function { type_params, params, param_names, param_kinds, return_type } => format!(
-                "{}({}) => {}",
-                if type_params.is_empty() { String::new() } else { format!("<{}>", type_params.join(", ")) },
-                params
-                    .iter()
-                    .enumerate()
-                    .map(|(i, p)| {
-                        let kind = param_kinds.get(i).copied().unwrap_or_default();
-                        match param_names.get(i).and_then(|n| n.as_ref()) {
-                            Some(name) => format!("{}{name}{}: {}", kind.prefix(), kind.marker(), p.to_raw_string()),
-                            None => p.to_raw_string(),
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", "),
+                "{} => {}",
+                signature_raw(type_params, params, param_names, param_kinds),
                 return_type.to_raw_string()
             ),
+            CollectedType::Callable { signatures, fields } => {
+                let signatures = signatures.iter().map(|s| {
+                    let new = match s.kind {
+                        SignatureKind::Call => "",
+                        SignatureKind::Construct => "new ",
+                    };
+                    let head = signature_raw(&s.type_params, &s.params, &s.param_names, &s.param_kinds);
+                    format!("{new}{head}: {}", s.return_type.to_raw_string())
+                });
+                let fields = fields.iter().map(|f| format!("{}: {}", f.name, f.collected_type.to_raw_string()));
+                format!("{{ {} }}", signatures.chain(fields).collect::<Vec<_>>().join("; "))
+            }
             CollectedType::Conditional { check, extends_type, true_type, false_type } => format!(
                 "{} extends {} ? {} : {}",
                 check.to_raw_string(),
@@ -411,9 +429,20 @@ impl CollectedType {
                 };
                 format!("{{ [{param} in {}]{modifier}: {} }}", key_type.to_raw_string(), value_type.to_raw_string())
             }
-            CollectedType::Tuple(members) => {
-                format!("[{}]", members.iter().map(|m| m.to_raw_string()).collect::<Vec<_>>().join(", "))
-            }
+            CollectedType::Tuple(elements) => format!(
+                "[{}]",
+                elements
+                    .iter()
+                    .map(|e| {
+                        let ty = e.element_type.to_raw_string();
+                        match &e.label {
+                            Some(label) => format!("{}{label}{}: {ty}", e.kind.prefix(), e.kind.marker()),
+                            None => format!("{}{ty}{}", e.kind.prefix(), e.kind.marker()),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             CollectedType::Object(_) => "{ ... }".into(),
             CollectedType::Raw(s) => s.clone(),
         }
@@ -433,6 +462,8 @@ impl CollectedType {
             CollectedType::Void => serde_json::json!("void"),
             CollectedType::BigInt => serde_json::json!("bigint"),
             CollectedType::Symbol => serde_json::json!("symbol"),
+            CollectedType::UniqueSymbol => serde_json::json!("usym"),
+            CollectedType::BigIntLiteral(value) => serde_json::json!({"bil": value.as_str()}),
             // Literals
             CollectedType::StringLiteral(s) => serde_json::json!({"sl": s.as_str()}),
             CollectedType::NumberLiteral(n) => {
@@ -470,32 +501,42 @@ impl CollectedType {
             CollectedType::Array(inner) => serde_json::json!({"arr": inner.to_json_value()}),
             // Readonly: {"ro": inner}
             CollectedType::Readonly(inner) => serde_json::json!({"ro": inner.to_json_value()}),
-            // Tuple: {"tup": [members...]}
-            CollectedType::Tuple(members) => serde_json::json!({
-                "tup": members.iter().map(|m| m.to_json_value()).collect::<Vec<_>>()
+            // Tuple: {"tup": [{t, k?, l?}...]}, `k` the element's `ParamKind` code when not required.
+            CollectedType::Tuple(elements) => serde_json::json!({
+                "tup": elements.iter().map(|e| {
+                    let mut element = serde_json::Map::new();
+                    element.insert("t".into(), e.element_type.to_json_value());
+                    if e.kind != ParamKind::Required {
+                        element.insert("k".into(), serde_json::json!(e.kind.code()));
+                    }
+                    if let Some(label) = &e.label {
+                        element.insert("l".into(), serde_json::json!(label.as_str()));
+                    }
+                    serde_json::Value::Object(element)
+                }).collect::<Vec<_>>()
             }),
             // Object: {"obj": [{name, t, req, desc, ro?, ik?}...]}
-            CollectedType::Object(fields) => serde_json::json!({
-                "obj": fields.iter().map(|f| {
-                    let mut field = serde_json::json!({
-                        "name": f.name,
-                        "t": f.collected_type.to_json_value(),
-                        "req": f.required,
-                        "desc": f.description,
-                    });
-                    if let Some(map) = field.as_object_mut() {
-                        if f.readonly {
-                            map.insert("ro".into(), serde_json::Value::Bool(true));
+            CollectedType::Object(fields) => serde_json::json!({"obj": fields_to_json(fields)}),
+            // Callable: {"call": {s: [{c?, tp, p, names, kinds, r}...], f: [fields...]}}
+            CollectedType::Callable { signatures, fields } => serde_json::json!({
+                "call": {
+                    "s": signatures.iter().map(|s| {
+                        let mut signature = serde_json::json!({
+                            "tp": s.type_params.iter().map(CompactString::as_str).collect::<Vec<_>>(),
+                            "p": s.params.iter().map(|p| p.to_json_value()).collect::<Vec<_>>(),
+                            "names": s.param_names.iter().map(|n| n.as_ref().map(|s| s.as_str())).collect::<Vec<_>>(),
+                            "kinds": s.param_kinds.iter().map(|k| k.code()).collect::<Vec<_>>(),
+                            "r": s.return_type.to_json_value(),
+                        });
+                        if s.kind == SignatureKind::Construct
+                            && let Some(map) = signature.as_object_mut()
+                        {
+                            map.insert("c".into(), serde_json::Value::Bool(true));
                         }
-                        if let Some(key) = &f.index_key {
-                            map.insert("ik".into(), key.to_json_value());
-                        }
-                        if !f.tags.is_empty() {
-                            map.insert("tags".into(), serde_json::json!(f.tags));
-                        }
-                    }
-                    field
-                }).collect::<Vec<_>>()
+                        signature
+                    }).collect::<Vec<_>>(),
+                    "f": fields_to_json(fields),
+                }
             }),
             // TypeOf: {"to": name}
             CollectedType::TypeOf(name) => serde_json::json!({"to": name.as_str()}),
@@ -565,11 +606,15 @@ impl CollectedType {
                 "void" => CollectedType::Void,
                 "bigint" => CollectedType::BigInt,
                 "symbol" => CollectedType::Symbol,
+                "usym" => CollectedType::UniqueSymbol,
                 other => CollectedType::Raw(other.to_string()),
             }),
             serde_json::Value::Object(map) => {
                 if let Some(s) = map.get("sl").and_then(|v| v.as_str()) {
                     return Ok(CollectedType::StringLiteral(s.into()));
+                }
+                if let Some(s) = map.get("bil").and_then(|v| v.as_str()) {
+                    return Ok(CollectedType::BigIntLiteral(s.into()));
                 }
                 if let Some(val) = map.get("nl") {
                     if let Some(s) = val.as_str() {
@@ -611,50 +656,52 @@ impl CollectedType {
                     return Ok(CollectedType::Readonly(Box::new(Self::from_json_value(inner)?)));
                 }
                 if let Some(arr) = map.get("tup").and_then(|v| v.as_array()) {
-                    return Ok(CollectedType::Tuple(arr.iter().map(Self::from_json_value).collect::<Result<_, _>>()?));
-                }
-                if let Some(arr) = map.get("obj").and_then(|v| v.as_array()) {
-                    let fields: Vec<CollectedObjectField> = arr
+                    let elements = arr
                         .iter()
-                        .map(|f| {
-                            let o = f.as_object().ok_or_else(|| "expected object for field".to_string())?;
-                            // A missing/wrong-type "name" would otherwise silently
-                            // default to "" — indistinguishable from a real (if
-                            // unusual) empty-string prop name, unlike every other
-                            // field in this struct, which either has a visible
-                            // Raw("null") escape hatch (`t`, via the recursive
-                            // from_json_value call) or a low-stakes default
-                            // (`req`/`desc`). Erroring here surfaces malformed
-                            // cache data as a deserialize failure — cache.rs's
-                            // `rmp_serde::from_slice(&bytes).ok()?` already treats
-                            // any such error as a full cache miss, falling back to
-                            // re-parsing from source, rather than serving a
-                            // corrupted-but-plausible-looking prop.
-                            let name = o
-                                .get("name")
-                                .and_then(|v| v.as_str())
-                                .ok_or_else(|| "object field missing a 'name' string".to_string())?
-                                .to_owned();
-                            Ok(CollectedObjectField {
-                                name,
-                                collected_type: Self::from_json_value(o.get("t").unwrap_or(&serde_json::Value::Null))?,
-                                required: o.get("req").and_then(|v| v.as_bool()).unwrap_or(false),
-                                description: o.get("desc").and_then(|v| v.as_str()).unwrap_or("").to_owned(),
-                                readonly: o.get("ro").and_then(|v| v.as_bool()).unwrap_or(false),
-                                index_key: o.get("ik").map(Self::from_json_value).transpose()?.map(Box::new),
-                                tags: o
-                                    .get("tags")
-                                    .and_then(|v| v.as_object())
-                                    .map(|tags| {
-                                        tags.iter()
-                                            .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
-                                            .collect()
-                                    })
-                                    .unwrap_or_default(),
+                        .map(|e| {
+                            let o = e.as_object().ok_or_else(|| "expected object for tuple element".to_string())?;
+                            Ok(CollectedTupleElement {
+                                element_type: Self::from_json_value(o.get("t").unwrap_or(&serde_json::Value::Null))?,
+                                kind: ParamKind::from_code(o.get("k").and_then(|k| k.as_u64()).unwrap_or(0)),
+                                label: o.get("l").and_then(|l| l.as_str()).map(CompactString::from),
                             })
                         })
                         .collect::<Result<_, std::string::String>>()?;
-                    return Ok(CollectedType::Object(fields));
+                    return Ok(CollectedType::Tuple(elements));
+                }
+                if let Some(arr) = map.get("obj").and_then(|v| v.as_array()) {
+                    return Ok(CollectedType::Object(fields_from_json(arr)?));
+                }
+                if let Some(inner) = map.get("call") {
+                    let signatures = inner
+                        .get("s")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .map(|s| {
+                                    let (type_params, params, param_names, param_kinds, return_type) =
+                                        Self::signature_from_json(s)?;
+                                    Ok(CollectedSignature {
+                                        kind: if s.get("c").and_then(|c| c.as_bool()).unwrap_or(false) {
+                                            SignatureKind::Construct
+                                        } else {
+                                            SignatureKind::Call
+                                        },
+                                        type_params,
+                                        params,
+                                        param_names,
+                                        param_kinds,
+                                        return_type,
+                                    })
+                                })
+                                .collect::<Result<Vec<_>, std::string::String>>()
+                        })
+                        .unwrap_or(Ok(vec![]))?;
+                    let fields = match inner.get("f").and_then(|v| v.as_array()) {
+                        Some(arr) => fields_from_json(arr)?,
+                        None => vec![],
+                    };
+                    return Ok(CollectedType::Callable { signatures, fields });
                 }
                 if let Some(name) = map.get("to").and_then(|v| v.as_str()) {
                     return Ok(CollectedType::TypeOf(name.into()));
@@ -673,33 +720,14 @@ impl CollectedType {
                     ));
                 }
                 if let Some(inner) = map.get("fn") {
-                    let params = inner
-                        .get("p")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| arr.iter().map(Self::from_json_value).collect::<Result<Vec<_>, _>>())
-                        .unwrap_or(Ok(vec![]))?;
-                    let param_names = inner
-                        .get("names")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| arr.iter().map(|v| v.as_str().map(CompactString::from)).collect::<Vec<_>>())
-                        .unwrap_or_default();
-                    let param_kinds = inner
-                        .get("kinds")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| arr.iter().map(|v| ParamKind::from_code(v.as_u64().unwrap_or(0))).collect())
-                        .unwrap_or_default();
-                    let type_params = inner
-                        .get("tp")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(CompactString::from)).collect())
-                        .unwrap_or_default();
-                    let rt = Self::from_json_value(inner.get("r").unwrap_or(&serde_json::Value::Null))?;
+                    let (type_params, params, param_names, param_kinds, return_type) =
+                        Self::signature_from_json(inner)?;
                     return Ok(CollectedType::Function {
                         type_params,
                         params,
                         param_names,
                         param_kinds,
-                        return_type: Box::new(rt),
+                        return_type: Box::new(return_type),
                     });
                 }
                 if let Some(inner) = map.get("cond") {
@@ -733,6 +761,173 @@ impl CollectedType {
             _ => Ok(CollectedType::Raw(v.to_string())),
         }
     }
+
+    /// A function type's or a signature's `{tp, p, names, kinds, r}`.
+    #[allow(clippy::type_complexity)]
+    fn signature_from_json(
+        v: &serde_json::Value,
+    ) -> Result<
+        (Vec<CompactString>, Vec<CollectedType>, Vec<Option<CompactString>>, Vec<ParamKind>, CollectedType),
+        std::string::String,
+    > {
+        let params = v
+            .get("p")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().map(Self::from_json_value).collect::<Result<Vec<_>, _>>())
+            .unwrap_or(Ok(vec![]))?;
+        let param_names = v
+            .get("names")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().map(|v| v.as_str().map(CompactString::from)).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let param_kinds = v
+            .get("kinds")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().map(|v| ParamKind::from_code(v.as_u64().unwrap_or(0))).collect())
+            .unwrap_or_default();
+        let type_params = v
+            .get("tp")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(CompactString::from)).collect())
+            .unwrap_or_default();
+        let return_type = Self::from_json_value(v.get("r").unwrap_or(&serde_json::Value::Null))?;
+        Ok((type_params, params, param_names, param_kinds, return_type))
+    }
+}
+
+/// A source signature's `<T>(a: A, b?: B)`, with the names it has.
+fn signature_raw(
+    type_params: &[CompactString],
+    params: &[CollectedType],
+    param_names: &[Option<CompactString>],
+    param_kinds: &[ParamKind],
+) -> std::string::String {
+    let type_params = if type_params.is_empty() { String::new() } else { format!("<{}>", type_params.join(", ")) };
+    let params = params
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let kind = param_kinds.get(i).copied().unwrap_or_default();
+            match param_names.get(i).and_then(|n| n.as_ref()) {
+                Some(name) => format!("{}{name}{}: {}", kind.prefix(), kind.marker(), p.to_raw_string()),
+                None => p.to_raw_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{type_params}({params})")
+}
+
+/// Feed `hasher` an object type's fields.
+fn hash_fields<H: std::hash::Hasher>(fields: &[CollectedObjectField], hasher: &mut H) {
+    use std::hash::Hash;
+    fields.len().hash(hasher);
+    for field in fields {
+        field.name.hash(hasher);
+        field.required.hash(hasher);
+        field.readonly.hash(hasher);
+        if let Some(key) = &field.index_key {
+            key.structural_hash(hasher);
+        }
+        field.collected_type.structural_hash(hasher);
+    }
+}
+
+/// An object type's fields as `[{name, t, req, desc, ro?, ik?, tags?}...]`.
+fn fields_to_json(fields: &[CollectedObjectField]) -> Vec<serde_json::Value> {
+    fields
+        .iter()
+        .map(|f| {
+            let mut field = serde_json::json!({
+                "name": f.name,
+                "t": f.collected_type.to_json_value(),
+                "req": f.required,
+                "desc": f.description,
+            });
+            if let Some(map) = field.as_object_mut() {
+                if f.readonly {
+                    map.insert("ro".into(), serde_json::Value::Bool(true));
+                }
+                if let Some(key) = &f.index_key {
+                    map.insert("ik".into(), key.to_json_value());
+                }
+                if !f.tags.is_empty() {
+                    map.insert("tags".into(), serde_json::json!(f.tags));
+                }
+            }
+            field
+        })
+        .collect()
+}
+
+/// The fields `fields_to_json` writes.
+fn fields_from_json(arr: &[serde_json::Value]) -> Result<Vec<CollectedObjectField>, std::string::String> {
+    arr.iter()
+        .map(|f| {
+            let o = f.as_object().ok_or_else(|| "expected object for field".to_string())?;
+            // A missing/wrong-type "name" would otherwise silently default to "" — indistinguishable from a real (if
+            // unusual) empty-string prop name, unlike every other field in this struct, which either has a visible
+            // Raw("null") escape hatch (`t`, via the recursive from_json_value call) or a low-stakes default
+            // (`req`/`desc`). Erroring here surfaces malformed cache data as a deserialize failure — cache.rs's
+            // `rmp_serde::from_slice(&bytes).ok()?` already treats any such error as a full cache miss, falling back to
+            // re-parsing from source, rather than serving a corrupted-but-plausible-looking prop.
+            let name = o
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "object field missing a 'name' string".to_string())?
+                .to_owned();
+            Ok(CollectedObjectField {
+                name,
+                collected_type: CollectedType::from_json_value(o.get("t").unwrap_or(&serde_json::Value::Null))?,
+                required: o.get("req").and_then(|v| v.as_bool()).unwrap_or(false),
+                description: o.get("desc").and_then(|v| v.as_str()).unwrap_or("").to_owned(),
+                readonly: o.get("ro").and_then(|v| v.as_bool()).unwrap_or(false),
+                index_key: o.get("ik").map(CollectedType::from_json_value).transpose()?.map(Box::new),
+                tags: o
+                    .get("tags")
+                    .and_then(|v| v.as_object())
+                    .map(|tags| tags.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned()))).collect())
+                    .unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
+/// One element of a [`CollectedType::Tuple`], as written.
+#[derive(Debug, Clone)]
+pub struct CollectedTupleElement {
+    /// The type as written: for a rest element `...T`, `T` itself (`number[]` in `...number[]`, `Tail` in
+    /// `...Tail`), which the resolver reads to tell a rest element from a spread it flattens.
+    pub element_type: CollectedType,
+    /// `T`, `T?` or `...T`, the same three forms a parameter takes.
+    pub kind: ParamKind,
+    /// The element's label, `head` in `[head: string]`.
+    pub label: Option<CompactString>,
+}
+
+impl CollectedTupleElement {
+    /// A required, unlabeled element.
+    pub fn required(element_type: CollectedType) -> Self {
+        Self { element_type, kind: ParamKind::Required, label: None }
+    }
+}
+
+/// One call or construct signature of a [`CollectedType::Callable`], with its parameters as a
+/// [`CollectedType::Function`] holds them.
+#[derive(Debug, Clone)]
+pub struct CollectedSignature {
+    /// A call `(a: A): R` or a construct `new (a: A): R` signature.
+    pub kind: SignatureKind,
+    /// The signature's own type parameters.
+    pub type_params: Vec<CompactString>,
+    /// The parameter types in order.
+    pub params: Vec<CollectedType>,
+    /// Source parameter names, parallel to `params`.
+    pub param_names: Vec<Option<CompactString>>,
+    /// Each parameter's kind, parallel to `params`.
+    pub param_kinds: Vec<ParamKind>,
+    /// What a call returns, or what `new` creates.
+    pub return_type: CollectedType,
 }
 
 impl serde::Serialize for CollectedType {
@@ -1184,7 +1379,12 @@ impl CollectedType {
             }
             CollectedType::Union(members) => CollectedType::Union(all(members)),
             CollectedType::Intersection(members) => CollectedType::Intersection(all(members)),
-            CollectedType::Tuple(members) => CollectedType::Tuple(all(members)),
+            CollectedType::Tuple(elements) => CollectedType::Tuple(
+                elements
+                    .iter()
+                    .map(|e| CollectedTupleElement { element_type: e.element_type.rename_named(rename), ..e.clone() })
+                    .collect(),
+            ),
             CollectedType::TemplateLiteral(parts) => CollectedType::TemplateLiteral(all(parts)),
             CollectedType::Array(inner) => CollectedType::Array(Box::new(inner.rename_named(rename))),
             CollectedType::Readonly(inner) => CollectedType::Readonly(Box::new(inner.rename_named(rename))),
@@ -1192,20 +1392,22 @@ impl CollectedType {
             CollectedType::AtFile { file, inner } => {
                 CollectedType::AtFile { file: file.clone(), inner: Box::new(inner.rename_named(rename)) }
             }
-            CollectedType::Object(fields) => CollectedType::Object(
-                fields
+            CollectedType::Object(fields) => CollectedType::Object(rename_fields(fields, rename)),
+            CollectedType::Callable { signatures, fields } => CollectedType::Callable {
+                signatures: signatures
                     .iter()
-                    .map(|f| CollectedObjectField {
-                        name: f.name.clone(),
-                        collected_type: f.collected_type.rename_named(rename),
-                        required: f.required,
-                        description: f.description.clone(),
-                        readonly: f.readonly,
-                        index_key: f.index_key.as_ref().map(|key| Box::new(key.rename_named(rename))),
-                        tags: f.tags.clone(),
+                    .map(|s| {
+                        let scoped =
+                            |name: &str| if s.type_params.iter().any(|p| p == name) { None } else { rename(name) };
+                        CollectedSignature {
+                            params: s.params.iter().map(|p| p.rename_named(&scoped)).collect(),
+                            return_type: s.return_type.rename_named(&scoped),
+                            ..s.clone()
+                        }
                     })
                     .collect(),
-            ),
+                fields: rename_fields(fields, rename),
+            },
             CollectedType::IndexedAccess { obj, key } => CollectedType::IndexedAccess {
                 obj: Box::new(obj.rename_named(rename)),
                 key: Box::new(key.rename_named(rename)),
@@ -1246,13 +1448,34 @@ impl CollectedType {
             | CollectedType::Void
             | CollectedType::BigInt
             | CollectedType::Symbol
+            | CollectedType::UniqueSymbol
             | CollectedType::StringLiteral(_)
             | CollectedType::NumberLiteral(_)
             | CollectedType::BoolLiteral(_)
+            | CollectedType::BigIntLiteral(_)
             | CollectedType::TypeOf(_)
             | CollectedType::Raw(_) => self.clone(),
         }
     }
+}
+
+/// An object type's fields with [`CollectedType::rename_named`] applied to each type.
+fn rename_fields(
+    fields: &[CollectedObjectField],
+    rename: &dyn Fn(&str) -> Option<TypeName>,
+) -> Vec<CollectedObjectField> {
+    fields
+        .iter()
+        .map(|f| CollectedObjectField {
+            name: f.name.clone(),
+            collected_type: f.collected_type.rename_named(rename),
+            required: f.required,
+            description: f.description.clone(),
+            readonly: f.readonly,
+            index_key: f.index_key.as_ref().map(|key| Box::new(key.rename_named(rename))),
+            tags: f.tags.clone(),
+        })
+        .collect()
 }
 
 impl CollectedTypeAlias {

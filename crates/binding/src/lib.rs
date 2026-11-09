@@ -12,7 +12,7 @@ use dashmap::DashMap;
 use napi_derive::napi;
 
 use caliper_docgen_core::pipeline::{
-    extraction_output_to_json, incremental_update_to_json, PipelineOptions, WatchSession,
+    PipelineOptions, WatchSession, extraction_output_to_json, incremental_update_to_json,
 };
 
 #[global_allocator]
@@ -139,7 +139,7 @@ pub struct JsExtractOptions {
     #[napi(ts_type = "'off' | 'on-demand'")]
     pub semantic_types: Option<String>,
     /// Session only, with `semanticTypes: 'on-demand'`: the `tsc` binary to run, instead of the nearest
-    /// `node_modules/typescript/bin/tsc`.
+    /// `node_modules/typescript/bin/tsc` or `node_modules/tsrs/bin/tsrs`.
     pub tsc_path: Option<String>,
     /// Session only, with `semanticTypes: 'on-demand'`: how many milliseconds a request waits for the checker before
     /// it takes the structural answer (default 150).
@@ -161,7 +161,7 @@ fn new_session(options: JsExtractOptions) -> napi::Result<Arc<WatchSession>> {
             options.semantic_wait_ms.unwrap_or(DEFAULT_SEMANTIC_WAIT_MS),
         )),
         Some(other) => {
-            return Err(napi::Error::from_reason(format!("semanticTypes must be 'off' or 'on-demand', got '{other}'")))
+            return Err(napi::Error::from_reason(format!("semanticTypes must be 'off' or 'on-demand', got '{other}'")));
         }
     };
     let pipeline_options = PipelineOptions::try_from(options).map_err(napi::Error::from_reason)?;

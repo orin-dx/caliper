@@ -5,7 +5,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 
 use super::WatchSession;
-use crate::pipeline::{extract, ComponentAnswer, PipelineOptions};
+use crate::pipeline::{ComponentAnswer, PipelineOptions, extract};
 use crate::types::Diagnostic;
 
 fn project(files: &[(&str, &str)]) -> (tempfile::TempDir, Utf8PathBuf) {

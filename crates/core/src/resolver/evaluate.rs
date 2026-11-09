@@ -19,7 +19,7 @@ use super::import::{
     lookup_interface_from, lookup_interface_including_ambient, lookup_type_alias, resolve_to_canonical,
 };
 use super::substitute::{bind_declared, build_substitution, substitute_alias, substitute_type};
-use super::{ResolutionContext, MAX_DEPTH};
+use super::{MAX_DEPTH, ResolutionContext};
 
 /// A type, and the file its names resolve in.
 pub(super) type Located = (CollectedType, Utf8PathBuf);
@@ -125,7 +125,7 @@ pub(super) fn mapped_keys(
                 return None;
             };
             // A tuple's elements come through as the source text of a literal (`"a"`).
-            let names = elements.iter().map(|element| match element {
+            let names = elements.iter().map(|element| match &element.element_type {
                 CollectedType::StringLiteral(name) => Some(name.to_string()),
                 CollectedType::Raw(text) => Some(text.trim().strip_prefix('"')?.strip_suffix('"')?.to_owned()),
                 _ => None,
@@ -375,6 +375,9 @@ fn object_union_members(
         | CollectedType::Void
         | CollectedType::BigInt
         | CollectedType::Symbol
+        | CollectedType::UniqueSymbol
+        | CollectedType::BigIntLiteral(_)
+        | CollectedType::Callable { .. }
         | CollectedType::StringLiteral(_)
         | CollectedType::NumberLiteral(_)
         | CollectedType::BoolLiteral(_)
@@ -432,6 +435,9 @@ fn array_element(arg: &CollectedType, file: &Utf8Path, ctx: &ResolutionContext, 
         | CollectedType::Void
         | CollectedType::BigInt
         | CollectedType::Symbol
+        | CollectedType::UniqueSymbol
+        | CollectedType::BigIntLiteral(_)
+        | CollectedType::Callable { .. }
         | CollectedType::StringLiteral(_)
         | CollectedType::NumberLiteral(_)
         | CollectedType::BoolLiteral(_)

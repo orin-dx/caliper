@@ -22,7 +22,7 @@ use crate::pipeline::HtmlAttributeMode;
 use crate::react_types::{checker_prop_used, react_props_wanted};
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use crate::types::semantic::{
-    merge_semantic_props, SemanticComponent, SemanticOutcome, SemanticProp, SemanticProvider, SemanticTarget,
+    SemanticComponent, SemanticOutcome, SemanticProp, SemanticProvider, SemanticTarget, merge_semantic_props,
 };
 
 /// What the checker said about one component at one version of its file, and the generation they belong to.

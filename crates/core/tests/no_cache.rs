@@ -1,6 +1,6 @@
 //! `PipelineOptions::use_cache` off: nothing is read from or written to the cache directory, and the output is the same.
 
-use caliper_docgen_core::pipeline::{extract, PipelineOptions};
+use caliper_docgen_core::pipeline::{PipelineOptions, extract};
 use camino::{Utf8Path, Utf8PathBuf};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
@@ -9,8 +9,14 @@ fn project() -> TestResult<(tempfile::TempDir, Utf8PathBuf)> {
     let tmp = tempfile::TempDir::new()?;
     let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize()?).map_err(|path| format!("not UTF-8: {path:?}"))?;
     for (path, body) in [
-        ("node_modules/@types/react/package.json", r#"{ "name": "@types/react", "version": "19.0.0", "types": "index.d.ts" }"#),
-        ("node_modules/@types/react/index.d.ts", "export = React;\nexport as namespace React;\ndeclare namespace React { type ReactNode = string | null; }\n"),
+        (
+            "node_modules/@types/react/package.json",
+            r#"{ "name": "@types/react", "version": "19.0.0", "types": "index.d.ts" }"#,
+        ),
+        (
+            "node_modules/@types/react/index.d.ts",
+            "export = React;\nexport as namespace React;\ndeclare namespace React { type ReactNode = string | null; }\n",
+        ),
         ("node_modules/pkg-a/package.json", r#"{ "name": "pkg-a", "version": "1.0.0", "types": "index.d.ts" }"#),
         ("node_modules/pkg-a/index.d.ts", "export interface AProps { a?: string }\n"),
         ("src/A.tsx", "import type { AProps } from 'pkg-a';\nexport function A(props: AProps) { return null; }\n"),

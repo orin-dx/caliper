@@ -1,6 +1,6 @@
 # 0007. Let the backend discover components, always compile it in, and keep structural as the default
 
-**Status:** Accepted, discovery not yet implemented **Date:** 2026-10-21
+**Status:** Accepted, discovery not yet implemented, superseded in part by 0026 **Date:** 2026-10-21
 
 **Note (2026-11-02):** The first Decision bullet (discovery) is not built. `merge_semantic` (`crates/core/src/types/semantic.rs`) skips a checker component that has no structural match, and `ComponentEntry` records no origin. The only provenance is the `SemanticBackend` `Info` diagnostic and its `affects` keys. The rest shipped: a runtime opt-in, always compiled in, structural as default and fallback, and `schemaVersion` (ADR 0017).
 

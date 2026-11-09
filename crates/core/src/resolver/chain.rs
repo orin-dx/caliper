@@ -6,7 +6,7 @@ use camino::Utf8Path;
 use compact_str::CompactString;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::known::{push_known_opaque_diagnostic, KnownPatternResult};
+use crate::known::{KnownPatternResult, push_known_opaque_diagnostic};
 use crate::react_types;
 use crate::types::*;
 
@@ -184,10 +184,11 @@ pub(super) fn resolve_props_chain(
 
     // Strip "React." namespace prefix before all builtin/utility checks.
     let type_name_bare = type_name.strip_prefix("React.").unwrap_or(type_name);
-    if type_name_bare == "PropsWithoutRef" && super::may_be_react_builtin(type_name, consuming_file, ctx) {
-        if let Some(alias) = super::alias::react_props_without_ref_alias(type_args, consuming_file) {
-            return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
-        }
+    if type_name_bare == "PropsWithoutRef"
+        && super::may_be_react_builtin(type_name, consuming_file, ctx)
+        && let Some(alias) = super::alias::react_props_without_ref_alias(type_args, consuming_file)
+    {
+        return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
     }
 
     // ── Step 0.5: Inline utility type in extends position ─────────────────────
@@ -226,10 +227,10 @@ pub(super) fn resolve_props_chain(
             });
         }
     }
-    if super::may_be_utility(type_name, consuming_file, ctx) {
-        if let Some(alias) = super::substitute::synthesize_utility_alias(type_name_bare, type_args, consuming_file) {
-            return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
-        }
+    if super::may_be_utility(type_name, consuming_file, ctx)
+        && let Some(alias) = super::substitute::synthesize_utility_alias(type_name_bare, type_args, consuming_file)
+    {
+        return resolve_type_alias_chain(&alias, consuming_file, mapping, ctx, state, depth);
     }
 
     // ── Step 0.6: React's `ComponentProps<typeof Button>` is `Button`'s props ─
@@ -274,22 +275,22 @@ pub(super) fn resolve_props_chain(
                 ctx,
                 &mut state.diagnostics,
             );
-            if let CollectedTypeAlias::Passthrough { target: CollectedType::Object(fields), file_path } = &alias {
-                if ctx.collapses(file_path, &canonical_name, fields.len(), depth, state) {
-                    let notable = fields
-                        .iter()
-                        .filter(|field| field.is_member() && is_notable(&field.name))
-                        .map(|f| (f.name.as_str(), f.collected_type.clone(), f.required, f.description.as_str()));
-                    return collapsed_source(
-                        &canonical_name,
-                        file_path,
-                        fields.iter().map(|field| field.name.clone()).collect(),
-                        notable.collect(),
-                        ctx,
-                        state,
-                        depth,
-                    );
-                }
+            if let CollectedTypeAlias::Passthrough { target: CollectedType::Object(fields), file_path } = &alias
+                && ctx.collapses(file_path, &canonical_name, fields.len(), depth, state)
+            {
+                let notable = fields
+                    .iter()
+                    .filter(|field| field.is_member() && is_notable(&field.name))
+                    .map(|f| (f.name.as_str(), f.collected_type.clone(), f.required, f.description.as_str()));
+                return collapsed_source(
+                    &canonical_name,
+                    file_path,
+                    fields.iter().map(|field| field.name.clone()).collect(),
+                    notable.collect(),
+                    ctx,
+                    state,
+                    depth,
+                );
             }
             let mut attempt = state.branch();
             drop(super::precedence::enter_alias_site(ctx, &mut attempt, &canonical_file, &matched_key));

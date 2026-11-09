@@ -96,10 +96,10 @@ fn follow_reexports(
     depth: u8,
 ) -> (Utf8PathBuf, String) {
     #[cfg(test)]
-    if let Some((scope, count)) = FOLLOW_REEXPORTS_CALLS.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
-        if file.starts_with(&*scope) {
-            *count += 1;
-        }
+    if let Some((scope, count)) = FOLLOW_REEXPORTS_CALLS.lock().unwrap_or_else(|p| p.into_inner()).as_mut()
+        && file.starts_with(&*scope)
+    {
+        *count += 1;
     }
 
     super::deps::record(&file);

@@ -104,10 +104,8 @@ impl<'src> SourceDataCollector<'src> {
         let renders_argument = super::evidence::Scope::is_react_wrapper(&*self, call)
             || super::component::is_component_wrapper_call(call)
             || super::evidence::is_element_factory_callee(super::component::peel_expr(&call.callee), &*self);
-        if renders_argument {
-            if let Some(Argument::Identifier(component)) = call.arguments.first() {
-                self.uses_of(component.name.as_str()).rendered += 1;
-            }
+        if renders_argument && let Some(Argument::Identifier(component)) = call.arguments.first() {
+            self.uses_of(component.name.as_str()).rendered += 1;
         }
     }
 

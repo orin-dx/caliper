@@ -43,7 +43,9 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 ///     and `class_scopes` record where the other declarations sit.
 /// 32: `CollectedInterface::scope` replaces `SourceData::interface_scopes`, an interface in a function body, block or
 ///     `switch` case has the scope in its key, and `FunctionResult` records the scope its names are written in.
-const CACHE_SCHEMA_VERSION: u32 = 32;
+/// 33: tuple elements record their kind and label, and the types gain bigint literals, `unique symbol` and object
+///     types with call or construct signatures (`CollectedType::Callable`).
+const CACHE_SCHEMA_VERSION: u32 = 33;
 
 const DATA_FILE: &str = "dts.msgpack";
 
@@ -208,18 +210,18 @@ impl DtsCache {
 
         // Checked before reading, so a cache file that isn't ours (or a corrupt one) can't make a run allocate it all.
         let path = dir.join(DATA_FILE);
-        if let Ok(meta) = std::fs::metadata(path.as_std_path()) {
-            if meta.len() > MAX_CACHE_FILE_BYTES {
-                return Err(LoadFailure::Unreadable(format!(
-                    "it is {} bytes, over the {MAX_CACHE_FILE_BYTES}-byte limit",
-                    meta.len()
-                )));
-            }
+        if let Ok(meta) = std::fs::metadata(path.as_std_path())
+            && meta.len() > MAX_CACHE_FILE_BYTES
+        {
+            return Err(LoadFailure::Unreadable(format!(
+                "it is {} bytes, over the {MAX_CACHE_FILE_BYTES}-byte limit",
+                meta.len()
+            )));
         }
         let bytes = match std::fs::read(path.as_std_path()) {
             Ok(bytes) => bytes,
             Err(error) if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => {
-                return Err(LoadFailure::Absent)
+                return Err(LoadFailure::Absent);
             }
             Err(error) => return Err(LoadFailure::Unreadable(error.to_string())),
         };

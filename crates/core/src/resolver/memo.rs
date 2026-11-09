@@ -26,7 +26,7 @@ use rustc_hash::FxHashSet;
 use crate::types::{ComponentMapping, Diagnostic, ResolveState, StateReads};
 
 use super::deps::Dependencies;
-use super::{ResolvedChain, MAX_DEPTH, MAX_NAMED_NESTING};
+use super::{MAX_DEPTH, MAX_NAMED_NESTING, ResolvedChain};
 use crate::types::PropType;
 
 /// Recordings kept per interface and depth. A component whose state differs from all of them resolves the chain itself.

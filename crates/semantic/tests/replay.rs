@@ -5,12 +5,12 @@
 
 use std::time::Duration;
 
-use caliper_docgen_core::pipeline::{extract, PipelineOptions};
-use caliper_docgen_core::types::semantic::{merge_semantic, SemanticOutcome};
+use caliper_docgen_core::pipeline::{PipelineOptions, extract};
+use caliper_docgen_core::types::semantic::{SemanticOutcome, merge_semantic};
 use caliper_docgen_core::types::{
     DefaultValue, DiagnosticCode, DiagnosticSeverity, ExtractionOutput, FunctionParam, ParsedProp, PropType,
 };
-use caliper_docgen_semantic::{resolve, targets_of, SemanticRequest};
+use caliper_docgen_semantic::{SemanticRequest, resolve, targets_of};
 use camino::Utf8PathBuf;
 
 const FAKE_VERSION: &str = "7.1.0-test";
@@ -106,7 +106,13 @@ fn function_components_get_the_checkers_props_merged_over_the_structural_ones() 
             return_type: Box::new(PropType::Void),
         }
     );
-    assert_eq!(prop(&output, "Button", "pair").prop_type, PropType::Tuple(vec![PropType::String, PropType::Number]));
+    assert_eq!(
+        prop(&output, "Button", "pair").prop_type,
+        PropType::Tuple(vec![
+            caliper_docgen_core::types::TupleElement::required(PropType::String),
+            caliper_docgen_core::types::TupleElement::required(PropType::Number)
+        ])
+    );
     assert_eq!(prop(&output, "Button", "tags").prop_type, PropType::Array(Box::new(PropType::String)));
 
     // The checker orders union members by creation, not by source.
@@ -201,6 +207,48 @@ fn function_parameters_keep_their_optional_and_rest_markers() {
             PropType::Void
         )
     );
+}
+
+/// Which parameters are optional is stated only by the printed type, so the printed type has to be one that states it:
+/// an alias is printed as what it stands for, a long type is not cut short, a `this` parameter is not counted, and each
+/// signature of an overload set has its own markers. Where nothing can be read, no parameter is made required.
+#[test]
+fn optional_parameters_are_read_through_an_alias_a_long_type_a_this_parameter_and_overloads() {
+    let project = project_of("markers", &["Markers.tsx", "tsconfig.json"], true);
+    let output = structural(&project);
+
+    let outcome = resolve(request_replaying(&project, &output, None, "markers.recording.json"));
+    assert!(outcome.diagnostics.is_empty(), "{:?} / {:?}", outcome.diagnostics, outcome.fallbacks);
+
+    let aliased = &outcome.components.iter().find(|component| component.display_name == "Aliased").unwrap().props;
+    let prop_type = |name: &str| aliased.iter().find(|prop| prop.name == name).unwrap().prop_type.clone();
+    let text = |name: &str| prop_type(name).raw_string();
+
+    // `onChange: Handler` with `type Handler = (value?: string) => void`: the callback may be called with no argument.
+    assert_eq!(
+        prop_type("onChange"),
+        PropType::Function {
+            type_params: vec![],
+            params: vec![FunctionParam {
+                name: Some("value".to_string()),
+                param_type: PropType::String,
+                optional: true,
+                rest: false
+            }],
+            return_type: Box::new(PropType::Void),
+        }
+    );
+    // Parameters after a long one are still read: the checker cuts the printed type short unless it is told not to.
+    assert!(text("long").ends_with(", c?: number, d?: string) => void"), "{}", text("long"));
+    assert_eq!(text("withThis"), "(a?: number) => void");
+    assert_eq!(text("overloaded"), "{ (a?: string): string; (a: number, b?: number): number }");
+    assert_eq!(text("withCall"), "{ (a?: string): number; displayName: string }");
+    assert_eq!(text("ctor"), "{ new (a?: string): Date }");
+
+    // A callable interface is printed as its name whatever the flags: nothing states `a?`, so it is not a function
+    // with a required `a`; it is opaque, and the prop is degraded.
+    assert!(matches!(prop_type("named"), PropType::Opaque(_)), "{:?}", prop_type("named"));
+    assert_eq!(serde_json::to_value(prop_type("named")).unwrap()["reason"]["type"], "unsupportedExpression");
 }
 
 #[test]
@@ -320,4 +368,54 @@ fn an_empty_outcome_merges_to_the_structural_output_unchanged() {
     merge_semantic(&mut output, SemanticOutcome::default());
 
     assert_eq!(serde_json::to_string(&output).unwrap(), before);
+}
+
+/// The checker gives an unresolved import or an undeclared name the flag of `any` as well; only its `intrinsicName`
+/// (`"error"`, where a written `any` says `"any"`) tells them apart. An error type is not `any`: the prop says it
+/// could not be resolved.
+#[test]
+fn an_unresolved_name_is_degraded_and_a_written_any_is_not() {
+    let project = project_of("errors", &["Errors.tsx", "tsconfig.json"], true);
+    let mut output = structural(&project);
+
+    let outcome = resolve(request_replaying(&project, &output, None, "errors.recording.json"));
+    assert!(outcome.diagnostics.is_empty() && outcome.fallbacks.is_empty(), "{outcome:?}");
+    merge_semantic(&mut output, outcome);
+
+    let degraded_by = |name: &str| prop(&output, "Errors", name).degraded_by;
+    assert_eq!(prop(&output, "Errors", "explicitAny").prop_type, PropType::Any);
+    assert!(degraded_by("explicitAny").is_empty());
+    assert!(degraded_by("label").is_empty());
+    for name in ["fromImport", "undeclared"] {
+        assert_eq!(degraded_by(name), ["unresolvableImport"], "{name}: {:?}", prop(&output, "Errors", name).prop_type);
+        assert_ne!(prop(&output, "Errors", name).prop_type, PropType::Any, "{name}");
+    }
+}
+
+/// The program is created from `createPrograms[].compilerOptions`; the Node client sends the same list under
+/// `options`. The checker accepts both, so this pins the key the backend sends.
+#[test]
+fn the_snapshot_is_created_with_compiler_options_for_the_root_files() {
+    let project = project(true);
+    let output = structural(&project);
+    let log = project.root.join("requests.jsonl");
+    let mut request = request(&project, &output, None);
+    request.extra_env.push(("REPLAY_LOG".to_string(), log.to_string()));
+
+    let outcome = resolve(request);
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+
+    let sent: Vec<serde_json::Value> = std::fs::read_to_string(&log)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .filter(|request: &serde_json::Value| request["method"] == "createSnapshot")
+        .collect();
+    let [snapshot] = sent.as_slice() else { panic!("one createSnapshot expected: {sent:?}") };
+    let [program] = snapshot["params"]["createPrograms"].as_array().unwrap().as_slice() else {
+        panic!("one program expected: {snapshot}")
+    };
+    assert!(program["compilerOptions"].is_object(), "{program}");
+    assert!(program.get("options").is_none(), "{program}");
+    assert!(program["rootFiles"].as_array().is_some_and(|files| !files.is_empty()), "{program}");
 }

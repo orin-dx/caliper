@@ -2073,7 +2073,11 @@ fn deeply_chained_conditional_types_hit_the_depth_guard_not_the_bracket_heuristi
     // See SPEC-EXTRACTOR-001's AC-023 for the single-child-vs-multi-child
     // distinction this exact count is pinned to.
     let count = data.diagnostics.iter().filter(|d| d.code == DiagnosticCode::MaxDepthExceeded).count();
-    assert_eq!(count, 4, "expected exactly 4 MaxDepthExceeded diagnostics (one per TSConditionalType child branch that crosses the threshold), got {count}: {:?}", data.diagnostics);
+    assert_eq!(
+        count, 4,
+        "expected exactly 4 MaxDepthExceeded diagnostics (one per TSConditionalType child branch that crosses the threshold), got {count}: {:?}",
+        data.diagnostics
+    );
     assert!(data.diagnostics.iter().all(|d| d.severity == DiagnosticSeverity::Warning));
 }
 

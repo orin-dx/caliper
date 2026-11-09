@@ -49,7 +49,6 @@ $ caliper-docgen schema
             "pandaCodegenMissing",
             "depthExceeded",
             "indexedAccess",
-            "templateLiteral",
             "unsupportedExpression"
           ]
         }
@@ -103,7 +102,7 @@ $ caliper-docgen schema
     "schemaVersion": {
       "description": "The shape of this JSON (ADR 0017). A reader checks it equals the version it was written for",
       "type": "integer",
-      "const": 4
+      "const": 5
     },
     "components": {
       "type": "object",

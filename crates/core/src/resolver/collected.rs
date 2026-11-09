@@ -4,11 +4,11 @@ use camino::Utf8Path;
 
 use crate::types::*;
 
-use super::func::{resolve_function_type, resolve_typeof};
+use super::ResolutionContext;
+use super::func::{resolve_function_type, resolve_signature, resolve_typeof};
 use super::named::resolve_named;
 use super::primitives::{resolve_indexed_access, resolve_intersection, resolve_union};
 use super::template::resolve_template_literal;
-use super::ResolutionContext;
 
 /// `ty` without the `AtFile` markers around it.
 fn unwrap_at_file(ty: &CollectedType) -> &CollectedType {
@@ -44,14 +44,16 @@ pub fn resolve_collected_type(
         CollectedType::Never => PropType::Never,
         CollectedType::Unknown => PropType::Unknown,
         CollectedType::Void => PropType::Void,
-        // BigInt/Symbol — no dedicated PropType; surface as Named.
+        // BigInt/Symbol — no dedicated PropType; surface as Named. `unique symbol` alone (TypeScript allows it only
+        // as a const's declared type, which `typeof` reads) is a symbol.
         CollectedType::BigInt => PropType::Named { name: "bigint".into(), args: vec![] },
-        CollectedType::Symbol => PropType::Named { name: "symbol".into(), args: vec![] },
+        CollectedType::Symbol | CollectedType::UniqueSymbol => PropType::Named { name: "symbol".into(), args: vec![] },
 
         // ── Literals ─────────────────────────────────────────────────────────
         CollectedType::StringLiteral(s) => PropType::StringLiteral(s.to_string()),
         CollectedType::NumberLiteral(n) => PropType::NumberLiteral(*n),
         CollectedType::BoolLiteral(b) => PropType::BoolLiteral(*b),
+        CollectedType::BigIntLiteral(value) => big_int_literal(value),
 
         // ── Composites ───────────────────────────────────────────────────────
         CollectedType::Union(members) => resolve_union(members, consuming_file, ctx, state, depth),
@@ -59,28 +61,17 @@ pub fn resolve_collected_type(
         CollectedType::Array(inner) => {
             PropType::Array(Box::new(resolve_collected_type(inner, consuming_file, ctx, state, depth + 1)))
         }
-        CollectedType::Tuple(members) => PropType::Tuple(
-            members.iter().map(|m| resolve_collected_type(m, consuming_file, ctx, state, depth + 1)).collect(),
-        ),
+        CollectedType::Tuple(elements) => {
+            tuple_of(elements, |ty| resolve_collected_type(ty, consuming_file, ctx, state, depth + 1))
+        }
         CollectedType::Readonly(inner) => {
             PropType::Readonly(Box::new(resolve_collected_type(inner, consuming_file, ctx, state, depth + 1)))
         }
-        CollectedType::Object(fields) => PropType::Object(
-            fields
-                .iter()
-                .map(|f| ObjectField {
-                    name: f.name.clone(),
-                    prop_type: resolve_collected_type(&f.collected_type, consuming_file, ctx, state, depth + 1),
-                    required: f.required,
-                    description: f.description.clone(),
-                    readonly: f.readonly,
-                    index_key: f
-                        .index_key
-                        .as_ref()
-                        .map(|key| Box::new(resolve_collected_type(key, consuming_file, ctx, state, depth + 1))),
-                })
-                .collect(),
-        ),
+        CollectedType::Object(fields) => PropType::Object(resolve_fields(fields, consuming_file, ctx, state, depth)),
+        CollectedType::Callable { signatures, fields } => PropType::Callable {
+            signatures: signatures.iter().map(resolve_signature).collect(),
+            fields: resolve_fields(fields, consuming_file, ctx, state, depth),
+        },
 
         // ── Named type reference ──────────────────────────────────────────────
         CollectedType::Named { name, args } => resolve_named(name, args, consuming_file, ctx, state, depth),
@@ -94,10 +85,10 @@ pub fn resolve_collected_type(
         CollectedType::KeyOf(target) => {
             // `keyof typeof Icons` over a `const` object literal: its keys. Another operand would need the keys of an
             // interface with its index signatures and every parent, which a partly loaded dependency can't give.
-            if let CollectedType::TypeOf(_) = unwrap_at_file(target) {
-                if let Some(keys) = super::evaluate::keys_of(target, consuming_file, ctx, 0) {
-                    return super::primitives::union_of(keys.into_iter().map(|key| PropType::StringLiteral(key.name)));
-                }
+            if let CollectedType::TypeOf(_) = unwrap_at_file(target)
+                && let Some(keys) = super::evaluate::keys_of(target, consuming_file, ctx, 0)
+            {
+                return super::primitives::union_of(keys.into_iter().map(|key| PropType::StringLiteral(key.name)));
             }
             let diag = opaque_diagnostic("a standalone 'keyof'", ct, consuming_file);
             OpaqueDetail::give_up(state, ct.to_raw_string(), OpaqueReason::MappedType, diag)
@@ -177,6 +168,120 @@ pub fn resolve_collected_type(
             }
         }
     }
+}
+
+/// An object type's fields, each type resolved.
+fn resolve_fields(
+    fields: &[CollectedObjectField],
+    consuming_file: &Utf8Path,
+    ctx: &ResolutionContext,
+    state: &mut ResolveState,
+    depth: u8,
+) -> Vec<ObjectField> {
+    fields
+        .iter()
+        .map(|f| ObjectField {
+            name: f.name.clone(),
+            prop_type: resolve_collected_type(&f.collected_type, consuming_file, ctx, state, depth + 1),
+            required: f.required,
+            description: f.description.clone(),
+            readonly: f.readonly,
+            index_key: f
+                .index_key
+                .as_ref()
+                .map(|key| Box::new(resolve_collected_type(key, consuming_file, ctx, state, depth + 1))),
+        })
+        .collect()
+}
+
+/// A bigint literal's value. The extractor writes only decimal digits after an optional `-`; anything else would be a
+/// cache entry from another shape, kept as written.
+pub(super) fn big_int_literal(value: &str) -> PropType {
+    match BigIntValue::parse(value) {
+        Some(value) => PropType::BigIntLiteral(value),
+        None => PropType::Named { name: format!("{value}n").into(), args: vec![] },
+    }
+}
+
+/// A tuple's elements with each type read by `read`, which resolves it (or, for a signature, keeps it as written). A
+/// rest element `...T` is what `T` turns out to be: the elements of a known tuple, spread in as TypeScript flattens
+/// them (`[string, ...[number, boolean]]` is `[string, number, boolean]`); a rest element of an array's element type
+/// (`...number[]`); or, for anything else (`...U` of a type parameter), a variadic element of `T` itself.
+pub(super) fn tuple_of(
+    elements: &[CollectedTupleElement],
+    mut read: impl FnMut(&CollectedType) -> PropType,
+) -> PropType {
+    let mut out = Vec::with_capacity(elements.len());
+    for element in elements {
+        let label = element.label.as_deref().and_then(TupleLabel::new);
+        let ty = read(&element.element_type);
+        let kind = match element.kind {
+            ParamKind::Required => TupleElementKind::Required,
+            ParamKind::Optional => TupleElementKind::Optional,
+            ParamKind::Rest => {
+                let spread = if let PropType::Readonly(inner) = ty { *inner } else { ty };
+                if let PropType::Tuple(inner) = spread {
+                    out.extend(inner);
+                } else if let PropType::Array(inner) = spread {
+                    out.push(TupleElement { element_type: *inner, kind: TupleElementKind::Rest, label });
+                } else {
+                    out.push(TupleElement { element_type: spread, kind: TupleElementKind::Variadic, label });
+                }
+                continue;
+            }
+        };
+        out.push(TupleElement { element_type: ty, kind, label });
+    }
+    let mut elements = normalize_tuple(out);
+    // A tuple of one rest element is the array type, as TypeScript's `getTupleTargetType` has it.
+    match elements.as_mut_slice() {
+        [only] if only.kind == TupleElementKind::Rest => {
+            PropType::Array(Box::new(std::mem::replace(&mut only.element_type, PropType::Never)))
+        }
+        _ => PropType::Tuple(elements),
+    }
+}
+
+/// A tuple's elements as TypeScript's `createNormalizedTupleType` leaves them (typescript-go
+/// `internal/checker/checker.go`), after a rest element was flattened in:
+///
+/// - an optional element before the last required one is required, its type admitting `undefined`
+///   (`[...[string?], number]` is `[string | undefined, number]`);
+/// - everything from the first rest element through the last optional or rest element is one rest element of the
+///   union of their types, an optional one adding `undefined` (`[...number[], ...string[]]` is
+///   `(number | string)[]`, `[...number[], ...[string?]]` is `(number | string | undefined)[]`). Required elements
+///   after the last rest stay (`[...number[], string]`), and one between two rests is swallowed by the union.
+///
+/// A variadic element inside that range is left as it is: the checker folds it in as `T[number]`, which has no
+/// [`PropType`], and a tuple with an unresolved spread is already generic. Labels and `readonly` need nothing here:
+/// a spread tuple's elements keep their own labels, the merged rest element keeps the first rest's, and `readonly` wraps the finished tuple.
+fn normalize_tuple(mut elements: Vec<TupleElement>) -> Vec<TupleElement> {
+    let last_required = elements.iter().rposition(|e| e.kind == TupleElementKind::Required);
+    for element in elements.iter_mut().take(last_required.unwrap_or(0)) {
+        match element.kind {
+            TupleElementKind::Optional => {
+                element.kind = TupleElementKind::Required;
+                let ty = std::mem::replace(&mut element.element_type, PropType::Undefined);
+                element.element_type = super::primitives::union_of([ty, PropType::Undefined]);
+            }
+            TupleElementKind::Required | TupleElementKind::Rest | TupleElementKind::Variadic => {}
+        }
+    }
+    let first_rest = elements.iter().position(|e| e.kind == TupleElementKind::Rest);
+    let last_open =
+        elements.iter().rposition(|e| matches!(e.kind, TupleElementKind::Optional | TupleElementKind::Rest));
+    let (Some(first), Some(last)) = (first_rest, last_open) else { return elements };
+    if first >= last || elements[first..=last].iter().any(|e| e.kind == TupleElementKind::Variadic) {
+        return elements;
+    }
+    let label = elements[first].label.clone();
+    let merged = elements.drain(first..=last).map(|e| match e.kind {
+        TupleElementKind::Optional => super::primitives::union_of([e.element_type, PropType::Undefined]),
+        TupleElementKind::Required | TupleElementKind::Rest | TupleElementKind::Variadic => e.element_type,
+    });
+    let element_type = super::primitives::union_of(merged);
+    elements.insert(first, TupleElement { element_type, kind: TupleElementKind::Rest, label });
+    elements
 }
 
 /// Build the diagnostic explaining why a `CollectedType` degrades to

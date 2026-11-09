@@ -40,7 +40,6 @@ pub fn push_known_opaque_diagnostic(
         OpaqueReason::PandaCodegenMissing => "depends on PandaCSS's generated styled-system output".to_string(),
         OpaqueReason::DepthExceeded => "exceeded the maximum resolution depth".to_string(),
         OpaqueReason::IndexedAccess { expression } => format!("is an indexed access type ('{expression}')"),
-        OpaqueReason::TemplateLiteral { expression } => format!("is a template literal type ('{expression}')"),
         OpaqueReason::UnsupportedExpression => "is a type expression this tool doesn't recognize".to_string(),
     };
     diagnostics.push(Diagnostic {

@@ -1677,13 +1677,13 @@ fn resolved_chain_give_up_pushes_diagnostic_and_populates_composes() {
     assert_eq!(state.diagnostics, vec![diag]);
 }
 
-// ── Test 12: Template literal — opaque on unresolvable parts ─────────────
+// ── Test 12: Template literal — a pattern on unresolvable parts ──────────
 
 #[test]
-fn test_template_literal_opaque_on_unknown_type() {
+fn test_template_literal_stays_a_pattern_on_unknown_type() {
     let ctx = empty_ctx();
     let mut state = ResolveState::default();
-    // `compact-${UnknownSize}` — UnknownSize is not in global, so opaque.
+    // `compact-${UnknownSize}` — UnknownSize is not in global, so it cannot be expanded.
     let ct = CollectedType::TemplateLiteral(vec![
         CollectedType::StringLiteral("compact-".into()),
         CollectedType::Named { name: "UnknownSize".into(), args: vec![] },
@@ -1698,10 +1698,13 @@ fn test_template_literal_opaque_on_unknown_type() {
         &mut state,
         0,
     );
-    assert!(
-        matches!(&result, PropType::Opaque(d) if matches!(d.reason(), OpaqueReason::TemplateLiteral { .. })),
-        "Expected Opaque TemplateLiteral, got {:?}",
-        result
+    // The pattern is kept: the hole is the name it could not expand.
+    assert_eq!(
+        result,
+        PropType::TemplateLiteral(vec![
+            TemplatePart::Text("compact-".into()),
+            TemplatePart::Type(PropType::Named { name: "UnknownSize".into(), args: vec![] }),
+        ])
     );
     assert!(
         state.diagnostics.iter().any(|d| d.code == DiagnosticCode::TemplateLiteralOpaque),

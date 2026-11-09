@@ -39101,10 +39101,14 @@ expression: value
             "kind": "tuple",
             "elements": [
               {
-                "kind": "number"
+                "type": {
+                  "kind": "number"
+                }
               },
               {
-                "kind": "number"
+                "type": {
+                  "kind": "number"
+                }
               }
             ]
           },
@@ -39286,20 +39290,6 @@ expression: value
       "column": null,
       "help": "Check that the package is installed and its types are resolvable.",
       "code": "UNRESOLVABLE_IMPORT",
-      "affects": [
-        "Box",
-        "Card",
-        "Icon"
-      ]
-    },
-    {
-      "severity": "info",
-      "message": "Circular type reference detected resolving 'ReactNode' in '[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts' — stopping here to avoid infinite recursion",
-      "file": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts",
-      "line": null,
-      "column": null,
-      "help": "This type (directly or indirectly) references itself.",
-      "code": "CIRCULAR_REFERENCE",
       "affects": [
         "Box",
         "Card",

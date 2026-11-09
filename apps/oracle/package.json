@@ -7,7 +7,9 @@
   "scripts": {
     "test": "vitest run",
     "construct:capture": "tsx src/construct-capture.ts",
-    "construct:check": "tsx src/construct-capture.ts --check"
+    "construct:check": "tsx src/construct-capture.ts --check",
+    "construct:checker": "tsx src/construct-checker-lane.ts",
+    "construct:parity": "tsx src/construct-parity.ts"
   },
   "dependencies": {
     "react-docgen": "^8.0.4",
@@ -17,6 +19,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "tsrs": "0.23.0-ts7.1.0-beta",
     "tsx": "^4.23.15",
     "vitest": "^5.0.5"
   }

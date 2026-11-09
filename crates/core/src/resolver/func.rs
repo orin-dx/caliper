@@ -5,8 +5,8 @@ use compact_str::CompactString;
 
 use crate::types::*;
 
-use super::primitives::union_of;
 use super::ResolutionContext;
+use super::primitives::union_of;
 
 /// A function type with its parameters and return type as written. A signature names its types (`(mode: CalendarMode)
 /// => void`) the way TypeScript prints it; expanding each alias into its definition would read worse and, for a
@@ -18,7 +18,30 @@ pub(super) fn resolve_function_type(
     param_kinds: &[ParamKind],
     return_type: &CollectedType,
 ) -> PropType {
-    let params = params
+    PropType::Function {
+        type_params: type_params.iter().map(|p| p.to_string()).collect(),
+        params: params_as_written(params, param_names, param_kinds),
+        return_type: Box::new(as_written(return_type)),
+    }
+}
+
+/// A call or construct signature of an object type, as written like a function type's.
+pub(super) fn resolve_signature(signature: &CollectedSignature) -> CallSignature {
+    CallSignature {
+        kind: signature.kind,
+        type_params: signature.type_params.iter().map(|p| p.to_string()).collect(),
+        params: params_as_written(&signature.params, &signature.param_names, &signature.param_kinds),
+        return_type: as_written(&signature.return_type),
+    }
+}
+
+/// A signature's parameters, each type as written.
+fn params_as_written(
+    params: &[CollectedType],
+    param_names: &[Option<CompactString>],
+    param_kinds: &[ParamKind],
+) -> Vec<FunctionParam> {
+    params
         .iter()
         .enumerate()
         .map(|(i, param)| {
@@ -30,12 +53,22 @@ pub(super) fn resolve_function_type(
                 rest: kind == ParamKind::Rest,
             }
         })
-        .collect();
-    PropType::Function {
-        type_params: type_params.iter().map(|p| p.to_string()).collect(),
-        params,
-        return_type: Box::new(as_written(return_type)),
-    }
+        .collect()
+}
+
+/// An object type's fields, each type as written.
+fn fields_as_written(fields: &[CollectedObjectField]) -> Vec<ObjectField> {
+    fields
+        .iter()
+        .map(|f| ObjectField {
+            name: f.name.clone(),
+            prop_type: as_written(&f.collected_type),
+            required: f.required,
+            description: f.description.clone(),
+            readonly: f.readonly,
+            index_key: f.index_key.as_deref().map(|key| Box::new(as_written(key))),
+        })
+        .collect()
 }
 
 /// `ct` as its source spells it: names stay names, and a form `PropType` has no shape for keeps its source text.
@@ -54,24 +87,17 @@ pub(super) fn as_written(ct: &CollectedType) -> PropType {
         CollectedType::StringLiteral(s) => PropType::StringLiteral(s.to_string()),
         CollectedType::NumberLiteral(n) => PropType::NumberLiteral(*n),
         CollectedType::BoolLiteral(b) => PropType::BoolLiteral(*b),
+        CollectedType::BigIntLiteral(value) => super::collected::big_int_literal(value),
         CollectedType::Union(members) => union_of(members.iter().map(as_written)),
         CollectedType::Intersection(members) => PropType::Intersection(members.iter().map(as_written).collect()),
         CollectedType::Array(inner) => PropType::Array(Box::new(as_written(inner))),
-        CollectedType::Tuple(members) => PropType::Tuple(members.iter().map(as_written).collect()),
+        CollectedType::Tuple(elements) => super::collected::tuple_of(elements, as_written),
         CollectedType::Readonly(inner) => PropType::Readonly(Box::new(as_written(inner))),
-        CollectedType::Object(fields) => PropType::Object(
-            fields
-                .iter()
-                .map(|f| ObjectField {
-                    name: f.name.clone(),
-                    prop_type: as_written(&f.collected_type),
-                    required: f.required,
-                    description: f.description.clone(),
-                    readonly: f.readonly,
-                    index_key: f.index_key.as_deref().map(|key| Box::new(as_written(key))),
-                })
-                .collect(),
-        ),
+        CollectedType::Object(fields) => PropType::Object(fields_as_written(fields)),
+        CollectedType::Callable { signatures, fields } => PropType::Callable {
+            signatures: signatures.iter().map(resolve_signature).collect(),
+            fields: fields_as_written(fields),
+        },
         CollectedType::Named { name, args } => {
             PropType::Named { name: unmarked(name).into(), args: args.iter().map(as_written).collect() }
         }
@@ -79,12 +105,13 @@ pub(super) fn as_written(ct: &CollectedType) -> PropType {
             resolve_function_type(type_params, params, param_names, param_kinds, return_type)
         }
         CollectedType::AtFile { inner, .. } => as_written(inner),
+        CollectedType::TemplateLiteral(parts) => super::template::template_of(parts, as_written),
         CollectedType::BigInt
         | CollectedType::Symbol
+        | CollectedType::UniqueSymbol
         | CollectedType::TypeOf(_)
         | CollectedType::KeyOf(_)
         | CollectedType::IndexedAccess { .. }
-        | CollectedType::TemplateLiteral(_)
         | CollectedType::Conditional { .. }
         | CollectedType::Mapped { .. }
         | CollectedType::Raw(_) => named(ct.to_raw_string()),
@@ -114,6 +141,8 @@ pub(super) fn resolve_typeof(
         Some(CollectedType::StringLiteral(value)) => return PropType::StringLiteral(value.to_string()),
         Some(CollectedType::NumberLiteral(value)) => return PropType::NumberLiteral(value),
         Some(CollectedType::BoolLiteral(value)) => return PropType::BoolLiteral(value),
+        // `declare const brand: unique symbol`: the symbol type only that value has.
+        Some(CollectedType::UniqueSymbol) => return PropType::UniqueSymbol { name: name.clone() },
         _ => {}
     }
 

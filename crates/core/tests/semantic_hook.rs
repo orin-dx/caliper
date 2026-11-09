@@ -3,9 +3,9 @@
 //! answers in time, the structural ones when it does not, its late answer on the next request, and one warning when it
 //! is unavailable. The checker here is a fake, so the contract is tested without `tsc`.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
 use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, WatchSession};

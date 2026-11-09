@@ -1,0 +1,34 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "tuple",
+        "elements": [
+          {
+            "k": "union",
+            "members": [
+              {
+                "k": "prim",
+                "name": "undefined"
+              },
+              {
+                "k": "prim",
+                "name": "string"
+              }
+            ]
+          },
+          {
+            "k": "prim",
+            "name": "number"
+          }
+        ]
+      }
+    ]
+  },
+  "text": "[a: string | undefined, b: number] | undefined"
+}

@@ -21983,12 +21983,55 @@ expression: value
                 "value": "on"
               },
               {
-                "kind": "opaque",
-                "raw": "`${OptionalPrefixToken<AutoFillSection>}${OptionalPrefixToken<AutoFillAddressKind>}${AutoFillField}${OptionalPostfixToken<AutoFillCredentialField>}`",
-                "reason": {
-                  "type": "templateLiteral",
-                  "expression": "`${OptionalPrefixToken<AutoFillSection>}${OptionalPrefixToken<AutoFillAddressKind>}${AutoFillField}${OptionalPostfixToken<AutoFillCredentialField>}`"
-                }
+                "kind": "templateLiteral",
+                "parts": [
+                  {
+                    "type": {
+                      "kind": "named",
+                      "name": "OptionalPrefixToken",
+                      "args": [
+                        {
+                          "kind": "named",
+                          "name": "AutoFillSection",
+                          "args": []
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": {
+                      "kind": "named",
+                      "name": "OptionalPrefixToken",
+                      "args": [
+                        {
+                          "kind": "named",
+                          "name": "AutoFillAddressKind",
+                          "args": []
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": {
+                      "kind": "named",
+                      "name": "AutoFillField",
+                      "args": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "kind": "named",
+                      "name": "OptionalPostfixToken",
+                      "args": [
+                        {
+                          "kind": "named",
+                          "name": "AutoFillCredentialField",
+                          "args": []
+                        }
+                      ]
+                    }
+                  }
+                ]
               },
               {
                 "kind": "string"
@@ -22008,9 +22051,6 @@ expression: value
               "name": "InputHTMLAttributes",
               "fileName": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts"
             }
-          ],
-          "degradedBy": [
-            "templateLiteral"
           ]
         },
         "autoCorrect": {
@@ -31196,20 +31236,6 @@ expression: value
       "column": null,
       "help": "Check that the package is installed and its types are resolvable.",
       "code": "UNRESOLVABLE_IMPORT",
-      "affects": [
-        "Badge",
-        "Button",
-        "Input"
-      ]
-    },
-    {
-      "severity": "info",
-      "message": "Circular type reference detected resolving 'ReactNode' in '[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts' — stopping here to avoid infinite recursion",
-      "file": "[ROOT]/node_modules/.pnpm/@types+react@[VERSION]/node_modules/@types/react/index.d.ts",
-      "line": null,
-      "column": null,
-      "help": "This type (directly or indirectly) references itself.",
-      "code": "CIRCULAR_REFERENCE",
       "affects": [
         "Badge",
         "Button",
