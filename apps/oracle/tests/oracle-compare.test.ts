@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { caliperNorm } from '../src/caliper-norm.ts'
+import { HTML_ATTRIBUTE_MEMBERS } from '../src/html-attribute-members.ts'
 import { compare, prim, type Norm } from '../src/oracle-compare.ts'
 import { lit } from './lit.ts'
 
@@ -367,6 +368,73 @@ describe('the oracle comparison', () => {
       const noValue: Norm = { k: 'object', fields: [], index: true }
       expect(compare(noValue, checkerIndex(prim('number')))).toBe('less precise')
       expect(compare(caliperNorm(idx({ kind: 'number' })), noValue)).toBe('less precise')
+    })
+  })
+
+  describe('an intersection of an object literal and an HTML-attributes family', () => {
+    // react/34: `interface BoxProps extends Omit<HTMLAttributes<HTMLDivElement>, "color"> { color?; as? }`, which the
+    // checker answers as the literal intersected with the family, and the golden flattens.
+    const divMembers = [...HTML_ATTRIBUTE_MEMBERS.div]
+    const caliper = (omitted: string[], ...ownNames: string[]): Norm =>
+      caliperNorm({
+        kind: 'intersection',
+        members: [
+          { kind: 'object', fields: ownNames.map((name) => ({ name, propType: { kind: 'string' } })) },
+          {
+            kind: 'named',
+            name: 'Omit',
+            args: [
+              { kind: 'htmlAttributes', element: 'div', omitted: [] },
+              ...omitted.map((value) => ({ kind: 'stringLiteral', value })),
+            ],
+          },
+        ],
+      })
+    const flat = (fields: string[]): Norm => optional({ k: 'object', fields: fields.toSorted(), index: false })
+
+    it('holds the same members as the golden when the golden is own members plus the family less the omitted keys', () => {
+      expect.hasAssertions()
+      const golden = flat([...divMembers.filter((name) => name !== 'color'), 'color', 'as'])
+      expect(compare(caliper(['color'], 'color', 'as'), golden)).toBe('identical')
+    })
+
+    it('stays less precise when the golden has a member the intersection does not give', () => {
+      expect.hasAssertions()
+      expect(compare(caliper(['color'], 'color', 'as'), flat([...divMembers, 'as', 'extra']))).toBe('less precise')
+    })
+
+    it('is wrong when the intersection gives a member the golden lacks', () => {
+      expect.hasAssertions()
+      expect(compare(caliper(['color'], 'color', 'as'), flat([...divMembers]))).toBe('wrong')
+    })
+
+    it('does not match a golden that still has a key the family omitted and the literal does not restate', () => {
+      expect.hasAssertions()
+      expect(compare(caliper(['color'], 'as'), flat([...divMembers, 'as']))).toBe('less precise')
+    })
+
+    it('is left as written when the family has no member table', () => {
+      expect.hasAssertions()
+      const unknown = caliperNorm({
+        kind: 'intersection',
+        members: [
+          { kind: 'object', fields: [{ name: 'as', propType: { kind: 'string' } }] },
+          { kind: 'htmlAttributes', element: 'marquee', omitted: [] },
+        ],
+      })
+      expect(compare(unknown, flat([...divMembers, 'as']))).toBe('less precise')
+    })
+
+    it('keeps the family table the same as the golden of HTMLAttributes<HTMLDivElement>', () => {
+      expect.hasAssertions()
+      const golden = JSON.parse(
+        readFileSync(
+          join(import.meta.dirname, '..', 'construct-suite', 'react', '14-htmlattributes-div.golden.json'),
+          'utf8',
+        ),
+      )
+      const object = golden.checker.members.find((m: { k: string }) => m.k === 'object')
+      expect(divMembers).toStrictEqual(object.fields)
     })
   })
 })

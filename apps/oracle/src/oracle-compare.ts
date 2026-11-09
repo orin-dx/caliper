@@ -1,8 +1,17 @@
 // The structural comparison behind src/oracle.ts: both sides' prop types reduced to one shape, and one verdict per
 // pair. Pure: nothing here talks to the checker.
+import { HTML_ATTRIBUTE_MEMBERS } from './html-attribute-members.ts'
 
 /** The primitive a literal is a value of: `"0"` and `0` spell the same `value` and are two types. */
 export type LiteralKind = 'string' | 'number' | 'bigint' | 'boolean'
+
+/** A name that is a recognized React HTML-attributes family: the attributes of `element`, less the `omitted` keys
+ * (`HTMLAttributes<HTMLDivElement>`, or `Omit<…, "color">` of it). The name stays what it is for every comparison
+ * that reads names; only the intersection rule below reads the family. */
+export interface HtmlFamily {
+  element: string
+  omitted: string[]
+}
 
 /** A type reduced to what both sides can state: kind, literal value, members, fields, parameters. `alias` is the
  * checker's name for it (an alias, or the interface that declares it), which Caliper may print instead. */
@@ -15,7 +24,7 @@ export type Norm = (
   | { k: 'tuple'; elements: Norm[] }
   | { k: 'function'; params: { optional: boolean; rest: boolean; type: Norm }[]; returns: Norm }
   | { k: 'object'; fields: string[]; index: boolean; indexValue?: Norm }
-  | { k: 'name'; name: string }
+  | { k: 'name'; name: string; family?: HtmlFamily }
   | { k: 'param'; name: string; fallback?: Norm; constraint?: Norm }
   | { k: 'opaque' }
   | { k: 'error' }
@@ -97,6 +106,28 @@ function compareUnions(cm: Norm[], km: Norm[], depth: number): Verdict {
   // A union with a name or opaque member (`MantineColor | 'initials'`, a template literal) may hold the other side's
   // values in that member, so a member it cannot match is not proof of a different type.
   return verdict === 'wrong' && [...cm, ...km].some((m) => isUnexpanded(m)) ? 'less precise' : verdict
+}
+
+/** An intersection of one object literal and one recognized HTML-attributes family (`{ color?; as? } & Omit<
+ * HTMLAttributes<div>, "color">`), against the checker's one flat object. The checker flattens the intersection, so the
+ * object holds the literal's own members plus the family's members less the omitted keys. Equal sets are the same type;
+ * a member the flat object lacks is wrong, and one it has beyond them (an omitted key it still has, a member the family
+ * does not) leaves the intersection less precise, as every intersection Caliper left as written is. A family with no
+ * member table, or an intersection of any other shape, is left as written. */
+function flattenedFamily(c: Norm & { k: 'intersection' }, flat: Norm & { k: 'object' }): Verdict {
+  const [first, second] = c.members
+  const literal = first.k === 'object' ? first : second
+  const named = first.k === 'object' ? second : first
+  const family = named.k === 'name' ? named.family : undefined
+  const familyMembers = family && HTML_ATTRIBUTE_MEMBERS[family.element]
+  if (c.members.length !== 2 || literal.k !== 'object' || !family || !familyMembers || literal.index || flat.index) {
+    return 'less precise'
+  }
+  const omitted = new Set(family.omitted)
+  const expected = new Set([...literal.fields, ...familyMembers.filter((name) => !omitted.has(name))])
+  const actual = new Set(flat.fields)
+  if ([...expected].some((name) => !actual.has(name))) return 'wrong'
+  return actual.size === expected.size ? 'identical' : 'less precise'
 }
 
 function compareFunctions(c: Norm & { k: 'function' }, k: Norm & { k: 'function' }, depth: number): Verdict {
@@ -210,7 +241,10 @@ function compareValues(c: Norm, k: Norm, depth: number): Verdict {
     return 'less precise'
   }
   // An intersection Caliper left as written, which the checker reduced (`Mode & …` to a literal union).
-  if (c.k === 'intersection' && !km.some((m) => m.k === 'intersection')) return 'less precise'
+  if (c.k === 'intersection' && !km.some((m) => m.k === 'intersection')) {
+    const [flat] = km
+    return km.length === 1 && flat.k === 'object' ? flattenedFamily(c, flat) : 'less precise'
+  }
   const cm = members(c, true)
   if (cm.length !== 1 || km.length !== 1) return compareUnions(cm, km, depth)
   const [cOne] = cm
