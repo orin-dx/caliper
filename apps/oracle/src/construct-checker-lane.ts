@@ -2,7 +2,8 @@
 // `tsrs` binary over apps/oracle/construct-suite, and each row's verdict against its golden. It is a gate on
 // construct-suite/checker-expectations.json: it prints the report, then exits 1 when a row is better or worse than the
 // expectation allows (an improvement means the gap closed: update the file), when the checker did not answer for a row,
-// or when the checker backend was unavailable. Run it with `just test-checker-lane`, or by hand:
+// when the checker backend was unavailable, or when checker-expectations.json ranks a row below expectations.json
+// without an `improvement` reason (ADR 0026's S4 gate). Run it with `just test-checker-lane`, or by hand:
 //
 //   cargo build --release -p caliper-docgen
 //   CALIPER_SEMANTIC=1 TSRS_BIN=<node_modules/@tsrs/<platform>/tsrs> pnpm --filter caliper-docgen-oracle construct:checker
@@ -11,7 +12,14 @@
 // the checker. `--json <file>` also writes every row with the type each side gave.
 import { existsSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { checkerExpectations, laneFailures, runCheckerLane, type Row } from './construct-checker-run.ts'
+import {
+  againstStructural,
+  checkerExpectations,
+  laneFailures,
+  runCheckerLane,
+  structuralExpectations,
+  type Row,
+} from './construct-checker-run.ts'
 import { GREEN } from './construct-suite.ts'
 
 if (process.env.CALIPER_SEMANTIC !== '1') {
@@ -67,10 +75,15 @@ for (const row of structuralRows) console.log(`  ${row.id}: ${row.verdict}`)
 
 if (jsonOut) writeFileSync(jsonOut, JSON.stringify({ elapsedMs, rows }, null, 2))
 
-const failures = laneFailures(run, checkerExpectations())
+const failures = [
+  ...laneFailures(run, checkerExpectations()),
+  ...againstStructural(structuralExpectations().rows, checkerExpectations().rows),
+]
 if (failures.length > 0) {
   console.error('')
-  console.error(`construct-checker-lane: ${failures.length} row(s) differ from checker-expectations.json:`)
+  console.error(
+    `construct-checker-lane: ${failures.length} row(s) differ from checker-expectations.json or fall below the structural path:`,
+  )
   for (const failure of failures) console.error(`  ${failure}`)
   process.exit(1)
 }
