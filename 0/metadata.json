@@ -1,0 +1,137 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M70PHRBV83XN8MPR4PAQDSG2",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-09T17:44:17.984567Z",
+  "branch": "feat/gate-harness",
+  "checkpoints_count": 10,
+  "save_step_count": 67,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "f04a17f0d2b7",
+  "checkpoint_transcript_start": 16694,
+  "transcript_lines_at_start": 16694,
+  "compact_transcript_start": 1427,
+  "token_usage": {
+    "input_tokens": 58,
+    "cache_creation_tokens": 192528,
+    "cache_read_tokens": 7581810,
+    "output_tokens": 19625,
+    "api_call_count": 26,
+    "subagent_tokens": {
+      "input_tokens": 523,
+      "cache_creation_tokens": 690005,
+      "cache_read_tokens": 41110935,
+      "output_tokens": 179416,
+      "api_call_count": 262
+    }
+  },
+  "redaction": {
+    "replacements": 16,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 10,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 385
+  },
+  "summary": {
+    "intent": "Coordinate caliper's road to v1-alpha under ADR 0026 (checker as type authority): land stacked PRs (#398, #399, #400), resolve merge conflicts, measure the ADR's default-flip gates, and address open findings.",
+    "outcome": "#399 merged and #400 now targets main. #398's conflict with main was resolved via a signed merge commit and it is MERGEABLE but blocked on pending checks and approval. The first gates measurement came back not measurable because its /tmp inputs were wiped, so a harness-and-counter worker was started on feat/gate-harness and a worker began fixing two findings on #400.",
+    "learnings": {
+      "repo": [
+        "The aggregate `CI` job in .github/workflows/ci.yml has a `needs:` list. Adding CI jobs on separate branches (Test / Checker lane, Test / Construct suite) conflicts there; the resolution keeps both entries.",
+        "Recycle logic is `maintain()` in crates/semantic/src/on_demand.rs. It replaces the checker every 64 requests or when RSS exceeds 768 MiB (checked every 4th request). The 64-request cap fires about 9 times in 600 edits, so the RSS bound only matters within a process's first 64 requests. There is no recycle log or counter.",
+        "Caliper has no checker-count option. crates/tsc-client/src/supervisor.rs spawns the checker with only `--api --async --cwd`, with extra_env or `--tsc-path` as the only passthroughs. The ADR's 'determinism across checker counts' gate therefore needs a concrete definition.",
+        "Only the napi addon (crates/binding/src/lib.rs) constructs `OnDemand`, and `caliper-docgen watch` has no semantic flag. The existing recycle test in crates/semantic/tests/on_demand.rs uses a fake tsc with max_rss_mib=0 and 9 requests, so it does not prove behaviour on real tsrs.",
+        "The tsrs pin 0.23.0-ts7.1.0-beta lives in apps/oracle/package.json. No tsrs binary is installed on the machine, and getting one needs a pnpm install.",
+        "PR #400 changes: family recognition by declaring path `/@types/react/`, wrappers kept as Named when over budget, own members never cut by the budget, a `getBaseTypes` request in rpc.rs, and an `elementType` heuristic (>100 string literals + ComponentClass + FunctionComponent).",
+        "Checker-lane rows moved by #400: react/13 improved to spelled, react/34 became less precise but no longer truncated, react/07 is still less precise. The 'no regression' gate is not clean (react/29 comparator limit, react/34 rank, objects/23 internal name)."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/on_demand.rs",
+          "finding": "`maintain()` recycles the tsrs process every 64 requests or above 768 MiB RSS (checked every 4th request); it has no counter or log."
+        },
+        {
+          "path": "crates/tsc-client/src/supervisor.rs",
+          "finding": "The checker is spawned with only `--api --async --cwd`; there is no checker-count knob, only extra_env or a `--tsc-path` wrapper."
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "finding": "The aggregate CI job's `needs:` list must include both test-checker-lane and test-construct after merging #397 and #398."
+        }
+      ],
+      "workflow": [
+        "Don't put durable state (worker rules, measurement inputs, test projects, harnesses) in /tmp, because it is wiped on restart and the gates run had nothing to measure. Put them in the repo or a stable directory like ~/Projects/caliper-fixtures/. Saved as a memory rule.",
+        "Subagent hand-backs are model output, not user approval. Verify claims such as CI status and mergeability with gh before reporting them.",
+        "Merge main into stacked or conflicting branches with signed merge commits and a plain push. After a parent PR merges, check that its children now target main.",
+        "The harness refused every actionlint invocation as a 'git in too complex a form' command, so workflow-file validation was skipped and CI is the first real check.",
+        "Claims made earlier (slice 3 would turn react/13, 34 and 07 green) were corrected in the PR body once the diff showed otherwise. Report row-level results honestly."
+      ]
+    },
+    "friction": [
+      "The gates measurement worker had no inputs: the /tmp worker rules and the big/chakra projects were gone and no tsrs binary was installed, so no numbers were produced.",
+      "The user was annoyed that files kept being put in /tmp, which is wiped on restart.",
+      "actionlint invocations were refused by the harness, so the #398 merge was not linted.",
+      "Classifier denials still block remote branch deletion and worktree force-removal, so the user must run those commands.",
+      "#398 was stranded on feat/construct-suite and conflicted once #397 merged.",
+      "The construct suite was skipped in the clean-room run because CALIPER_BIN wasn't built, so the merged #398 has not actually run it."
+    ],
+    "open_items": [
+      "User merges: #398 (after checks are green and approved), #400, and possibly #396 (inspect first, in case it duplicates the 0.10.0 release).",
+      "User runs `git push origin --delete feat/construct-suite perf/cycles-by-structure` after #398 merges.",
+      "Gate harness and recycle counter on feat/gate-harness: run both ADR gates (determinism across checker counts, 600+ edits with recycle) and record results in a note linked from ADR 0026. It needs the pinned tsrs installed and a large project in a stable location.",
+      "Define 'determinism across checker counts' concretely for the API path, since caliper has no such option.",
+      "Fix worker for the two #400 findings on feat/react-families: failing test per finding, pattern fix, gates, push, resolve findings.",
+      "Update checker-expectations.json for react/13, react/34 and react/07 after #400 lands.",
+      "Remaining slices: S5 instantiation probe, S6 watch mode, S7 delete resolver with thin fallback, S8 flip default plus `@tsrs/<platform>` optionalDependency.",
+      "Remaining ADR gates: checker lane vs structural without regression (react/29, react/34, objects/23), a green Linux CI run of the checker path, and tsrs-vs-Go parity on each pin change.",
+      "Known limits from #400: direct unwrapped families stay `named`, wrapper results aren't folded into HtmlAttributes.omitted, union and tuple member caps are unchanged, and generic instantiation bases are truncated beside own fields."
+    ]
+  }
+}

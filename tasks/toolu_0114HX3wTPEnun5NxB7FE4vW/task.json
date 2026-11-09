@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_0114HX3wTPEnun5NxB7FE4vW",
+  "agent_id": "ac945d9f118df91ce",
+  "subagent_type": "general-purpose",
+  "task_description": "Measure ADR 0026 gates",
+  "token_usage": {
+    "input_tokens": 26,
+    "cache_creation_tokens": 73218,
+    "cache_read_tokens": 756810,
+    "output_tokens": 6293,
+    "api_call_count": 13
+  },
+  "started_at": "2026-11-09T08:18:29.615722-08:00",
+  "completed_at": "2026-11-09T08:20:08.061774-08:00"
+}

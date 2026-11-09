@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01LiSJ6Cjae9JYmKoRr9BiNz",
+  "agent_id": "acbaeb365fce8fbe9",
+  "subagent_type": "general-purpose",
+  "task_description": "Resolve PR 398 conflict with main",
+  "token_usage": {
+    "input_tokens": 30,
+    "cache_creation_tokens": 63980,
+    "cache_read_tokens": 829751,
+    "output_tokens": 3309,
+    "api_call_count": 15
+  },
+  "started_at": "2026-11-08T20:39:50.14989-08:00",
+  "completed_at": "2026-11-08T20:41:11.894634-08:00"
+}
