@@ -1,0 +1,130 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M713Z0ZAN7YBQWWGNSK45VEZ",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-09T21:38:36.996321Z",
+  "branch": "feat/checker-wins",
+  "checkpoints_count": 2,
+  "save_step_count": 67,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "33792950e9bf",
+  "checkpoint_transcript_start": 17623,
+  "transcript_lines_at_start": 17623,
+  "compact_transcript_start": 1509,
+  "token_usage": {
+    "input_tokens": 10,
+    "cache_creation_tokens": 6966,
+    "cache_read_tokens": 731236,
+    "output_tokens": 1729,
+    "api_call_count": 4,
+    "subagent_tokens": {
+      "input_tokens": 320,
+      "cache_creation_tokens": 309758,
+      "cache_read_tokens": 28072641,
+      "output_tokens": 104958,
+      "api_call_count": 160
+    }
+  },
+  "redaction": {
+    "replacements": 18,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 12,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 399
+  },
+  "summary": {
+    "intent": "Land a fix so the oracle comparator scores react/34 (an intersection of an object literal and an HTML-attributes family with omitted keys) as identical to the flat golden, then work out what remains in the project queue.",
+    "outcome": "A subagent delivered the comparator fix on PR #402 (commit ac8fb188) with passing checks except the pending Entire Gates approval; the assistant summarized the fix and laid out user actions, the running S4 task, and the queued S5-S8 work.",
+    "learnings": {
+      "repo": [
+        "The oracle comparator has a single enforcement point for the 'intersection left as written' case: `flattenedFamily` in apps/oracle/src/oracle-compare.ts.",
+        "caliper-norm.ts now carries {element, omitted} on the name; `Omit<htmlAttributes, ...>` folds its keys into `omitted`, and name comparison is unchanged.",
+        "The HTML-attributes member table (apps/oracle/src/html-attribute-members.ts) has 278 names for `div` only, copied from the react/14 golden, so it is not independent evidence. A drift test pins it to that golden.",
+        "Elements without a table (e.g. button, a) stay `less precise`, which is the safe direction.",
+        "Other intersection sites (tool-norm.ts, oracle-checker.ts, reference-*) build Norms and were intentionally left alone.",
+        "Validation commands: `just lint doc-check machete typos`, `just test-checker-lane`, `just test-construct`, `pnpm --filter caliper-docgen-oracle test`.",
+        "construct-suite/README.md keeps a 'today:' list of known-failing rows, which was trimmed to react/29 only.",
+        "The weekly oracle shares the comparator, but only rows where Caliper's output is an object plus an htmlAttributes family can move.",
+        "PR #401 (gate harness and measurements) has merged to main. The Entire Gates check needs user approval."
+      ],
+      "code": [
+        {
+          "path": "apps/oracle/src/oracle-compare.ts",
+          "finding": "`flattenedFamily` implements the rule: an object literal plus one recognized HTML-attributes family is identical to a flat golden when the golden's members equal own members plus family members minus omitted keys. A member the golden lacks gives `wrong`; extra golden members or an omitted key still present stay `less precise`."
+        },
+        {
+          "path": "tests/oracle-compare.test.ts",
+          "finding": "Six new cases cover the rule. With the src change stashed, 2 of 43 tests failed (equivalent case and missing member), and all 43 pass with it restored."
+        }
+      ],
+      "workflow": [
+        "Subagent hand-back reports are model output without user authority, so the assistant verified PR state with `gh pr view` before summarizing.",
+        "Slice work is queued serially (S4, then the bigint PropType change, then S5-S8) to avoid conflicts in crates/core and convert.rs.",
+        "Clean-room verification at the commit (frozen-lockfile install plus test lanes) was used to confirm the fix."
+      ]
+    },
+    "friction": [
+      "The Entire Gates check is pending and needs user approval before #402 can merge.",
+      "The subagent could not confirm that `tsc -p tsconfig.json` includes apps/oracle, so no separate typecheck was verified.",
+      "The weekly oracle and corpora were not run, and the corpus rows that could move were not enumerated.",
+      "PR #396 (version packages) may duplicate 0.10.0.",
+      "S4 had not reported back yet, which blocks the queued work."
+    ],
+    "open_items": [
+      "User to approve and merge #402.",
+      "Check #396 before merging.",
+      "Delete the old remote branches feat/construct-suite and perf/cycles-by-structure.",
+      "Decide whether to reword ADR 0026's determinism bullet, to be folded into S4's ADR slice-marker update.",
+      "Consider generating the HTML-attribute member tables from @types/react if more elements than `div` are needed.",
+      "Queued work: the `bigint` primitive in PropType (after S4), S5 generic and polymorphic component instantiation, S6 watch mode, S7 delete the resolver but keep a thin fallback, S8 flip the default and add the @tsrs/<platform> optionalDependency.",
+      "Run the weekly oracle to see if the comparator change moves any corpus rows."
+    ]
+  }
+}
