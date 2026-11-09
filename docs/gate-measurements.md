@@ -1,0 +1,31 @@
+# Gate measurements
+
+**Last measured:** 2026-11-09 on `feat/gate-harness` at `f3784be5`, tsrs `0.23.0-ts7.1.0-beta` (the pin), macOS 27.3 on an Apple M5 Max (18 cores, 64 GiB). Two of the gates in [ADR 0026](adr/0026-the-checker-is-the-type-authority.md#gates-before-the-default-flips) need a measurement rather than a test: determinism on a large program and memory past 600 edits. This records how each was made measurable and what it read.
+
+Rerun both with `just gate-measure` (about 17 minutes). It builds the large project outside the repository (`GATE_FIXTURES`, default `~/Projects/caliper-fixtures/gate-large`, by `scripts/gate_fixtures.mjs`), builds `crates/semantic/examples/gate_harness.rs`, and prints one JSON line per gate. A run that fails its own check exits 1.
+
+## The program
+
+- `scripts/gate_fixtures.mjs` installs `@chakra-ui/react` 3.37.0 and `@mui/material` 9.5.0 (the root `package.json`'s pins) with `pnpm`, and writes one wrapper per exported component, `export function ChakraButton(props: ComponentProps<typeof Button>)`: 1,616 components (1,466 Chakra, 150 MUI). The Chakra and MUI sources themselves were not fetched, so this is not the Chakra corpus of `docs/measurement.md`: it is what an app that wraps both libraries asks the checker.
+- Each request to the checker builds a program that loads one library's declarations whole, which is what makes it a large program.
+- The harness uses the session a Storybook addon runs: a lazy `WatchSession` with `load_dependencies` on, nothing collapsed, and a warm `OnDemand` that waits up to 120 s, over the pinned tsrs binary the oracle's `tsrs-bin.ts` resolves.
+
+## Memory past 600 edits
+
+- **How.** `OnDemand` now counts its planned process replacements by cause (`recycles()`: `worn` after 64 programs, `bloated` after `max_rss_mib`) and reports the process that answered last (`process_id()`); each replacement is logged at debug level. The harness rewrites one component's file (`ButtonProps & { edit{n}: string }`, which makes the checker load Chakra), calls `update_file`, asks for the component, and reads the process's PID and resident memory from `ps` after every answer, 650 times. It then asks a fresh session over the final files and compares the two answers whole.
+- **Result at the shipped bound (768 MiB):** 650 of 650 answers came from the checker and carried that edit's prop (0 stale). The checker ran as 11 processes, 10 replacements, all `worn` and none `bloated`. Peak resident memory was 446 MiB (452 MiB in an earlier run of the same command). The last answer equals the fresh session's.
+- **What that shows, and what it does not.** The 64-program limit does the work on this program: a process reached 446 MiB at most, so the 768 MiB bound never fired. The gate asks for the bound to be exercised, so the harness takes `--max-rss-mib`. With 300: 49 `bloated` replacements, 50 processes, no `worn`, peak 331 MiB (a request that grows past the bound finishes first, and the check runs on every fourth request), and the last answer equals the fresh session's again.
+- **Verdict: PASS** for what was measured (no leak past 650 edits, replacements keep the answers right, the memory bound works when crossed). Not measured: a program whose single process passes 768 MiB on its own, or a real watch session with the Storybook addon and Node in the loop.
+
+## Determinism across checker counts
+
+- **Not applicable as worded.** tsrs has no checker-count option on the path caliper uses. `tsrs --api --help` lists `-async`, `-callbacks`, `-cwd`, `-pipe`, `-runExternalCode`, `-timing` and `-useCaseSensitiveFileNames`, and `--api --checkers 2` is refused with `flag provided but not defined: -checkers`. The compile mode (`tsrs --checkers 2 -p .`) takes the flag, as `typescript@7.1.0-beta`'s `tsc --help --all` documents, but caliper never runs it: `supervisor.rs` starts `--api --async --cwd` and passes nothing else, and the only thread-count variable among the binary's strings is rayon's `RAYON_NUM_THREADS`.
+- **Nearest measurable form.** The output must not depend on how the checker's parallelism is set, on the order components are asked in, or on which process answers. The harness asks a fresh tsrs process for 150 components (every tenth of the 1,616, sorted by key) with `RAYON_NUM_THREADS` set to 1, 2 and 4, three runs each, the middle run asking in reverse order, and byte-compares all nine outputs (each component's JSON entry and diagnostics, sorted by key). The variable changes the process: its thread count read 4, 5 and 7 at 1, 2 and 4. It does not change a checker count, which nothing here sets.
+- **Result:** all nine outputs are identical, 341,396,960 bytes each. 148 of the 150 components were answered by the checker in every run; `MuiPopoverRoot` and `MuiSliderMark` kept their structural answer in every run (why the checker declined them was not investigated). So the checker's answers are identical across thread counts, runs, process restarts and query order.
+- **Verdict: NOT MEASURABLE as worded; PASS in the nearest form.** The ADR's wording should read "output is deterministic across repeated runs, thread counts, restarts and query order on a large program" until tsrs exposes a count on `--api`. The compile-mode flag was not tried against a program, since its output is not what caliper reads.
+
+## Not covered
+
+- Other platforms: both measurements ran on macOS arm64. The Linux CI run is a separate gate.
+- Wall time was not part of the question; a run takes about 0.5 s per edit here.
+- The per-edit `ps` sampling reads the answering process after its reply, so a process that peaked inside a request and shrank before the sample is under-read.

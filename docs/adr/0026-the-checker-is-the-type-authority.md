@@ -53,6 +53,8 @@ S8 stays behind these gates:
 - Memory behaviour past 600 edits in a watch session, with the recycle threshold (768 MiB `max_rss_mib`) exercised.
 - The tsrs-against-Go parity check (`pnpm --filter caliper-docgen-oracle construct:parity`, PR 392) passes on the pinned version, and runs on every pin change.
 
+The determinism and memory gates are measured by `just gate-measure`; what it reads, and why the first gate's wording cannot be met as written (tsrs's `--api` has no checker-count option), is in [gate measurements](../gate-measurements.md).
+
 ## Alternatives considered
 
 - **Keep the checker opt-in.** Two sources of truth, and the default keeps the silent wrong answers above.

@@ -8,7 +8,8 @@
 //! never nests runtimes and can bound how long it waits. A failure to start or a crash yields an outcome with no
 //! components and one diagnostic, never an error; after [`MAX_RESTARTS`] crashes the checker stays down.
 
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -96,6 +97,24 @@ fn resident_mib(pid: u32) -> Option<u64> {
     Some(kib / 1024)
 }
 
+/// How often a warm checker's process was replaced on purpose, by cause (crashes are not counted).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Recycles {
+    /// Replaced after building the most programs one process is allowed.
+    pub worn: u32,
+    /// Replaced after its resident memory passed [`OnDemandConfig::max_rss_mib`].
+    pub bloated: u32,
+}
+
+/// What the worker thread reports about the process, for the type that owns the thread to read.
+#[derive(Default)]
+struct Gauges {
+    worn: AtomicU32,
+    bloated: AtomicU32,
+    /// The process that answered last; 0 before the first answer.
+    process: AtomicU32,
+}
+
 enum Job {
     /// Start the checker now instead of at the first request.
     Warm,
@@ -112,6 +131,7 @@ pub struct OnDemand {
     /// Receives once when the worker has stopped `tsc` and is about to exit.
     stopped: std::sync::Mutex<Option<mpsc::Receiver<()>>>,
     shutdown_wait: Duration,
+    gauges: Arc<Gauges>,
 }
 
 impl OnDemand {
@@ -120,10 +140,12 @@ impl OnDemand {
         let shutdown_wait = config.shutdown_wait;
         let (jobs, queue) = unbounded_channel();
         let (stopped_tx, stopped) = mpsc::channel();
+        let gauges = Arc::new(Gauges::default());
+        let worker_gauges = Arc::clone(&gauges);
         let thread = std::thread::Builder::new()
             .name("caliper-tsc".to_string())
             .spawn(move || {
-                worker(config, queue);
+                worker(config, queue, worker_gauges);
                 stopped_tx.send(()).ok();
             })
             .ok();
@@ -132,7 +154,23 @@ impl OnDemand {
             thread,
             stopped: std::sync::Mutex::new(Some(stopped)),
             shutdown_wait,
+            gauges,
         }
+    }
+
+    /// How many times the process has been replaced so far, by cause. A replacement happens after the reply it
+    /// follows, so read this after the next request to see the last one.
+    pub fn recycles(&self) -> Recycles {
+        Recycles {
+            worn: self.gauges.worn.load(Ordering::Relaxed),
+            bloated: self.gauges.bloated.load(Ordering::Relaxed),
+        }
+    }
+
+    /// The operating system's id of the `tsc` process that answered the last request, `None` before the first one.
+    /// Read after a reply, it is the process that built that answer.
+    pub fn process_id(&self) -> Option<u32> {
+        Some(self.gauges.process.load(Ordering::Relaxed)).filter(|pid| *pid != 0)
     }
 
     /// Starts `tsc` in the background so the first request does not pay for it.
@@ -177,7 +215,7 @@ impl Drop for OnDemand {
     }
 }
 
-fn worker(config: OnDemandConfig, mut queue: UnboundedReceiver<Job>) {
+fn worker(config: OnDemandConfig, mut queue: UnboundedReceiver<Job>, gauges: Arc<Gauges>) {
     let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -191,7 +229,7 @@ fn worker(config: OnDemandConfig, mut queue: UnboundedReceiver<Job>) {
         }
     };
     runtime.block_on(async move {
-        let mut checker = Checker::default();
+        let mut checker = Checker { gauges, ..Checker::default() };
         while let Some(job) = queue.recv().await {
             match job {
                 Job::Warm => {
@@ -220,6 +258,7 @@ struct Checker {
     served: u32,
     /// Why the checker cannot be used for the rest of the session.
     down: Option<String>,
+    gauges: Arc<Gauges>,
 }
 
 impl Checker {
@@ -289,6 +328,7 @@ impl Checker {
         request.extra_env.clone_from(&config.extra_env);
         request.prepared_options.clone_from(&self.options);
         let outcome = answer_with(supervisor, &request).await;
+        self.gauges.process.store(supervisor.process_id().unwrap_or(0), Ordering::Relaxed);
         self.served += 1;
         outcome
     }
@@ -298,10 +338,14 @@ impl Checker {
     async fn maintain(&mut self, config: &OnDemandConfig) {
         let Some(supervisor) = self.supervisor.as_ref() else { return };
         let worn = self.served >= MAX_REQUESTS_PER_PROCESS;
-        let bloated = !worn
-            && self.served.is_multiple_of(RSS_CHECK_EVERY)
-            && supervisor.process_id().and_then(resident_mib).is_some_and(|mib| mib > config.max_rss_mib);
+        let resident = (!worn && self.served.is_multiple_of(RSS_CHECK_EVERY))
+            .then(|| supervisor.process_id().and_then(resident_mib))
+            .flatten();
+        let bloated = resident.is_some_and(|mib| mib > config.max_rss_mib);
         if worn || bloated {
+            let (count, cause) = if worn { (&self.gauges.worn, "worn") } else { (&self.gauges.bloated, "bloated") };
+            count.fetch_add(1, Ordering::Relaxed);
+            tracing::debug!(cause, served = self.served, resident_mib = ?resident, "replacing the checker process");
             if let Some(old) = self.supervisor.take() {
                 old.shutdown().await.ok();
             }

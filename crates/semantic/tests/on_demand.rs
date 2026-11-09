@@ -7,7 +7,7 @@ use std::time::Duration;
 use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, WatchSession, extract};
 use caliper_docgen_core::types::semantic::{SemanticOutcome, SemanticProvider, SemanticTarget};
 use caliper_docgen_core::types::{DiagnosticSeverity, ExtractionOutput, PropType};
-use caliper_docgen_semantic::{OnDemand, OnDemandConfig, targets_of};
+use caliper_docgen_semantic::{OnDemand, OnDemandConfig, Recycles, targets_of};
 use camino::Utf8PathBuf;
 
 const FAKE_VERSION: &str = "7.1.0-test";
@@ -290,11 +290,46 @@ fn a_checker_past_its_memory_bound_is_replaced_between_requests_and_keeps_answer
         .push(("REPLAY_FIXTURE".to_string(), format!("{}/tests/fixtures/recording.json", env!("CARGO_MANIFEST_DIR"))));
     let checker = OnDemand::new(config);
 
+    let mut processes = Vec::new();
     for round in 0..9 {
         let answered = ask(&checker, target(&output, "Button"));
         assert_eq!(answered.diagnostics, [], "request {round}");
         assert_eq!(answered.components.len(), 1, "request {round}");
+        processes.push(checker.process_id().expect("a request was answered"));
     }
+
+    // The checks fall after the fourth and eighth replies, so requests 0 to 3, 4 to 7 and 8 each have a process.
+    assert_eq!(checker.recycles(), Recycles { worn: 0, bloated: 2 });
+    assert_eq!(processes[..4], [processes[0]; 4]);
+    assert_eq!(processes[4..8], [processes[4]; 4]);
+    assert!(processes[0] != processes[4] && processes[4] != processes[8], "{processes:?}");
+}
+
+#[test]
+fn a_checker_that_has_built_its_programs_is_replaced_and_counted_as_worn() {
+    let project = project(true);
+    let output = structural(&project);
+    let mut config = OnDemandConfig::new(project.root.clone());
+    config.expected_versions = &[FAKE_VERSION];
+    config.request_timeout = Duration::from_secs(20);
+    config.max_rss_mib = u64::MAX;
+    config
+        .extra_env
+        .push(("REPLAY_FIXTURE".to_string(), format!("{}/tests/fixtures/recording.json", env!("CARGO_MANIFEST_DIR"))));
+    let checker = OnDemand::new(config);
+    assert_eq!((checker.recycles(), checker.process_id()), (Recycles::default(), None));
+
+    // 64 programs is one process's allowance, so the 65th request is the first answered by a second process.
+    let mut last = None;
+    for round in 0..65 {
+        let answered = ask(&checker, target(&output, "Button"));
+        assert_eq!(answered.components.len(), 1, "request {round}");
+        let process = checker.process_id();
+        assert_eq!(process != last, round == 0 || round == 64, "request {round}");
+        last = process;
+    }
+
+    assert_eq!(checker.recycles(), Recycles { worn: 1, bloated: 0 });
 }
 
 #[test]
