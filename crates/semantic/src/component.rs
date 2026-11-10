@@ -7,12 +7,15 @@ use caliper_docgen_core::types::semantic::{PropInterner, SemanticProp};
 
 use crate::Target;
 use crate::convert::{Converter, declared_in, without_undefined};
-use crate::rpc::{CallError, Rpc, SignatureKind, SymbolInfo, flag};
+use crate::instantiate::{self, Instantiation};
+use crate::rpc::{CallError, Rpc, SignatureKind, SymbolInfo, TypeInfo, flag};
 
 pub(crate) enum Answer {
     Props(Vec<Arc<SemanticProp>>),
     /// The component keeps its structural result, for this reason.
     Fallback(String),
+    /// A generic component, whose props are read from an instantiation of it ([`crate::instantiate`]).
+    Instantiate(Instantiation),
 }
 
 /// What `@types/react` declares (`key`, `ref`, `children` on `PropsWithChildren`, HTML attributes). Reported with the
@@ -70,10 +73,24 @@ pub(crate) async fn props_of(
     };
     let parameters = rpc.parameters(signature.id).await?;
     let Some(first) = parameters.first() else { return fallback("takes no props parameter") };
+    if let Some(arguments) = instantiate::default_arguments(rpc, signature).await? {
+        return Ok(Answer::Instantiate(Instantiation { export: export.name.clone(), arguments }));
+    }
 
     let props_type = rpc.type_of_symbol(&first.reference).await?;
+    Ok(props_of_type(rpc, converter, interner, &props_type, target).await?.map_or_else(Answer::Fallback, Answer::Props))
+}
+
+/// The props a component's props type holds, or why the component keeps its structural result.
+pub(crate) async fn props_of_type(
+    rpc: &Rpc,
+    converter: &Converter,
+    interner: &PropInterner,
+    props_type: &TypeInfo,
+    target: &Target,
+) -> Result<Result<Vec<Arc<SemanticProp>>, String>, CallError> {
     if props_type.flags & (flag::ANY | flag::UNKNOWN | flag::UNION | flag::TYPE_PARAMETER) != 0 {
-        return fallback("props type is any, unknown, generic or a union");
+        return Ok(Err("props type is any, unknown, generic or a union".to_string()));
     }
 
     let own: Vec<SymbolInfo> = rpc
@@ -106,7 +123,7 @@ pub(crate) async fn props_of(
             },
         }));
     }
-    Ok(Answer::Props(props))
+    Ok(Ok(props))
 }
 
 #[cfg(test)]

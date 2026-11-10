@@ -6,13 +6,15 @@
 //! timeout) yields an outcome with no components and one diagnostic, never an error: the structural result is
 //! complete on its own.
 //!
-//! This slice answers function components exported by name or as `default`. Class components, overloaded or
-//! generic components and union props types keep their structural result and say why.
+//! This slice answers function components exported by name or as `default`; a generic one whose first type parameter
+//! declares a default is read at that default (`instantiate`). Class components, overloaded components and union props
+//! types keep their structural result and say why.
 
 #![deny(missing_docs)]
 
 mod component;
 mod convert;
+mod instantiate;
 mod locate;
 mod on_demand;
 mod printed;
@@ -34,6 +36,7 @@ use tokio::task::JoinSet;
 
 use crate::component::Answer;
 use crate::convert::Converter;
+use crate::instantiate::Instantiation;
 use crate::rpc::{CallError, REQUESTS, Rpc};
 
 /// The builds whose protocol this backend was traced against: the `typescript` 7.1 series, from `7.1.0-beta` on, and
@@ -231,12 +234,14 @@ async fn session(
     }
 
     let mut outcome = SemanticOutcome::default();
+    let mut generic = Vec::new();
     let mut failure = None;
     while let Some(joined) = tasks.join_next().await {
         match joined {
-            Ok(Ok(mut answered)) => {
+            Ok(Ok((mut answered, mut instantiations))) => {
                 outcome.components.append(&mut answered.components);
                 outcome.fallbacks.append(&mut answered.fallbacks);
+                generic.append(&mut instantiations);
             }
             Ok(Err(error)) => {
                 failure = Some(error);
@@ -253,6 +258,13 @@ async fn session(
     }
     if let Some(error) = failure {
         return Err(error);
+    }
+    if !generic.is_empty() {
+        let mut instantiated =
+            instantiate::answer(&rpc, files, &request.project_root, &interner, request.reverse_queries, generic)
+                .await?;
+        outcome.components.append(&mut instantiated.components);
+        outcome.fallbacks.append(&mut instantiated.fallbacks);
     }
 
     if let (Some(path), Some(recording)) = (&request.record_to, rpc.recording())
@@ -283,22 +295,24 @@ fn fallback_of(target: &Target, reason: &str) -> SemanticFallback {
     }
 }
 
-/// A fatal error aborts the run; a call the checker rejected only sends that component to its structural result.
+/// A fatal error aborts the run; a call the checker rejected only sends that component to its structural result. The
+/// generic components come back apart, to be answered from their instantiations once every file is done.
 async fn answer_file(
     rpc: &Rpc,
     converter: &Converter,
     interner: &PropInterner,
     targets: Vec<Target>,
-) -> Result<SemanticOutcome, CallError> {
+) -> Result<(SemanticOutcome, Vec<(Target, Instantiation)>), CallError> {
     let mut outcome = SemanticOutcome::default();
-    let Some(first) = targets.first() else { return Ok(outcome) };
+    let mut generic = Vec::new();
+    let Some(first) = targets.first() else { return Ok((outcome, generic)) };
     let exports = match module_exports(rpc, first.file_path.as_str()).await {
         Ok(Some(exports)) => exports,
         Ok(None) | Err(CallError::Rejected(_)) => {
             outcome
                 .fallbacks
                 .extend(targets.iter().map(|target| fallback_of(target, "not part of the checker's program")));
-            return Ok(outcome);
+            return Ok((outcome, generic));
         }
         Err(fatal) => return Err(fatal),
     };
@@ -321,13 +335,14 @@ async fn answer_file(
                 props,
             }),
             Ok(Answer::Fallback(reason)) => outcome.fallbacks.push(fallback_of(target, &reason)),
+            Ok(Answer::Instantiate(instantiation)) => generic.push((target.clone(), instantiation)),
             Err(CallError::Rejected(message)) => {
                 outcome.fallbacks.push(fallback_of(target, &format!("the checker rejected a request: {message}")));
             }
             Err(fatal) => return Err(fatal),
         }
     }
-    Ok(outcome)
+    Ok((outcome, generic))
 }
 
 async fn module_exports(rpc: &Rpc, file: &str) -> Result<Option<Vec<rpc::SymbolInfo>>, CallError> {

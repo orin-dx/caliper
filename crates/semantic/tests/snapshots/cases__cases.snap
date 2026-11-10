@@ -533,9 +533,8 @@ expression: rendered(&outcome)
         "name": "as",
         "required": false,
         "type": {
-          "kind": "named",
-          "name": "E",
-          "args": []
+          "kind": "stringLiteral",
+          "value": "div"
         }
       },
       {

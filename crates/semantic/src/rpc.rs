@@ -2,7 +2,7 @@
 //! `7.1.0-beta`); a method this module does not name is not used.
 
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use caliper_docgen_tsc_client::{Client, TscClientError};
@@ -246,9 +246,43 @@ pub(crate) struct Rpc {
     deadline: Duration,
     snapshot: u64,
     project: String,
-    /// Every call and its answer, when the caller asked to record a replay fixture.
-    recording: Option<Mutex<Vec<Value>>>,
-    calls: Mutex<BTreeMap<String, u64>>,
+    /// The compiler options the program was built with, for a snapshot that adds files to it ([`Rpc::layered`]).
+    options: Value,
+    /// Every call and its answer, when the caller asked to record a replay fixture; shared with a layered snapshot.
+    recording: Option<Arc<Mutex<Vec<Value>>>>,
+    calls: Arc<Mutex<BTreeMap<String, u64>>>,
+}
+
+/// A diagnostic the checker reports for a file: where it starts and what it says.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FileDiagnostic {
+    /// The file the error is in, which is not always the file asked about.
+    pub file_name: String,
+    pub start_position: Position,
+    /// `DiagnosticCategory`: warning 0, error 1, suggestion 2, message 3.
+    pub category: u8,
+    /// The message; a chain of messages arrives as an object, of which only the first is shown.
+    pub text: Value,
+}
+
+impl FileDiagnostic {
+    pub(crate) fn is_error(&self) -> bool {
+        self.category == 1
+    }
+
+    pub(crate) fn message(&self) -> String {
+        match &self.text {
+            Value::String(text) => text.clone(),
+            other => other.get("messageText").and_then(Value::as_str).unwrap_or("a type error").to_string(),
+        }
+    }
+}
+
+/// A position in a file, zero-based.
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub(crate) struct Position {
+    pub line: usize,
 }
 
 impl Rpc {
@@ -276,8 +310,9 @@ impl Rpc {
             deadline,
             snapshot: 0,
             project: String::new(),
+            options: Value::Null,
             recording: None,
-            calls: Mutex::new(BTreeMap::new()),
+            calls: Arc::default(),
         };
         rpc.call("initialize", Value::Null).await?;
         Ok(match tsconfig {
@@ -297,29 +332,52 @@ impl Rpc {
         root_files: &[String],
         record: bool,
     ) -> Result<Rpc, CallError> {
-        let mut rpc = Rpc {
+        let rpc = Rpc {
             client,
             deadline,
             snapshot: 0,
             project: String::new(),
-            recording: record.then(|| Mutex::new(Vec::new())),
-            calls: Mutex::new(BTreeMap::new()),
+            options: options.clone(),
+            recording: record.then(Arc::default),
+            calls: Arc::default(),
         };
-        let created = rpc
-            .call(
-                "createSnapshot",
-                json!({ "createPrograms": [{ "rootFiles": root_files, "compilerOptions": options }] }),
-            )
-            .await?;
-        let response: SnapshotResponse = decode(&created)?;
+        rpc.created(json!({ "createPrograms": [{ "rootFiles": root_files, "compilerOptions": options }] })).await
+    }
+
+    /// A new snapshot of the same program with `files` added, held in the checker's memory and never written to disk:
+    /// each is a root file, keyed by its absolute path. The calls on it count, and are recorded, with this one's.
+    pub(crate) async fn layered(&self, root_files: &[String], files: &[(String, String)]) -> Result<Rpc, CallError> {
+        let rpc = Rpc {
+            client: self.client.clone(),
+            deadline: self.deadline,
+            snapshot: 0,
+            project: String::new(),
+            options: self.options.clone(),
+            recording: self.recording.clone(),
+            calls: self.calls.clone(),
+        };
+        let mut roots = root_files.to_vec();
+        roots.extend(files.iter().map(|(path, _)| path.clone()));
+        let layer: serde_json::Map<String, Value> =
+            files.iter().map(|(path, text)| (path.clone(), Value::String(text.clone()))).collect();
+        rpc.created(json!({
+            "fileSystem": { "kind": "layer", "files": layer },
+            "createPrograms": [{ "rootFiles": roots, "compilerOptions": self.options }],
+        }))
+        .await
+    }
+
+    /// This session bound to the snapshot `createSnapshot` makes from `params`, and to its one project.
+    async fn created(mut self, params: Value) -> Result<Rpc, CallError> {
+        let response: SnapshotResponse = decode(&self.call("createSnapshot", params).await?)?;
         let project = response
             .projects
             .into_iter()
             .next()
             .ok_or_else(|| CallError::Rejected("createSnapshot returned no project".to_string()))?;
-        rpc.snapshot = response.snapshot;
-        rpc.project = project.id;
-        Ok(rpc)
+        self.snapshot = response.snapshot;
+        self.project = project.id;
+        Ok(self)
     }
 
     pub(crate) async fn release(&self) {
@@ -396,6 +454,21 @@ impl Rpc {
 
     pub(crate) async fn type_parameters(&self, signature: u64) -> Result<Vec<TypeInfo>, CallError> {
         self.scoped("getTypeParametersOfSignature", json!({ "objectId": signature })).await
+    }
+
+    /// The type a type parameter defaults to (`"div"` in `E extends ElementType = "div"`); none when it declares none.
+    pub(crate) async fn default_of_type_parameter(&self, type_id: u64) -> Result<Option<TypeInfo>, CallError> {
+        self.scoped("getDefaultFromTypeParameter", json!({ "objectId": type_id })).await
+    }
+
+    /// The type a type alias or interface declares, `T` in `type A = T`.
+    pub(crate) async fn declared_type_of_symbol(&self, symbol: &Value) -> Result<TypeInfo, CallError> {
+        self.scoped("getDeclaredTypeOfSymbol", json!({ "symbol": symbol })).await
+    }
+
+    /// The type errors in a file of the program.
+    pub(crate) async fn semantic_diagnostics(&self, file: &str) -> Result<Vec<FileDiagnostic>, CallError> {
+        self.scoped("getSemanticDiagnostics", json!({ "file": file })).await
     }
 
     /// The symbol that declares a type: the interface, class, enum member or unique symbol behind it.
