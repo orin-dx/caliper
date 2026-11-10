@@ -1,8 +1,9 @@
 // Scores one tool (Caliper, react-docgen-typescript or react-docgen) against the checker over the same universe of props,
 // so the three are held to the same rules. Pure: nothing here talks to the checker or reads a file.
 //
-// The universe is every own prop the checker finds on a component export (React's inherited DOM attributes, `ref` and
-// `key` are not part of it; src/oracle.ts filters them). A tool's prop is `listed` when the tool reports it, and gets
+// The universe is every own prop the checker finds on a candidate component export (React's inherited DOM attributes,
+// `ref` and `key` are not part of it, nor are the functions whose shape says they are no component, src/component-shape.ts;
+// src/oracle.ts and src/tool-universe.ts filter them). A tool's prop is `listed` when the tool reports it, and gets
 // the same verdict the oracle gives Caliper (src/oracle-compare.ts); otherwise it is `missing`, for one of three
 // reasons, and counted by where the checker says the prop is declared.
 import { compare, VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'

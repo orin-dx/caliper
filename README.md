@@ -20,7 +20,7 @@
 
 `react-docgen-typescript` builds a full TypeScript `Program`, which takes seconds on a mid-size design system. Caliper parses files in parallel with OXC and skips the type checker.
 
-On whole libraries (Mantine, Chakra, Ant Design, shadcn/ui and React Spectrum at pinned commits, source only), Caliper takes 34 to 81ms and is 17 to 39 times faster than `react-docgen-typescript` on the same files, a median of 22 times. CI checks this weekly ([`docs/performance.md`](docs/performance.md)). Recall and agreement with `react-docgen-typescript` on installed repos are in [`docs/measurement.md`](docs/measurement.md).
+On whole libraries (Mantine, Chakra, Ant Design, shadcn/ui and React Spectrum at pinned commits, source only), Caliper takes 34 to 81ms and is 17 to 39 times faster than `react-docgen-typescript` on the same files, a median of 22 times. CI checks this weekly ([`docs/performance.md`](docs/performance.md)). Whether the types are right is judged against TypeScript's checker, not against `react-docgen-typescript`: on the props both tools list, the checker contradicts Caliper on 0 to 1.09% and `react-docgen-typescript` on 0.006 to 5.02%, depending on the corpus (weekly run of 2026-11-06, [`docs/rdt-differences.md`](docs/rdt-differences.md)). Recall against `react-docgen-typescript` (the share of its reference components and props that Caliper also reports) is in [`docs/measurement.md`](docs/measurement.md); it is not a measure of correctness, because what `react-docgen-typescript` lists beyond Caliper is not necessarily right.
 
 ## A component through Caliper
 

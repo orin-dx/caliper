@@ -4,7 +4,7 @@
 import { realpathSync } from 'node:fs'
 import { relative } from 'node:path'
 import { ObjectFlags, SignatureKind, TypeFlags } from 'typescript-beta/sync'
-import { exportName, propsTypeOf } from './checker-components.ts'
+import { declaredExports, exportName, propsTypeOf } from './checker-components.ts'
 import {
   keyOf,
   seeded,
@@ -107,7 +107,7 @@ export function collect(files: string[], options: CollectOptions): Universe {
     if (!mustRead && control >= options.cap) continue
     const moduleSymbol = checker.getSymbolOfSourceFile(file)
     if (!moduleSymbol) continue
-    for (const exported of checker.getExportsOfModule(moduleSymbol)) {
+    for (const exported of declaredExports(checker, moduleSymbol)) {
       let propsType
       try {
         propsType = propsTypeOf(checker, exported)

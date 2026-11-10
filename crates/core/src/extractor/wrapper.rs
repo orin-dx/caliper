@@ -64,7 +64,7 @@ fn is_element_type_arg(ty: &TSType<'_>) -> bool {
 
 fn is_component_reference(name: &str) -> bool {
     // `_Box` is Mantine's spelling of an implementation component.
-    name.trim_start_matches(['_', '$']).starts_with(|c: char| c.is_ascii_uppercase())
+    super::is_pascal_case(name.trim_start_matches('$'))
 }
 
 /// How strongly the first argument says the call builds a component.

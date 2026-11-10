@@ -2,7 +2,7 @@
 """The five public repos Caliper is measured on, fetched at pinned commits. Shared by weekly.py and bench.py.
 
 `setup` fetches each repo, installs its dependencies with its own package manager and lockfile (lifecycle scripts off,
-caches under the corpora directory's parent), and prunes tests, stories and demos from the source directory. With
+caches under the corpora directory's parent), and prunes tests, stories and demos (not declaration files) from the source directory. With
 --sparse it fetches only the source directory and installs nothing: enough to extract without dependencies, not for
 `just bench`, which loads them.
 
@@ -70,8 +70,12 @@ PRUNED_DIRS = {
     '__tests__', '__snapshots__', 'test', 'tests', 'stories', '__stories__', 'demo', '__demo__', 'docs', 'e2e',
     'dist', 'build', '.storybook', 'examples',
 }
-PRUNED_FILE = re.compile(r'\.(test|spec|stories|story)\.|\.d\.ts$')
+# Declaration files are kept: a corpus's own type packages (react-spectrum's @react-types/shared) are declared in .d.ts
+# and the measured source imports them. Generated declarations live in dist/ and build/, which PRUNED_DIRS removes.
+PRUNED_FILE = re.compile(r'\.(test|spec|stories|story)\.')
 MARKER = '.corpus-complete'
+# Bump when what `prune` removes changes: an installed corpus pruned under an older rule is fetched again.
+PRUNE_VERSION = 2
 
 
 def selected(names):
@@ -226,6 +230,10 @@ def prune(src):
                 os.remove(os.path.join(current, f))
 
 
+def installed_marker():
+    return f':installed:prune{PRUNE_VERSION}'
+
+
 def ready(corpus, corpora_dir, sparse):
     """The source directory when the corpus is fetched at its pinned commit (installed, unless `sparse`), else None."""
     checkout = os.path.join(corpora_dir, corpus['clone'])
@@ -234,7 +242,7 @@ def ready(corpus, corpora_dir, sparse):
             have = f.read()
     except OSError:
         return None
-    wanted = corpus['commit'] + ('' if sparse else ':installed')
+    wanted = corpus['commit'] + ('' if sparse else installed_marker())
     if have == wanted or (sparse and have.startswith(corpus['commit'])):
         return os.path.join(checkout, corpus['src'])
     return None
@@ -282,7 +290,7 @@ def setup(args):
                 install(corpus, checkout, base, env, log)
             prune(os.path.join(checkout, corpus['src']))
             with open(os.path.join(checkout, MARKER), 'w') as f:
-                f.write(corpus['commit'] + ':installed')
+                f.write(corpus['commit'] + installed_marker())
         except (subprocess.CalledProcessError, RuntimeError, OSError) as error:
             # One corpus failing must not hide the others: say which one and why, then carry on with the rest.
             failed.append(corpus['name'])

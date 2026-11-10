@@ -193,10 +193,40 @@ class RecallIsNotComparedAcrossReferences(unittest.TestCase):
         self.assertTrue(weekly.same_reference(record(1), record()))
         self.assertFalse(weekly.same_reference(record(weekly.REFERENCE_VERSION), record()))
 
+    def universe(self, version, wrong, **extra):
+        """A corpus entry whose oracle counted the universe of `version`, with a headline of `wrong` wrong props."""
+        oracle = {'tools': {}, **({'universe_version': version} if version else {})}
+        return {'caliper': {'ms': 100, 'rss_mib': 100}, 'oracle': oracle, 'recall': {'caliper': {}},
+                'headline': {'components': 1, 'props': 2000, 'correct': 1900, 'less_precise': 0, 'wrong': wrong,
+                             'no_checker_type': 0, 'missing': 0, 'named_only': 0}, **extra}
+
+    def test_a_rise_in_wrong_types_is_not_read_against_another_universe(self):
+        now = {'corpora': {'antd': self.universe(2, 1)}}
+        before = {'corpora': {'antd': self.universe(None, 0)}}
+        self.assertEqual(weekly.findings(now, before), [])
+        again = {'corpora': {'antd': self.universe(2, 0)}}
+        self.assertEqual(len(weekly.findings(now, again)), 1)
+
+    def test_the_summary_says_the_universe_changed(self):
+        now = {'corpora': {'antd': self.universe(2, 0)}}
+        before = {'corpora': {'antd': self.universe(None, 0)}}
+        self.assertEqual(weekly.changes(now, before), [
+            "antd: the oracle's universe is version 2 now and was version 1 last week, so its props, agreement and wrong "
+            "types are not compared with last week's"])
+        self.assertEqual(weekly.changes(now, now), [])
+
+    def test_a_corpus_without_an_oracle_has_no_universe_to_differ(self):
+        self.assertTrue(weekly.same_universe({'caliper': {}}, {'oracle': {'tools': {}}}))
+        self.assertTrue(weekly.same_universe({'oracle': {'error': 'x'}}, {'oracle': {'tools': {}}}))
+
     def test_the_table_says_when_recall_was_not_compared(self):
         now = {'caliper': 'x', 'runs': 1, 'reference_version': 2, 'corpora': {}}
         self.assertIn('version 1 of the rules, this one by version 2', weekly.markdown(now, [], 1))
         self.assertNotIn('not compared', weekly.markdown(now, []))
+
+    def test_the_recall_section_says_recall_is_not_correctness(self):
+        now = {'caliper': 'x', 'runs': 1, 'reference_version': 2, 'corpora': {}}
+        self.assertIn('It is not a measure of correctness', weekly.markdown(now, []))
 
 
 class MeasureHelperErrors(unittest.TestCase):

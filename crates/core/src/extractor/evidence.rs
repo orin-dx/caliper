@@ -172,11 +172,7 @@ fn returns_element(expr: &Expression<'_>, element_locals: &FxHashSet<String>, sc
         Expression::NullLiteral(_) => true,
         Expression::Identifier(id) if element_locals.contains(id.name.as_str()) => true,
         // A component invoked directly: `return JoinList({ ... })`.
-        Expression::CallExpression(call)
-            if callee_name(&call.callee).is_some_and(|n| n.starts_with(|c: char| c.is_ascii_uppercase())) =>
-        {
-            true
-        }
+        Expression::CallExpression(call) if callee_name(&call.callee).is_some_and(super::is_pascal_case) => true,
         e if is_children(e) => true,
         e => value_has_element(e, scope),
     }

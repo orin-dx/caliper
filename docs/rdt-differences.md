@@ -1,6 +1,6 @@
 # Where Caliper differs from react-docgen-typescript and the checker
 
-Caliper aims for correct types for Storybook and for agents. TypeScript's checker is the arbiter of a prop's type. Agreement with react-docgen-typescript (RDT) is information, not a goal. Where Caliper differs from RDT only because RDT is wrong or less precise, that is intended. Where Caliper is not better, it is a gap, and this page says so.
+Recall against RDT (`docs/measurement.md`) is not a measure of correctness; the table under "How the numbers are produced" is the checker's judgment of both tools. Caliper aims for correct types for Storybook and for agents. TypeScript's checker is the arbiter of a prop's type. Agreement with react-docgen-typescript (RDT) is information, not a goal. Where Caliper differs from RDT only because RDT is wrong or less precise, that is intended. Where Caliper is not better, it is a gap, and this page says so.
 
 RDT is a fair reference for a reason that also limits it: it prints the checker's own type text, alias names kept. On most props RDT and the checker are the same string, so "Caliper differs from RDT" almost always means "Caliper differs from the checker", and the question is whether that is acceptable. Caliper is better than RDT in one class only (RDT truncates or picks the wrong declaration). Everywhere else the honest label is "acceptable difference" or "gap".
 
@@ -28,7 +28,7 @@ Measured 2026-11-06 on `main` at `c5fbb33e`, the pinned corpora, `scripts/weekly
 | antd     |        3,426 |          205 |     0 |                 1 |  94.0% |       0 |                  1.05% |
 | spectrum |        2,023 |          100 |    22 |               208 |  83.7% |   1.09% |                  5.02% |
 
-The last column is `oracle.tools.rdt.wrong_listed`: the share of the props RDT lists that the checker contradicts. react-docgen throws on 51 of 295 antd files and 265 of 1,240 shadcn files (17% and 21%) and so omits their props.
+The last column is `oracle.tools.rdt.wrong_listed`: the share of the props RDT lists that the checker contradicts. It is over every function the checker takes for a component, as the record was until `universe_version` 2 (2026-11-10); a later record has it over candidate components only (`oracle.tools`) and over every function in `oracle.tools_all_functions`, and its spectrum row has more shared props, because default exports are named (`docs/measurement.md`). react-docgen throws on 51 of 295 antd files and 265 of 1,240 shadcn files (17% and 21%) and so omits their props.
 
 The 31 wrong verdicts are 28 index-signature artifacts (class 1), 2 silent call-signature errors (class 4) and 1 narrower type from a factory (class 6). The 3,201 shared props that are not agree are 2,893 less precise, 31 wrong and 277 checker any/error.
 
