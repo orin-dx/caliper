@@ -6,7 +6,7 @@
 // construct-suite/parity-allowlist.json does not list.
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
-import { exportName, propsTypeOf } from './checker-components.ts'
+import { exportAt, propsTypeOf } from './checker-components.ts'
 import { listFixtures, PROP } from './construct-suite.ts'
 import { checkerNormalizer } from './oracle-checker.ts'
 import type { Norm } from './oracle-compare.ts'
@@ -167,29 +167,25 @@ export interface ApiModule {
   API: new (options: { cwd: string }) => any
 }
 
-/** The one-program capture of src/construct-capture.ts with the given API: every fixture's `Row.p`. */
+/** The one-program capture of src/construct-capture.ts with the given API: prop `p` of every row's component. */
 export function captureRows(mod: ApiModule, suite: string): Capture {
   const fixtures = listFixtures(suite)
   if (fixtures.length === 0) throw new Error(`no fixtures under ${suite}`)
   const api = new mod.API({ cwd: suite })
   try {
     const { options } = api.parseConfigFile(join(suite, 'tsconfig.json'))
-    const program = api.createProgram(
-      fixtures.map((f) => f.file),
-      options,
-    )
+    const program = api.createProgram([...new Set(fixtures.map((f) => f.file))], options)
     try {
       const { checker } = program.getProject()
       const norm = checkerNormalizer(checker)
       const rows: Capture = {}
       for (const fixture of fixtures) {
         const moduleSymbol = checker.getSymbolOfSourceFile(fixture.file)
-        const exported =
-          moduleSymbol && checker.getExportsOfModule(moduleSymbol).find((e: any) => exportName(checker, e) === 'Row')
-        if (!exported) throw new Error(`${fixture.id}: no exported Row`)
+        const exported = moduleSymbol && exportAt(checker, moduleSymbol, fixture.exportPath)
+        if (!exported) throw new Error(`${fixture.id}: no export ${fixture.exportPath.join('.')}`)
         const propsType = propsTypeOf(checker, exported)
         const prop = propsType && checker.getPropertyOfType(propsType, PROP)
-        if (!prop) throw new Error(`${fixture.id}: Row has no prop ${PROP}`)
+        if (!prop) throw new Error(`${fixture.id}: ${fixture.component} has no prop ${PROP}`)
         const type = checker.getTypeOfSymbol(prop)
         rows[fixture.id] = {
           norm: norm(type),

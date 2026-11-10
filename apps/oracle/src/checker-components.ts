@@ -20,6 +20,19 @@ export function propsTypeOf(checker: any, exported: any): any | undefined {
   return undefined
 }
 
+/** The symbol at `path` in a module: the export named `path[0]` exactly (`default` for the default export), then each
+ * property of it an attached sub-component is reached through. Undefined when any step is missing. */
+export function exportAt(checker: any, moduleSymbol: any, path: string[]): any | undefined {
+  const [name, ...members] = path
+  let symbol = checker.getExportsOfModule(moduleSymbol).find((e: any) => e.name === name)
+  for (const member of members) {
+    if (!symbol) return undefined
+    const resolved = symbol.flags & SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol
+    symbol = checker.getPropertyOfType(checker.getTypeOfSymbol(resolved), member)
+  }
+  return symbol
+}
+
 /** A default export is named by what it exports: the aliased declaration, or the function or class itself. */
 export function exportName(checker: any, exported: any): string {
   if (exported.name !== 'default') return exported.name

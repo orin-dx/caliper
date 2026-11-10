@@ -1,0 +1,8 @@
+{
+  "checker": {
+    "k": "lit",
+    "value": "menu",
+    "of": "string"
+  },
+  "text": "\"menu\""
+}

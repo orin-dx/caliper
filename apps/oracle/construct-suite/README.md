@@ -10,9 +10,10 @@ construct-suite/
   expectations.json          row id -> allowed verdicts (and the reason for each gap)
   <family>/<NN>-<slug>.tsx   a fixture
   <family>/<NN>-<slug>.golden.json   its committed golden, written by construct:capture
+  <family>/<NN>-<slug>.<Component>.golden.json   the golden of each component of a fixture that lists several
 ```
 
-A row id is `<family>/<NN>-<slug>`. The harness is `../src/construct-suite.ts` (pure helpers), `../src/construct-capture.ts` (the capture script) and `../tests/construct-suite.test.ts`. `seed/` holds the three rows that prove the harness. The other families are `literals`, `objects`, `tuples-arrays`, `utility-mapped`, `generics` and `react`.
+A row id is `<family>/<NN>-<slug>`, or `<family>/<NN>-<slug>#<Component>` for a component of a fixture that lists several. The harness is `../src/construct-suite.ts` (pure helpers), `../src/construct-capture.ts` (the capture script) and `../tests/construct-suite.test.ts`. `seed/` holds the three rows that prove the harness. The other families are `literals`, `objects`, `tuples-arrays`, `utility-mapped`, `generics`, `react` and `exports`.
 
 A fixture declares one `interface Props` with one prop `p`, and exports a component `Row` that takes it:
 
@@ -25,6 +26,28 @@ export function Row(props: Props) {
   return null
 }
 ```
+
+A fixture of several components (the `exports` family: which component is which export, ADR 0027) lists them in a comment, each as `<display name>=<export path>`, and gives each its own `interface` with a prop `p` of a type no other component in the file has, so a component answered with another's props is `wrong`. The export path is the export name (`default` for the default export), then the property of it an attached sub-component is reached through:
+
+```tsx
+// components: Item=default.Item Menu=default
+interface ItemProps {
+  p: 'item'
+}
+interface MenuProps {
+  p: 'menu'
+}
+function Item(props: ItemProps) {
+  return null
+}
+function Menu(props: MenuProps) {
+  return null
+}
+Menu.Item = Item
+export default Menu
+```
+
+The capture finds each component by its export path, and the tests find Caliper's by file and display name.
 
 ## Commands
 
@@ -39,7 +62,7 @@ pnpm --filter caliper-docgen-oracle construct:check      # same as: construct:ca
 pnpm --filter caliper-docgen-oracle test
 ```
 
-The test runs one `extract` over this directory with the weekly's canonical options (`--html-attributes full --include-unexported --load-dependencies --collapse-inherited-props none`, plus `--no-cache --quiet`) and compares prop `p` of each `Row` with its golden. The binary is `$CALIPER_BIN`, or `target/release/caliper-docgen`. Without one the suite skips with a message and the rest of the package tests still pass.
+The test runs one `extract` over this directory with the weekly's canonical options (`--html-attributes full --include-unexported --load-dependencies --collapse-inherited-props none`, plus `--no-cache --quiet`) and compares prop `p` of each row's component with its golden. The binary is `$CALIPER_BIN`, or `target/release/caliper-docgen`. Without one the suite skips with a message and the rest of the package tests still pass.
 
 ## Adding a row
 

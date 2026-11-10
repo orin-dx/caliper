@@ -1,0 +1,8 @@
+{
+  "checker": {
+    "k": "lit",
+    "value": "option",
+    "of": "string"
+  },
+  "text": "\"option\""
+}

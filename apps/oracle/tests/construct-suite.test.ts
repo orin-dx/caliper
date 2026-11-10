@@ -7,10 +7,12 @@ import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { checkCaliperShape, flattenProps } from '../src/caliper-input.ts'
 import {
+  componentsOf,
   expectationFailure,
   expectationProblems,
   listFixtures,
   PROP,
+  rowKey,
   rowVerdict,
   type Expectation,
   type Golden,
@@ -91,6 +93,23 @@ describe('the construct suite helpers', () => {
     expect(expectationProblems(ids, expectations.rows)).toStrictEqual([])
   })
 
+  it('a fixture of several components lists each with its export path, and a plain fixture is one Row', () => {
+    expect.hasAssertions()
+    expect(componentsOf('// components: Item=default.Item Menu=default\nfunction Item() {}')).toStrictEqual([
+      { component: 'Item', exportPath: ['default', 'Item'] },
+      { component: 'Menu', exportPath: ['default'] },
+    ])
+    expect(componentsOf('export function Row(props: Props) { return null }')).toBeUndefined()
+    expect(() => componentsOf('// components: Item')).toThrow('<display name>=<export path>')
+    const rows = listFixtures(suite).filter((f) => f.file.endsWith('03-attached-to-default.tsx'))
+    expect(
+      rows.map((f) => [f.id, f.component, f.exportPath, f.golden.slice(f.golden.lastIndexOf('/') + 1)]),
+    ).toStrictEqual([
+      ['exports/03-attached-to-default#Item', 'Item', ['default', 'Item'], '03-attached-to-default.Item.golden.json'],
+      ['exports/03-attached-to-default#Menu', 'Menu', ['default'], '03-attached-to-default.Menu.golden.json'],
+    ])
+  })
+
   it('every fixture has a golden', () => {
     expect.hasAssertions()
     const missing = listFixtures(suite).filter((f) => !existsSync(f.golden))
@@ -126,17 +145,19 @@ describe.skipIf(!available)('the construct suite against the caliper binary', ()
     )
     const caliper = JSON.parse(stdout)
     checkCaliperShape(caliper)
-    const propByFile = new Map<string, any>()
+    const propByRow = new Map<string, any>()
     for (const [key, component] of Object.entries<any>(caliper.components)) {
-      if (component.displayName !== 'Row') continue
       const id = flattenProps(caliper, key, component)[PROP]
-      propByFile.set(realpathSync(component.filePath), id === undefined ? undefined : caliper.props[id])
+      propByRow.set(
+        rowKey(realpathSync(component.filePath), component.displayName),
+        id === undefined ? undefined : caliper.props[id],
+      )
     }
 
     const failures: string[] = []
     for (const fixture of listFixtures(suite)) {
       const golden: Golden = JSON.parse(readFileSync(fixture.golden, 'utf8'))
-      const verdict = rowVerdict(propByFile.get(realpathSync(fixture.file)), golden)
+      const verdict = rowVerdict(propByRow.get(rowKey(realpathSync(fixture.file), fixture.component)), golden)
       const row = expectations.rows[fixture.id]
       const failure = row && expectationFailure(fixture.id, verdict, row)
       if (failure) failures.push(failure)

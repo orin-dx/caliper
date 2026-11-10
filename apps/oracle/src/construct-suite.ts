@@ -1,7 +1,7 @@
 // The deterministic construct suite's pure half (apps/oracle/construct-suite/README.md): which fixtures exist, the verdict
 // one of Caliper's props earns against its golden, and the check of the expectations file. Nothing here runs the checker
 // or Caliper, so tests/construct-suite.test.ts can pin it without either.
-import { readdirSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { caliperNorm } from './caliper-norm.ts'
 import { compare, type Norm, type Verdict } from './oracle-compare.ts'
@@ -35,19 +35,43 @@ export interface Golden {
   text: string
 }
 
+/** One row: a component of a fixture file. A file holds one row (`Row`, exported as `Row`) unless it lists its
+ * components (`componentsOf`). */
 export interface Fixture {
-  /** `<family>/<NN>-<slug>`: the row id the expectations file keys on. */
+  /** `<family>/<NN>-<slug>`, or `<family>/<NN>-<slug>#<component>` in a file of several components: the row id the
+   * expectations file keys on. */
   id: string
   /** The fixture's absolute path. */
   file: string
-  /** The golden's absolute path, next to the fixture. */
+  /** The golden's absolute path, next to the fixture: `<NN>-<slug>.golden.json`, or `<NN>-<slug>.<component>.golden.json`. */
   golden: string
+  /** The component's display name in Caliper's output. */
+  component: string
+  /** How the module exports it: the export name (`default` for the default export), then the properties of the export
+   * a sub-component is attached to (`['default', 'Item']` for `Menu.Item = Item; export default Menu`). */
+  exportPath: string[]
 }
 
 const FIXTURE = /^\d{2}-[a-z0-9][a-z0-9-]*\.tsx$/
+const COMPONENTS = /^\/\/ components:(.*)$/m
 
-/** Every `<family>/<NN>-<slug>.tsx` under `dir`, sorted by id. A `.tsx` whose name breaks the pattern is an error, not a
- * row that quietly never runs. */
+/** A fixture of several components lists them in a comment, each as `<display name>=<export path>`:
+ * `// components: Item=default.Item Menu=default`. Undefined for a fixture of one `Row`. */
+export function componentsOf(source: string): { component: string; exportPath: string[] }[] | undefined {
+  const line = COMPONENTS.exec(source)?.[1]
+  if (line === undefined) return undefined
+  return line
+    .trim()
+    .split(/\s+/)
+    .map((entry) => {
+      const [component, path] = entry.split('=')
+      if (!component || !path) throw new Error(`"${entry}": a listed component is <display name>=<export path>`)
+      return { component, exportPath: path.split('.') }
+    })
+}
+
+/** Every row of every `<family>/<NN>-<slug>.tsx` under `dir`, sorted by id. A `.tsx` whose name breaks the pattern is
+ * an error, not a row that quietly never runs. */
 export function listFixtures(dir: string): Fixture[] {
   const fixtures: Fixture[] = []
   for (const family of readdirSync(dir, { withFileTypes: true })) {
@@ -58,15 +82,34 @@ export function listFixtures(dir: string): Fixture[] {
         throw new Error(`${family.name}/${entry}: a fixture is named <NN>-<slug>.tsx (lowercase)`)
       }
       const file = join(dir, family.name, entry)
-      fixtures.push({
-        id: `${family.name}/${entry.replace(/\.tsx$/, '')}`,
-        file,
-        golden: file.replace(/\.tsx$/, '.golden.json'),
-      })
+      const id = `${family.name}/${entry.replace(/\.tsx$/, '')}`
+      const listed = componentsOf(readFileSync(file, 'utf8'))
+      if (listed === undefined) {
+        fixtures.push({
+          id,
+          file,
+          golden: file.replace(/\.tsx$/, '.golden.json'),
+          component: 'Row',
+          exportPath: ['Row'],
+        })
+        continue
+      }
+      for (const { component, exportPath } of listed) {
+        fixtures.push({
+          id: `${id}#${component}`,
+          file,
+          golden: file.replace(/\.tsx$/, `.${component}.golden.json`),
+          component,
+          exportPath,
+        })
+      }
     }
   }
   return fixtures.toSorted((a, b) => (a.id < b.id ? -1 : 1))
 }
+
+/** Where Caliper's component for a row is in `components`, keyed by `rowKey`. */
+export const rowKey = (file: string, component: string): string => `${file}#${component}`
 
 /** The verdict for Caliper's prop against the golden. A prop with `degradedBy` that is only `less precise` is an
  * `opaque with marker`: Caliper said it did not evaluate the type. A `wrong` prop stays wrong with or without a marker. */
