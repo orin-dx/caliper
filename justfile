@@ -97,6 +97,8 @@ test-checker-lane:
     # S5's gate on tsrs: generic components instantiated (Test / Rust runs the same tests on the Go checker).
     cargo test --locked -p caliper-docgen-semantic --lib instantiate
     cargo test --locked -p caliper-docgen-semantic --test instantiate
+    # S6's gate on tsrs: a kept snapshot brought up to date, and an edit nobody announced caught loudly.
+    cargo test --locked -p caliper-docgen-semantic --test watch
 
 # Build the native binding and run the Vite plugin against it
 test-integration:
@@ -104,10 +106,10 @@ test-integration:
     NAPI_BINARY_REQUIRED=true pnpm --filter caliper-docgen-vite-plugin test:integration
     NAPI_BINARY_REQUIRED=true pnpm --filter caliper-docgen-storybook test:integration
 
-# Measure ADR 0026's memory, determinism and first-answer gates against the pinned tsrs (docs/gate-measurements.md).
-# Builds the large project outside the repository (GATE_FIXTURES, default ~/Projects/caliper-fixtures/gate-large), so it
-# needs the network or a warm pnpm store; `just gate-measure --edits 650 --runs 3` passes options to the harness. Takes
-# minutes, and stops at the first gate that fails.
+# Measure ADR 0026's memory, determinism, first-answer and watch gates against the pinned tsrs
+# (docs/gate-measurements.md). Builds the large project outside the repository (GATE_FIXTURES, default
+# ~/Projects/caliper-fixtures/gate-large), so it needs the network or a warm pnpm store; `just gate-measure --runs 3`
+# passes options to every gate. Takes minutes, runs every gate, and fails if any failed.
 gate-measure *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -115,9 +117,11 @@ gate-measure *args:
     node scripts/gate_fixtures.mjs "$fixtures"
     cargo build --release --locked -p caliper-docgen-semantic --example gate_harness
     TSRS_BIN="$(pnpm --silent --filter caliper-docgen-oracle exec tsx src/tsrs-bin.ts)"
-    for gate in memory determinism first-answer; do
-        target/release/examples/gate_harness "$gate" --src "$fixtures/src" --tsc "$TSRS_BIN" {{ args }}
+    failed=0
+    for gate in memory determinism first-answer watch; do
+        target/release/examples/gate_harness "$gate" --src "$fixtures/src" --tsc "$TSRS_BIN" {{ args }} || failed=1
     done
+    exit "$failed"
 
 # The deterministic construct suite on the release binary: goldens current, then the suite, which must not skip
 test-construct:

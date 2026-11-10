@@ -1,12 +1,15 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout, clippy::print_stderr)]
 //! The measurable ADR 0026 gates, through the session a Storybook addon runs: a lazy `WatchSession` asking a warm
-//! `OnDemand` over the project's own `tsc` (`just gate-measure` runs all three).
+//! `OnDemand` over the project's own `tsc` (`just gate-measure` runs all four).
 //!
 //!   gate_harness memory       --src DIR --tsc PATH [--edits 650] [--max-rss-mib N]
 //!   gate_harness determinism  --src DIR --tsc PATH [--components 150] [--threads 1,2,4] [--runs 3]
 //!   gate_harness first-answer --src DIR --tsc PATH [--component ChakraButton] [--runs 5] [--budget-ms 150]
+//!   gate_harness watch        --src DIR --tsc PATH [--edits 300] [--sample 100] [--budget-ms 25] [--max-rss-mib N]
+//!                             [--props button|own]
 //!
-//! `first-answer` (S4) times the first answer for one component in fresh sessions: see [`first_answer`].
+//! `first-answer` (S4) times the first answer for one component in fresh sessions: see [`first_answer`]. `watch` (S6)
+//! times edit-and-query on the snapshot the checker keeps: see [`watch`].
 //! `memory` rewrites one component's file, tells the session, and asks for the component, `--edits` times; it samples the
 //! checker's PID and resident memory after every answer and prints the recycles, the peak, and whether the last answer
 //! equals a fresh session's. `determinism` asks a fresh checker for the same components under each `RAYON_NUM_THREADS`
@@ -18,7 +21,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use caliper_docgen_core::pipeline::{CollapseInheritedProps, ComponentAnswer, PipelineOptions, WatchSession};
-use caliper_docgen_core::types::semantic::SemanticProvider;
+use caliper_docgen_core::react_types::react_props_wanted;
+use caliper_docgen_core::types::DiagnosticSeverity;
+use caliper_docgen_core::types::semantic::{SemanticProvider, SemanticTarget};
 use caliper_docgen_semantic::{OnDemand, OnDemandConfig};
 use camino::Utf8PathBuf;
 
@@ -67,9 +72,26 @@ fn process_stats(pid: u32) -> Option<(u64, usize)> {
     Some((rss / 1024, ps(&["-M"])?.lines().count().saturating_sub(1)))
 }
 
+/// CPU time a process has used, in milliseconds, from `ps` (`[hh:]mm:ss.ss`); `None` once it has gone. Unlike wall
+/// time, it does not grow with the machine's load.
+fn cpu_ms(pid: u32) -> Option<f64> {
+    let out = Command::new("ps").args(["-o", "cputime=", "-p", &pid.to_string()]).output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let seconds = text.trim().split(':').try_fold(0.0, |total, part| Some(total * 60.0 + part.parse::<f64>().ok()?));
+    out.status.success().then_some(seconds?).map(|seconds| seconds * 1000.0)
+}
+
 fn edit_source(n: usize) -> String {
     format!(
         "import type {{ ButtonProps }} from '@chakra-ui/react'\nexport function GateEdited(props: ButtonProps & {{ edit{n}: string }}) {{\n  return null\n}}\n"
+    )
+}
+
+/// The same program (the file still imports Chakra, so the checker loads it whole), but a component with one prop of
+/// its own: what an edit costs the checker, with almost nothing to convert.
+fn own_props_source(n: usize) -> String {
+    format!(
+        "import type {{ ButtonProps }} from '@chakra-ui/react'\nexport type Kept = ButtonProps\nexport function GateEdited(props: {{ edit{n}: string }}) {{\n  return null\n}}\n"
     )
 }
 
@@ -162,6 +184,125 @@ fn determinism(src: &Utf8PathBuf, tsc: &str, components: usize, threads: &[Strin
     ok
 }
 
+fn percentile(sorted: &[f64], at: f64) -> f64 {
+    let index = ((sorted.len() as f64 * at).ceil() as usize).clamp(1, sorted.len().max(1)) - 1;
+    sorted.get(index).copied().unwrap_or(0.0)
+}
+
+/// Each answer's JSON entry and diagnostics, in `keys` order.
+fn answer_bytes(session: &WatchSession, keys: &[String]) -> Vec<String> {
+    keys.iter()
+        .map(|key| {
+            let answer = session.component(key).expect("a sampled key is a component");
+            format!("{key}\n{}\n{:?}", serde_json::to_string(&answer.entry).unwrap(), answer.diagnostics)
+        })
+        .collect()
+}
+
+/// The options of [`watch`].
+struct WatchRun {
+    edits: usize,
+    sample: usize,
+    budget_ms: f64,
+    max_rss_mib: Option<u64>,
+    own_props: bool,
+}
+
+/// ADR 0026 S6: edit-and-query on the kept snapshot. Rewrites one component's file (`ButtonProps & { edit{n}: string }`),
+/// applies it with `update_file`, which tells the checker, and times that and the component's answer, `--edits` times,
+/// sampling the checker's resident memory after each. Then it times the checker's answer alone on its unchanged
+/// snapshot, and byte-compares the edited component and every `--sample`th other component with a fresh session asked
+/// in reverse order. Passes when every answer is the checker's, carries its edit and no warning, memory stays under
+/// `--max-rss-mib`, the bytes match, and the p95 is at most `--budget-ms`. `--props own` edits a component with one prop
+/// of its own in the same program instead ([`own_props_source`]).
+fn watch(src: &Utf8PathBuf, tsc: &str, run: WatchRun) -> bool {
+    let WatchRun { edits, sample, budget_ms, max_rss_mib, own_props } = run;
+    let source = if own_props { own_props_source } else { edit_source };
+    let file = src.join("GateEdited.tsx");
+    std::fs::write(&file, source(0)).unwrap();
+    let (session, checker) = open(src, tsc, Vec::new(), max_rss_mib);
+    let threshold = max_rss_mib.unwrap_or(OnDemandConfig::new(src.clone()).max_rss_mib);
+    drop(session.component("GateEdited").expect("GateEdited is a component"));
+    let (mut times, mut updates, mut processes, mut peak) = (Vec::new(), Vec::new(), BTreeSet::new(), 0);
+    let (mut answered, mut stale, mut warned) = (0, 0, 0);
+    // CPU time is what an edit costs whatever else the machine runs: the checker's, each process's last reading.
+    let (own_cpu, first) = (cpu_ms(std::process::id()), checker.process_id());
+    let first_cpu = first.and_then(cpu_ms).unwrap_or(0.0);
+    let mut checker_cpu = std::collections::BTreeMap::new();
+    for n in 1..=edits {
+        std::fs::write(&file, source(n)).unwrap();
+        let began = Instant::now();
+        session.update_file(&file);
+        updates.push(began.elapsed().as_secs_f64() * 1000.0);
+        let answer = session.component("GateEdited").expect("GateEdited is a component");
+        times.push(began.elapsed().as_secs_f64() * 1000.0);
+        answered += usize::from(by_checker(&answer));
+        stale += usize::from(!answer.entry.props.contains_key(&format!("edit{n}")));
+        warned += usize::from(answer.diagnostics.iter().any(|d| d.severity == DiagnosticSeverity::Warning));
+        if let Some(pid) = checker.process_id() {
+            processes.insert(pid);
+            peak = peak.max(process_stats(pid).map_or(0, |(mib, _)| mib));
+            if let Some(ms) = cpu_ms(pid) {
+                checker_cpu.insert(pid, ms);
+            }
+        }
+    }
+    let checker_cpu = (checker_cpu.values().sum::<f64>() - first_cpu) / edits as f64;
+    let own_cpu = own_cpu.zip(cpu_ms(std::process::id())).map_or(0.0, |(start, end)| (end - start) / edits as f64);
+    let snapshots = checker.snapshots();
+
+    // The checker's answer alone: the same request the session sends, on the snapshot it keeps, nothing changed.
+    let entry = session.component("GateEdited").unwrap().entry;
+    let target = SemanticTarget {
+        file_path: entry.file_path.clone(),
+        display_name: entry.display_name.clone(),
+        exported: entry.exported,
+        described: entry.props.values().filter(|p| !p.description.is_empty()).map(|p| p.name.clone()).collect(),
+        react_wanted: react_props_wanted(session.options.html_attributes, &entry.props),
+    };
+    let mut query = Vec::new();
+    for _ in 0..21 {
+        let began = Instant::now();
+        drop(checker.request(vec![target.clone()]).recv_timeout(Duration::from_secs(120)));
+        query.push(began.elapsed().as_secs_f64() * 1000.0);
+    }
+
+    let mut keys = session.component_keys();
+    keys.retain(|key| key != "GateEdited");
+    keys.sort();
+    let mut keys: Vec<String> = keys.into_iter().step_by(sample.max(1)).collect();
+    keys.insert(0, "GateEdited".to_string());
+    let watched = answer_bytes(&session, &keys);
+    let (fresh_session, _fresh) = open(src, tsc, Vec::new(), None);
+    let reversed: Vec<String> = keys.iter().rev().cloned().collect();
+    let mut fresh = answer_bytes(&fresh_session, &reversed);
+    fresh.reverse();
+    let identical = watched == fresh;
+    let recycles = checker.recycles();
+
+    times.sort_by(f64::total_cmp);
+    updates.sort_by(f64::total_cmp);
+    query.sort_by(f64::total_cmp);
+    let (p50, p95, p99) = (percentile(&times, 0.5), percentile(&times, 0.95), percentile(&times, 0.99));
+    let ok = answered == edits && stale == 0 && warned == 0 && identical && peak <= threshold && p95 <= budget_ms;
+    println!(
+        "{{\"gate\":\"watch\",\"props\":\"{}\",\"edits\":{edits},\"answeredByChecker\":{answered},\"staleAnswers\":{stale},\"warnedAnswers\":{warned},\"snapshots\":{{\"created\":{},\"updated\":{}}},\"processes\":{},\"recycles\":{{\"worn\":{},\"bloated\":{}}},\"peakRssMib\":{peak},\"maxRssMib\":{threshold},\"editAndQueryMs\":{{\"p50\":{p50:.1},\"p95\":{p95:.1},\"p99\":{p99:.1},\"max\":{:.1}}},\"updateFileMs\":{{\"p50\":{:.1}}},\"cpuMsPerEdit\":{{\"checker\":{checker_cpu:.1},\"caliper\":{own_cpu:.1}}},\"queryOnlyMs\":{{\"p50\":{:.1},\"min\":{:.1}}},\"budgetMs\":{budget_ms},\"comparedComponents\":{},\"comparedBytes\":{},\"equalsFreshReversed\":{identical},\"ok\":{ok}}}",
+        if own_props { "own" } else { "button" },
+        snapshots.created,
+        snapshots.updated,
+        processes.len(),
+        recycles.worn,
+        recycles.bloated,
+        times.last().copied().unwrap_or(0.0),
+        percentile(&updates, 0.5),
+        percentile(&query, 0.5),
+        query.first().copied().unwrap_or(0.0),
+        keys.len(),
+        watched.iter().map(String::len).sum::<usize>(),
+    );
+    ok
+}
+
 /// ADR 0026 S4: how long a story waits for the checker's answer through the Rust client. Each run opens a fresh session
 /// as the addon does (the checker started in the background at creation), waits until that process is up, then asks for
 /// `key` once and times the whole answer: the structural pass and the checker's program and conversion for the
@@ -228,6 +369,17 @@ fn main() {
                 number("--runs", 3),
             )
         }
+        Some("watch") => watch(
+            &src,
+            &tsc,
+            WatchRun {
+                edits: number("--edits", 300),
+                sample: number("--sample", 100),
+                budget_ms: arg(&args, "--budget-ms").map_or(25.0, |n| n.parse().expect("a number")),
+                max_rss_mib: arg(&args, "--max-rss-mib").map(|n| n.parse().expect("a number")),
+                own_props: arg(&args, "--props").is_some_and(|props| props == "own"),
+            },
+        ),
         Some("first-answer") => first_answer(
             &src,
             &tsc,
@@ -236,7 +388,7 @@ fn main() {
             arg(&args, "--budget-ms").map_or(150, |n| n.parse().expect("a number")),
         ),
         _ => {
-            eprintln!("usage: gate_harness memory|determinism|first-answer --src DIR --tsc PATH");
+            eprintln!("usage: gate_harness memory|determinism|first-answer|watch --src DIR --tsc PATH");
             false
         }
     };

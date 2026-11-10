@@ -4,22 +4,36 @@
 //! one component per story, so this keeps one `tsc --api` process alive, starts it on the first request, and roots a
 //! small program at just the requested files: the checker loads what those files import, not the project.
 //!
+//! The snapshot of that program is kept between requests (ADR 0026 S6). The next request brings it up to date with
+//! `updateSnapshot`, which re-reads only the files the session announced as changed ([`SemanticProvider::changed`]) and
+//! keeps the rest as parsed, re-rooting the program when the request names other files. The checker does not see an
+//! edit it is not told about, so before an answer every file the program read is compared with the stamp it had when
+//! read ([`crate::stamps`]): one that changed unannounced makes the answer come from a fresh snapshot, with a warning
+//! that names it.
+//!
 //! The process runs on its own thread with its own runtime, so a caller on any thread (a NAPI worker, a rayon task)
 //! never nests runtimes and can bound how long it waits. A failure to start or a crash yields an outcome with no
 //! components and one diagnostic, never an error; after [`MAX_RESTARTS`] crashes the checker stays down.
 
+use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
-use caliper_docgen_core::types::semantic::{SemanticOutcome, SemanticProvider, SemanticTarget};
-use caliper_docgen_tsc_client::Supervisor;
+use caliper_docgen_core::types::semantic::{SemanticOutcome, SemanticProvider, SemanticTarget, SourceChange};
+use caliper_docgen_core::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
+use caliper_docgen_tsc_client::{Client, Supervisor};
 use camino::Utf8PathBuf;
+use rustc_hash::{FxHashMap, FxHashSet};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-use crate::rpc::Rpc;
-use crate::{SUPPORTED_VERSIONS, SemanticRequest, answer_with, supervisor_config};
+use crate::rpc::{CallError, Rpc};
+use crate::stamps::{self, Stamp};
+use crate::{SUPPORTED_VERSIONS, SemanticRequest, answer_on, group_by_file, root_files, supervisor_config};
+
+/// How many files an unannounced-edit warning names before it counts the rest.
+const UNTOLD_NAMED: usize = 5;
 
 /// Crashes the checker may have before it stays down for the session.
 const MAX_RESTARTS: u32 = 3;
@@ -106,11 +120,23 @@ pub struct Recycles {
     pub bloated: u32,
 }
 
+/// How the snapshots a warm checker answered from were made.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Snapshots {
+    /// Built from the disk with `createSnapshot`: the first request of a process, one after a file changed that the
+    /// checker was not told about, or one after a snapshot could not be listed or updated.
+    pub created: u32,
+    /// Brought up to date from the one before with `updateSnapshot`: announced edits re-read, the rest kept.
+    pub updated: u32,
+}
+
 /// What the worker thread reports about the process, for the type that owns the thread to read.
 #[derive(Default)]
 struct Gauges {
     worn: AtomicU32,
     bloated: AtomicU32,
+    created: AtomicU32,
+    updated: AtomicU32,
     /// The process that answered last; 0 before the first answer.
     process: AtomicU32,
 }
@@ -118,6 +144,8 @@ struct Gauges {
 enum Job {
     /// Start the checker now instead of at the first request.
     Warm,
+    /// Files changed on disk; queued before any request that may read them.
+    Changed(SourceChange),
     Answer {
         targets: Vec<SemanticTarget>,
         reply: mpsc::SyncSender<SemanticOutcome>,
@@ -167,6 +195,14 @@ impl OnDemand {
         }
     }
 
+    /// How many snapshots the answers so far came from, by how each was made.
+    pub fn snapshots(&self) -> Snapshots {
+        Snapshots {
+            created: self.gauges.created.load(Ordering::Relaxed),
+            updated: self.gauges.updated.load(Ordering::Relaxed),
+        }
+    }
+
     /// The operating system's id of the `tsc` process that answered the last request, `None` before the first one.
     /// Read after a reply, it is the process that built that answer.
     pub fn process_id(&self) -> Option<u32> {
@@ -197,6 +233,12 @@ impl SemanticProvider for OnDemand {
             }
         }
         receiver
+    }
+
+    fn changed(&self, change: SourceChange) {
+        if let Some(jobs) = &self.jobs {
+            jobs.send(Job::Changed(change)).ok();
+        }
     }
 }
 
@@ -235,6 +277,7 @@ fn worker(config: OnDemandConfig, mut queue: UnboundedReceiver<Job>, gauges: Arc
                 Job::Warm => {
                     checker.ensure(&config).await.ok();
                 }
+                Job::Changed(change) => checker.told(change).await,
                 Job::Answer { targets, reply } => {
                     reply.send(checker.answer(&config, targets).await).ok();
                     // After the reply, so the caller never waits for the memory check or the replacement.
@@ -259,6 +302,41 @@ struct Checker {
     /// Why the checker cannot be used for the rest of the session.
     down: Option<String>,
     gauges: Arc<Gauges>,
+    /// The snapshot the last request was answered from, kept for the next.
+    live: Option<Live>,
+    /// Files announced as changed since `live` was brought up to date.
+    told: FxHashSet<Utf8PathBuf>,
+}
+
+/// A snapshot kept between requests, and what its program read.
+struct Live {
+    rpc: Arc<Rpc>,
+    /// The files its program is rooted at.
+    roots: Vec<String>,
+    /// When the files were compared with the disk, just before the snapshot was built or brought up to date.
+    read_from: SystemTime,
+    /// Every file the program read, as it was then; `None` until listed after the reply the snapshot built.
+    stamps: Option<FxHashMap<Utf8PathBuf, Stamp>>,
+}
+
+/// The warning an answer carries when files the snapshot read changed and the checker was not told.
+fn untold_warning(files: &[Utf8PathBuf]) -> Diagnostic {
+    let mut named: Vec<String> = files.iter().take(UNTOLD_NAMED).map(ToString::to_string).collect();
+    if files.len() > UNTOLD_NAMED {
+        named.push(format!("{} more", files.len() - UNTOLD_NAMED));
+    }
+    Diagnostic::new(
+        DiagnosticSeverity::Warning,
+        DiagnosticCode::SemanticBackend,
+        format!(
+            "the TypeScript checker was not told that {} changed; it read every file again for this answer",
+            named.join(", ")
+        ),
+    )
+    .with_help(
+        "Whatever writes the project's files must tell the session (`update_file` or `ensure_fresh`); an edit the \
+         checker is not told about is answered from the text it read before.",
+    )
 }
 
 impl Checker {
@@ -271,6 +349,8 @@ impl Checker {
                 dead.shutdown().await.ok();
             }
             self.options = None;
+            self.live = None;
+            self.told.clear();
             self.restarts += 1;
             if self.restarts > MAX_RESTARTS {
                 return Err(self.stay_down("the checker kept crashing".to_string()));
@@ -287,7 +367,6 @@ impl Checker {
                 record_to: None,
                 extra_env: config.extra_env.clone(),
                 reverse_queries: false,
-                prepared_options: None,
             };
             let started = supervisor_config(&request).map_err(|reason| self.stay_down(reason))?;
             let supervisor = match Supervisor::spawn(started).await {
@@ -320,21 +399,124 @@ impl Checker {
         let Some(supervisor) = self.supervisor.as_ref() else {
             return SemanticOutcome::unavailable("the checker is not running");
         };
+        let (client, process) = (supervisor.client(), supervisor.process_id());
         let mut request = SemanticRequest::new(config.project_root.clone(), targets);
         request.tsconfig = config.tsconfig.clone();
         request.tsc_path = config.tsc_path.clone();
         request.request_timeout = config.request_timeout;
         request.expected_versions = config.expected_versions;
         request.extra_env.clone_from(&config.extra_env);
-        request.prepared_options.clone_from(&self.options);
-        let outcome = answer_with(supervisor, &request).await;
-        self.gauges.process.store(supervisor.process_id().unwrap_or(0), Ordering::Relaxed);
+        let roots = root_files(&request);
+        if roots.is_empty() {
+            return group_by_file(&request).0;
+        }
+        let answered = match self.snapshot_for(client, config.request_timeout, roots.clone()).await {
+            Ok((rpc, warning)) => answer_on(&rpc, &request, &roots).await.map(|mut outcome| {
+                outcome.diagnostics.extend(warning);
+                outcome
+            }),
+            Err(error) => Err(error),
+        };
+        self.gauges.process.store(process.unwrap_or(0), Ordering::Relaxed);
         self.served += 1;
-        outcome
+        match answered {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                self.forget().await;
+                SemanticOutcome::unavailable(format!("the checker stopped answering: {error}"))
+            }
+        }
     }
 
-    /// Replaces the process when it has built enough programs or grown past the memory bound. A planned replacement,
-    /// not a crash: the next request starts a fresh process.
+    /// The snapshot to answer from, its program rooted at `roots`: the kept one brought up to date with the files the
+    /// checker was told about, or a fresh one when none is kept, the kept one cannot be checked or updated, or a file
+    /// it read changed with nobody telling the checker. The last comes with a warning that names the files.
+    async fn snapshot_for(
+        &mut self,
+        client: Client,
+        deadline: Duration,
+        roots: Vec<String>,
+    ) -> Result<(Arc<Rpc>, Option<Diagnostic>), CallError> {
+        let read_from = SystemTime::now();
+        let told = std::mem::take(&mut self.told);
+        let mut warning = None;
+        if let Some(live) = self.live.take() {
+            if let Some(stamps) = &live.stamps {
+                let drift = stamps::drift(stamps, &told);
+                if drift.untold.is_empty() {
+                    let reread: BTreeSet<Utf8PathBuf> = told.into_iter().chain(drift.unsure).collect();
+                    if reread.is_empty() && live.roots == roots {
+                        let rpc = live.rpc.clone();
+                        self.live = Some(live);
+                        return Ok((rpc, None));
+                    }
+                    let (changed, deleted): (Vec<String>, Vec<String>) = {
+                        let (present, gone): (Vec<_>, Vec<_>) = reread.into_iter().partition(|file| file.exists());
+                        (present.into_iter().map(String::from).collect(), gone.into_iter().map(String::from).collect())
+                    };
+                    let rerooted = (live.roots != roots).then_some(roots.as_slice());
+                    match live.rpc.updated(&changed, &deleted, rerooted).await {
+                        Ok(rpc) => {
+                            live.rpc.release().await;
+                            let rpc = Arc::new(rpc);
+                            self.gauges.updated.fetch_add(1, Ordering::Relaxed);
+                            self.live = Some(Live { rpc: rpc.clone(), roots, read_from, stamps: None });
+                            return Ok((rpc, None));
+                        }
+                        Err(CallError::Rejected(message)) => {
+                            tracing::debug!(%message, "the checker could not update its snapshot; building a fresh one");
+                        }
+                        Err(fatal) => return Err(fatal),
+                    }
+                } else {
+                    tracing::warn!(files = ?drift.untold, "files changed that the checker was not told about");
+                    warning = Some(untold_warning(&drift.untold));
+                }
+            }
+            live.rpc.release().await;
+        }
+        let options = self.options.as_ref().ok_or_else(|| CallError::Fatal("the checker is not initialized".into()))?;
+        let rpc = Arc::new(Rpc::open_with(client, deadline, options, &roots, false).await?);
+        self.gauges.created.fetch_add(1, Ordering::Relaxed);
+        self.live = Some(Live { rpc: rpc.clone(), roots, read_from, stamps: None });
+        Ok((rpc, warning))
+    }
+
+    /// Files changed on disk: the kept snapshot reads them again at the next request, or, when anything may have
+    /// changed, is dropped.
+    async fn told(&mut self, change: SourceChange) {
+        match change {
+            SourceChange::Files(files) if self.live.is_some() => self.told.extend(files),
+            SourceChange::Files(_) => {}
+            SourceChange::Everything => self.forget().await,
+        }
+    }
+
+    /// Drops the kept snapshot, so the next request builds one from the disk.
+    async fn forget(&mut self) {
+        self.told.clear();
+        if let Some(live) = self.live.take() {
+            live.rpc.release().await;
+        }
+    }
+
+    /// Lists and stamps the files the kept snapshot's program read, once, after the reply it answered, so the first
+    /// answer does not wait for it. A snapshot that cannot be listed cannot be checked, and is dropped.
+    async fn stamp(&mut self) {
+        let Some(live) = self.live.as_mut().filter(|live| live.stamps.is_none()) else { return };
+        match live.rpc.source_file_names().await {
+            Ok(files) => {
+                live.stamps = Some(stamps::record(files.into_iter().map(Utf8PathBuf::from).collect(), live.read_from))
+            }
+            Err(error) => {
+                tracing::debug!(%error, "could not list the snapshot's files; the next request builds a fresh one");
+                self.forget().await;
+            }
+        }
+    }
+
+    /// Replaces the process when it has built enough programs or grown past the memory bound, and otherwise stamps
+    /// the snapshot it keeps. A planned replacement, not a crash: the next request starts a fresh process.
     async fn maintain(&mut self, config: &OnDemandConfig) {
         let Some(supervisor) = self.supervisor.as_ref() else { return };
         let worn = self.served >= MAX_REQUESTS_PER_PROCESS;
@@ -346,12 +528,17 @@ impl Checker {
             let (count, cause) = if worn { (&self.gauges.worn, "worn") } else { (&self.gauges.bloated, "bloated") };
             count.fetch_add(1, Ordering::Relaxed);
             tracing::debug!(cause, served = self.served, resident_mib = ?resident, "replacing the checker process");
+            // The snapshot goes with the process; the next one reads every file from the disk.
+            self.live = None;
+            self.told.clear();
             if let Some(old) = self.supervisor.take() {
                 old.shutdown().await.ok();
             }
             self.options = None;
             self.served = 0;
+            return;
         }
+        self.stamp().await;
     }
 }
 

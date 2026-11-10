@@ -7,7 +7,8 @@
 //!
 //! An answer describes the component's props as the checker read them, which depends on every file the component
 //! imports, not only its own. So the session drops every answer when any source file changes
-//! ([`SemanticHook::invalidate`]), and an answer that was still on its way then is not kept.
+//! ([`SemanticHook::invalidate`]), and an answer that was still on its way then is not kept. The same call tells the
+//! checker which files changed, since a warm one answers from what it read before (ADR 0026 S6).
 
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,7 +23,7 @@ use crate::pipeline::HtmlAttributeMode;
 use crate::react_types::{checker_prop_used, react_props_wanted};
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use crate::types::semantic::{
-    MergedProps, SemanticComponent, SemanticOutcome, SemanticProp, SemanticProvider, SemanticTarget,
+    MergedProps, SemanticComponent, SemanticOutcome, SemanticProp, SemanticProvider, SemanticTarget, SourceChange,
     merge_semantic_props, unread_diagnostic,
 };
 
@@ -50,12 +51,14 @@ impl SemanticHook {
         Self { provider, wait, answers: Arc::new(Mutex::new(AnswerCache::default())), warned: AtomicBool::new(false) }
     }
 
-    /// Forget every answer, and refuse the ones still being waited for: a source file changed, and the checker's
-    /// props for any component can depend on it. The next request of each component asks the checker again.
-    pub(crate) fn invalidate(&self) {
+    /// Forget every answer, refuse the ones still being waited for, and tell the checker what changed: a source file
+    /// changed, and the checker's props for any component can depend on it. The next request of each component asks
+    /// the checker again, after it has been told.
+    pub(crate) fn invalidate(&self, change: SourceChange) {
         let mut cache = self.answers.lock().unwrap_or_else(PoisonError::into_inner);
         cache.generation += 1;
         cache.answers.clear();
+        self.provider.changed(change);
     }
 
     /// `answer` with the checker's props, when it has them.
@@ -157,8 +160,14 @@ impl SemanticHook {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Option<Arc<SemanticComponent>> {
         let SemanticOutcome { components, fallbacks, diagnostics: reported } = outcome;
+        // Only an outcome with no answer at all says the checker is unavailable; a warning that comes with an answer
+        // (an edit the checker was not told about) is about this request.
+        let unavailable = components.is_empty() && fallbacks.is_empty();
         for mut diagnostic in reported {
-            if diagnostic.severity == DiagnosticSeverity::Warning && self.warned.swap(true, Ordering::Relaxed) {
+            if unavailable
+                && diagnostic.severity == DiagnosticSeverity::Warning
+                && self.warned.swap(true, Ordering::Relaxed)
+            {
                 continue;
             }
             diagnostic.affects = vec![answer.key.clone()];

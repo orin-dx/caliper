@@ -365,6 +365,47 @@ impl Rpc {
         .await
     }
 
+    /// The snapshot after this one with `changed` and `deleted` read again from the disk and, given `roots`, its program
+    /// rooted there instead, built at once (`updateSnapshot` with `ensurePrograms`). Files the program has not changed
+    /// are kept as parsed: the checker re-reads only what it is told about, and a synthetic program sees even that
+    /// only when it is rebuilt. This snapshot stays alive until it is released.
+    pub(crate) async fn updated(
+        &self,
+        changed: &[String],
+        deleted: &[String],
+        roots: Option<&[String]>,
+    ) -> Result<Rpc, CallError> {
+        let mut changes = serde_json::Map::new();
+        if !changed.is_empty() || !deleted.is_empty() {
+            changes.insert("fileNotifications".to_string(), json!({ "changed": changed, "deleted": deleted }));
+        }
+        if let Some(roots) = roots {
+            changes.insert(
+                "reconfigurePrograms".to_string(),
+                json!([{ "id": self.project, "rootFiles": roots, "compilerOptions": self.options }]),
+            );
+        }
+        changes.insert("ensurePrograms".to_string(), Value::Bool(true));
+        let response: SnapshotResponse =
+            decode(&self.call("updateSnapshot", json!({ "snapshot": self.snapshot, "changes": changes })).await?)?;
+        // The response lists only the projects it replaced; the synthetic program keeps its id.
+        let project = response.projects.into_iter().next().map_or_else(|| self.project.clone(), |project| project.id);
+        Ok(Rpc {
+            client: self.client.clone(),
+            deadline: self.deadline,
+            snapshot: response.snapshot,
+            project,
+            options: self.options.clone(),
+            recording: self.recording.clone(),
+            calls: Arc::default(),
+        })
+    }
+
+    /// Every file the snapshot's program read, as the checker names them.
+    pub(crate) async fn source_file_names(&self) -> Result<Vec<String>, CallError> {
+        self.scoped("getSourceFileNames", json!({})).await
+    }
+
     /// This session bound to the snapshot `createSnapshot` makes from `params`, and to its one project.
     async fn created(mut self, params: Value) -> Result<Rpc, CallError> {
         let response: SnapshotResponse = decode(&self.call("createSnapshot", params).await?)?;
