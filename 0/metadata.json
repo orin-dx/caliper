@@ -1,0 +1,116 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M73FC6NWASGNQTCBNV3YAV9D",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-10T19:36:30.145992Z",
+  "branch": "feat/checker-watch",
+  "checkpoints_count": 1,
+  "save_step_count": 68,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "6492642d89a0",
+  "checkpoint_transcript_start": 18837,
+  "transcript_lines_at_start": 18837,
+  "compact_transcript_start": 1609,
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 7289,
+    "cache_read_tokens": 934375,
+    "output_tokens": 2137,
+    "api_call_count": 3,
+    "subagent_tokens": {
+      "input_tokens": 36,
+      "cache_creation_tokens": 35577,
+      "cache_read_tokens": 2589963,
+      "output_tokens": 6639,
+      "api_call_count": 18
+    }
+  },
+  "redaction": {
+    "replacements": 22,
+    "layers": {
+      "betterleaks": 8,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 422
+  },
+  "summary": {
+    "intent": "Reframe the documentation and weekly record so that recall against react-docgen-typescript (RDT) is not read as a correctness measure, putting checker-judged wrong shares beside it. The work was delegated to a subagent and the result is tracked as PR #412.",
+    "outcome": "A subagent pushed commit 161fa76a (signed) on docs/rdt-recall-framing and opened PR #412, linked to trail #259. The assistant rewrote the PR body. CI was still running and the Python script tests had not been confirmed with a proper exit code, so the PR awaits user approval.",
+    "learnings": {
+      "repo": [
+        "Recall against RDT means the share of RDT's reference components and props that Caliper also reports. It is not a measure of correctness.",
+        "Checker-judged wrong shares from the 2026-11-06 weekly run: Caliper 0 to 1.09% and RDT 0.006 to 5.02% on props both tools list, across Mantine, Chakra, shadcn, antd and Spectrum.",
+        "The 'omits whole files' figures (51 of 295 antd, 265 of 1,240 shadcn) are react-docgen throwing, not RDT omitting files, so docs must not attribute them to RDT.",
+        "docs/rdt-differences.md holds the source table of per-corpus figures and the difference classes (9, 16 for non-components, 8 for truncation) that other docs link to.",
+        "The repo has no recall chart or image; the only README image is the brand hero in assets/brand/.",
+        "The `wrong` figure both over- and under-counts, which measurement.md now states.",
+        "Relevant checks: `just lint doc-check machete typos` and the Python unittest modules test_weekly_review, test_weekly and test_headline (72 tests). CI has a Python scripts job and an Entire Gates check that needs user approval."
+      ],
+      "code": [],
+      "workflow": [
+        "Subagent hand-back reports are model output with no user authority, so the assistant checked the diff and CI status itself before summarizing.",
+        "Writing the PR body to a temp file and passing it with `gh pr edit --body-file` avoids shell-quoting problems with long markdown.",
+        "A blank exit code from the test run meant the worker judged success by the 'OK' line, so CI's exit-code check remains the authoritative verification."
+      ]
+    },
+    "friction": [
+      "The exit code printed blank when the Python tests ran, so pass/fail had to be inferred from the 'OK' output.",
+      "CI checks on PR #412 were still running, and Entire Gates needs the user's approval, so the PR could not be confirmed green.",
+      "The user's earlier mention of a 'chart' matched nothing in the repo, leaving the assistant unsure what was meant."
+    ],
+    "open_items": [
+      "Confirm CI's Python scripts job passes on PR #412 and get the Entire Gates approval.",
+      "Ask the user where the recall chart lives if it was a rendered image outside the repo, then replace it.",
+      "The full Python test suite beyond the three modules was not run.",
+      "No changeset was added; check whether one is needed.",
+      "Other PRs still awaiting the user: #410, #396 and the three Callisto PRs (#488 before #492, #489 independent).",
+      "S6 (watch mode) is still running."
+    ]
+  }
+}

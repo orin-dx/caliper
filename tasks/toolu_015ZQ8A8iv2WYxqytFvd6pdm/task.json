@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_015ZQ8A8iv2WYxqytFvd6pdm",
+  "agent_id": "a2c61d1220f1a3543",
+  "subagent_type": "general-purpose",
+  "task_description": "Reframe RDT recall in docs",
+  "token_usage": {
+    "input_tokens": 30,
+    "cache_creation_tokens": 52760,
+    "cache_read_tokens": 951800,
+    "output_tokens": 6113,
+    "api_call_count": 15
+  },
+  "started_at": "2026-11-10T11:28:16.259568-08:00",
+  "completed_at": "2026-11-10T11:30:35.009536-08:00"
+}
