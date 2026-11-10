@@ -11,6 +11,11 @@ export function Poly<E extends React.ElementType = "div">(props: PolyProps<E>) {
   return null;
 }
 
+/** The same props as `Poly`, at another default. */
+export function Anchor<E extends React.ElementType = "a">(props: PolyProps<E>) {
+  return null;
+}
+
 interface Settings {
   dense: boolean;
 }

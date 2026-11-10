@@ -14,6 +14,14 @@
 //! line the checker reports an error on (a default it prints with a name the file cannot see) sends that component to
 //! its structural result with the error as the reason, and a checker that does not load the file sends them all; a
 //! result is never read from an instantiation that did not form.
+//!
+//! A printed default is text, and the probe file is another module than the component's: a name it prints may resolve
+//! there to another symbol than it does in the component's module (the module's own `FormData` against the global
+//! one), which forms without an error. So the line also declares each type argument as a type of its own and the
+//! signature as `CaliperSignature0`, and a component is read only when each argument is, in the checker that holds the
+//! probe file, the very type its signature declares as the default ([`arguments_keep_their_meaning`]). That is the one
+//! place the pattern "the probe's type arguments resolve, in the probe file, to what they resolve to in the component's
+//! module" is enforced; a default that does not pass sends the component to its structural result.
 
 use std::sync::Arc;
 
@@ -23,7 +31,7 @@ use rustc_hash::FxHashMap;
 
 use crate::component;
 use crate::convert::Converter;
-use crate::rpc::{CallError, Rpc, SignatureInfo};
+use crate::rpc::{CallError, FileDiagnostic, Rpc, SignatureInfo, SignatureKind};
 use crate::{Target, fallback_of};
 
 /// The file the instantiations are declared in, in the project's root directory. It exists only in the checker's memory.
@@ -51,13 +59,46 @@ pub(crate) async fn default_arguments(rpc: &Rpc, signature: &SignatureInfo) -> R
     Ok(Some(vec![rpc.type_to_string(default.id).await?]))
 }
 
-/// The line of the probe file that instantiates `instantiation`, the component exported by `file`. Each component is one
-/// line, so an error the checker reports is the error of the line it starts on.
+/// Whether each type argument the probe file declares for component `index` is the type its signature declares as the
+/// default of that parameter, in the checker that holds the probe file: the same type, not one of the same name.
+async fn arguments_keep_their_meaning(
+    layered: &Rpc,
+    probes: &FxHashMap<String, serde_json::Value>,
+    index: usize,
+    instantiation: &Instantiation,
+) -> Result<bool, CallError> {
+    let Some(signature_alias) = probes.get(&format!("CaliperSignature{index}")) else { return Ok(false) };
+    let component = layered.declared_type_of_symbol(signature_alias).await?;
+    let signatures = layered.signatures(component.id, SignatureKind::Call).await?;
+    let [signature] = signatures.as_slice() else { return Ok(false) };
+    let parameters = layered.type_parameters(signature.id).await?;
+    for (position, parameter) in parameters.iter().enumerate().take(instantiation.arguments.len()) {
+        let Some(default) = layered.default_of_type_parameter(parameter.id).await? else { return Ok(false) };
+        let Some(argument_alias) = probes.get(&format!("CaliperArgument{index}_{position}")) else {
+            return Ok(false);
+        };
+        if layered.declared_type_of_symbol(argument_alias).await?.id != default.id {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// The line of the probe file that instantiates `instantiation`, the component exported by `file`: the instantiation's
+/// props, the component's signature and each type argument, which [`arguments_keep_their_meaning`] compares. Each
+/// component is one line, so an error the checker reports is the error of the line it starts on.
 fn probe_line(index: usize, file: &Utf8Path, instantiation: &Instantiation) -> String {
     let quoted = |text: &str| serde_json::Value::String(text.to_string()).to_string();
+    let declared: String = instantiation
+        .arguments
+        .iter()
+        .enumerate()
+        .map(|(position, argument)| format!(" export type CaliperArgument{index}_{position} = {argument};"))
+        .collect();
     format!(
         "import type {{ {export} as CaliperComponent{index} }} from {file}; export type CaliperProbe{index} = \
-         Parameters<typeof CaliperComponent{index}<{arguments}>>[0];",
+         Parameters<typeof CaliperComponent{index}<{arguments}>>[0]; export type CaliperSignature{index} = typeof \
+         CaliperComponent{index};{declared}",
         export = quoted(&instantiation.export),
         file = quoted(file.as_str()),
         arguments = instantiation.arguments.join(", "),
@@ -132,7 +173,10 @@ async fn answer_layered(
         .map(|symbol| (symbol.name, symbol.reference))
         .collect();
     let mut errors: FxHashMap<usize, String> = FxHashMap::default();
-    for diagnostic in layered.semantic_diagnostics(probe).await?.into_iter().filter(|d| d.is_error()) {
+    // The checker's answer for a file also holds errors it found in other files while forming the instantiations; a
+    // line number says nothing about those, so only the probe file's own errors are the errors of a probe line.
+    let in_probe = |diagnostic: &FileDiagnostic| diagnostic.file_name.replace('\\', "/") == probe.replace('\\', "/");
+    for diagnostic in layered.semantic_diagnostics(probe).await?.into_iter().filter(|d| d.is_error() && in_probe(d)) {
         errors.entry(diagnostic.start_position.line).or_insert_with(|| diagnostic.message());
     }
 
@@ -143,11 +187,23 @@ async fn answer_layered(
                 Err(format!("the instantiation {} could not be formed: {error}", written(target, instantiation)))
             }
             (None, None) => Err(format!("the instantiation {} was not declared", written(target, instantiation))),
-            (None, Some(symbol)) => match read_probe(layered, &converter, interner, symbol, target).await {
-                Ok(read) => read,
-                Err(CallError::Rejected(message)) => Err(format!("the checker rejected a request: {message}")),
-                Err(fatal) => return Err(fatal),
-            },
+            (None, Some(symbol)) => {
+                let kept = arguments_keep_their_meaning(layered, &probes, index, instantiation).await;
+                match kept {
+                    Ok(false) => Err(format!(
+                        "the instantiation {} could not be formed: a name in its type arguments means something \
+                         else where the instantiation is written than in the component's module",
+                        written(target, instantiation)
+                    )),
+                    Ok(true) => match read_probe(layered, &converter, interner, symbol, target).await {
+                        Ok(read) => read,
+                        Err(CallError::Rejected(message)) => Err(format!("the checker rejected a request: {message}")),
+                        Err(fatal) => return Err(fatal),
+                    },
+                    Err(CallError::Rejected(message)) => Err(format!("the checker rejected a request: {message}")),
+                    Err(fatal) => return Err(fatal),
+                }
+            }
         };
         match read {
             Ok(props) => outcome.components.push(SemanticComponent {
@@ -185,7 +241,8 @@ mod tests {
         assert_eq!(
             line,
             "import type { \"default\" as CaliperComponent3 } from \"/p/src/Poly.tsx\"; export type CaliperProbe3 = \
-             Parameters<typeof CaliperComponent3<\"div\">>[0];"
+             Parameters<typeof CaliperComponent3<\"div\">>[0]; export type CaliperSignature3 = typeof \
+             CaliperComponent3; export type CaliperArgument3_0 = \"div\";"
         );
     }
 
@@ -211,7 +268,8 @@ mod tests {
         checker.map(camino::Utf8PathBuf::from)
     }
 
-    /// ADR 0026's S5 gate: `Poly<"div">` has at least 260 props, and `Poly<"a">` others.
+    /// ADR 0026's S5 gate: `Poly<"div">` has at least 260 props, and `Anchor<"a">`, the same props at another default,
+    /// others. An instantiation is always at the defaults, so a second element is a second component.
     #[test]
     #[allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stderr)]
     fn a_polymorphic_component_has_the_props_of_the_element_it_is_instantiated_with() {
@@ -225,8 +283,10 @@ mod tests {
             described: Default::default(),
             react_wanted: None,
         };
-        let at =
-            |element: &str| Instantiation { export: "Poly".to_string(), arguments: vec![format!("\"{element}\"")] };
+        let at = |export: &str, element: &str| Instantiation {
+            export: export.to_string(),
+            arguments: vec![format!("\"{element}\"")],
+        };
         let mut request = crate::SemanticRequest::new(root.clone(), Vec::new());
         request.tsc_path = Some(checker);
         let config = crate::supervisor_config(&request).unwrap();
@@ -238,7 +298,7 @@ mod tests {
             let tsconfig = root.join("tsconfig.json");
             let files = [file.to_string()];
             let rpc = Rpc::open(supervisor.client(), timeout, Some(tsconfig.as_str()), &files, false).await.unwrap();
-            let pending = vec![(target("Poly<div>"), at("div")), (target("Poly<a>"), at("a"))];
+            let pending = vec![(target("Poly<div>"), at("Poly", "div")), (target("Poly<a>"), at("Anchor", "a"))];
             let outcome = answer(&rpc, &files, &root, &PropInterner::default(), false, pending).await.unwrap();
             rpc.release().await;
             supervisor.shutdown().await.unwrap();

@@ -257,6 +257,8 @@ pub(crate) struct Rpc {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FileDiagnostic {
+    /// The file the error is in, which is not always the file asked about.
+    pub file_name: String,
     pub start_position: Position,
     /// `DiagnosticCategory`: warning 0, error 1, suggestion 2, message 3.
     pub category: u8,
