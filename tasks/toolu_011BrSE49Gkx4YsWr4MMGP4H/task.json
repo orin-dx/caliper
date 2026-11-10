@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_011BrSE49Gkx4YsWr4MMGP4H",
+  "agent_id": "a956872688f1d84ba",
+  "subagent_type": "general-purpose",
+  "task_description": "Diagnose Spectrum dependency gap",
+  "token_usage": {
+    "input_tokens": 168,
+    "cache_creation_tokens": 243439,
+    "cache_read_tokens": 13869369,
+    "output_tokens": 73512,
+    "api_call_count": 84
+  },
+  "started_at": "2026-11-10T12:31:31.371739-08:00",
+  "completed_at": "2026-11-10T12:43:29.620801-08:00"
+}

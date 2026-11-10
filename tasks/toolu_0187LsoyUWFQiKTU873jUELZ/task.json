@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_0187LsoyUWFQiKTU873jUELZ",
+  "agent_id": "ae45c5efd132639fe",
+  "subagent_type": "general-purpose",
+  "task_description": "ADR 0026 S6 watch mode",
+  "token_usage": {
+    "input_tokens": 428,
+    "cache_creation_tokens": 410145,
+    "cache_read_tokens": 62380456,
+    "output_tokens": 160954,
+    "api_call_count": 212
+  },
+  "started_at": "2026-11-10T10:23:40.197303-08:00",
+  "completed_at": "2026-11-10T11:40:18.959865-08:00"
+}
