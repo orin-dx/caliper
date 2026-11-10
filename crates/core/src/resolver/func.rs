@@ -84,6 +84,7 @@ pub(super) fn as_written(ct: &CollectedType) -> PropType {
         CollectedType::Never => PropType::Never,
         CollectedType::Unknown => PropType::Unknown,
         CollectedType::Void => PropType::Void,
+        CollectedType::BigInt => PropType::BigInt,
         CollectedType::StringLiteral(s) => PropType::StringLiteral(s.to_string()),
         CollectedType::NumberLiteral(n) => PropType::NumberLiteral(*n),
         CollectedType::BoolLiteral(b) => PropType::BoolLiteral(*b),
@@ -106,8 +107,7 @@ pub(super) fn as_written(ct: &CollectedType) -> PropType {
         }
         CollectedType::AtFile { inner, .. } => as_written(inner),
         CollectedType::TemplateLiteral(parts) => super::template::template_of(parts, as_written),
-        CollectedType::BigInt
-        | CollectedType::Symbol
+        CollectedType::Symbol
         | CollectedType::UniqueSymbol
         | CollectedType::TypeOf(_)
         | CollectedType::KeyOf(_)

@@ -18,6 +18,7 @@ fn to_tagged_value(pt: &PropType) -> serde_json::Value {
         PropType::Never => serde_json::json!({"kind": "never"}),
         PropType::Unknown => serde_json::json!({"kind": "unknown"}),
         PropType::Void => serde_json::json!({"kind": "void"}),
+        PropType::BigInt => serde_json::json!({"kind": "bigint"}),
         PropType::ReactNode => serde_json::json!({"kind": "reactNode"}),
         PropType::CssProperties => serde_json::json!({"kind": "cssProperties"}),
         PropType::ElementType => serde_json::json!({"kind": "elementType"}),
@@ -853,6 +854,7 @@ mod streaming_serialize_tests {
             PropType::Never,
             PropType::Unknown,
             PropType::Void,
+            PropType::BigInt,
             PropType::ReactNode,
             PropType::CssProperties,
             PropType::ElementType,
@@ -996,6 +998,7 @@ mod streaming_serialize_tests {
     fn each_new_kind_prints_as_typescript_writes_it() {
         let cases = [
             (every_tuple_element(), "[string, count?: number, ...rest: boolean[], ...T]"),
+            (PropType::BigInt, "bigint"),
             (PropType::BigIntLiteral(BigIntValue::parse("-10").unwrap()), "-10n"),
             (PropType::UniqueSymbol { name: "brand".into() }, "typeof brand"),
             (size_small(), "Size.Small"),

@@ -18,7 +18,18 @@ const TERMINALS: Record<string, string> = {
   ref: 'Ref',
   sxProps: 'SxProps',
 }
-const PRIMITIVES = new Set(['string', 'number', 'boolean', 'null', 'undefined', 'any', 'unknown', 'never', 'void'])
+const PRIMITIVES = new Set([
+  'string',
+  'number',
+  'boolean',
+  'bigint',
+  'null',
+  'undefined',
+  'any',
+  'unknown',
+  'never',
+  'void',
+])
 const LITERAL_KINDS: Record<string, LiteralKind> = {
   stringLiteral: 'string',
   numberLiteral: 'number',
@@ -131,10 +142,7 @@ export function caliperNorm(t: any, depth = 0): Norm {
       }))
       return { k: 'function', params, returns: inner(t.returnType) }
     }
-    // `PropType` has no `bigint` primitive yet, so Caliper writes it as the name `bigint`, which no declaration can take
-    // (TS2457): it is the primitive.
     case 'named': {
-      if (t.name === 'bigint' && (t.args ?? []).length === 0) return prim('bigint')
       const family = omittedFamily(t, inner)
       return { k: 'name', name: bareName(t.name), ...(family && { family }) }
     }

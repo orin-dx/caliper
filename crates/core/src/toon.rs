@@ -224,6 +224,7 @@ fn format_type_compact(prop_type: &PropType) -> String {
         PropType::Never => "never".into(),
         PropType::Unknown => "unknown".into(),
         PropType::Void => "void".into(),
+        PropType::BigInt => "bigint".into(),
         PropType::StringLiteral(s) => quote_literal(s),
         PropType::NumberLiteral(n) => n.to_string(),
         PropType::BoolLiteral(b) => b.to_string(),

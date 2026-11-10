@@ -44,9 +44,9 @@ pub fn resolve_collected_type(
         CollectedType::Never => PropType::Never,
         CollectedType::Unknown => PropType::Unknown,
         CollectedType::Void => PropType::Void,
-        // BigInt/Symbol — no dedicated PropType; surface as Named. `unique symbol` alone (TypeScript allows it only
+        CollectedType::BigInt => PropType::BigInt,
+        // Symbol has no dedicated PropType; it surfaces as Named. `unique symbol` alone (TypeScript allows it only
         // as a const's declared type, which `typeof` reads) is a symbol.
-        CollectedType::BigInt => PropType::Named { name: "bigint".into(), args: vec![] },
         CollectedType::Symbol | CollectedType::UniqueSymbol => PropType::Named { name: "symbol".into(), args: vec![] },
 
         // ── Literals ─────────────────────────────────────────────────────────
@@ -152,6 +152,7 @@ pub fn resolve_collected_type(
                 "undefined" => return PropType::Undefined,
                 "never" => return PropType::Never,
                 "void" => return PropType::Void,
+                "bigint" => return PropType::BigInt,
                 "any" => return PropType::Any,
                 "unknown" => return PropType::Unknown,
                 _ => {}

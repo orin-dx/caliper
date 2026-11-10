@@ -3,7 +3,7 @@ import { caliperNorm } from '../src/caliper-norm.ts'
 import { compare, prim } from '../src/oracle-compare.ts'
 import { checkCaliperShape, flattenProps, requireComparison } from '../src/caliper-input.ts'
 
-const good = { schemaVersion: 5, components: {}, propSets: {}, props: {} }
+const good = { schemaVersion: 6, components: {}, propSets: {}, props: {} }
 
 describe('the oracle input checks', () => {
   it('a renamed propSets key stops the run naming the key', () => {
@@ -16,7 +16,7 @@ describe('the oracle input checks', () => {
   it('a schema version the oracle does not read stops the run', () => {
     expect.hasAssertions()
     expect(() => checkCaliperShape({ ...good, schemaVersion: 3 })).toThrow(
-      'caliper output has schemaVersion 3, the oracle reads 5',
+      'caliper output has schemaVersion 3, the oracle reads 6',
     )
     expect(() => checkCaliperShape({ components: {} })).toThrow('has schemaVersion undefined')
   })

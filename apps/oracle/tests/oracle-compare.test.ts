@@ -159,20 +159,17 @@ describe('the oracle comparison', () => {
       )
     })
 
-    it('the name `bigint` is the primitive, which `PropType` has no kind for', () => {
+    it('the `bigint` kind is the primitive', () => {
       expect.hasAssertions()
       const key = caliperNorm({
         kind: 'union',
-        members: [{ kind: 'string' }, { kind: 'number' }, { kind: 'named', name: 'bigint', args: [] }],
+        members: [{ kind: 'string' }, { kind: 'number' }, { kind: 'bigint' }],
       })
       expect(compare(key, { ...optional(union(prim('string'), prim('number'), prim('bigint'))), alias: 'Key' })).toBe(
         'identical',
       )
-      // A name with arguments is a name.
-      expect(caliperNorm({ kind: 'named', name: 'bigint', args: [{ kind: 'string' }] })).toStrictEqual({
-        k: 'name',
-        name: 'bigint',
-      })
+      // The name `bigint` is no longer how Caliper writes the primitive, so it stays a name.
+      expect(caliperNorm({ kind: 'named', name: 'bigint', args: [] })).toStrictEqual({ k: 'name', name: 'bigint' })
     })
 
     it('an index signature keeps its named fields beside it', () => {

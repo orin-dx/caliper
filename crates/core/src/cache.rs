@@ -45,7 +45,9 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 ///     `switch` case has the scope in its key, and `FunctionResult` records the scope its names are written in.
 /// 33: tuple elements record their kind and label, and the types gain bigint literals, `unique symbol` and object
 ///     types with call or construct signatures (`CollectedType::Callable`).
-const CACHE_SCHEMA_VERSION: u32 = 33;
+/// 34: moves with canonical `SCHEMA_VERSION` 6 (`PropType::BigInt`); `CollectedType` is unchanged, so this only
+///     retires entries written before `bigint` became a primitive.
+const CACHE_SCHEMA_VERSION: u32 = 34;
 
 const DATA_FILE: &str = "dts.msgpack";
 

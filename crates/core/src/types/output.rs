@@ -16,7 +16,8 @@ pub(crate) mod interned;
 /// previous shape would misread or lose data from the new one; never by an addition it can ignore. Version 2 writes a
 /// component's props as prop set ids and an inheritance layer's `omitted` as a name list id (ADR 0018). Version 5 writes
 /// a tuple's elements as `{ type, label?, modifier? }` and adds the kinds the checker states (ADR 0026, slice S1).
-pub const SCHEMA_VERSION: u32 = 5;
+/// Version 6 writes `bigint` as `{ "kind": "bigint" }`, where version 5 wrote `{ "kind": "named", "name": "bigint" }`.
+pub const SCHEMA_VERSION: u32 = 6;
 
 // ─── Top-level output ─────────────────────────────────────────────────────────
 
@@ -364,6 +365,8 @@ pub enum PropType {
     Unknown,
     /// `void`.
     Void,
+    /// `bigint`.
+    BigInt,
 
     // ── Literals
     /// A string literal type such as `"primary"`, holding the value without its quotes.
@@ -565,6 +568,7 @@ impl PropType {
             | PropType::Never
             | PropType::Unknown
             | PropType::Void
+            | PropType::BigInt
             | PropType::ReactNode
             | PropType::CssProperties
             | PropType::ElementType
@@ -700,6 +704,7 @@ impl PropType {
             | PropType::Never
             | PropType::Unknown
             | PropType::Void
+            | PropType::BigInt
             | PropType::StringLiteral(_)
             | PropType::NumberLiteral(_)
             | PropType::BoolLiteral(_)
@@ -740,6 +745,7 @@ impl PropType {
             | PropType::Never
             | PropType::Unknown
             | PropType::Void
+            | PropType::BigInt
             | PropType::UniqueSymbol { .. }
             | PropType::TemplateLiteral(_)
             | PropType::Union(_)
@@ -828,6 +834,7 @@ impl PropType {
             PropType::Never => "never".into(),
             PropType::Unknown => "unknown".into(),
             PropType::Void => "void".into(),
+            PropType::BigInt => "bigint".into(),
             PropType::StringLiteral(s) => format!("\"{}\"", s),
             PropType::NumberLiteral(n) => n.to_string(),
             PropType::BoolLiteral(b) => b.to_string(),
@@ -904,6 +911,7 @@ impl PropType {
             | PropType::Never
             | PropType::Unknown
             | PropType::Void
+            | PropType::BigInt
             | PropType::StringLiteral(_)
             | PropType::NumberLiteral(_)
             | PropType::BoolLiteral(_)
@@ -958,6 +966,7 @@ impl serde::Serialize for PropType {
             PropType::Never => map.serialize_entry("kind", "never")?,
             PropType::Unknown => map.serialize_entry("kind", "unknown")?,
             PropType::Void => map.serialize_entry("kind", "void")?,
+            PropType::BigInt => map.serialize_entry("kind", "bigint")?,
             PropType::ReactNode => map.serialize_entry("kind", "reactNode")?,
             PropType::CssProperties => map.serialize_entry("kind", "cssProperties")?,
             PropType::ElementType => map.serialize_entry("kind", "elementType")?,
@@ -1290,6 +1299,7 @@ impl PropType {
             "never" => Ok(PropType::Never),
             "unknown" => Ok(PropType::Unknown),
             "void" => Ok(PropType::Void),
+            "bigint" => Ok(PropType::BigInt),
             "reactNode" | "react_node" => Ok(PropType::ReactNode),
             "cssProperties" | "css_properties" => Ok(PropType::CssProperties),
             "elementType" | "element_type" => Ok(PropType::ElementType),

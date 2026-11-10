@@ -385,9 +385,7 @@ expression: rendered(&outcome)
         "name": "big",
         "required": true,
         "type": {
-          "kind": "named",
-          "name": "bigint",
-          "args": []
+          "kind": "bigint"
         }
       },
       {
@@ -4120,9 +4118,7 @@ expression: rendered(&outcome)
         "name": "big",
         "required": true,
         "type": {
-          "kind": "named",
-          "name": "bigint",
-          "args": []
+          "kind": "bigint"
         }
       },
       {

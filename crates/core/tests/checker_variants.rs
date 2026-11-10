@@ -30,6 +30,10 @@ export interface WidgetProps {
   spread?: [string, ...Tail];
   genericSpread?: Prepend<string, [number, boolean]>;
   bigints?: 10n | -20n;
+  big?: bigint;
+  key?: string | number | bigint;
+  bigTuple?: [bigint, string];
+  bigCallback?: (id: bigint) => bigint;
   negative?: -1 | 0 | 1;
   symbol?: typeof brand;
   members?: Size.Small | Size.Large;
@@ -162,6 +166,26 @@ fn a_flattened_tuple_is_normalized_as_the_checker_does() {
             { "kind": "number" }, { "kind": "string" }, { "kind": "undefined" },
         ] } })
     );
+}
+
+#[test]
+fn the_bigint_primitive_is_its_own_kind() {
+    let out = extracted();
+    let (rdt, wire, degraded) = prop(&out, "big");
+    assert_eq!(rdt, &json!("bigint"));
+    assert_eq!(wire, &json!({ "kind": "bigint" }));
+    assert_eq!(degraded, None);
+    assert!(toon_row(&out.toon, "big").contains("bigint"), "{}", toon_row(&out.toon, "big"));
+    let (_, key, _) = prop(&out, "key");
+    assert_eq!(key["members"][2], json!({ "kind": "bigint" }));
+    let (_, tuple, _) = prop(&out, "bigTuple");
+    assert_eq!(tuple["elements"][0], json!({ "type": { "kind": "bigint" } }));
+    let (rdt, callback, _) = prop(&out, "bigCallback");
+    assert_eq!(rdt, &json!("(id: bigint) => bigint"));
+    assert_eq!(callback["params"][0]["type"], json!({ "kind": "bigint" }));
+    assert_eq!(callback["returnType"], json!({ "kind": "bigint" }));
+    // Storybook has no control for a bigint, so it stays a type name and not an `enum`.
+    assert_eq!(out.rdt["key"], json!({ "name": "string | number | bigint" }));
 }
 
 #[test]
