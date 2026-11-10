@@ -47,7 +47,9 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 ///     types with call or construct signatures (`CollectedType::Callable`).
 /// 34: moves with canonical `SCHEMA_VERSION` 6 (`PropType::BigInt`); `CollectedType` is unchanged, so this only
 ///     retires entries written before `bigint` became a primitive.
-const CACHE_SCHEMA_VERSION: u32 = 34;
+/// 35: a leading underscore and digits no longer keep a name from being PascalCase (`_3D`, `_Box`), so a declaration the
+///     extractor skipped before can be a component candidate; `SourceData` is unchanged.
+const CACHE_SCHEMA_VERSION: u32 = 35;
 
 const DATA_FILE: &str = "dts.msgpack";
 

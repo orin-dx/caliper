@@ -1396,9 +1396,13 @@ fn accessor(member: &TSSignature<'_>) -> Option<(TSMethodSignatureKind, String)>
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/// Whether `s` is written as a component or class name: an uppercase letter first, after any leading underscores and the
+/// digits that follow them. An identifier cannot start with a digit, so `3D.tsx` exports `_3D`, and Mantine writes an
+/// implementation component as `_Box`. `_helper` and `_3d` are not, which keeps a private function out of the candidates.
 pub(super) fn is_pascal_case(s: &str) -> bool {
-    let mut chars = s.chars();
-    chars.next().is_some_and(|c| c.is_uppercase())
+    let name = s.trim_start_matches('_');
+    let name = if name.len() < s.len() { name.trim_start_matches(|c: char| c.is_ascii_digit()) } else { name };
+    name.chars().next().is_some_and(char::is_uppercase)
 }
 
 /// Whether `name` is written as a constant, `MENU_OPTIONS` or `ORIGIN`: more than one letter and none lowercase. Such a
