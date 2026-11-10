@@ -1,0 +1,165 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M73R0TRE3AR81JDKFZFYPAWW",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-10T22:07:41.382938Z",
+  "branch": "feat/component-exports",
+  "checkpoints_count": 1,
+  "save_step_count": 68,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "919fb775e4dd",
+  "checkpoint_transcript_start": 19533,
+  "transcript_lines_at_start": 19533,
+  "compact_transcript_start": 1660,
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 24616,
+    "cache_read_tokens": 1309649,
+    "output_tokens": 6261,
+    "api_call_count": 3,
+    "subagent_tokens": {
+      "input_tokens": 68,
+      "cache_creation_tokens": 78120,
+      "cache_read_tokens": 8722219,
+      "output_tokens": 40568,
+      "api_call_count": 33
+    }
+  },
+  "redaction": {
+    "replacements": 22,
+    "layers": {
+      "betterleaks": 8,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 436
+  },
+  "summary": {
+    "intent": "Act on a subagent's pattern audit of 248 review findings in the caliper repo: identify recurring defect patterns, design the smallest structural fixes, and turn them into trails and worker tasks.",
+    "outcome": "Created four trails (#301-#304) and started a part 1 worker on branch feat/component-exports for ADR 0027 (component exports and keyed answers). The audit also drafted ADR 0027 on docs/pattern-audit-adr (not yet read or accepted) and produced a worker checklist.",
+    "learnings": {
+      "repo": [
+        "Dominant live defect class is component/export identity: the extractor keeps only display_name and exported: bool, so five readers re-derive the export from the name. About 54 findings, of which about 42 are resolver scope-capture already handled by ADR 0025 and mostly deleted by S7.",
+        "Second most frequent class is the same rule written twice (about 35 findings), e.g. 'declared by @types/react' is written at 13 sites across Rust, oracle TypeScript, Python and mjs scripts.",
+        "AGENTS.md already states 'sibling-path parity' and 'assert content' rules, but the violations keep recurring.",
+        "Construct suite rows have one Row per file, so S7's gate cannot detect multi-component export bugs. Part 1 (A1) must land before S7, and part 2 before S8.",
+        "Checker declaration handles are per snapshot ('<node index>.<kind>.<path>', no offset), so a DeclId identity is ruled out by ADR 0026. Identity is export name plus declaring file.",
+        "Review findings live on Entire trails (entire trail finding list), not in GitHub review comments.",
+        "degraded_also_by puts degradedBy on the ParsedProp itself via a sealed constructor, so the earlier 'side path' suspicion was wrong.",
+        "Precedents to copy: Converter::enter as a single gate, Resolved/ComponentAnswer storing answers whole, and PR 413's component-shape.json shared case file for cross-language rules."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/component.rs",
+          "line": 54,
+          "finding": "Falls back to the module's default export when looking up a component. Reproduced: with Menu.Item = Item and export default Menu, Item gets Menu's props (label, open) and is labelled 'resolved by the TypeScript checker'. Same lookup is on main."
+        },
+        {
+          "path": "crates/core/src/extractor/mod.rs",
+          "line": 620,
+          "finding": "exported is set by membership of the local name, dropping export names. This is the root cause of the identity problem."
+        },
+        {
+          "path": "crates/semantic/src/pipeline/semantic_hook.rs",
+          "line": 31,
+          "end_line": 36,
+          "finding": "AnswerCache holds only Option<Arc<SemanticComponent>>. The hit path adds no diagnostics, the live path adds them to the response but not the cache, and the late path drops fallbacks and diagnostics (:144, .next() with no pairing). Fallback reasons are lost on cache hits."
+        },
+        {
+          "path": "apps/oracle/src/oracle-compare.ts",
+          "line": 238,
+          "finding": "Returns 'identical' whenever the checker side is opaque, scoring unknown as agreement."
+        },
+        {
+          "path": "apps/oracle/src/caliper-norm.ts",
+          "line": 80,
+          "end_line": 156,
+          "finding": "caliperNorm is a switch on any with a default arm falling back to opaque, so a new PropType kind compares silently."
+        },
+        {
+          "path": "crates/semantic/src/instantiate.rs",
+          "line": 135,
+          "finding": "Probe diagnostics are matched by line across files, so an error in another file at the probe's line misattributes."
+        },
+        {
+          "path": "crates/binding/src/lib.rs",
+          "line": 479,
+          "finding": "session_component_toon answers null for an unknown session, unlike its three siblings that use live_session(session_id)?."
+        },
+        {
+          "path": "crates/core/src/types/semantic.rs",
+          "line": 316,
+          "end_line": 360,
+          "finding": "Merge pairs entries by file and display name, a latent identity collision."
+        }
+      ],
+      "workflow": [
+        "Subagent audit counts are manual classifications with overlapping categories, so treat them as approximate. Cost estimates come from rg touch-point counts, not an implementation.",
+        "Subagent hand-back text carries no user authority. The audit's recommendations were treated as input and the user is asked to decide on the ADR and ordering.",
+        "Putting a worker checklist (identity, fallbacks, provenance, correlation, duplicated rules, siblings, unknowns, proof) into every brief is meant to stop pattern recurrence."
+      ]
+    },
+    "friction": [
+      "The ADR 0027 text was drafted by the audit agent and has not been read by the assistant or the user.",
+      "Some claims could not be verified: the reproduction binary's build commit is unknown and predates PR 414, so the _Card variant is not reproduced. Backslash checker paths and overlay support in tsrs/Go 7.1 are unconfirmed.",
+      "The assistant's earlier 'degradedBy side path' hypothesis was wrong.",
+      "The budget decision still blocks S7 and S8, and many PRs (#410-#415, #396, Callisto) are waiting on the user."
+    ],
+    "open_items": [
+      "User must read and accept ADR 0027 (Proposed, branch docs/pattern-audit-adr, commit 73ee5e68). No PR was opened and it is unclear whether Entire opens one.",
+      "Decide whether trails #302 (canonical JSON exports) and #303 (oracle unjudged scoring) run after part 1 or in parallel.",
+      "Trail #304 (session_component_toon error) is created but not started.",
+      "Structural probe fix (overlay of the component's own module) needs a spike. The spot fix, filtering diagnostics by probe file, should land before S5 merges.",
+      "The semantic_hook answer-as-one-value fix (B) should land with the S6/#411 fix.",
+      "Verify whether tsrs fills declarations for export symbols, whether checker paths can contain backslashes, and whether main loses fallback reasons on a cache hit (read from source, not run).",
+      "Run one oracle pass after the batch merges and note what moved in docs/measurement.md.",
+      "Add the 8-question checklist to all future worker briefs.",
+      "Resolve the budget decision blocking S7/S8."
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01MfCoADHTmAzbQ79tMACSxq",
+  "agent_id": "a23bf3c299a2a0e27",
+  "subagent_type": "general-purpose",
+  "task_description": "Audit recurring finding patterns, draft ADR",
+  "token_usage": {
+    "input_tokens": 268,
+    "cache_creation_tokens": 306419,
+    "cache_read_tokens": 24294370,
+    "output_tokens": 87995,
+    "api_call_count": 133
+  },
+  "started_at": "2026-11-10T13:19:31.574941-08:00",
+  "completed_at": "2026-11-10T13:40:47.714945-08:00"
+}
