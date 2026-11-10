@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { API } from 'typescript-beta/sync'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { exportName, propsTypeOf } from '../src/checker-components.ts'
+import { declaredExports, exportName, propsTypeOf } from '../src/checker-components.ts'
 
 const FILES: Record<string, string> = {
   'Badge.tsx': `export default function Badge(props: { label: string }) { return <span>{props.label}</span> }\n`,
@@ -15,11 +15,18 @@ const FILES: Record<string, string> = {
   'Wrapped.tsx': `export default (props: { label: string }) => <u>{props.label}</u>\n`,
   'Reexport.tsx': `export { default } from './Badge'\n`,
   'Named.tsx': `export function Named(props: { label: string }) { return <u>{props.label}</u> }\n`,
+  'Twice.tsx': `export default function Twice(props: { label: string }) { return <u>{props.label}</u> }\nexport { Twice }\n`,
+  'Aliased.tsx': `function Chip(props: { label: string }) { return <u>{props.label}</u> }\nexport { Chip, Chip as Tag }\n`,
+  'AliasedDefault.tsx': `const Pill = (props: { label: string }) => <u>{props.label}</u>\nexport default Pill\nexport { Pill as Lozenge }\n`,
+  'One.tsx': `export function Item(props: { one: string }) { return <u>{props.one}</u> }\n`,
+  'Two.tsx': `export function Item(props: { two: string }) { return <u>{props.two}</u> }\n`,
+  'Barrel.tsx': `export { Item } from './One'\nexport { Item as Other } from './Two'\nexport * from './Named'\n`,
 }
 
 let dir: string
 let names: Map<string, string[]>
 let propNames: Map<string, string[]>
+let declared: Map<string, string[]>
 
 beforeAll(() => {
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'checker-components-')))
@@ -44,9 +51,14 @@ beforeAll(() => {
   const { checker } = program.getProject()
   names = new Map()
   propNames = new Map()
+  declared = new Map()
   for (const file of Object.keys(FILES)) {
     const moduleSymbol = checker.getSymbolOfSourceFile(join(dir, 'src', file))!
     const exported = checker.getExportsOfModule(moduleSymbol)
+    declared.set(
+      file,
+      declaredExports(checker, moduleSymbol).map((e: any) => exportName(checker, e)),
+    )
     names.set(
       file,
       exported.map((e: any) => exportName(checker, e)),
@@ -94,5 +106,35 @@ describe('exportName', () => {
   it('still finds the props of every one of them', () => {
     expect(propNames.get('Badge.tsx')).toStrictEqual(['label'])
     expect(propNames.get('button-group.tsx')).toStrictEqual(['label'])
+  })
+})
+
+describe('declaredExports', () => {
+  it('counts a function exported as default and by name once', () => {
+    expect(names.get('Twice.tsx')).toStrictEqual(['Twice', 'Twice'])
+    expect(declared.get('Twice.tsx')).toStrictEqual(['Twice'])
+  })
+
+  it('counts a declaration exported under an alias once, under its own name', () => {
+    expect(declared.get('Aliased.tsx')).toStrictEqual(['Chip'])
+  })
+
+  it('counts a default export and an alias of the same declaration once', () => {
+    expect(declared.get('AliasedDefault.tsx')).toStrictEqual(['Pill'])
+  })
+
+  it('counts two components of one name in different files both', () => {
+    expect(declared.get('One.tsx')).toStrictEqual(['Item'])
+    expect(declared.get('Two.tsx')).toStrictEqual(['Item'])
+  })
+
+  it('leaves a re-export to the file that declares the component', () => {
+    expect(declared.get('Reexport.tsx')).toStrictEqual([])
+    expect(declared.get('Barrel.tsx')).toStrictEqual([])
+  })
+
+  it('keeps an ordinary file as it is', () => {
+    expect(declared.get('Named.tsx')).toStrictEqual(['Named'])
+    expect(declared.get('Badge.tsx')).toStrictEqual(['Badge'])
   })
 })

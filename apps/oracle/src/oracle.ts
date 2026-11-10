@@ -24,7 +24,7 @@ import { readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { API } from 'typescript-beta/sync'
 import { checkCaliperShape, flattenProps, requireComparison } from './caliper-input.ts'
-import { exportName, propsTypeOf } from './checker-components.ts'
+import { declaredExports, exportName, propsTypeOf } from './checker-components.ts'
 import { nonComponentReason, type ShapeProp } from './component-shape.ts'
 import { checkerNormalizer } from './oracle-checker.ts'
 import { caliperNorm } from './caliper-norm.ts'
@@ -249,7 +249,7 @@ for (const file of files) {
   const moduleSymbol = checker.getSymbolOfSourceFile(file)
   if (!moduleSymbol) continue
   const candidates = caliperByFile.get(rel(file)) ?? []
-  for (const exported of checker.getExportsOfModule(moduleSymbol)) visitExport(exported, candidates, file)
+  for (const exported of declaredExports(checker, moduleSymbol)) visitExport(exported, candidates, file)
 }
 const compareMs = performance.now() - start
 requireComparison(totals.propsShared, totals.componentsMatched)
