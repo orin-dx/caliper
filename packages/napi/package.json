@@ -46,7 +46,7 @@
     "caliper-docgen-napi-win32-x64-msvc": "0.10.0"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.10.9"
+    "@napi-rs/cli": "^3.10.11"
   },
   "license": "FSL-1.1-MIT",
   "repository": {
