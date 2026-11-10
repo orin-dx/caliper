@@ -936,16 +936,16 @@
       "flags": 33554497,
       "checkFlags": 0,
       "declarations": [
-        "5140.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es5.d.ts",
-        "6124.262./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es5.d.ts",
-        "3.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es2015.core.d.ts",
-        "282.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es2015.iterable.d.ts",
-        "120.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es2015.symbol.wellknown.d.ts",
-        "3.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es2016.array.include.d.ts",
-        "199.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es2019.array.d.ts",
-        "3.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es2022.array.d.ts"
+        "5140.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es5.d.ts",
+        "6124.262./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es5.d.ts",
+        "3.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es2015.core.d.ts",
+        "282.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es2015.iterable.d.ts",
+        "120.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es2015.symbol.wellknown.d.ts",
+        "3.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es2016.array.include.d.ts",
+        "199.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es2019.array.d.ts",
+        "3.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es2022.array.d.ts"
       ],
-      "valueDeclaration": "6124.262./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es5.d.ts"
+      "valueDeclaration": "6124.262./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es5.d.ts"
     }
   },
   {

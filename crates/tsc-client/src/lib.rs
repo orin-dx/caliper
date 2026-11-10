@@ -33,7 +33,7 @@ mod protocol;
 mod supervisor;
 pub mod transport; // also used by tests/bin/fake_tsc.rs, so client and fake server can't drift on wire format
 
-pub use client::{Client, TaggedResponse};
+pub use client::{Client, RawResponse, TaggedResponse};
 pub use error::{MalformedFrameReason, TscClientError};
 pub use protocol::Notification;
 pub use supervisor::{Supervisor, SupervisorConfig};

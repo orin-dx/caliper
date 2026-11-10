@@ -8,7 +8,7 @@ use tokio::sync::{Mutex as AsyncMutex, Notify, mpsc, oneshot};
 use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
 
-use crate::error::TscClientError;
+use crate::error::{MalformedFrameReason, TscClientError};
 use crate::protocol::{self, IncomingMessage, Notification, RequestId, RequestMessage};
 use crate::transport::{self, ContentLengthDecoder};
 
@@ -16,7 +16,7 @@ use crate::transport::{self, ContentLengthDecoder};
 /// in `request()` under their own deadline instead of buffering without limit. The bound counts frames, not bytes.
 const WRITE_QUEUE_FRAMES: usize = 16;
 
-type PendingSender = oneshot::Sender<Result<TaggedResponse, TscClientError>>;
+type PendingSender = oneshot::Sender<Result<RawResponse, TscClientError>>;
 
 /// A response's decoded `result`, tagged with `seq`, the wire-arrival order it was read in. A caller can tell whether
 /// an answer could reflect an update it already saw acknowledged (`answer.seq > update_ack.seq`).
@@ -26,6 +26,31 @@ pub struct TaggedResponse {
     pub value: serde_json::Value,
     /// The wire-arrival order the response was read in, counted from the start of the session.
     pub seq: u64,
+}
+
+/// A response's `result` as the JSON text it arrived as, tagged with `seq` as [`TaggedResponse`] is. A caller that
+/// knows the shape it expects parses the text once, straight into that shape, instead of first into a
+/// [`serde_json::Value`] tree: on a large answer the tree costs several times the parse.
+#[derive(Debug, Clone)]
+pub struct RawResponse {
+    /// The response's `result`, unparsed; `null` when it had none.
+    pub result: Box<serde_json::value::RawValue>,
+    /// The wire-arrival order the response was read in, counted from the start of the session.
+    pub seq: u64,
+}
+
+impl RawResponse {
+    /// The result parsed into a [`serde_json::Value`]: the form [`Client::request`] answers in.
+    fn tagged(self) -> Result<TaggedResponse, TscClientError> {
+        let value = serde_json::from_str(self.result.get())
+            .map_err(|_source| TscClientError::MalformedFrame { reason: MalformedFrameReason::InvalidJson })?;
+        Ok(TaggedResponse { value, seq: self.seq })
+    }
+}
+
+/// The text of a JSON `null`, for a response that carried no `result`.
+fn null() -> Box<serde_json::value::RawValue> {
+    serde_json::value::RawValue::NULL.to_owned()
 }
 
 /// State shared with the reader and writer tasks. Kept apart from [`ClientInner`] so the tasks never hold the write
@@ -60,7 +85,7 @@ impl Shared {
                     let result = if let Some(error) = response.error {
                         Err(TscClientError::RpcError { code: error.code, message: error.message, data: error.data })
                     } else {
-                        Ok(TaggedResponse { value: response.result.unwrap_or(serde_json::Value::Null), seq })
+                        Ok(RawResponse { result: response.result.unwrap_or_else(null), seq })
                     };
                     // A dropped receiver means the caller already gave up (e.g. timed
                     // out) — nothing left to deliver to.
@@ -228,17 +253,23 @@ impl Client {
         params: serde_json::Value,
         deadline: Duration,
     ) -> Result<TaggedResponse, TscClientError> {
+        self.request_raw(method, params, deadline).await?.tagged()
+    }
+
+    /// [`Client::request`], with the `result` left as the JSON text it arrived as (see [`RawResponse`]).
+    pub async fn request_raw(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+        deadline: Duration,
+    ) -> Result<RawResponse, TscClientError> {
         match tokio::time::timeout(deadline, self.enqueue_and_wait(method, params)).await {
             Ok(result) => result,
             Err(_elapsed) => Err(TscClientError::Timeout { method: method.to_string(), after: deadline }),
         }
     }
 
-    async fn enqueue_and_wait(
-        &self,
-        method: &str,
-        params: serde_json::Value,
-    ) -> Result<TaggedResponse, TscClientError> {
+    async fn enqueue_and_wait(&self, method: &str, params: serde_json::Value) -> Result<RawResponse, TscClientError> {
         let shared = &self.0.shared;
         if let Some(reason) = self.closed() {
             return Err(reason);
