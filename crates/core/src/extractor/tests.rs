@@ -1754,6 +1754,126 @@ fn a_component_records_the_exports_its_module_has_for_it_or_for_the_export_it_is
     );
 }
 
+#[test]
+fn an_inline_sub_component_has_only_the_exports_of_the_parent_it_is_attached_to() {
+    // Each mapping is told apart by its props type, as its name `Item` is shared.
+    let exports = |source: &str| -> Vec<(String, String, Vec<String>)> {
+        let data = parse_file(Utf8Path::new("/test/items.tsx"), source);
+        let mut found: Vec<(String, String, Vec<String>)> = data
+            .component_mappings
+            .iter()
+            .map(|m| {
+                (
+                    m.component_name.to_string(),
+                    m.props_type_name.to_string(),
+                    m.exports.iter().map(ToString::to_string).collect(),
+                )
+            })
+            .collect();
+        found.sort_unstable();
+        found
+    };
+    let row = |name: &str, props: &str, exports: &[&str]| {
+        (name.to_string(), props.to_string(), exports.iter().map(ToString::to_string).collect::<Vec<_>>())
+    };
+    let source = r#"
+        interface AProps { a: string }
+        interface BProps { b: string }
+        export function A(props: AProps) { return <ul />; }
+        export function B(props: BProps) { return <ol />; }
+        A.Item = (props: AProps) => <li />;
+        B.Item = (props: BProps) => <li />;
+    "#;
+    assert_eq!(
+        exports(source),
+        [
+            row("A", "AProps", &["A"]),
+            row("B", "BProps", &["B"]),
+            row("Item", "AProps", &["A.Item"]),
+            row("Item", "BProps", &["B.Item"])
+        ]
+    );
+    let source = r#"
+        interface AProps { a: string }
+        interface BProps { b: string }
+        interface CProps { c: string }
+        function ARoot(props: AProps) { return <ul />; }
+        export const A = Object.assign(ARoot, { Item: (props: AProps) => <li /> });
+        export function B(props: BProps) { return <ol />; }
+        B.Item = (props: BProps) => <li />;
+        function C(props: CProps) { return <p />; }
+        C.Item = (props: CProps) => <li />;
+        const shown = <C c="x" />;
+    "#;
+    assert_eq!(
+        exports(source),
+        [
+            row("A", "AProps", &["A"]),
+            row("B", "BProps", &["B"]),
+            row("C", "CProps", &[]),
+            row("Item", "AProps", &["A.Item"]),
+            row("Item", "BProps", &["B.Item"]),
+            row("Item", "CProps", &[]),
+        ]
+    );
+    // A binding that shares the inline sub-component's name keeps its own exports.
+    let source = r#"
+        interface AProps { a: string }
+        interface IProps { i: string }
+        export function A(props: AProps) { return <ul />; }
+        A.Item = (props: AProps) => <li />;
+        export default function Item(props: IProps) { return <li />; }
+    "#;
+    assert_eq!(
+        exports(source),
+        [row("A", "AProps", &["A"]), row("Item", "AProps", &["A.Item"]), row("Item", "IProps", &["default"])]
+    );
+    let source = r#"
+        interface AProps { a: string }
+        interface IProps { i: string }
+        export function A(props: AProps) { return <ul />; }
+        A.Item = (props: AProps) => <li />;
+        function Item(props: IProps) { return <li />; }
+        const shown = <Item i="x" />;
+    "#;
+    assert_eq!(
+        exports(source),
+        [row("A", "AProps", &["A"]), row("Item", "AProps", &["A.Item"]), row("Item", "IProps", &[])]
+    );
+}
+
+#[test]
+fn a_binding_is_not_taken_for_an_inline_sub_component_of_the_same_name() {
+    let source = r#"
+        interface AProps { a: string }
+        interface BaseProps { base: string }
+        export function A(props: AProps) { return <ul />; }
+        A.Item = (props: AProps) => <li />;
+        export const Item = Base;
+        function Base(props: BaseProps) { return <li />; }
+    "#;
+    let data = parse_file(Utf8Path::new("/test/binding.tsx"), source);
+    let mut found: Vec<(String, String, Vec<String>)> = data
+        .component_mappings
+        .iter()
+        .map(|m| {
+            (
+                m.component_name.to_string(),
+                m.props_type_name.to_string(),
+                m.exports.iter().map(ToString::to_string).collect(),
+            )
+        })
+        .collect();
+    found.sort_unstable();
+    let row = |name: &str, props: &str, exports: &[&str]| {
+        (name.to_string(), props.to_string(), exports.iter().map(ToString::to_string).collect::<Vec<_>>())
+    };
+    assert_eq!(
+        found,
+        [row("A", "AProps", &["A"]), row("Item", "AProps", &["A.Item"]), row("Item", "BaseProps", &["Item"]),]
+    );
+}
+
 fn named(expected: &[(&str, &[&str])]) -> Vec<(String, Vec<String>)> {
     expected
         .iter()

@@ -1813,6 +1813,12 @@ impl ComponentMapping {
         }
     }
 
+    /// Whether this is the component the module's binding `name` declares. An inline sub-component
+    /// (`Parent.Name = (props: P) => …`) has the name but no binding, and another component can have the binding.
+    pub fn is_binding_named(&self, name: &str) -> bool {
+        self.rule != DetectionRule::AttachedSubComponent && self.component_name == name
+    }
+
     /// Whether its module exports it, directly or as a sub-component attached to an exported component.
     pub fn exported(&self) -> bool {
         !self.exports.is_empty()

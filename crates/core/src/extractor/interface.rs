@@ -8,6 +8,7 @@ use crate::types::{
     RawDefault,
 };
 
+use super::uses::Subject;
 use super::{SourceDataCollector, is_pascal_case, js_text};
 
 /// Extract the binding name and the `as const`-peeled inner expression from
@@ -367,7 +368,7 @@ impl<'src> SourceDataCollector<'src> {
             return;
         }
 
-        if let Some(mapping) = self.data.component_mappings.iter_mut().find(|m| m.component_name == obj_name) {
+        if let Some(mapping) = self.data.component_mappings.iter_mut().find(|m| m.is_binding_named(&obj_name)) {
             mapping.param_defaults.extend(defaults);
         }
     }
@@ -428,12 +429,12 @@ impl<'src> SourceDataCollector<'src> {
                 Expression::FunctionExpression(fe) => (&fe.params, fe.span.start, fe.span.end),
                 Expression::ArrowFunctionExpression(afe) => (&afe.params, afe.span.start, afe.span.end),
                 Expression::Identifier(sub) => {
-                    self.record_attached(sub.name.as_str(), parent_id.name.as_str(), &key_name);
+                    self.record_attached(Subject::local(sub.name.as_str()), parent_id.name.as_str(), &key_name);
                     continue;
                 }
                 _ => continue,
             };
-            self.record_attached(&key_name, parent_id.name.as_str(), &key_name);
+            self.record_attached(Subject::Inline(span_start), parent_id.name.as_str(), &key_name);
             self.record_inline_sub_component(key_name, "an Object.assign-attached", params, span_start, span_end);
         }
     }
@@ -473,7 +474,7 @@ impl<'src> SourceDataCollector<'src> {
             }
             _ => return,
         };
-        self.record_attached(key_name, parent.name.as_str(), key_name);
+        self.record_attached(Subject::Inline(span_start), parent.name.as_str(), key_name);
         self.record_inline_sub_component(key_name.to_owned(), "a property-assigned", params, span_start, span_end);
     }
 

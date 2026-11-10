@@ -25,21 +25,22 @@ const FAKE_VERSION: &str = "7.1.0-test";
 struct Project {
     _dir: tempfile::TempDir,
     root: Utf8PathBuf,
+    fixture: &'static str,
 }
 
-/// `tests/fixtures/exports` in a scratch directory whose name has an upper-case letter (see `replay_tsc.rs`), with
+/// `tests/fixtures/<fixture>` in a scratch directory whose name has an upper-case letter (see `replay_tsc.rs`), with
 /// `replay-tsc` installed as `node_modules/typescript/bin/tsc` when `replay`.
-fn project(replay: bool) -> Project {
+fn project(fixture: &'static str, replay: bool) -> Project {
     let dir = tempfile::Builder::new().prefix("Exports").tempdir().unwrap();
     let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
-    copy_fixture(&Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/exports"), &root);
+    copy_fixture(&Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(fixture), &root);
     if replay {
         let package = root.join("node_modules/typescript");
         std::fs::create_dir_all(package.join("bin")).unwrap();
         std::fs::write(package.join("package.json"), format!(r#"{{"version": "{FAKE_VERSION}"}}"#)).unwrap();
         std::fs::copy(env!("CARGO_BIN_EXE_replay-tsc"), package.join("bin/tsc")).unwrap();
     }
-    Project { _dir: dir, root }
+    Project { _dir: dir, root, fixture }
 }
 
 fn structural(project: &Project) -> ExtractionOutput {
@@ -55,7 +56,7 @@ fn request(project: &Project, targets: Vec<Target>, real: Option<&Utf8PathBuf>) 
             request.expected_versions = &[FAKE_VERSION];
             request.extra_env.push((
                 "REPLAY_FIXTURE".to_string(),
-                format!("{}/tests/fixtures/exports.recording.json", env!("CARGO_MANIFEST_DIR")),
+                format!("{}/tests/fixtures/{}.recording.json", env!("CARGO_MANIFEST_DIR"), project.fixture),
             ));
         }
     }
@@ -89,7 +90,7 @@ fn owned(expected: &[(&str, &[&str])]) -> Vec<(String, Vec<String>)> {
 }
 
 fn each_component_gets_the_props_of_its_own_export(real: Option<&Utf8PathBuf>) {
-    let project = project(real.is_none());
+    let project = project("exports", real.is_none());
     let mut output = structural(&project);
     let expected = owned(&[
         ("CardImpl", &["title"]),
@@ -127,7 +128,7 @@ fn each_component_gets_the_props_of_its_own_export_from_a_real_tsrs() {
 /// take the module's `default` (`Other`) instead.
 #[test]
 fn a_missing_export_keeps_the_structural_result_and_never_falls_back_to_default() {
-    let project = project(true);
+    let project = project("exports", true);
     let mut output = structural(&project);
     output.components.get_mut("CardImpl").unwrap().exports = vec![ComponentExport::named("Gone")];
     let before = output.components["CardImpl"].clone();
@@ -155,7 +156,7 @@ fn a_missing_export_keeps_the_structural_result_and_never_falls_back_to_default(
 #[test]
 fn an_export_declared_in_another_file_keeps_the_structural_result() {
     let Some(bin) = tsrs_bin() else { return };
-    let project = project(false);
+    let project = project("exports", false);
     let mut output = structural(&project);
     output.components.get_mut("Menu").unwrap().exports = vec![ComponentExport::named("Elsewhere")];
     let before = output.components["Menu"].clone();
@@ -173,4 +174,60 @@ fn an_export_declared_in_another_file_keeps_the_structural_result() {
             vec!["Menu".to_string()]
         )]
     );
+}
+
+/// What each component is, as a reader of the output sees it: its name, the exports it has and its props.
+fn components_with_exports(output: &ExtractionOutput) -> Vec<(String, Vec<String>, Vec<String>)> {
+    let mut found: Vec<_> = output
+        .components
+        .values()
+        .map(|entry| {
+            (
+                entry.display_name.clone(),
+                entry.exports.iter().map(ToString::to_string).collect(),
+                entry.props.keys().cloned().collect(),
+            )
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+/// `A.Item = …` and `B.Item = …` in one file are two components of one name. Each has the props of its own property,
+/// not the first attached `Item`'s: the checker was asked for `A.Item` and for `B.Item` and no other.
+fn two_inline_sub_components_of_one_name_each_get_their_own_props(real: Option<&Utf8PathBuf>) {
+    let project = project("items", real.is_none());
+    let mut output = structural(&project);
+    let row = |name: &str, exports: &[&str], props: &[&str]| {
+        (
+            name.to_string(),
+            exports.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            props.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        )
+    };
+    let expected = [
+        row("A", &["A"], &["a"]),
+        row("B", &["B"], &["b"]),
+        row("Item", &["A.Item"], &["itemOfA"]),
+        row("Item", &["B.Item"], &["itemOfB"]),
+    ];
+    assert_eq!(components_with_exports(&output), expected, "the structural pass");
+
+    let outcome = resolve(request(&project, targets_of(&output), real));
+    merge_semantic(&mut output, outcome);
+
+    assert_eq!(components_with_exports(&output), expected, "the checker");
+    let messages: Vec<&str> = output.diagnostics.iter().map(|d| d.message.as_str()).collect();
+    assert!(messages.contains(&"4 component(s) resolved by the TypeScript checker"), "{messages:?}");
+}
+
+#[test]
+fn two_inline_sub_components_of_one_name_each_get_their_own_props_replayed() {
+    two_inline_sub_components_of_one_name_each_get_their_own_props(None);
+}
+
+#[test]
+fn two_inline_sub_components_of_one_name_each_get_their_own_props_from_a_real_tsrs() {
+    let Some(bin) = tsrs_bin() else { return };
+    two_inline_sub_components_of_one_name_each_get_their_own_props(Some(&bin));
 }

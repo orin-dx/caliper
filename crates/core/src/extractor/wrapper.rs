@@ -249,7 +249,7 @@ impl<'src> SourceDataCollector<'src> {
         let (tagged, others): (Vec<_>, Vec<_>) =
             pending_wrappers.into_iter().zip(shared_tags).partition(|(pending, _)| pending.tag.is_some());
         for (pending, shared_tag) in others.into_iter().chain(tagged) {
-            if self.data.component_mappings.iter().any(|m| m.component_name == pending.name) {
+            if self.data.component_mappings.iter().any(|m| m.is_binding_named(&pending.name)) {
                 continue;
             }
             if let Some(tag) = &pending.tag {
@@ -513,7 +513,7 @@ impl<'src> SourceDataCollector<'src> {
     /// Turn the recorded factory calls into mappings, now that every alias in the file has had its chance.
     pub(super) fn promote_factory_calls(&mut self) {
         for pending in std::mem::take(&mut self.pending_factory_calls) {
-            if self.data.component_mappings.iter().any(|m| m.component_name == pending.name) {
+            if self.data.component_mappings.iter().any(|m| m.is_binding_named(&pending.name)) {
                 continue;
             }
             self.data.component_mappings.push(

@@ -73,7 +73,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             });
             if let Some((base_name, props_name)) = self.cast_component_aliases.get(local).cloned()
                 && let Some(index) =
-                    self.data.component_mappings.iter().position(|mapping| mapping.component_name == base_name)
+                    self.data.component_mappings.iter().position(|mapping| mapping.is_binding_named(&base_name))
             {
                 let mut public = self.data.component_mappings[index].clone();
                 public.component_name = exported.to_owned();
@@ -86,7 +86,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 // A rename (`export { A as B }`) replaces only the mapping of the inner component being re-exported
                 // under its own name; another local that happens to be called `B` keeps its mapping.
                 let existing = (local == exported || base_name == exported)
-                    .then(|| self.data.component_mappings.iter().position(|mapping| mapping.component_name == exported))
+                    .then(|| self.data.component_mappings.iter().position(|mapping| mapping.is_binding_named(exported)))
                     .flatten();
                 if let Some(at) = existing {
                     self.data.component_mappings[at] = public;

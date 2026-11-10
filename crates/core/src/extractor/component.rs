@@ -100,7 +100,7 @@ impl<'src> SourceDataCollector<'src> {
     pub(super) fn try_record_cast_component_alias<'a>(&mut self, decl: &VariableDeclarator<'a>, name: &str) {
         let Some(Expression::TSAsExpression(assertion)) = decl.init.as_ref() else { return };
         let Expression::Identifier(inner) = assertion.expression.without_parentheses() else { return };
-        let has_base = self.data.component_mappings.iter().any(|mapping| mapping.component_name == inner.name.as_str());
+        let has_base = self.data.component_mappings.iter().any(|mapping| mapping.is_binding_named(inner.name.as_str()));
         if !has_base {
             return;
         }
@@ -743,7 +743,7 @@ impl<'src> SourceDataCollector<'src> {
 
     /// Bind `name` to a clone of the component `inner` once that is collected.
     fn alias_outcome(&mut self, name: &str, inner: &str, call: Option<AliasCall>) -> AliasOutcome {
-        let Some(base) = self.data.component_mappings.iter().find(|m| m.component_name == inner) else {
+        let Some(base) = self.data.component_mappings.iter().find(|m| m.is_binding_named(inner)) else {
             return AliasOutcome::NoBase;
         };
         if call.is_some_and(|call| !call.wrapper) {
@@ -778,7 +778,7 @@ impl<'src> SourceDataCollector<'src> {
             let before = pending.len();
             let mut waiting = Vec::new();
             for alias in pending {
-                if self.data.component_mappings.iter().any(|m| m.component_name == alias.name) {
+                if self.data.component_mappings.iter().any(|m| m.is_binding_named(&alias.name)) {
                     continue;
                 }
                 match self.alias_outcome(&alias.name, &alias.inner, alias.call) {

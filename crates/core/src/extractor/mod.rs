@@ -612,12 +612,15 @@ impl<'src> SourceDataCollector<'src> {
                 .collect();
             let hidden: FxHashSet<CompactString> =
                 self.aliased_away.iter().filter(|n| !exported.contains(n.as_str())).cloned().collect();
-            self.data.component_mappings.retain(|m| !hidden.contains(m.component_name.as_str()));
+            self.data.component_mappings.retain(|m| match uses::Subject::of(m) {
+                uses::Subject::Local(name) => !hidden.contains(&name),
+                uses::Subject::Inline(_) => true,
+            });
         }
         let exports = self.component_exports();
         self.drop_functions_used_only_as_functions(&exports);
         for mapping in &mut self.data.component_mappings {
-            mapping.exports = exports.get(mapping.component_name.as_str()).cloned().unwrap_or_default();
+            mapping.exports = exports.get(&uses::Subject::of(mapping)).cloned().unwrap_or_default();
             for (start, end, defaults) in &self.body_defaults {
                 if *start >= mapping.span_start && *end <= mapping.span_end {
                     for (name, default) in defaults {
@@ -636,7 +639,7 @@ impl<'src> SourceDataCollector<'src> {
             }
         }
         for (obj_name, display_name) in self.pending_display_name_renames.drain(..) {
-            if let Some(mapping) = self.data.component_mappings.iter_mut().find(|m| m.component_name == obj_name) {
+            if let Some(mapping) = self.data.component_mappings.iter_mut().find(|m| m.is_binding_named(&obj_name)) {
                 mapping.component_name = display_name;
             }
         }

@@ -34,7 +34,7 @@ impl SourceDataCollector<'_> {
         let name = id.name.as_str();
         let file = self.file_path.clone();
         let Some(index) =
-            self.data.component_mappings.iter().position(|m| m.component_name == name && m.file_path == file)
+            self.data.component_mappings.iter().position(|m| m.is_binding_named(name) && m.file_path == file)
         else {
             return;
         };
