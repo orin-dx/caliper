@@ -94,6 +94,9 @@ test-checker-lane:
     pnpm --filter caliper-docgen-oracle construct:parity
     CALIPER_SEMANTIC=1 pnpm --filter caliper-docgen-oracle construct:checker
     pnpm --filter caliper-docgen-oracle exec vitest run tests/construct-checker-lane.test.ts
+    # S5's gate on tsrs: generic components instantiated (Test / Rust runs the same tests on the Go checker).
+    cargo test --locked -p caliper-docgen-semantic --lib instantiate
+    cargo test --locked -p caliper-docgen-semantic --test instantiate
 
 # Build the native binding and run the Vite plugin against it
 test-integration:

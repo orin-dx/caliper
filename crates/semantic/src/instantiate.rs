@@ -1,0 +1,259 @@
+//! Generic components, read through an instantiation the checker forms itself.
+//!
+//! The props parameter of `function Poly<E extends ElementType = "div">(props: PolyProps<E>)` is `PolyProps<E>` with `E`
+//! open, which has two props where `<Poly />` has every attribute of a `div`. The checker's API has no request that
+//! instantiates a signature, so the instantiation is written as source: one file, held in the checker's memory and never
+//! on disk (`createSnapshot` with a `fileSystem` layer), declares for each such component
+//!
+//! ```ts
+//! import type { "Poly" as CaliperComponent0 } from "/project/src/Poly.tsx"; export type CaliperProbe0 = Parameters<typeof CaliperComponent0<"div">>[0];
+//! ```
+//!
+//! and the props are those of `CaliperProbe0`, read as any props type is. The file is added to a second snapshot of the
+//! same program, made only when a requested component is generic, so a project without one sends no request more. A
+//! line the checker reports an error on (a default it prints with a name the file cannot see) sends that component to
+//! its structural result with the error as the reason, and a checker that does not load the file sends them all; a
+//! result is never read from an instantiation that did not form.
+
+use std::sync::Arc;
+
+use caliper_docgen_core::types::semantic::{PropInterner, SemanticComponent, SemanticOutcome, SemanticProp};
+use camino::Utf8Path;
+use rustc_hash::FxHashMap;
+
+use crate::component;
+use crate::convert::Converter;
+use crate::rpc::{CallError, Rpc, SignatureInfo};
+use crate::{Target, fallback_of};
+
+/// The file the instantiations are declared in, in the project's root directory. It exists only in the checker's memory.
+const PROBE_FILE: &str = "__caliper_instantiations__.ts";
+
+/// A generic component to read through an instantiation: the name its module exports it under, and the type arguments.
+#[derive(Debug, Clone)]
+pub(crate) struct Instantiation {
+    pub export: String,
+    pub arguments: Vec<String>,
+}
+
+/// The type arguments of the instantiation a generic component gets when written without any (`<Poly />`): its first
+/// type parameter's declared default, as the checker prints it. The checker fills in the parameters after it from their
+/// own defaults, which may refer to the first. `None` when the component is not generic or its first type parameter
+/// declares no default: then no instantiation is the one a story renders, and the props keep the open parameters.
+pub(crate) async fn default_arguments(rpc: &Rpc, signature: &SignatureInfo) -> Result<Option<Vec<String>>, CallError> {
+    if signature.type_parameters.is_empty() {
+        return Ok(None);
+    }
+    // The ids a signature lists are not handles the checker knows until it has answered for them itself.
+    let parameters = rpc.type_parameters(signature.id).await?;
+    let Some(first) = parameters.first() else { return Ok(None) };
+    let Some(default) = rpc.default_of_type_parameter(first.id).await? else { return Ok(None) };
+    Ok(Some(vec![rpc.type_to_string(default.id).await?]))
+}
+
+/// The line of the probe file that instantiates `instantiation`, the component exported by `file`. Each component is one
+/// line, so an error the checker reports is the error of the line it starts on.
+fn probe_line(index: usize, file: &Utf8Path, instantiation: &Instantiation) -> String {
+    let quoted = |text: &str| serde_json::Value::String(text.to_string()).to_string();
+    format!(
+        "import type {{ {export} as CaliperComponent{index} }} from {file}; export type CaliperProbe{index} = \
+         Parameters<typeof CaliperComponent{index}<{arguments}>>[0];",
+        export = quoted(&instantiation.export),
+        file = quoted(file.as_str()),
+        arguments = instantiation.arguments.join(", "),
+    )
+}
+
+/// The written form of an instantiation, for a reason: `Poly<"div">`.
+fn written(target: &Target, instantiation: &Instantiation) -> String {
+    format!("{}<{}>", target.display_name, instantiation.arguments.join(", "))
+}
+
+/// Answers each generic component from its instantiation, in a snapshot of `rpc`'s program over `root_files` with the
+/// probe file added. The snapshot is released before this returns.
+pub(crate) async fn answer(
+    rpc: &Rpc,
+    root_files: &[String],
+    project_root: &Utf8Path,
+    interner: &PropInterner,
+    reverse: bool,
+    mut pending: Vec<(Target, Instantiation)>,
+) -> Result<SemanticOutcome, CallError> {
+    let mut outcome = SemanticOutcome::default();
+    // The file's text is part of the request, so it must not depend on the order the components were answered in.
+    pending.sort_by(|(a, _), (b, _)| (&a.file_path, &a.display_name).cmp(&(&b.file_path, &b.display_name)));
+    let probe = project_root.join(PROBE_FILE);
+    let text: Vec<String> = pending
+        .iter()
+        .enumerate()
+        .map(|(index, (target, instantiation))| probe_line(index, &target.file_path, instantiation))
+        .collect();
+    let all_fall_back = |outcome: &mut SemanticOutcome, reason: &str| {
+        outcome.fallbacks.extend(pending.iter().map(|(target, _)| fallback_of(target, reason)));
+    };
+
+    let layered = match rpc.layered(root_files, &[(probe.to_string(), text.join("\n"))]).await {
+        Ok(layered) => Arc::new(layered),
+        Err(CallError::Rejected(message)) => {
+            all_fall_back(&mut outcome, &format!("the checker could not instantiate a generic component: {message}"));
+            return Ok(outcome);
+        }
+        Err(fatal) => return Err(fatal),
+    };
+    let answered = answer_layered(&layered, probe.as_str(), interner, reverse, &pending).await;
+    layered.release().await;
+    match answered {
+        Ok(answered) => Ok(answered),
+        Err(CallError::Rejected(message)) => {
+            all_fall_back(&mut outcome, &format!("the checker rejected a request: {message}"));
+            Ok(outcome)
+        }
+        Err(fatal) => Err(fatal),
+    }
+}
+
+async fn answer_layered(
+    layered: &Arc<Rpc>,
+    probe: &str,
+    interner: &PropInterner,
+    reverse: bool,
+    pending: &[(Target, Instantiation)],
+) -> Result<SemanticOutcome, CallError> {
+    let mut outcome = SemanticOutcome::default();
+    let Some(module) = layered.source_file_symbol(probe).await? else {
+        let reason = "the checker did not load the file that instantiates generic components";
+        outcome.fallbacks.extend(pending.iter().map(|(target, _)| fallback_of(target, reason)));
+        return Ok(outcome);
+    };
+    let probes: FxHashMap<String, serde_json::Value> = layered
+        .exports_of_module(&module.reference)
+        .await?
+        .into_iter()
+        .map(|symbol| (symbol.name, symbol.reference))
+        .collect();
+    let mut errors: FxHashMap<usize, String> = FxHashMap::default();
+    for diagnostic in layered.semantic_diagnostics(probe).await?.into_iter().filter(|d| d.is_error()) {
+        errors.entry(diagnostic.start_position.line).or_insert_with(|| diagnostic.message());
+    }
+
+    let converter = Converter::new(layered.clone(), reverse);
+    for (index, (target, instantiation)) in pending.iter().enumerate() {
+        let read = match (errors.get(&index), probes.get(&format!("CaliperProbe{index}"))) {
+            (Some(error), _) => {
+                Err(format!("the instantiation {} could not be formed: {error}", written(target, instantiation)))
+            }
+            (None, None) => Err(format!("the instantiation {} was not declared", written(target, instantiation))),
+            (None, Some(symbol)) => match read_probe(layered, &converter, interner, symbol, target).await {
+                Ok(read) => read,
+                Err(CallError::Rejected(message)) => Err(format!("the checker rejected a request: {message}")),
+                Err(fatal) => return Err(fatal),
+            },
+        };
+        match read {
+            Ok(props) => outcome.components.push(SemanticComponent {
+                file_path: target.file_path.clone(),
+                display_name: target.display_name.clone(),
+                props,
+            }),
+            Err(reason) => outcome.fallbacks.push(fallback_of(target, &reason)),
+        }
+    }
+    Ok(outcome)
+}
+
+async fn read_probe(
+    layered: &Rpc,
+    converter: &Converter,
+    interner: &PropInterner,
+    symbol: &serde_json::Value,
+    target: &Target,
+) -> Result<Result<Vec<Arc<SemanticProp>>, String>, CallError> {
+    let props_type = layered.declared_type_of_symbol(symbol).await?;
+    component::props_of_type(layered, converter, interner, &props_type, target).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_probe_line_imports_the_export_by_its_quoted_name_and_instantiates_it() {
+        let instantiation = Instantiation { export: "default".to_string(), arguments: vec!["\"div\"".to_string()] };
+
+        let line = probe_line(3, Utf8Path::new("/p/src/Poly.tsx"), &instantiation);
+
+        assert_eq!(
+            line,
+            "import type { \"default\" as CaliperComponent3 } from \"/p/src/Poly.tsx\"; export type CaliperProbe3 = \
+             Parameters<typeof CaliperComponent3<\"div\">>[0];"
+        );
+    }
+
+    #[test]
+    fn a_path_with_quotes_or_backslashes_stays_one_string() {
+        let instantiation = Instantiation { export: "Poly".to_string(), arguments: vec!["string".to_string()] };
+
+        let line = probe_line(0, Utf8Path::new("C:\\p\\a\"b.tsx"), &instantiation);
+
+        assert!(line.contains(r#"from "C:\\p\\a\"b.tsx";"#), "{line}");
+    }
+
+    /// `TSRS_BIN`, else `CALIPER_TEST_TSC`; `None` skips, which on CI is a failure (as in `tests/instantiate.rs`).
+    #[allow(clippy::print_stderr, reason = "a skipped test says so")]
+    fn real_checker() -> Option<camino::Utf8PathBuf> {
+        let checker = ["TSRS_BIN", "CALIPER_TEST_TSC"]
+            .into_iter()
+            .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()));
+        if checker.is_none() {
+            assert!(std::env::var_os("CI").is_none(), "on CI, TSRS_BIN or CALIPER_TEST_TSC must name a real checker");
+            eprintln!("skipped: neither TSRS_BIN nor CALIPER_TEST_TSC names a real checker");
+        }
+        checker.map(camino::Utf8PathBuf::from)
+    }
+
+    /// ADR 0026's S5 gate: `Poly<"div">` has at least 260 props, and `Poly<"a">` others.
+    #[test]
+    #[allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stderr)]
+    fn a_polymorphic_component_has_the_props_of_the_element_it_is_instantiated_with() {
+        let Some(checker) = real_checker() else { return };
+        let root = camino::Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/generic");
+        let file = root.join("Poly.tsx");
+        let target = |name: &str| Target {
+            file_path: file.clone(),
+            display_name: name.to_string(),
+            exported: true,
+            described: Default::default(),
+            react_wanted: None,
+        };
+        let at =
+            |element: &str| Instantiation { export: "Poly".to_string(), arguments: vec![format!("\"{element}\"")] };
+        let mut request = crate::SemanticRequest::new(root.clone(), Vec::new());
+        request.tsc_path = Some(checker);
+        let config = crate::supervisor_config(&request).unwrap();
+        let timeout = std::time::Duration::from_secs(60);
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+
+        let outcome = runtime.block_on(async {
+            let supervisor = caliper_docgen_tsc_client::Supervisor::spawn(config).await.unwrap();
+            let tsconfig = root.join("tsconfig.json");
+            let files = [file.to_string()];
+            let rpc = Rpc::open(supervisor.client(), timeout, Some(tsconfig.as_str()), &files, false).await.unwrap();
+            let pending = vec![(target("Poly<div>"), at("div")), (target("Poly<a>"), at("a"))];
+            let outcome = answer(&rpc, &files, &root, &PropInterner::default(), false, pending).await.unwrap();
+            rpc.release().await;
+            supervisor.shutdown().await.unwrap();
+            outcome
+        });
+
+        assert_eq!(outcome.fallbacks, []);
+        let names = |display: &str| -> Vec<String> {
+            let component = outcome.components.iter().find(|c| c.display_name == display).expect("answered");
+            component.props.iter().map(|prop| prop.name.clone()).collect()
+        };
+        let (div, a) = (names("Poly<div>"), names("Poly<a>"));
+        assert!(div.len() >= 260, "Poly<\"div\"> has {} props", div.len());
+        assert_ne!(div, a);
+        assert!(a.contains(&"href".to_string()) && !div.contains(&"href".to_string()));
+        eprintln!("Poly<\"div\">: {} props, Poly<\"a\">: {} props", div.len(), a.len());
+    }
+}
