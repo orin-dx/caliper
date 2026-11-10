@@ -266,7 +266,8 @@ pub(super) fn resolve_guarded(
                     tags: Default::default(),
                     methods: vec![],
                     detected_by: mapping.rule,
-                    exported: mapping.exported,
+                    exported: mapping.exported(),
+                    exports: mapping.exports.clone(),
                 };
                 // A panicked resolution re-runs on any edit to its own file.
                 let mut deps = crate::resolver::Dependencies::default();

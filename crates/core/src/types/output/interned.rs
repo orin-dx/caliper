@@ -406,6 +406,8 @@ impl Serialize for InternedComponent<'_> {
             methods,
             detected_by,
             exported,
+            // The canonical JSON gains `exports` with its schema version (ADR 0027).
+            exports: _,
         } = self.entry;
         let mut out = serializer.serialize_struct("ComponentEntry", 12)?;
         out.serialize_field("displayName", display_name)?;

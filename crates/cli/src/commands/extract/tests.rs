@@ -336,6 +336,7 @@ fn serialize_rdt_emits_composes_exactly() {
         methods: vec![],
         detected_by: caliper_docgen_core::types::DetectionRule::FunctionDeclaration,
         exported: true,
+        exports: Vec::new(),
     };
     let mut components = std::collections::BTreeMap::new();
     components.insert("Widget".to_string(), entry);
@@ -384,6 +385,7 @@ fn component_with_props(name: &str, props: Vec<(&str, &str)>) -> caliper_docgen_
         methods: vec![],
         detected_by: caliper_docgen_core::types::DetectionRule::FunctionDeclaration,
         exported: true,
+        exports: Vec::new(),
     }
 }
 

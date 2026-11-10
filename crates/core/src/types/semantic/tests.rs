@@ -37,6 +37,7 @@ fn output() -> ExtractionOutput {
         methods: vec![],
         detected_by: DetectionRule::FunctionDeclaration,
         exported: true,
+        exports: vec![ComponentExport::named(name)],
     };
     ExtractionOutput {
         components: BTreeMap::from([
@@ -60,7 +61,7 @@ fn semantic_prop(name: &str, description: &str, required: bool) -> Arc<SemanticP
 }
 
 fn button(props: Vec<Arc<SemanticProp>>) -> SemanticComponent {
-    SemanticComponent { file_path: "/src/Button.tsx".into(), display_name: "Button".to_string(), props }
+    SemanticComponent { key: "Button".to_string(), props }
 }
 
 #[test]
@@ -195,11 +196,7 @@ fn provenance_names_the_resolved_components_and_each_fallback_reason() {
     let mut out = output();
     let outcome = SemanticOutcome {
         components: vec![button(vec![])],
-        fallbacks: vec![SemanticFallback {
-            file_path: "/src/Card.tsx".into(),
-            display_name: "Card".to_string(),
-            reason: "not exported".to_string(),
-        }],
+        fallbacks: vec![SemanticFallback { key: "Card".to_string(), reason: "not exported".to_string() }],
         diagnostics: vec![],
     };
 
@@ -280,14 +277,40 @@ fn identical_props_are_shared_between_components_and_a_different_one_is_not() {
 #[test]
 fn merged_props_that_come_out_equal_are_one_allocation() {
     let mut out = output();
-    let card = SemanticComponent {
-        file_path: "/src/Card.tsx".into(),
-        display_name: "Card".to_string(),
-        props: vec![semantic_prop("tone", "", true)],
-    };
+    let card = SemanticComponent { key: "Card".to_string(), props: vec![semantic_prop("tone", "", true)] };
     let tone_on_button = button(vec![semantic_prop("tone", "", true)]);
 
     merge_semantic(&mut out, SemanticOutcome { components: vec![tone_on_button, card], ..Default::default() });
 
     assert!(Arc::ptr_eq(&out.components["Button"].props["tone"], &out.components["Card"].props["tone"]));
+}
+
+/// Two components can share a file and a display name (a `displayName` assignment, or the same name in two scopes); the
+/// answer for one must not land on the other.
+#[test]
+fn an_answer_merges_into_the_entry_its_key_names_not_the_first_with_the_same_file_and_name() {
+    let mut out = output();
+    let mut twin = out.components["Card"].clone();
+    twin.exports = vec![ComponentExport::named("default").member("Card")];
+    out.components.insert("Card~2".to_string(), twin);
+    let before = out.components["Card"].clone();
+
+    let answer = SemanticComponent { key: "Card~2".to_string(), props: vec![semantic_prop("tone", "", true)] };
+    let fallback = SemanticFallback { key: "Card".to_string(), reason: "why".to_string() };
+    merge_semantic(
+        &mut out,
+        SemanticOutcome { components: vec![answer], fallbacks: vec![fallback], ..Default::default() },
+    );
+
+    assert_eq!(out.components["Card"], before);
+    assert_eq!(out.components["Card~2"].props.keys().collect::<Vec<_>>(), ["tone"]);
+    let affected: Vec<(&str, Vec<String>)> =
+        out.diagnostics.iter().map(|d| (d.message.as_str(), d.affects.clone())).collect();
+    assert_eq!(
+        affected,
+        [
+            ("1 component(s) resolved by the TypeScript checker", vec!["Card~2".to_string()]),
+            ("1 component(s) kept their structural result: why", vec!["Card".to_string()]),
+        ]
+    );
 }

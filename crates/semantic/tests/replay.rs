@@ -140,7 +140,7 @@ fn a_prop_name_that_starts_with_underscores_is_the_name_the_source_writes() {
     let outcome = resolve(request_replaying(&project, &output, None, "markers.recording.json"));
     assert!(outcome.diagnostics.is_empty(), "{:?} / {:?}", outcome.diagnostics, outcome.fallbacks);
 
-    let answered = &outcome.components.iter().find(|component| component.display_name == "Markers").unwrap().props;
+    let answered = &outcome.components.iter().find(|component| component.key == "Markers").unwrap().props;
     let mut answered_names: Vec<_> = answered.iter().map(|prop| prop.name.as_str()).collect();
     answered_names.sort_unstable();
     assert_eq!(answered_names, ["___triple", "__size", "_single", "plain"], "the checker's `___size` is not a prop");
@@ -163,7 +163,7 @@ fn function_parameters_keep_their_optional_and_rest_markers() {
     let outcome = resolve(request_replaying(&project, &output, None, "markers.recording.json"));
     assert!(outcome.diagnostics.is_empty(), "{:?} / {:?}", outcome.diagnostics, outcome.fallbacks);
 
-    let callbacks = &outcome.components.iter().find(|component| component.display_name == "Callbacks").unwrap().props;
+    let callbacks = &outcome.components.iter().find(|component| component.key == "Callbacks").unwrap().props;
     let params = |name: &str| match &callbacks.iter().find(|prop| prop.name == name).unwrap().prop_type {
         PropType::Function { params, return_type, .. } => (params.clone(), (**return_type).clone()),
         other => panic!("{name} is not a function: {other:?}"),
@@ -220,7 +220,7 @@ fn optional_parameters_are_read_through_an_alias_a_long_type_a_this_parameter_an
     let outcome = resolve(request_replaying(&project, &output, None, "markers.recording.json"));
     assert!(outcome.diagnostics.is_empty(), "{:?} / {:?}", outcome.diagnostics, outcome.fallbacks);
 
-    let aliased = &outcome.components.iter().find(|component| component.display_name == "Aliased").unwrap().props;
+    let aliased = &outcome.components.iter().find(|component| component.key == "Aliased").unwrap().props;
     let prop_type = |name: &str| aliased.iter().find(|prop| prop.name == name).unwrap().prop_type.clone();
     let text = |name: &str| prop_type(name).raw_string();
 
@@ -348,6 +348,7 @@ fn a_run_with_nothing_exported_never_starts_tsc() {
     let mut output = structural(&project);
     for entry in output.components.values_mut() {
         entry.exported = false;
+        entry.exports.clear();
     }
     let before = output.components.clone();
 

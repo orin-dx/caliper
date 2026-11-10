@@ -76,7 +76,7 @@ fn main() {
     checker.warm_up();
     // A request queued behind the warm-up returns when the process is up and the first program is built.
     let mut picks: Vec<_> = Vec::new();
-    let exported: Vec<_> = all.iter().filter(|t| t.exported).cloned().collect();
+    let exported: Vec<_> = all.iter().filter(|t| !t.exports.is_empty()).cloned().collect();
     for _ in 0..count.min(exported.len()) {
         seed ^= seed << 13;
         seed ^= seed >> 7;
@@ -103,11 +103,7 @@ fn main() {
                 for component in &outcome.components {
                     answered += 1;
                     found_props += component.props.len();
-                    structural_of_answered += output
-                        .components
-                        .values()
-                        .find(|e| e.file_path == component.file_path && e.display_name == component.display_name)
-                        .map_or(0, |e| e.props.len());
+                    structural_of_answered += output.components.get(&component.key).map_or(0, |e| e.props.len());
                 }
             }
             Err(error) => unavailable = format!("no answer: {error}"),

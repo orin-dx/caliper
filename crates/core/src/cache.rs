@@ -47,7 +47,8 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, SourceData};
 ///     types with call or construct signatures (`CollectedType::Callable`).
 /// 34: moves with canonical `SCHEMA_VERSION` 6 (`PropType::BigInt`); `CollectedType` is unchanged, so this only
 ///     retires entries written before `bigint` became a primitive.
-const CACHE_SCHEMA_VERSION: u32 = 34;
+/// 36: `ComponentMapping::exports` replaces `exported`: how the module exports each component (ADR 0027).
+const CACHE_SCHEMA_VERSION: u32 = 36;
 
 const DATA_FILE: &str = "dts.msgpack";
 

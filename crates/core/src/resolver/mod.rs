@@ -944,7 +944,8 @@ fn unpublished_entry(mapping: &ComponentMapping) -> ComponentEntry {
         tags: mapping.tags.clone(),
         methods: vec![],
         detected_by: mapping.rule,
-        exported: mapping.exported,
+        exported: mapping.exported(),
+        exports: mapping.exports.clone(),
     }
 }
 
@@ -1099,7 +1100,8 @@ pub(crate) fn resolve_component_shared(
             tags: mapping.tags.clone(),
             methods: vec![],
             detected_by: mapping.rule,
-            exported: mapping.exported,
+            exported: mapping.exported(),
+            exports: mapping.exports.clone(),
         },
         ResolvedDiagnostics { own: state.diagnostics, shared: state.shared_diagnostics },
     )

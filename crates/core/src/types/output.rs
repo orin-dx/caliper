@@ -127,6 +127,11 @@ pub struct ComponentEntry {
     /// Whether its module exports it, directly or as a sub-component attached to an exported component. An unexported
     /// component is an implementation detail other components render; RDT does not report those.
     pub exported: bool,
+    /// How its module exports it ([`crate::types::ComponentMapping::exports`]); `exported` is whether it has any. The
+    /// TypeScript checker asks for the component by these. Not in the canonical JSON yet, so an output read back from
+    /// JSON has none.
+    #[serde(skip)]
+    pub exports: Vec<crate::types::ComponentExport>,
 }
 
 impl ComponentEntry {

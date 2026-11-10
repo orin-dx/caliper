@@ -62,9 +62,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
     /// `export { Foo }`: local specifiers, no source.
     fn visit_export_named_declaration(&mut self, node: &ExportNamedDeclaration<'a>) {
         for spec in &node.specifiers {
-            self.record_exported_local(spec.local.name().as_str());
             // Recorded as a local declaration for now; `finish()` turns it into a re-export when `local` is an import.
             let (local, exported) = (spec.local.name().as_str(), spec.exported.name().as_str());
+            self.record_exported_local(local, exported);
             self.pending_local_exports.push((self.data.exports.len(), local.to_owned()));
             self.data.exports.push(LexedExport::LocalDeclaration {
                 name: exported.to_owned(),
@@ -93,7 +93,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 } else {
                     self.data.component_mappings.push(public);
                 }
-                self.record_exported_local(exported);
+                self.record_exported_local(exported, exported);
             }
         }
 
@@ -131,7 +131,9 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             Declaration::VariableDeclaration(vd) => {
                 for declarator in &vd.declarations {
                     match &declarator.id {
-                        BindingPattern::BindingIdentifier(id) => self.record_exported_local(id.name.as_str()),
+                        BindingPattern::BindingIdentifier(id) => {
+                            self.record_exported_local(id.name.as_str(), id.name.as_str());
+                        }
                         // `export const { Option, Item: Row } = Imported` exports `Option` and `Row`.
                         BindingPattern::ObjectPattern(pattern) => {
                             for property in &pattern.properties {
@@ -141,7 +143,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                                     is_type_only: false,
                                     declared_as: None,
                                 });
-                                self.record_exported_local(local.name.as_str());
+                                self.record_exported_local(local.name.as_str(), local.name.as_str());
                             }
                         }
                         _ => {}
@@ -150,7 +152,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             }
             declaration => {
                 if let Some(name) = declaration_name(declaration) {
-                    self.record_exported_local(name);
+                    self.record_exported_local(name, name);
                 }
             }
         }
@@ -665,7 +667,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
         };
         match local {
             Some(name) => {
-                self.record_exported_local(name);
+                self.record_exported_local(name, "default");
                 // `export default Tooltip`: the module's default is `Tooltip`, which `finish` turns into a re-export
                 // when it is an import, as `export { Tooltip as default }` is.
                 self.pending_local_exports.push((self.data.exports.len(), name.to_owned()));
@@ -677,7 +679,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             }
             None => {
                 if let Some(name) = super::component::pascal_case_from_file_stem(&self.file_path) {
-                    self.record_exported_local(&name);
+                    self.record_exported_local(&name, "default");
                 }
             }
         }

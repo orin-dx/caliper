@@ -4,657 +4,6 @@ expression: rendered(&outcome)
 ---
 {
   "components": {
-    "Cb": [
-      {
-        "name": "onChange",
-        "required": true,
-        "type": {
-          "kind": "function",
-          "typeParams": [],
-          "params": [
-            {
-              "name": "value",
-              "type": {
-                "kind": "string"
-              }
-            },
-            {
-              "name": "ev",
-              "type": {
-                "kind": "named",
-                "name": "ChangeEvent",
-                "args": [
-                  {
-                    "kind": "named",
-                    "name": "HTMLInputElement",
-                    "args": []
-                  }
-                ]
-              },
-              "optional": true
-            },
-            {
-              "name": "rest",
-              "type": {
-                "kind": "array",
-                "element": {
-                  "kind": "number"
-                }
-              },
-              "rest": true
-            }
-          ],
-          "returnType": {
-            "kind": "void"
-          }
-        }
-      },
-      {
-        "name": "render",
-        "required": false,
-        "type": {
-          "kind": "function",
-          "typeParams": [],
-          "params": [
-            {
-              "name": "x",
-              "type": {
-                "kind": "object",
-                "fields": [
-                  {
-                    "name": "a",
-                    "propType": {
-                      "kind": "number"
-                    },
-                    "required": true,
-                    "description": ""
-                  }
-                ]
-              }
-            }
-          ],
-          "returnType": {
-            "kind": "reactNode"
-          }
-        }
-      }
-    ],
-    "Colored": [
-      {
-        "name": "color",
-        "required": false,
-        "type": {
-          "kind": "union",
-          "members": [
-            {
-              "kind": "stringLiteral",
-              "value": "green"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "red"
-            },
-            {
-              "kind": "intersection",
-              "members": [
-                {
-                  "kind": "string"
-                },
-                {
-                  "kind": "object",
-                  "fields": []
-                }
-              ]
-            }
-          ]
-        }
-      },
-      {
-        "name": "level",
-        "required": false,
-        "type": {
-          "kind": "union",
-          "members": [
-            {
-              "kind": "numberLiteral",
-              "value": 1.0
-            },
-            {
-              "kind": "numberLiteral",
-              "value": 2.0
-            },
-            {
-              "kind": "numberLiteral",
-              "value": 3.0
-            }
-          ]
-        }
-      },
-      {
-        "name": "flag",
-        "required": true,
-        "type": {
-          "kind": "boolean"
-        }
-      }
-    ],
-    "CondC": [
-      {
-        "name": "k",
-        "required": true,
-        "type": {
-          "kind": "opaque",
-          "raw": "T extends string ? \"str\" : \"other\"",
-          "reason": {
-            "type": "conditionalType"
-          }
-        }
-      }
-    ],
-    "Dep": [
-      {
-        "name": "own",
-        "required": true,
-        "type": {
-          "kind": "string"
-        }
-      },
-      {
-        "name": "tone",
-        "required": false,
-        "type": {
-          "kind": "union",
-          "members": [
-            {
-              "kind": "stringLiteral",
-              "value": "calm"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "loud"
-            }
-          ]
-        }
-      },
-      {
-        "name": "onTone",
-        "required": false,
-        "type": {
-          "kind": "function",
-          "typeParams": [],
-          "params": [
-            {
-              "name": "t",
-              "type": {
-                "kind": "union",
-                "members": [
-                  {
-                    "kind": "stringLiteral",
-                    "value": "calm"
-                  },
-                  {
-                    "kind": "stringLiteral",
-                    "value": "loud"
-                  }
-                ]
-              }
-            },
-            {
-              "name": "ev",
-              "type": {
-                "kind": "object",
-                "fields": [
-                  {
-                    "name": "x",
-                    "propType": {
-                      "kind": "number"
-                    },
-                    "required": true,
-                    "description": ""
-                  }
-                ]
-              }
-            }
-          ],
-          "returnType": {
-            "kind": "void"
-          }
-        }
-      }
-    ],
-    "Fc": [
-      {
-        "name": "a",
-        "required": false,
-        "type": {
-          "kind": "string"
-        }
-      }
-    ],
-    "Fwd": [
-      {
-        "name": "variant",
-        "required": false,
-        "type": {
-          "kind": "union",
-          "members": [
-            {
-              "kind": "stringLiteral",
-              "value": "ghost"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "solid"
-            }
-          ]
-        }
-      }
-    ],
-    "Idx": [
-      {
-        "name": "fixed",
-        "required": true,
-        "type": {
-          "kind": "string"
-        }
-      }
-    ],
-    "Mapper": [
-      {
-        "name": "a",
-        "required": false,
-        "type": {
-          "kind": "string"
-        }
-      },
-      {
-        "name": "b",
-        "required": false,
-        "type": {
-          "kind": "number"
-        }
-      },
-      {
-        "name": "c",
-        "required": false,
-        "type": {
-          "kind": "boolean"
-        }
-      },
-      {
-        "name": "x",
-        "required": true,
-        "type": {
-          "kind": "number"
-        }
-      },
-      {
-        "name": "y",
-        "required": true,
-        "type": {
-          "kind": "number"
-        }
-      },
-      {
-        "name": "extra",
-        "required": true,
-        "type": {
-          "kind": "object",
-          "fields": [
-            {
-              "name": "a",
-              "propType": {
-                "kind": "string"
-              },
-              "required": true,
-              "description": ""
-            }
-          ]
-        }
-      }
-    ],
-    "Misc": [
-      {
-        "name": "tree",
-        "required": true,
-        "type": {
-          "kind": "object",
-          "fields": [
-            {
-              "name": "value",
-              "propType": {
-                "kind": "string"
-              },
-              "required": true,
-              "description": ""
-            },
-            {
-              "name": "children",
-              "propType": {
-                "kind": "array",
-                "element": {
-                  "kind": "recursive",
-                  "name": "Tree",
-                  "args": []
-                }
-              },
-              "required": false,
-              "description": ""
-            },
-            {
-              "name": "parent",
-              "propType": {
-                "kind": "recursive",
-                "name": "Tree",
-                "args": []
-              },
-              "required": false,
-              "description": ""
-            }
-          ]
-        }
-      },
-      {
-        "name": "dir",
-        "required": true,
-        "type": {
-          "kind": "union",
-          "members": [
-            {
-              "kind": "enumMember",
-              "enum": "Dir",
-              "member": "Up",
-              "value": {
-                "kind": "stringLiteral",
-                "value": "UP"
-              }
-            },
-            {
-              "kind": "enumMember",
-              "enum": "Dir",
-              "member": "Down",
-              "value": {
-                "kind": "stringLiteral",
-                "value": "DOWN"
-              }
-            }
-          ]
-        }
-      },
-      {
-        "name": "big",
-        "required": true,
-        "type": {
-          "kind": "bigint"
-        }
-      },
-      {
-        "name": "tpl",
-        "required": true,
-        "type": {
-          "kind": "templateLiteral",
-          "parts": [
-            {
-              "text": "row-"
-            },
-            {
-              "type": {
-                "kind": "number"
-              }
-            }
-          ]
-        }
-      },
-      {
-        "name": "s",
-        "required": true,
-        "type": {
-          "kind": "uniqueSymbol",
-          "name": "sym"
-        }
-      },
-      {
-        "name": "fn",
-        "required": true,
-        "type": {
-          "kind": "callable",
-          "signatures": [
-            {
-              "typeParams": [],
-              "params": [
-                {
-                  "name": "a",
-                  "type": {
-                    "kind": "string"
-                  }
-                }
-              ],
-              "returnType": {
-                "kind": "void"
-              }
-            },
-            {
-              "typeParams": [],
-              "params": [
-                {
-                  "name": "a",
-                  "type": {
-                    "kind": "number"
-                  }
-                }
-              ],
-              "returnType": {
-                "kind": "void"
-              }
-            }
-          ],
-          "fields": []
-        }
-      },
-      {
-        "name": "getter",
-        "required": false,
-        "type": {
-          "kind": "object",
-          "fields": [
-            {
-              "name": "x",
-              "propType": {
-                "kind": "number"
-              },
-              "required": true,
-              "description": "",
-              "readonly": true
-            }
-          ]
-        }
-      }
-    ],
-    "Plain": [
-      {
-        "name": "label",
-        "required": true,
-        "type": {
-          "kind": "string"
-        }
-      },
-      {
-        "name": "count",
-        "required": false,
-        "type": {
-          "kind": "number"
-        }
-      },
-      {
-        "name": "disabled",
-        "required": false,
-        "type": {
-          "kind": "boolean"
-        }
-      },
-      {
-        "name": "size",
-        "required": false,
-        "type": {
-          "kind": "union",
-          "members": [
-            {
-              "kind": "stringLiteral",
-              "value": "lg"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "md"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "sm"
-            }
-          ]
-        }
-      },
-      {
-        "name": "id",
-        "required": false,
-        "type": {
-          "kind": "string"
-        }
-      },
-      {
-        "name": "children",
-        "required": false,
-        "type": {
-          "kind": "reactNode"
-        }
-      }
-    ],
-    "Poly": [
-      {
-        "name": "as",
-        "required": false,
-        "type": {
-          "kind": "stringLiteral",
-          "value": "div"
-        }
-      },
-      {
-        "name": "tone",
-        "required": false,
-        "type": {
-          "kind": "union",
-          "members": [
-            {
-              "kind": "stringLiteral",
-              "value": "a"
-            },
-            {
-              "kind": "stringLiteral",
-              "value": "b"
-            }
-          ]
-        }
-      }
-    ],
-    "Tup": [
-      {
-        "name": "pos",
-        "required": true,
-        "type": {
-          "kind": "tuple",
-          "elements": [
-            {
-              "type": {
-                "kind": "number"
-              }
-            },
-            {
-              "type": {
-                "kind": "number"
-              },
-              "modifier": "optional"
-            }
-          ]
-        }
-      },
-      {
-        "name": "named",
-        "required": true,
-        "type": {
-          "kind": "tuple",
-          "elements": [
-            {
-              "type": {
-                "kind": "number"
-              },
-              "label": "x"
-            },
-            {
-              "type": {
-                "kind": "string"
-              },
-              "label": "y"
-            }
-          ]
-        }
-      },
-      {
-        "name": "rest",
-        "required": true,
-        "type": {
-          "kind": "tuple",
-          "elements": [
-            {
-              "type": {
-                "kind": "string"
-              }
-            },
-            {
-              "type": {
-                "kind": "number"
-              },
-              "modifier": "rest"
-            }
-          ]
-        }
-      },
-      {
-        "name": "ro",
-        "required": true,
-        "type": {
-          "kind": "readonly",
-          "element": {
-            "kind": "tuple",
-            "elements": [
-              {
-                "type": {
-                  "kind": "numberLiteral",
-                  "value": 1.0
-                }
-              },
-              {
-                "type": {
-                  "kind": "numberLiteral",
-                  "value": 2.0
-                }
-              }
-            ]
-          }
-        }
-      },
-      {
-        "name": "arr",
-        "required": true,
-        "type": {
-          "kind": "readonly",
-          "element": {
-            "kind": "array",
-            "element": {
-              "kind": "string"
-            }
-          }
-        }
-      }
-    ],
     "Aliases": [
       {
         "name": "local",
@@ -2687,6 +2036,153 @@ expression: rendered(&outcome)
         }
       }
     ],
+    "Cb": [
+      {
+        "name": "onChange",
+        "required": true,
+        "type": {
+          "kind": "function",
+          "typeParams": [],
+          "params": [
+            {
+              "name": "value",
+              "type": {
+                "kind": "string"
+              }
+            },
+            {
+              "name": "ev",
+              "type": {
+                "kind": "named",
+                "name": "ChangeEvent",
+                "args": [
+                  {
+                    "kind": "named",
+                    "name": "HTMLInputElement",
+                    "args": []
+                  }
+                ]
+              },
+              "optional": true
+            },
+            {
+              "name": "rest",
+              "type": {
+                "kind": "array",
+                "element": {
+                  "kind": "number"
+                }
+              },
+              "rest": true
+            }
+          ],
+          "returnType": {
+            "kind": "void"
+          }
+        }
+      },
+      {
+        "name": "render",
+        "required": false,
+        "type": {
+          "kind": "function",
+          "typeParams": [],
+          "params": [
+            {
+              "name": "x",
+              "type": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "a",
+                    "propType": {
+                      "kind": "number"
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "reactNode"
+          }
+        }
+      }
+    ],
+    "Colored": [
+      {
+        "name": "color",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "stringLiteral",
+              "value": "green"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "red"
+            },
+            {
+              "kind": "intersection",
+              "members": [
+                {
+                  "kind": "string"
+                },
+                {
+                  "kind": "object",
+                  "fields": []
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "name": "level",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "numberLiteral",
+              "value": 1.0
+            },
+            {
+              "kind": "numberLiteral",
+              "value": 2.0
+            },
+            {
+              "kind": "numberLiteral",
+              "value": 3.0
+            }
+          ]
+        }
+      },
+      {
+        "name": "flag",
+        "required": true,
+        "type": {
+          "kind": "boolean"
+        }
+      }
+    ],
+    "CondC": [
+      {
+        "name": "k",
+        "required": true,
+        "type": {
+          "kind": "opaque",
+          "raw": "T extends string ? \"str\" : \"other\"",
+          "reason": {
+            "type": "conditionalType"
+          }
+        }
+      }
+    ],
     "DeepKinds": [
       {
         "name": "union",
@@ -3051,6 +2547,77 @@ expression: rendered(&outcome)
         }
       }
     ],
+    "Dep": [
+      {
+        "name": "own",
+        "required": true,
+        "type": {
+          "kind": "string"
+        }
+      },
+      {
+        "name": "tone",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "stringLiteral",
+              "value": "calm"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "loud"
+            }
+          ]
+        }
+      },
+      {
+        "name": "onTone",
+        "required": false,
+        "type": {
+          "kind": "function",
+          "typeParams": [],
+          "params": [
+            {
+              "name": "t",
+              "type": {
+                "kind": "union",
+                "members": [
+                  {
+                    "kind": "stringLiteral",
+                    "value": "calm"
+                  },
+                  {
+                    "kind": "stringLiteral",
+                    "value": "loud"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "ev",
+              "type": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "name": "x",
+                    "propType": {
+                      "kind": "number"
+                    },
+                    "required": true,
+                    "description": ""
+                  }
+                ]
+              }
+            }
+          ],
+          "returnType": {
+            "kind": "void"
+          }
+        }
+      }
+    ],
     "Enums": [
       {
         "name": "size",
@@ -3144,6 +2711,43 @@ expression: rendered(&outcome)
               }
             }
           ]
+        }
+      }
+    ],
+    "Fc": [
+      {
+        "name": "a",
+        "required": false,
+        "type": {
+          "kind": "string"
+        }
+      }
+    ],
+    "Fwd": [
+      {
+        "name": "variant",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "stringLiteral",
+              "value": "ghost"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "solid"
+            }
+          ]
+        }
+      }
+    ],
+    "Idx": [
+      {
+        "name": "fixed",
+        "required": true,
+        "type": {
+          "kind": "string"
         }
       }
     ],
@@ -3561,6 +3165,217 @@ expression: rendered(&outcome)
             "type": "unresolvableImport",
             "specifier": "any"
           }
+        }
+      }
+    ],
+    "Mapper": [
+      {
+        "name": "a",
+        "required": false,
+        "type": {
+          "kind": "string"
+        }
+      },
+      {
+        "name": "b",
+        "required": false,
+        "type": {
+          "kind": "number"
+        }
+      },
+      {
+        "name": "c",
+        "required": false,
+        "type": {
+          "kind": "boolean"
+        }
+      },
+      {
+        "name": "x",
+        "required": true,
+        "type": {
+          "kind": "number"
+        }
+      },
+      {
+        "name": "y",
+        "required": true,
+        "type": {
+          "kind": "number"
+        }
+      },
+      {
+        "name": "extra",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "a",
+              "propType": {
+                "kind": "string"
+              },
+              "required": true,
+              "description": ""
+            }
+          ]
+        }
+      }
+    ],
+    "Misc": [
+      {
+        "name": "tree",
+        "required": true,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "value",
+              "propType": {
+                "kind": "string"
+              },
+              "required": true,
+              "description": ""
+            },
+            {
+              "name": "children",
+              "propType": {
+                "kind": "array",
+                "element": {
+                  "kind": "recursive",
+                  "name": "Tree",
+                  "args": []
+                }
+              },
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "parent",
+              "propType": {
+                "kind": "recursive",
+                "name": "Tree",
+                "args": []
+              },
+              "required": false,
+              "description": ""
+            }
+          ]
+        }
+      },
+      {
+        "name": "dir",
+        "required": true,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "enumMember",
+              "enum": "Dir",
+              "member": "Up",
+              "value": {
+                "kind": "stringLiteral",
+                "value": "UP"
+              }
+            },
+            {
+              "kind": "enumMember",
+              "enum": "Dir",
+              "member": "Down",
+              "value": {
+                "kind": "stringLiteral",
+                "value": "DOWN"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "big",
+        "required": true,
+        "type": {
+          "kind": "bigint"
+        }
+      },
+      {
+        "name": "tpl",
+        "required": true,
+        "type": {
+          "kind": "templateLiteral",
+          "parts": [
+            {
+              "text": "row-"
+            },
+            {
+              "type": {
+                "kind": "number"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "s",
+        "required": true,
+        "type": {
+          "kind": "uniqueSymbol",
+          "name": "sym"
+        }
+      },
+      {
+        "name": "fn",
+        "required": true,
+        "type": {
+          "kind": "callable",
+          "signatures": [
+            {
+              "typeParams": [],
+              "params": [
+                {
+                  "name": "a",
+                  "type": {
+                    "kind": "string"
+                  }
+                }
+              ],
+              "returnType": {
+                "kind": "void"
+              }
+            },
+            {
+              "typeParams": [],
+              "params": [
+                {
+                  "name": "a",
+                  "type": {
+                    "kind": "number"
+                  }
+                }
+              ],
+              "returnType": {
+                "kind": "void"
+              }
+            }
+          ],
+          "fields": []
+        }
+      },
+      {
+        "name": "getter",
+        "required": false,
+        "type": {
+          "kind": "object",
+          "fields": [
+            {
+              "name": "x",
+              "propType": {
+                "kind": "number"
+              },
+              "required": true,
+              "description": "",
+              "readonly": true
+            }
+          ]
         }
       }
     ],
@@ -3997,6 +3812,91 @@ expression: rendered(&outcome)
         }
       }
     ],
+    "Plain": [
+      {
+        "name": "label",
+        "required": true,
+        "type": {
+          "kind": "string"
+        }
+      },
+      {
+        "name": "count",
+        "required": false,
+        "type": {
+          "kind": "number"
+        }
+      },
+      {
+        "name": "disabled",
+        "required": false,
+        "type": {
+          "kind": "boolean"
+        }
+      },
+      {
+        "name": "size",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "stringLiteral",
+              "value": "lg"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "md"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "sm"
+            }
+          ]
+        }
+      },
+      {
+        "name": "id",
+        "required": false,
+        "type": {
+          "kind": "string"
+        }
+      },
+      {
+        "name": "children",
+        "required": false,
+        "type": {
+          "kind": "reactNode"
+        }
+      }
+    ],
+    "Poly": [
+      {
+        "name": "as",
+        "required": false,
+        "type": {
+          "kind": "stringLiteral",
+          "value": "div"
+        }
+      },
+      {
+        "name": "tone",
+        "required": false,
+        "type": {
+          "kind": "union",
+          "members": [
+            {
+              "kind": "stringLiteral",
+              "value": "a"
+            },
+            {
+              "kind": "stringLiteral",
+              "value": "b"
+            }
+          ]
+        }
+      }
+    ],
     "Recursion": [
       {
         "name": "json",
@@ -4261,6 +4161,106 @@ expression: rendered(&outcome)
           "kind": "named",
           "name": "Uppercase<string>",
           "args": []
+        }
+      }
+    ],
+    "Tup": [
+      {
+        "name": "pos",
+        "required": true,
+        "type": {
+          "kind": "tuple",
+          "elements": [
+            {
+              "type": {
+                "kind": "number"
+              }
+            },
+            {
+              "type": {
+                "kind": "number"
+              },
+              "modifier": "optional"
+            }
+          ]
+        }
+      },
+      {
+        "name": "named",
+        "required": true,
+        "type": {
+          "kind": "tuple",
+          "elements": [
+            {
+              "type": {
+                "kind": "number"
+              },
+              "label": "x"
+            },
+            {
+              "type": {
+                "kind": "string"
+              },
+              "label": "y"
+            }
+          ]
+        }
+      },
+      {
+        "name": "rest",
+        "required": true,
+        "type": {
+          "kind": "tuple",
+          "elements": [
+            {
+              "type": {
+                "kind": "string"
+              }
+            },
+            {
+              "type": {
+                "kind": "number"
+              },
+              "modifier": "rest"
+            }
+          ]
+        }
+      },
+      {
+        "name": "ro",
+        "required": true,
+        "type": {
+          "kind": "readonly",
+          "element": {
+            "kind": "tuple",
+            "elements": [
+              {
+                "type": {
+                  "kind": "numberLiteral",
+                  "value": 1.0
+                }
+              },
+              {
+                "type": {
+                  "kind": "numberLiteral",
+                  "value": 2.0
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "arr",
+        "required": true,
+        "type": {
+          "kind": "readonly",
+          "element": {
+            "kind": "array",
+            "element": {
+              "kind": "string"
+            }
+          }
         }
       }
     ],
@@ -4569,6 +4569,7 @@ expression: rendered(&outcome)
   },
   "fallbacks": {
     "Klass": "no call signature (class or non-function component)",
-    "Over": "overloaded call signatures"
+    "Over": "overloaded call signatures",
+    "Over (Cases.tsx)": "overloaded call signatures"
   }
 }

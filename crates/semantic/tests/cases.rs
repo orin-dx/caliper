@@ -85,6 +85,15 @@ fn request_for(project: &Project, output: &ExtractionOutput, checker: &Checker) 
     request
 }
 
+/// An output key without the scratch directory: a name two components share is keyed `Name (<path>)`, and the
+/// snapshot keeps only the path's file name.
+fn portable(key: &str) -> String {
+    match key.strip_suffix(')').and_then(|key| key.split_once(" (")) {
+        Some((name, path)) => format!("{name} ({})", Utf8PathBuf::from(path).file_name().unwrap_or(path)),
+        None => key.to_string(),
+    }
+}
+
 /// The outcome as the JSON the snapshot holds: each component's props in the order the checker gave them.
 fn rendered(outcome: &SemanticOutcome) -> Value {
     let components: serde_json::Map<String, Value> = outcome
@@ -102,11 +111,11 @@ fn rendered(outcome: &SemanticOutcome) -> Value {
                     })
                 })
                 .collect();
-            (component.display_name.clone(), Value::Array(props))
+            (portable(&component.key), Value::Array(props))
         })
         .collect();
     let fallbacks: serde_json::Map<String, Value> =
-        outcome.fallbacks.iter().map(|fallback| (fallback.display_name.clone(), json!(fallback.reason))).collect();
+        outcome.fallbacks.iter().map(|fallback| (portable(&fallback.key), json!(fallback.reason))).collect();
     json!({ "components": components, "fallbacks": fallbacks })
 }
 
@@ -177,7 +186,7 @@ fn the_merge_puts_a_unions_members_back_in_declaration_order() {
     let mut output = structural(&project);
     let outcome = answer(&project, &output, &Checker::Replay);
     let size = |outcome: &SemanticOutcome| {
-        let component = outcome.components.iter().find(|component| component.display_name == "Plain").unwrap();
+        let component = outcome.components.iter().find(|component| component.key == "Plain").unwrap();
         let prop = component.props.iter().find(|prop| prop.name == "size").unwrap();
         serde_json::to_value(&prop.prop_type).unwrap()
     };

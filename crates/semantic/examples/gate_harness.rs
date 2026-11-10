@@ -254,9 +254,10 @@ fn watch(src: &Utf8PathBuf, tsc: &str, run: WatchRun) -> bool {
     // The checker's answer alone: the same request the session sends, on the snapshot it keeps, nothing changed.
     let entry = session.component("GateEdited").unwrap().entry;
     let target = SemanticTarget {
+        key: "GateEdited".to_string(),
         file_path: entry.file_path.clone(),
         display_name: entry.display_name.clone(),
-        exported: entry.exported,
+        exports: entry.exports.clone(),
         described: entry.props.values().filter(|p| !p.description.is_empty()).map(|p| p.name.clone()).collect(),
         react_wanted: react_props_wanted(session.options.html_attributes, &entry.props),
     };

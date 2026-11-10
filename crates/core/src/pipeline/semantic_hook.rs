@@ -23,8 +23,8 @@ use crate::pipeline::HtmlAttributeMode;
 use crate::react_types::{checker_prop_used, react_props_wanted};
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use crate::types::semantic::{
-    MergedProps, SemanticComponent, SemanticOutcome, SemanticProp, SemanticProvider, SemanticTarget, SourceChange,
-    merge_semantic_props, unread_diagnostic,
+    MergedProps, SemanticComponent, SemanticFallback, SemanticOutcome, SemanticProp, SemanticProvider, SemanticTarget,
+    SourceChange, merge_semantic_props, unread_diagnostic,
 };
 
 /// What one request of the checker made of a component: the component it found, if any, and what the checker said
@@ -87,9 +87,10 @@ impl SemanticHook {
         }
 
         let target = SemanticTarget {
+            key: answer.key.clone(),
             file_path: answer.entry.file_path.clone(),
             display_name: answer.entry.display_name.clone(),
-            exported: answer.entry.exported,
+            exports: answer.entry.exports.clone(),
             described: answer
                 .entry
                 .props
@@ -102,7 +103,7 @@ impl SemanticHook {
         let receiver = self.provider.request(vec![target]);
         match receiver.recv_timeout(self.wait) {
             Ok(outcome) => {
-                let Read { answered, once } = read_outcome(&Asked::from(&answer), outcome);
+                let Read { answered, once } = read_outcome(&answer.key, outcome);
                 for diagnostic in once {
                     if !self.warned.swap(true, Ordering::Relaxed) {
                         answer.diagnostics.push(diagnostic);
@@ -161,7 +162,7 @@ impl SemanticHook {
     ) {
         let Some(key) = cache_key else { return };
         let answers = self.answers.clone();
-        let asked = Asked::from(answer);
+        let asked = answer.key.clone();
         std::thread::Builder::new()
             .name("caliper-late-answer".to_string())
             .spawn(move || {
@@ -223,23 +224,6 @@ fn store(answers: &Answers, key: (String, u64), generation: u64, answered: Answe
     }
 }
 
-/// The component a request asked about, as a late answer's thread, which has no [`ComponentAnswer`], knows it.
-struct Asked {
-    key: String,
-    file_path: camino::Utf8PathBuf,
-    display_name: String,
-}
-
-impl From<&ComponentAnswer> for Asked {
-    fn from(answer: &ComponentAnswer) -> Self {
-        Self {
-            key: answer.key.clone(),
-            file_path: answer.entry.file_path.clone(),
-            display_name: answer.entry.display_name.clone(),
-        }
-    }
-}
-
 /// An outcome read for the component asked about.
 struct Read {
     /// What is kept for the next request: the component and what the checker said about the request, each diagnostic
@@ -249,34 +233,34 @@ struct Read {
     once: Vec<Diagnostic>,
 }
 
-/// The component the checker answered for, and the diagnostics the request produced: a warning that came with an
-/// answer (an edit the checker was not told about) is about this request, and a fallback's reason says why the
-/// component kept its structural result.
-fn read_outcome(asked: &Asked, outcome: SemanticOutcome) -> Read {
+/// The answer for the component whose output key is `asked`, and the diagnostics the request produced: a warning that
+/// came with an answer (an edit the checker was not told about) is about this request, and its fallback's reason says
+/// why the component kept its structural result. An answer or fallback for another key is not this component's.
+fn read_outcome(asked: &str, outcome: SemanticOutcome) -> Read {
     let SemanticOutcome { components, fallbacks, diagnostics: reported } = outcome;
     // Only an outcome with no answer at all says the checker is unavailable.
     let unavailable = components.is_empty() && fallbacks.is_empty();
     let mut read = Read { answered: Answered::default(), once: Vec::new() };
     for mut diagnostic in reported {
-        diagnostic.affects = vec![asked.key.clone()];
+        diagnostic.affects = vec![asked.to_owned()];
         if unavailable && diagnostic.severity == DiagnosticSeverity::Warning {
             read.once.push(diagnostic);
         } else {
             read.answered.diagnostics.push(diagnostic);
         }
     }
-    for fallback in fallbacks {
+    for SemanticFallback { key, reason } in fallbacks {
+        if key != asked {
+            continue;
+        }
         let mut info = Diagnostic::new(
             DiagnosticSeverity::Info,
             DiagnosticCode::SemanticBackend,
-            format!("1 component(s) kept their structural result: {}", fallback.reason),
+            format!("1 component(s) kept their structural result: {reason}"),
         );
-        info.affects = vec![asked.key.clone()];
+        info.affects = vec![key];
         read.answered.diagnostics.push(info);
     }
-    read.answered.component = components
-        .into_iter()
-        .find(|found| found.file_path == asked.file_path && found.display_name == asked.display_name)
-        .map(Arc::new);
+    read.answered.component = components.into_iter().find(|found| found.key == asked).map(Arc::new);
     read
 }

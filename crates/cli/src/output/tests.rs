@@ -116,6 +116,7 @@ fn format_component_renders_header_description_props_table_and_inherited_note() 
         methods: vec![],
         detected_by: caliper_docgen_core::types::DetectionRule::FunctionDeclaration,
         exported: true,
+        exports: Vec::new(),
     };
 
     let lines: Vec<String> = format_component(&entry).iter().map(|line| strip_ansi(line)).collect();

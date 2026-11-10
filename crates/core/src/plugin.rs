@@ -113,6 +113,7 @@ mod tests {
             methods: vec![],
             detected_by: crate::types::DetectionRule::FunctionDeclaration,
             exported: true,
+            exports: Vec::new(),
         };
 
         registry.run_on_component_resolved(&mut entry);
@@ -181,6 +182,7 @@ mod tests {
             methods: vec![],
             detected_by: crate::types::DetectionRule::FunctionDeclaration,
             exported: true,
+            exports: Vec::new(),
         };
 
         let diagnostics = registry.run_on_component_resolved(&mut entry);

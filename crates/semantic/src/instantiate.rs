@@ -122,7 +122,9 @@ pub(crate) async fn answer(
 ) -> Result<SemanticOutcome, CallError> {
     let mut outcome = SemanticOutcome::default();
     // The file's text is part of the request, so it must not depend on the order the components were answered in.
-    pending.sort_by(|(a, _), (b, _)| (&a.file_path, &a.display_name).cmp(&(&b.file_path, &b.display_name)));
+    pending.sort_by(|(a, _), (b, _)| {
+        (&a.file_path, &a.display_name, &a.key).cmp(&(&b.file_path, &b.display_name, &b.key))
+    });
     let probe = project_root.join(PROBE_FILE);
     let text: Vec<String> = pending
         .iter()
@@ -206,11 +208,7 @@ async fn answer_layered(
             }
         };
         match read {
-            Ok(props) => outcome.components.push(SemanticComponent {
-                file_path: target.file_path.clone(),
-                display_name: target.display_name.clone(),
-                props,
-            }),
+            Ok(props) => outcome.components.push(SemanticComponent { key: target.key.clone(), props }),
             Err(reason) => outcome.fallbacks.push(fallback_of(target, &reason)),
         }
     }
@@ -277,9 +275,10 @@ mod tests {
         let root = camino::Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/generic");
         let file = root.join("Poly.tsx");
         let target = |name: &str| Target {
+            key: name.to_string(),
             file_path: file.clone(),
             display_name: name.to_string(),
-            exported: true,
+            exports: vec![caliper_docgen_core::types::ComponentExport::named("Poly")],
             described: Default::default(),
             react_wanted: None,
         };
@@ -307,7 +306,7 @@ mod tests {
 
         assert_eq!(outcome.fallbacks, []);
         let names = |display: &str| -> Vec<String> {
-            let component = outcome.components.iter().find(|c| c.display_name == display).expect("answered");
+            let component = outcome.components.iter().find(|c| c.key == display).expect("answered");
             component.props.iter().map(|prop| prop.name.clone()).collect()
         };
         let (div, a) = (names("Poly<div>"), names("Poly<a>"));

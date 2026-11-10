@@ -49,7 +49,7 @@ fn props<'a>(outcome: &'a SemanticOutcome, name: &str) -> Vec<(&'a str, &'a Prop
     let component = outcome
         .components
         .iter()
-        .find(|component| component.display_name == name)
+        .find(|component| component.key == name)
         .unwrap_or_else(|| panic!("{name} was not answered: {:?}", outcome.fallbacks));
     component.props.iter().map(|prop| (prop.name.as_str(), &prop.prop_type)).collect()
 }
@@ -73,7 +73,7 @@ fn a_default_no_other_file_can_name_keeps_the_structural_result_and_says_why() {
     let outcome = answer(checker);
 
     let fallback =
-        outcome.fallbacks.iter().find(|fallback| fallback.display_name == "Configured").expect("Configured fell back");
+        outcome.fallbacks.iter().find(|fallback| fallback.key == "Configured").expect("Configured fell back");
     assert_eq!(
         fallback.reason, "the instantiation Configured<Settings> could not be formed: Cannot find name 'Settings'.",
         "{}",
@@ -97,7 +97,7 @@ fn an_error_in_another_file_does_not_reject_a_valid_instantiation() {
     let Some(checker) = real_checker() else { return };
     let outcome = answer_in("generic-foreign-error", checker);
 
-    assert_eq!(outcome.fallbacks.iter().map(|f| (&f.display_name, &f.reason)).collect::<Vec<_>>(), []);
+    assert_eq!(outcome.fallbacks.iter().map(|f| (&f.key, &f.reason)).collect::<Vec<_>>(), []);
     let valid = props(&outcome, "Valid");
     assert_eq!(valid.iter().map(|(name, _)| *name).collect::<Vec<_>>(), ["value"]);
     assert_eq!(valid[0].1, &PropType::StringLiteral("a".to_string()));
@@ -110,7 +110,7 @@ fn a_default_that_names_a_local_type_is_never_read_as_the_global_one_of_that_nam
     let Some(checker) = real_checker() else { return };
     let outcome = answer_in("generic-shadowed", checker);
 
-    match outcome.components.iter().find(|component| component.display_name == "Form") {
+    match outcome.components.iter().find(|component| component.key == "Form") {
         Some(component) => {
             let value = component.props.iter().find(|prop| prop.name == "value").expect("value");
             let PropType::Object(fields) = &value.prop_type else {
@@ -119,7 +119,7 @@ fn a_default_that_names_a_local_type_is_never_read_as_the_global_one_of_that_nam
             assert_eq!(fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(), ["id"]);
         }
         None => {
-            let fallback = outcome.fallbacks.iter().find(|fallback| fallback.display_name == "Form").expect("answered");
+            let fallback = outcome.fallbacks.iter().find(|fallback| fallback.key == "Form").expect("answered");
             assert!(
                 fallback.reason.starts_with("the instantiation Form<FormData> could not be formed"),
                 "{}",

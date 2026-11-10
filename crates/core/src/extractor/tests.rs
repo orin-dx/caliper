@@ -1483,7 +1483,7 @@ fn a_member_destructured_from_an_import_and_an_imported_name_re_bound_are_aliase
         .iter()
         .map(|m| {
             assert_eq!(m.rule, ImportedMemberAlias);
-            (m.component_name.as_str(), format!("{:?}", m.props_type_args), m.exported)
+            (m.component_name.as_str(), format!("{:?}", m.props_type_args), m.exported())
         })
         .collect();
     assert_eq!(
@@ -1675,11 +1675,15 @@ fn functions_used_only_as_functions_are_not_components() {
 }
 
 #[test]
-fn a_component_is_exported_when_its_module_exports_it_or_attaches_it_to_an_export() {
-    let exports = |path: &str, source: &str| -> Vec<(String, bool)> {
+fn a_component_records_the_exports_its_module_has_for_it_or_for_the_export_it_is_attached_to() {
+    let exports = |path: &str, source: &str| -> Vec<(String, Vec<String>)> {
         let data = parse_file(Utf8Path::new(path), source);
-        let mut found: Vec<(String, bool)> =
-            data.component_mappings.iter().map(|m| (m.component_name.to_string(), m.exported)).collect();
+        let mut found: Vec<(String, Vec<String>)> = data
+            .component_mappings
+            .iter()
+            .inspect(|m| assert_eq!(m.exported(), !m.exports.is_empty()))
+            .map(|m| (m.component_name.to_string(), m.exports.iter().map(ToString::to_string).collect()))
+            .collect();
         found.sort_unstable();
         found
     };
@@ -1705,24 +1709,56 @@ fn a_component_is_exported_when_its_module_exports_it_or_attaches_it_to_an_expor
     "#;
     assert_eq!(
         exports("/test/exports.tsx", source),
-        vec![
-            ("Arrow".to_string(), true),
-            ("Card".to_string(), true),
-            ("Defaulted".to_string(), true),
-            ("Direct".to_string(), true),
-            ("Header".to_string(), true),
-            ("Internal".to_string(), false),
-            ("Item".to_string(), true),
-            ("Menu".to_string(), true),
-            ("MenuItem".to_string(), true),
-            ("Orphan".to_string(), false),
-            ("Renamed".to_string(), true),
-        ]
+        named(&[
+            ("Arrow", &["Arrow"]),
+            ("Card", &["Card"]),
+            ("Defaulted", &["default"]),
+            ("Direct", &["Direct"]),
+            ("Header", &["Card.Header"]),
+            ("Internal", &[]),
+            ("Item", &["Direct.Item"]),
+            ("Menu", &["Menu"]),
+            ("MenuItem", &["Menu.Item"]),
+            ("Orphan", &[]),
+            ("Renamed", &["Public"]),
+        ])
     );
     assert_eq!(
         exports("/test/fancy-badge.tsx", "export default function (props: { tone: string }) { return <span />; }"),
-        vec![("FancyBadge".to_string(), true)]
+        named(&[("FancyBadge", &["default"])])
     );
+    // The module's default is `Menu`, so `Item` is `default.Item`, and never the default itself; one function under two
+    // names has both; sub-components attached to each other in a cycle end at the first path that reaches them.
+    let source = r#"
+        interface P { label: string }
+        function Item(props: P) { return <li />; }
+        function Menu(props: P) { return <ul />; }
+        Menu.Item = Item;
+        export default Menu;
+        function Ping(props: P) { return <i />; }
+        function Pong(props: P) { return <u />; }
+        Ping.Pong = Pong;
+        Pong.Ping = Ping;
+        export { Ping as Game };
+    "#;
+    assert_eq!(
+        exports("/test/menu.tsx", source),
+        named(&[("Item", &["default.Item"]), ("Menu", &["default"]), ("Ping", &["Game"]), ("Pong", &["Game.Pong"]),])
+    );
+    assert_eq!(
+        exports(
+            "/test/twice.tsx",
+            "export function Twice(props: { a: string }) { return <b />; } export default Twice;"
+        ),
+        named(&[("Twice", &["Twice", "default"])])
+    );
+}
+
+fn named(expected: &[(&str, &[&str])]) -> Vec<(String, Vec<String>)> {
+    expected
+        .iter()
+        .map(|(name, exports)| (name.to_string(), exports.iter().map(ToString::to_string).collect()))
+        .collect()
 }
 
 #[test]

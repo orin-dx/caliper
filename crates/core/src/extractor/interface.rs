@@ -428,12 +428,12 @@ impl<'src> SourceDataCollector<'src> {
                 Expression::FunctionExpression(fe) => (&fe.params, fe.span.start, fe.span.end),
                 Expression::ArrowFunctionExpression(afe) => (&afe.params, afe.span.start, afe.span.end),
                 Expression::Identifier(sub) => {
-                    self.record_attached(sub.name.as_str(), parent_id.name.as_str());
+                    self.record_attached(sub.name.as_str(), parent_id.name.as_str(), &key_name);
                     continue;
                 }
                 _ => continue,
             };
-            self.record_attached(&key_name, parent_id.name.as_str());
+            self.record_attached(&key_name, parent_id.name.as_str(), &key_name);
             self.record_inline_sub_component(key_name, "an Object.assign-attached", params, span_start, span_end);
         }
     }
@@ -473,7 +473,7 @@ impl<'src> SourceDataCollector<'src> {
             }
             _ => return,
         };
-        self.record_attached(key_name, parent.name.as_str());
+        self.record_attached(key_name, parent.name.as_str(), key_name);
         self.record_inline_sub_component(key_name.to_owned(), "a property-assigned", params, span_start, span_end);
     }
 
