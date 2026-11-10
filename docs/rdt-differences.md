@@ -1,6 +1,6 @@
 # Where Caliper differs from react-docgen-typescript and the checker
 
-Caliper aims for correct types for Storybook and for agents. TypeScript's checker is the arbiter of a prop's type. Agreement with react-docgen-typescript (RDT) is information, not a goal. Where Caliper differs from RDT only because RDT is wrong or less precise, that is intended. Where Caliper is not better, it is a gap, and this page says so.
+Recall against RDT (`docs/measurement.md`) is not a measure of correctness; the table under "How the numbers are produced" is the checker's judgment of both tools. Caliper aims for correct types for Storybook and for agents. TypeScript's checker is the arbiter of a prop's type. Agreement with react-docgen-typescript (RDT) is information, not a goal. Where Caliper differs from RDT only because RDT is wrong or less precise, that is intended. Where Caliper is not better, it is a gap, and this page says so.
 
 RDT is a fair reference for a reason that also limits it: it prints the checker's own type text, alias names kept. On most props RDT and the checker are the same string, so "Caliper differs from RDT" almost always means "Caliper differs from the checker", and the question is whether that is acceptable. Caliper is better than RDT in one class only (RDT truncates or picks the wrong declaration). Everywhere else the honest label is "acceptable difference" or "gap".
 

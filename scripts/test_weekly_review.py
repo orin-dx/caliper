@@ -198,6 +198,10 @@ class RecallIsNotComparedAcrossReferences(unittest.TestCase):
         self.assertIn('version 1 of the rules, this one by version 2', weekly.markdown(now, [], 1))
         self.assertNotIn('not compared', weekly.markdown(now, []))
 
+    def test_the_recall_section_says_recall_is_not_correctness(self):
+        now = {'caliper': 'x', 'runs': 1, 'reference_version': 2, 'corpora': {}}
+        self.assertIn('It is not a measure of correctness', weekly.markdown(now, []))
+
 
 class MeasureHelperErrors(unittest.TestCase):
     def test_command_that_cannot_run_names_itself(self):
