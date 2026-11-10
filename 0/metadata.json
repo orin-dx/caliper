@@ -1,0 +1,131 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M73P9H8GPZNHEBT1BMRZS0YJ",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-10T21:37:26.516806Z",
+  "branch": "docs/pattern-audit-adr",
+  "checkpoints_count": 1,
+  "save_step_count": 68,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "04ab3085f6bb",
+  "checkpoint_transcript_start": 19489,
+  "transcript_lines_at_start": 19489,
+  "compact_transcript_start": 1657,
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 6417,
+    "cache_read_tokens": 841446,
+    "output_tokens": 1356,
+    "api_call_count": 2,
+    "subagent_tokens": {
+      "input_tokens": 22,
+      "cache_creation_tokens": 12524,
+      "cache_read_tokens": 2633146,
+      "output_tokens": 6808,
+      "api_call_count": 11
+    }
+  },
+  "redaction": {
+    "replacements": 22,
+    "layers": {
+      "betterleaks": 8,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 435
+  },
+  "summary": {
+    "intent": "Get three review findings on stacked PRs fixed and resolved (two on #410 instantiation probe, one on #411 checker-watch), delegated to a subagent, then verify PR state and report back.",
+    "outcome": "The subagent fixed and resolved all three findings with failing-then-passing tests and green local gates; the PR status check showed no open findings, no failing checks on #410/#413, and #411 still had 15 checks pending. Merge approval and Entire Gates approval remain with the user.",
+    "learnings": {
+      "repo": [
+        "The probe file is a separate module from the component's file, so diagnostics and printed defaults from it must not be read by line number or name text in the component's file.",
+        "Single enforcement point for instantiation identity is `arguments_keep_their_meaning` in `crates/semantic/src/instantiate.rs`; each probe line declares `CaliperSignature{i}` and `CaliperArgument{i}_{j}` and a component is read only if the argument type id equals the signature's declared default id.",
+        "Identity is type-id based, so an inline default like `{ x: string }` now falls back conservatively; frequency of this is unknown.",
+        "`SemanticHook` in `crates/core/src/pipeline/semantic_hook.rs` now caches an `Answered` (component plus the diagnostics of the request that made it) and replays it on cache hits, including late answers; the unavailable-checker warning stays once per session.",
+        "The semantic hook cache is in memory only, so no `CACHE_SCHEMA_VERSION` bump, changelog, or golden changes are needed; the binding and `on_demand` cache no component answers.",
+        "Only `cases.recording.json` has a probe file, so it was the only recording re-recorded (against tsrs 0.23.0-ts7.1.0-beta); other recordings replay byte-identically.",
+        "Gate commands: `just lint doc-check machete typos`, `just semver`, `cargo check --workspace --all-targets`, `cargo nextest run --workspace --exclude caliper-docgen-napi --locked --no-fail-fast` with `TSRS_BIN` set, `just test-checker-lane`, `just test-construct`.",
+        "PR stack ordering: #411 (feat/checker-watch) builds on #410 (feat/instantiation-probe), so #410 must merge first."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/instantiate.rs",
+          "finding": "`arguments_keep_their_meaning` is the single enforcement point for the probe-file identity check and falls back with 'a name in its type arguments means something else…' on mismatch; only errors in the probe file (via `FileDiagnostic.file_name`) are counted."
+        },
+        {
+          "path": "crates/core/src/pipeline/semantic_hook.rs",
+          "finding": "Cache holds `Answered` rather than just the component so warnings/fallback reasons are replayed on each cache hit and for late answers."
+        },
+        {
+          "path": "crates/semantic/tests/instantiate.rs",
+          "finding": "Tests use real tsrs; FormData fixture must be `type FormData = { id: string }` since an interface reads as `Named(\"FormData\")` either way and cannot discriminate. The S5 unit test uses an `Anchor` fixture component because production only instantiates at defaults."
+        }
+      ],
+      "workflow": [
+        "Subagent hand-back reports are model output; the main session verified the claim by re-querying PR status and open findings per branch via `gh pr view` and `entire trail finding list`.",
+        "Confirming fixes by running new tests against unmodified src (equivalent to stashing) proves they fail before the fix.",
+        "When a fix touches a shared root cause, grep siblings (`type_to_string`, `semantic_diagnostics`, `start_position`, `FileDiagnostic`, `.layered(`) to confirm no other call sites share the bug.",
+        "Merge the lower PR's fix into the stacked branch first (clean merge `d60e2b7e`) before committing the dependent fix."
+      ]
+    },
+    "friction": [
+      "Resolving the 410 findings under trail `277` was ambiguous between `caliper/207` and `caliper/208`, so `caliper/208` was chosen.",
+      "#411 still had 15 checks pending after the new commits, so its CI result is unknown.",
+      "Entire Gates on the PRs requires user approval and could not be cleared by the agent."
+    ],
+    "open_items": [
+      "First-answer and RSS measurement (418 to 414 ms from S5) not re-run on these commits.",
+      "Go `typescript@7.1` checker not run via `CALIPER_TEST_TSC`.",
+      "No changeset added, since both fixes are in unreleased features.",
+      "Pattern audit is still running.",
+      "Awaiting user action: merge #410 before #411, plus #410 to #415, #396 and the Callisto PRs (#488, #489, #492), and approve Entire Gates.",
+      "Measure how often inline defaults now fall back under the type-id identity check."
+    ]
+  }
+}
