@@ -10,6 +10,7 @@
     "exports/05-attached-to-named#Tabs": {"verdicts":["identical","spelled"]},
     "exports/06-object-assign#Option": {"verdicts":["identical","spelled"]},
     "exports/06-object-assign#Select": {"verdicts":["identical","spelled"]},
+    "exports/07-underscore-export#_Row": {"verdicts":["identical","spelled"]},
     "generics/01-constraint-string": {"verdicts":["identical","spelled"]},
     "generics/02-default-type-param": {"verdicts":["identical","spelled"]},
     "generics/03-constraint-and-default": {"verdicts":["identical","spelled"]},
