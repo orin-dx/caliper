@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01ArbrXgdEQoTuM7ppBS2gR6",
+  "agent_id": "a694b4d7815184236",
+  "subagent_type": "general-purpose",
+  "task_description": "ADR 0027 part 1: component exports and keyed answers",
+  "started_at": "2026-11-10T13:41:33.436098-08:00"
+}
