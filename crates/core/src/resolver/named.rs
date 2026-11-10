@@ -651,6 +651,7 @@ fn exceeds_expanded_size(ty: &PropType) -> bool {
             | PropType::Never
             | PropType::Unknown
             | PropType::Void
+            | PropType::BigInt
             | PropType::StringLiteral(_)
             | PropType::NumberLiteral(_)
             | PropType::BoolLiteral(_)

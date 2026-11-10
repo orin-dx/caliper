@@ -96,6 +96,7 @@ export type PropType =
   | { kind: 'never' }
   | { kind: 'unknown' }
   | { kind: 'void' }
+  | { kind: 'bigint' }
   | { kind: 'reactNode' }
   | { kind: 'cssProperties' }
   | { kind: 'elementType' }

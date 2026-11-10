@@ -2,7 +2,7 @@
 // instead of shrinking the set of props compared.
 
 /** The canonical JSON shape this oracle reads (`SCHEMA_VERSION` in crates/core/src/types/output.rs). */
-export const SUPPORTED_SCHEMA_VERSION = 5
+export const SUPPORTED_SCHEMA_VERSION = 6
 
 /** Throws unless `caliper` has the keys the oracle reads, at the schema version it understands. */
 export function checkCaliperShape(caliper: any): void {

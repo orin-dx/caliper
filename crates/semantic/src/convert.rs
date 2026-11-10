@@ -1285,7 +1285,7 @@ fn simple(info: &TypeInfo) -> Option<PropType> {
         (flag::NEVER, PropType::Never),
         (flag::STRING, PropType::String),
         (flag::NUMBER, PropType::Number),
-        (flag::BIG_INT, named("bigint".to_string(), Vec::new())),
+        (flag::BIG_INT, PropType::BigInt),
         (flag::ES_SYMBOL, named("symbol".to_string(), Vec::new())),
         (flag::NON_PRIMITIVE, named("object".to_string(), Vec::new())),
     ];
