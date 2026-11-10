@@ -1,0 +1,122 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M73EATZGDW0F9XM636X6W2VP",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-10T19:18:20.497053Z",
+  "branch": "feat/checker-watch",
+  "checkpoints_count": 2,
+  "save_step_count": 68,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "2bcff8f90e6e",
+  "checkpoint_transcript_start": 18570,
+  "transcript_lines_at_start": 18570,
+  "compact_transcript_start": 1590,
+  "token_usage": {
+    "input_tokens": 24,
+    "cache_creation_tokens": 21969,
+    "cache_read_tokens": 3202178,
+    "output_tokens": 6895,
+    "api_call_count": 11,
+    "subagent_tokens": {
+      "input_tokens": 186,
+      "cache_creation_tokens": 272535,
+      "cache_read_tokens": 17763398,
+      "output_tokens": 92655,
+      "api_call_count": 92
+    }
+  },
+  "redaction": {
+    "replacements": 22,
+    "layers": {
+      "betterleaks": 8,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 420
+  },
+  "summary": {
+    "intent": "Drive the ADR 0026 stacked-slice work on Caliper (S5 instantiation probe, then S6 watch mode) through to PRs, and also get the user's concern addressed that a leading chart makes Caliper look worse than react-docgen-typescript (RDT), when RDT's extra props may be less correct.",
+    "outcome": "S5 (instantiation probe) was relinked to main and opened as PR #410 with all checks passing except Entire Gates, which awaits user approval; the PR body was written and S6 (watch mode, feat/checker-watch) was started as a subagent. The chart concern was not resolved: the user interrupted the search, and no chart was found in the README, so the user must say which artifact they meant.",
+    "learnings": {
+      "repo": [
+        "Stacked slice branches can lose their PR base: S5 was stacked on feat/bigint-primitive, which was deleted when #409 merged, so `entire trail link` reported success but no PR was created. Relinking with `--base main` fixed it.",
+        "`entire trail link <n> --branch <b> --base <base> --repo gh/orin-dx/caliper` links a trail to a branch and opens the PR; it can take a few seconds (the check waited 5s before querying).",
+        "Caliper has two pinned checkers (tsrs 0.23.0-ts7.1.0-beta and the Go 7.1.0-beta); gate results must agree on both.",
+        "Instantiation probes use `createSnapshot` with `fileSystem: {kind:\"layer\", files:{...}}` to add an in-memory `__caliper_instantiations__.ts`, so nothing is written to disk and `Converter::enter` stays untouched.",
+        "The CLI's whole-project merge leaves @types/react props to the inheritance layers, so the semantic layer's 281 props for `Poly<'div'>` is not what the CLI prints.",
+        "A checker-printed default that uses a name visible only to the component's module (e.g. `React.ElementType`) falls back to structural props with a reason rather than being instantiated.",
+        "`cases.recording.json` must be re-recorded against the pinned tsrs when new request types are added; here only Cases' `Poly.as` changed (`named E` to `\"div\"`).",
+        "Gate status: `just gate-measure` passes memory and determinism, but exits 1 because first answer is ~430 ms against a 150 ms gate (the open S4 failure; measured floor is about 230 ms).",
+        "The README has no chart; recall comparisons against RDT would live in docs/measurement.md or an unopened report.",
+        "CI includes an Entire Gates job that waits for manual user approval."
+      ],
+      "code": [],
+      "workflow": [
+        "The orchestrator wrote PR bodies itself (via `gh pr edit --body-file` with a heredoc in $TMPDIR) rather than delegating them to the workers.",
+        "Subagent hand-back reports carry no user authority; the orchestrator verified the PR state itself with `gh pr list` and `git merge-tree` instead of trusting the claim that the work was pushed.",
+        "Workers were instructed not to poll CI; the orchestrator polls `gh pr view --json statusCheckRollup` for failures and pending checks."
+      ]
+    },
+    "friction": [
+      "S5's branch was linked to a deleted base branch, so no PR existed even though the trail link reported success.",
+      "The user interrupted the investigation into the chart, so the chart concern was left unresolved and ambiguous (hero image, recall table, or a report).",
+      "Entire Gates requires user approval, which blocks full CI green on #410.",
+      "The first-answer gate still fails (430 ms vs 150 ms target).",
+      "Scratch worktrees s5-base and clean-s5 remain registered."
+    ],
+    "open_items": [
+      "User needs to say which chart is meant so it can be reworded to state that RDT's extra props are not evidence of correctness and that Caliper is judged against the TypeScript checker.",
+      "User approval and merge of #410, #396, and the Callisto PRs (#488 before #492; #489 independent).",
+      "S6 watch mode (trail #278, feat/checker-watch) in progress: gate is snapshot.update with a loud failure on an unnotified edit, Chakra edit-and-query p95 at most 25 ms, and 300 edits under the memory threshold.",
+      "S7 (delete the structural resolver) and S8 are queued after S6.",
+      "Decision needed on the first-answer gate wording (150 ms vs the measured ~230 ms floor) before the default can flip.",
+      "S5 not verified on Linux, the oracle, the TS tests, or the Storybook harness.",
+      "Remove the scratch worktrees ~/Projects/caliper-fixtures/s5-base and clean-s5."
+    ]
+  }
+}
