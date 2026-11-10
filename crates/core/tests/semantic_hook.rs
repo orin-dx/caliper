@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, WatchSession};
 use caliper_docgen_core::types::semantic::{
-    SemanticComponent, SemanticOutcome, SemanticProp, SemanticProvider, SemanticTarget,
+    SemanticComponent, SemanticOutcome, SemanticProp, SemanticProvider, SemanticTarget, SourceChange,
 };
 use caliper_docgen_core::types::{DiagnosticCode, DiagnosticSeverity, PropType};
 use camino::Utf8PathBuf;
@@ -629,4 +629,161 @@ fn a_checker_that_disconnects_without_answering_leaves_the_structural_props_and_
     assert_eq!(notes[0].severity, DiagnosticSeverity::Warning);
     assert_eq!(notes[0].message, "the TypeScript checker stopped without answering; the structural props are used");
     assert_eq!(notes[0].affects, ["Button"]);
+}
+
+/// Records what the session tells it changed, and answers every request with `finds_size`.
+#[derive(Default)]
+struct Told(std::sync::Mutex<Vec<SourceChange>>);
+
+impl SemanticProvider for Told {
+    fn request(&self, targets: Vec<SemanticTarget>) -> Receiver<SemanticOutcome> {
+        let (sender, receiver) = channel();
+        sender.send(finds_size(&targets[0])).ok();
+        receiver
+    }
+
+    fn changed(&self, change: SourceChange) {
+        self.0.lock().unwrap().push(change);
+    }
+}
+
+/// A warm checker answers from what it read before, so every change the session applies reaches it (ADR 0026 S6).
+#[test]
+fn every_change_the_session_applies_is_told_to_the_checker() {
+    let project = project(&[("Button.tsx", BUTTON), ("Card.tsx", CARD)]);
+    let checker = Arc::new(Told::default());
+    let session = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() })
+        .with_semantic(checker.clone(), Duration::from_secs(5));
+    drop(session.initialize());
+    assert_eq!(*checker.0.lock().unwrap(), [SourceChange::Everything]);
+    drop(session.component("Button"));
+    // The first look applies again what was written just before the session started; what it tells is not the point.
+    session.ensure_fresh();
+    checker.0.lock().unwrap().clear();
+    let (button, card) = (project.root.join("Button.tsx"), project.root.join("Card.tsx"));
+
+    std::fs::write(&button, "export function Button(props: { label: string; tone: string }) { return null; }").unwrap();
+    session.update_file(&button);
+    std::fs::write(&card, "export function Card(props: { title: string; tone: string }) { return null; }").unwrap();
+    session.ensure_fresh();
+    drop(session.rebuild());
+
+    assert_eq!(
+        *checker.0.lock().unwrap(),
+        [SourceChange::Files(vec![button]), SourceChange::Files(vec![card]), SourceChange::Everything,]
+    );
+}
+
+/// A warning that comes with an answer is about that answer, and shows every time; only "unavailable" is said once.
+#[test]
+fn a_warning_that_comes_with_an_answer_is_shown_on_every_answer() {
+    fn warns(target: &SemanticTarget) -> SemanticOutcome {
+        let mut outcome = finds_size(target);
+        outcome.diagnostics.push(caliper_docgen_core::types::Diagnostic::new(
+            DiagnosticSeverity::Warning,
+            DiagnosticCode::SemanticBackend,
+            "the TypeScript checker was not told that types.ts changed",
+        ));
+        outcome
+    }
+    let project = project(&[("Button.tsx", BUTTON), ("Card.tsx", CARD)]);
+    let session = session(&project, Fake::new(Duration::ZERO, warns), Duration::from_secs(5));
+
+    for key in ["Button", "Card"] {
+        let answer = session.component(key).unwrap();
+        let warnings = answer.diagnostics.iter().filter(|d| d.severity == DiagnosticSeverity::Warning).count();
+        assert_eq!(warnings, 1, "{key}: {:?}", answer.diagnostics);
+    }
+}
+
+const NOT_TOLD: &str = "the TypeScript checker was not told that types.ts changed";
+
+fn warns_of_an_unannounced_edit(target: &SemanticTarget) -> SemanticOutcome {
+    let mut outcome = finds_size(target);
+    outcome.diagnostics.push(caliper_docgen_core::types::Diagnostic::new(
+        DiagnosticSeverity::Warning,
+        DiagnosticCode::SemanticBackend,
+        NOT_TOLD,
+    ));
+    outcome
+}
+
+fn keeps_structural_props_for_a_generic_component(target: &SemanticTarget) -> SemanticOutcome {
+    SemanticOutcome {
+        fallbacks: vec![caliper_docgen_core::types::semantic::SemanticFallback {
+            file_path: target.file_path.clone(),
+            display_name: target.display_name.clone(),
+            reason: "the instantiation Button<\"a\"> could not be formed: Cannot find name 'Settings'.".to_string(),
+        }],
+        ..SemanticOutcome::default()
+    }
+}
+
+fn messages(session: &WatchSession, key: &str) -> Vec<String> {
+    session.component(key).unwrap().diagnostics.iter().map(|d| d.message.clone()).collect()
+}
+
+/// What an answer says about the request that made it belongs to the answer: a late answer, and every request it then
+/// serves, carries it.
+#[test]
+fn a_late_answer_reports_the_warning_that_came_with_it_on_every_request_it_serves() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let session = session(
+        &project,
+        Fake::new(Duration::from_millis(300), warns_of_an_unannounced_edit),
+        Duration::from_millis(10),
+    );
+
+    let early = messages(&session, "Button");
+    assert!(!early.iter().any(|message| message == NOT_TOLD), "{early:?}");
+    std::thread::sleep(Duration::from_millis(900));
+
+    for request in ["first", "second"] {
+        let served = messages(&session, "Button");
+        assert_eq!(served.iter().filter(|message| *message == NOT_TOLD).count(), 1, "{request}: {served:?}");
+    }
+}
+
+#[test]
+fn an_answer_served_from_the_cache_reports_the_warning_that_came_with_it() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let checker = Fake::new(Duration::ZERO, warns_of_an_unannounced_edit);
+    let session = session(&project, checker.clone(), Duration::from_secs(5));
+
+    let first = messages(&session, "Button");
+    let cached = messages(&session, "Button");
+
+    assert_eq!(checker.requests(), 1);
+    assert_eq!(cached, first);
+    assert!(cached.iter().any(|message| message == NOT_TOLD), "{cached:?}");
+}
+
+#[test]
+fn a_fallback_reason_is_reported_again_when_the_cache_serves_the_component() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let checker = Fake::new(Duration::ZERO, keeps_structural_props_for_a_generic_component);
+    let session = session(&project, checker.clone(), Duration::from_secs(5));
+
+    let first = messages(&session, "Button");
+    let cached = messages(&session, "Button");
+
+    assert_eq!(checker.requests(), 1);
+    assert!(first.iter().any(|message| message.contains("could not be formed")), "{first:?}");
+    assert_eq!(cached, first);
+}
+
+#[test]
+fn a_late_fallback_reason_is_reported_by_the_request_that_finds_it() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let session = session(
+        &project,
+        Fake::new(Duration::from_millis(300), keeps_structural_props_for_a_generic_component),
+        Duration::from_millis(10),
+    );
+
+    drop(messages(&session, "Button"));
+    std::thread::sleep(Duration::from_millis(900));
+
+    let served = messages(&session, "Button");
+    assert!(served.iter().any(|message| message.contains("could not be formed")), "{served:?}");
 }

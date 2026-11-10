@@ -9,7 +9,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
-use crate::types::semantic::SemanticProvider;
+use crate::types::semantic::{SemanticProvider, SourceChange};
 use crate::types::*;
 
 use super::discover::{discover_dirs, discover_files};
@@ -339,7 +339,7 @@ impl WatchSession {
             true => Revision::cold_lazy(&self.options, id),
             false => Revision::cold(&self.options, id),
         });
-        self.forget_checker_answers();
+        self.forget_checker_answers(SourceChange::Everything);
         free_in_background(self.current.swap(Some(revision.clone())));
         revision
     }
@@ -352,11 +352,11 @@ impl WatchSession {
         free_in_background((self.current.swap(Some(next)), replaced));
     }
 
-    /// Drop what the checker said: a new revision may have changed a file the answers depend on. Called before the
-    /// revision is published, so no request sees the new files with an old answer.
-    fn forget_checker_answers(&self) {
+    /// Drop what the checker said and tell it what changed: a new revision may have changed a file the answers depend
+    /// on. Called before the revision is published, so no request sees the new files with an old answer.
+    fn forget_checker_answers(&self, change: SourceChange) {
         if let Some(hook) = &self.semantic {
-            hook.invalidate();
+            hook.invalidate(change);
         }
     }
 
@@ -542,12 +542,12 @@ impl WatchSession {
             Some((next, update)) => {
                 if let Some(stamps) = &mut writer.stamps {
                     if next.source_files().contains(&changed) {
-                        stamps.files.insert(changed, before);
+                        stamps.files.insert(changed.clone(), before);
                     } else {
                         stamps.files.remove(&changed);
                     }
                 }
-                self.forget_checker_answers();
+                self.forget_checker_answers(SourceChange::Files(vec![changed]));
                 self.publish(Arc::new(next), current);
                 update
             }
@@ -606,12 +606,13 @@ impl WatchSession {
             .collect();
         changed.sort_by(|a, b| a.0.cmp(&b.0));
         let mut next = current.clone();
-        let mut steps = Vec::new();
+        let (mut steps, mut applied) = (Vec::new(), Vec::new());
         for (path, now) in changed {
             if let Some((revision, update)) = next.next(&self.options, &path) {
                 let previous = std::mem::replace(&mut next, Arc::new(revision));
                 free_in_background(previous);
                 steps.push(update);
+                applied.push(path.clone());
             }
             if next.source_files().contains(&path) {
                 files.insert(path, now);
@@ -627,7 +628,7 @@ impl WatchSession {
             true => merge_lazy_updates(steps, next.id, start),
             false => output_delta(&current.output, &next.output, next.id, start),
         };
-        self.forget_checker_answers();
+        self.forget_checker_answers(SourceChange::Files(applied));
         self.publish(next, current);
         update
     }
@@ -636,7 +637,7 @@ impl WatchSession {
     fn rebuilt(&self, writer: &mut Freshness, current: Arc<Revision>) -> IncrementalUpdate {
         *writer = Freshness::cold(SystemTime::now());
         let (next, update) = current.rebuilt(&self.options);
-        self.forget_checker_answers();
+        self.forget_checker_answers(SourceChange::Everything);
         self.publish(Arc::new(next), current);
         update
     }

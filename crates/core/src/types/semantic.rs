@@ -144,6 +144,20 @@ pub trait SemanticProvider: Send + Sync {
     /// Queues `targets` for the checker and returns at once with the receiver that will yield their
     /// [`SemanticOutcome`].
     fn request(&self, targets: Vec<SemanticTarget>) -> std::sync::mpsc::Receiver<SemanticOutcome>;
+
+    /// Tells the checker that files changed on disk, before any request that may read them is queued. A checker that
+    /// keeps what it read (a warm `tsc` holding a snapshot, ADR 0026) reads them again; one that reads every file
+    /// afresh for each request needs nothing, which is the default.
+    fn changed(&self, _change: SourceChange) {}
+}
+
+/// What changed on disk, as a session tells its checker ([`SemanticProvider::changed`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceChange {
+    /// These files were edited, created or deleted.
+    Files(Vec<Utf8PathBuf>),
+    /// Anything may have changed: the session extracted everything again (a resolution config changed, or it started).
+    Everything,
 }
 
 impl SemanticOutcome {

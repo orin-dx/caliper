@@ -19,8 +19,9 @@ mod locate;
 mod on_demand;
 mod printed;
 mod rpc;
+mod stamps;
 
-pub use on_demand::{OnDemand, OnDemandConfig, Recycles};
+pub use on_demand::{OnDemand, OnDemandConfig, Recycles, Snapshots};
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -97,9 +98,6 @@ pub struct SemanticRequest {
     /// Ask the checker about a component's props, and about the members of each type, last to first. The answer must
     /// not change: no id the checker hands out, and so no order of queries, may show in it. The tests set this.
     pub reverse_queries: bool,
-    /// Compiler options of a `tsc` session that is already initialized. A warm checker sets this once so a request
-    /// only builds its program.
-    pub(crate) prepared_options: Option<serde_json::Value>,
 }
 
 impl SemanticRequest {
@@ -116,7 +114,6 @@ impl SemanticRequest {
             record_to: None,
             extra_env: Vec::new(),
             reverse_queries: false,
-            prepared_options: None,
         }
     }
 }
@@ -176,49 +173,50 @@ async fn run(request: SemanticRequest) -> SemanticOutcome {
     outcome
 }
 
-/// Answers the request's targets with a checker that is already running: one program rooted at their files.
+/// The files of the request's exported targets, in first-seen order: the roots of the program that answers it.
+fn root_files(request: &SemanticRequest) -> Vec<String> {
+    group_by_file(request).2.iter().map(|file| file.to_string()).collect()
+}
+
+/// Answers the request's targets with a checker that is already running: one program rooted at their files, released
+/// once they are answered.
 async fn answer_with(supervisor: &Supervisor, request: &SemanticRequest) -> SemanticOutcome {
+    let files = root_files(request);
+    if files.is_empty() {
+        return group_by_file(request).0;
+    }
+    let started = std::time::Instant::now();
+    let tsconfig = request.tsconfig.as_ref().map(|path| path.as_str());
+    let opened =
+        Rpc::open(supervisor.client(), request.request_timeout, tsconfig, &files, request.record_to.is_some()).await;
+    let rpc = match opened {
+        Ok(rpc) => Arc::new(rpc),
+        Err(error) => return SemanticOutcome::unavailable(format!("the checker stopped answering: {error}")),
+    };
+    tracing::debug!(program_ms = started.elapsed().as_millis() as u64, "semantic program built");
+    let answered = answer_on(&rpc, request, &files).await;
+    rpc.release().await;
+    answered.unwrap_or_else(|error| SemanticOutcome::unavailable(format!("the checker stopped answering: {error}")))
+}
+
+/// Answers the request's targets on a snapshot whose program is rooted at `files` ([`root_files`]). The snapshot is
+/// left as it is, for the caller to keep or release.
+async fn answer_on(rpc: &Arc<Rpc>, request: &SemanticRequest, files: &[String]) -> Result<SemanticOutcome, CallError> {
     let (mut outcome, by_file, order) = group_by_file(request);
-    if order.is_empty() {
-        return outcome;
-    }
-    let files: Vec<String> = order.iter().map(|file| file.to_string()).collect();
-    match session(supervisor, request, &files, &by_file, &order).await {
-        Ok(mut answered) => {
-            outcome.components.append(&mut answered.components);
-            outcome.fallbacks.append(&mut answered.fallbacks);
-            outcome
-        }
-        Err(error) => SemanticOutcome::unavailable(format!("the checker stopped answering: {error}")),
-    }
+    let mut answered = session(rpc, request, files, &by_file, &order).await?;
+    outcome.components.append(&mut answered.components);
+    outcome.fallbacks.append(&mut answered.fallbacks);
+    Ok(outcome)
 }
 
 async fn session(
-    supervisor: &Supervisor,
+    rpc: &Arc<Rpc>,
     request: &SemanticRequest,
     files: &[String],
     by_file: &FxHashMap<&Utf8Path, Vec<&Target>>,
     order: &[&Utf8Path],
 ) -> Result<SemanticOutcome, CallError> {
     let started = std::time::Instant::now();
-    let opened = match &request.prepared_options {
-        Some(options) => {
-            Rpc::open_with(supervisor.client(), request.request_timeout, options, files, request.record_to.is_some())
-                .await
-        }
-        None => {
-            Rpc::open(
-                supervisor.client(),
-                request.request_timeout,
-                request.tsconfig.as_ref().map(|path| path.as_str()),
-                files,
-                request.record_to.is_some(),
-            )
-            .await
-        }
-    };
-    let rpc = Arc::new(opened?);
-    let opened = started.elapsed();
     let converter = Converter::new(rpc.clone(), request.reverse_queries);
     let limit = Arc::new(Semaphore::new(FILES_IN_FLIGHT));
     let interner = Arc::new(PropInterner::default());
@@ -261,8 +259,7 @@ async fn session(
     }
     if !generic.is_empty() {
         let mut instantiated =
-            instantiate::answer(&rpc, files, &request.project_root, &interner, request.reverse_queries, generic)
-                .await?;
+            instantiate::answer(rpc, files, &request.project_root, &interner, request.reverse_queries, generic).await?;
         outcome.components.append(&mut instantiated.components);
         outcome.fallbacks.append(&mut instantiated.fallbacks);
     }
@@ -277,11 +274,9 @@ async fn session(
         requests = ?rpc.calls(),
         files = files.len(),
         type_memo = ?converter.memo_stats(),
-        program_ms = opened.as_millis() as u64,
         total_ms = started.elapsed().as_millis() as u64,
         "semantic backend finished"
     );
-    rpc.release().await;
     outcome.components.sort_by(|a, b| (&a.file_path, &a.display_name).cmp(&(&b.file_path, &b.display_name)));
     outcome.fallbacks.sort_by(|a, b| (&a.file_path, &a.display_name).cmp(&(&b.file_path, &b.display_name)));
     Ok(outcome)
