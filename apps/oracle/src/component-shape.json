@@ -1,0 +1,7 @@
+{
+  "libFile": "/typescript(?:-[a-z0-9-]+)?/lib/lib\\.[^/]*\\.d\\.ts$",
+  "reactDirectory": "node_modules/@types/react/",
+  "hook": "^use[A-Z0-9]",
+  "contextValueProps": ["value", "children"],
+  "promiseType": "^Promise<"
+}

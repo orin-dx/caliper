@@ -206,6 +206,9 @@ def score(listed=3, universe=10, agree=0.4, **more):
             'missing_by_reason': {'component': 5, 'failed_file': 0, 'prop': 2, 'collapsed': 0}, 'examples': {}, **more}
 
 
+EXCLUDED = {'components': 4, 'props': 9, 'by_reason': {'hook': {'components': 4, 'props': 9}}}
+
+
 class OracleTools(unittest.TestCase):
     def test_the_oracle_gets_both_dumps_and_the_record_keeps_caliper_numbers_and_the_tool_scores(self):
         with tempfile.TemporaryDirectory() as work:
@@ -216,7 +219,9 @@ class OracleTools(unittest.TestCase):
                 if '--out' in command:
                     with open(command[command.index('--out') + 1], 'w') as f:
                         f.write(json.dumps({'props_shared': 10, 'verdicts': {'identical': 6, 'spelled': 2, 'wrong': 1},
-                                            'tools': {'caliper': score(), 'rdt': score(listed=9)}}))
+                                            'tools': {'caliper': score(), 'rdt': score(listed=9)},
+                                            'tools_all_functions': {'caliper': score(universe=14), 'rdt': score(universe=14)},
+                                            'universe_excluded': EXCLUDED}))
                 return subprocess.CompletedProcess(command, 0)
 
             with mock.patch.object(weekly.subprocess, 'run', side_effect=fake_run):
@@ -228,6 +233,34 @@ class OracleTools(unittest.TestCase):
         self.assertEqual(sorted(out['tools']), ['caliper', 'rdt'])
         self.assertNotIn('examples', out['tools']['rdt'])
         self.assertEqual(out['tools']['rdt']['listed'], 9)
+
+    def test_the_record_keeps_the_universe_before_the_shape_rules_beside_the_one_after_them(self):
+        with tempfile.TemporaryDirectory() as work:
+            def fake_run(command, **kwargs):
+                if '--out' in command:
+                    with open(command[command.index('--out') + 1], 'w') as f:
+                        f.write(json.dumps({'props_shared': 10, 'verdicts': {'identical': 6, 'spelled': 2, 'wrong': 1},
+                                            'tools': {'caliper': score()},
+                                            'tools_all_functions': {'caliper': score(universe=14, examples={'wrong': []})},
+                                            'universe_excluded': EXCLUDED}))
+                return subprocess.CompletedProcess(command, 0)
+
+            with mock.patch.object(weekly.subprocess, 'run', side_effect=fake_run):
+                out = weekly.oracle('bin', 'antd', os.path.join(work, 'src'), work, work, '/w/rdt.json', '/w/rdg.json')
+        self.assertEqual(out['universe_version'], weekly.UNIVERSE_VERSION)
+        self.assertEqual((out['tools']['caliper']['universe'], out['tools_all_functions']['caliper']['universe']), (10, 14))
+        self.assertNotIn('examples', out['tools_all_functions']['caliper'])
+        self.assertEqual(out['universe_excluded'], EXCLUDED)
+
+    def test_the_excluded_line_names_the_rules_and_the_figure_before_them(self):
+        entry = {'universe_excluded': {'components': 22, 'props': 741, 'by_reason': {
+                     'lib_members': {'components': 18, 'props': 730}, 'hook': {'components': 4, 'props': 11}}},
+                 'tools_all_functions': {'caliper': score(agree=0.307), 'rdt': score(agree=0.425)}}
+        self.assertEqual(weekly.excluded_line('spectrum', entry),
+                         '- spectrum: 22 functions with 741 props left out (730 a lib type, 11 a hook); over every function: '
+                         'Caliper 30.7%, RDT 42.5%')
+        self.assertEqual(weekly.excluded_line('antd', {'universe_excluded': {'components': 0, 'props': 0, 'by_reason': {}}}),
+                         '- antd: 0 functions with 0 props left out')
 
     def test_a_tool_line_says_what_it_agrees_on_and_what_it_omits(self):
         self.assertEqual(
@@ -249,11 +282,16 @@ class OracleTools(unittest.TestCase):
                   'recall': {'caliper': {k: [1, 1] for k in ('components', 'own', 'react', 'own_layers', 'react_layers')},
                              'react_docgen': {k: [1, 1] for k in ('components', 'own', 'react')}},
                   'oracle': {'shared_props': 10, 'agree': 0.8, 'wrong': 0.0,
-                             'tools': {'caliper': score(), 'rdt': score(), 'react_docgen': score()}}}
+                             'tools': {'caliper': score(), 'rdt': score(), 'react_docgen': score()},
+                             'tools_all_functions': {'caliper': score(agree=0.3), 'rdt': score(agree=0.4)},
+                             'universe_excluded': EXCLUDED}}
         text = weekly.markdown({'caliper': 'x', 'runs': 1, 'reference_version': 2, 'corpora': {'antd': corpus}}, [])
         order = [text.index(f'- antd, {label}: ') for label in ('Caliper', 'RDT', 'react-docgen')]
         self.assertEqual(order, sorted(order))
         self.assertLess(text.index("### TypeScript 7.1's checker"), order[0])
+        self.assertIn('exported candidate component', text)
+        self.assertIn('- antd: 4 functions with 9 props left out (9 a hook); over every function: Caliper 30.0%, RDT 40.0%', text)
+        self.assertLess(order[-1], text.index('- antd: 4 functions'))
 
 
 class Baseline(unittest.TestCase):
