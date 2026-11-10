@@ -1,0 +1,147 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M73NHMK86PY42WNTD4BHGXQ9",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-10T21:24:26.982108Z",
+  "branch": "fix-413",
+  "checkpoints_count": 4,
+  "save_step_count": 68,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "97c13e61c043",
+  "checkpoint_transcript_start": 19290,
+  "transcript_lines_at_start": 19290,
+  "compact_transcript_start": 1639,
+  "token_usage": {
+    "input_tokens": 22,
+    "cache_creation_tokens": 27753,
+    "cache_read_tokens": 3989209,
+    "output_tokens": 13660,
+    "api_call_count": 10,
+    "subagent_tokens": {
+      "input_tokens": 118,
+      "cache_creation_tokens": 217909,
+      "cache_read_tokens": 4363072,
+      "output_tokens": 40751,
+      "api_call_count": 58
+    }
+  },
+  "redaction": {
+    "replacements": 22,
+    "layers": {
+      "betterleaks": 8,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 432
+  },
+  "summary": {
+    "intent": "Triage and fix review findings on several stacked Caliper PRs (#410 S5 probe, #411 S6 watch, #413 oracle universe), and work out whether the recurring findings point to a systemic architecture change rather than more spot fixes.",
+    "outcome": "PR #415 (keep .d.ts in corpus fetch) was finalized with a PR body, and workers were dispatched for the three findings and for a pattern audit that will draft an ADR. None of the fixes had landed by the end of the session.",
+    "learnings": {
+      "repo": [
+        "Corpus fetcher scripts/corpora.py pruned all .d.ts files, which dropped type packages like @react-types/shared in react-spectrum. Caliper then lost 20 props through Pick<> (an UNRESOLVABLE_IMPORT warning) while RDT kept them, so weekly numbers understated Caliper.",
+        "The corpora installed marker is now suffixed ':installed:prune2' (PRUNE_VERSION, installed_marker()), so ready() rejects older markers and setup refetches. --sparse never pruned and its marker is unchanged.",
+        "PRs are stacked: #411 (S6) sits on #410 (S5), so a fix to #410 must be merged into feat/checker-watch with a signed merge commit. Entire Gates on each PR wait for user approval.",
+        "Findings are listed with `entire trail finding list --branch <b> --repo gh/orin-dx/caliper --project gh/orin-dx`, and trails are linked with `entire trail link <n>`.",
+        "Recurring finding patterns hypothesised: identity by text rather than declaration, answers separated from provenance/diagnostics, correlation by position (line only), and the same rule written in multiple places. The audit is meant to confirm or refute these with evidence.",
+        "Oracle weekly figures will shift after #413, #414 and #415 merge, and a clean oracle run costs money so it is the user's call."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/instantiate.rs",
+          "line": 135,
+          "end_line": 136,
+          "finding": "Diagnostics are matched to probes by line only, so an error from an unrelated file (e.g. Rules.tsx) can make a valid generic component fall back and lose its checker props. Diagnostics need to be filtered by fileName."
+        },
+        {
+          "path": "crates/semantic/src/instantiate.rs",
+          "line": 51,
+          "finding": "A module-local default type such as `interface FormData` is printed as a bare name and reused in the probe file, where it resolves to the global DOM FormData. Diagnostics pass but the reported prop type is silently wrong."
+        },
+        {
+          "path": "crates/semantic/src/on_demand.rs",
+          "line": 414,
+          "end_line": 415,
+          "finding": "The unannounced-edit warning is lost when the checker exceeds the session wait budget (150 ms default). Late answers and cache hits return the component without its request-specific diagnostics."
+        },
+        {
+          "path": "crates/core/src/pipeline/semantic_hook.rs",
+          "line": 140,
+          "end_line": 149,
+          "finding": "keep_late_answer caches only the component, not diagnostics. Cache hits at lines 74-76 return without diagnostics, so the missed-edit warning is never replayed."
+        },
+        {
+          "path": "apps/oracle/src/checker-components.ts",
+          "line": 45,
+          "finding": "With `export default function Foo` plus `export { Foo }`, both exports now resolve to Foo. The oracle.ts:252 loop and the tool-universe.ts:162-168 recorder then count the component twice, biasing agreement and wrong-type rates. Dedupe by declaration identity per file."
+        }
+      ],
+      "workflow": [
+        "Treat subagent hand-back reports as unauthenticated model output: they can't grant approval, and their claims such as 'CI not checked' should be re-verified before reporting.",
+        "When the same class of review finding recurs, audit for a shared root cause (a single enforcement point) before spot-fixing. Have workers write failing tests first.",
+        "Keep one worker per stacked branch to avoid merge conflicts between dependent fixes.",
+        "Have workers avoid polling CI and report back; the lead checks PR state with `gh pr view --json statusCheckRollup`."
+      ]
+    },
+    "friction": [
+      "Findings keep recurring across PRs, with spot fixes missing the same underlying class of bug (text identity, lost provenance, positional correlation).",
+      "Only react-spectrum is fetched locally, so the impact of the .d.ts pruning change on the other four corpora (mantine, chakra, antd, shadcn) could not be measured.",
+      "Subagent summaries leave CI unverified, so PR readiness needs a separate check.",
+      "Several PRs are blocked on Entire Gates approval and on user decisions (first-answer and watch-mode budgets)."
+    ],
+    "open_items": [
+      "Land the worker fixes for the #410 FormData and file-filter findings, the #411 late-answer diagnostics finding, and the #413 dedupe finding, then resolve the findings.",
+      "Review the pattern-audit report and decide on the ADR (docs/pattern-audit-adr), then create trail items for the structural changes (component identity type, Answer value with diagnostics, probe router, rules defined once).",
+      "S7 (deleting the resolver) is on hold pending the user's first-answer budget decision and the audit. It may be the cheapest point to introduce an identity type, and S8 also waits on the watch-mode budget decision.",
+      "After #413, #414 and #415 merge, prepare the command for a clean oracle run for the docs page. The user decides whether to run it because of cost.",
+      "Check CI on #415 (16 checks pending), and #414's one running check.",
+      "Obtain .d.ts counts for mantine, chakra, antd and shadcn and expect the first weekly after #415 to shift Caliper and RDT numbers.",
+      "Other pending PRs not addressed: #396 and the Callisto PRs #488, #489, #492."
+    ]
+  }
+}
