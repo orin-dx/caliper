@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_017kQ7p2fckgTWFFvDHpoF2x",
+  "agent_id": "a5148716fc3fa34fe",
+  "subagent_type": "general-purpose",
+  "task_description": "ADR 0026 S4 checker wins",
+  "token_usage": {
+    "input_tokens": 400,
+    "cache_creation_tokens": 815801,
+    "cache_read_tokens": 52283213,
+    "output_tokens": 125121,
+    "api_call_count": 198
+  },
+  "started_at": "2026-11-09T13:01:22.050063-08:00",
+  "completed_at": "2026-11-09T13:39:52.316626-08:00"
+}
