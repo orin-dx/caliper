@@ -4,7 +4,9 @@ Two things, both small: a weekly record of how Caliper compares with react-docge
 
 ## Weekly record
 
-`.github/workflows/weekly.yml` runs on Mondays and by hand. `scripts/corpora.py` fetches each repo at a pinned commit and installs its dependencies with its own package manager and lockfile (lifecycle scripts off, caches under `.corpora/`, gitignored), then removes tests, stories, demos and `.d.ts` files from the source directory so every tool reads the same files. `scripts/weekly.py` runs the tools.
+`.github/workflows/weekly.yml` runs on Mondays and by hand. `scripts/corpora.py` fetches each repo at a pinned commit and installs its dependencies with its own package manager and lockfile (lifecycle scripts off, caches under `.corpora/`, gitignored), then removes tests, stories, demos and the `dist/` and `build/` directories from the source directory so every tool reads the same files. `scripts/weekly.py` runs the tools.
+
+Declaration files are kept. Until 2026-11 the fetch also deleted every `.d.ts`, which removed a corpus's own type packages: React Spectrum declares `@react-types/shared` in `packages/@react-types/shared/src/*.d.ts` and its components import from it. With those files gone, 20 props that reach a component through `Pick` of a name declared there were lost; on unmodified main with the files restored, Caliper reports 20 of 20. Generated declarations sit in `dist/` and `build/`, which are still removed. A fetched corpus records a prune version in its marker (`PRUNE_VERSION` in `scripts/corpora.py`), so one pruned under the older rule is fetched again on the next `setup`; `--sparse` never pruned and already kept declaration files. The first weekly run after this change moves Caliper's and RDT's numbers on every corpus whose source tree holds `.d.ts` files (React Spectrum has 67 under `packages/`).
 
 | Corpus | Repository | Commit | Source directory | Install |
 | --- | --- | --- | --- | --- |
