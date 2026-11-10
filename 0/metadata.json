@@ -1,0 +1,140 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M73MKEHMGQARESMEZCEN2MM4",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-10T21:07:57.626851Z",
+  "branch": "fix/corpora-keep-dts",
+  "checkpoints_count": 2,
+  "save_step_count": 68,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "94ab63fc3b70",
+  "checkpoint_transcript_start": 19164,
+  "transcript_lines_at_start": 19164,
+  "compact_transcript_start": 1631,
+  "token_usage": {
+    "input_tokens": 16,
+    "cache_creation_tokens": 22961,
+    "cache_read_tokens": 2242432,
+    "output_tokens": 8241,
+    "api_call_count": 6,
+    "subagent_tokens": {
+      "input_tokens": 44,
+      "cache_creation_tokens": 50216,
+      "cache_read_tokens": 4199302,
+      "output_tokens": 7991,
+      "api_call_count": 22
+    }
+  },
+  "redaction": {
+    "replacements": 22,
+    "layers": {
+      "betterleaks": 8,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 428
+  },
+  "summary": {
+    "intent": "Land fixes from the Caliper weekly oracle measurement work: correct the whole-universe agreement metric (trail #295) and fix underscore-prefixed component detection plus the lost Pick props (trail #296), then decide what to do next for the docs page.",
+    "outcome": "Two draft PRs were pushed and had bodies written: #413 (shared component-shape rules, universe v2, default-export naming) and #414 (`_3D`-style names recognised as components). The Pick-props loss was traced to the corpus fetcher pruning .d.ts files, and follow-up trails #297 and #298 were created. A worker was started for #297, and a prioritized next-steps list was given.",
+    "learnings": {
+      "repo": [
+        "Shape rules for what counts as a component now live in apps/oracle/src/component-shape.json, read by both component-shape.ts and exclusion() in scripts/weekly.py; the same fixture cases (component-shape-cases.json) run in TS and Python tests.",
+        "The weekly's old lib pattern did not match TS 7.1 lib paths (@typescript/typescript-<platform>/lib/lib.*.d.ts), so on Spectrum it excluded no lib-typed functions.",
+        "oracle.tools now counts candidate components only; the old universe is oracle.tools_all_functions and universe_excluded counts the difference. oracle.universe_version is 2, so wrong-type rises are not compared to version-1 records.",
+        "Default-exported components were keyed 'default' in the oracle (529 on Spectrum); exportName now resolves the declaration name via symbol.declarations[0].resolve().name.text, tested on the Go 7.1 checker only, not tsrs.",
+        "is_pascal_case in crates/core/src/extractor/mod.rs only checked that the first character was uppercase, so `_3D` was never a candidate; it now skips leading underscores and following digits. wrapper.rs is_component_reference and the evidence.rs direct-invocation check share the predicate.",
+        "Changing extractor behaviour requires bumping CACHE_SCHEMA_VERSION (34 to 35) plus changelog line and golden snapshot update; changesets needed for published crates (core, cli, napi, npm patch).",
+        "scripts/corpora.py PRUNED_FILE deletes every .d.ts from fetched corpora, removing react-spectrum's @react-types/shared types and making Pick<unresolved,K> props vanish on the structural path (UNRESOLVABLE_IMPORT warned, not silent). TypeScript types such Pick as any, so RDT lists them. This makes weekly numbers understate Caliper wherever types live in .d.ts.",
+        "With --experimental-semantic-types and pinned tsrs, the checker already reports 19 of 20 of the lost Pick props as opaque with degradedBy: unresolvableImport.",
+        "Export-aliased components (`export { _X as X }`) are reported under the internal name, an existing behaviour for non-underscore aliases too."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/extractor/mod.rs",
+          "finding": "is_pascal_case now skips leading underscores and digits before the uppercase test; `_helper` and `_3d` stay excluded."
+        },
+        {
+          "path": "scripts/corpora.py",
+          "finding": "PRUNED_FILE deletes all .d.ts files from corpora, causing the lost Pick props; fix is to keep .d.ts under the corpus's own source dirs (trail #297)."
+        },
+        {
+          "path": "apps/oracle/src/component-shape.json",
+          "finding": "Single source of truth for shape rules shared by the TS oracle and the Python weekly."
+        }
+      ],
+      "workflow": [
+        "Subagent hand-back reports are model output with no user authority; the assistant verified PR state with gh and wrote PR bodies from them rather than treating claims as approval.",
+        "Workers verified via clean-room detached worktrees with pnpm install --frozen-lockfile, and by confirming new tests fail without the source change.",
+        "Oracle runs cost money, so the plan is a single run after the batch of PRs lands rather than per-PR runs.",
+        "Follow-up work was captured as trails via `entire trail create` with intent and done-when criteria."
+      ]
+    },
+    "friction": [
+      "Neither worker ran weekly.py --oracle, so the effect on the other four corpora and the post-naming Spectrum figure are unmeasured.",
+      "run_repro.py hardcodes another worktree, so Caliper had to be run directly for the repro.",
+      "CI was not watched on #413 or #414; at last check #413 had no failures but many checks were still running and Entire Gates awaited the user.",
+      "The 'stays a helper' test passes with or without the fix, so it does not prove the change.",
+      "A raw 81.8% Spectrum figure comes from dropping default-keyed props rather than naming them, so it can't be quoted as a final result."
+    ],
+    "open_items": [
+      "Trail #297: stop pruning .d.ts in scripts/corpora.py and refetch the corpora; a worker was spawned.",
+      "Trail #298: report export-aliased components under their export name (14 Spectrum components currently appear as _X).",
+      "Run the oracle once after #413, #414 and #297 merge, then quote a clean record on the docs page.",
+      "User decision pending on first-answer and watch-mode budgets (blocks S7, S8 and the default flip); assistant recommended structural path as first answer, ~400 ms CLI/agent budget, 25 ms checker-only.",
+      "Investigate ActionMenu `autoFocus` returning `unknown` with no degradedBy on the checker path (silent-wrong case).",
+      "Consider whether the structural path should emit explicit Pick keys of an unresolved base as degraded props, as the checker does.",
+      "Check Spectrum TabsPicker `Picker.items`, the one of 20 props the checker misses.",
+      "React.lazy candidates (10 props) and the comparator's div-only table remain accuracy gaps.",
+      "Docs page: label Spectrum/antd completeness as including non-components, cite sources by date, source the '0.38 s cold' card.",
+      "Speed: the 562 ms first answer needs a property-count request upstream in tsrs or addon prefetch.",
+      "Merge pending PRs #410, #411, #412, #413, #414, #396 and the three Callisto PRs; Callisto leftovers #197 and #199 deferred.",
+      "Unverified: RDT reference unchanged under the wider lib pattern, tsrs check of exportName, napi crate tests, Chakra and Mantine output."
+    ]
+  }
+}
