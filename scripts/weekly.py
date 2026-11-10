@@ -39,6 +39,10 @@ RECALL_DROP = 0.02
 # The rules that decide what the reference is: the exclusions and the pairing. Raise it when a change to them moves recall,
 # so that a record is never compared on recall with one made under other rules (a record without it is version 1).
 REFERENCE_VERSION = 2
+# The universe of the oracle's scores (`oracle.tools`): version 2 counts candidate components only, naming a default export
+# by its declaration; a record without it is version 1, which counted every function the checker takes for a component
+# and named a default export `default`. Raise it when a change moves what the oracle counts.
+UNIVERSE_VERSION = 2
 
 
 def norm_name(name):
@@ -117,8 +121,14 @@ def caliper_layer_members(binary, src, root):
     return members
 
 
-LIB_FILE = re.compile(r'/typescript/lib/lib\.[^/]*\.d\.ts$')
-REACT_DIR = 'node_modules/@types/react/'
+# The shape rules of `exclusion`, shared with the oracle's universe (apps/oracle/src/component-shape.ts): the patterns are in
+# one file both read, and both run the cases of apps/oracle/tests/fixtures/component-shape-cases.json.
+with open(os.path.join(ROOT, 'apps', 'oracle', 'src', 'component-shape.json')) as shape_file:
+    SHAPE = json.load(shape_file)
+LIB_FILE = re.compile(SHAPE['libFile'])
+HOOK = re.compile(SHAPE['hook'])
+PROMISE_TYPE = re.compile(SHAPE['promiseType'])
+REACT_DIR = SHAPE['reactDirectory']
 EXTENSIONS = ('', '.tsx', '.ts', '/index.tsx', '/index.ts')
 # An identifier inside any number of calls (`memo(forwardRef(Foo))`, `React.memo(Foo)`, `Object.assign(Foo, {...})`),
 # followed by what ends an argument or an expression: `, ) ; !`, a type assertion or the end of the line.
@@ -136,19 +146,20 @@ def exclusion(comp):
     object of props; a hook is named `use` and a capital; a `value` declared by `@types/react` and nothing else is a
     context's Provider; a lowercase name cannot be a JSX tag unless it takes the attributes of one (a `@types/react`
     prop) or is the file's or directory's own name, which RDT gives a default export; and props that are all promises
-    are handed over by a router, not by a parent."""
+    are handed over by a router, not by a parent. The oracle's universe applies the same rules to the checker's functions
+    (apps/oracle/src/component-shape.ts)."""
     props = comp['props']
     in_lib = sum(bool(LIB_FILE.search(i.get('parent') or '')) for i in props.values())
     if in_lib * 2 > len(props):
         return 'lib_members'
     name = comp['name']
-    if re.match(r'use[A-Z0-9]', name):
+    if HOOK.search(name):
         return 'hook'
-    if 'value' in props and set(props) <= {'value', 'children'} and all(map(declared_in_react, props.values())):
+    if 'value' in props and set(props) <= set(SHAPE['contextValueProps']) and all(map(declared_in_react, props.values())):
         return 'context_value'
     if name[:1].islower() and norm_name(name) not in own_names(comp['file']) and not any(map(declared_in_react, props.values())):
         return 'not_jsx'
-    if all(i.get('type', '').startswith('Promise<') for i in props.values()):
+    if all(PROMISE_TYPE.search(i.get('type', '')) for i in props.values()):
         return 'promise_props'
     return None
 
@@ -449,7 +460,10 @@ def oracle_tools(tools):
 def oracle(binary, name, src, root, work, rdt_out, rdg_out):
     """How often TypeScript 7.1's checker contradicts Caliper's prop types (apps/oracle/src/oracle.ts), and how RDT and
     react-docgen fare against it over the same props. `shared_props`, `agree` and `wrong` are Caliper's, over the props
-    both list, and keep their meaning from week to week; `tools` holds all three over every prop the checker finds."""
+    both list, and keep their meaning from week to week; `tools` holds all three over every prop of the candidate
+    components the checker finds (the functions `exclusion`'s shape rules take out are left out: `universe_excluded`), and
+    `tools_all_functions` the same scores over every function the checker takes for a component, as `tools` was before
+    `universe_version` 2."""
     caliper_json = os.path.join(work, f'{name}.caliper.json')
     with open(caliper_json, 'w') as f:
         subprocess.run([binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported',
@@ -463,7 +477,9 @@ def oracle(binary, name, src, root, work, rdt_out, rdg_out):
         e = json.load(f)
     shared = e['props_shared']
     return {'shared_props': shared, 'agree': rate((e['verdicts']['identical'] + e['verdicts']['spelled'], shared)),
-            'wrong': rate((e['verdicts']['wrong'], shared)), 'tools': oracle_tools(e['tools'])}
+            'wrong': rate((e['verdicts']['wrong'], shared)), 'universe_version': UNIVERSE_VERSION,
+            'tools': oracle_tools(e['tools']), 'tools_all_functions': oracle_tools(e['tools_all_functions']),
+            'universe_excluded': e['universe_excluded']}
 
 
 def measure(args, corpus, work):
@@ -514,12 +530,24 @@ def same_reference(record, previous):
     return record.get('reference_version', 1) == previous.get('reference_version', 1)
 
 
+def same_universe(entry, old):
+    """Whether two corpus entries counted the same props: the oracle's universe has had its rules changed (`UNIVERSE_VERSION`)
+    when their `universe_version` differs. An entry without an oracle has no universe to differ."""
+    now, before = entry.get('oracle') or {}, old.get('oracle') or {}
+    if 'tools' not in now or 'tools' not in before:
+        return True
+    return now.get('universe_version', 1) == before.get('universe_version', 1)
+
+
 def findings(record, previous):
     """What opens the issue: a wrong type above the gate or higher than last week, a silent-wrong answer to a reader's
-    question, a whole run over a budget (scripts/headline.py). Drift against `previous` is `changes`, not a finding."""
+    question, a whole run over a budget (scripts/headline.py). Drift against `previous` is `changes`, not a finding. A rise
+    in wrong types is not read against a record whose universe was another (`same_universe`): the props counted differ."""
     out = []
     for name, entry in record['corpora'].items():
         old = previous.get('corpora', {}).get(name)
+        if old and not same_universe(entry, old):
+            old = {key: value for key, value in old.items() if key != 'headline'}
         out += headline.findings(name, entry, old) + agent_eval.findings(name, entry)
     return out
 
@@ -533,6 +561,10 @@ def changes(record, previous):
         old = previous.get('corpora', {}).get(name)
         if not old:
             continue
+        if not same_universe(entry, old):
+            out.append(f"{name}: the oracle's universe is version {entry['oracle'].get('universe_version', 1)} now and was version "
+                       f"{old['oracle'].get('universe_version', 1)} last week, so its props, agreement and wrong types are "
+                       "not compared with last week's")
         for key, label in (('ms', 'time'), ('rss_mib', 'peak memory')):
             if entry['caliper'][key] > SLOWER * old['caliper'][key]:
                 out.append(f"{name}: {label} {old['caliper'][key]} -> {entry['caliper'][key]}")
@@ -563,6 +595,22 @@ def tool_line(corpus, tool, score):
     if score.get('failed_files'):
         parts.append(f"threw on {score['failed_files']:,} files, {score['missing_by_reason']['failed_file']:,} of the omitted props")
     return f"- {corpus}, {TOOL_LABELS[tool]}: " + '; '.join(parts)
+
+
+SHAPE_LABELS = {'lib_members': 'a lib type', 'hook': 'a hook', 'context_value': "a context's value", 'not_jsx': 'lowercase',
+                'promise_props': 'promises'}
+
+
+def excluded_line(corpus, oracle_entry):
+    """What the oracle's universe left out as not components, and what each tool's whole-universe agreement reads without
+    that rule (`tools_all_functions`), so the figure before `universe_version` 2 stays in sight."""
+    left = oracle_entry['universe_excluded']
+    why = ', '.join(f"{v['props']:,} {SHAPE_LABELS[k]}" for k, v in left['by_reason'].items())
+    before = oracle_entry.get('tools_all_functions') or {}
+    reads = ', '.join(f"{TOOL_LABELS[t]} {100 * before[t]['agree_universe']:.1f}%"
+                      for t in ('caliper', 'rdt', 'react_docgen') if t in before)
+    return (f"- {corpus}: {left['components']:,} functions with {left['props']:,} props left out"
+            + (f' ({why})' if why else '') + (f'; over every function: {reads}' if reads else ''))
 
 
 def markdown(record, notes, reference_changed=None, moved=(), baseline=True, baseline_failed=False):
@@ -606,10 +654,15 @@ def markdown(record, notes, reference_changed=None, moved=(), baseline=True, bas
                          f"| {name} | {o['shared_props']:,} | {100 * o['agree']:.1f}% | {100 * o['wrong']:.2f}% |")
         tool_rows = [(n, o['tools']) for n, o in oracle_rows if 'tools' in o]
         if tool_rows:
-            lines += ['', "Each tool against the checker, over every own prop the checker finds on an exported component "
-                          '(a prop a tool omits counts against it; components include some functions that are not):', '']
+            lines += ['', "Each tool against the checker, over every own prop the checker finds on an exported candidate "
+                          'component (a prop a tool omits counts against it). Hooks, lowercase helpers and functions whose '
+                          "parameter is a lib type, a context's value or a router's promises are no candidates and are left "
+                          'out, by the rules of the reference above:', '']
             lines += [tool_line(name, tool, tools[tool]) for name, tools in tool_rows
                       for tool in ('caliper', 'rdt', 'react_docgen') if tool in tools]
+            lines += ['', 'Left out of that universe as not components, with the whole-universe agreement over every function '
+                          'the checker takes for a component (the universe before these rules):', '']
+            lines += [excluded_line(name, o) for name, o in oracle_rows if 'tools' in o and 'universe_excluded' in o]
     lines += agent_eval.markdown(record)
     if baseline_failed:
         lines += ['', BASELINE_FAILED + ' Nothing here was checked for getting worse.']

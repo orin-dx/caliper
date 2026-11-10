@@ -16,12 +16,16 @@
 // ~470,000 props cost a few thousand distinct comparisons.
 //
 // With `--rdt` and `--rdg` (the dumps scripts/rdt.mjs and scripts/rdg.mjs write) the report also scores react-docgen-
-// typescript and react-docgen over every own prop the checker finds (`tools`; src/tool-universe.ts).
+// typescript and react-docgen over every own prop the checker finds on a candidate component (`tools`;
+// src/tool-universe.ts), and over every function it takes for a component (`tools_all_functions`). A function is no
+// candidate when its shape says so (src/component-shape.ts: a hook, a lowercase helper, a lib-typed parameter), and
+// `universe_excluded` counts them.
 import { readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { API } from 'typescript-beta/sync'
 import { checkCaliperShape, flattenProps, requireComparison } from './caliper-input.ts'
-import { exportName, propsTypeOf } from './checker-components.ts'
+import { declaredExports, exportName, propsTypeOf } from './checker-components.ts'
+import { nonComponentReason, type ShapeProp } from './component-shape.ts'
 import { checkerNormalizer } from './oracle-checker.ts'
 import { caliperNorm } from './caliper-norm.ts'
 import { compare, VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'
@@ -175,7 +179,13 @@ function visitExport(exported: any, candidates: { name: string; key: string; com
   )
   totals.propsChecker += own.length
   const matches = candidates.filter((c) => c.name === normComponent(name))
-  universe.record({ own, name, file, matches })
+  const shape = new Map<string, ShapeProp>(
+    props.map((p: any) => [
+      p.name,
+      { path: p.declarations?.[0]?.path, type: () => checker.typeToString(checker.getTypeOfSymbol(p)) },
+    ]),
+  )
+  universe.record({ own, name, file, matches, nonComponent: nonComponentReason(name, file, shape) })
   if (matches.length > 1) {
     totals.ambiguousExports++
     return
@@ -239,7 +249,7 @@ for (const file of files) {
   const moduleSymbol = checker.getSymbolOfSourceFile(file)
   if (!moduleSymbol) continue
   const candidates = caliperByFile.get(rel(file)) ?? []
-  for (const exported of checker.getExportsOfModule(moduleSymbol)) visitExport(exported, candidates, file)
+  for (const exported of declaredExports(checker, moduleSymbol)) visitExport(exported, candidates, file)
 }
 const compareMs = performance.now() - start
 requireComparison(totals.propsShared, totals.componentsMatched)
@@ -258,6 +268,8 @@ const report = {
   program_ms: Math.round(programMs),
   compare_ms: Math.round(compareMs),
   tools: universe.score(counts),
+  tools_all_functions: universe.scoreAll(),
+  universe_excluded: universe.excluded(),
   examples,
 }
 writeFileSync(args.out, JSON.stringify(report, null, 2))
