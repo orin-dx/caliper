@@ -133,7 +133,7 @@
     "react/31-forwardref-props-type": {"verdicts":["identical","spelled"]},
     "react/32-memo-exotic-component": {"verdicts":["identical","spelled"]},
     "react/33-props-with-children": {"verdicts":["identical","spelled"]},
-    "react/34-interface-extends-htmlattributes": {"verdicts":["less precise"],"gap":"the comparison scores an intersection against the golden's flat 279-member object as less precise: the checker answers `BoxProps` as its own members intersected with `Omit<HTMLAttributes<div>, \"color\">` (the DOM props stay one recognized family, nothing truncated, no marker needed), which is the interface's type","improvement":"the structural path keeps the bare name `BoxProps`, scored spelled only because it matches the golden's alias; the checker states the own members and the DOM family it inherits, which is more than the name, and nothing is lost"},
+    "react/34-interface-extends-htmlattributes": {"verdicts":["identical","spelled"]},
     "seed/01-string-literal-union": {"verdicts":["identical","spelled"]},
     "seed/02-array-of-records": {"verdicts":["identical","spelled"]},
     "seed/03-conditional-type": {"verdicts":["identical","spelled"]},

@@ -1,12 +1,20 @@
 // Caliper's side of src/oracle-compare.ts: its canonical `PropType` JSON reduced to the shape the comparison reads, as
 // the checker side (src/oracle-checker.ts) reduces the checker's type.
-import { bareName, isBareObject, lit, MAX_DEPTH, prim, type LiteralKind, type Norm } from './oracle-compare.ts'
+import {
+  bareName,
+  isBareObject,
+  lit,
+  MAX_DEPTH,
+  prim,
+  type HtmlFamily,
+  type LiteralKind,
+  type Norm,
+} from './oracle-compare.ts'
 
 const TERMINALS: Record<string, string> = {
   reactNode: 'ReactNode',
   cssProperties: 'CSSProperties',
   elementType: 'ElementType',
-  htmlAttributes: 'HTMLAttributes',
   ref: 'Ref',
   sxProps: 'SxProps',
 }
@@ -42,6 +50,21 @@ function objectNorm(fields: any[], inner: (m: any) => Norm): Norm {
       indexValue: indexValues.length === 1 ? indexValues[0] : { k: 'union', members: indexValues },
     }),
   }
+}
+
+/** The string keys `Omit<X, K>` names: one literal, or a union of them. Undefined for anything else. */
+function omittedKeys(key: Norm): string[] | undefined {
+  if (key.k === 'lit' && key.of === 'string') return [key.value]
+  if (key.k !== 'union') return undefined
+  const keys = key.members.map((m) => omittedKeys(m))
+  return keys.every((k) => k !== undefined) ? keys.flat() : undefined
+}
+
+/** `Omit<HTMLAttributes<…>, "key" | …>`: the family with the keys it leaves out, so the comparison can expand it. */
+function omittedFamily(t: any, inner: (m: any) => Norm): HtmlFamily | undefined {
+  if (bareName(t.name) !== 'Omit' || t.args?.length !== 2 || t.args[0].kind !== 'htmlAttributes') return undefined
+  const keys = omittedKeys(inner(t.args[1]))
+  return keys && { element: t.args[0].element, omitted: [...(t.args[0].omitted ?? []), ...keys] }
 }
 
 /** Caliper's canonical `PropType` JSON, normalized. */
@@ -112,7 +135,12 @@ export function caliperNorm(t: any, depth = 0): Norm {
     // (TS2457): it is the primitive.
     case 'named': {
       if (t.name === 'bigint' && (t.args ?? []).length === 0) return prim('bigint')
-      return { k: 'name', name: bareName(t.name) }
+      const family = omittedFamily(t, inner)
+      return { k: 'name', name: bareName(t.name), ...(family && { family }) }
+    }
+    // `React.HTMLAttributes<…>` and its relatives, with the element and the keys left out that the type carries.
+    case 'htmlAttributes': {
+      return { k: 'name', name: 'HTMLAttributes', family: { element: t.element, omitted: t.omitted ?? [] } }
     }
     default: {
       return TERMINALS[t.kind] ? { k: 'name', name: TERMINALS[t.kind] } : { k: 'opaque' }
