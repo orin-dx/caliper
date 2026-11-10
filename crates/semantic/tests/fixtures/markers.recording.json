@@ -3083,34 +3083,6 @@
     ]
   },
   {
-    "method": "getTypesOfType",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "objectId": 95
-    },
-    "result": [
-      {
-        "id": 10,
-        "flags": 4,
-        "objectFlags": 0,
-        "isTupleType": false,
-        "value": null,
-        "isThisType": false,
-        "intrinsicName": "undefined"
-      },
-      {
-        "id": 14,
-        "flags": 32,
-        "objectFlags": 0,
-        "isTupleType": false,
-        "value": null,
-        "isThisType": false,
-        "intrinsicName": "string"
-      }
-    ]
-  },
-  {
     "method": "getReturnTypeOfSignature",
     "params": {
       "snapshot": 1,
@@ -3482,34 +3454,6 @@
     ]
   },
   {
-    "method": "getTypesOfType",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "objectId": 95
-    },
-    "result": [
-      {
-        "id": 10,
-        "flags": 4,
-        "objectFlags": 0,
-        "isTupleType": false,
-        "value": null,
-        "isThisType": false,
-        "intrinsicName": "undefined"
-      },
-      {
-        "id": 14,
-        "flags": 32,
-        "objectFlags": 0,
-        "isTupleType": false,
-        "value": null,
-        "isThisType": false,
-        "intrinsicName": "string"
-      }
-    ]
-  },
-  {
     "method": "getReturnTypeOfSignature",
     "params": {
       "snapshot": 1,
@@ -3627,34 +3571,6 @@
         "isTupleType": false,
         "value": null,
         "isThisType": false
-      }
-    ]
-  },
-  {
-    "method": "getTypesOfType",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "objectId": 100
-    },
-    "result": [
-      {
-        "id": 10,
-        "flags": 4,
-        "objectFlags": 0,
-        "isTupleType": false,
-        "value": null,
-        "isThisType": false,
-        "intrinsicName": "undefined"
-      },
-      {
-        "id": 15,
-        "flags": 64,
-        "objectFlags": 0,
-        "isTupleType": false,
-        "value": null,
-        "isThisType": false,
-        "intrinsicName": "number"
       }
     ]
   },
@@ -4111,14 +4027,14 @@
       "flags": 33554497,
       "checkFlags": 0,
       "declarations": [
-        "2652.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es5.d.ts",
-        "3452.262./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es5.d.ts",
-        "17565.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es5.d.ts",
-        "654.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.scripthost.d.ts",
-        "171.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es2015.symbol.wellknown.d.ts",
-        "3.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es2020.date.d.ts"
+        "2652.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es5.d.ts",
+        "3452.262./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es5.d.ts",
+        "17565.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es5.d.ts",
+        "654.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.scripthost.d.ts",
+        "171.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es2015.symbol.wellknown.d.ts",
+        "3.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es2020.date.d.ts"
       ],
-      "valueDeclaration": "3452.262./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es5.d.ts"
+      "valueDeclaration": "3452.262./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es5.d.ts"
     }
   },
   {
@@ -4877,34 +4793,6 @@
     ]
   },
   {
-    "method": "getTypesOfType",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "objectId": 100
-    },
-    "result": [
-      {
-        "id": 10,
-        "flags": 4,
-        "objectFlags": 0,
-        "isTupleType": false,
-        "value": null,
-        "isThisType": false,
-        "intrinsicName": "undefined"
-      },
-      {
-        "id": 15,
-        "flags": 64,
-        "objectFlags": 0,
-        "isTupleType": false,
-        "value": null,
-        "isThisType": false,
-        "intrinsicName": "number"
-      }
-    ]
-  },
-  {
     "method": "getSymbolOfType",
     "params": {
       "snapshot": 1,
@@ -4922,16 +4810,16 @@
       "flags": 33554497,
       "checkFlags": 0,
       "declarations": [
-        "5140.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es5.d.ts",
-        "6124.262./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es5.d.ts",
-        "3.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es2015.core.d.ts",
-        "282.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es2015.iterable.d.ts",
-        "120.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es2015.symbol.wellknown.d.ts",
-        "3.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es2016.array.include.d.ts",
-        "199.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es2019.array.d.ts",
-        "3.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es2022.array.d.ts"
+        "5140.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es5.d.ts",
+        "6124.262./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es5.d.ts",
+        "3.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es2015.core.d.ts",
+        "282.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es2015.iterable.d.ts",
+        "120.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es2015.symbol.wellknown.d.ts",
+        "3.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es2016.array.include.d.ts",
+        "199.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es2019.array.d.ts",
+        "3.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es2022.array.d.ts"
       ],
-      "valueDeclaration": "6124.262./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.es5.d.ts"
+      "valueDeclaration": "6124.262./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.es5.d.ts"
     }
   },
   {
@@ -5404,8 +5292,8 @@
       "reference": {
         "kind": 0,
         "file": {
-          "fileName": "/private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.dom.d.ts",
-          "path": "/private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.dom.d.ts",
+          "fileName": "/private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/T/tsrs-pkg/package/lib.dom.d.ts",
+          "path": "/private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.dom.d.ts",
           "contentHash": "7bef8e45599a00823d58da6008f60967",
           "parseOptionsKey": "0",
           "scriptKind": 3,
@@ -5417,10 +5305,10 @@
       "flags": 65,
       "checkFlags": 0,
       "declarations": [
-        "36477.266./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.dom.d.ts",
-        "36696.262./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.dom.d.ts"
+        "36477.266./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.dom.d.ts",
+        "36696.262./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.dom.d.ts"
       ],
-      "valueDeclaration": "36696.262./private/tmp/claude-501/convfind/node_modules/@tsrs/darwin-arm64/lib.dom.d.ts"
+      "valueDeclaration": "36696.262./private/var/folders/q1/qkn6792j1c3cxt6vjd88tlc00000gn/t/tsrs-pkg/package/lib.dom.d.ts"
     }
   },
   {
@@ -6211,62 +6099,6 @@
         "isTupleType": false,
         "value": null,
         "isThisType": false
-      },
-      {
-        "id": 14,
-        "flags": 32,
-        "objectFlags": 0,
-        "isTupleType": false,
-        "value": null,
-        "isThisType": false,
-        "intrinsicName": "string"
-      }
-    ]
-  },
-  {
-    "method": "getTypesOfType",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "objectId": 100
-    },
-    "result": [
-      {
-        "id": 10,
-        "flags": 4,
-        "objectFlags": 0,
-        "isTupleType": false,
-        "value": null,
-        "isThisType": false,
-        "intrinsicName": "undefined"
-      },
-      {
-        "id": 15,
-        "flags": 64,
-        "objectFlags": 0,
-        "isTupleType": false,
-        "value": null,
-        "isThisType": false,
-        "intrinsicName": "number"
-      }
-    ]
-  },
-  {
-    "method": "getTypesOfType",
-    "params": {
-      "snapshot": 1,
-      "project": "/dev/null/synthetic/1",
-      "objectId": 95
-    },
-    "result": [
-      {
-        "id": 10,
-        "flags": 4,
-        "objectFlags": 0,
-        "isTupleType": false,
-        "value": null,
-        "isThisType": false,
-        "intrinsicName": "undefined"
       },
       {
         "id": 14,

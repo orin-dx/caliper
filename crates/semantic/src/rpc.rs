@@ -8,6 +8,7 @@ use std::time::Duration;
 use caliper_docgen_tsc_client::{Client, TscClientError};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde_json::value::RawValue;
 use serde_json::{Value, json};
 
 /// Why a call failed, split by whether the rest of the run can go on.
@@ -169,8 +170,9 @@ struct BatchPage {
 
 #[derive(Debug, Deserialize)]
 struct BatchAnswer {
+    /// The answer's text, parsed by the caller into the shape it expects; absent reads as `null`.
     #[serde(default)]
-    result: Value,
+    result: Option<Box<RawValue>>,
     #[serde(default)]
     error: Option<String>,
 }
@@ -280,7 +282,7 @@ impl Rpc {
         rpc.call("initialize", Value::Null).await?;
         Ok(match tsconfig {
             Some(file) => {
-                let parsed = rpc.call("parseConfigFile", json!({ "file": file })).await?;
+                let parsed: Value = decode(&rpc.call("parseConfigFile", json!({ "file": file })).await?)?;
                 parsed.get("options").cloned().unwrap_or_else(default_options)
             }
             None => default_options(),
@@ -309,7 +311,7 @@ impl Rpc {
                 json!({ "createPrograms": [{ "rootFiles": root_files, "compilerOptions": options }] }),
             )
             .await?;
-        let response: SnapshotResponse = decode(created)?;
+        let response: SnapshotResponse = decode(&created)?;
         let project = response
             .projects
             .into_iter()
@@ -335,26 +337,35 @@ impl Rpc {
         self.calls.lock().map(|calls| calls.clone()).unwrap_or_default()
     }
 
-    async fn call(&self, method: &str, params: Value) -> Result<Value, CallError> {
+    /// One request, its answer as the JSON text it arrived as: [`decode`] parses it once, into the shape the caller
+    /// expects.
+    async fn call(&self, method: &str, params: Value) -> Result<Box<RawValue>, CallError> {
         if let Ok(mut calls) = self.calls.lock() {
             *calls.entry(method.to_string()).or_default() += 1;
         }
         REQUESTS.try_with(|count| count.fetch_add(1, std::sync::atomic::Ordering::Relaxed)).ok();
-        let answer = self.client.request(method, params.clone(), self.deadline).await.map_err(classify)?;
-        if let Some(log) = &self.recording
-            && let Ok(mut log) = log.lock()
-        {
-            log.push(json!({ "method": method, "params": params, "result": answer.value }));
+        let Some(log) = &self.recording else {
+            return Ok(self.client.request_raw(method, params, self.deadline).await.map_err(classify)?.result);
+        };
+        let answer = self.client.request_raw(method, params.clone(), self.deadline).await.map_err(classify)?;
+        let result: Value = decode(&answer.result)?;
+        if let Ok(mut log) = log.lock() {
+            log.push(json!({ "method": method, "params": params, "result": result }));
         }
-        Ok(answer.value)
+        Ok(answer.result)
     }
 
     async fn scoped<T: DeserializeOwned>(&self, method: &str, extra: Value) -> Result<T, CallError> {
+        decode(&self.scoped_text(method, extra).await?)
+    }
+
+    /// A request about this snapshot and project, its answer left as text.
+    async fn scoped_text(&self, method: &str, extra: Value) -> Result<Box<RawValue>, CallError> {
         let mut params = json!({ "snapshot": self.snapshot, "project": self.project });
         if let (Some(base), Value::Object(extra)) = (params.as_object_mut(), extra) {
             base.extend(extra);
         }
-        decode(self.call(method, params).await?)
+        self.call(method, params).await
     }
 
     pub(crate) async fn source_file_symbol(&self, file: &str) -> Result<Option<SymbolInfo>, CallError> {
@@ -415,12 +426,12 @@ impl Rpc {
     /// Whether each property is declared `readonly`, in one round trip.
     pub(crate) async fn readonly_symbols(&self, symbols: &[&Value]) -> Result<Vec<bool>, CallError> {
         let requests = symbols.iter().map(|symbol| ("isReadonlySymbol", json!({ "symbol": symbol }))).collect();
-        self.batch(requests).await?.into_iter().map(decode).collect()
+        self.batch(requests).await?.iter().map(|answer| decode(answer)).collect()
     }
 
     /// Several requests in one round trip. A request the checker rejects fails the batch: nothing here asks for one
     /// that may legitimately fail.
-    pub(crate) async fn batch(&self, requests: Vec<(&str, Value)>) -> Result<Vec<Value>, CallError> {
+    pub(crate) async fn batch(&self, requests: Vec<(&str, Value)>) -> Result<Vec<Box<RawValue>>, CallError> {
         let wanted = requests.len();
         let scoped: Vec<Value> = requests
             .into_iter()
@@ -439,12 +450,12 @@ impl Rpc {
             if let (Some(token), Some(map)) = (&token, params.as_object_mut()) {
                 map.insert("continuationToken".to_string(), json!(token));
             }
-            let page: BatchPage = decode(self.call("batchRequests", params).await?)?;
+            let page: BatchPage = decode(&self.call("batchRequests", params).await?)?;
             for response in page.responses {
                 if let Some(error) = response.error {
                     return Err(CallError::Rejected(error));
                 }
-                answers.push(response.result);
+                answers.push(response.result.unwrap_or_else(|| RawValue::NULL.to_owned()));
             }
             match page.continuation_token {
                 Some(next) => token = Some(next),
@@ -469,12 +480,14 @@ impl Rpc {
         self.scoped("getPropertiesOfType", json!({ "type": type_id })).await
     }
 
-    pub(crate) async fn members(&self, type_id: u64) -> Result<Vec<TypeInfo>, CallError> {
-        self.scoped("getTypesOfType", json!({ "objectId": type_id })).await
+    /// The members of a union, intersection or template literal, as the text the checker answered (a list of types).
+    pub(crate) async fn members_text(&self, type_id: u64) -> Result<Box<RawValue>, CallError> {
+        self.scoped_text("getTypesOfType", json!({ "objectId": type_id })).await
     }
 
-    pub(crate) async fn type_arguments(&self, type_id: u64) -> Result<Vec<TypeInfo>, CallError> {
-        self.scoped("getTypeArguments", json!({ "type": type_id })).await
+    /// The type arguments of a reference, as the text the checker answered (a list of types).
+    pub(crate) async fn type_arguments_text(&self, type_id: u64) -> Result<Box<RawValue>, CallError> {
+        self.scoped_text("getTypeArguments", json!({ "type": type_id })).await
     }
 
     /// The call and construct signatures, the properties and the index signatures of a type, in one round trip.
@@ -488,10 +501,10 @@ impl Rpc {
         let mut answers = self.batch(requests).await?.into_iter();
         let mut next = || answers.next().ok_or_else(|| CallError::Rejected("a short batch".to_string()));
         Ok(ObjectMembers {
-            calls: decode(next()?)?,
-            constructs: decode(next()?)?,
-            properties: decode(next()?)?,
-            indexes: decode(next()?)?,
+            calls: decode(&next()?)?,
+            constructs: decode(&next()?)?,
+            properties: decode(&next()?)?,
+            indexes: decode(&next()?)?,
         })
     }
 
@@ -519,8 +532,10 @@ fn default_options() -> Value {
     json!({ "jsx": 1, "module": 99, "moduleResolution": 100, "target": 9, "strict": true, "skipLibCheck": true, "noEmit": true })
 }
 
-fn decode<T: DeserializeOwned>(value: Value) -> Result<T, CallError> {
-    serde_json::from_value(value).map_err(|error| CallError::Rejected(format!("unexpected response shape: {error}")))
+/// An answer parsed from its text straight into `T`, in one pass.
+pub(crate) fn decode<T: DeserializeOwned>(answer: &RawValue) -> Result<T, CallError> {
+    serde_json::from_str(answer.get())
+        .map_err(|error| CallError::Rejected(format!("unexpected response shape: {error}")))
 }
 
 #[cfg(test)]

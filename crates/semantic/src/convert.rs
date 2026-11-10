@@ -39,8 +39,9 @@ use rustc_hash::FxHashMap;
 
 use crate::printed::{Marker, SignatureMarkers, signature_markers, tuple_labels};
 use crate::rpc::{
-    CallError, CompactSymbol, ObjectMembers, Rpc, SignatureInfo, SignatureKind, SymbolInfo, TypeInfo, flag,
+    CallError, CompactSymbol, ObjectMembers, Rpc, SignatureInfo, SignatureKind, SymbolInfo, TypeInfo, decode, flag,
 };
+use serde_json::value::RawValue;
 
 /// Nesting past which an object, union or intersection is cut with [`TruncationLimit::Depth`].
 const MAX_DEPTH: u8 = 5;
@@ -274,6 +275,25 @@ impl Entry {
 
 type Memo = Mutex<FxHashMap<(u64, u8), Vec<Arc<Entry>>>>;
 
+/// The parts of each type asked about so far, by (type handle, which parts), as the text the checker answered: read
+/// again on each use, which costs a fraction of the round trip, and is several times smaller than the read lists.
+type PartsSeen = Mutex<FxHashMap<(u64, Parts), Arc<RawValue>>>;
+
+/// Which parts of a type [`Converter::parts`] asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Parts {
+    /// A union's, intersection's or template literal's members (`getTypesOfType`).
+    Members,
+    /// A reference's type arguments (`getTypeArguments`), the `this` type the checker appends included.
+    Arguments,
+}
+
+/// The type arguments a reference names, without the `this` type the checker appends to a class's or interface's.
+fn without_this(arguments: &[TypeInfo]) -> &[TypeInfo] {
+    let named = arguments.iter().rposition(|argument| !argument.is_this_type).map_or(0, |last| last + 1);
+    arguments.get(..named).unwrap_or_default()
+}
+
 #[derive(Default)]
 struct State {
     /// Conversions by (type handle, depth), each entry with the enclosing instantiations it depended on. The handles
@@ -294,6 +314,12 @@ struct State {
     origins: Mutex<FxHashMap<(bool, CompactSymbol), Option<Origin>>>,
     /// By (type handle, whether printed expanded: see [`Rpc::type_to_string_expanded`]).
     printed: Mutex<FxHashMap<(u64, bool), String>>,
+    /// The parts of a type by its handle (see [`Parts`]). They are the checker's answer about the type, fixed inside the
+    /// snapshot, while the memo converts a type again at another depth or under other instantiations: kept, that
+    /// conversion asks for none of them again. Kept for the whole snapshot, since components of one library share
+    /// most of their types: kept per component, a program of every Chakra component answered 16 at a time held 16
+    /// copies of the same style props' members.
+    parts: PartsSeen,
     hits: AtomicU64,
     misses: AtomicU64,
 }
@@ -446,6 +472,27 @@ impl Converter {
         Ok(text)
     }
 
+    /// The members or type arguments of a type, asked once per type however many conversions read them.
+    async fn parts(&self, id: u64, kind: Parts) -> Result<Vec<TypeInfo>, CallError> {
+        let key = (id, kind);
+        let known = self.state.parts.lock().ok().and_then(|parts| parts.get(&key).cloned());
+        let text = match known {
+            Some(text) => text,
+            None => {
+                let fetched: Arc<RawValue> = match kind {
+                    Parts::Members => self.rpc.members_text(id).await?,
+                    Parts::Arguments => self.rpc.type_arguments_text(id).await?,
+                }
+                .into();
+                if let Ok(mut parts) = self.state.parts.lock() {
+                    parts.insert(key, fetched.clone());
+                }
+                fetched
+            }
+        };
+        decode(&text)
+    }
+
     /// The alias a type was written through, when it has one.
     async fn alias_origin(&self, info: &TypeInfo) -> Result<Option<Origin>, CallError> {
         match &info.alias_symbol {
@@ -579,22 +626,18 @@ impl Converter {
     /// The type arguments a name carries: an alias's own, or the instantiation's (without the `this` type the checker
     /// appends to a class or interface).
     async fn type_arguments_of(&self, info: &TypeInfo, origin: &Origin, cx: &Cx) -> Result<Vec<PropType>, CallError> {
-        let arguments = if origin.alias {
+        if origin.alias {
             if info.alias_type_arguments.is_empty() {
-                Vec::new()
-            } else {
-                self.rpc.alias_type_arguments(info.id).await?
+                return Ok(Vec::new());
             }
-        } else if info.object_flags & flag::OBJECT_REFERENCE != 0 {
-            let mut arguments = self.rpc.type_arguments(info.id).await?;
-            while arguments.last().is_some_and(|argument| argument.is_this_type) {
-                arguments.pop();
-            }
-            arguments
-        } else {
-            Vec::new()
-        };
-        self.convert_all(&arguments, &cx.argument()).await
+            let arguments = self.rpc.alias_type_arguments(info.id).await?;
+            return self.convert_all(&arguments, &cx.argument()).await;
+        }
+        if info.object_flags & flag::OBJECT_REFERENCE == 0 {
+            return Ok(Vec::new());
+        }
+        let arguments = self.parts(info.id, Parts::Arguments).await?;
+        self.convert_all(without_this(&arguments), &cx.argument()).await
     }
 
     async fn named_type(&self, info: &TypeInfo, origin: &Origin, cx: &Cx) -> Result<PropType, CallError> {
@@ -772,7 +815,7 @@ impl Converter {
 
     /// Whether the first type argument of an instantiation is React's alias `name`.
     async fn argument_is_alias(&self, info: &TypeInfo, name: &str) -> Result<bool, CallError> {
-        let arguments = self.rpc.type_arguments(info.id).await?;
+        let arguments = self.parts(info.id, Parts::Arguments).await?;
         let Some(first) = arguments.first() else { return Ok(false) };
         Ok(self
             .alias_origin(first)
@@ -782,7 +825,7 @@ impl Converter {
 
     /// The members of a union, intersection or template literal, and how many there are.
     async fn members_of(&self, info: &TypeInfo) -> Result<(Vec<TypeInfo>, usize), CallError> {
-        let members = self.rpc.members(info.id).await?;
+        let members = self.parts(info.id, Parts::Members).await?;
         let total = members.len();
         Ok((members, total))
     }
@@ -1013,11 +1056,8 @@ impl Converter {
         }
         let element = match origin.name.as_str() {
             "HTMLAttributes" | "DOMAttributes" | "HTMLProps" | "AllHTMLAttributes" | "SVGAttributes" | "SVGProps" => {
-                let mut arguments = self.rpc.type_arguments(info.id).await?;
-                while arguments.last().is_some_and(|argument| argument.is_this_type) {
-                    arguments.pop();
-                }
-                let Some(element) = arguments.first() else { return Ok(None) };
+                let arguments = self.parts(info.id, Parts::Arguments).await?;
+                let Some(element) = without_this(&arguments).first() else { return Ok(None) };
                 let Some(declared) = self.symbol_origin(element).await? else { return Ok(None) };
                 html_element_from_type_arg(&declared.name)
             }
@@ -1031,7 +1071,7 @@ impl Converter {
         let origin = self.alias_origin(info).await?;
         let gate = self
             .enter(info, origin.as_ref(), cx, MAX_MEMBERS, || async {
-                let arguments = self.rpc.type_arguments(info.id).await?;
+                let arguments = self.parts(info.id, Parts::Arguments).await?;
                 let total = arguments.len();
                 Ok((arguments, total))
             })
@@ -1053,7 +1093,7 @@ impl Converter {
         let gate = self
             .enter(info, origin.as_ref(), cx, MAX_MEMBERS, || async {
                 // The reference carries the arguments; the tuple type it instantiates carries how each element is declared.
-                let arguments = self.rpc.type_arguments(info.id).await?;
+                let arguments = self.parts(info.id, Parts::Arguments).await?;
                 let target = self.rpc.target_of_type(info.id).await?;
                 let total = arguments.len();
                 Ok(((arguments, target), total))

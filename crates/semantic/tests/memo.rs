@@ -4,7 +4,8 @@
 //! real `tsrs`, asked live, forward and last to first:
 //!
 //! - `memo`: one big type under many different enclosing types. The number of round trips to the checker is held to a
-//!   bound, so a memo keyed by the whole enclosing context (which converts the type again under each) fails;
+//!   bound, so a memo keyed by the whole enclosing context (which converts the type again under each) fails, and a
+//!   type converted again at another depth does not ask for its members or type arguments again;
 //! - `cycles`: a type reached both inside a cycle and outside it, in either order, is a back-reference only where the
 //!   type it points to encloses it, so a memo that reused a conversion across contexts it depends on fails.
 
@@ -55,10 +56,12 @@ fn tsrs_bin() -> Option<Utf8PathBuf> {
     bin.map(Utf8PathBuf::from)
 }
 
-/// The outcome of one run, and how many calls the backend made to the checker.
+/// The outcome of one run, and the calls the backend made to the checker.
 struct Run {
     outcome: SemanticOutcome,
     round_trips: usize,
+    /// Each call as `{method, params, result}`, in the order sent.
+    calls: Vec<Value>,
 }
 
 /// Asks the checker about every component of `fixture`: replayed, or live (`reverse`: asked last to first).
@@ -86,7 +89,7 @@ fn run(fixture: &str, live: Option<(&Utf8PathBuf, bool)>) -> Run {
     assert_eq!(outcome.diagnostics, []);
     assert_eq!(outcome.fallbacks, []);
     let recorded: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(calls).unwrap()).unwrap();
-    Run { outcome, round_trips: recorded.len() }
+    Run { outcome, round_trips: recorded.len(), calls: recorded }
 }
 
 /// Every way to ask: replayed, and with `TSRS_BIN` live, first to last and last to first.
@@ -108,8 +111,8 @@ fn prop_type(outcome: &SemanticOutcome, component: &str, prop: &str) -> Value {
     serde_json::to_value(&prop.prop_type).unwrap()
 }
 
-/// The most round trips the `memo` fixture takes with the memo shared across contexts: it takes 274, where keyed by the
-/// whole enclosing context it takes 1,211.
+/// The most round trips the `memo` fixture takes with the memo shared across contexts: it takes 244, where keyed by the
+/// whole enclosing context it took 1,211.
 const ROUND_TRIPS: usize = 300;
 
 /// A type that many different types enclose is converted once, not once under each: sixteen interfaces and twelve
@@ -138,6 +141,29 @@ fn a_type_many_types_enclose_is_converted_once() {
         for index in 1..12 {
             assert_eq!(shared("Unions", "wide", &format!("/members/{index}/fields/1/propType")), member, "{how}");
         }
+    });
+}
+
+/// What a type's parts are does not change inside a snapshot, so a type converted again (the memo is keyed by depth too)
+/// does not ask the checker for its members or type arguments a second time. Each repeat is a round trip, and on
+/// Chakra's `Button`, whose style props hold the same unions again one level down, they were one request in eight.
+#[test]
+fn the_parts_of_a_type_are_asked_for_once() {
+    each_way("memo", |run, how| {
+        let mut seen = std::collections::BTreeMap::new();
+        for call in &run.calls {
+            let method = call["method"].as_str().unwrap_or_default();
+            if matches!(method, "getTypesOfType" | "getTypeArguments") {
+                *seen.entry((method.to_string(), call["params"].to_string())).or_insert(0) += 1;
+            }
+        }
+        let repeated: Vec<String> = seen
+            .iter()
+            .filter(|(_, count)| **count > 1)
+            .map(|((method, params), count)| format!("{method} {params} x{count}"))
+            .collect();
+        assert!(!seen.is_empty(), "{how}: no parts were asked for");
+        assert_eq!(repeated, Vec::<String>::new(), "{how}");
     });
 }
 
