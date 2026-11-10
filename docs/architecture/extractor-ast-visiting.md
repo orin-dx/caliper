@@ -90,7 +90,7 @@ Wired in:
 Explicitly _not_ wired (by design, per Invariant 4):
 
 - A zero-param PascalCase function declaration (no props type source exists at all — not a malformed candidate, never was one).
-- A lowercase-first-letter binding (never PascalCase, never entered the candidate chain).
+- A lowercase-first-letter binding (never PascalCase, never entered the candidate chain). PascalCase (`is_pascal_case`) allows leading underscores and the digits after them, so `_3D` and `_Box` are candidates and `_helper` and `_3d` are not; a candidate still needs render evidence (`evidence.rs`) to be mapped.
 - A `.tsx` PascalCase binding with **no initializer at all** — deferred to Pattern 5 (ambient `.d.ts`-style declarations) or legitimately not a component.
 
 Other extractor drop paths may have no `record_skip` call despite being structurally identical to the ones that do (computed, symbol and numeric interface property keys are excluded silently, for one). Do not assume `SkippedCandidate` coverage is complete just because some paths have it.
