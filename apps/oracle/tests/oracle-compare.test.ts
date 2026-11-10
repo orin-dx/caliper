@@ -142,6 +142,39 @@ describe('the oracle comparison', () => {
       )
     })
 
+    it('a member keyed by a symbol is the checker side’s `__@name` member', () => {
+      expect.hasAssertions()
+      // `{ [tag]: string; name: string }`, which the checker keys `__@tag@<id>` and src/oracle-checker.ts reads `__@tag`.
+      const caliper = caliperNorm({
+        kind: 'object',
+        fields: [
+          { name: '[tag]', propType: { kind: 'string' }, required: true, description: '' },
+          { name: '[Symbol.iterator]', propType: { kind: 'string' }, required: true, description: '' },
+          { name: 'name', propType: { kind: 'string' }, required: true, description: '' },
+        ],
+      })
+      expect(caliper).toMatchObject({ fields: ['__@iterator', '__@tag', 'name'] })
+      expect(compare(caliper, { k: 'object', fields: ['__@iterator', '__@tag', 'name'], index: false })).toBe(
+        'identical',
+      )
+    })
+
+    it('the name `bigint` is the primitive, which `PropType` has no kind for', () => {
+      expect.hasAssertions()
+      const key = caliperNorm({
+        kind: 'union',
+        members: [{ kind: 'string' }, { kind: 'number' }, { kind: 'named', name: 'bigint', args: [] }],
+      })
+      expect(compare(key, { ...optional(union(prim('string'), prim('number'), prim('bigint'))), alias: 'Key' })).toBe(
+        'identical',
+      )
+      // A name with arguments is a name.
+      expect(caliperNorm({ kind: 'named', name: 'bigint', args: [{ kind: 'string' }] })).toStrictEqual({
+        k: 'name',
+        name: 'bigint',
+      })
+    })
+
     it('an index signature keeps its named fields beside it', () => {
       expect.hasAssertions()
       const caliper = caliperNorm({

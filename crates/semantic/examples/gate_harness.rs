@@ -1,10 +1,12 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout, clippy::print_stderr)]
-//! The two measurable ADR 0026 gates before the checker becomes the default, through the session a Storybook addon runs:
-//! a lazy `WatchSession` asking a warm `OnDemand` over the project's own `tsc` (`just gate-measure` runs both).
+//! The measurable ADR 0026 gates, through the session a Storybook addon runs: a lazy `WatchSession` asking a warm
+//! `OnDemand` over the project's own `tsc` (`just gate-measure` runs all three).
 //!
-//!   gate_harness memory      --src DIR --tsc PATH [--edits 650] [--max-rss-mib N]
-//!   gate_harness determinism --src DIR --tsc PATH [--components 150] [--threads 1,2,4] [--runs 3]
+//!   gate_harness memory       --src DIR --tsc PATH [--edits 650] [--max-rss-mib N]
+//!   gate_harness determinism  --src DIR --tsc PATH [--components 150] [--threads 1,2,4] [--runs 3]
+//!   gate_harness first-answer --src DIR --tsc PATH [--component ChakraButton] [--runs 5] [--budget-ms 150]
 //!
+//! `first-answer` (S4) times the first answer for one component in fresh sessions: see [`first_answer`].
 //! `memory` rewrites one component's file, tells the session, and asks for the component, `--edits` times; it samples the
 //! checker's PID and resident memory after every answer and prints the recycles, the peak, and whether the last answer
 //! equals a fresh session's. `determinism` asks a fresh checker for the same components under each `RAYON_NUM_THREADS`
@@ -13,7 +15,7 @@
 use std::collections::BTreeSet;
 use std::process::Command;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use caliper_docgen_core::pipeline::{CollapseInheritedProps, ComponentAnswer, PipelineOptions, WatchSession};
 use caliper_docgen_core::types::semantic::SemanticProvider;
@@ -160,6 +162,49 @@ fn determinism(src: &Utf8PathBuf, tsc: &str, components: usize, threads: &[Strin
     ok
 }
 
+/// ADR 0026 S4: how long a story waits for the checker's answer through the Rust client. Each run opens a fresh session
+/// as the addon does (the checker started in the background at creation), waits until that process is up, then asks for
+/// `key` once and times the whole answer: the structural pass and the checker's program and conversion for the
+/// component. Passes when every answer is the checker's and the median is at most `budget_ms`, the addon's default
+/// `semanticWaitMs`.
+fn first_answer(src: &Utf8PathBuf, tsc: &str, key: &str, runs: usize, budget_ms: u128) -> bool {
+    let (mut start, mut first, mut structural, mut answered) = (Vec::new(), Vec::new(), Vec::new(), 0);
+    for _ in 0..runs.max(1) {
+        let plain = WatchSession::lazy(PipelineOptions {
+            src_dirs: vec![src.clone()],
+            load_dependencies: true,
+            collapse_inherited_props: CollapseInheritedProps::None,
+            ..PipelineOptions::default()
+        });
+        drop(plain.initialize());
+        let began = Instant::now();
+        drop(plain.component(key).expect("the key is a component"));
+        structural.push(began.elapsed().as_millis());
+
+        let (session, checker) = open(src, tsc, Vec::new(), None);
+        let began = Instant::now();
+        checker.warm_up();
+        // Queued behind the warm-up, an empty request returns once the process is up and initialized.
+        drop(checker.request(Vec::new()).recv_timeout(Duration::from_secs(120)));
+        start.push(began.elapsed().as_millis());
+        let began = Instant::now();
+        let answer = session.component(key).expect("the key is a component");
+        first.push(began.elapsed().as_millis());
+        answered += usize::from(by_checker(&answer));
+    }
+    let median = |values: &mut Vec<u128>| {
+        values.sort_unstable();
+        values[values.len() / 2]
+    };
+    let (start_ms, first_ms, structural_ms) = (median(&mut start), median(&mut first), median(&mut structural));
+    let ok = answered == first.len() && first_ms <= budget_ms;
+    println!(
+        "{{\"gate\":\"first-answer\",\"component\":{key:?},\"runs\":{},\"answeredByChecker\":{answered},\"startMs\":{start_ms},\"structuralMs\":{structural_ms},\"firstAnswerMs\":{first_ms},\"firstAnswerEachMs\":{first:?},\"budgetMs\":{budget_ms},\"ok\":{ok}}}",
+        first.len(),
+    );
+    ok
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let src = Utf8PathBuf::from(arg(&args, "--src").expect("--src"));
@@ -183,8 +228,15 @@ fn main() {
                 number("--runs", 3),
             )
         }
+        Some("first-answer") => first_answer(
+            &src,
+            &tsc,
+            &arg(&args, "--component").unwrap_or_else(|| "ChakraButton".to_string()),
+            number("--runs", 5),
+            arg(&args, "--budget-ms").map_or(150, |n| n.parse().expect("a number")),
+        ),
         _ => {
-            eprintln!("usage: gate_harness memory|determinism --src DIR --tsc PATH");
+            eprintln!("usage: gate_harness memory|determinism|first-answer --src DIR --tsc PATH");
             false
         }
     };

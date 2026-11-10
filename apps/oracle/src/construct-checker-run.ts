@@ -10,6 +10,7 @@ import {
   expectationFailure,
   expectationProblems,
   listFixtures,
+  ORDER,
   PROP,
   rowVerdict,
   type Expectation,
@@ -118,6 +119,39 @@ export function runCheckerLane(bin: string, tsrs: string): LaneRun {
     })
   }
   return { elapsedMs, rows, backendProblem }
+}
+
+/** The worst verdict an expectation allows, as a rank in ORDER (higher is worse). */
+const worstAllowed = (row: Expectation) => Math.max(...row.verdicts.map((v) => ORDER.indexOf(v)))
+
+/** ADR 0026's S4 gate, from the two expectation files alone: the checker path equals the structural path on every row
+ * except listed improvements. A row whose checker verdicts rank below the structural ones is a regression unless its
+ * checker expectation gives an `improvement` reason (an answer the comparison scores lower although it states more,
+ * such as an expansion where the structural pass kept a name). An `improvement` on a row the checker does not rank
+ * below the structural path is stale. Rows the checker ranks above the structural path need no entry: the structural
+ * expectation's `gap` already says what the structural path misses. Empty when the gate holds. */
+export function againstStructural(
+  structural: Record<string, Expectation>,
+  checker: Record<string, Expectation>,
+): string[] {
+  const failures: string[] = []
+  for (const [id, row] of Object.entries(checker)) {
+    const base = structural[id]
+    if (base === undefined) continue
+    const worse = worstAllowed(row) > worstAllowed(base)
+    const reason = typeof row.improvement === 'string' && row.improvement.trim() !== ''
+    if (worse && !reason) {
+      failures.push(
+        `${id}: the checker path allows ${row.verdicts.join(' | ')}, worse than the structural path's ${base.verdicts.join(' | ')}: a regression unless listed with an "improvement" reason`,
+      )
+    }
+    if (!worse && row.improvement !== undefined) {
+      failures.push(
+        `${id}: "improvement" is listed, but the checker path is not ranked below the structural path: remove it`,
+      )
+    }
+  }
+  return failures
 }
 
 /** What is wrong with the run against checker-expectations.json: rows the checker did not answer for, rows better or

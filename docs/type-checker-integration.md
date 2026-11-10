@@ -1,6 +1,6 @@
 # Semantic backend (TypeScript 7)
 
-**Status:** slice 1 implemented as an experimental opt-in, off by default ([ADR 0006](adr/0006-semantic-backend-as-second-resolver.md), [ADR 0007](adr/0007-backend-discovers-components-and-compiles-in.md)): `extract --experimental-semantic-types` (see "Slice 1" below). Structural extraction stays the default and the fallback. Separately, TypeScript 7.1's checker runs as a test-only oracle for structural prop types (`scripts/weekly.py --oracle`, `docs/measurement.md`). **Last verified:** 2026-10-23 for slice 1 against `7.1.0-beta`; 2026-09-27 for the Cost measurements, each naming its nightly; 2026-10-22 for the API table against the `7.1.0-beta` package; 2026-10-23 for the fixture-corpus parity on `7.1.0-beta`.
+**Status:** slice 1 implemented as an experimental opt-in, off by default ([ADR 0006](adr/0006-semantic-backend-as-second-resolver.md), [ADR 0007](adr/0007-backend-discovers-components-and-compiles-in.md)): `extract --experimental-semantic-types` (see "Slice 1" below). [ADR 0026](adr/0026-the-checker-is-the-type-authority.md)'s slices S1 to S4 are in: when the checker runs, its answer wins prop by prop (see "The checker's answer wins"); it becomes the default in S8. Structural extraction stays the default and the fallback. Separately, TypeScript 7.1's checker runs as a test-only oracle for structural prop types (`scripts/weekly.py --oracle`, `docs/measurement.md`). **Last verified:** 2026-10-23 for slice 1 against `7.1.0-beta`; 2026-09-27 for the Cost measurements, each naming its nightly; 2026-10-22 for the API table against the `7.1.0-beta` package; 2026-10-23 for the fixture-corpus parity on `7.1.0-beta`.
 
 ## Next step
 
@@ -37,7 +37,7 @@ The structural result is complete on its own and returns first. The semantic pas
 
 | Field | Source |
 | --- | --- |
-| Props present, `type`, `required` | Semantic |
+| Props present, `type`, `required` | Semantic. A `type` the checker could not read (an `opaque` part) where the structural one is read in full stays structural, marked (see "The checker's answer wins") |
 | `parent`, `declarations` | Semantic. `declarations` lists every declaring interface, not just the first |
 | `description`, `tags` | Semantic JSDoc, structural if empty |
 | `defaultValue` | Structural. RDT reads defaults from the AST too |
@@ -137,6 +137,15 @@ A prop's checker type becomes a `PropType` from structured answers only (`crates
 - **Recursion** is a `recursive` marker named by the declaration (the alias or interface) with the instantiation's type arguments. Whether a type is one it is inside of is decided by its type handle, which is the instantiation: `Box<string>` inside `Box<Box<string>>` is another type from the one around it and is expanded, while `Tree<string>` inside `Tree<string>` is a back-reference; an alias of an array or tuple of itself (`type Loop = Loop[]`) ends at the first lap. A handle is only compared inside one conversion, never stored in an answer; type handles change with the order of queries, so a test asks last to first and compares bytes. The per-snapshot memo is keyed by the handle, the depth and the set of enclosing handles, so a hit gives what a miss would.
 - **Union order.** The checker sorts a union's members by kind and value. Where the structural pass resolved the same union (in a parsed file, or a loaded dependency), the merge puts the members back in its order, which it read from the type node (`types/semantic/order.rs`). A union the structural pass left opaque keeps the checker's order, with no marker.
 - **Debug stat.** With `RUST_LOG=caliper_docgen_semantic=debug`, each component logs its request count and milliseconds, and the session logs requests by method and memo hits.
+
+### The checker's answer wins (ADR 0026, slice S4)
+
+The checker stays an explicit opt-in (`--experimental-semantic-types`, `semanticTypes: 'on-demand'`); the default flips in S8. When it runs, its answer replaces the structural one prop by prop, at each surface:
+
+- **CLI.** `extract --experimental-semantic-types` waits for the checker: every candidate component in one program and one snapshot, as in slice 1. `--semantic-timeout-ms` (default 10,000) bounds the checker's start and each request; past it the run takes the structural result with one `SEMANTIC_BACKEND` warning that says it timed out. It bounds a hang, not the run: on 938 Chakra and MUI wrappers (`~/Projects/caliper-fixtures/gate-large`) the whole answer takes 15 to 17 s with tsrs (its program 71 ms) and finishes at the default bound.
+- **Addon and sessions.** Unchanged from ADR 0022: the structural answer first, the checker's within `semanticWaitMs` (default 150), a late answer for the next request. The premise that the checker is too slow for a first story still holds with tsrs: Chakra's `Button` (about 1,100 props) takes a median 562 ms through the Rust client, so it arrives on the next request (see [gate measurements](gate-measurements.md#first-answer-s4)).
+- **A prop the checker could not read.** Where the checker's type of a prop holds an `opaque` part (an import or a name it did not resolve, a conditional type it left open, signatures it could not read) and the structural pass read the same prop's type in full, the prop keeps the structural type and its `degradedBy` also lists the checker's reasons: the checker did not confirm the type, so it is marked rather than silently trusted. One `SEMANTIC_BACKEND` `Info` diagnostic counts those props and names their components. A type the checker only cut at a limit (`truncated`) is still its answer, and so is an opaque checker type where the structural one is opaque too. On the 938 wrappers this applies to 60 props, such as Chakra's `cornerShape`, which the checker answers with its error type, and `storageManager`, whose `StorageManager` it left opaque.
+- **Gate.** The construct suite's checker lane holds `checker-expectations.json` against `expectations.json`: no row may rank below the structural path unless it lists an `improvement` reason (`apps/oracle/construct-suite/README.md`, "The checker lane").
 
 ## TypeScript 7.1 API
 

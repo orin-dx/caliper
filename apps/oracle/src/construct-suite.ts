@@ -82,6 +82,9 @@ export interface Expectation {
   verdicts: RowVerdict[]
   /** Why Caliper falls short of the checker here. Present exactly on a documented gap. */
   gap?: string
+  /** checker-expectations.json only: why the checker path's answer is accepted although its verdict ranks below the
+   * structural path's for the same row (see `againstStructural` in src/construct-checker-run.ts). */
+  improvement?: string
 }
 
 /** Problems with the expectations against the fixtures; empty when they agree. */
