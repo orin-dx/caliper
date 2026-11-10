@@ -185,7 +185,9 @@ pub struct ParsedProp {
     pub declarations: Vec<PropParent>,
     /// Why this prop's type is partly a guess, when part of it is `opaque`: the reason kinds of its opaque members
     /// (`conditionalType`, `mappedType`, `indexedAccess`, …), each once, in the order the type holds them. Empty for a
-    /// type the resolver evaluated in full. Derived from `prop_type`, so it never disagrees with it.
+    /// type the resolver evaluated in full. Derived from `prop_type`, so it never disagrees with it, with one addition:
+    /// a prop the TypeScript checker could not read keeps its structural type, and lists after that type's own kinds
+    /// the kinds of what the checker could not read, since the checker did not confirm the type.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub degraded_by: Vec<String>,
     /// Private, zero-sized, and unconstructible outside this module — its
@@ -264,6 +266,17 @@ impl ParsedProp {
             degraded_by,
             _seal: Seal,
         }
+    }
+
+    /// This prop with `kinds` added to its `degraded_by`, each once and after its own: the reasons another reader of
+    /// the same prop (the checker) could not read it. The type is left as it is.
+    pub(crate) fn degraded_also_by(mut self, kinds: &[&'static str]) -> ParsedProp {
+        for kind in kinds {
+            if !self.degraded_by.iter().any(|own| own == kind) {
+                self.degraded_by.push((*kind).to_string());
+            }
+        }
+        self
     }
 }
 
@@ -1697,7 +1710,7 @@ impl PropType {
 }
 
 /// The `degradedBy` entry of a [`PropType::Truncated`] member.
-const TRUNCATED_KIND: &str = "truncated";
+pub(crate) const TRUNCATED_KIND: &str = "truncated";
 
 /// One parameter of a [`PropType::Function`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

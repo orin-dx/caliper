@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  againstStructural,
   checkerExpectations,
   laneFailures,
   runCheckerLane,
@@ -48,6 +49,31 @@ describe('the checker lane expectations', () => {
     expect.hasAssertions()
     const ids = Object.keys(structuralExpectations().rows)
     expect(expectationProblems(ids, checkerExpectations().rows)).toStrictEqual([])
+  })
+
+  it('rank no row below the structural path except a listed improvement (ADR 0026 S4)', () => {
+    expect.hasAssertions()
+    expect(againstStructural(structuralExpectations().rows, checkerExpectations().rows)).toStrictEqual([])
+  })
+
+  it('fail a checker row ranked below the structural one without a reason, and a reason on a row that is not', () => {
+    expect.hasAssertions()
+    const structural = {
+      'a/01-green': { verdicts: ['identical', 'spelled'] },
+      'a/02-gap': { verdicts: ['less precise'], gap: 'unevaluated' },
+      'a/03-green': { verdicts: ['identical', 'spelled'] },
+      'a/04-gap': { verdicts: ['less precise'], gap: 'unevaluated' },
+    } satisfies Parameters<typeof againstStructural>[0]
+    const checker = {
+      'a/01-green': { verdicts: ['less precise'], gap: 'expanded' },
+      'a/02-gap': { verdicts: ['identical', 'spelled'] },
+      'a/03-green': { verdicts: ['less precise'], gap: 'expanded', improvement: 'states more than the name' },
+      'a/04-gap': { verdicts: ['less precise'], gap: 'unevaluated', improvement: 'stale' },
+    } satisfies Parameters<typeof againstStructural>[1]
+    const failures = againstStructural(structural, checker)
+    expect(failures).toHaveLength(2)
+    expect(failures[0]).toContain('a/01-green: the checker path allows less precise, worse than')
+    expect(failures[1]).toContain('a/04-gap: "improvement" is listed, but the checker path is not ranked below')
   })
 
   it('fail a run with a row better or worse than allowed, or one the checker did not answer for', () => {

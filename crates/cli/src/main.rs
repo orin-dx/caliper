@@ -128,8 +128,9 @@ pub struct ExtractArgs {
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 
-    /// Experimental: ask TypeScript 7.1's `tsc --api` for each component's props and merge them over the structural
-    /// result, which stands wherever the checker cannot answer (off by default)
+    /// Experimental: ask TypeScript 7.1's `tsc --api` (or `tsrs`) for every component's props in one program and wait
+    /// for the answer, which replaces the structural one prop by prop; the structural result stands wherever the
+    /// checker cannot answer (off by default)
     #[arg(long)]
     pub experimental_semantic_types: bool,
 
@@ -137,7 +138,16 @@ pub struct ExtractArgs {
     /// `node_modules/typescript/bin/tsc` or `node_modules/tsrs/bin/tsrs`
     #[arg(long, requires = "experimental_semantic_types")]
     pub tsc_path: Option<String>,
+
+    /// With `--experimental-semantic-types`: how long the checker may take to start or to answer any one request, in
+    /// milliseconds, before the run takes the structural result with one warning
+    #[arg(long, requires = "experimental_semantic_types", default_value_t = DEFAULT_SEMANTIC_TIMEOUT_MS)]
+    pub semantic_timeout_ms: u64,
 }
+
+/// `--semantic-timeout-ms` when not given: ADR 0026's proposed 10 s. A hung checker is caught that fast, and it bounds
+/// each request, not the run: a 938-component Chakra and MUI program answers in 15 to 17 s in all within it.
+pub const DEFAULT_SEMANTIC_TIMEOUT_MS: u64 = 10_000;
 
 /// The formats `extract` can write.
 #[derive(clap::ValueEnum, Clone)]

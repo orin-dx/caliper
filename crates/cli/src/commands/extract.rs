@@ -48,7 +48,7 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
 
     let mut output = caliper_docgen_core::pipeline::extract(&options);
     if options.experimental_semantic_types {
-        apply_semantic_backend(&options, &mut output);
+        apply_semantic_backend(&options, std::time::Duration::from_millis(args.semantic_timeout_ms), &mut output);
     }
 
     if let Some(pb) = pb {
@@ -87,10 +87,12 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
     Ok(exit_code)
 }
 
-/// Resolve the components the structural pass found with TypeScript's checker and merge the answer over `output`. An
-/// unavailable checker leaves `output` as it was, plus one diagnostic.
+/// Resolve the components the structural pass found with TypeScript's checker, all in one program, and merge the answer
+/// over `output`. The run waits for the checker; one request (or its start) that takes longer than `timeout`, like an
+/// unavailable checker, leaves `output` as it was, plus one diagnostic.
 fn apply_semantic_backend(
     options: &caliper_docgen_core::pipeline::PipelineOptions,
+    timeout: std::time::Duration,
     output: &mut caliper_docgen_core::types::ExtractionOutput,
 ) {
     let project_root = options
@@ -110,6 +112,7 @@ fn apply_semantic_backend(
         .clone()
         .or_else(|| request.project_root.ancestors().map(|dir| dir.join("tsconfig.json")).find(|file| file.is_file()));
     request.tsc_path = options.semantic_tsc_path.clone();
+    request.request_timeout = timeout;
     let outcome = caliper_docgen_semantic::resolve(request);
     caliper_docgen_core::types::semantic::merge_semantic(output, outcome);
 }

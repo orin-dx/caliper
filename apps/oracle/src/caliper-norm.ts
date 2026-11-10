@@ -21,6 +21,13 @@ const LITERALS = new Set(Object.keys(LITERAL_KINDS))
 
 const isIndexField = (field: any) => field.indexKey !== undefined
 
+/** A field's name as the checker side keys it. Caliper writes a member keyed by a symbol as the source does, `[tag]` or
+ * `[Symbol.iterator]`; the checker keys it `__@tag@<symbol id>`, which src/oracle-checker.ts reads as `__@tag`. */
+export function fieldName(name: string): string {
+  const symbol = /^\[(?:Symbol\.)?([A-Za-z_$][\w$]*)\]$/.exec(name)
+  return symbol ? `__@${symbol[1]}` : name
+}
+
 /** An object type's fields. Caliper writes an index signature as one field whose `indexKey` is the key type: its name is
  * the signature's parameter name (`[id: string]: number`), not a property. */
 function objectNorm(fields: any[], inner: (m: any) => Norm): Norm {
@@ -29,7 +36,7 @@ function objectNorm(fields: any[], inner: (m: any) => Norm): Norm {
   const indexValues: Norm[] = indexed.map((field) => inner(field.propType))
   return {
     k: 'object',
-    fields: named.map((field) => field.name).toSorted(),
+    fields: named.map((field) => fieldName(field.name)).toSorted(),
     index: indexed.length > 0,
     ...(indexed.length > 0 && {
       indexValue: indexValues.length === 1 ? indexValues[0] : { k: 'union', members: indexValues },
@@ -101,7 +108,10 @@ export function caliperNorm(t: any, depth = 0): Norm {
       }))
       return { k: 'function', params, returns: inner(t.returnType) }
     }
+    // `PropType` has no `bigint` primitive yet, so Caliper writes it as the name `bigint`, which no declaration can take
+    // (TS2457): it is the primitive.
     case 'named': {
+      if (t.name === 'bigint' && (t.args ?? []).length === 0) return prim('bigint')
       return { k: 'name', name: bareName(t.name) }
     }
     default: {

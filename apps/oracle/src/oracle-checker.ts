@@ -142,7 +142,8 @@ export function checkerNormalizer(checker: any): (t: any) => Norm {
     const indexValues: Norm[] = infos.map((info: any) => norm(info.valueType, depth + 1))
     return {
       k: 'object',
-      fields: properties.map((p: any) => p.name).toSorted(),
+      // A member keyed by a symbol is `__@tag@<symbol id>`, and the id depends on the rest of the program.
+      fields: properties.map((p: any) => String(p.name).replace(/^(__@[\w$]+)@\d+$/, '$1')).toSorted(),
       index: infos.length > 0,
       ...(infos.length > 0 && {
         indexValue: indexValues.length === 1 ? indexValues[0] : { k: 'union', members: indexValues },
