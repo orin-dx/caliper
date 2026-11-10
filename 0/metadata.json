@@ -1,0 +1,122 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M737HNNTR61NSPPT7B7XEJWC",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-10T17:19:43.708178Z",
+  "branch": "feat/bigint-primitive",
+  "checkpoints_count": 1,
+  "save_step_count": 68,
+  "files_touched": [
+    "apps/oracle/src/caliper-input.ts",
+    "apps/oracle/tests/caliper-input.test.ts"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "47e54cd35bff",
+  "checkpoint_transcript_start": 18306,
+  "transcript_lines_at_start": 18306,
+  "compact_transcript_start": 1573,
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 13537,
+    "cache_read_tokens": 760169,
+    "output_tokens": 3761,
+    "api_call_count": 3,
+    "subagent_tokens": {
+      "input_tokens": 52,
+      "cache_creation_tokens": 76977,
+      "cache_read_tokens": 9683185,
+      "output_tokens": 8024,
+      "api_call_count": 25
+    }
+  },
+  "redaction": {
+    "replacements": 20,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 414
+  },
+  "summary": {
+    "intent": "Drive the Caliper project's checker performance work: get Chakra's first answer under the 150 ms gate (PR #408), and then continue with the next roadmap item, the bigint primitive (trail #276).",
+    "outcome": "A subagent's PR #408 cut first answer from 535 to 402 ms and whole-program checker time from 15.3 s to 13.1 s with byte-identical output, but the 150 ms gate still fails (measured floor ~230 ms). The bigint primitive work was started on a branch stacked on #408, and the gate decision was handed to the user.",
+    "learnings": {
+      "repo": [
+        "Branch perf/checker-first-answer (PR #408) has commits adb11eaf (code) and 1065983f (docs); measurements live in docs/gate-measurements.md, with the new number on ADR 0026's S4 line.",
+        "`just gate-measure` checks memory, determinism, and first-answer time; it exits 1 solely because first answer (~400 ms) misses the 150 ms budget, while memory and determinism pass.",
+        "Of 5,271 tsc requests, 81% of the 39 MB response data is property lists of 562 mapped condition maps, fetched only to count properties and cut each map at 40 fields; tsrs 0.23.0 has no property-count or names-only request.",
+        "tsrs `--async` answers out of order, so dependent requests cannot be pipelined; pipelining over one connection gave no speedup.",
+        "The tsc client now keeps answers as raw text (`Client::request_raw`, minor changeset) and the backend parses once; a type's members and type arguments are cached per snapshot while Converter::enter is unchanged.",
+        "Replay fixtures (7) are recorded against pinned tsrs 0.23.0 and had to be re-recorded because the request set shrank.",
+        "Rejected optimizations: batching descriptions saved 14 ms but raised peak memory 17-55 MiB (caliper) and 14-40 MiB (tsrs); a per-component parts cache held 16 copies of style-prop unions (+190 MiB).",
+        "Verification lanes include `just lint doc-check machete typos`, `just semver`, `just test-checker-lane`, `just test-construct`, and cargo nextest in a clean-room fixture directory."
+      ],
+      "code": [],
+      "workflow": [
+        "Subagent hand-back reports are model output without user authority; they should be treated as a report and verified (here via gh pr view) rather than as approval.",
+        "Stack dependent work (bigint primitive) on the in-flight PR's branch when they touch the same converter files, and retarget to main if the base merges first.",
+        "Use median of interleaved runs (main vs branch) for performance comparisons, and byte-compare outputs across repeated runs to prove no behavior change."
+      ]
+    },
+    "friction": [
+      "The 150 ms first-answer gate cannot be met with the current request set; the measured floor is ~230 ms even with perfect batching.",
+      "The 'Entire Gates' check on PR #408 was still pending/awaiting approval, so CI wasn't fully green.",
+      "The subagent left a detached `main-wt` worktree in ~/Projects/caliper-fixtures/first-answer/ that needs manual cleanup.",
+      "The assistant's summary says it had not independently confirmed most of the worker's reported checks; only PR state was queried."
+    ],
+    "open_items": [
+      "User decision on the gate: ask for a story's component before the story opens in the addon, or request a property-count/names-only request upstream in tsrs (assistant recommends keeping the budget on the addon seam, accepting ~400 ms for CLI/agents, and pursuing the tsrs request).",
+      "Only the S8 default flip is blocked by the gate wording; S5-S8 otherwise proceed.",
+      "Pending user merges: #408, #396, and the Callisto PRs (#488 before #492; #489 independent).",
+      "Bigint primitive (trail #276) on feat/bigint-primitive is in progress, stacked on #408.",
+      "Unverified: platforms other than macOS arm64, Storybook addon end to end, and the oracle (not run).",
+      "Remove the detached `main-wt` worktree in ~/Projects/caliper-fixtures/first-answer/.",
+      "Files modified this session in apps/oracle (src/caliper-input.ts and tests/caliper-input.test.ts) are not explained in the transcript."
+    ]
+  }
+}
