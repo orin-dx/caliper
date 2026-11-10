@@ -586,6 +586,8 @@ def markdown(record, notes, reference_changed=None, moved=(), baseline=True, bas
         for cause, count in sorted(e['reference'].get('unmatched', {}).get('by_cause', {}).items(), key=lambda c: -c[1]):
             lines.append(f'| {name} | {cause} | {count} |')
     lines += ['', '### Recall against the reference', '',
+              "Recall is the share of RDT's reference components and props that Caliper also reports. It is not a measure of "
+              "correctness: what RDT lists beyond Caliper is not necessarily right.", '',
               '| Corpus | Tool | Components | Own props | Own, with layers | `@types/react` props | `@types/react`, with layers |',
               '| --- | --- | --: | --: | --: | --: | --: |']
     for name, e in record['corpora'].items():
