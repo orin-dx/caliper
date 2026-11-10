@@ -695,3 +695,95 @@ fn a_warning_that_comes_with_an_answer_is_shown_on_every_answer() {
         assert_eq!(warnings, 1, "{key}: {:?}", answer.diagnostics);
     }
 }
+
+const NOT_TOLD: &str = "the TypeScript checker was not told that types.ts changed";
+
+fn warns_of_an_unannounced_edit(target: &SemanticTarget) -> SemanticOutcome {
+    let mut outcome = finds_size(target);
+    outcome.diagnostics.push(caliper_docgen_core::types::Diagnostic::new(
+        DiagnosticSeverity::Warning,
+        DiagnosticCode::SemanticBackend,
+        NOT_TOLD,
+    ));
+    outcome
+}
+
+fn keeps_structural_props_for_a_generic_component(target: &SemanticTarget) -> SemanticOutcome {
+    SemanticOutcome {
+        fallbacks: vec![caliper_docgen_core::types::semantic::SemanticFallback {
+            file_path: target.file_path.clone(),
+            display_name: target.display_name.clone(),
+            reason: "the instantiation Button<\"a\"> could not be formed: Cannot find name 'Settings'.".to_string(),
+        }],
+        ..SemanticOutcome::default()
+    }
+}
+
+fn messages(session: &WatchSession, key: &str) -> Vec<String> {
+    session.component(key).unwrap().diagnostics.iter().map(|d| d.message.clone()).collect()
+}
+
+/// What an answer says about the request that made it belongs to the answer: a late answer, and every request it then
+/// serves, carries it.
+#[test]
+fn a_late_answer_reports_the_warning_that_came_with_it_on_every_request_it_serves() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let session = session(
+        &project,
+        Fake::new(Duration::from_millis(300), warns_of_an_unannounced_edit),
+        Duration::from_millis(10),
+    );
+
+    let early = messages(&session, "Button");
+    assert!(!early.iter().any(|message| message == NOT_TOLD), "{early:?}");
+    std::thread::sleep(Duration::from_millis(900));
+
+    for request in ["first", "second"] {
+        let served = messages(&session, "Button");
+        assert_eq!(served.iter().filter(|message| *message == NOT_TOLD).count(), 1, "{request}: {served:?}");
+    }
+}
+
+#[test]
+fn an_answer_served_from_the_cache_reports_the_warning_that_came_with_it() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let checker = Fake::new(Duration::ZERO, warns_of_an_unannounced_edit);
+    let session = session(&project, checker.clone(), Duration::from_secs(5));
+
+    let first = messages(&session, "Button");
+    let cached = messages(&session, "Button");
+
+    assert_eq!(checker.requests(), 1);
+    assert_eq!(cached, first);
+    assert!(cached.iter().any(|message| message == NOT_TOLD), "{cached:?}");
+}
+
+#[test]
+fn a_fallback_reason_is_reported_again_when_the_cache_serves_the_component() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let checker = Fake::new(Duration::ZERO, keeps_structural_props_for_a_generic_component);
+    let session = session(&project, checker.clone(), Duration::from_secs(5));
+
+    let first = messages(&session, "Button");
+    let cached = messages(&session, "Button");
+
+    assert_eq!(checker.requests(), 1);
+    assert!(first.iter().any(|message| message.contains("could not be formed")), "{first:?}");
+    assert_eq!(cached, first);
+}
+
+#[test]
+fn a_late_fallback_reason_is_reported_by_the_request_that_finds_it() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let session = session(
+        &project,
+        Fake::new(Duration::from_millis(300), keeps_structural_props_for_a_generic_component),
+        Duration::from_millis(10),
+    );
+
+    drop(messages(&session, "Button"));
+    std::thread::sleep(Duration::from_millis(900));
+
+    let served = messages(&session, "Button");
+    assert!(served.iter().any(|message| message.contains("could not be formed")), "{served:?}");
+}

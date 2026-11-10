@@ -27,12 +27,21 @@ use crate::types::semantic::{
     merge_semantic_props, unread_diagnostic,
 };
 
+/// What one request of the checker made of a component: the component it found, if any, and what the checker said
+/// about the request itself (an edit it was not told about, why a component kept its structural result). Both are the
+/// answer, so a late answer and every request the cache serves it to carry both.
+#[derive(Clone, Default)]
+struct Answered {
+    component: Option<Arc<SemanticComponent>>,
+    diagnostics: Vec<Diagnostic>,
+}
+
 /// What the checker said about one component at one version of its file, and the generation they belong to.
 #[derive(Default)]
 struct AnswerCache {
     /// Raised by every [`SemanticHook::invalidate`]; an answer asked for under an earlier one is not stored.
     generation: u64,
-    answers: FxHashMap<(String, u64), Option<Arc<SemanticComponent>>>,
+    answers: FxHashMap<(String, u64), Answered>,
 }
 
 type Answers = Mutex<AnswerCache>;
@@ -72,7 +81,8 @@ impl SemanticHook {
         let generation = self.generation();
 
         if let Some(cached) = cache_key.as_ref().and_then(|key| self.cached(key)) {
-            self.apply(&mut answer, cached.as_ref(), mode);
+            answer.diagnostics.extend(cached.diagnostics);
+            self.apply(&mut answer, cached.component.as_ref(), mode);
             return answer;
         }
 
@@ -92,16 +102,21 @@ impl SemanticHook {
         let receiver = self.provider.request(vec![target]);
         match receiver.recv_timeout(self.wait) {
             Ok(outcome) => {
-                let mut reported = Vec::new();
-                let component = self.take_component(&answer, outcome, &mut reported);
-                answer.diagnostics.extend(reported);
+                let Read { answered, once } = read_outcome(&Asked::from(&answer), outcome);
+                for diagnostic in once {
+                    if !self.warned.swap(true, Ordering::Relaxed) {
+                        answer.diagnostics.push(diagnostic);
+                    }
+                }
+                answer.diagnostics.extend(answered.diagnostics.iter().cloned());
+                let component = answered.component.clone();
                 if let Some(key) = cache_key {
-                    self.store(key, generation, component.clone());
+                    self.store(key, generation, answered);
                 }
                 self.apply(&mut answer, component.as_ref(), mode);
             }
             Err(RecvTimeoutError::Timeout) => {
-                self.keep_late_answer(receiver, cache_key, generation);
+                self.keep_late_answer(receiver, &answer, cache_key, generation);
                 let mut pending = Diagnostic::new(
                     DiagnosticSeverity::Info,
                     DiagnosticCode::SemanticBackend,
@@ -128,64 +143,33 @@ impl SemanticHook {
         self.answers.lock().unwrap_or_else(PoisonError::into_inner).generation
     }
 
-    fn cached(&self, key: &(String, u64)) -> Option<Option<Arc<SemanticComponent>>> {
+    fn cached(&self, key: &(String, u64)) -> Option<Answered> {
         self.answers.lock().unwrap_or_else(PoisonError::into_inner).answers.get(key).cloned()
     }
 
-    fn store(&self, key: (String, u64), generation: u64, component: Option<Arc<SemanticComponent>>) {
-        store(&self.answers, key, generation, component);
+    fn store(&self, key: (String, u64), generation: u64, answered: Answered) {
+        store(&self.answers, key, generation, answered);
     }
 
     /// Waits for an answer that missed its budget on a thread of its own, so the next request finds it.
-    fn keep_late_answer(&self, receiver: Receiver<SemanticOutcome>, cache_key: Option<(String, u64)>, generation: u64) {
+    fn keep_late_answer(
+        &self,
+        receiver: Receiver<SemanticOutcome>,
+        answer: &ComponentAnswer,
+        cache_key: Option<(String, u64)>,
+        generation: u64,
+    ) {
         let Some(key) = cache_key else { return };
         let answers = self.answers.clone();
+        let asked = Asked::from(answer);
         std::thread::Builder::new()
             .name("caliper-late-answer".to_string())
             .spawn(move || {
                 if let Ok(outcome) = receiver.recv() {
-                    let component = outcome.components.into_iter().next().map(Arc::new);
-                    store(&answers, key, generation, component);
+                    store(&answers, key, generation, read_outcome(&asked, outcome).answered);
                 }
             })
             .ok();
-    }
-
-    /// The component the checker answered for, with its diagnostics (an unavailable checker's, once; a fallback's
-    /// reason) recorded on `diagnostics`.
-    fn take_component(
-        &self,
-        answer: &ComponentAnswer,
-        outcome: SemanticOutcome,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> Option<Arc<SemanticComponent>> {
-        let SemanticOutcome { components, fallbacks, diagnostics: reported } = outcome;
-        // Only an outcome with no answer at all says the checker is unavailable; a warning that comes with an answer
-        // (an edit the checker was not told about) is about this request.
-        let unavailable = components.is_empty() && fallbacks.is_empty();
-        for mut diagnostic in reported {
-            if unavailable
-                && diagnostic.severity == DiagnosticSeverity::Warning
-                && self.warned.swap(true, Ordering::Relaxed)
-            {
-                continue;
-            }
-            diagnostic.affects = vec![answer.key.clone()];
-            diagnostics.push(diagnostic);
-        }
-        for fallback in fallbacks {
-            let mut info = Diagnostic::new(
-                DiagnosticSeverity::Info,
-                DiagnosticCode::SemanticBackend,
-                format!("1 component(s) kept their structural result: {}", fallback.reason),
-            );
-            info.affects = vec![answer.key.clone()];
-            diagnostics.push(info);
-        }
-        components
-            .into_iter()
-            .find(|found| found.file_path == answer.entry.file_path && found.display_name == answer.entry.display_name)
-            .map(Arc::new)
     }
 
     fn apply(&self, answer: &mut ComponentAnswer, component: Option<&Arc<SemanticComponent>>, mode: HtmlAttributeMode) {
@@ -231,10 +215,68 @@ impl SemanticHook {
     }
 }
 
-/// Keeps `component` for `key` unless the cache was invalidated since the question was asked.
-fn store(answers: &Answers, key: (String, u64), generation: u64, component: Option<Arc<SemanticComponent>>) {
+/// Keeps `answered` for `key` unless the cache was invalidated since the question was asked.
+fn store(answers: &Answers, key: (String, u64), generation: u64, answered: Answered) {
     let mut cache = answers.lock().unwrap_or_else(PoisonError::into_inner);
     if cache.generation == generation {
-        cache.answers.insert(key, component);
+        cache.answers.insert(key, answered);
     }
+}
+
+/// The component a request asked about, as a late answer's thread, which has no [`ComponentAnswer`], knows it.
+struct Asked {
+    key: String,
+    file_path: camino::Utf8PathBuf,
+    display_name: String,
+}
+
+impl From<&ComponentAnswer> for Asked {
+    fn from(answer: &ComponentAnswer) -> Self {
+        Self {
+            key: answer.key.clone(),
+            file_path: answer.entry.file_path.clone(),
+            display_name: answer.entry.display_name.clone(),
+        }
+    }
+}
+
+/// An outcome read for the component asked about.
+struct Read {
+    /// What is kept for the next request: the component and what the checker said about the request, each diagnostic
+    /// naming the component.
+    answered: Answered,
+    /// What an unavailable checker says, which a session says once and not per component, so it is not kept.
+    once: Vec<Diagnostic>,
+}
+
+/// The component the checker answered for, and the diagnostics the request produced: a warning that came with an
+/// answer (an edit the checker was not told about) is about this request, and a fallback's reason says why the
+/// component kept its structural result.
+fn read_outcome(asked: &Asked, outcome: SemanticOutcome) -> Read {
+    let SemanticOutcome { components, fallbacks, diagnostics: reported } = outcome;
+    // Only an outcome with no answer at all says the checker is unavailable.
+    let unavailable = components.is_empty() && fallbacks.is_empty();
+    let mut read = Read { answered: Answered::default(), once: Vec::new() };
+    for mut diagnostic in reported {
+        diagnostic.affects = vec![asked.key.clone()];
+        if unavailable && diagnostic.severity == DiagnosticSeverity::Warning {
+            read.once.push(diagnostic);
+        } else {
+            read.answered.diagnostics.push(diagnostic);
+        }
+    }
+    for fallback in fallbacks {
+        let mut info = Diagnostic::new(
+            DiagnosticSeverity::Info,
+            DiagnosticCode::SemanticBackend,
+            format!("1 component(s) kept their structural result: {}", fallback.reason),
+        );
+        info.affects = vec![asked.key.clone()];
+        read.answered.diagnostics.push(info);
+    }
+    read.answered.component = components
+        .into_iter()
+        .find(|found| found.file_path == asked.file_path && found.display_name == asked.display_name)
+        .map(Arc::new);
+    read
 }
