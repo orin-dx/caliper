@@ -1,0 +1,21 @@
+{
+  "tool_use_id": "toolu_01KTu3KTQkAxLnoY6QfrSwZK",
+  "agent_id": "a954f01d69a4bce35",
+  "subagent_type": "general-purpose",
+  "task_description": "S7a checker supplies parent, tags, order, composes",
+  "files": [
+    "apps/oracle/spike-s7a-facts.ts",
+    "apps/oracle/spike-s7a-prop.ts",
+    "apps/oracle/spike-s7a-raw.ts",
+    "apps/oracle/spike-s7a.ts"
+  ],
+  "token_usage": {
+    "input_tokens": 498,
+    "cache_creation_tokens": 462610,
+    "cache_read_tokens": 79182566,
+    "output_tokens": 185121,
+    "api_call_count": 249
+  },
+  "started_at": "2026-11-11T12:34:19.674392-08:00",
+  "completed_at": "2026-11-11T13:26:44.638557-08:00"
+}
