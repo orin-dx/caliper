@@ -288,7 +288,6 @@ impl Indexed {
             }
             let mut diags: Vec<Diagnostic> = io_diag.into_iter().collect();
             diags.append(&mut data.diagnostics);
-            diags.extend(options.plugins.run_on_file_extracted(&path, &mut data));
             if !diags.is_empty() {
                 file_diagnostics.insert(path.clone(), diags);
             }
@@ -381,7 +380,6 @@ impl Revision {
                 let mut data = crate::extractor::parse_file(changed, &source);
                 let mut diags: Vec<Diagnostic> = io_diag.into_iter().collect();
                 diags.append(&mut data.diagnostics);
-                diags.extend(options.plugins.run_on_file_extracted(changed, &mut data));
                 if !diags.is_empty() {
                     file_diagnostics.insert(changed.to_owned(), diags);
                 }
@@ -643,7 +641,7 @@ impl Revision {
         let mut keys = FxHashMap::default();
         let mut seen_names: FxHashMap<String, u32> = FxHashMap::default();
         for (id, _) in component_ids(&self.global, options) {
-            let Some((mut entry, resolved_diagnostics)) = take(&id) else { continue };
+            let Some((entry, resolved_diagnostics)) = take(&id) else { continue };
             // An alias of an imported component whose package isn't loaded, or a call whose result is no component,
             // has nothing to document.
             if matches!(entry.detected_by, DetectionRule::ImportedMemberAlias | DetectionRule::FactoryResult)
@@ -657,7 +655,6 @@ impl Revision {
             *count += 1;
             // The first occurrence of a name keeps it bare; later ones take their file path, which is unique per file.
             let key = if *count == 1 { base_name } else { format!("{} ({})", base_name, entry.file_path) };
-            diagnostics.extend(options.plugins.run_on_component_resolved(&mut entry), Some(&key));
             let new_file_path = entry.file_path.clone();
             if let Some(previous) = components.insert(key.clone(), entry) {
                 diagnostics.add(

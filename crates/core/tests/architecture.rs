@@ -215,17 +215,6 @@ fn types_never_import_resolver_or_pipeline() {
 }
 
 #[test]
-fn types_import_plugin_only_for_the_registry_in_pipeline_options() {
-    let violations = forbidden_imports(
-        &core_sources(),
-        &["types"],
-        &["crate::plugin"],
-        &[("types/options.rs", "PipelineOptions.plugins holds the PluginRegistry; plugin.rs in turn names SourceData")],
-    );
-    assert_eq!(violations, Vec::<String>::new());
-}
-
-#[test]
 fn the_resolver_names_dependency_types_only_for_the_layer_it_reads() {
     // `dependency_types` sits above the resolver: it loads declarations through the resolver's module resolution.
     // The one edge back is the `DependencyLayer` value the resolver reads. Moving that type (and its `chain`,

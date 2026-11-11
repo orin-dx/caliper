@@ -121,7 +121,6 @@ known.rs          — library shortcuts: VariantProps, sx, css, cva, tv, defineR
 react_types.rs    — React builtin recognition + notable HTML attribute table
 import_map.rs     — import binding resolution
 cache.rs          — DTS parse cache (content-hash keys, msgpack, atomic write, discarded when the build changes)
-plugin.rs         — DocgenPlugin and PluginRegistry hooks
 toon.rs           — TOON token-optimized output
 panic_guard.rs    — contain_panic, the one panic-containment boundary (ADR 0005)
 ```

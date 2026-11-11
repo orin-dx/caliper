@@ -634,47 +634,20 @@ fn typescript_7_without_its_platform_package_is_reported_once_by_extract_and_ini
 }
 
 // ── SPEC-PIPELINE-001 AC-014: initialize() called twice does not re-run
-// extraction — a plugin hook counter is unchanged on the second call, and
-// the second call's diagnostics are empty regardless of the first call's.
+// extraction, and the second call's diagnostics are empty regardless of the first call's.
 
 #[test]
 fn initialize_called_twice_does_not_rerun_extraction_or_replay_diagnostics() {
-    use crate::plugin::{DocgenPlugin, PluginRegistry};
-    use std::sync::Arc as StdArc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    struct CountingPlugin(StdArc<AtomicUsize>);
-    impl DocgenPlugin for CountingPlugin {
-        fn name(&self) -> &str {
-            "counting-plugin"
-        }
-        fn on_file_extracted(&self, _path: &camino::Utf8Path, _data: &mut crate::types::SourceData) {
-            self.0.fetch_add(1, Ordering::SeqCst);
-        }
-    }
-
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = camino::Utf8Path::from_path(tmp.path()).expect("utf8 path").to_owned();
     std::fs::write(dir.join("Button.tsx").as_std_path(), "export const Button = () => null;")
         .expect("write Button.tsx");
 
-    let count = StdArc::new(AtomicUsize::new(0));
-    let mut plugins = PluginRegistry::new();
-    plugins.register(CountingPlugin(count.clone()));
-
-    let options = PipelineOptions { src_dirs: vec![dir], plugins, ..Default::default() };
+    let options = PipelineOptions { src_dirs: vec![dir], ..Default::default() };
     let session = WatchSession::new(options);
 
     let first = session.initialize();
-    let count_after_first = count.load(Ordering::SeqCst);
-    assert!(count_after_first > 0, "expected the plugin hook to have run at least once");
-
     let second = session.initialize();
-    assert_eq!(
-        count.load(Ordering::SeqCst),
-        count_after_first,
-        "second initialize() call must not re-parse/re-extract"
-    );
     assert_eq!(second, first, "a second initialize() returns the current snapshot unchanged");
 }
 
