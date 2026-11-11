@@ -58,13 +58,6 @@ pub(crate) struct Attachment {
     property: Option<CompactString>,
 }
 
-/// Whether the call is `Object.assign(...)`.
-pub(super) fn is_object_assign_call(call: &CallExpression<'_>) -> bool {
-    matches!(&call.callee, Expression::StaticMemberExpression(callee)
-        if callee.property.name == "assign"
-            && matches!(&callee.object, Expression::Identifier(object) if object.name == "Object"))
-}
-
 impl<'src> SourceDataCollector<'src> {
     fn uses_of(&mut self, name: &str) -> &mut NameUses {
         self.name_uses.entry(CompactString::from(name)).or_default()
@@ -83,16 +76,16 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
-    /// The local component a default export's call wraps: `React.forwardRef(Inner) as T` and `memo(forwardRef(Card))`
-    /// give `Inner` and `Card`. `None` for a call that is no component wrapper, or whose argument is no name.
+    /// The local component a default export's call wraps: `React.forwardRef(Inner) as T`, `memo(forwardRef(Card))` and
+    /// `Object.assign(Root, { Item })` give `Inner`, `Card` and `Root`. `None` for a call that is no component alias, or
+    /// whose argument is no name.
     pub(super) fn component_wrapped_by(&self, expression: &Expression<'_>) -> Option<CompactString> {
         let Expression::CallExpression(call) = super::component::peel_expr(expression) else { return None };
-        if !(super::evidence::Scope::is_react_wrapper(self, call) || super::component::is_component_wrapper_call(call))
-        {
+        if !super::component::is_component_alias_call(self, call) {
             return None;
         }
-        let first = call.arguments.first()?.as_expression()?;
-        match super::component::peel_expr(first) {
+        let first = super::component::aliased_component(call)?;
+        match first {
             Expression::Identifier(id) => Some(CompactString::from(id.name.as_str())),
             _ => self.component_wrapped_by(first),
         }
@@ -119,10 +112,11 @@ impl<'src> SourceDataCollector<'src> {
         });
     }
 
-    /// `const Parent = Object.assign(Root, { Sub })`: `Parent` is the root under another name, with `Sub` attached.
+    /// `const Parent = Object.assign(Root, { Sub })`, or the default export of one with `Root` as `parent`: `Parent` is
+    /// the root under another name, with `Sub` attached.
     pub(super) fn record_object_assign_declarator(&mut self, parent: &str, init: Option<&Expression<'_>>) {
         let Some(Expression::CallExpression(call)) = init.map(super::component::peel_expr) else { return };
-        if !is_object_assign_call(call) {
+        if !super::component::is_object_assign_call(call) {
             return;
         }
         for argument in &call.arguments {
@@ -206,8 +200,7 @@ impl<'src> SourceDataCollector<'src> {
         if let Expression::Identifier(callee) = super::component::peel_expr(&call.callee) {
             self.uses_of(callee.name.as_str()).calls += 1;
         }
-        let renders_argument = super::evidence::Scope::is_react_wrapper(&*self, call)
-            || super::component::is_component_wrapper_call(call)
+        let renders_argument = super::component::is_component_wrapper(&*self, call)
             || super::evidence::is_element_factory_callee(super::component::peel_expr(&call.callee), &*self);
         if renders_argument && let Some(Argument::Identifier(component)) = call.arguments.first() {
             self.uses_of(component.name.as_str()).rendered += 1;

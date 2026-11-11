@@ -108,6 +108,16 @@ describe('DocgenSession.find', () => {
     expect(session.resolveExport(path, 'default')).toBe('InternalTable')
   })
 
+  it('answers the story’s default import of `Object.assign(Root, { Item })` with Root, not with a component of its name', async () => {
+    const path = join(src, 'Menu.tsx')
+    const session = await sessionWith({
+      Root: entry('Root', path, ['default']),
+      Item: entry('Item', path, ['default.Item']),
+    })
+    expect(session.resolveExport(path, 'default', 'Menu')).toBe('Root')
+    expect(session.keyOfExport(path, 'default', ['Item'])).toBe('Item')
+  })
+
   it('tells an anonymous default export from a named export of its file name', async () => {
     const path = join(src, 'E.tsx')
     const session = await sessionWith({

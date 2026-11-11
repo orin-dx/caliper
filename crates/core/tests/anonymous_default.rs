@@ -72,3 +72,23 @@ export default React.forwardRef(InternalTable) as RefTable;
 "#;
     assert_eq!(components("Table.tsx", source), BTreeMap::from([("InternalTable".to_owned(), row("rows", "default"))]));
 }
+
+#[test]
+fn a_default_export_of_object_assign_is_an_export_of_the_component_it_attaches_statics_to() {
+    let source = r#"
+interface RootProps { open?: boolean }
+interface ItemProps { label: string }
+
+const Root = (props: RootProps) => <ul />;
+const Item = (props: ItemProps) => <li />;
+
+export default Object.assign(Root, { Item });
+"#;
+    assert_eq!(
+        components("Menu.tsx", source),
+        BTreeMap::from([
+            ("Item".to_owned(), row("label", "default.Item")),
+            ("Root".to_owned(), row("open", "default"))
+        ])
+    );
+}

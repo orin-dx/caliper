@@ -3467,3 +3467,46 @@ fn a_default_export_a_call_wraps_is_an_export_of_the_component_it_wraps() {
         "interface P { a: string }\nconst Inner = (props: P) => <div />;\nexport default makePanel(Inner);\n";
     assert_eq!(identities("/test/Panel.tsx", not_a_wrapper), vec![identity("Inner", "P", &[])]);
 }
+
+#[test]
+fn a_default_export_a_component_alias_wraps_is_an_export_of_the_component_it_wraps() {
+    let prelude = "import * as React from 'react';\nimport { forwardRef, memo } from 'react';\nimport { observer } from 'mobx-react';\n\
+                   interface P { a: string }\nconst Root = (props: P) => <div />;\nconst Item = (props: P) => <li />;\n";
+    for (label, default) in [
+        ("an unwrapped identifier", "export default Root;"),
+        ("React.forwardRef", "export default React.forwardRef(Root);"),
+        ("forwardRef as T", "export default forwardRef(Root) as RefRoot;"),
+        ("memo", "export default memo(Root);"),
+        ("memo(forwardRef)", "export default memo(forwardRef(Root));"),
+        ("observer", "export default observer(Root);"),
+        ("a withX higher-order component", "export default withTheme(Root);"),
+        ("a curried wrapper", "export default connect(mapState)(Root);"),
+        ("Object.assign", "export default Object.assign(Root, { Item });"),
+        ("Object.assign of forwardRef", "export default Object.assign(forwardRef(Root), { Item });"),
+        ("Object.assign of memo(forwardRef)", "export default Object.assign(memo(forwardRef(Root)), { Item });"),
+        ("a parenthesized call", "export default (memo(Root));"),
+        ("an as expression", "export default Object.assign(Root, { Item }) as typeof Root;"),
+        ("a satisfies expression", "export default Object.assign(Root, { Item }) satisfies object;"),
+    ] {
+        let found = identities("/test/Menu.tsx", &format!("{prelude}{default}\n"));
+        let root =
+            found.iter().find(|(name, ..)| name == "Root").unwrap_or_else(|| panic!("{label}: no Root in {found:?}"));
+        assert_eq!(root.2, vec!["default".to_owned()], "{label}: {found:?}");
+        assert!(found.iter().all(|(name, ..)| name == "Root" || name == "Item"), "{label}: {found:?}");
+    }
+}
+
+#[test]
+fn a_default_export_no_component_alias_wraps_records_no_export_for_what_it_receives() {
+    let prelude =
+        "import { forwardRef } from 'react';\ninterface P { a: string }\nconst Root = (props: P) => <div />;\n";
+    for (label, default) in [
+        ("a factory call", "export default makePanel(Root);"),
+        ("styled(Component) alone", "export default styled(Root);"),
+        ("a call with the component second", "export default wrap(1, Root);"),
+        ("a call with no argument", "export default forwardRef();"),
+    ] {
+        let found = identities("/test/Menu.tsx", &format!("{prelude}{default}\n"));
+        assert_eq!(found, vec![identity("Root", "P", &[])], "{label}");
+    }
+}

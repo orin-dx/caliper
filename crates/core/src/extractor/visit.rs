@@ -720,6 +720,7 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
             && let Some(wrapped) = self.component_wrapped_by(expression)
         {
             self.record_exported_local(&wrapped, "default");
+            self.record_object_assign_declarator(&wrapped, node.declaration.as_expression());
         }
         walk::walk_export_default_declaration(self, node);
     }

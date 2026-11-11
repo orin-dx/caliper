@@ -106,9 +106,7 @@ fn component_argument_evidence(
         Expression::StaticMemberExpression(m) if is_component_reference(m.property.name.as_str()) => {
             Ok(ArgumentEvidence::Sufficient)
         }
-        Expression::CallExpression(inner)
-            if react.is_react_wrapper(inner) || super::component::is_component_wrapper_call(inner) =>
-        {
+        Expression::CallExpression(inner) if super::component::is_component_wrapper(react, inner) => {
             Ok(ArgumentEvidence::Sufficient)
         }
         _ => Err("is given an argument that is not a render function, a tag or a component reference"),
