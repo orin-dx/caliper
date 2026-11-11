@@ -1784,6 +1784,10 @@ pub struct ComponentMapping {
     /// The type parameters of the functions the declaration contains (`function ActionBar<T extends object>(props:
     /// ActionBarProps<T>)`): placeholders in the props type, not unresolvable names.
     pub type_params: Vec<TypeName>,
+    /// Whether the module has a binding named `component_name` that this declares. An inline sub-component
+    /// (`Parent.Sub = (props: P) => …`) and an anonymous default export (named after its file) have no binding: nothing
+    /// finds them by name, and another component of the file can have the name.
+    pub bound: bool,
 }
 
 impl ComponentMapping {
@@ -1810,13 +1814,22 @@ impl ComponentMapping {
             exports: Vec::new(),
             wrapper_callee: None,
             type_params: Vec::new(),
+            bound: rule != DetectionRule::AttachedSubComponent,
         }
     }
 
     /// Whether this is the component the module's binding `name` declares. An inline sub-component
-    /// (`Parent.Name = (props: P) => …`) has the name but no binding, and another component can have the binding.
+    /// (`Parent.Name = (props: P) => …`) or an anonymous default export has the name but no binding, and another
+    /// component can have the binding.
     pub fn is_binding_named(&self, name: &str) -> bool {
-        self.rule != DetectionRule::AttachedSubComponent && self.component_name == name
+        self.bound && self.component_name == name
+    }
+
+    /// Marks the component as no binding of the module: it is told apart by where it starts, not by its name.
+    #[must_use]
+    pub fn without_binding(mut self) -> Self {
+        self.bound = false;
+        self
     }
 
     /// Whether its module exports it, directly or as a sub-component attached to an exported component.

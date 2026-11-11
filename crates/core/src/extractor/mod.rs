@@ -304,6 +304,9 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) takes_a_second_parameter: FxHashSet<CompactString>,
     /// Local names the module exports, each with the names it exports them under, in source order (`uses.rs`).
     pub(super) exported_locals: FxHashMap<CompactString, Vec<CompactString>>,
+    /// Where the component the module's anonymous default export is starts (`ComponentMapping::span_start`): it has no
+    /// binding to be exported by name, so `exports` finds it by this.
+    pub(super) anonymous_default: Option<u32>,
     /// Each component attached to another (`Parent.Sub = Sub`, `Object.assign(Parent, { Sub })`): exported when its
     /// parent is, through the parent's property.
     pub(super) attached_to: Vec<uses::Attachment>,
@@ -362,6 +365,7 @@ impl<'src> SourceDataCollector<'src> {
             name_uses: Default::default(),
             takes_a_second_parameter: FxHashSet::default(),
             exported_locals: FxHashMap::default(),
+            anonymous_default: None,
             attached_to: Vec::new(),
             function_depth: 0,
             ambient_depth: 0,
@@ -643,6 +647,7 @@ impl<'src> SourceDataCollector<'src> {
                 mapping.component_name = display_name;
             }
         }
+        self.name_the_anonymous_default();
         self.data
     }
 
