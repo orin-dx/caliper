@@ -406,10 +406,9 @@ impl Serialize for InternedComponent<'_> {
             methods,
             detected_by,
             exported,
-            // The canonical JSON gains `exports` with its schema version (ADR 0027).
-            exports: _,
+            exports,
         } = self.entry;
-        let mut out = serializer.serialize_struct("ComponentEntry", 12)?;
+        let mut out = serializer.serialize_struct("ComponentEntry", 13)?;
         out.serialize_field("displayName", display_name)?;
         out.serialize_field("filePath", file_path)?;
         out.serialize_field("description", description)?;
@@ -425,6 +424,7 @@ impl Serialize for InternedComponent<'_> {
         out.serialize_field("methods", methods)?;
         out.serialize_field("detectedBy", detected_by)?;
         out.serialize_field("exported", exported)?;
+        out.serialize_field("exports", exports)?;
         out.end()
     }
 }

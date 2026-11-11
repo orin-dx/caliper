@@ -10897,7 +10897,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "forwardRefExoticDecl",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "default",
+          "members": []
+        }
+      ]
     },
     "TextField": {
       "displayName": "TextField",
@@ -11983,7 +11989,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "forwardRefExoticDecl",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "default",
+          "members": []
+        }
+      ]
     }
   },
   "enums": {},

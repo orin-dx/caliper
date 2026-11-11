@@ -189,6 +189,19 @@ export interface ComponentEntry {
   detectedBy: DetectionRule
   /** Whether its module exports it, directly or as a sub-component attached to an exported component. */
   exported: boolean
+  /** How its module exports it, in source order; `exported` is whether there are any. */
+  exports: ComponentExport[]
+}
+
+/**
+ * One way a module exports a component: `Card` for `export function Card` and for `export { _Card as Card }`,
+ * `default` for `export default Menu`. A sub-component attached to an exported component names the export it hangs
+ * from and the properties that reach it: `Menu.Item = Item` beside `export default Menu` is
+ * `{ name: 'default', members: ['Item'] }`, not `Menu.Item`, since `Menu` is the file's own name for the component.
+ */
+export interface ComponentExport {
+  name: string
+  members: string[]
 }
 
 export type DetectionRule =
@@ -233,10 +246,13 @@ export interface WireDiagnostic extends Omit<Diagnostic, 'affects'> {
   affects?: NameListId
 }
 
-/** What `initializeSessionIndex` resolves to: where each component lives and the run's diagnostics, without props. */
+/**
+ * What `initializeSessionIndex` resolves to: where each component lives, what it is called and how its module exports
+ * it, and the run's diagnostics, without props.
+ */
 export interface SessionIndex {
   schemaVersion: number
-  components: Record<string, { filePath: string; displayName: string }>
+  components: Record<string, Pick<ComponentEntry, 'filePath' | 'displayName' | 'exports'>>
   nameLists: Record<NameListId, string[]>
   diagnostics: WireDiagnostic[]
 }

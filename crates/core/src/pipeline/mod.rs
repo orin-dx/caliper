@@ -115,6 +115,7 @@ impl Serialize for SessionIndex<'_> {
         struct Location<'a> {
             file_path: &'a str,
             display_name: &'a str,
+            exports: &'a [crate::types::ComponentExport],
         }
 
         let mut lists = NameLists::new();
@@ -122,7 +123,11 @@ impl Serialize for SessionIndex<'_> {
         let locations: std::collections::BTreeMap<&str, Location<'_>> = self
             .locations
             .iter()
-            .map(|at| (at.key.as_str(), Location { file_path: at.file_path.as_str(), display_name: &at.display_name }))
+            .map(|at| {
+                let location =
+                    Location { file_path: at.file_path.as_str(), display_name: &at.display_name, exports: &at.exports };
+                (at.key.as_str(), location)
+            })
             .collect();
         let mut out = serializer.serialize_struct("SessionIndex", 4)?;
         out.serialize_field("schemaVersion", &crate::types::SCHEMA_VERSION)?;

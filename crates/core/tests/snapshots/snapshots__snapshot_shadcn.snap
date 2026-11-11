@@ -9977,7 +9977,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "functionDeclaration",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "Badge",
+          "members": []
+        }
+      ]
     },
     "Button": {
       "displayName": "Button",
@@ -20302,7 +20308,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "forwardRef",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "Button",
+          "members": []
+        }
+      ]
     },
     "Input": {
       "displayName": "Input",
@@ -31148,7 +31160,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "forwardRef",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "Input",
+          "members": []
+        }
+      ]
     }
   },
   "enums": {

@@ -204,7 +204,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "forwardRef",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "Accordion",
+          "members": []
+        }
+      ]
     },
     "Avatar": {
       "displayName": "Avatar",
@@ -282,7 +288,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "hocWrapper",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "Avatar",
+          "members": []
+        }
+      ]
     },
     "Badge": {
       "displayName": "Badge",
@@ -331,7 +343,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "fcAnnotation",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "Badge",
+          "members": []
+        }
+      ]
     },
     "Box": {
       "displayName": "Box",
@@ -12624,7 +12642,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "forwardRef",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "Box",
+          "members": []
+        }
+      ]
     },
     "Card": {
       "displayName": "Card",
@@ -22658,7 +22682,13 @@ expression: value
       },
       "methods": [],
       "detectedBy": "forwardRef",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "Card",
+          "members": []
+        }
+      ]
     },
     "Chip": {
       "displayName": "Chip",
@@ -22716,7 +22746,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "fcAnnotation",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "Chip",
+          "members": []
+        }
+      ]
     },
     "Icon": {
       "displayName": "Icon",
@@ -38459,7 +38495,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "forwardRef",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "Icon",
+          "members": []
+        }
+      ]
     },
     "IconButton": {
       "displayName": "IconButton",
@@ -38608,7 +38650,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "forwardRef",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "IconButton",
+          "members": []
+        }
+      ]
     },
     "Select": {
       "displayName": "Select",
@@ -38827,7 +38875,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "forwardRef",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "Select",
+          "members": []
+        }
+      ]
     },
     "Toast": {
       "displayName": "Toast",
@@ -38886,7 +38940,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "forwardRef",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "Toast",
+          "members": []
+        }
+      ]
     },
     "Toggle": {
       "displayName": "Toggle",
@@ -38981,7 +39041,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "forwardRef",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "Toggle",
+          "members": []
+        }
+      ]
     },
     "TypeSampler": {
       "displayName": "TypeSampler",
@@ -39253,7 +39319,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "forwardRef",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "TypeSampler",
+          "members": []
+        }
+      ]
     }
   },
   "enums": {},

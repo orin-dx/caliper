@@ -10260,7 +10260,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "forwardRefExoticDecl",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "Button",
+          "members": []
+        }
+      ]
     }
   },
   "enums": {},

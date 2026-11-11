@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { caliperNorm } from '../src/caliper-norm.ts'
 import { compare, prim } from '../src/oracle-compare.ts'
 import { checkCaliperShape, flattenProps, requireComparison } from '../src/caliper-input.ts'
+import { SUPPORTED_SCHEMA_VERSION } from '../src/schema-version.ts'
 
-const good = { schemaVersion: 6, components: {}, propSets: {}, props: {} }
+const good = { schemaVersion: SUPPORTED_SCHEMA_VERSION, components: {}, propSets: {}, props: {} }
 
 describe('the oracle input checks', () => {
   it('a renamed propSets key stops the run naming the key', () => {
@@ -13,10 +14,20 @@ describe('the oracle input checks', () => {
     expect(() => checkCaliperShape(renamed)).toThrow('caliper output has no "propSets" object')
   })
 
+  it('a component with no exports list stops the run naming the component', () => {
+    expect.hasAssertions()
+    const components = { Card: { displayName: 'Card', exports: [] }, Chip: { displayName: 'Chip' } }
+    expect(() => checkCaliperShape({ ...good, components })).toThrow('caliper component Chip has no "exports" list')
+    expect(() => checkCaliperShape({ ...good, components: { Card: components.Card } })).not.toThrow()
+  })
+
   it('a schema version the oracle does not read stops the run', () => {
     expect.hasAssertions()
     expect(() => checkCaliperShape({ ...good, schemaVersion: 3 })).toThrow(
-      'caliper output has schemaVersion 3, the oracle reads 6',
+      `caliper output has schemaVersion 3, the oracle reads ${SUPPORTED_SCHEMA_VERSION}`,
+    )
+    expect(() => checkCaliperShape({ ...good, schemaVersion: 6 })).toThrow(
+      'caliper output has schemaVersion 6, the oracle reads 7',
     )
     expect(() => checkCaliperShape({ components: {} })).toThrow('has schemaVersion undefined')
   })

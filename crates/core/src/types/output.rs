@@ -17,7 +17,9 @@ pub(crate) mod interned;
 /// component's props as prop set ids and an inheritance layer's `omitted` as a name list id (ADR 0018). Version 5 writes
 /// a tuple's elements as `{ type, label?, modifier? }` and adds the kinds the checker states (ADR 0026, slice S1).
 /// Version 6 writes `bigint` as `{ "kind": "bigint" }`, where version 5 wrote `{ "kind": "named", "name": "bigint" }`.
-pub const SCHEMA_VERSION: u32 = 6;
+/// Version 7 gives each component `exports`, the names its module exports it under (ADR 0027): a reader of version 6
+/// has no way to tell which export a component is, and joined on the display name instead.
+pub const SCHEMA_VERSION: u32 = 7;
 
 // ─── Top-level output ─────────────────────────────────────────────────────────
 
@@ -128,9 +130,8 @@ pub struct ComponentEntry {
     /// component is an implementation detail other components render; RDT does not report those.
     pub exported: bool,
     /// How its module exports it ([`crate::types::ComponentMapping::exports`]); `exported` is whether it has any. The
-    /// TypeScript checker asks for the component by these. Not in the canonical JSON yet, so an output read back from
-    /// JSON has none.
-    #[serde(skip)]
+    /// TypeScript checker asks for the component by these, and a reader of the canonical JSON finds the component by
+    /// file and export instead of by display name.
     pub exports: Vec<crate::types::ComponentExport>,
 }
 
