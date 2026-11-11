@@ -63,7 +63,10 @@ export declare function isResolutionConfig(sessionId: number, filePath: string):
 export interface JsExtractOptions {
   /** Source directories to scan. */
   srcDirs: Array<string>
-  /** Extra glob-like patterns to exclude (on top of built-in: stories, tests, snapshots). */
+  /**
+   * Extra gitignore-style glob patterns to exclude, relative to each source directory (on top of built-in: stories,
+   * tests, snapshots).
+   */
   exclude?: Array<string>
   /** `'full'` (the default) lists all of an element's attributes, `'curated'` a compact subset, `'none'` none. */
   htmlAttributes?: 'curated' | 'full' | 'none'
