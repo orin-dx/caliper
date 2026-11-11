@@ -23,7 +23,7 @@ pub use watch::{LazyStats, WatchSession};
 
 /// Filename that trips a simulated panic in the Phase 2 parse closure —
 /// exists only to let tests exercise `panic_guard::contain_panic`'s
-/// containment without a plugin hook to inject a real one through.
+/// containment without a real panic to trigger.
 #[cfg(test)]
 const PARSE_PANIC_TEST_SENTINEL: &str = "__PANIC_TEST__.tsx";
 

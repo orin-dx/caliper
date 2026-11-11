@@ -648,9 +648,8 @@ impl Revision {
     pub(crate) fn lazy_component(&self, options: &PipelineOptions, key: &str) -> Option<ComponentAnswer> {
         let (id, index) = self.lazy_target(options, key)?;
         let resolved = self.lazy_resolved(options, id, index)?;
-        let mut entry = resolved.entry.clone();
+        let entry = resolved.entry.clone();
         let mut diagnostics = DiagnosticSet::default();
-        diagnostics.extend(options.plugins.run_on_component_resolved(&mut entry), Some(key));
         diagnostics.extend(resolved.diagnostics.own.iter().cloned(), Some(key));
         for chunk in &resolved.diagnostics.shared {
             diagnostics.extend_shared(chunk, key);

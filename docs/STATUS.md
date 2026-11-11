@@ -19,7 +19,6 @@ Core extraction, resolver, CLI, NAPI binding, and Vite plugin all work and are f
 
 - **`htmlAttributes` defaults to `full`** — every attribute `@types/react` declares is listed, `ref` for `forwardRef` and `ComponentProps<"div">` props; `curated` is an opt-in compact mode. Costs against the old default: wall time +9 to +31%, peak RSS +12 to +37%, canonical JSON +42 to +105%.
 - **Testing Stack** — `cargo-nextest` process runner, `rstest` parameterized spec tables, `insta` snapshots, and `trycmd` executable Markdown CLI specs.
-- **Plugin system** (`DocgenPlugin` / `PluginRegistry`) — Extensible AST and component resolution hooks in `crates/core/src/plugin.rs`.
 - **TOON output format** (`--format toon` / `toon.rs`) — Token-optimized format for LLM agents, cutting context window token usage by ~65-75%.
 - **JSON schema export** (`caliper-docgen schema`) — Machine-readable Draft-07 JSON Schema export for component metadata validation.
 - **Atomic & Bounded DTS cache** (`cache.rs`) — Atomic temp-file swap writes, dirty flag tracking, and 5,000 entry eviction cap. Keyed by content hash, and discarded whenever the build that wrote it differs.
