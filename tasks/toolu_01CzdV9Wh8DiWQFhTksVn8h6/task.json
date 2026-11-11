@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01CzdV9Wh8DiWQFhTksVn8h6",
+  "agent_id": "a0861b71761010129",
+  "subagent_type": "general-purpose",
+  "task_description": "Delete unused scripts, compact recordings",
+  "token_usage": {
+    "input_tokens": 94,
+    "cache_creation_tokens": 82850,
+    "cache_read_tokens": 3897948,
+    "output_tokens": 19319,
+    "api_call_count": 47
+  },
+  "started_at": "2026-11-11T10:05:35.631264-08:00",
+  "completed_at": "2026-11-11T10:14:27.474801-08:00"
+}
