@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_018hqGwSxbheo7B7HYrsBonK",
+  "agent_id": "a03baddf5a8d4c86f",
+  "subagent_type": "general-purpose",
+  "task_description": "session_component_toon unknown session error",
+  "token_usage": {
+    "input_tokens": 22,
+    "cache_creation_tokens": 69172,
+    "cache_read_tokens": 614558,
+    "output_tokens": 4138,
+    "api_call_count": 11
+  },
+  "started_at": "2026-11-10T20:49:51.402921-08:00",
+  "completed_at": "2026-11-10T20:53:51.610242-08:00"
+}
