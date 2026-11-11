@@ -67,7 +67,8 @@ impl CollapseInheritedProps {
 pub struct PipelineOptions {
     /// Source directories to scan.
     pub src_dirs: Vec<Utf8PathBuf>,
-    /// Extra glob-like patterns to exclude (on top of built-in: stories, tests, snapshots).
+    /// Extra gitignore-style glob patterns to exclude, relative to each source directory (on top of built-in: stories,
+    /// tests, snapshots).
     pub exclude_patterns: Vec<String>,
     /// Component name prefixes to skip.
     pub exclude_prefixes: Vec<String>,

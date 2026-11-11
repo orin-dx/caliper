@@ -1,10 +1,12 @@
 use camino::{Utf8Path, Utf8PathBuf};
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 
 use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 
 /// Walk `src_dirs` and collect every TypeScript file (`.ts`, `.tsx`, `.mts`, `.cts`), excluding:
 /// - Built-in patterns: `.stories.`, `.test.`, `.spec.`, `__snapshots__`, `node_modules`
-/// - User-supplied extra exclude patterns
+/// - User-supplied extra exclude patterns: gitignore-style globs on the path inside the source directory (see
+///   [`compile_excludes`]); one that does not parse excludes nothing and is reported
 ///
 /// Returns discovered files alongside any diagnostics raised while walking
 /// (e.g. a permission-denied subtree) — never dropped silently (AGENTS.md
@@ -13,7 +15,9 @@ pub(super) fn discover_files(
     src_dirs: &[Utf8PathBuf],
     extra_excludes: &[String],
 ) -> (Vec<Utf8PathBuf>, Vec<Diagnostic>) {
-    let found = std::sync::Mutex::new((Vec::new(), Vec::new()));
+    let (extra_excludes, invalid) = compile_excludes(extra_excludes);
+    let extra_excludes = &extra_excludes;
+    let found = std::sync::Mutex::new((Vec::new(), invalid_pattern_diagnostics(&invalid)));
 
     for dir in src_dirs {
         // If the user explicitly points at a node_modules path, respect it.
@@ -59,6 +63,8 @@ pub(super) fn discover_dirs(
     extra_excludes: &[String],
     is_config: impl Fn(&str) -> bool,
 ) -> (Vec<Utf8PathBuf>, Vec<Utf8PathBuf>) {
+    let (extra_excludes, _) = compile_excludes(extra_excludes);
+    let extra_excludes = &extra_excludes;
     let (mut dirs, mut configs) = (Vec::new(), Vec::new());
     for dir in src_dirs {
         let dir_is_in_node_modules = in_node_modules(dir);
@@ -91,7 +97,7 @@ fn visit(
     dir: &Utf8Path,
     root: &Utf8Path,
     dir_is_in_node_modules: bool,
-    extra_excludes: &[String],
+    extra_excludes: &Gitignore,
 ) -> Option<Result<Utf8PathBuf, Diagnostic>> {
     let entry = match result {
         Ok(entry) => entry,
@@ -137,8 +143,7 @@ fn in_node_modules(dir: &Utf8Path) -> bool {
 /// Excludes apply to the path inside the source directory: a project checked out under `my.test.repo/` or
 /// `~/node_modules-backup/` must not lose every file. `node_modules` is skipped only when the source directory is not
 /// itself inside one.
-fn excluded(relative: &std::path::Path, dir_is_in_node_modules: bool, extra_excludes: &[String]) -> bool {
-    let relative_str = relative.to_str().unwrap_or("");
+fn excluded(relative: &std::path::Path, dir_is_in_node_modules: bool, extra_excludes: &Gitignore) -> bool {
     let file_name = relative.file_name().and_then(|n| n.to_str()).unwrap_or("");
     let in_component = |name: &str| relative.components().any(|c| c.as_os_str() == name);
     file_name.contains(".stories.")
@@ -146,7 +151,38 @@ fn excluded(relative: &std::path::Path, dir_is_in_node_modules: bool, extra_excl
         || file_name.contains(".spec.")
         || in_component("__snapshots__")
         || (!dir_is_in_node_modules && in_component("node_modules"))
-        || extra_excludes.iter().any(|p| relative_str.contains(p.as_str()))
+        || extra_excludes.matched_path_or_any_parents(relative, false).is_ignore()
+}
+
+/// The user's `exclude` patterns as one matcher over paths relative to a source directory. Patterns are gitignore-style
+/// globs: `*.tsx`, `legacy/` (a directory), `**/fixtures/**`, `src/Button.tsx` (anchored at the source directory, as it
+/// has a slash). A bare name such as `Button` matches only a file or directory named exactly that. The patterns that do
+/// not parse come back beside the matcher and match nothing.
+pub(super) fn compile_excludes(patterns: &[String]) -> (Gitignore, Vec<(String, ignore::Error)>) {
+    let mut builder = GitignoreBuilder::new("");
+    let mut invalid: Vec<(String, ignore::Error)> = patterns
+        .iter()
+        .filter_map(|pattern| builder.add_line(None, pattern).err().map(|err| (pattern.clone(), err)))
+        .collect();
+    let matcher = builder.build().unwrap_or_else(|err| {
+        invalid.push((patterns.join(", "), err));
+        Gitignore::empty()
+    });
+    (matcher, invalid)
+}
+
+fn invalid_pattern_diagnostics(invalid: &[(String, ignore::Error)]) -> Vec<Diagnostic> {
+    invalid
+        .iter()
+        .map(|(pattern, err)| {
+            Diagnostic::new(
+                DiagnosticSeverity::Warning,
+                DiagnosticCode::IoError,
+                format!("exclude pattern '{pattern}' is not a valid glob and excludes nothing: {err}"),
+            )
+            .with_help("Exclude patterns are gitignore-style globs, e.g. \"**/*.fixture.tsx\" or \"legacy/\".")
+        })
+        .collect()
 }
 
 /// Whether discovery would include `path`: TypeScript, under a source directory, and not excluded. Watch mode asks
@@ -155,10 +191,11 @@ pub(super) fn is_source_file(path: &Utf8Path, src_dirs: &[Utf8PathBuf], extra_ex
     if !crate::extractor::is_typescript(path.as_std_path()) {
         return false;
     }
+    let (extra_excludes, _) = compile_excludes(extra_excludes);
     src_dirs.iter().any(|dir| {
         let dir = crate::canonical_path::canonicalize(dir).unwrap_or_else(|_| dir.clone());
         path.strip_prefix(&dir)
-            .is_ok_and(|relative| !excluded(relative.as_std_path(), in_node_modules(&dir), extra_excludes))
+            .is_ok_and(|relative| !excluded(relative.as_std_path(), in_node_modules(&dir), &extra_excludes))
     })
 }
 

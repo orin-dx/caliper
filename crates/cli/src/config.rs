@@ -24,6 +24,22 @@ struct DocgenConfigSchema {
     tsc_path: Option<String>,
 }
 
+/// The keys `DocgenConfigSchema` accepts, for the error help; a test holds this list to the struct's own field list.
+const CONFIG_KEYS: [&str; 12] = [
+    "srcDirs",
+    "excludePatterns",
+    "excludePrefixes",
+    "htmlAttributes",
+    "tsconfigPath",
+    "cacheDir",
+    "cache",
+    "extraBuiltins",
+    "loadDependencies",
+    "collapseInheritedProps",
+    "experimentalSemanticTypes",
+    "tscPath",
+];
+
 impl DocgenConfigSchema {
     /// `Err` names the bad `htmlAttributes` value — a typo must not silently fall back to a default
     /// (non-negotiable #6: never fail silently).
@@ -199,10 +215,10 @@ pub fn try_load_config(path: &std::path::Path) -> Result<Option<PipelineOptions>
 
     let schema: DocgenConfigSchema = serde_json::from_slice(&output.stdout).map_err(|e| {
         miette::miette!(
-            help = "Check docgen.config.ts's exported fields against the supported schema \
-                    (srcDirs, excludePatterns, excludePrefixes, reactVersion, crossPackage, \
-                    pandacssOutdir, variantFunctions, htmlAttributes, tsconfigPath, \
-                    vanillaExtract, cacheDir, extraBuiltins, loadDependencies, collapseInheritedProps, experimentalSemanticTypes, tscPath).",
+            help = format!(
+                "Check docgen.config.ts's exported fields against the supported schema ({}).",
+                CONFIG_KEYS.join(", ")
+            ),
             "docgen.config.ts at {} doesn't match the expected shape: {}",
             path.display(),
             e,

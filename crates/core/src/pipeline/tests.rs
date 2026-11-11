@@ -2594,30 +2594,24 @@ fn test_triple_duplicate_declaration_produces_exactly_two_entries() {
     );
 }
 
-// ── SPEC-PIPELINE-001 AC-022: exclude_patterns entries containing
-// glob-invalid characters are inert (plain substring match).
+// ── exclude_patterns are gitignore-style globs on the path inside the source directory.
 
 #[test]
-fn test_exclude_patterns_with_glob_invalid_characters_are_inert() {
+fn test_exclude_patterns_with_an_invalid_glob_exclude_nothing_and_are_reported() {
     let tmp = TempDir::new().unwrap();
     write_file(&tmp, "Button.tsx", "export const Button = () => null;");
 
     let dir = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
-    let (files, diagnostics) = discover_files(&[dir], &["[unclosed*".to_string()]);
+    let (files, diagnostics) = discover_files(&[dir], &["{a".to_string()]);
 
     let names: Vec<&str> = files.iter().map(|f| f.file_name().unwrap()).collect();
-    assert!(
-        names.contains(&"Button.tsx"),
-        "a glob-invalid pattern that doesn't literally match must not exclude anything, got {names:?}"
-    );
-    assert!(diagnostics.is_empty(), "no error/panic expected for a glob-invalid but harmless pattern");
+    assert_eq!(names, ["Button.tsx"]);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert!(diagnostics[0].message.contains("{a"), "{}", diagnostics[0].message);
 }
 
-// ── SPEC-PIPELINE-001 AC-023: an empty-string exclude_patterns entry
-// excludes every file (str::contains("") is always true).
-
 #[test]
-fn test_exclude_patterns_empty_string_excludes_everything() {
+fn test_exclude_patterns_empty_string_excludes_nothing() {
     let tmp = TempDir::new().unwrap();
     write_file(&tmp, "Button.tsx", "export const Button = () => null;");
     write_file(&tmp, "Widget.tsx", "export const Widget = () => null;");
@@ -2625,8 +2619,42 @@ fn test_exclude_patterns_empty_string_excludes_everything() {
     let dir = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
     let (files, diagnostics) = discover_files(&[dir], &["".to_string()]);
 
-    assert!(files.is_empty(), "an empty-string pattern should exclude every file, got {files:?}");
+    assert_eq!(files.len(), 2, "{files:?}");
     assert!(diagnostics.is_empty());
+}
+
+#[test]
+fn test_exclude_patterns_are_globs_not_substrings() {
+    const FILES: [&str; 6] =
+        ["Button.tsx", "Card.ts", "legacy/Old.tsx", "legacy/deep/Older.tsx", "ui/Button.tsx", "ui/Panel.tsx"];
+    let cases: [(&str, &[&str]); 9] = [
+        ("*.ts", &["Card.ts"]),
+        ("Button.*", &["Button.tsx", "ui/Button.tsx"]),
+        ("legacy/", &["legacy/Old.tsx", "legacy/deep/Older.tsx"]),
+        ("**/deep/**", &["legacy/deep/Older.tsx"]),
+        ("ui/*.tsx", &["ui/Button.tsx", "ui/Panel.tsx"]),
+        ("/Button.tsx", &["Button.tsx"]),
+        ("**/Old*.tsx", &["legacy/Old.tsx", "legacy/deep/Older.tsx"]),
+        // These matched as substrings of the path before; as globs they name no file or directory.
+        ("Butt", &[]),
+        ("legacy", &["legacy/Old.tsx", "legacy/deep/Older.tsx"]),
+    ];
+    for (pattern, gone) in cases {
+        let tmp = TempDir::new().unwrap();
+        for name in FILES {
+            let path = tmp.path().join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "export const X = () => null;").unwrap();
+        }
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let (found, diagnostics) = discover_files(std::slice::from_ref(&root), &[pattern.to_string()]);
+        let mut found: Vec<String> = found.iter().map(|f| f.strip_prefix(&root).unwrap().to_string()).collect();
+        found.sort();
+        let mut expected: Vec<String> = FILES.iter().filter(|f| !gone.contains(f)).map(ToString::to_string).collect();
+        expected.sort();
+        assert_eq!(found, expected, "pattern {pattern:?}");
+        assert!(diagnostics.is_empty(), "pattern {pattern:?}: {diagnostics:?}");
+    }
 }
 
 #[test]
