@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01GjzWHHXeFnD3VY3zRMjK2L",
+  "agent_id": "a01cae0928526343a",
+  "subagent_type": "general-purpose",
+  "task_description": "Anonymous default identity and wrapped defaults",
+  "token_usage": {
+    "input_tokens": 246,
+    "cache_creation_tokens": 248198,
+    "cache_read_tokens": 22428458,
+    "output_tokens": 72804,
+    "api_call_count": 123
+  },
+  "started_at": "2026-11-11T12:20:19.766362-08:00",
+  "completed_at": "2026-11-11T12:48:13.949779-08:00"
+}

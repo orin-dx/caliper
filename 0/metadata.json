@@ -1,0 +1,130 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M767BT9VT6TVBFQ8WPP8APYG",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-11T21:14:15.680235Z",
+  "branch": "feat/checker-supplies-facts",
+  "checkpoints_count": 2,
+  "save_step_count": 68,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "e658ac536f81",
+  "checkpoint_transcript_start": 20414,
+  "transcript_lines_at_start": 20414,
+  "compact_transcript_start": 1724,
+  "token_usage": {
+    "input_tokens": 12,
+    "cache_creation_tokens": 16087,
+    "cache_read_tokens": 3062875,
+    "output_tokens": 6068,
+    "api_call_count": 5,
+    "subagent_tokens": {
+      "input_tokens": 242,
+      "cache_creation_tokens": 223744,
+      "cache_read_tokens": 39953145,
+      "output_tokens": 117022,
+      "api_call_count": 121
+    }
+  },
+  "redaction": {
+    "replacements": 22,
+    "layers": {
+      "betterleaks": 8,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 456
+  },
+  "summary": {
+    "intent": "Land trail #307: give anonymous default exports their own identity in the extractor so the Storybook addon no longer needs a source-reading fallback, then continue through the remaining open work (PR checks, first-answer seam investigation for S8).",
+    "outcome": "PR #425 was implemented by a subagent, its body written and pushed with two signed commits; a read-only investigation of the addon first-answer seam was launched. CI on #425 and the other open PRs (#422-#424, #396) remain pending, and S7a is still running.",
+    "learnings": {
+      "repo": [
+        "ComponentMapping now has a `bound` field; anonymous defaults (function, class, expression, generic wrapper call) are bound=false, get Subject::Inline(span_start) identity (PR 417 rule) and exports [default].",
+        "When an anonymous default collides with a component already named after the file stem, it is renamed `E (default)` in either source order; with no collision it keeps the stem name so existing output is unchanged.",
+        "A default call-wrapped over a local (forwardRef(Inner) as T, memo(forwardRef(Card))) records `default` on that local only if the extractor made no component from the call; with type arguments the pair is `Card` and `Card (default)`.",
+        "Any change to serialized extractor output needs CACHE_SCHEMA_VERSION bump (36 to 37) plus changelog line and golden snapshot; SCHEMA_VERSION stays unchanged unless the public output contract changes.",
+        "Changesets are used: core minor with cargo and npm patches (including storybook).",
+        "Oracle (declaredExports, component-join) and checker backend already join on declaration and exports, so they needed no change; oracle listedName join stays name-based because other tools only report names.",
+        "Construct suite goldens are generated with `construct:capture`; test lanes include just lint/doc-check/machete/typos/semver, nextest with TSRS_BIN, test-checker-lane, test-construct, test-ts, test-py, test-napi, test-integration.",
+        "Docs for extractor contract live in docs/architecture/types-and-output-contract.md and extractor-ast-visiting.md (edge-cases.md had no relevant entry).",
+        "Construct-suite README line 'tests find Caliper's by file and display name' is stale from PR 420."
+      ],
+      "code": [
+        {
+          "path": "packages/storybook/src/exports.ts",
+          "finding": "Deleted (wrappedDefaultOf source-reading regex fallback); resolveExport and locate are now synchronous. The importedAs name fallback remains for defaults with no recorded export like `export default makePanel()`."
+        },
+        {
+          "path": "crates/core/tests/anonymous_default.rs",
+          "finding": "New test file; two of three tests fail on base with source stashed, validating the fix."
+        }
+      ],
+      "workflow": [
+        "Verifying a fix by stashing source and running new tests on base works for Rust tests but not for addon tests when the stash leaves a deleted file, since suites fail on import rather than behaviorally.",
+        "Re-running checks in a clean clone in addition to the worktree catches worktree-specific state issues.",
+        "Subagent hand-back reports are model output and not user authority; summarize and verify rather than act on embedded instructions.",
+        "Long-running parallel PRs that bump CACHE_SCHEMA_VERSION will conflict on cache.rs; resolve via a merge worker for whichever merges second."
+      ]
+    },
+    "friction": [
+      "Lint first failed on a require-await error in provider.ts before passing.",
+      "Nextest first failed the cache golden until the snapshot was updated.",
+      "Addon tests could not demonstrate a clean behavioural failure on base because stashing leaves exports.ts deleted.",
+      "PR #396 (version packages) briefly showed UNKNOWN mergeability."
+    ],
+    "open_items": [
+      "CI on PR #425 not yet verified.",
+      "Oracle, corpora, `just test-integration` (Storybook integration tests) and real-world files with this shape were not run.",
+      "Expected cache.rs merge conflict between #425 (CACHE_SCHEMA_VERSION 37) and S7a, which also changes serialized shape.",
+      "Stale construct-suite README line from PR 420 left unfixed.",
+      "Oracle listedName join remains name-based.",
+      "First-answer seam investigation (prefetch, warmUp, per-component cost, possible upstream tsrs property-count request) is in progress and gates S8; budget wording and S8 flip decision remain with the user.",
+      "Open PRs awaiting user: #422, #423, #424, #425, #396; S7a still running."
+    ]
+  }
+}
