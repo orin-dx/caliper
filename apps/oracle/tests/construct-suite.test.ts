@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import type { PropType } from '../../../packages/napi/index.d.ts'
 import { checkCaliperShape, flattenProps } from '../src/caliper-input.ts'
 import {
   componentsOf,
@@ -33,6 +34,7 @@ if (!available && !required) {
   )
 }
 
+const opaque: PropType = { kind: 'opaque', raw: 'T extends U ? X : Y', reason: { type: 'conditionalType' } }
 const goldenOf = (checker: Golden['checker']): Golden => ({ checker, text: '' })
 const expectations: { rows: Record<string, Expectation> } = JSON.parse(
   readFileSync(join(suite, 'expectations.json'), 'utf8'),
@@ -43,9 +45,20 @@ describe('the construct suite helpers', () => {
     expect.hasAssertions()
     const golden = goldenOf(prim('string'))
     expect(rowVerdict({ type: { kind: 'string' } }, golden)).toBe('identical')
-    expect(rowVerdict({ type: { kind: 'opaque' } }, golden)).toBe('less precise')
-    expect(rowVerdict({ type: { kind: 'opaque' }, degradedBy: ['conditionalType'] }, golden)).toBe('opaque with marker')
-    expect(rowVerdict({ type: { kind: 'opaque' }, degradedBy: [] }, golden)).toBe('less precise')
+    expect(rowVerdict({ type: opaque }, golden)).toBe('less precise')
+    expect(rowVerdict({ type: opaque, degradedBy: ['conditionalType'] }, golden)).toBe('opaque with marker')
+    expect(rowVerdict({ type: opaque, degradedBy: [] }, golden)).toBe('less precise')
+  })
+
+  it('a golden the checker stopped short of is not judged, and ranks below every verdict that judged', () => {
+    expect.hasAssertions()
+    const golden = goldenOf({ k: 'opaque' })
+    expect(rowVerdict({ type: { kind: 'string' } }, golden)).toBe('not judged')
+    expect(rowVerdict({ type: opaque, degradedBy: ['conditionalType'] }, golden)).toBe('not judged')
+    expect(expectationFailure('r', 'not judged', { verdicts: ['wrong'], gap: 'g' })).toContain('worse than expected')
+    expect(
+      expectationProblems(['r'], { r: { verdicts: ['not judged'], gap: 'the golden has no type' } }),
+    ).toStrictEqual([])
   })
 
   it('a marker does not excuse a wrong type, and a missing prop is its own verdict', () => {

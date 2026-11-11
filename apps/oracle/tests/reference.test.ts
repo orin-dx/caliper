@@ -101,7 +101,7 @@ beforeAll(() => {
       props: {
         size: { type: { kind: 'literalUnion', members: ['small', 'large'] } },
         count: { type: { kind: 'number' } },
-        mode: { type: { kind: 'named', name: 'Mode' } },
+        mode: { type: { kind: 'named', name: 'Mode', args: [] } },
         text: { type: { kind: 'string' } },
       },
     }),

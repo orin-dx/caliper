@@ -66,6 +66,25 @@ describe('reference', () => {
     expect(reference({ k: 'error' }, undefined)).toStrictEqual({ kind: 'none' })
   })
 
+  it('does not take a checker type it did not evaluate for agreement with anything', () => {
+    expect.hasAssertions()
+    expect(reference({ k: 'opaque' }, undefined)).toStrictEqual({ kind: 'none' })
+    expect(reference({ k: 'opaque' }, prim('number'))).toStrictEqual({
+      kind: 'agreed',
+      basis: 'declaration',
+      norm: prim('number'),
+      why: 'abstained',
+    })
+    // Part of the checker's type was not evaluated: the declaration stands alone for the whole.
+    const partial: Norm = { k: 'array', element: { k: 'opaque' } }
+    expect(reference(partial, { k: 'array', element: prim('number') })).toStrictEqual({
+      kind: 'agreed',
+      basis: 'declaration',
+      norm: { k: 'array', element: prim('number') },
+      why: 'abstained',
+    })
+  })
+
   it('is contested when both methods have a type and the types differ', () => {
     expect.hasAssertions()
     expect(reference(prim('string'), prim('number'))).toStrictEqual({
@@ -112,6 +131,12 @@ describe('score', () => {
     expect.hasAssertions()
     expect(score(sizes, agreed, false)).toStrictEqual({ outcome: 'correct', basis: 'both' })
     expect(score(sizes, { ...agreed, basis: 'checker' }, false)).toStrictEqual({ outcome: 'correct', basis: 'checker' })
+  })
+
+  it('has no reference to hold a tool to where the reference was not evaluated', () => {
+    expect.hasAssertions()
+    const unevaluated: Reference = { kind: 'agreed', basis: 'checker', norm: { k: 'opaque' } }
+    expect(score(prim('string'), unevaluated, false)).toStrictEqual({ outcome: 'no reference' })
   })
 
   it('calls a looser type less precise and a contradicting one wrong', () => {

@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import type { CallSignature, PropType } from '../../../packages/napi/index.d.ts'
 import { caliperNorm } from '../src/caliper-norm.ts'
 import { HTML_ATTRIBUTE_MEMBERS } from '../src/html-attribute-members.ts'
 import { compare, prim, type Norm } from '../src/oracle-compare.ts'
@@ -124,7 +125,7 @@ describe('the oracle comparison', () => {
   describe('comparator artifacts', () => {
     // Caliper's canonical JSON for `{ [id: string]: V }`: one field, named after the signature's parameter, whose
     // `indexKey` is the key type.
-    const indexSignature = (name: string, value: object) => ({
+    const indexSignature = (name: string, value: PropType): PropType => ({
       kind: 'object',
       fields: [{ name, propType: value, required: true, description: '', indexKey: { kind: 'string' } }],
     })
@@ -212,8 +213,8 @@ describe('the oracle comparison', () => {
 
     it('the kinds schema version 5 adds read as the checker states them', () => {
       expect.hasAssertions()
-      const string = { kind: 'string' }
-      const number = { kind: 'number' }
+      const string: PropType = { kind: 'string' }
+      const number: PropType = { kind: 'number' }
       // A rest element is its element type, as the checker's tuple type arguments are.
       const rest = caliperNorm({
         kind: 'tuple',
@@ -237,8 +238,8 @@ describe('the oracle comparison', () => {
       )
       expect(caliperNorm({ kind: 'recursive', name: 'Json', args: [] })).toStrictEqual({ k: 'name', name: 'Json' })
       expect(caliperNorm({ kind: 'truncated', text: 'A', limit: { type: 'depth' } })).toStrictEqual({ k: 'opaque' })
-      const call = { typeParams: [], params: [{ name: 'value', type: string }], returnType: string }
-      const construct = { construct: true, typeParams: [], params: [], returnType: string }
+      const call: CallSignature = { typeParams: [], params: [{ name: 'value', type: string }], returnType: string }
+      const construct: CallSignature = { construct: true, typeParams: [], params: [], returnType: string }
       // Overloads read as the first call signature, a callable with properties as its properties, and construct
       // signatures alone as an empty object: what the checker side makes of each.
       expect(caliperNorm({ kind: 'callable', signatures: [construct, call, call], fields: [] })).toStrictEqual({
@@ -343,7 +344,7 @@ describe('the oracle comparison', () => {
   })
 
   describe('an index-only object and a string literal are told from `{}` and a number', () => {
-    const idx = (value: object) => ({
+    const idx = (value: PropType): PropType => ({
       kind: 'object',
       fields: [{ name: 'key', propType: value, required: true, description: '', indexKey: { kind: 'string' } }],
     })
@@ -380,7 +381,7 @@ describe('the oracle comparison', () => {
       // Mantine's `labelProps?: React.ComponentPropsWithoutRef<'label'> & { [key: string]: any }`.
       const caliper = caliperNorm({
         kind: 'intersection',
-        members: [{ kind: 'named', name: 'ComponentPropsWithoutRef' }, idx({ kind: 'any' })],
+        members: [{ kind: 'named', name: 'ComponentPropsWithoutRef', args: [] }, idx({ kind: 'any' })],
       })
       expect(caliper.k).toBe('intersection')
       const checker: Norm = { k: 'intersection', members: [{ k: 'opaque' }, checkerIndex(prim('any'))] }
@@ -409,13 +410,16 @@ describe('the oracle comparison', () => {
       caliperNorm({
         kind: 'intersection',
         members: [
-          { kind: 'object', fields: ownNames.map((name) => ({ name, propType: { kind: 'string' } })) },
+          {
+            kind: 'object',
+            fields: ownNames.map((name) => ({ name, propType: { kind: 'string' }, required: true, description: '' })),
+          },
           {
             kind: 'named',
             name: 'Omit',
             args: [
               { kind: 'htmlAttributes', element: 'div', omitted: [] },
-              ...omitted.map((value) => ({ kind: 'stringLiteral', value })),
+              ...omitted.map((value): PropType => ({ kind: 'stringLiteral', value })),
             ],
           },
         ],
@@ -448,7 +452,10 @@ describe('the oracle comparison', () => {
       const unknown = caliperNorm({
         kind: 'intersection',
         members: [
-          { kind: 'object', fields: [{ name: 'as', propType: { kind: 'string' } }] },
+          {
+            kind: 'object',
+            fields: [{ name: 'as', propType: { kind: 'string' }, required: true, description: '' }],
+          },
           { kind: 'htmlAttributes', element: 'marquee', omitted: [] },
         ],
       })
@@ -466,5 +473,52 @@ describe('the oracle comparison', () => {
       const object = golden.checker.members.find((m: { k: string }) => m.k === 'object')
       expect(divMembers).toStrictEqual(object.fields)
     })
+  })
+})
+
+describe('a type the checker side did not evaluate', () => {
+  const opaque: Norm = { k: 'opaque' }
+  const fn = (type: Norm): Norm => ({
+    k: 'function',
+    params: [{ optional: false, rest: false, type }],
+    returns: prim('void'),
+  })
+
+  it('is not judged, however Caliper wrote the type', () => {
+    expect.hasAssertions()
+    expect(compare(prim('string'), opaque)).toBe('not judged')
+    expect(compare(prim('number'), optional(opaque))).toBe('not judged')
+    expect(compare({ k: 'array', element: prim('string') }, opaque)).toBe('not judged')
+    expect(compare(opaque, opaque)).toBe('not judged')
+  })
+
+  it('is not judged when it is part of the type, unless another part is already a difference', () => {
+    expect.hasAssertions()
+    expect(compare({ k: 'array', element: prim('string') }, { k: 'array', element: opaque })).toBe('not judged')
+    expect(compare(fn(prim('string')), fn(opaque))).toBe('not judged')
+    expect(compare(union(prim('string'), prim('number')), optional(union(prim('string'), opaque)))).toBe('not judged')
+    const caliper: Norm = {
+      k: 'function',
+      params: [
+        { optional: false, rest: false, type: prim('string') },
+        { optional: false, rest: false, type: prim('string') },
+      ],
+      returns: prim('void'),
+    }
+    const checker: Norm = {
+      k: 'function',
+      params: [
+        { optional: false, rest: false, type: opaque },
+        { optional: false, rest: false, type: prim('number') },
+      ],
+      returns: prim('void'),
+    }
+
+    expect(compare(caliper, checker)).toBe('wrong')
+  })
+
+  it('still lets a name the checker aliased be spelled', () => {
+    expect.hasAssertions()
+    expect(compare({ k: 'name', name: 'Slot' }, { ...opaque, alias: 'Slot' })).toBe('spelled')
   })
 })

@@ -7,14 +7,16 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import headline
+import oracle_data
 import weekly
 
 
-def scored(universe=1000, identical=700, spelled=100, less=100, wrong=2, no_type=8, prop=30, collapsed=60, components=40):
+def scored(universe=1000, identical=700, spelled=100, less=100, wrong=2, no_type=8, prop=30, collapsed=60, components=40,
+           not_judged=0):
     """The oracle's score of Caliper over the components it reports (`caliper_reported`)."""
     return {'universe': universe, 'components': components,
             'verdicts': {'identical': identical, 'spelled': spelled, 'less precise': less, 'wrong': wrong,
-                         'checker any/error': no_type},
+                         'checker any/error': no_type, 'not judged': not_judged},
             'missing_by_reason': {'component': 0, 'failed_file': 0, 'prop': prop, 'collapsed': collapsed}}
 
 
@@ -23,7 +25,7 @@ def oracle(**parts):
 
 
 HEADLINE = {'components': 40, 'props': 1000, 'correct': 800, 'less_precise': 100, 'wrong': 2, 'no_checker_type': 8,
-            'missing': 30, 'named_only': 60}
+            'not_judged': 0, 'missing': 30, 'named_only': 60}
 
 
 def entry(h=None, ms=1000, rss_mib=400, **extra):
@@ -40,6 +42,19 @@ class Compute(unittest.TestCase):
     def test_correct_is_identical_and_spelled(self):
         h = headline.compute(oracle(identical=1, spelled=2, less=0, wrong=0, no_type=0, prop=0, collapsed=0, universe=3))
         self.assertEqual((h['correct'], h['props']), (3, 3))
+
+    def test_a_prop_the_oracle_did_not_judge_is_counted_apart_from_agreement_and_from_wrong(self):
+        h = headline.compute(oracle(identical=690, not_judged=10))
+        self.assertEqual((h['correct'], h['not_judged'], h['wrong'], h['less_precise']), (790, 10, 2, 100))
+        self.assertNotIn('other', h)
+        self.assertEqual(headline.judged(h), 892)
+
+    def test_every_verdict_of_the_oracle_has_a_headline_kind(self):
+        kinds = {headline.kind_of(v) for v in oracle_data.VERDICTS}
+        self.assertEqual(kinds, {'correct', 'less_precise', 'wrong', 'no_checker_type', 'not_judged'})
+        self.assertTrue(kinds <= set(headline.KINDS))
+        with self.assertRaises(KeyError):
+            headline.kind_of('a verdict the vocabulary does not have')
 
     def test_parts_that_do_not_add_up_are_counted_as_other(self):
         self.assertEqual(headline.compute(oracle(universe=1003))['other'], 3)
@@ -103,12 +118,14 @@ class Summary(unittest.TestCase):
     def test_the_table_gives_each_kind_as_a_share_of_the_props(self):
         lines = headline.markdown(self.record(antd=entry(HEADLINE)))
         self.assertEqual(lines[2:4], ['### Headline: are the types Storybook shows right?', ''])
-        self.assertEqual(lines[-3:-1], ['| --- | --: | --: | --: | --: | --: | --: | --: |',
-                                       '| antd | 1,000 | 80.0% | 10.0% | 0.20% | 0.8% | 3.0% | 6.0% |'])
+        self.assertEqual(lines[-4:-1], ['| Corpus | Props | Correct | Less precise | Wrong | No checker type | Not judged | Missing '
+                                       '| Named only |',
+                                       '| --- | --: | --: | --: | --: | --: | --: | --: | --: |',
+                                       '| antd | 1,000 | 80.0% | 10.0% | 0.20% | 0.8% | 0.0% | 3.0% | 6.0% |'])
 
     def test_an_oracle_that_failed_is_named(self):
         lines = headline.markdown(self.record(antd=entry(oracle={'error': 'tsx failed'})))
-        self.assertIn('| antd | unavailable: tsx failed | | | | | | |', lines)
+        self.assertIn('| antd | unavailable: tsx failed | | | | | | | |', lines)
 
     def test_the_budgets_and_the_gate_in_the_text_are_the_ones_used(self):
         self.assertIn('more than 0.1% wrong', headline.HOW_TO_READ)

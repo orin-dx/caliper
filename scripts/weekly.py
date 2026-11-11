@@ -30,6 +30,7 @@ import tempfile
 import agent_eval
 import corpora
 import headline
+import oracle_data
 import schema_version
 from corpora import ROOT, run_once, selected
 
@@ -42,8 +43,10 @@ REFERENCE_VERSION = 2
 # The universe of the oracle's scores (`oracle.tools`): version 2 counts candidate components only, naming a default export
 # by its declaration; a record without it is version 1, which counted every function the checker takes for a component
 # and named a default export `default`. Version 3 pairs a checker component with Caliper's by file and export name
-# (ADR 0027) where version 2 paired by a normalised display name. Raise it when a change moves what the oracle counts.
-UNIVERSE_VERSION = 3
+# (ADR 0027) where version 2 paired by a normalised display name. Version 4 scores a prop whose checker type the oracle did
+# not evaluate as `not judged` where version 3 scored it identical, and classes a declaration's path by one rule
+# (apps/oracle/src/path-classes.json). Raise it when a change moves what the oracle counts.
+UNIVERSE_VERSION = 4
 
 
 def norm_name(name):
@@ -123,13 +126,9 @@ def caliper_layer_members(binary, src, root):
 
 
 # The shape rules of `exclusion`, shared with the oracle's universe (apps/oracle/src/component-shape.ts): the patterns are in
-# one file both read, and both run the cases of apps/oracle/tests/fixtures/component-shape-cases.json.
-with open(os.path.join(ROOT, 'apps', 'oracle', 'src', 'component-shape.json')) as shape_file:
-    SHAPE = json.load(shape_file)
-LIB_FILE = re.compile(SHAPE['libFile'])
-HOOK = re.compile(SHAPE['hook'])
-PROMISE_TYPE = re.compile(SHAPE['promiseType'])
-REACT_DIR = SHAPE['reactDirectory']
+# one file both read (scripts/oracle_data.py), and both run the cases of apps/oracle/tests/fixtures/component-shape-cases.json.
+HOOK = re.compile(oracle_data.SHAPE['hook'])
+PROMISE_TYPE = re.compile(oracle_data.SHAPE['promiseType'])
 EXTENSIONS = ('', '.tsx', '.ts', '/index.tsx', '/index.ts')
 # An identifier inside any number of calls (`memo(forwardRef(Foo))`, `React.memo(Foo)`, `Object.assign(Foo, {...})`),
 # followed by what ends an argument or an expression: `, ) ; !`, a type assertion or the end of the line.
@@ -137,7 +136,7 @@ WRAPPED = r'(?:[\w.]+\s*(?:<[^>]*>)?\s*\(\s*)*(\w+)(?=\s*[,);!]|\s+as\b|\s+satis
 
 
 def declared_in_react(info):
-    return REACT_DIR in (info.get('parent') or '')
+    return oracle_data.is_react_types(info.get('parent') or '')
 
 
 def exclusion(comp):
@@ -150,13 +149,13 @@ def exclusion(comp):
     are handed over by a router, not by a parent. The oracle's universe applies the same rules to the checker's functions
     (apps/oracle/src/component-shape.ts)."""
     props = comp['props']
-    in_lib = sum(bool(LIB_FILE.search(i.get('parent') or '')) for i in props.values())
+    in_lib = sum(oracle_data.is_lib_file(i.get('parent') or '') for i in props.values())
     if in_lib * 2 > len(props):
         return 'lib_members'
     name = comp['name']
     if HOOK.search(name):
         return 'hook'
-    if 'value' in props and set(props) <= set(SHAPE['contextValueProps']) and all(map(declared_in_react, props.values())):
+    if 'value' in props and set(props) <= set(oracle_data.SHAPE['contextValueProps']) and all(map(declared_in_react, props.values())):
         return 'context_value'
     if name[:1].islower() and norm_name(name) not in own_names(comp['file']) and not any(map(declared_in_react, props.values())):
         return 'not_jsx'
@@ -302,7 +301,7 @@ def pair(comp, root, found_by_file, read, exists, claimed=()):
     name = norm_name(comp['name'])
     for info in comp['props'].values():
         parent = info.get('parent') or ''
-        declared = relative(parent, root) if parent and REACT_DIR not in parent else None
+        declared = relative(parent, root) if parent and not oracle_data.is_react_types(parent) else None
         if declared and declared != file and name in found_by_file.get(declared, {}):
             return (declared, name), 'declaration'
     return None
@@ -461,7 +460,8 @@ def oracle_tools(tools):
 def oracle(binary, name, src, root, work, rdt_out, rdg_out):
     """How often TypeScript 7.1's checker contradicts Caliper's prop types (apps/oracle/src/oracle.ts), and how RDT and
     react-docgen fare against it over the same props. `shared_props`, `agree` and `wrong` are Caliper's, over the props
-    both list, and keep their meaning from week to week; `tools` holds all three over every prop of the candidate
+    both list, and keep their meaning from week to week (a prop the checker side did not evaluate is in `shared_props`
+    and counts toward neither `agree` nor `wrong`, as `verdicts['not judged']`); `tools` holds all three over every prop of the candidate
     components the checker finds (the functions `exclusion`'s shape rules take out are left out: `universe_excluded`), and
     `tools_all_functions` the same scores over every function the checker takes for a component, as `tools` was before
     `universe_version` 2."""
@@ -477,7 +477,7 @@ def oracle(binary, name, src, root, work, rdt_out, rdg_out):
     with open(verdicts) as f:
         e = json.load(f)
     shared = e['props_shared']
-    return {'shared_props': shared, 'agree': rate((e['verdicts']['identical'] + e['verdicts']['spelled'], shared)),
+    return {'shared_props': shared, 'agree': rate((sum(e['verdicts'][v] for v in oracle_data.AGREE), shared)),
             'wrong': rate((e['verdicts']['wrong'], shared)), 'universe_version': UNIVERSE_VERSION,
             'tools': oracle_tools(e['tools']), 'tools_all_functions': oracle_tools(e['tools_all_functions']),
             'universe_excluded': e['universe_excluded']}

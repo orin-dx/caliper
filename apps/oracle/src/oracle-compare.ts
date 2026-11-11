@@ -1,6 +1,7 @@
 // The structural comparison behind src/oracle.ts: both sides' prop types reduced to one shape, and one verdict per
 // pair. Pure: nothing here talks to the checker.
 import { HTML_ATTRIBUTE_MEMBERS } from './html-attribute-members.ts'
+import { SEVERITY, type Verdict } from './vocabulary.ts'
 
 /** The primitive a literal is a value of: `"0"` and `0` spell the same `value` and are two types. */
 export type LiteralKind = 'string' | 'number' | 'bigint' | 'boolean'
@@ -30,11 +31,7 @@ export type Norm = (
   | { k: 'error' }
 ) & { alias?: string }
 
-export type Verdict = 'identical' | 'spelled' | 'less precise' | 'wrong' | 'checker any/error'
-
 export const MAX_DEPTH = 3
-export const VERDICTS: Verdict[] = ['identical', 'spelled', 'less precise', 'wrong', 'checker any/error']
-const RANK: Verdict[] = ['identical', 'spelled', 'less precise', 'wrong']
 
 /** A type name without `React.` or a namespace qualifier. */
 export const bareName = (name: string) => name.replace(/^.*\./, '')
@@ -45,8 +42,9 @@ export const lit = (value: string, of: LiteralKind): Norm => ({ k: 'lit', value,
  * `Norm`: an index-only object (`{ [key: string]: V }`) has no fields either, and is not empty. */
 export const isBareObject = (m: Norm) => m.k === 'object' && m.fields.length === 0 && !m.index
 
-const worst = (vs: Verdict[]): Verdict => vs.reduce((a, b) => (RANK.indexOf(b) > RANK.indexOf(a) ? b : a), 'identical')
-const best = (vs: Verdict[]): Verdict => vs.reduce((a, b) => (RANK.indexOf(b) < RANK.indexOf(a) ? b : a), 'wrong')
+const rank = (v: Verdict) => SEVERITY.indexOf(v)
+const worst = (vs: Verdict[]): Verdict => vs.reduce((a, b) => (rank(b) > rank(a) ? b : a), 'identical')
+const best = (vs: Verdict[]): Verdict => vs.reduce((a, b) => (rank(b) < rank(a) ? b : a), 'wrong')
 const isBool = (n: Norm, value: string) => n.k === 'lit' && n.of === 'boolean' && n.value === value
 const isUndefined = (m: Norm) => m.k === 'prim' && m.name === 'undefined'
 const WIDENING = new Set(['string', 'number', 'boolean'])
@@ -213,7 +211,7 @@ export function compare(c: Norm, k: Norm, depth = 0): Verdict {
 }
 
 function compareValues(c: Norm, k: Norm, depth: number): Verdict {
-  if (depth > MAX_DEPTH) return 'identical'
+  if (depth > MAX_DEPTH) return 'not judged'
   // The checker has no type to compare with: an error, `any`, or a top-level `unknown` where Caliper has a type
   // (most often a declaration the program couldn't resolve).
   const uninformative =
@@ -235,7 +233,8 @@ function compareValues(c: Norm, k: Norm, depth: number): Verdict {
     // resolves to another name).
     return 'less precise'
   }
-  if (k.k === 'opaque') return 'identical'
+  // A type the checker side stopped short of holds whatever Caliper wrote, so agreement is not what it says.
+  if (k.k === 'opaque') return 'not judged'
   if (c.k === 'opaque') return 'less precise'
   if (c.k === 'prim' && (c.name === 'any' || c.name === 'unknown') && !(k.k === 'prim' && k.name === c.name)) {
     return 'less precise'

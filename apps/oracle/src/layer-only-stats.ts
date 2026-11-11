@@ -2,6 +2,7 @@
 // by relevance would list that the size rule does not. Pure apart from the `read` it is given.
 import { classify, layerOnly, topApi, type Kind, type LayerOnly, type TopApi, type Why } from './layer-only.ts'
 import { layerMembers, listedProps } from './canonical.ts'
+import { isDependency, isReactTypes } from './path-class.ts'
 
 /** The collapse threshold: a dependency source declaring more props than this is one layer, not a list of props. */
 export const THRESHOLD = 30
@@ -45,7 +46,7 @@ export function expandedDependencySources(caliper: any): { layer: string; file: 
   for (const prop of Object.values<any>(caliper.props)) {
     const { parent } = prop
     const file = parent ? String(parent.fileName) : ''
-    if (!file.includes('/node_modules/') || file.includes('/@types/react/')) continue
+    if (!isDependency(file) || isReactTypes(file)) continue
     const key = `${parent.name}\u0000${file}`
     if (collapsed.has(key)) continue
     const source = sources.get(key) ?? { layer: parent.name, file, names: new Set() }
@@ -137,7 +138,7 @@ export function ambientListedToday(caliper: any) {
     for (const [name, id] of Object.entries(listedProps(caliper, component))) {
       const parent = caliper.props[id]?.parent
       const file = parent ? String(parent.fileName) : ''
-      if (!file.includes('/node_modules/') || file.includes('/@types/react/')) continue
+      if (!isDependency(file) || isReactTypes(file)) continue
       if (classify({ layer: parent.name, layerFile: file, prop: name }).kind !== 'ambient') continue
       props++
       ids.add(id)

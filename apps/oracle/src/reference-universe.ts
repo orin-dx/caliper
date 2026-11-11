@@ -14,6 +14,7 @@ import {
   type PropsShape,
   type ValueKind,
 } from './reference-sample.ts'
+import { isDependency, isReactTypes } from './path-class.ts'
 import { pathKey } from './tool-universe.ts'
 
 /** A prop the checker found, with what judging it needs. */
@@ -68,8 +69,8 @@ function shapeOf(propsType: any): PropsShape {
 function originOf(declaration: string | undefined, file: string): Origin {
   if (declaration === undefined) return 'own'
   const path = pathKey(declaration)
-  if (path.includes('/@types/react/')) return 'html'
-  if (path.includes('/node_modules/')) return 'dependency'
+  if (isReactTypes(path)) return 'html'
+  if (isDependency(path)) return 'dependency'
   return path === pathKey(file) ? 'own' : 'extends'
 }
 

@@ -1,0 +1,40 @@
+{
+  "verdicts": [
+    "identical",
+    "spelled",
+    "less precise",
+    "wrong",
+    "checker any/error",
+    "not judged"
+  ],
+  "agree": [
+    "identical",
+    "spelled"
+  ],
+  "severity": [
+    "identical",
+    "spelled",
+    "not judged",
+    "less precise",
+    "wrong"
+  ],
+  "rowVerdicts": [
+    "identical",
+    "spelled",
+    "opaque with marker",
+    "less precise",
+    "wrong",
+    "missing",
+    "checker any/error",
+    "not judged"
+  ],
+  "outcomes": [
+    "correct",
+    "less precise",
+    "wrong",
+    "contested",
+    "no reference",
+    "layer",
+    "missing"
+  ]
+}
