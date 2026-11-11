@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01CK4mdVTtGNno74B9HvBez9",
+  "agent_id": "a0bce3c04a689c765",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix exclude glob versus substring",
+  "started_at": "2026-11-11T12:20:19.716447-08:00"
+}
