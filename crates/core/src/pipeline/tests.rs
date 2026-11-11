@@ -1,4 +1,4 @@
-use super::discover::discover_files;
+use super::discover::{discover_dirs, discover_files, is_source_file};
 use super::*;
 use std::fs;
 use tempfile::TempDir;
@@ -2655,6 +2655,141 @@ fn test_exclude_patterns_are_globs_not_substrings() {
         assert_eq!(found, expected, "pattern {pattern:?}");
         assert!(diagnostics.is_empty(), "pattern {pattern:?}: {diagnostics:?}");
     }
+}
+
+// Discovery, the directory walk the watcher stamps, and the watcher's per-path check must give one answer.
+#[test]
+fn discovery_the_directory_walk_and_the_watcher_agree_on_every_exclude_list() {
+    const FILES: [&str; 9] = [
+        "Button.tsx",
+        "Card.ts",
+        "legacy/Old.tsx",
+        "legacy/deep/Older.tsx",
+        "ui/Button.tsx",
+        "ui/Button.stories.tsx",
+        "ui/forms/Input.tsx",
+        "notes/readme.md",
+        "ui/forms/data.json",
+    ];
+    const CONFIGS: [&str; 3] = ["tsconfig.json", "legacy/tsconfig.json", "ui/tsconfig.json"];
+    const ALL_DIRS: [&str; 6] = [".", "legacy", "legacy/deep", "notes", "ui", "ui/forms"];
+    // (exclude list, files kept, directories kept, configs kept)
+    type Case = (&'static [&'static str], &'static [&'static str], &'static [&'static str], &'static [&'static str]);
+    let cases: [Case; 9] = [
+        (
+            &[],
+            &[
+                "Button.tsx",
+                "Card.ts",
+                "legacy/Old.tsx",
+                "legacy/deep/Older.tsx",
+                "ui/Button.tsx",
+                "ui/forms/Input.tsx",
+            ],
+            &ALL_DIRS,
+            &CONFIGS,
+        ),
+        // A directory is not matched by a file rule, so `!*/` keeps every directory and `!*.tsx` the components in them.
+        (
+            &["*", "!*/", "!*.tsx"],
+            &["Button.tsx", "legacy/Old.tsx", "legacy/deep/Older.tsx", "ui/Button.tsx", "ui/forms/Input.tsx"],
+            &ALL_DIRS,
+            &CONFIGS,
+        ),
+        (&["*", "!*/"], &[], &ALL_DIRS, &CONFIGS),
+        (&["*.tsx"], &["Card.ts"], &ALL_DIRS, &CONFIGS),
+        // A negation cannot bring back anything inside an excluded directory, as in gitignore.
+        (
+            &["legacy/", "!*.tsx"],
+            &["Button.tsx", "Card.ts", "ui/Button.tsx", "ui/forms/Input.tsx"],
+            &[".", "notes", "ui", "ui/forms"],
+            &["tsconfig.json", "ui/tsconfig.json"],
+        ),
+        (
+            &["legacy/", "!legacy/deep/"],
+            &["Button.tsx", "Card.ts", "ui/Button.tsx", "ui/forms/Input.tsx"],
+            &[".", "notes", "ui", "ui/forms"],
+            &["tsconfig.json", "ui/tsconfig.json"],
+        ),
+        // A directory excluded by `ui/*` can be named again, and what is inside it comes back.
+        (
+            &["ui/*", "!ui/forms/"],
+            &["Button.tsx", "Card.ts", "legacy/Old.tsx", "legacy/deep/Older.tsx", "ui/forms/Input.tsx"],
+            &[".", "legacy", "legacy/deep", "notes", "ui", "ui/forms"],
+            &CONFIGS,
+        ),
+        (
+            &["notes/"],
+            &[
+                "Button.tsx",
+                "Card.ts",
+                "legacy/Old.tsx",
+                "legacy/deep/Older.tsx",
+                "ui/Button.tsx",
+                "ui/forms/Input.tsx",
+            ],
+            &[".", "legacy", "legacy/deep", "ui", "ui/forms"],
+            &CONFIGS,
+        ),
+        (
+            &["ui/"],
+            &["Button.tsx", "Card.ts", "legacy/Old.tsx", "legacy/deep/Older.tsx"],
+            &[".", "legacy", "legacy/deep", "notes"],
+            &["tsconfig.json", "legacy/tsconfig.json"],
+        ),
+    ];
+    for (patterns, files_kept, dirs_kept, configs_kept) in cases {
+        let tmp = TempDir::new().unwrap();
+        for name in FILES.iter().chain(&CONFIGS) {
+            let path = tmp.path().join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "export const X = () => null;").unwrap();
+        }
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let patterns: Vec<String> = patterns.iter().map(ToString::to_string).collect();
+        let relative = |paths: &[Utf8PathBuf]| -> Vec<String> {
+            let mut paths: Vec<String> = paths
+                .iter()
+                .map(|p| p.strip_prefix(&root).map_or_else(|_| p.to_string(), ToString::to_string))
+                .map(|p| if p.is_empty() { ".".to_string() } else { p })
+                .collect();
+            paths.sort();
+            paths
+        };
+        let sorted = |names: &[&str]| -> Vec<String> {
+            let mut names: Vec<String> = names.iter().map(ToString::to_string).collect();
+            names.sort();
+            names
+        };
+
+        let (files, _) = discover_files(std::slice::from_ref(&root), &patterns);
+        let (dirs, configs) = discover_dirs(std::slice::from_ref(&root), &patterns, |name| name == "tsconfig.json");
+
+        assert_eq!(relative(&files), sorted(files_kept), "files for {patterns:?}");
+        assert_eq!(relative(&dirs), sorted(dirs_kept), "directories for {patterns:?}");
+        assert_eq!(relative(&configs), sorted(configs_kept), "configs for {patterns:?}");
+        for name in FILES.iter().filter(|name| name.ends_with(".ts") || name.ends_with(".tsx")) {
+            let path = root.join(name);
+            assert_eq!(
+                is_source_file(&path, std::slice::from_ref(&root), &patterns),
+                files.contains(&path),
+                "is_source_file({name}) for {patterns:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_directory_named_like_a_source_file_is_not_a_source_file() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("Weird.tsx")).unwrap();
+    write_file(&tmp, "Weird.tsx/Inner.tsx", "export const Inner = () => null;");
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+
+    let (files, _) = discover_files(std::slice::from_ref(&root), &[]);
+
+    assert_eq!(files, [root.join("Weird.tsx/Inner.tsx")]);
+    assert!(!is_source_file(&root.join("Weird.tsx"), std::slice::from_ref(&root), &[]));
 }
 
 #[test]
