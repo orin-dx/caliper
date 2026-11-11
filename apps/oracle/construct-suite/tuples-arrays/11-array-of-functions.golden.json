@@ -30,5 +30,16 @@
     ],
     "alias": "Array"
   },
-  "text": "((x: string) => void)[] | undefined"
+  "text": "((x: string) => void)[] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/11-array-of-functions.tsx"
+    },
+    "order": null
+  }
 }

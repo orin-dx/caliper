@@ -18,5 +18,16 @@
     ],
     "alias": "Tree"
   },
-  "text": "Tree | undefined"
+  "text": "Tree | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/32-recursive.tsx"
+    },
+    "order": null
+  }
 }

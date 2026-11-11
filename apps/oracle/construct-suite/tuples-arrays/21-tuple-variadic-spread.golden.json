@@ -25,5 +25,16 @@
       }
     ]
   },
-  "text": "[string, number, boolean] | undefined"
+  "text": "[string, number, boolean] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/21-tuple-variadic-spread.tsx"
+    },
+    "order": null
+  }
 }

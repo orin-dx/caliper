@@ -64,6 +64,18 @@ pnpm --filter caliper-docgen-oracle test
 
 The test runs one `extract` over this directory with the weekly's canonical options (`--html-attributes full --include-unexported --load-dependencies --collapse-inherited-props none`, plus `--no-cache --quiet`) and compares prop `p` of each row's component with its golden. The binary is `$CALIPER_BIN`, or `target/release/caliper-docgen`. Without one the suite skips with a message and the rest of the package tests still pass.
 
+## Facts
+
+Besides the type, a golden holds the `facts` both lanes are held to on every row (`Facts` and `factDifferences` in `../src/construct-suite.ts`), each captured from the Go checker and its AST:
+
+- `description` (`getDocumentationComment`) and `tags` (`getJsDocTags`, by name, the last of a repeated tag winning, text trimmed);
+- `default`: the text of `@default` or `@defaultValue`, else null (a fixture writes no code default);
+- `required`: the property is not optional;
+- `parent`: react-docgen-typescript's, the interface the prop's first declaration is a member of, by name and by file relative to this directory; null for a member of a type literal;
+- `order`: the members of the union the declaration writes (directly, or through a non-generic alias it names), in written order; null when it writes none. Caliper's union keeps the order when the members it states for them stand in that order.
+
+A fact Caliper states differently fails the row unless its expectation lists it under `"facts"` with the reason (`{ "verdicts": [...], "facts": { "order": "<why>" } }`), and a listed fact that agrees fails as stale. No row lists one today. The checker lane may not list a fact the structural expectation does not: the checker supplies what the structural path states (ADR 0026, S7a).
+
 ## Adding a row
 
 1. Write `<family>/<NN>-<slug>.tsx` (two digits, lowercase slug).

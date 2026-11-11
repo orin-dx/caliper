@@ -7,8 +7,9 @@
     clippy::let_underscore_must_use
 )]
 //! A fake `tsc --api` that answers from a recording of the real `7.1.0-beta`: every request is matched, by method and
-//! exact params, against the `{method, params, result}` entries of the JSON file named by `REPLAY_FIXTURE`. A request
-//! with no recorded answer gets a JSON-RPC error, so a change to the calls the backend makes fails its test instead of
+//! exact params, against the `{method, params, result}` entries of the JSON file named by `REPLAY_FIXTURE`; a batch the
+//! recording does not hold whole is answered request by request (see `batch_from_parts`). A request with no recorded
+//! answer gets a JSON-RPC error, so a change to the calls the backend makes fails its test instead of
 //! being silently answered. `REPLAY_SCENARIO=crash` exits at once, `hang` answers nothing, `invalid_json` answers every request after `initialize` with a
 //! well-framed body that is not JSON.
 //!
@@ -23,6 +24,47 @@
 //! `[[bin]]` cannot use.
 
 use std::io::{BufRead, Read, Write};
+
+use serde_json::{Value, json};
+
+/// The answer to a batch the recording does not hold as a whole, put together from the answers to each of its requests:
+/// alone, or inside a recorded batch (a page of one starts where the page before it ended). The backend shares what a
+/// snapshot was already told between components that are answered concurrently, so which requests one batch holds
+/// depends on their order, while each request and its answer do not. The entry it returns has the recorded shape
+/// (`result`); `None` when any request has no recorded answer.
+fn batch_from_parts(recorded: &[Value], params: &Value) -> Option<Value> {
+    let mut answered: Vec<(Value, Value)> = Vec::new();
+    let mut offsets: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for entry in recorded {
+        let method = entry.get("method").and_then(Value::as_str);
+        if method != Some("batchRequests") {
+            if let (Some(method), Some(params), Some(result)) = (method, entry.get("params"), entry.get("result")) {
+                answered.push((json!({ "method": method, "params": params }), result.clone()));
+            }
+            continue;
+        }
+        let (Some(requests), Some(responses)) = (
+            entry.pointer("/params/requests").and_then(Value::as_array),
+            entry.pointer("/result/responses").and_then(Value::as_array),
+        ) else {
+            continue;
+        };
+        let offset = offsets.entry(serde_json::to_string(requests).unwrap()).or_default();
+        for (request, response) in requests.iter().skip(*offset).zip(responses) {
+            answered.push((request.clone(), response.get("result").cloned().unwrap_or(Value::Null)));
+        }
+        *offset += responses.len();
+    }
+    let responses = params
+        .get("requests")?
+        .as_array()?
+        .iter()
+        .map(|request| {
+            answered.iter().find(|(asked, _)| asked == request).map(|(_, result)| json!({ "result": result }))
+        })
+        .collect::<Option<Vec<Value>>>()?;
+    Some(json!({ "result": { "responses": responses } }))
+}
 
 fn main() {
     match std::env::var("REPLAY_SCENARIO").as_deref() {
@@ -68,9 +110,13 @@ fn main() {
         let id = request.get("id").cloned().unwrap_or(serde_json::Value::Null);
         let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
         let params = request.get("params").cloned().unwrap_or(serde_json::Value::Null);
-        let answer = recorded.iter().find(|entry| {
-            entry.get("method").and_then(|m| m.as_str()) == Some(method) && entry.get("params") == Some(&params)
-        });
+        let answer = recorded
+            .iter()
+            .find(|entry| {
+                entry.get("method").and_then(|m| m.as_str()) == Some(method) && entry.get("params") == Some(&params)
+            })
+            .cloned()
+            .or_else(|| (method == "batchRequests").then(|| batch_from_parts(&recorded, &params)).flatten());
         if invalid_json && method != "initialize" {
             let bytes = b"{ this is not json";
             write!(stdout, "Content-Length: {}\r\n\r\n", bytes.len()).unwrap();

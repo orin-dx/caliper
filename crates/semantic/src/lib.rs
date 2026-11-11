@@ -15,6 +15,7 @@
 
 mod component;
 mod convert;
+mod declared;
 mod instantiate;
 mod locate;
 mod on_demand;
@@ -322,7 +323,9 @@ async fn answer_file(
             "semantic component answered"
         );
         match answered {
-            Ok(Answer::Props(props)) => outcome.components.push(SemanticComponent { key: target.key.clone(), props }),
+            Ok(Answer::Props(component::Props { props, composes })) => {
+                outcome.components.push(SemanticComponent { key: target.key.clone(), props, composes });
+            }
             Ok(Answer::Fallback(reason)) => outcome.fallbacks.push(fallback_of(target, &reason)),
             Ok(Answer::Instantiate(instantiation)) => generic.push((target.clone(), instantiation)),
             Err(CallError::Rejected(message)) => {

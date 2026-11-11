@@ -25,5 +25,16 @@
       }
     ]
   },
-  "text": "(<U>(item: U) => U) | undefined"
+  "text": "(<U>(item: U) => U) | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/07-generic-function-prop.tsx"
+    },
+    "order": null
+  }
 }

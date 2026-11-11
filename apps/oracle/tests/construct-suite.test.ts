@@ -10,6 +10,8 @@ import {
   componentsOf,
   expectationFailure,
   expectationProblems,
+  factDifferences,
+  factFailures,
   listFixtures,
   PROP,
   rowKey,
@@ -33,7 +35,8 @@ if (!available && !required) {
   )
 }
 
-const goldenOf = (checker: Golden['checker']): Golden => ({ checker, text: '' })
+const noFacts: Golden['facts'] = { description: '', tags: {}, default: null, required: true, parent: null, order: null }
+const goldenOf = (checker: Golden['checker']): Golden => ({ checker, text: '', facts: noFacts })
 const expectations: { rows: Record<string, Expectation> } = JSON.parse(
   readFileSync(join(suite, 'expectations.json'), 'utf8'),
 )
@@ -86,6 +89,71 @@ describe('the construct suite helpers', () => {
     expect(expectationFailure('r', 'opaque with marker', gap)).toContain('better than expected')
     expect(expectationFailure('r', 'wrong', gap)).toContain('worse than expected')
     expect(expectationFailure('r', 'less precise', green)).toContain('worse than expected')
+  })
+
+  it('a fact Caliper states differently from the golden is named, and a union out of written order is one', () => {
+    expect.hasAssertions()
+    const file = join(suite, 'seed', '01-string-literal-union.tsx')
+    const golden: Golden = {
+      checker: prim('string'),
+      text: '',
+      facts: {
+        description: 'How large.',
+        tags: { since: '2.0' },
+        default: "'sm'",
+        required: false,
+        parent: { name: 'Props', file: 'seed/01-string-literal-union.tsx' },
+        order: [lit('b', 'string'), lit('a', 'string')],
+      },
+    }
+    const union = (...values: string[]) => ({
+      kind: 'union',
+      members: values.map((value) => ({ kind: 'stringLiteral', value })),
+    })
+    const prop = {
+      type: union('b', 'x', 'a'),
+      description: 'How large.',
+      tags: { since: '2.0' },
+      defaultValue: { value: "'sm'", computed: false },
+      required: false,
+      parent: { name: 'Props', fileName: file },
+    }
+    expect(factDifferences(prop, golden, suite)).toStrictEqual([])
+    expect(
+      factDifferences(
+        {
+          ...prop,
+          type: union('a', 'b'),
+          description: '',
+          tags: {},
+          defaultValue: null,
+          required: true,
+          parent: null,
+        },
+        golden,
+        suite,
+      ),
+    ).toStrictEqual(['description', 'tags', 'default', 'required', 'parent', 'order'])
+    expect(factDifferences({ ...prop, parent: { name: 'Base', fileName: file } }, golden, suite)).toStrictEqual([
+      'parent',
+    ])
+    expect(factDifferences(undefined, golden, suite)).toStrictEqual([])
+  })
+
+  it('a differing fact fails unless listed, and a listed fact that agrees fails as stale', () => {
+    expect.hasAssertions()
+    const row: Expectation = { verdicts: ['identical', 'spelled'], facts: { order: 'the checker sorts members' } }
+    expect(factFailures('r', ['order'], row)).toStrictEqual([])
+    expect(factFailures('r', ['parent', 'order'], row)).toStrictEqual([
+      'r: parent differs from the golden (a regression, or list it under "facts" with the reason)',
+    ])
+    expect(factFailures('r', [], row)).toStrictEqual([
+      'r: order no longer differs from the golden: remove it from "facts"',
+    ])
+    const unknownFact: Record<string, Expectation> = JSON.parse(
+      '{"r":{"verdicts":["identical"],"facts":{"colour":"x"}}}',
+    )
+    expect(expectationProblems(['r'], unknownFact)).toStrictEqual(['r: unknown fact colour'])
   })
 
   it('the expectations file agrees with the fixtures on disk', () => {
@@ -155,10 +223,12 @@ describe.skipIf(!available)('the construct suite against the caliper binary', ()
     const failures: string[] = []
     for (const fixture of listFixtures(suite)) {
       const golden: Golden = JSON.parse(readFileSync(fixture.golden, 'utf8'))
-      const verdict = rowVerdict(propByRow.get(rowKey(realpathSync(fixture.file), fixture.exportPath)), golden)
+      const prop = propByRow.get(rowKey(realpathSync(fixture.file), fixture.exportPath))
+      const verdict = rowVerdict(prop, golden)
       const row = expectations.rows[fixture.id]
       const failure = row && expectationFailure(fixture.id, verdict, row)
       if (failure) failures.push(failure)
+      if (row) failures.push(...factFailures(fixture.id, factDifferences(prop, golden, suite), row))
     }
     expect(failures).toStrictEqual([])
   })

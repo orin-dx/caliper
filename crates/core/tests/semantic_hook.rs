@@ -56,10 +56,14 @@ fn finds_size(target: &SemanticTarget) -> SemanticOutcome {
             required: false,
             description: String::new(),
             react_declared: false,
+            tags: Default::default(),
+            parent: None,
+            declarations: Vec::new(),
         })
     };
     SemanticOutcome {
         components: vec![SemanticComponent {
+            composes: Vec::new(),
             key: target.key.clone(),
             props: vec![
                 prop("label", PropType::String),
@@ -83,10 +87,14 @@ fn reports_react_props(target: &SemanticTarget) -> SemanticOutcome {
             required: false,
             description: String::new(),
             react_declared,
+            tags: Default::default(),
+            parent: None,
+            declarations: Vec::new(),
         })
     };
     SemanticOutcome {
         components: vec![SemanticComponent {
+            composes: Vec::new(),
             key: target.key.clone(),
             props: vec![
                 prop("label", PropType::String, false),
@@ -168,6 +176,7 @@ fn a_checker_that_answers_in_time_replaces_the_structural_props_and_says_so() {
 fn cannot_read_label(target: &SemanticTarget) -> SemanticOutcome {
     SemanticOutcome {
         components: vec![SemanticComponent {
+            composes: Vec::new(),
             key: target.key.clone(),
             props: vec![Arc::new(SemanticProp {
                 name: "label".to_string(),
@@ -175,6 +184,9 @@ fn cannot_read_label(target: &SemanticTarget) -> SemanticOutcome {
                 required: true,
                 description: String::new(),
                 react_declared: false,
+                tags: Default::default(),
+                parent: None,
+                declarations: Vec::new(),
             })],
         }],
         ..SemanticOutcome::default()
@@ -385,6 +397,7 @@ fn types_file_outcome(target: &SemanticTarget, text: &str) -> SemanticOutcome {
     let version = format!("v{}", names.len());
     SemanticOutcome {
         components: vec![SemanticComponent {
+            composes: Vec::new(),
             key: target.key.clone(),
             props: names
                 .into_iter()
@@ -395,6 +408,9 @@ fn types_file_outcome(target: &SemanticTarget, text: &str) -> SemanticOutcome {
                         required: false,
                         description: String::new(),
                         react_declared: false,
+                        tags: Default::default(),
+                        parent: None,
+                        declarations: Vec::new(),
                     })
                 })
                 .collect(),
@@ -503,10 +519,14 @@ fn answers_every_prop(target: &SemanticTarget) -> SemanticOutcome {
             required: true,
             description: String::new(),
             react_declared: false,
+            tags: Default::default(),
+            parent: None,
+            declarations: Vec::new(),
         })
     };
     SemanticOutcome {
         components: vec![SemanticComponent {
+            composes: Vec::new(),
             key: target.key.clone(),
             props: vec![prop("label", PropType::String), prop("item", PropType::StringLiteral("a".into()))],
         }],
@@ -550,10 +570,14 @@ fn label_size_and_class_name(target: &SemanticTarget) -> SemanticOutcome {
             required: false,
             description: String::new(),
             react_declared,
+            tags: Default::default(),
+            parent: None,
+            declarations: Vec::new(),
         })
     };
     SemanticOutcome {
         components: vec![SemanticComponent {
+            composes: Vec::new(),
             key: target.key.clone(),
             props: vec![
                 prop("label", PropType::StringLiteral("ok".into()), false),
@@ -836,6 +860,7 @@ fn a_session_asks_for_a_component_by_its_key_and_its_exports_eager_or_lazy() {
 fn answers_for_menu(_: &SemanticTarget) -> SemanticOutcome {
     SemanticOutcome {
         components: vec![SemanticComponent {
+            composes: Vec::new(),
             key: "Menu".to_string(),
             props: vec![Arc::new(SemanticProp {
                 name: "label".to_string(),
@@ -843,6 +868,9 @@ fn answers_for_menu(_: &SemanticTarget) -> SemanticOutcome {
                 required: true,
                 description: String::new(),
                 react_declared: false,
+                tags: Default::default(),
+                parent: None,
+                declarations: Vec::new(),
             })],
         }],
         fallbacks: vec![caliper_docgen_core::types::semantic::SemanticFallback {

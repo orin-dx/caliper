@@ -25,5 +25,16 @@
       }
     ]
   },
-  "text": "[string, number, boolean] | undefined"
+  "text": "[string, number, boolean] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/22-tuple-variadic-generic.tsx"
+    },
+    "order": null
+  }
 }

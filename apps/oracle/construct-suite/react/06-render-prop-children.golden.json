@@ -92,5 +92,16 @@
       "alias": "ReactNode"
     }
   },
-  "text": "(state: { open: boolean; toggle: () => void; }) => ReactNode"
+  "text": "(state: { open: boolean; toggle: () => void; }) => ReactNode",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "react/06-render-prop-children.tsx"
+    },
+    "order": null
+  }
 }

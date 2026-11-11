@@ -16,5 +16,16 @@
       }
     ]
   },
-  "text": "{ icon: ReactNode; onClick?: MouseEventHandler<HTMLButtonElement> | undefined; } | undefined"
+  "text": "{ icon: ReactNode; onClick?: MouseEventHandler<HTMLButtonElement> | undefined; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/37-react-member.tsx"
+    },
+    "order": null
+  }
 }

@@ -43,5 +43,16 @@
       }
     ]
   },
-  "text": "[string | undefined, number | undefined, boolean] | undefined"
+  "text": "[string | undefined, number | undefined, boolean] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/34-tuple-two-optionals-then-required.tsx"
+    },
+    "order": null
+  }
 }

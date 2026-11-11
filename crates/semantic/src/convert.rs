@@ -37,6 +37,7 @@ use caliper_docgen_core::types::{
 };
 use rustc_hash::FxHashMap;
 
+use crate::declared::Declared;
 use crate::printed::{Marker, SignatureMarkers, signature_markers, tuple_labels};
 use crate::rpc::{
     CallError, CompactSymbol, ObjectMembers, Rpc, SignatureInfo, SignatureKind, SymbolInfo, TypeInfo, decode, flag,
@@ -320,6 +321,8 @@ struct State {
     /// most of their types: kept per component, a program of every Chakra component answered 16 at a time held 16
     /// copies of the same style props' members.
     parts: PartsSeen,
+    /// Where props are declared ([`crate::declared`]), kept for the snapshot like the rest.
+    declared: crate::declared::Memo,
     hits: AtomicU64,
     misses: AtomicU64,
 }
@@ -358,6 +361,50 @@ impl Converter {
     /// The own types of a component's props, from the top.
     pub(crate) async fn convert_roots(&self, infos: &[TypeInfo]) -> Result<Vec<PropType>, CallError> {
         self.convert_all(infos, &Cx::default()).await
+    }
+
+    /// Where each prop of `asked` is declared and what its JSDoc says ([`crate::declared`]).
+    pub(crate) async fn declared(&self, asked: &[crate::declared::Asked<'_>]) -> Result<Vec<Declared>, CallError> {
+        crate::declared::declared(&self.rpc, &self.state.declared, asked).await
+    }
+
+    /// The `@types/react` types a props type is made of, by name, in the order it names them: its bases and the members
+    /// of an intersection, seen through the project's and dependencies' own types and through a lib utility (`Omit`,
+    /// `Pick`) to what it applies to. A React type is found by where it is declared, as [`Origin::react_terminal`]
+    /// finds React's terminals, and is not looked into.
+    pub(crate) async fn composes(&self, props_type: &TypeInfo) -> Result<Vec<String>, CallError> {
+        let mut names: Vec<String> = Vec::new();
+        let mut seen: Vec<u64> = Vec::new();
+        let mut pending = vec![props_type.clone()];
+        while let Some(info) = pending.pop() {
+            if seen.contains(&info.id) {
+                continue;
+            }
+            seen.push(info.id);
+            let origin = self.origin(&info).await?;
+            if let Some(origin) = &origin {
+                if origin.in_react() {
+                    if !names.contains(&origin.name) {
+                        names.push(origin.name.clone());
+                    }
+                    continue;
+                }
+                if origin.alias && origin.in_lib() && UTILITIES.contains(&origin.name.as_str()) {
+                    pending.extend(self.rpc.alias_type_arguments(info.id).await?.into_iter().take(1));
+                    continue;
+                }
+            }
+            let parts = if info.flags & flag::INTERSECTION != 0 {
+                self.parts(info.id, Parts::Members).await?
+            } else if states_bases(&info) {
+                self.rpc.base_types(info.id).await?
+            } else {
+                Vec::new()
+            };
+            // Last first onto the stack, so they are taken in the order the type names them.
+            pending.extend(parts.into_iter().rev());
+        }
+        Ok(names)
     }
 
     fn convert<'a>(&'a self, info: &'a TypeInfo, cx: &'a Cx) -> Converted<'a> {

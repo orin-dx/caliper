@@ -33,5 +33,16 @@
     ],
     "alias": "Array"
   },
-  "text": "(\"a\" | \"b\" | \"c\")[] | undefined"
+  "text": "(\"a\" | \"b\" | \"c\")[] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/08-array-of-literal-union.tsx"
+    },
+    "order": null
+  }
 }

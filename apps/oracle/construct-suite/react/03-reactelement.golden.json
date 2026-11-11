@@ -19,5 +19,16 @@
     ],
     "alias": "ReactElement"
   },
-  "text": "ReactElement<unknown, string | JSXElementConstructor<any>> | undefined"
+  "text": "ReactElement<unknown, string | JSXElementConstructor<any>> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/03-reactelement.tsx"
+    },
+    "order": null
+  }
 }

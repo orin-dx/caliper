@@ -12,5 +12,16 @@
       }
     ]
   },
-  "text": "string | undefined"
+  "text": "string | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/02-default-type-param.tsx"
+    },
+    "order": null
+  }
 }

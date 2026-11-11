@@ -21,5 +21,16 @@
       }
     ]
   },
-  "text": "[...string[], number] | undefined"
+  "text": "[...string[], number] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/19-tuple-leading-rest.tsx"
+    },
+    "order": null
+  }
 }

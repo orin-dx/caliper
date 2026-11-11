@@ -15,7 +15,7 @@ mod order;
 use crate::types::collected::ComponentExport;
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use crate::types::output::{
-    ComponentEntry, ExtractionOutput, OpaqueDetail, OpaqueReason, ParsedProp, PropType, TRUNCATED_KIND,
+    ComponentEntry, ExtractionOutput, OpaqueDetail, OpaqueReason, ParsedProp, PropParent, PropType, TRUNCATED_KIND,
 };
 
 /// The type of a name the checker could not resolve (an import that does not resolve, a name declared nowhere), which
@@ -45,6 +45,17 @@ pub struct SemanticProp {
     pub required: bool,
     /// The prop's JSDoc description, empty when it has none; the merge then keeps the structural description.
     pub description: String,
+    /// The prop's JSDoc tags (`@deprecated`, `@since`, `@default`), each by name with the text the checker renders, empty
+    /// when it has none; the merge then keeps the structural tags, as for `description`. `@types/react`'s props are not
+    /// asked for theirs.
+    pub tags: BTreeMap<String, String>,
+    /// The interface that declares the prop, as react-docgen-typescript states it: the parent of its first declaration
+    /// when that is an interface, with the file it is in. `None` for a prop declared in a type literal or with no
+    /// declaration. It replaces the structural `parent`, `None` included.
+    pub parent: Option<PropParent>,
+    /// The interface of each declaration that is in one, in the checker's order: two when an intersection or a merged
+    /// interface declares the prop twice.
+    pub declarations: Vec<PropParent>,
     /// Declared by `@types/react` (`children`, `aria-*`, handlers, `className`): not the component's own prop.
     pub react_declared: bool,
 }
@@ -56,6 +67,11 @@ impl SemanticProp {
         self.required.hash(&mut hasher);
         self.react_declared.hash(&mut hasher);
         self.description.hash(&mut hasher);
+        self.tags.hash(&mut hasher);
+        for parent in self.parent.iter().chain(&self.declarations) {
+            parent.name.hash(&mut hasher);
+            parent.file_name.hash(&mut hasher);
+        }
         self.prop_type.structural_hash(&mut hasher);
         hasher.finish()
     }
@@ -91,6 +107,10 @@ pub struct SemanticComponent {
     pub key: String,
     /// Declared props in declaration order, with the `@types/react` ones the request asked for.
     pub props: Vec<Arc<SemanticProp>>,
+    /// The `@types/react` types the props type is made of (`RefAttributes`, `HTMLAttributes` under an `Omit`), by
+    /// name, in the order the props type names them: what the checker leaves to the inheritance layers. It replaces the
+    /// structural `composes`, which also lists the types the structural pass could not follow and the checker did.
+    pub composes: Vec<String>,
 }
 
 /// A component the backend left to the structural result, and why.
@@ -175,17 +195,18 @@ impl SemanticOutcome {
     }
 }
 
-/// Replaces `entry`'s props with the checker's, keeping what only the structural pass has (a default value, tags,
-/// `parent`, `declarations`, and a description when the checker has none). A prop whose type the checker could not
-/// read keeps its structural type, marked (see [`merge_semantic_props`]). `shared` interns identical props across the
-/// components of one merge. Returns how many props kept their structural type that way.
+/// Replaces `entry`'s props and `composes` with the checker's, keeping what only the structural pass has (a default
+/// value, and a description or tags when the checker has none). A prop whose type the checker could not read keeps its
+/// structural type, marked (see [`merge_semantic_props`]). `shared` interns identical props across the components of
+/// one merge. Returns how many props kept their structural type that way.
 pub fn apply_semantic_props(
     entry: &mut ComponentEntry,
     semantic: &SemanticComponent,
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
 ) -> usize {
     // The whole-project merge replaces the props and leaves `@types/react`'s to the inheritance layers.
-    replace_props(entry, semantic.props.iter().filter(|prop| !prop.react_declared), Unanswered::Drop, shared).unread
+    let own = semantic.props.iter().filter(|prop| !prop.react_declared);
+    replace_props(entry, own, &semantic.composes, Unanswered::Drop, shared).unread
 }
 
 /// How a merge went for one component.
@@ -199,17 +220,19 @@ pub struct MergedProps {
     pub unread: usize,
 }
 
-/// Merges the checker's `props` into `entry` by name: the checker's type, optionality and description win where both
-/// have a prop, and every structural prop the checker did not return stays as the structural pass resolved it. A prop
-/// whose checker type holds an `opaque` part, where the structural type holds none, keeps the structural type and adds
-/// the checker's reasons to its `degradedBy`: the checker's answer there is a placeholder, and the structural one is
-/// not confirmed, so it is marked. A type the checker only cut at a limit (`truncated`) is still its answer.
+/// Merges the checker's `props` into `entry` by name: the checker's type, optionality, description, tags, `parent` and
+/// `declarations` win where both have a prop, and every structural prop the checker did not return stays as the
+/// structural pass resolved it. `composes` replaces the entry's ([`SemanticComponent::composes`]). A prop whose checker
+/// type holds an `opaque` part, where the structural type holds none, keeps the structural type and adds the checker's
+/// reasons to its `degradedBy`: the checker's answer there is a placeholder, and the structural one is not confirmed,
+/// so it is marked. A type the checker only cut at a limit (`truncated`) is still its answer.
 pub fn merge_semantic_props<'a>(
     entry: &mut ComponentEntry,
     props: impl Iterator<Item = &'a Arc<SemanticProp>>,
+    composes: &[String],
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
 ) -> MergedProps {
-    replace_props(entry, props, Unanswered::Keep, shared)
+    replace_props(entry, props, composes, Unanswered::Keep, shared)
 }
 
 /// The kinds of what the checker could not read in `checker`, when the structural type `structural` read everything:
@@ -250,6 +273,7 @@ enum Unanswered {
 fn replace_props<'a>(
     entry: &mut ComponentEntry,
     props_in: impl Iterator<Item = &'a Arc<SemanticProp>>,
+    composes: &[String],
     unanswered: Unanswered,
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
 ) -> MergedProps {
@@ -261,6 +285,11 @@ fn replace_props<'a>(
             structural.map(|s| s.description.clone()).unwrap_or_default()
         } else {
             prop.description.clone()
+        };
+        let tags = if prop.tags.is_empty() {
+            structural.map(|s| s.tags.clone()).unwrap_or_default()
+        } else {
+            prop.tags.clone()
         };
         let unread_kinds = structural.map(|s| unread_by_checker(&prop.prop_type, &s.prop_type)).unwrap_or_default();
         // The checker sorts a union's members; where the structural pass resolved the same union, its order is the
@@ -277,9 +306,9 @@ fn replace_props<'a>(
             prop.required,
             structural.and_then(|s| s.default_value.clone()),
             description,
-            structural.map(|s| s.tags.clone()).unwrap_or_default(),
-            structural.and_then(|s| s.parent.clone()),
-            structural.map(|s| s.declarations.clone()).unwrap_or_default(),
+            tags,
+            prop.parent.clone(),
+            prop.declarations.clone(),
         )
         .degraded_also_by(&unread_kinds);
         let mut hasher = FxHasher::default();
@@ -305,16 +334,18 @@ fn replace_props<'a>(
         }
     }
     entry.props = props;
+    entry.composes = composes.to_vec();
     MergedProps { kept, unread }
 }
 
 /// Merge the checker's props over `output`, component by component.
 ///
-/// Per `docs/type-checker-integration.md`: the checker decides which props exist, their types and whether they are
-/// required; a description comes from the checker, else the structural pass; a default value stays structural (the
-/// checker has no initializer for a destructured parameter); `parent` and `declarations` stay with the structural
-/// prop of the same name. Inheritance layers and curated inherited props stay structural. Components the checker did
-/// not answer for keep their structural result untouched.
+/// Per `docs/type-checker-integration.md`: the checker decides which props exist, their types, whether they are
+/// required, `parent`, `declarations` and the component's `composes`; a description and tags come from the checker,
+/// else the structural pass; a default value stays structural (the checker has no initializer for a destructured
+/// parameter), and so does a union's member order where the structural pass resolved the same union (the checker sorts
+/// members). Inheritance layers, curated inherited props and `discriminantProp` stay structural. Components the checker
+/// did not answer for keep their structural result untouched.
 ///
 /// Records provenance as `Info` diagnostics whose `affects` lists the output keys, so the canonical JSON gains no
 /// field: one for the components the checker resolved, one per fallback reason.

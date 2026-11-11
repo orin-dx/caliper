@@ -921,5 +921,16 @@
     ],
     "alias": "ElementType"
   },
-  "text": "ElementType<any, keyof IntrinsicElements> | undefined"
+  "text": "ElementType<any, keyof IntrinsicElements> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/19-elementtype.tsx"
+    },
+    "order": null
+  }
 }

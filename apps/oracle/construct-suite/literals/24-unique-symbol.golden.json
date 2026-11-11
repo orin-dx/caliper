@@ -12,5 +12,16 @@
       }
     ]
   },
-  "text": "unique symbol | undefined"
+  "text": "unique symbol | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/24-unique-symbol.tsx"
+    },
+    "order": null
+  }
 }

@@ -3,5 +3,16 @@
     "k": "prim",
     "name": "undefined"
   },
-  "text": "undefined"
+  "text": "undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/32-intersection-disjoint.tsx"
+    },
+    "order": null
+  }
 }

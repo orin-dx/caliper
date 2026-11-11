@@ -23,5 +23,32 @@
       }
     ]
   },
-  "text": "-1 | 0 | 1 | undefined"
+  "text": "-1 | 0 | 1 | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/28-negative-number.tsx"
+    },
+    "order": [
+      {
+        "k": "lit",
+        "value": "-1",
+        "of": "number"
+      },
+      {
+        "k": "lit",
+        "value": "0",
+        "of": "number"
+      },
+      {
+        "k": "lit",
+        "value": "1",
+        "of": "number"
+      }
+    ]
+  }
 }

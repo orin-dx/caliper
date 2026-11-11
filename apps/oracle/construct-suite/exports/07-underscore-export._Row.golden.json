@@ -4,5 +4,16 @@
     "value": "underscore",
     "of": "string"
   },
-  "text": "\"underscore\""
+  "text": "\"underscore\"",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "exports/07-underscore-export.tsx"
+    },
+    "order": null
+  }
 }

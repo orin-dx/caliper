@@ -18,5 +18,16 @@
     ],
     "alias": "Folder"
   },
-  "text": "Folder | undefined"
+  "text": "Folder | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/22-mutual-recursion.tsx"
+    },
+    "order": null
+  }
 }

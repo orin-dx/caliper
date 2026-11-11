@@ -23,5 +23,16 @@
       }
     ]
   },
-  "text": "\"lg\" | \"md\" | \"sm\" | undefined"
+  "text": "\"lg\" | \"md\" | \"sm\" | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/13-array-keyof-indexed.tsx"
+    },
+    "order": null
+  }
 }

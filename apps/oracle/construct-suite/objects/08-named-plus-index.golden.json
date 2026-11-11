@@ -19,5 +19,16 @@
       }
     ]
   },
-  "text": "{ [key: string]: string; id: string; } | undefined"
+  "text": "{ [key: string]: string; id: string; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/08-named-plus-index.tsx"
+    },
+    "order": null
+  }
 }

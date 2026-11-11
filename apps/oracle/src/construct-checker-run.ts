@@ -9,6 +9,8 @@ import { checkCaliperShape, flattenProps } from './caliper-input.ts'
 import {
   expectationFailure,
   expectationProblems,
+  factDifferences,
+  factFailures,
   listFixtures,
   ORDER,
   PROP,
@@ -16,6 +18,7 @@ import {
   rowKeysOf,
   rowVerdict,
   type Expectation,
+  type FactName,
   type Golden,
   type RowVerdict,
 } from './construct-suite.ts'
@@ -32,6 +35,8 @@ export interface Row {
   type: unknown
   degradedBy: unknown
   golden: string
+  /** The facts that differ from the golden's (`factDifferences`). */
+  facts: FactName[]
 }
 
 export interface LaneRun {
@@ -119,6 +124,7 @@ export function runCheckerLane(bin: string, tsrs: string): LaneRun {
       type: found?.prop?.type,
       degradedBy: found?.prop?.degradedBy,
       golden: golden.text,
+      facts: factDifferences(found?.prop, golden, suiteDir),
     })
   }
   return { elapsedMs, rows, backendProblem }
@@ -132,7 +138,9 @@ const worstAllowed = (row: Expectation) => Math.max(...row.verdicts.map((v) => O
  * checker expectation gives an `improvement` reason (an answer the comparison scores lower although it states more,
  * such as an expansion where the structural pass kept a name). An `improvement` on a row the checker does not rank
  * below the structural path is stale. Rows the checker ranks above the structural path need no entry: the structural
- * expectation's `gap` already says what the structural path misses. Empty when the gate holds. */
+ * expectation's `gap` already says what the structural path misses. A fact (description, tags, default, required,
+ * parent, member order) the checker path may state differently while the structural path states it as the checker does
+ * is a regression too (S7a: the checker supplies them before the resolver goes). Empty when the gate holds. */
 export function againstStructural(
   structural: Record<string, Expectation>,
   checker: Record<string, Expectation>,
@@ -153,6 +161,13 @@ export function againstStructural(
         `${id}: "improvement" is listed, but the checker path is not ranked below the structural path: remove it`,
       )
     }
+    for (const fact of Object.keys(row.facts ?? {})) {
+      if (base.facts?.[fact as FactName] === undefined) {
+        failures.push(
+          `${id}: the checker path may state ${fact} differently, where the structural path states it right`,
+        )
+      }
+    }
   }
   return failures
 }
@@ -169,6 +184,7 @@ export function laneFailures(run: LaneRun, expectations: Expectations): string[]
     const expectation = expectations.rows[row.id]
     const failure = expectation && expectationFailure(row.id, row.verdict, expectation)
     if (failure) failures.push(failure)
+    if (expectation) failures.push(...factFailures(row.id, row.facts, expectation))
   }
   return failures
 }

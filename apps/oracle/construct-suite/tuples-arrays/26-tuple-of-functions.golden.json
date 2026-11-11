@@ -38,5 +38,16 @@
       }
     ]
   },
-  "text": "[(a: string) => void, () => number] | undefined"
+  "text": "[(a: string) => void, () => number] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/26-tuple-of-functions.tsx"
+    },
+    "order": null
+  }
 }

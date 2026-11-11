@@ -294,5 +294,16 @@
     ],
     "alias": "HTMLAttributes"
   },
-  "text": "HTMLAttributes<HTMLDivElement> | undefined"
+  "text": "HTMLAttributes<HTMLDivElement> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/14-htmlattributes-div.tsx"
+    },
+    "order": null
+  }
 }

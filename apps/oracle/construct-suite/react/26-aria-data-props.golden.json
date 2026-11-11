@@ -19,5 +19,16 @@
       }
     ]
   },
-  "text": "{ \"aria-label\"?: string | undefined; \"aria-hidden\"?: \"false\" | \"true\" | boolean | undefined; \"aria-live\"?: \"assertive\" | \"off\" | \"polite\" | undefined; \"data-testid\"?: string | undefined; role?: AriaRole | undefined; } | undefined"
+  "text": "{ \"aria-label\"?: string | undefined; \"aria-hidden\"?: \"false\" | \"true\" | boolean | undefined; \"aria-live\"?: \"assertive\" | \"off\" | \"polite\" | undefined; \"data-testid\"?: string | undefined; role?: AriaRole | undefined; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/26-aria-data-props.tsx"
+    },
+    "order": null
+  }
 }

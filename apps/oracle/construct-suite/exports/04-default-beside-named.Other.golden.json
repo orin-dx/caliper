@@ -4,5 +4,16 @@
     "value": "default",
     "of": "string"
   },
-  "text": "\"default\""
+  "text": "\"default\"",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "OtherProps",
+      "file": "exports/04-default-beside-named.tsx"
+    },
+    "order": null
+  }
 }

@@ -20,5 +20,29 @@
       }
     ]
   },
-  "text": "string | number[] | undefined"
+  "text": "string | number[] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/06-union-with-array-unparenthesized.tsx"
+    },
+    "order": [
+      {
+        "k": "prim",
+        "name": "string"
+      },
+      {
+        "k": "array",
+        "element": {
+          "k": "prim",
+          "name": "number"
+        },
+        "alias": "Array"
+      }
+    ]
+  }
 }

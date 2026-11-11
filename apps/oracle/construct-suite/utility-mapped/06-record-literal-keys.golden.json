@@ -19,5 +19,16 @@
     ],
     "alias": "Record"
   },
-  "text": "Record<\"lg\" | \"md\" | \"sm\", number> | undefined"
+  "text": "Record<\"lg\" | \"md\" | \"sm\", number> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/06-record-literal-keys.tsx"
+    },
+    "order": null
+  }
 }

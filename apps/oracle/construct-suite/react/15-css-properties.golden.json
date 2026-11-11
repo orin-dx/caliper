@@ -873,5 +873,16 @@
     ],
     "alias": "CSSProperties"
   },
-  "text": "CSSProperties | undefined"
+  "text": "CSSProperties | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/15-css-properties.tsx"
+    },
+    "order": null
+  }
 }

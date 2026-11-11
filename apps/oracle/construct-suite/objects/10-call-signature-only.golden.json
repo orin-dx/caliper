@@ -25,5 +25,16 @@
       }
     ]
   },
-  "text": "((value: string) => number) | undefined"
+  "text": "((value: string) => number) | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/10-call-signature-only.tsx"
+    },
+    "order": null
+  }
 }

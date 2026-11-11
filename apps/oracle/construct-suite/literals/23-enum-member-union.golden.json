@@ -18,5 +18,27 @@
       }
     ]
   },
-  "text": "Size.Small | Size.Large | undefined"
+  "text": "Size.Small | Size.Large | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/23-enum-member-union.tsx"
+    },
+    "order": [
+      {
+        "k": "lit",
+        "value": "small",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "large",
+        "of": "string"
+      }
+    ]
+  }
 }

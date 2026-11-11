@@ -17,5 +17,16 @@
     ],
     "alias": "Box"
   },
-  "text": "Box | undefined"
+  "text": "Box | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/19-accessor-get-set.tsx"
+    },
+    "order": null
+  }
 }

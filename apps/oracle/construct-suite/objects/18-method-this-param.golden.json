@@ -15,5 +15,16 @@
       }
     ]
   },
-  "text": "{ run(this: { count: number; }, step: number): void; } | undefined"
+  "text": "{ run(this: { count: number; }, step: number): void; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/18-method-this-param.tsx"
+    },
+    "order": null
+  }
 }

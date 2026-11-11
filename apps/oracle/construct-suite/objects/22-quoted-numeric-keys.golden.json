@@ -17,5 +17,16 @@
       }
     ]
   },
-  "text": "{ 1: string; \"aria-label\": string; 'x y'?: number | undefined; } | undefined"
+  "text": "{ 1: string; \"aria-label\": string; 'x y'?: number | undefined; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/22-quoted-numeric-keys.tsx"
+    },
+    "order": null
+  }
 }

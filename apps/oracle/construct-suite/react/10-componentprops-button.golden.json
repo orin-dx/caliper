@@ -319,5 +319,16 @@
     ],
     "alias": "DetailedHTMLProps"
   },
-  "text": "DetailedHTMLProps<ButtonHTMLAttributes<HTMLButtonElement>, HTMLButtonElement> | undefined"
+  "text": "DetailedHTMLProps<ButtonHTMLAttributes<HTMLButtonElement>, HTMLButtonElement> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/10-componentprops-button.tsx"
+    },
+    "order": null
+  }
 }

@@ -14,5 +14,16 @@
     ],
     "alias": "Small"
   },
-  "text": "Size.Small | undefined"
+  "text": "Size.Small | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/22-enum-member-type.tsx"
+    },
+    "order": null
+  }
 }

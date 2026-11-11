@@ -21,5 +21,33 @@
     ],
     "alias": "Key"
   },
-  "text": "Key | undefined"
+  "text": "Key | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/29-key.tsx"
+    },
+    "order": [
+      {
+        "k": "prim",
+        "name": "string"
+      },
+      {
+        "k": "prim",
+        "name": "number"
+      },
+      {
+        "k": "prim",
+        "name": "bigint"
+      },
+      {
+        "k": "prim",
+        "name": "never"
+      }
+    ]
+  }
 }

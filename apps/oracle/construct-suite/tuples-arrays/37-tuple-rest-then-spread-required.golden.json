@@ -25,5 +25,16 @@
       }
     ]
   },
-  "text": "[...number[], string, boolean] | undefined"
+  "text": "[...number[], string, boolean] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/37-tuple-rest-then-spread-required.tsx"
+    },
+    "order": null
+  }
 }

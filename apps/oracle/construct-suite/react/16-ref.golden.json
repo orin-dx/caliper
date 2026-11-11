@@ -55,5 +55,16 @@
       }
     ]
   },
-  "text": "Ref<HTMLDivElement> | undefined"
+  "text": "Ref<HTMLDivElement> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/16-ref.tsx"
+    },
+    "order": null
+  }
 }

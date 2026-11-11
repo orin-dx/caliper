@@ -26,5 +26,16 @@
       }
     ]
   },
-  "text": "string | number | boolean | undefined"
+  "text": "string | number | boolean | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/20-indexed-access-keyof.tsx"
+    },
+    "order": null
+  }
 }

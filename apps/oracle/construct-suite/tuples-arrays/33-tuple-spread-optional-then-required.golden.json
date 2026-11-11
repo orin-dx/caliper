@@ -30,5 +30,16 @@
       }
     ]
   },
-  "text": "[string | undefined, number] | undefined"
+  "text": "[string | undefined, number] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/33-tuple-spread-optional-then-required.tsx"
+    },
+    "order": null
+  }
 }

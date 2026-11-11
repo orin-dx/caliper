@@ -23,5 +23,32 @@
       }
     ]
   },
-  "text": "\"lg\" | \"md\" | \"sm\" | undefined"
+  "text": "\"lg\" | \"md\" | \"sm\" | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/02-string-union.tsx"
+    },
+    "order": [
+      {
+        "k": "lit",
+        "value": "sm",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "md",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "lg",
+        "of": "string"
+      }
+    ]
+  }
 }

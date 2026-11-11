@@ -18,5 +18,16 @@
     ],
     "alias": "Getters"
   },
-  "text": "Getters<Base> | undefined"
+  "text": "Getters<Base> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/27-mapped-as-clause.tsx"
+    },
+    "order": null
+  }
 }

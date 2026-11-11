@@ -302,5 +302,16 @@
     ],
     "alias": "Omit"
   },
-  "text": "Omit<Omit<DetailedHTMLProps<AnchorHTMLAttributes<HTMLAnchorElement>, HTMLAnchorElement>, \"ref\">, \"href\"> | undefined"
+  "text": "Omit<Omit<DetailedHTMLProps<AnchorHTMLAttributes<HTMLAnchorElement>, HTMLAnchorElement>, \"ref\">, \"href\"> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/13-componentpropswithoutref.tsx"
+    },
+    "order": null
+  }
 }

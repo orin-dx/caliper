@@ -70,6 +70,9 @@ for (const row of checkerRows.filter((r) => green(r) && !r.structural.every((v) 
   console.log(`  ${row.id}: ${row.verdict} (structural: ${row.structural.join('/')})`)
 }
 console.log('')
+console.log('Rows whose facts differ from the golden (description, tags, default, required, parent, member order):')
+for (const row of rows.filter((r) => r.facts.length > 0)) console.log(`  ${row.id}: ${row.facts.join(', ')}`)
+console.log('')
 console.log('Rows that kept their structural result (no checker verdict):')
 for (const row of structuralRows) console.log(`  ${row.id}: ${row.verdict}`)
 

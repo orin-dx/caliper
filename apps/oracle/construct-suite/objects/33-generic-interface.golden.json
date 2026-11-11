@@ -18,5 +18,16 @@
     ],
     "alias": "Box"
   },
-  "text": "Box<number> | undefined"
+  "text": "Box<number> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/33-generic-interface.tsx"
+    },
+    "order": null
+  }
 }

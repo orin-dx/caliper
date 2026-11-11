@@ -18,5 +18,16 @@
     ],
     "alias": "StringBox"
   },
-  "text": "StringBox | undefined"
+  "text": "StringBox | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/13-alias-instantiation.tsx"
+    },
+    "order": null
+  }
 }

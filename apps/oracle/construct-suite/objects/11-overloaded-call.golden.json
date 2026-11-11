@@ -25,5 +25,16 @@
       }
     ]
   },
-  "text": "{ (value: string): string; (value: number): number; } | undefined"
+  "text": "{ (value: string): string; (value: number): number; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/11-overloaded-call.tsx"
+    },
+    "order": null
+  }
 }

@@ -16,5 +16,16 @@
       }
     ]
   },
-  "text": "{ id: string; n: number; } | undefined"
+  "text": "{ id: string; n: number; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/11-returntype.tsx"
+    },
+    "order": null
+  }
 }

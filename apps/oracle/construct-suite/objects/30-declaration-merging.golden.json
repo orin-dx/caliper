@@ -18,5 +18,16 @@
     ],
     "alias": "Merged"
   },
-  "text": "Merged | undefined"
+  "text": "Merged | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/30-declaration-merging.tsx"
+    },
+    "order": null
+  }
 }

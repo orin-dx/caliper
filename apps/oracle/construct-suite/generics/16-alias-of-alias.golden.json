@@ -18,5 +18,16 @@
     ],
     "alias": "StringNumber"
   },
-  "text": "StringNumber | undefined"
+  "text": "StringNumber | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/16-alias-of-alias.tsx"
+    },
+    "order": null
+  }
 }

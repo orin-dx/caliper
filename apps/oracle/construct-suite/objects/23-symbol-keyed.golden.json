@@ -16,5 +16,16 @@
       }
     ]
   },
-  "text": "{ [tag]: string; name: string; } | undefined"
+  "text": "{ [tag]: string; name: string; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/23-symbol-keyed.tsx"
+    },
+    "order": null
+  }
 }

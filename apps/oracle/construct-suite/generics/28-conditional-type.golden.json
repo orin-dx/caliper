@@ -13,5 +13,16 @@
       }
     ]
   },
-  "text": "\"text\" | undefined"
+  "text": "\"text\" | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/28-conditional-type.tsx"
+    },
+    "order": null
+  }
 }

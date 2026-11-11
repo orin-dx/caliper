@@ -63,5 +63,16 @@
     ],
     "alias": "MouseEventHandler"
   },
-  "text": "MouseEventHandler<HTMLButtonElement> | undefined"
+  "text": "MouseEventHandler<HTMLButtonElement> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/22-mouse-event-handler.tsx"
+    },
+    "order": null
+  }
 }

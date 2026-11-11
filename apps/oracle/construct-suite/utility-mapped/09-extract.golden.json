@@ -16,5 +16,16 @@
       }
     ]
   },
-  "text": "string | number | undefined"
+  "text": "string | number | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/09-extract.tsx"
+    },
+    "order": null
+  }
 }

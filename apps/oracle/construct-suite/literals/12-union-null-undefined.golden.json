@@ -22,5 +22,35 @@
       }
     ]
   },
-  "text": "\"off\" | \"on\" | null | undefined"
+  "text": "\"off\" | \"on\" | null | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "literals/12-union-null-undefined.tsx"
+    },
+    "order": [
+      {
+        "k": "lit",
+        "value": "on",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "off",
+        "of": "string"
+      },
+      {
+        "k": "prim",
+        "name": "null"
+      },
+      {
+        "k": "prim",
+        "name": "undefined"
+      }
+    ]
+  }
 }

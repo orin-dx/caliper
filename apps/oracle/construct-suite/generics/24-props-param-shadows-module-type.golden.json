@@ -12,5 +12,16 @@
       }
     ]
   },
-  "text": "number | undefined"
+  "text": "number | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/24-props-param-shadows-module-type.tsx"
+    },
+    "order": null
+  }
 }

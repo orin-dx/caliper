@@ -25,5 +25,16 @@
       }
     ]
   },
-  "text": "((value: T) => void) | undefined"
+  "text": "((value: T) => void) | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/05-callback-param.tsx"
+    },
+    "order": null
+  }
 }

@@ -19,5 +19,16 @@
     ],
     "alias": "Kind"
   },
-  "text": "Kind | undefined"
+  "text": "Kind | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/20-declare-enum.tsx"
+    },
+    "order": null
+  }
 }

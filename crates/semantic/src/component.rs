@@ -8,15 +8,23 @@ use caliper_docgen_core::types::semantic::{PropInterner, SemanticProp};
 
 use crate::Target;
 use crate::convert::{Converter, declared_in, without_undefined};
+use crate::declared::Asked;
 use crate::instantiate::{self, Instantiation};
 use crate::rpc::{CallError, Rpc, SignatureKind, SymbolInfo, TypeInfo, flag};
 
 pub(crate) enum Answer {
-    Props(Vec<Arc<SemanticProp>>),
+    Props(Props),
     /// The component keeps its structural result, for this reason.
     Fallback(String),
     /// A generic component, whose props are read from an instantiation of it ([`crate::instantiate`]).
     Instantiate(Instantiation),
+}
+
+/// What the checker says about one component's props type.
+pub(crate) struct Props {
+    pub(crate) props: Vec<Arc<SemanticProp>>,
+    /// See [`caliper_docgen_core::types::semantic::SemanticComponent::composes`].
+    pub(crate) composes: Vec<String>,
 }
 
 /// What `@types/react` declares (`key`, `ref`, `children` on `PropsWithChildren`, HTML attributes). Reported with the
@@ -132,7 +140,7 @@ pub(crate) async fn props_of_type(
     interner: &PropInterner,
     props_type: &TypeInfo,
     target: &Target,
-) -> Result<Result<Vec<Arc<SemanticProp>>, String>, CallError> {
+) -> Result<Result<Props, String>, CallError> {
     if props_type.flags & (flag::ANY | flag::UNKNOWN | flag::UNION | flag::TYPE_PARAMETER) != 0 {
         return Ok(Err("props type is any, unknown, generic or a union".to_string()));
     }
@@ -150,24 +158,35 @@ pub(crate) async fn props_of_type(
     let types = if references.is_empty() { Vec::new() } else { rpc.types_of_symbols(&references).await? };
 
     let converted = converter.convert_roots(&types).await?;
+    // React's own descriptions and tags are the structural pass's to give, and its props are most of a component's.
+    let asked: Vec<Asked<'_>> = own
+        .iter()
+        .map(|property| {
+            let react_declared = is_react_declared(property);
+            Asked {
+                property,
+                description: !react_declared && !target.described.contains(&property.name),
+                tags: !react_declared,
+            }
+        })
+        .collect();
+    let declared = converter.declared(&asked).await?;
     let mut props = Vec::with_capacity(own.len());
-    for (property, prop_type) in own.iter().zip(converted) {
+    for ((property, prop_type), declared) in own.iter().zip(converted).zip(declared) {
         let required = property.flags & flag::SYMBOL_OPTIONAL == 0;
-        let react_declared = is_react_declared(property);
         props.push(interner.share(SemanticProp {
             name: property.name.clone(),
             prop_type: without_undefined(prop_type, !required),
             required,
-            react_declared,
-            // React's own descriptions are the structural pass's to give, and fetching one per attribute is a call each.
-            description: if react_declared || target.described.contains(&property.name) {
-                String::new()
-            } else {
-                rpc.documentation(&property.reference).await?
-            },
+            description: declared.description,
+            tags: declared.tags,
+            parent: declared.parent,
+            declarations: declared.declarations,
+            react_declared: is_react_declared(property),
         }));
     }
-    Ok(Ok(props))
+    let composes = converter.composes(props_type).await?;
+    Ok(Ok(Props { props, composes }))
 }
 
 #[cfg(test)]
@@ -180,6 +199,7 @@ mod tests {
             name: "x".to_string(),
             flags: 4,
             declarations: vec![declaration.to_string()],
+            parent: None,
         }
     }
 

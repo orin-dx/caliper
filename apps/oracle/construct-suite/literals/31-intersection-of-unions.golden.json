@@ -18,5 +18,16 @@
       }
     ]
   },
-  "text": "\"b\" | \"c\" | undefined"
+  "text": "\"b\" | \"c\" | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/31-intersection-of-unions.tsx"
+    },
+    "order": null
+  }
 }

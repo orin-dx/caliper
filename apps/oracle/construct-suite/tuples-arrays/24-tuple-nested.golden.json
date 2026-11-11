@@ -39,5 +39,16 @@
       }
     ]
   },
-  "text": "[[number, number], [number, number]] | undefined"
+  "text": "[[number, number], [number, number]] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/24-tuple-nested.tsx"
+    },
+    "order": null
+  }
 }

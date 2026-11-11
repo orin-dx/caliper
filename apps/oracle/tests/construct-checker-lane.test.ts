@@ -42,6 +42,7 @@ const row = (id: string, verdict: LaneRun['rows'][number]['verdict'], answered =
   type: undefined,
   degradedBy: undefined,
   golden: '',
+  facts: [],
 })
 
 describe('the checker lane expectations', () => {
@@ -74,6 +75,33 @@ describe('the checker lane expectations', () => {
     expect(failures).toHaveLength(2)
     expect(failures[0]).toContain('a/01-green: the checker path allows less precise, worse than')
     expect(failures[1]).toContain('a/04-gap: "improvement" is listed, but the checker path is not ranked below')
+  })
+
+  it('fail a checker row that may state a fact differently where the structural path states it right', () => {
+    expect.hasAssertions()
+    const structural = {
+      'a/01-green': { verdicts: ['identical', 'spelled'] },
+      'a/02-green': { verdicts: ['identical', 'spelled'], facts: { order: 'kept as a literal union' } },
+    } satisfies Parameters<typeof againstStructural>[0]
+    const checker = {
+      'a/01-green': { verdicts: ['identical', 'spelled'], facts: { parent: 'not supplied' } },
+      'a/02-green': { verdicts: ['identical', 'spelled'], facts: { order: 'sorted' } },
+    } satisfies Parameters<typeof againstStructural>[1]
+    expect(againstStructural(structural, checker)).toStrictEqual([
+      'a/01-green: the checker path may state parent differently, where the structural path states it right',
+    ])
+  })
+
+  it('fail a run with a row whose facts differ from the golden unless its expectation lists them', () => {
+    expect.hasAssertions()
+    const rows = {
+      'a/01-green': { verdicts: ['identical', 'spelled'] },
+    } satisfies Parameters<typeof laneFailures>[1]['rows']
+    const run: LaneRun = { elapsedMs: 0, rows: [{ ...row('a/01-green', 'identical'), facts: ['tags', 'parent'] }] }
+    expect(laneFailures(run, { rows })).toStrictEqual([
+      'a/01-green: tags differs from the golden (a regression, or list it under "facts" with the reason)',
+      'a/01-green: parent differs from the golden (a regression, or list it under "facts" with the reason)',
+    ])
   })
 
   it('fail a run with a row better or worse than allowed, or one the checker did not answer for', () => {

@@ -18,5 +18,16 @@
     ],
     "alias": "Derived"
   },
-  "text": "Derived | undefined"
+  "text": "Derived | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/28-extends-override.tsx"
+    },
+    "order": null
+  }
 }

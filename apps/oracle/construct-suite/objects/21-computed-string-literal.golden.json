@@ -16,5 +16,16 @@
       }
     ]
   },
-  "text": "{ \"a-b\": string; c?: number | undefined; } | undefined"
+  "text": "{ \"a-b\": string; c?: number | undefined; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/21-computed-string-literal.tsx"
+    },
+    "order": null
+  }
 }

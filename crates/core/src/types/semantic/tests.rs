@@ -57,11 +57,14 @@ fn semantic_prop(name: &str, description: &str, required: bool) -> Arc<SemanticP
         required,
         description: description.to_string(),
         react_declared: false,
+        tags: Default::default(),
+        parent: None,
+        declarations: Vec::new(),
     })
 }
 
 fn button(props: Vec<Arc<SemanticProp>>) -> SemanticComponent {
-    SemanticComponent { key: "Button".to_string(), props }
+    SemanticComponent { key: "Button".to_string(), props, composes: Vec::new() }
 }
 
 #[test]
@@ -82,7 +85,7 @@ fn the_checker_decides_which_props_exist_their_type_and_whether_they_are_require
 }
 
 #[test]
-fn a_description_is_the_checkers_else_the_structural_one_and_the_default_and_parent_stay_structural() {
+fn a_description_is_the_checkers_else_the_structural_one_and_the_default_stays_structural() {
     let mut out = output();
     let outcome = SemanticOutcome {
         components: vec![button(vec![semantic_prop("label", "", true), semantic_prop("size", "Checker size.", true)])],
@@ -96,7 +99,88 @@ fn a_description_is_the_checkers_else_the_structural_one_and_the_default_and_par
     assert_eq!(props["size"].description, "Checker size.");
     assert_eq!(props["size"].default_value, Some(DefaultValue { value: "\"sm\"".to_string(), computed: false }));
     assert!(!props["size"].required, "a default value makes the prop optional");
-    assert_eq!(props["label"].parent.as_ref().map(|p| p.name.as_str()), Some("Props"));
+}
+
+fn declared(name: &str, parent: Option<&str>, tags: &[(&str, &str)]) -> Arc<SemanticProp> {
+    let parent = parent.map(|parent| PropParent { name: parent.to_string(), file_name: "/src/Base.ts".to_string() });
+    Arc::new(SemanticProp {
+        tags: tags.iter().map(|(name, text)| (name.to_string(), text.to_string())).collect(),
+        declarations: parent.iter().cloned().collect(),
+        parent,
+        ..(*semantic_prop(name, "", true)).clone()
+    })
+}
+
+#[test]
+fn parent_and_declarations_are_the_checkers_even_where_it_names_none() {
+    let mut out = output();
+    let outcome = SemanticOutcome {
+        components: vec![button(vec![declared("label", Some("BaseProps"), &[]), declared("size", None, &[])])],
+        ..Default::default()
+    };
+
+    merge_semantic(&mut out, outcome);
+
+    let props = &out.components["Button"].props;
+    let base = PropParent { name: "BaseProps".to_string(), file_name: "/src/Base.ts".to_string() };
+    assert_eq!(props["label"].parent, Some(base.clone()));
+    assert_eq!(props["label"].declarations, [base]);
+    // The structural pass named `Props` for `size`; the checker found it in a type literal, which has no name.
+    assert_eq!(props["size"].parent, None);
+    assert_eq!(props["size"].declarations, []);
+}
+
+#[test]
+fn tags_are_the_checkers_else_the_structural_ones() {
+    let mut out = output();
+    let tagged = |name: &str, tags: &[(&str, &str)]| {
+        Arc::new(ParsedProp::new(
+            name.to_string(),
+            PropType::Any,
+            true,
+            None,
+            String::new(),
+            tags.iter().map(|(name, text)| (name.to_string(), text.to_string())).collect(),
+            None,
+            vec![],
+        ))
+    };
+    let props = &mut out.components.get_mut("Button").unwrap().props;
+    props.insert("label".to_string(), tagged("label", &[("since", "1.0")]));
+    props.insert("size".to_string(), tagged("size", &[("since", "1.0")]));
+    let outcome = SemanticOutcome {
+        components: vec![button(vec![
+            declared("label", None, &[("deprecated", "use tone")]),
+            declared("size", None, &[]),
+        ])],
+        ..Default::default()
+    };
+
+    merge_semantic(&mut out, outcome);
+
+    let props = &out.components["Button"].props;
+    let tags = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+        pairs.iter().map(|(name, text)| (name.to_string(), text.to_string())).collect()
+    };
+    assert_eq!(props["label"].tags, tags(&[("deprecated", "use tone")]));
+    assert_eq!(props["size"].tags, tags(&[("since", "1.0")]));
+}
+
+#[test]
+fn composes_is_the_checkers_in_the_whole_project_merge_and_in_a_session_merge() {
+    let mut out = output();
+    out.components.get_mut("Button").unwrap().composes = vec!["AriaLabelingProps".to_string()];
+    let mut answered = button(vec![semantic_prop("label", "", true)]);
+    answered.composes = vec!["RefAttributes".to_string()];
+
+    merge_semantic(&mut out, SemanticOutcome { components: vec![answered.clone()], ..Default::default() });
+    assert_eq!(out.components["Button"].composes, ["RefAttributes"]);
+
+    let mut session = output();
+    let entry = session.components.get_mut("Button").unwrap();
+    entry.composes = vec!["AriaLabelingProps".to_string()];
+    merge_semantic_props(entry, answered.props.iter(), &answered.composes, &mut FxHashMap::default());
+    assert_eq!(entry.composes, ["RefAttributes"]);
 }
 
 fn typed(name: &str, prop_type: PropType) -> Arc<SemanticProp> {
@@ -106,6 +190,9 @@ fn typed(name: &str, prop_type: PropType) -> Arc<SemanticProp> {
         required: false,
         description: String::new(),
         react_declared: false,
+        tags: Default::default(),
+        parent: None,
+        declarations: Vec::new(),
     })
 }
 
@@ -174,7 +261,7 @@ fn a_session_merge_counts_the_props_that_kept_their_structural_type() {
     let entry = out.components.get_mut("Button").unwrap();
     let answer = [typed("label", unresolved_type("Missing")), typed("size", PropType::String)];
 
-    let merged = merge_semantic_props(entry, answer.iter(), &mut FxHashMap::default());
+    let merged = merge_semantic_props(entry, answer.iter(), &[], &mut FxHashMap::default());
 
     assert_eq!(merged, MergedProps { kept: 1, unread: 1 });
     assert_eq!(entry.props["label"].prop_type, PropType::Any);
@@ -254,6 +341,9 @@ fn identical_props_are_shared_between_components_and_a_different_one_is_not() {
         required: true,
         description: String::new(),
         react_declared: false,
+        tags: Default::default(),
+        parent: None,
+        declarations: Vec::new(),
     });
     let b = interner.share(SemanticProp {
         name: "x".into(),
@@ -261,6 +351,9 @@ fn identical_props_are_shared_between_components_and_a_different_one_is_not() {
         required: true,
         description: String::new(),
         react_declared: false,
+        tags: Default::default(),
+        parent: None,
+        declarations: Vec::new(),
     });
     let c = interner.share(SemanticProp {
         name: "x".into(),
@@ -268,6 +361,9 @@ fn identical_props_are_shared_between_components_and_a_different_one_is_not() {
         required: true,
         description: String::new(),
         react_declared: false,
+        tags: Default::default(),
+        parent: None,
+        declarations: Vec::new(),
     });
 
     assert!(Arc::ptr_eq(&a, &b));
@@ -277,7 +373,11 @@ fn identical_props_are_shared_between_components_and_a_different_one_is_not() {
 #[test]
 fn merged_props_that_come_out_equal_are_one_allocation() {
     let mut out = output();
-    let card = SemanticComponent { key: "Card".to_string(), props: vec![semantic_prop("tone", "", true)] };
+    let card = SemanticComponent {
+        key: "Card".to_string(),
+        props: vec![semantic_prop("tone", "", true)],
+        composes: Vec::new(),
+    };
     let tone_on_button = button(vec![semantic_prop("tone", "", true)]);
 
     merge_semantic(&mut out, SemanticOutcome { components: vec![tone_on_button, card], ..Default::default() });
@@ -295,7 +395,11 @@ fn an_answer_merges_into_the_entry_its_key_names_not_the_first_with_the_same_fil
     out.components.insert("Card~2".to_string(), twin);
     let before = out.components["Card"].clone();
 
-    let answer = SemanticComponent { key: "Card~2".to_string(), props: vec![semantic_prop("tone", "", true)] };
+    let answer = SemanticComponent {
+        key: "Card~2".to_string(),
+        props: vec![semantic_prop("tone", "", true)],
+        composes: Vec::new(),
+    };
     let fallback = SemanticFallback { key: "Card".to_string(), reason: "why".to_string() };
     merge_semantic(
         &mut out,

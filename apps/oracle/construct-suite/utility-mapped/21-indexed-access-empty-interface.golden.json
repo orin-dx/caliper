@@ -3,5 +3,16 @@
     "k": "prim",
     "name": "undefined"
   },
-  "text": "undefined"
+  "text": "undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/21-indexed-access-empty-interface.tsx"
+    },
+    "order": null
+  }
 }

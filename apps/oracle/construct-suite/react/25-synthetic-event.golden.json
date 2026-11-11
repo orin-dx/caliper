@@ -62,5 +62,16 @@
       }
     ]
   },
-  "text": "((event: SyntheticEvent<HTMLFormElement, Event>, reason: \"reset\" | \"submit\") => void) | undefined"
+  "text": "((event: SyntheticEvent<HTMLFormElement, Event>, reason: \"reset\" | \"submit\") => void) | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/25-synthetic-event.tsx"
+    },
+    "order": null
+  }
 }

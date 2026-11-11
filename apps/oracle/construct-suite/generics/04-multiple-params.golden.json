@@ -15,5 +15,16 @@
     ],
     "alias": "Record"
   },
-  "text": "Record<K, V> | undefined"
+  "text": "Record<K, V> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/04-multiple-params.tsx"
+    },
+    "order": null
+  }
 }

@@ -15,5 +15,16 @@
       }
     ]
   },
-  "text": "{ readonly size: number; } | undefined"
+  "text": "{ readonly size: number; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/20-accessor-get-only.tsx"
+    },
+    "order": null
+  }
 }

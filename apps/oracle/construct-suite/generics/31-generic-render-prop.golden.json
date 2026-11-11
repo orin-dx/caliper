@@ -73,5 +73,16 @@
       }
     ]
   },
-  "text": "((item: T) => ReactNode) | undefined"
+  "text": "((item: T) => ReactNode) | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/31-generic-render-prop.tsx"
+    },
+    "order": null
+  }
 }

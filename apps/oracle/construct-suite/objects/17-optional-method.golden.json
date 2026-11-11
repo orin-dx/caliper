@@ -15,5 +15,16 @@
       }
     ]
   },
-  "text": "{ onClose?(reason: string): void; } | undefined"
+  "text": "{ onClose?(reason: string): void; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/17-optional-method.tsx"
+    },
+    "order": null
+  }
 }

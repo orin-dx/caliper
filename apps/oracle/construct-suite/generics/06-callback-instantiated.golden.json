@@ -33,5 +33,16 @@
       }
     ]
   },
-  "text": "((value: string, index: number) => boolean) | undefined"
+  "text": "((value: string, index: number) => boolean) | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/06-callback-instantiated.tsx"
+    },
+    "order": null
+  }
 }

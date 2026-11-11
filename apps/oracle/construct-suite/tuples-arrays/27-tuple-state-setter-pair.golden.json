@@ -34,5 +34,16 @@
       }
     ]
   },
-  "text": "[value: string, setValue: (next: string) => void] | undefined"
+  "text": "[value: string, setValue: (next: string) => void] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/27-tuple-state-setter-pair.tsx"
+    },
+    "order": null
+  }
 }

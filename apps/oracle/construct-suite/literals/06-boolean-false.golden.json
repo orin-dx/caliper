@@ -4,5 +4,16 @@
     "value": "false",
     "of": "boolean"
   },
-  "text": "false"
+  "text": "false",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "literals/06-boolean-false.tsx"
+    },
+    "order": null
+  }
 }

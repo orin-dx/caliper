@@ -21,5 +21,16 @@
     ],
     "alias": "Array"
   },
-  "text": "{ label: string; value: number; }[] | undefined"
+  "text": "{ label: string; value: number; }[] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/10-array-of-objects.tsx"
+    },
+    "order": null
+  }
 }

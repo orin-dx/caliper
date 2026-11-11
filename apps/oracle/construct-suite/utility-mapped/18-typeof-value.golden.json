@@ -16,5 +16,16 @@
       }
     ]
   },
-  "text": "{ size: \"md\" | \"sm\"; count: number; } | undefined"
+  "text": "{ size: \"md\" | \"sm\"; count: number; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/18-typeof-value.tsx"
+    },
+    "order": null
+  }
 }

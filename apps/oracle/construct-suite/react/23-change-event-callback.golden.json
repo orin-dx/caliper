@@ -43,5 +43,16 @@
       }
     ]
   },
-  "text": "((event: ChangeEvent<HTMLInputElement, Element>) => void) | undefined"
+  "text": "((event: ChangeEvent<HTMLInputElement, Element>) => void) | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/23-change-event-callback.tsx"
+    },
+    "order": null
+  }
 }

@@ -4,5 +4,16 @@
     "value": "tabs",
     "of": "string"
   },
-  "text": "\"tabs\""
+  "text": "\"tabs\"",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "TabsProps",
+      "file": "exports/05-attached-to-named.tsx"
+    },
+    "order": null
+  }
 }

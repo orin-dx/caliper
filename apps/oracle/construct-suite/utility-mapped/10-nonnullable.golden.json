@@ -12,5 +12,16 @@
       }
     ]
   },
-  "text": "string | undefined"
+  "text": "string | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/10-nonnullable.tsx"
+    },
+    "order": null
+  }
 }

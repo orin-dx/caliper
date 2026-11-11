@@ -23,5 +23,16 @@
       }
     ]
   },
-  "text": "keyof Base | undefined"
+  "text": "keyof Base | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/16-keyof.tsx"
+    },
+    "order": null
+  }
 }
