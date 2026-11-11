@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_015Y7KVJMHJ1yxfRdCicj8Nm",
+  "agent_id": "a44502eebb7437769",
+  "subagent_type": "general-purpose",
+  "task_description": "ADR 0027 part 2: exports in JSON, oracle and addon",
+  "started_at": "2026-11-10T20:49:51.435083-08:00"
+}
