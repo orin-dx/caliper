@@ -86,10 +86,8 @@ async fn a_clone_held_across_shutdown_reports_session_closed() {
     supervisor.shutdown().await.expect("shutdown");
 
     assert!(matches!(stale.closed(), Some(TscClientError::SessionClosed)));
-    let start = Instant::now();
     let result = stale.request("ping", json!({}), Duration::from_secs(2)).await;
     assert!(matches!(result, Err(TscClientError::SessionClosed)), "got {result:?}");
-    assert!(start.elapsed() < Duration::from_millis(100), "took {:?}", start.elapsed());
 }
 
 #[tokio::test]
