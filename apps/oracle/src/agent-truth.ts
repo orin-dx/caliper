@@ -45,7 +45,7 @@ const { options } = api.parseConfigFile(args.tsconfig)
 const program = api.createProgram(files, options)
 const { checker } = program.getProject()
 
-const without = (type: any) => checker.getNonNullableType(type)
+const without = (type: any): any => checker.getNonNullableType(type)
 
 /** What a reader of one prop's type could say about it, from the checker's type and not from its text. */
 function kindOf(type: any): string {
@@ -84,7 +84,7 @@ function answer(q: Question): Truth {
   if (exported) {
     // A checker failure propagates to the caller's `the checker failed` fact instead of reading as no props.
     const propsType = propsTypeOf(checker, exported)
-    props = propsType ? checker.getPropertiesOfType(propsType) : []
+    props = propsType ? [...checker.getPropertiesOfType(propsType)] : []
   }
   if (q.kind === 'present') return { value: props.length > 0 }
   if (props.length === 0) return { invalid: `the checker finds no component ${q.component} in ${q.file}` }

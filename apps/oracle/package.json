@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json",
+    "vocabulary": "node src/write-vocabulary.ts",
     "construct:capture": "tsx src/construct-capture.ts",
     "construct:check": "tsx src/construct-capture.ts --check",
     "construct:checker": "tsx src/construct-checker-lane.ts",

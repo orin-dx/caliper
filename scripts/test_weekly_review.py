@@ -198,7 +198,7 @@ class RecallIsNotComparedAcrossReferences(unittest.TestCase):
         oracle = {'tools': {}, **({'universe_version': version} if version else {})}
         return {'caliper': {'ms': 100, 'rss_mib': 100}, 'oracle': oracle, 'recall': {'caliper': {}},
                 'headline': {'components': 1, 'props': 2000, 'correct': 1900, 'less_precise': 0, 'wrong': wrong,
-                             'no_checker_type': 0, 'missing': 0, 'named_only': 0}, **extra}
+                             'no_checker_type': 0, 'not_judged': 0, 'missing': 0, 'named_only': 0}, **extra}
 
     def test_a_rise_in_wrong_types_is_not_read_against_another_universe(self):
         now = {'corpora': {'antd': self.universe(2, 1)}}
@@ -208,12 +208,20 @@ class RecallIsNotComparedAcrossReferences(unittest.TestCase):
         self.assertEqual(len(weekly.findings(now, again)), 1)
 
     def test_the_pairing_by_export_is_universe_version_3_and_is_not_compared_with_2(self):
-        self.assertEqual(weekly.UNIVERSE_VERSION, 3)
         now = {'corpora': {'antd': self.universe(3, 1)}}
         before = {'corpora': {'antd': self.universe(2, 0)}}
         self.assertEqual(weekly.findings(now, before), [])
         self.assertEqual(weekly.changes(now, before), [
             "antd: the oracle's universe is version 3 now and was version 2 last week, so its props, agreement and wrong "
+            "types are not compared with last week's"])
+
+    def test_scoring_an_unjudged_prop_apart_is_universe_version_4_and_is_not_compared_with_3(self):
+        self.assertEqual(weekly.UNIVERSE_VERSION, 4)
+        now = {'corpora': {'antd': self.universe(4, 1)}}
+        before = {'corpora': {'antd': self.universe(3, 0)}}
+        self.assertEqual(weekly.findings(now, before), [])
+        self.assertEqual(weekly.changes(now, before), [
+            "antd: the oracle's universe is version 4 now and was version 3 last week, so its props, agreement and wrong "
             "types are not compared with last week's"])
 
     def test_the_summary_says_the_universe_changed(self):

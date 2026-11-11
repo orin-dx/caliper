@@ -38,7 +38,7 @@ describe('universeRecorder', () => {
   let file: string
   const prop = (name: string) => ({ name, declarations: [{ path: file }] })
   const checker = { getTypeOfSymbol: (symbols: unknown[]) => symbols.map(() => ({})) }
-  const counts = { identical: 0, spelled: 0, 'less precise': 0, wrong: 0, 'checker any/error': 0 }
+  const counts = { identical: 0, spelled: 0, 'less precise': 0, wrong: 0, 'checker any/error': 0, 'not judged': 0 }
 
   beforeAll(() => {
     dir = realpathSync(mkdtempSync(join(tmpdir(), 'tool-universe-')))

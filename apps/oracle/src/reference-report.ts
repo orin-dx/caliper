@@ -1,7 +1,8 @@
 // What the independent reference reports: one row per judged prop, counted per corpus, and the contested props written
 // out for a person to settle. Pure.
 import type { Abstention } from './reference-declared.ts'
-import { OUTCOMES, type Basis, type Outcome } from './reference-judge.ts'
+import type { Basis } from './reference-judge.ts'
+import { OUTCOMES, type Outcome } from './vocabulary.ts'
 import type { Origin, Stratum } from './reference-sample.ts'
 
 export interface Row {

@@ -6,7 +6,9 @@ import { relative } from 'node:path'
 import { layerMembers } from './canonical.ts'
 import { caliperNorm } from './caliper-norm.ts'
 import { SHAPE_REASONS, type ShapeReason } from './component-shape.ts'
-import { VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'
+import type { Norm } from './oracle-compare.ts'
+import { isDependency } from './path-class.ts'
+import { VERDICTS, type Verdict } from './vocabulary.ts'
 import { rdgNorm, rdtNorm } from './tool-norm.ts'
 import {
   scoreReported,
@@ -81,7 +83,7 @@ interface Match {
 function stratumOf(p: any, file: string): Stratum {
   const path = p.declarations?.[0]?.path
   if (!path) return 'unknown'
-  if (String(path).includes('/node_modules/')) return 'dependency'
+  if (isDependency(String(path))) return 'dependency'
   return pathKey(String(path)) === pathKey(realpathSync(file)) ? 'same_file' : 'other_project_file'
 }
 

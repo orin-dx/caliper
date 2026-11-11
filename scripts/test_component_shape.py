@@ -1,12 +1,13 @@
 """Tests that the weekly's `exclusion` and the oracle's `nonComponentReason` (apps/oracle/src/component-shape.ts) are one
-rule: both read apps/oracle/src/component-shape.json, and both run the cases of
-apps/oracle/tests/fixtures/component-shape-cases.json (apps/oracle/tests/component-shape.test.ts is the other half)."""
+rule: both read apps/oracle/src/component-shape.json (and the path classes of path-classes.json), and both run the cases
+of apps/oracle/tests/fixtures/component-shape-cases.json (apps/oracle/tests/component-shape.test.ts is the other half)."""
 import json
 import os
 import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import oracle_data
 import weekly
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -31,8 +32,11 @@ class SharedRules(unittest.TestCase):
         with open(os.path.join(ORACLE, 'src', 'component-shape.ts')) as f:
             source = f.read()
         self.assertIn("new URL('component-shape.json', import.meta.url)", source)
-        self.assertEqual(weekly.SHAPE['libFile'], weekly.LIB_FILE.pattern)
-        self.assertEqual(weekly.SHAPE['hook'], weekly.HOOK.pattern)
+        self.assertEqual(oracle_data.SHAPE['hook'], weekly.HOOK.pattern)
+        self.assertEqual(oracle_data.SHAPE['promiseType'], weekly.PROMISE_TYPE.pattern)
+
+    def test_the_patterns_file_holds_no_path_rule_the_path_classes_own(self):
+        self.assertEqual(set(oracle_data.SHAPE), {'hook', 'contextValueProps', 'promiseType'})
 
 
 if __name__ == '__main__':

@@ -1,0 +1,5 @@
+{
+  "dependency": "(?:^|/)node_modules/",
+  "reactTypes": "(?:^|/)node_modules/@types/react/",
+  "libFile": "/typescript(?:-[a-z0-9-]+)?/lib/lib\\.[^/]*\\.d\\.ts$"
+}
