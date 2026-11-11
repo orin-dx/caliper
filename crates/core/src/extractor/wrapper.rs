@@ -106,9 +106,7 @@ fn component_argument_evidence(
         Expression::StaticMemberExpression(m) if is_component_reference(m.property.name.as_str()) => {
             Ok(ArgumentEvidence::Sufficient)
         }
-        Expression::CallExpression(inner)
-            if react.is_react_wrapper(inner) || super::component::is_component_wrapper_call(inner) =>
-        {
+        Expression::CallExpression(inner) if super::component::is_component_wrapper(react, inner) => {
             Ok(ArgumentEvidence::Sufficient)
         }
         _ => Err("is given an argument that is not a render function, a tag or a component reference"),
@@ -249,7 +247,9 @@ impl<'src> SourceDataCollector<'src> {
         let (tagged, others): (Vec<_>, Vec<_>) =
             pending_wrappers.into_iter().zip(shared_tags).partition(|(pending, _)| pending.tag.is_some());
         for (pending, shared_tag) in others.into_iter().chain(tagged) {
-            if self.data.component_mappings.iter().any(|m| m.is_binding_named(&pending.name)) {
+            // The anonymous default export is no binding of its name, so a binding of that name is no reason to skip it.
+            let bound = self.anonymous_default != Some(pending.span.start);
+            if bound && self.data.component_mappings.iter().any(|m| m.is_binding_named(&pending.name)) {
                 continue;
             }
             if let Some(tag) = &pending.tag {
@@ -323,6 +323,9 @@ impl<'src> SourceDataCollector<'src> {
             .with_doc(pending.description, pending.tags);
             if let Some(callee) = pending.callee {
                 mapping = mapping.with_wrapper_callee(callee);
+            }
+            if !bound {
+                mapping = mapping.without_binding();
             }
             self.data.component_mappings.push(mapping);
         }

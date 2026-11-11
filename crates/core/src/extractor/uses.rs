@@ -22,13 +22,14 @@ pub(crate) struct NameUses {
 }
 
 /// Which component an export or attachment is of. A named component is the module's binding of that name. An inline
-/// sub-component (`Parent.Sub = (props: P) => …`) is no binding, and `A.Item = …` beside `B.Item = …` gives two
-/// mappings one name, so only where its function starts tells them apart, and from a binding of the same name.
+/// sub-component (`Parent.Sub = (props: P) => …`) and an anonymous default export are no binding, and `A.Item = …`
+/// beside `B.Item = …`, or a default export named after its file beside a binding of that name, give two mappings one
+/// name, so only where the function starts tells them apart, and from a binding of the same name.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Subject {
     /// The module's binding of this name.
     Local(CompactString),
-    /// The inline function that starts at this offset: the `span_start` of its mapping.
+    /// The function that starts at this offset: the `span_start` of its mapping.
     Inline(u32),
 }
 
@@ -37,12 +38,9 @@ impl Subject {
         Self::Local(CompactString::from(name))
     }
 
-    /// The component a mapping is: an inline sub-component by where it starts, any other by its name.
+    /// The component a mapping is: one with no binding by where it starts, any other by its name.
     pub(super) fn of(mapping: &crate::types::ComponentMapping) -> Self {
-        match mapping.rule {
-            crate::types::DetectionRule::AttachedSubComponent => Self::Inline(mapping.span_start),
-            _ => Self::local(mapping.component_name.as_str()),
-        }
+        if mapping.bound { Self::local(mapping.component_name.as_str()) } else { Self::Inline(mapping.span_start) }
     }
 }
 
@@ -58,13 +56,6 @@ pub(crate) struct Attachment {
     /// The property it is attached under; `None` when it is the parent itself under another name
     /// (`const Parent = Object.assign(Root, { Sub })` makes `Parent` the same object as `Root`).
     property: Option<CompactString>,
-}
-
-/// Whether the call is `Object.assign(...)`.
-pub(super) fn is_object_assign_call(call: &CallExpression<'_>) -> bool {
-    matches!(&call.callee, Expression::StaticMemberExpression(callee)
-        if callee.property.name == "assign"
-            && matches!(&callee.object, Expression::Identifier(object) if object.name == "Object"))
 }
 
 impl<'src> SourceDataCollector<'src> {
@@ -85,6 +76,33 @@ impl<'src> SourceDataCollector<'src> {
         }
     }
 
+    /// The local component a default export's call wraps: `React.forwardRef(Inner) as T`, `memo(forwardRef(Card))` and
+    /// `Object.assign(Root, { Item })` give `Inner`, `Card` and `Root`. `None` for a call that is no component alias, or
+    /// whose argument is no name.
+    pub(super) fn component_wrapped_by(&self, expression: &Expression<'_>) -> Option<CompactString> {
+        let Expression::CallExpression(call) = super::component::peel_expr(expression) else { return None };
+        if !super::component::is_component_alias_call(self, call) {
+            return None;
+        }
+        let first = super::component::aliased_component(call)?;
+        match first {
+            Expression::Identifier(id) => Some(CompactString::from(id.name.as_str())),
+            _ => self.component_wrapped_by(first),
+        }
+    }
+
+    /// An anonymous default export is named after its file. When another component of the file has that name, it is
+    /// `Name (default)`, so the two have names and output keys of their own whatever the order they are written in.
+    pub(super) fn name_the_anonymous_default(&mut self) {
+        let Some(start) = self.anonymous_default else { return };
+        let mappings = &mut self.data.component_mappings;
+        let Some(at) = mappings.iter().position(|m| !m.bound && m.span_start == start) else { return };
+        let name = mappings[at].component_name.clone();
+        if mappings.iter().enumerate().any(|(index, m)| index != at && m.component_name == name) {
+            mappings[at].component_name = format!("{name} (default)");
+        }
+    }
+
     /// `Parent.property = Sub` or `Object.assign(Parent, { property: Sub })`.
     pub(super) fn record_attached(&mut self, sub: Subject, parent: &str, property: &str) {
         self.attached_to.push(Attachment {
@@ -94,10 +112,11 @@ impl<'src> SourceDataCollector<'src> {
         });
     }
 
-    /// `const Parent = Object.assign(Root, { Sub })`: `Parent` is the root under another name, with `Sub` attached.
+    /// `const Parent = Object.assign(Root, { Sub })`, or the default export of one with `Root` as `parent`: `Parent` is
+    /// the root under another name, with `Sub` attached.
     pub(super) fn record_object_assign_declarator(&mut self, parent: &str, init: Option<&Expression<'_>>) {
         let Some(Expression::CallExpression(call)) = init.map(super::component::peel_expr) else { return };
-        if !is_object_assign_call(call) {
+        if !super::component::is_object_assign_call(call) {
             return;
         }
         for argument in &call.arguments {
@@ -149,6 +168,9 @@ impl<'src> SourceDataCollector<'src> {
                 (Subject::local(local), names.iter().map(|name| ComponentExport::named(name.as_str())).collect())
             })
             .collect();
+        if let Some(start) = self.anonymous_default {
+            exports.insert(Subject::Inline(start), vec![ComponentExport::named("default")]);
+        }
         loop {
             let mut reached = ComponentExports::default();
             for Attachment { sub, parent, property } in &self.attached_to {
@@ -178,8 +200,7 @@ impl<'src> SourceDataCollector<'src> {
         if let Expression::Identifier(callee) = super::component::peel_expr(&call.callee) {
             self.uses_of(callee.name.as_str()).calls += 1;
         }
-        let renders_argument = super::evidence::Scope::is_react_wrapper(&*self, call)
-            || super::component::is_component_wrapper_call(call)
+        let renders_argument = super::component::is_component_wrapper(&*self, call)
             || super::evidence::is_element_factory_callee(super::component::peel_expr(&call.callee), &*self);
         if renders_argument && let Some(Argument::Identifier(component)) = call.arguments.first() {
             self.uses_of(component.name.as_str()).rendered += 1;

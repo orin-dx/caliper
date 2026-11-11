@@ -1,8 +1,6 @@
-import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import type * as Napi from 'caliper-docgen-napi'
 import type { Diagnostic, IncrementalUpdate, RdtComponentDoc, SessionIndex } from 'caliper-docgen-napi'
-import { wrappedDefaultOf } from './exports.js'
 import { Fill } from './fill.js'
 import { toNapiOptions, type SessionOptions } from './options.js'
 import {
@@ -222,18 +220,14 @@ export class DocgenSession {
   }
 
   /**
-   * `keyOf`, else for a default export no component has, the local a call wraps in the source (`export default
-   * React.forwardRef(Inner) as T`), else the component named as the story named its default import (`importedAs`).
+   * `keyOf`, else for a default export no component has, the component named as the story named its default import
+   * (`importedAs`).
    */
-  async resolveExport(path: string, exportName: string, importedAs?: string): Promise<string | undefined> {
+  resolveExport(path: string, exportName: string, importedAs?: string): string | undefined {
     const key = this.keyOf(path, exportName)
-    if (key || exportName !== 'default') return key
+    if (key || exportName !== 'default' || importedAs === undefined) return key
     const inFile = this.lookups().byFile.get(resolve(path))
-    if (!inFile) return undefined
-    const named = (name: string | undefined) =>
-      only(inFile.filter((each) => name !== undefined && this.components.get(each)?.displayName === name))
-    const source = await readFile(resolve(path), 'utf8').catch(() => '')
-    return named(wrappedDefaultOf(source)) ?? named(importedAs)
+    return only(inFile?.filter((each) => this.components.get(each)?.displayName === importedAs))
   }
 
   /** The key of `namespace.property` (`Select.Option`): attached to the export in `near`, else by display name beside it. */

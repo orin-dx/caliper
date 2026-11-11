@@ -27,6 +27,15 @@ fn config_schema_rejects_unknown_fields() {
 }
 
 #[test]
+fn the_config_help_lists_exactly_the_keys_the_schema_accepts() {
+    let err = serde_json::from_str::<DocgenConfigSchema>(r#"{ "noSuchKey": 1 }"#).unwrap_err().to_string();
+    let listed = err.split("expected one of ").nth(1).expect("serde lists the fields");
+    let listed = listed.split(" at line").next().expect("split yields a first part");
+    let accepted: std::collections::BTreeSet<&str> = listed.split(", ").map(|key| key.trim_matches('`')).collect();
+    assert_eq!(accepted, CONFIG_KEYS.into_iter().collect());
+}
+
+#[test]
 fn config_schema_rejects_options_that_were_removed_for_doing_nothing() {
     // These were accepted and ignored before; a config still naming one must now say so instead of looking honored.
     for key in

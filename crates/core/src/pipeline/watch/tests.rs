@@ -358,6 +358,29 @@ fn ensure_fresh_before_initialize_reports_every_component() {
     assert_matches_cold(&session);
 }
 
+#[test]
+fn a_file_created_in_a_folder_an_exclude_list_keeps_is_noticed() {
+    let (_tmp, widget, mut options) = widget_project("export function Widget(props: { w: string }) { return null; }\n");
+    options.exclude_patterns = ["*", "!*/", "!*.tsx"].map(String::from).to_vec();
+    let ui = widget.with_file_name("ui");
+    std::fs::create_dir(&ui).unwrap();
+    std::fs::write(ui.join("Button.tsx"), "export function Button(props: { b: string }) { return null; }\n").unwrap();
+    let watched = WatchSession::new(options.clone());
+    let _ignored = watched.initialize();
+    let polled = fresh_session(&options);
+    assert_eq!(polled.snapshot().components.keys().collect::<Vec<_>>(), ["Button", "Widget"]);
+
+    let created = ui.join("New.tsx");
+    std::fs::write(&created, "export function New(props: { n: string }) { return null; }\n").unwrap();
+    let expected = watched.update_file(&created);
+    let update = polled.ensure_fresh();
+
+    assert_eq!(expected.updated_keys, ["New"]);
+    assert_eq!(delta(&update), delta(&expected));
+    assert_eq!(polled.snapshot().components.keys().collect::<Vec<_>>(), ["Button", "New", "Widget"]);
+    assert_matches_cold(&polled);
+}
+
 const BROKEN: &str = "export const = ;\n";
 const FIXED: &str = "export function Widget() { return null; }\n";
 
