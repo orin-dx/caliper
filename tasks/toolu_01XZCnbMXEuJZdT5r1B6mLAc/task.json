@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01XZCnbMXEuJZdT5r1B6mLAc",
+  "agent_id": "a10c9b5a677c8e347",
+  "subagent_type": "general-purpose",
+  "task_description": "Wait for checker on empty structural; join in-flight requests",
+  "token_usage": {
+    "input_tokens": 310,
+    "cache_creation_tokens": 354747,
+    "cache_read_tokens": 39243757,
+    "output_tokens": 130193,
+    "api_call_count": 153
+  },
+  "started_at": "2026-11-11T13:34:48.834933-08:00",
+  "completed_at": "2026-11-11T14:18:01.212523-08:00"
+}
