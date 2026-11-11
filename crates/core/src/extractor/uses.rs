@@ -1,12 +1,13 @@
 //! How each name is used and exported in its file. A function that only looks like a component is not reported as one:
 //! a helper that is only ever called (`IndexedAccess(type)`), or a render callback that takes a ref and is never
-//! rendered (`{render: TableDropIndicatorWrapper}`). Every component records whether its module exports it.
+//! rendered (`{render: TableDropIndicatorWrapper}`). Every component records how its module exports it.
 
 use compact_str::CompactString;
 use oxc_ast::ast::*;
 use oxc_span::Span;
+use rustc_hash::FxHashMap;
 
-use crate::types::DiagnosticCode;
+use crate::types::{ComponentExport, DiagnosticCode};
 
 use super::SourceDataCollector;
 
@@ -18,6 +19,45 @@ pub(crate) struct NameUses {
     calls: u32,
     /// References that render it: a JSX tag, or the first argument of `createElement` or a component wrapper.
     rendered: u32,
+}
+
+/// Which component an export or attachment is of. A named component is the module's binding of that name. An inline
+/// sub-component (`Parent.Sub = (props: P) => …`) is no binding, and `A.Item = …` beside `B.Item = …` gives two
+/// mappings one name, so only where its function starts tells them apart, and from a binding of the same name.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum Subject {
+    /// The module's binding of this name.
+    Local(CompactString),
+    /// The inline function that starts at this offset: the `span_start` of its mapping.
+    Inline(u32),
+}
+
+impl Subject {
+    pub(super) fn local(name: &str) -> Self {
+        Self::Local(CompactString::from(name))
+    }
+
+    /// The component a mapping is: an inline sub-component by where it starts, any other by its name.
+    pub(super) fn of(mapping: &crate::types::ComponentMapping) -> Self {
+        match mapping.rule {
+            crate::types::DetectionRule::AttachedSubComponent => Self::Inline(mapping.span_start),
+            _ => Self::local(mapping.component_name.as_str()),
+        }
+    }
+}
+
+/// How the module exports each of its components.
+pub(crate) type ComponentExports = FxHashMap<Subject, Vec<ComponentExport>>;
+
+/// A component attached to another: `Parent.Sub = Sub`, `Object.assign(Parent, { Sub })`.
+pub(crate) struct Attachment {
+    /// The attached component.
+    sub: Subject,
+    /// The local name of the component it is attached to.
+    parent: CompactString,
+    /// The property it is attached under; `None` when it is the parent itself under another name
+    /// (`const Parent = Object.assign(Root, { Sub })` makes `Parent` the same object as `Root`).
+    property: Option<CompactString>,
 }
 
 /// Whether the call is `Object.assign(...)`.
@@ -36,14 +76,22 @@ impl<'src> SourceDataCollector<'src> {
         self.uses_of(reference.name.as_str()).references += 1;
     }
 
-    /// A local name the module exports (`export function Name`, `export { Name as Other }`, `export default Name`).
-    pub(super) fn record_exported_local(&mut self, name: &str) {
-        self.exported_locals.insert(CompactString::from(name));
+    /// A local name the module exports, and the name it exports it under (`export function Name` is `Name` under
+    /// `Name`, `export { Name as Other }` under `Other`, `export default Name` under `default`).
+    pub(super) fn record_exported_local(&mut self, local: &str, exported: &str) {
+        let names = self.exported_locals.entry(CompactString::from(local)).or_default();
+        if !names.iter().any(|name| name == exported) {
+            names.push(CompactString::from(exported));
+        }
     }
 
-    /// `Parent.Sub = Sub` or `Object.assign(Parent, { Sub: Sub })`.
-    pub(super) fn record_attached(&mut self, sub: &str, parent: &str) {
-        self.attached_to.push((CompactString::from(sub), CompactString::from(parent)));
+    /// `Parent.property = Sub` or `Object.assign(Parent, { property: Sub })`.
+    pub(super) fn record_attached(&mut self, sub: Subject, parent: &str, property: &str) {
+        self.attached_to.push(Attachment {
+            sub,
+            parent: CompactString::from(parent),
+            property: Some(CompactString::from(property)),
+        });
     }
 
     /// `const Parent = Object.assign(Root, { Sub })`: `Parent` is the root under another name, with `Sub` attached.
@@ -54,12 +102,21 @@ impl<'src> SourceDataCollector<'src> {
         }
         for argument in &call.arguments {
             match argument.as_expression().map(super::component::peel_expr) {
-                Some(Expression::Identifier(root)) => self.record_attached(root.name.as_str(), parent),
+                Some(Expression::Identifier(root)) => self.attached_to.push(Attachment {
+                    sub: Subject::local(root.name.as_str()),
+                    parent: CompactString::from(parent),
+                    property: None,
+                }),
                 Some(Expression::ObjectExpression(object)) => {
                     for property in &object.properties {
                         let ObjectPropertyKind::ObjectProperty(property) = property else { continue };
+                        let Some(key) = property.key.static_name() else { continue };
                         if let Expression::Identifier(sub) = super::component::peel_expr(&property.value) {
-                            self.record_attached(sub.name.as_str(), parent);
+                            self.record_attached(
+                                Subject::local(sub.name.as_str()),
+                                parent,
+                                &super::js_text::property_name(&key),
+                            );
                         }
                     }
                 }
@@ -77,23 +134,43 @@ impl<'src> SourceDataCollector<'src> {
         else {
             return;
         };
-        self.record_attached(sub.name.as_str(), parent.name.as_str());
+        self.record_attached(Subject::local(sub.name.as_str()), parent.name.as_str(), target.property.name.as_str());
     }
 
-    /// The names of the file's exported components: the exported locals, and any component attached to an exported
-    /// one, transitively.
-    pub(super) fn exported_components(&self) -> rustc_hash::FxHashSet<CompactString> {
-        let mut exported = self.exported_locals.clone();
+    /// How the module exports each of its exported components: the exported locals under their export names, and any
+    /// component attached to an exported one through the parent's exports, transitively. A component keeps the paths of
+    /// the first round that reaches it, so attachments that form a cycle end. A parent is always a binding; a component
+    /// is a [`Subject`], so an inline sub-component gets the paths of its own attachments and no other's.
+    pub(super) fn component_exports(&self) -> ComponentExports {
+        let mut exports: ComponentExports = self
+            .exported_locals
+            .iter()
+            .map(|(local, names)| {
+                (Subject::local(local), names.iter().map(|name| ComponentExport::named(name.as_str())).collect())
+            })
+            .collect();
         loop {
-            let before = exported.len();
-            for (sub, parent) in &self.attached_to {
-                if exported.contains(parent) {
-                    exported.insert(sub.clone());
+            let mut reached = ComponentExports::default();
+            for Attachment { sub, parent, property } in &self.attached_to {
+                if exports.contains_key(sub) {
+                    continue;
+                }
+                let Some(through) = exports.get(&Subject::Local(parent.clone())) else { continue };
+                let paths = reached.entry(sub.clone()).or_default();
+                for export in through {
+                    let path = match property {
+                        Some(property) => export.member(property.as_str()),
+                        None => export.clone(),
+                    };
+                    if !paths.contains(&path) {
+                        paths.push(path);
+                    }
                 }
             }
-            if exported.len() == before {
-                return exported;
+            if reached.is_empty() {
+                return exports;
             }
+            exports.extend(reached);
         }
     }
 
@@ -117,11 +194,13 @@ impl<'src> SourceDataCollector<'src> {
 
     /// Drop the component candidates that are not exported and are used only as functions: every reference is a call,
     /// or they take a second parameter (a ref) and are never rendered. Each is reported as a skipped candidate.
-    pub(super) fn drop_functions_used_only_as_functions(&mut self, exported: &rustc_hash::FxHashSet<CompactString>) {
+    pub(super) fn drop_functions_used_only_as_functions(&mut self, exported: &ComponentExports) {
         let mut dropped: Vec<(String, String, Span)> = Vec::new();
         for mapping in &self.data.component_mappings {
             let name = mapping.component_name.as_str();
-            if exported.contains(name) {
+            // An inline sub-component is no binding, so no use of a name is a use of it.
+            let subject = Subject::of(mapping);
+            if matches!(subject, Subject::Inline(_)) || exported.contains_key(&subject) {
                 continue;
             }
             let uses = self.name_uses.get(name).copied().unwrap_or_default();
@@ -136,7 +215,7 @@ impl<'src> SourceDataCollector<'src> {
             dropped.push((name.to_owned(), reason.to_owned(), Span::new(mapping.span_start, mapping.span_end)));
         }
         for (name, reason, span) in dropped {
-            self.data.component_mappings.retain(|m| m.component_name != name);
+            self.data.component_mappings.retain(|m| m.component_name != name || m.span_start != span.start);
             self.record_skip(DiagnosticCode::SkippedCandidate, format!("'{name}' {reason}, not a component"), span);
         }
     }

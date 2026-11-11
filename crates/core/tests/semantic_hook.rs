@@ -12,7 +12,7 @@ use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, WatchSes
 use caliper_docgen_core::types::semantic::{
     SemanticComponent, SemanticOutcome, SemanticProp, SemanticProvider, SemanticTarget, SourceChange,
 };
-use caliper_docgen_core::types::{DiagnosticCode, DiagnosticSeverity, PropType};
+use caliper_docgen_core::types::{ComponentExport, DiagnosticCode, DiagnosticSeverity, PropType};
 use camino::Utf8PathBuf;
 
 const BUTTON: &str = "export function Button(props: { label: string }) { return null; }";
@@ -60,8 +60,7 @@ fn finds_size(target: &SemanticTarget) -> SemanticOutcome {
     };
     SemanticOutcome {
         components: vec![SemanticComponent {
-            file_path: target.file_path.clone(),
-            display_name: target.display_name.clone(),
+            key: target.key.clone(),
             props: vec![
                 prop("label", PropType::String),
                 prop(
@@ -88,8 +87,7 @@ fn reports_react_props(target: &SemanticTarget) -> SemanticOutcome {
     };
     SemanticOutcome {
         components: vec![SemanticComponent {
-            file_path: target.file_path.clone(),
-            display_name: target.display_name.clone(),
+            key: target.key.clone(),
             props: vec![
                 prop("label", PropType::String, false),
                 prop("children", PropType::String, true),
@@ -170,8 +168,7 @@ fn a_checker_that_answers_in_time_replaces_the_structural_props_and_says_so() {
 fn cannot_read_label(target: &SemanticTarget) -> SemanticOutcome {
     SemanticOutcome {
         components: vec![SemanticComponent {
-            file_path: target.file_path.clone(),
-            display_name: target.display_name.clone(),
+            key: target.key.clone(),
             props: vec![Arc::new(SemanticProp {
                 name: "label".to_string(),
                 prop_type: caliper_docgen_core::types::semantic::unresolved_type("Label"),
@@ -388,8 +385,7 @@ fn types_file_outcome(target: &SemanticTarget, text: &str) -> SemanticOutcome {
     let version = format!("v{}", names.len());
     SemanticOutcome {
         components: vec![SemanticComponent {
-            file_path: target.file_path.clone(),
-            display_name: target.display_name.clone(),
+            key: target.key.clone(),
             props: names
                 .into_iter()
                 .map(|name| {
@@ -476,9 +472,10 @@ fn an_answer_that_arrives_after_an_edit_is_not_kept_for_the_edited_project() {
     session.update_file(&types);
     // The answer to the question asked before the edit: it describes `types.ts` as it was.
     let target = SemanticTarget {
+        key: "Button".to_string(),
         file_path: project.root.join("Button.tsx"),
         display_name: "Button".to_string(),
-        exported: true,
+        exports: vec![ComponentExport::named("Button")],
         described: Default::default(),
         react_wanted: None,
     };
@@ -510,8 +507,7 @@ fn answers_every_prop(target: &SemanticTarget) -> SemanticOutcome {
     };
     SemanticOutcome {
         components: vec![SemanticComponent {
-            file_path: target.file_path.clone(),
-            display_name: target.display_name.clone(),
+            key: target.key.clone(),
             props: vec![prop("label", PropType::String), prop("item", PropType::StringLiteral("a".into()))],
         }],
         ..SemanticOutcome::default()
@@ -558,8 +554,7 @@ fn label_size_and_class_name(target: &SemanticTarget) -> SemanticOutcome {
     };
     SemanticOutcome {
         components: vec![SemanticComponent {
-            file_path: target.file_path.clone(),
-            display_name: target.display_name.clone(),
+            key: target.key.clone(),
             props: vec![
                 prop("label", PropType::StringLiteral("ok".into()), false),
                 prop("size", PropType::Number, false),
@@ -579,9 +574,10 @@ fn the_whole_project_merge_and_the_session_merge_agree_on_every_prop_the_checker
 
     let mut batch = caliper_docgen_core::extract(&options);
     let target = SemanticTarget {
+        key: "Button".to_string(),
         file_path: batch.components["Button"].file_path.clone(),
         display_name: "Button".to_string(),
-        exported: true,
+        exports: batch.components["Button"].exports.clone(),
         described: Default::default(),
         react_wanted: None,
     };
@@ -711,8 +707,7 @@ fn warns_of_an_unannounced_edit(target: &SemanticTarget) -> SemanticOutcome {
 fn keeps_structural_props_for_a_generic_component(target: &SemanticTarget) -> SemanticOutcome {
     SemanticOutcome {
         fallbacks: vec![caliper_docgen_core::types::semantic::SemanticFallback {
-            file_path: target.file_path.clone(),
-            display_name: target.display_name.clone(),
+            key: target.key.clone(),
             reason: "the instantiation Button<\"a\"> could not be formed: Cannot find name 'Settings'.".to_string(),
         }],
         ..SemanticOutcome::default()
@@ -786,4 +781,94 @@ fn a_late_fallback_reason_is_reported_by_the_request_that_finds_it() {
 
     let served = messages(&session, "Button");
     assert!(served.iter().any(|message| message.contains("could not be formed")), "{served:?}");
+}
+
+const MENU: &str = "export interface MenuProps { open: boolean; label: string }
+export interface ItemProps { value: number }
+function Item(props: ItemProps) { return null; }
+function Menu(props: MenuProps) { return null; }
+Menu.Item = Item;
+export default Menu;";
+
+/// Records every target it is asked about and never answers.
+struct Recorder(std::sync::Mutex<Vec<SemanticTarget>>);
+
+impl SemanticProvider for Recorder {
+    fn request(&self, targets: Vec<SemanticTarget>) -> Receiver<SemanticOutcome> {
+        self.0.lock().unwrap().extend(targets);
+        channel().1
+    }
+}
+
+/// A session asks the checker for a component by its key and by how its module exports it, never by its name alone:
+/// `Item` is reached through `Menu`, the module's default export, and nothing exports it as `Item`.
+#[test]
+fn a_session_asks_for_a_component_by_its_key_and_its_exports_eager_or_lazy() {
+    let project = project(&[("Menu.tsx", MENU)]);
+    for lazy in [false, true] {
+        let options = PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() };
+        let recorder = Arc::new(Recorder(std::sync::Mutex::new(Vec::new())));
+        let session = if lazy { WatchSession::lazy(options) } else { WatchSession::new(options) }
+            .with_semantic(recorder.clone(), Duration::from_millis(1));
+        drop(session.initialize());
+        drop(session.component("Item"));
+        drop(session.component("Menu"));
+
+        let asked: Vec<(String, String, Vec<String>)> = recorder
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|t| (t.key.clone(), t.display_name.clone(), t.exports.iter().map(ToString::to_string).collect()))
+            .collect();
+        assert_eq!(
+            asked,
+            [
+                ("Item".to_string(), "Item".to_string(), vec!["default.Item".to_string()]),
+                ("Menu".to_string(), "Menu".to_string(), vec!["default".to_string()]),
+            ],
+            "lazy: {lazy}"
+        );
+    }
+}
+
+/// An outcome that answers for `Menu`, and gives `Menu` a fallback reason, whatever was asked.
+fn answers_for_menu(_: &SemanticTarget) -> SemanticOutcome {
+    SemanticOutcome {
+        components: vec![SemanticComponent {
+            key: "Menu".to_string(),
+            props: vec![Arc::new(SemanticProp {
+                name: "label".to_string(),
+                prop_type: PropType::String,
+                required: true,
+                description: String::new(),
+                react_declared: false,
+            })],
+        }],
+        fallbacks: vec![caliper_docgen_core::types::semantic::SemanticFallback {
+            key: "Menu".to_string(),
+            reason: "about Menu".to_string(),
+        }],
+        diagnostics: vec![],
+    }
+}
+
+/// `Item` and `Menu` share a file; what the checker says about `Menu` is not `Item`'s, whether it comes in time, late,
+/// or from the cache.
+#[test]
+fn an_answer_for_another_component_of_the_same_file_is_not_merged() {
+    let project = project(&[("Menu.tsx", MENU)]);
+    let structural = structural_session(&project, HtmlAttributeMode::Full).component("Item").unwrap().entry;
+    let in_time = session(&project, Fake::new(Duration::ZERO, answers_for_menu), Duration::from_secs(5));
+    let late = session(&project, Fake::new(Duration::from_millis(200), answers_for_menu), Duration::from_millis(10));
+    drop(late.component("Item"));
+    std::thread::sleep(Duration::from_millis(700));
+
+    for (path, session) in [("in time", &in_time), ("late", &late), ("cached", &in_time)] {
+        let item = session.component("Item").unwrap();
+        assert_eq!(item.entry, structural, "{path}");
+        let checker: Vec<&String> =
+            item.diagnostics.iter().filter(|d| d.code == DiagnosticCode::SemanticBackend).map(|d| &d.message).collect();
+        assert_eq!(checker, Vec::<&String>::new(), "{path}");
+    }
 }

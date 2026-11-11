@@ -1,10 +1,10 @@
 // Writes (or, with --check, verifies) the golden files of the deterministic construct suite: for every fixture under
-// construct-suite/, the type TypeScript 7.1's checker gives prop `p` of the exported `Row`, normalized as src/oracle.ts
-// normalizes it. One program holds all fixtures.
+// construct-suite/, the type TypeScript 7.1's checker gives prop `p` of each row's component (the exported `Row`, or
+// the components a fixture lists), normalized as src/oracle.ts normalizes it. One program holds all fixtures.
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { API } from 'typescript-beta/sync'
-import { exportName, propsTypeOf } from './checker-components.ts'
+import { exportAt, propsTypeOf } from './checker-components.ts'
 import { listFixtures, PROP, type Fixture, type Golden } from './construct-suite.ts'
 import { checkerNormalizer } from './oracle-checker.ts'
 
@@ -17,21 +17,17 @@ if (fixtures.length === 0) throw new Error(`no fixtures under ${suite}`)
 const api = new API({ cwd: suite })
 // `parseConfigFile`, not options by hand: the 7.1 beta's server panics on string-valued enum options (src/oracle.ts).
 const { options } = api.parseConfigFile(join(suite, 'tsconfig.json'))
-const program = api.createProgram(
-  fixtures.map((f) => f.file),
-  options,
-)
+const program = api.createProgram([...new Set(fixtures.map((f) => f.file))], options)
 const { checker } = program.getProject()
 const norm = checkerNormalizer(checker)
 
 function capture(fixture: Fixture): Golden {
   const moduleSymbol = checker.getSymbolOfSourceFile(fixture.file)
-  const exported =
-    moduleSymbol && checker.getExportsOfModule(moduleSymbol).find((e: any) => exportName(checker, e) === 'Row')
-  if (!exported) throw new Error(`${fixture.id}: no exported Row`)
+  const exported = moduleSymbol && exportAt(checker, moduleSymbol, fixture.exportPath)
+  if (!exported) throw new Error(`${fixture.id}: no export ${fixture.exportPath.join('.')}`)
   const propsType = propsTypeOf(checker, exported)
   const prop = propsType && checker.getPropertyOfType(propsType, PROP)
-  if (!prop) throw new Error(`${fixture.id}: Row has no prop ${PROP}`)
+  if (!prop) throw new Error(`${fixture.id}: ${fixture.component} has no prop ${PROP}`)
   const type = checker.getTypeOfSymbol(prop)
   return { checker: norm(type), text: checker.typeToString(type) }
 }

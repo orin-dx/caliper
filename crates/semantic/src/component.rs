@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use caliper_docgen_core::types::ComponentExport;
 use caliper_docgen_core::types::semantic::{PropInterner, SemanticProp};
 
 use crate::Target;
@@ -24,45 +25,85 @@ fn is_react_declared(property: &SymbolInfo) -> bool {
     property.declarations.iter().any(|declaration| declared_in(declaration).contains("/@types/react/"))
 }
 
-/// The export names a component may have. A display name is not always the export: Mantine sets
-/// `displayName = "@mantine/core/Accordion"` on the export `Accordion`, and a static one reads `Menu.Item`.
-fn candidate_names(display_name: &str) -> Vec<&str> {
-    let mut names = vec![display_name];
-    for separator in ['/', '.'] {
-        if let Some((_, last)) = display_name.rsplit_once(separator)
-            && !last.is_empty()
-            && !names.contains(&last)
-        {
-            names.push(last);
-        }
-    }
-    names
-}
-
 fn fallback(reason: &str) -> Result<Answer, CallError> {
     Ok(Answer::Fallback(reason.to_string()))
+}
+
+/// A module as the checker reads it: its own symbol, whose declaration names its file in the checker's spelling, and
+/// its exports.
+pub(crate) struct Module {
+    pub(crate) symbol: SymbolInfo,
+    pub(crate) exports: Vec<SymbolInfo>,
+}
+
+impl Module {
+    /// Whether one of `symbol`'s declarations is in this module's file.
+    fn declares(&self, symbol: &SymbolInfo) -> bool {
+        let files: Vec<&str> = self.symbol.declarations.iter().map(|declaration| declared_in(declaration)).collect();
+        symbol.declarations.iter().any(|declaration| files.contains(&declared_in(declaration)))
+    }
+}
+
+/// The symbol `export` names in `module`: the export of exactly that name, through an alias to what it aliases, then
+/// each property an attached sub-component is reached through. `Err` says why there is none, or why it is not the
+/// component the extractor found: one declared in another file.
+async fn exported_symbol(
+    rpc: &Rpc,
+    module: &Module,
+    export: &ComponentExport,
+) -> Result<Result<SymbolInfo, String>, CallError> {
+    let Some(symbol) = module.exports.iter().find(|symbol| symbol.name == export.name) else {
+        return Ok(Err(format!("the checker finds no export `{}` in its module", export.name)));
+    };
+    let mut symbol = if symbol.flags & flag::SYMBOL_ALIAS != 0 {
+        rpc.aliased_symbol(&symbol.reference).await?
+    } else {
+        symbol.clone()
+    };
+    for member in &export.members {
+        let parent = rpc.type_of_symbol(&symbol.reference).await?;
+        let Some(property) = rpc.properties(parent.id).await?.into_iter().find(|property| property.name == *member)
+        else {
+            return Ok(Err(format!("the checker finds no property `{member}` on the export `{}`", export.name)));
+        };
+        symbol = property;
+    }
+    if !module.declares(&symbol) {
+        return Ok(Err(format!("the export `{export}` is declared in another file")));
+    }
+    Ok(Ok(symbol))
+}
+
+/// The component's symbol: the first export the extractor recorded for it that the checker finds. Never another
+/// export, such as the module's `default` when `default` is not one of them.
+async fn component_symbol(
+    rpc: &Rpc,
+    module: &Module,
+    target: &Target,
+) -> Result<Result<(SymbolInfo, ComponentExport), String>, CallError> {
+    let mut reasons = Vec::new();
+    for export in &target.exports {
+        match exported_symbol(rpc, module, export).await? {
+            Ok(symbol) => return Ok(Ok((symbol, export.clone()))),
+            Err(reason) => reasons.push(reason),
+        }
+    }
+    Ok(Err(if reasons.is_empty() { "not exported by its module".to_string() } else { reasons.join("; ") }))
 }
 
 pub(crate) async fn props_of(
     rpc: &Rpc,
     converter: &Converter,
     interner: &PropInterner,
-    exports: &[SymbolInfo],
+    module: &Module,
     target: &Target,
 ) -> Result<Answer, CallError> {
-    let display_name = target.display_name.as_str();
-    let export = candidate_names(display_name)
-        .into_iter()
-        .find_map(|name| exports.iter().find(|symbol| symbol.name == name))
-        .or_else(|| exports.iter().find(|symbol| symbol.name == "default"));
-    let Some(export) = export else { return fallback("not found among the module's exports") };
+    let (symbol, export) = match component_symbol(rpc, module, target).await? {
+        Ok(found) => found,
+        Err(reason) => return Ok(Answer::Fallback(reason)),
+    };
 
-    let mut reference = export.reference.clone();
-    if export.flags & flag::SYMBOL_ALIAS != 0 {
-        reference = rpc.aliased_symbol(&reference).await?.reference;
-    }
-
-    let component = rpc.type_of_symbol(&reference).await?;
+    let component = rpc.type_of_symbol(&symbol.reference).await?;
     let signatures = rpc.signatures(component.id, SignatureKind::Call).await?;
     let [signature] = signatures.as_slice() else {
         return fallback(if signatures.is_empty() {
@@ -74,7 +115,10 @@ pub(crate) async fn props_of(
     let parameters = rpc.parameters(signature.id).await?;
     let Some(first) = parameters.first() else { return fallback("takes no props parameter") };
     if let Some(arguments) = instantiate::default_arguments(rpc, signature).await? {
-        return Ok(Answer::Instantiate(Instantiation { export: export.name.clone(), arguments }));
+        if !export.members.is_empty() {
+            return fallback("a generic sub-component reached through its parent's property is not instantiated");
+        }
+        return Ok(Answer::Instantiate(Instantiation { export: export.name, arguments }));
     }
 
     let props_type = rpc.type_of_symbol(&first.reference).await?;
@@ -146,13 +190,6 @@ mod tests {
             "/proj/node_modules/@types/react/index.d.ts"
         );
         assert_eq!(declared_in("garbage"), "");
-    }
-
-    #[test]
-    fn a_display_name_with_a_package_or_namespace_prefix_also_tries_its_last_segment() {
-        assert_eq!(candidate_names("Button"), ["Button"]);
-        assert_eq!(candidate_names("@mantine/core/Accordion"), ["@mantine/core/Accordion", "Accordion"]);
-        assert_eq!(candidate_names("Menu.Item"), ["Menu.Item", "Item"]);
     }
 
     #[test]

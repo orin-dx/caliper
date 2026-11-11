@@ -12,6 +12,7 @@ use rustc_hash::{FxHashMap, FxHasher};
 
 mod order;
 
+use crate::types::collected::ComponentExport;
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use crate::types::output::{
     ComponentEntry, ExtractionOutput, OpaqueDetail, OpaqueReason, ParsedProp, PropType, TRUNCATED_KIND,
@@ -83,13 +84,11 @@ impl PropInterner {
     }
 }
 
-/// One component the checker answered for, found by the file and name the structural pass reported.
+/// One component the checker answered for.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SemanticComponent {
-    /// The file that declares the component, as the structural pass reported it.
-    pub file_path: Utf8PathBuf,
-    /// The component's name, as the structural pass reported it; with `file_path` it identifies the entry to merge into.
-    pub display_name: String,
+    /// The output key of the [`SemanticTarget`] this answers: the entry to merge into.
+    pub key: String,
     /// Declared props in declaration order, with the `@types/react` ones the request asked for.
     pub props: Vec<Arc<SemanticProp>>,
 }
@@ -97,10 +96,8 @@ pub struct SemanticComponent {
 /// A component the backend left to the structural result, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticFallback {
-    /// The file that declares the component.
-    pub file_path: Utf8PathBuf,
-    /// The component's name, as the structural pass reported it.
-    pub display_name: String,
+    /// The output key of the [`SemanticTarget`] this answers.
+    pub key: String,
     /// Why the checker did not answer, for example that the component is not exported by its module. The merge groups
     /// components by this text into one warning.
     pub reason: String,
@@ -121,13 +118,16 @@ pub struct SemanticOutcome {
 /// A component the checker may be asked about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticTarget {
+    /// The component's output key. Its answer, or its fallback, carries it back, and the merge finds the entry by it:
+    /// never by file and display name, which two components can share.
+    pub key: String,
     /// The file that declares the component.
     pub file_path: Utf8PathBuf,
-    /// The component's name, as the structural pass reported it.
+    /// The component's display name, for messages; the checker does not look the component up by it.
     pub display_name: String,
-    /// Whether the module exports the component, by name or as `default`. The checker answers only for exported
-    /// ones and reports the rest as fallbacks.
-    pub exported: bool,
+    /// How the module exports the component ([`ComponentEntry::exports`]): the checker asks for it by exactly these.
+    /// It answers only for exported components and reports the rest as fallbacks.
+    pub exports: Vec<ComponentExport>,
     /// Props the structural pass already has a description for. The checker is not asked for those: it is 65% of
     /// the requests on Mantine, and the merge keeps the structural description when the checker's is empty.
     pub described: rustc_hash::FxHashSet<String>,
@@ -324,19 +324,13 @@ pub fn merge_semantic(output: &mut ExtractionOutput, outcome: SemanticOutcome) {
     let (mut unread_keys, mut unread_props) = (Vec::new(), 0);
     let mut shared: FxHashMap<u64, Vec<Arc<ParsedProp>>> = FxHashMap::default();
     for semantic in components {
-        let Some((key, entry)) = output
-            .components
-            .iter_mut()
-            .find(|(_, entry)| entry.file_path == semantic.file_path && entry.display_name == semantic.display_name)
-        else {
-            continue;
-        };
+        let Some(entry) = output.components.get_mut(&semantic.key) else { continue };
         let unread = apply_semantic_props(entry, &semantic, &mut shared);
         if unread > 0 {
             unread_props += unread;
-            unread_keys.push(key.clone());
+            unread_keys.push(semantic.key.clone());
         }
-        merged_keys.push(key.clone());
+        merged_keys.push(semantic.key);
     }
     output.diagnostics.extend(diagnostics);
 
@@ -367,15 +361,10 @@ pub fn merge_semantic(output: &mut ExtractionOutput, outcome: SemanticOutcome) {
     }
 
     let mut by_reason: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for fallback in fallbacks {
-        let Some((key, _)) = output
-            .components
-            .iter()
-            .find(|(_, entry)| entry.file_path == fallback.file_path && entry.display_name == fallback.display_name)
-        else {
-            continue;
-        };
-        by_reason.entry(fallback.reason).or_default().push(key.clone());
+    for SemanticFallback { key, reason } in fallbacks {
+        if output.components.contains_key(&key) {
+            by_reason.entry(reason).or_default().push(key);
+        }
     }
     for (reason, mut keys) in by_reason {
         keys.sort();

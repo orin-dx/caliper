@@ -13,7 +13,7 @@ use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
 use oxc_parser::{ParseOptions, Parser};
 use oxc_span::{SourceType, Span};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 #[cfg(test)]
 use crate::types::LexedExport;
@@ -302,11 +302,11 @@ pub(super) struct SourceDataCollector<'src> {
     pub(super) name_uses: rustc_hash::FxHashMap<CompactString, uses::NameUses>,
     /// Component candidates declared with a second parameter: a function component takes only props.
     pub(super) takes_a_second_parameter: FxHashSet<CompactString>,
-    /// Local names the module exports, under any exported name (`uses.rs`).
-    pub(super) exported_locals: FxHashSet<CompactString>,
-    /// `(sub-component, parent)` for each component attached to another (`Parent.Sub = Sub`,
-    /// `Object.assign(Parent, { Sub })`): exported when its parent is.
-    pub(super) attached_to: Vec<(CompactString, CompactString)>,
+    /// Local names the module exports, each with the names it exports them under, in source order (`uses.rs`).
+    pub(super) exported_locals: FxHashMap<CompactString, Vec<CompactString>>,
+    /// Each component attached to another (`Parent.Sub = Sub`, `Object.assign(Parent, { Sub })`): exported when its
+    /// parent is, through the parent's property.
+    pub(super) attached_to: Vec<uses::Attachment>,
     /// How many function bodies enclose the node being visited. A component declared inside one exists per call (a
     /// factory's returned component, a story's local helper), so no module imports it under that name.
     pub(super) function_depth: u32,
@@ -361,7 +361,7 @@ impl<'src> SourceDataCollector<'src> {
             argument_declined: false,
             name_uses: Default::default(),
             takes_a_second_parameter: FxHashSet::default(),
-            exported_locals: FxHashSet::default(),
+            exported_locals: FxHashMap::default(),
             attached_to: Vec::new(),
             function_depth: 0,
             ambient_depth: 0,
@@ -612,12 +612,15 @@ impl<'src> SourceDataCollector<'src> {
                 .collect();
             let hidden: FxHashSet<CompactString> =
                 self.aliased_away.iter().filter(|n| !exported.contains(n.as_str())).cloned().collect();
-            self.data.component_mappings.retain(|m| !hidden.contains(m.component_name.as_str()));
+            self.data.component_mappings.retain(|m| match uses::Subject::of(m) {
+                uses::Subject::Local(name) => !hidden.contains(&name),
+                uses::Subject::Inline(_) => true,
+            });
         }
-        let exported = self.exported_components();
-        self.drop_functions_used_only_as_functions(&exported);
+        let exports = self.component_exports();
+        self.drop_functions_used_only_as_functions(&exports);
         for mapping in &mut self.data.component_mappings {
-            mapping.exported = exported.contains(mapping.component_name.as_str());
+            mapping.exports = exports.get(&uses::Subject::of(mapping)).cloned().unwrap_or_default();
             for (start, end, defaults) in &self.body_defaults {
                 if *start >= mapping.span_start && *end <= mapping.span_end {
                     for (name, default) in defaults {
@@ -636,7 +639,7 @@ impl<'src> SourceDataCollector<'src> {
             }
         }
         for (obj_name, display_name) in self.pending_display_name_renames.drain(..) {
-            if let Some(mapping) = self.data.component_mappings.iter_mut().find(|m| m.component_name == obj_name) {
+            if let Some(mapping) = self.data.component_mappings.iter_mut().find(|m| m.is_binding_named(&obj_name)) {
                 mapping.component_name = display_name;
             }
         }

@@ -105,7 +105,7 @@ fn prop_type(outcome: &SemanticOutcome, component: &str, prop: &str) -> Value {
     let component = outcome
         .components
         .iter()
-        .find(|candidate| candidate.display_name == component)
+        .find(|candidate| candidate.key == component)
         .unwrap_or_else(|| panic!("{component} is in the answer"));
     let prop = component.props.iter().find(|candidate| candidate.name == prop).unwrap();
     serde_json::to_value(&prop.prop_type).unwrap()

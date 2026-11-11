@@ -1,0 +1,8 @@
+{
+  "checker": {
+    "k": "lit",
+    "value": "tab",
+    "of": "string"
+  },
+  "text": "\"tab\""
+}

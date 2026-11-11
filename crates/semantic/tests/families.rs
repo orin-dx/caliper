@@ -83,7 +83,7 @@ fn rendered(outcome: &SemanticOutcome) -> Value {
                     })
                 })
                 .collect();
-            (component.display_name.clone(), Value::Array(props))
+            (component.key.clone(), Value::Array(props))
         })
         .collect();
     json!({ "components": components })

@@ -1,0 +1,8 @@
+{
+  "checker": {
+    "k": "lit",
+    "value": "one",
+    "of": "string"
+  },
+  "text": "\"one\""
+}

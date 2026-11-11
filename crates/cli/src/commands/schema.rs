@@ -342,6 +342,7 @@ mod tests {
                 methods: vec![],
                 detected_by: caliper_docgen_core::types::DetectionRule::FunctionDeclaration,
                 exported: true,
+                exports: Vec::new(),
             },
         );
 

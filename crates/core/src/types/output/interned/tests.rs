@@ -61,6 +61,7 @@ fn component(name: &str, props: &[ParsedProp], notable: &[ParsedProp]) -> Compon
         methods: vec![],
         detected_by: DetectionRule::FunctionDeclaration,
         exported: true,
+        exports: Vec::new(),
     }
 }
 

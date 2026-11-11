@@ -6,7 +6,8 @@
 //! timeout) yields an outcome with no components and one diagnostic, never an error: the structural result is
 //! complete on its own.
 //!
-//! This slice answers function components exported by name or as `default`; a generic one whose first type parameter
+//! This slice answers function components by the exports the extractor recorded for them (a name, `default`, or the
+//! property of an exported component a sub-component is attached to); a generic one whose first type parameter
 //! declares a default is read at that default (`instantiate`). Class components, overloaded components and union props
 //! types keep their structural result and say why.
 
@@ -58,11 +59,12 @@ pub use caliper_docgen_core::types::semantic::SemanticTarget as Target;
 pub fn targets_of(output: &ExtractionOutput) -> Vec<Target> {
     output
         .components
-        .values()
-        .map(|entry| Target {
+        .iter()
+        .map(|(key, entry)| Target {
+            key: key.clone(),
             file_path: entry.file_path.clone(),
             display_name: entry.display_name.clone(),
-            exported: entry.exported,
+            exports: entry.exports.clone(),
             described: entry
                 .props
                 .values()
@@ -135,7 +137,7 @@ fn group_by_file(request: &SemanticRequest) -> (SemanticOutcome, FxHashMap<&Utf8
     let mut by_file: FxHashMap<&Utf8Path, Vec<&Target>> = FxHashMap::default();
     let mut order: Vec<&Utf8Path> = Vec::new();
     for target in &request.targets {
-        if !target.exported {
+        if target.exports.is_empty() {
             outcome.fallbacks.push(fallback_of(target, "not exported by its module"));
             continue;
         }
@@ -157,7 +159,7 @@ fn supervisor_config(request: &SemanticRequest) -> Result<SupervisorConfig, Stri
 }
 
 async fn run(request: SemanticRequest) -> SemanticOutcome {
-    if !request.targets.iter().any(|target| target.exported) {
+    if request.targets.iter().all(|target| target.exports.is_empty()) {
         return group_by_file(&request).0;
     }
     let config = match supervisor_config(&request) {
@@ -277,17 +279,13 @@ async fn session(
         total_ms = started.elapsed().as_millis() as u64,
         "semantic backend finished"
     );
-    outcome.components.sort_by(|a, b| (&a.file_path, &a.display_name).cmp(&(&b.file_path, &b.display_name)));
-    outcome.fallbacks.sort_by(|a, b| (&a.file_path, &a.display_name).cmp(&(&b.file_path, &b.display_name)));
+    outcome.components.sort_by(|a, b| a.key.cmp(&b.key));
+    outcome.fallbacks.sort_by(|a, b| a.key.cmp(&b.key));
     Ok(outcome)
 }
 
 fn fallback_of(target: &Target, reason: &str) -> SemanticFallback {
-    SemanticFallback {
-        file_path: target.file_path.clone(),
-        display_name: target.display_name.clone(),
-        reason: reason.to_string(),
-    }
+    SemanticFallback { key: target.key.clone(), reason: reason.to_string() }
 }
 
 /// A fatal error aborts the run; a call the checker rejected only sends that component to its structural result. The
@@ -301,8 +299,8 @@ async fn answer_file(
     let mut outcome = SemanticOutcome::default();
     let mut generic = Vec::new();
     let Some(first) = targets.first() else { return Ok((outcome, generic)) };
-    let exports = match module_exports(rpc, first.file_path.as_str()).await {
-        Ok(Some(exports)) => exports,
+    let module = match module_exports(rpc, first.file_path.as_str()).await {
+        Ok(Some(module)) => module,
         Ok(None) | Err(CallError::Rejected(_)) => {
             outcome
                 .fallbacks
@@ -316,7 +314,7 @@ async fn answer_file(
         let requests = Arc::new(AtomicU64::new(0));
         let started = std::time::Instant::now();
         let answered =
-            REQUESTS.scope(requests.clone(), component::props_of(rpc, converter, interner, &exports, target)).await;
+            REQUESTS.scope(requests.clone(), component::props_of(rpc, converter, interner, &module, target)).await;
         tracing::debug!(
             component = %target.display_name,
             requests = requests.load(Ordering::Relaxed),
@@ -324,11 +322,7 @@ async fn answer_file(
             "semantic component answered"
         );
         match answered {
-            Ok(Answer::Props(props)) => outcome.components.push(SemanticComponent {
-                file_path: target.file_path.clone(),
-                display_name: target.display_name.clone(),
-                props,
-            }),
+            Ok(Answer::Props(props)) => outcome.components.push(SemanticComponent { key: target.key.clone(), props }),
             Ok(Answer::Fallback(reason)) => outcome.fallbacks.push(fallback_of(target, &reason)),
             Ok(Answer::Instantiate(instantiation)) => generic.push((target.clone(), instantiation)),
             Err(CallError::Rejected(message)) => {
@@ -340,7 +334,9 @@ async fn answer_file(
     Ok((outcome, generic))
 }
 
-async fn module_exports(rpc: &Rpc, file: &str) -> Result<Option<Vec<rpc::SymbolInfo>>, CallError> {
-    let Some(module) = rpc.source_file_symbol(file).await? else { return Ok(None) };
-    Ok(Some(rpc.exports_of_module(&module.reference).await?))
+/// The module `file` is, as the checker reads it, with its exports; `None` when the file is not in its program.
+async fn module_exports(rpc: &Rpc, file: &str) -> Result<Option<component::Module>, CallError> {
+    let Some(symbol) = rpc.source_file_symbol(file).await? else { return Ok(None) };
+    let exports = rpc.exports_of_module(&symbol.reference).await?;
+    Ok(Some(component::Module { symbol, exports }))
 }

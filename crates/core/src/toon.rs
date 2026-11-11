@@ -344,6 +344,7 @@ mod tests {
             methods: vec![],
             detected_by: crate::types::DetectionRule::FunctionDeclaration,
             exported: true,
+            exports: Vec::new(),
         };
 
         let toon = render_component_toon(&entry);
@@ -595,6 +596,7 @@ mod tests {
             methods: vec![],
             detected_by: crate::types::DetectionRule::FunctionDeclaration,
             exported: true,
+            exports: Vec::new(),
         }
     }
 

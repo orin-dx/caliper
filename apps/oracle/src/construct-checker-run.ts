@@ -12,6 +12,7 @@ import {
   listFixtures,
   ORDER,
   PROP,
+  rowKey,
   rowVerdict,
   type Expectation,
   type Golden,
@@ -96,18 +97,20 @@ export function runCheckerLane(bin: string, tsrs: string): LaneRun {
     }
   }
 
-  const byFile = new Map<string, { key: string; prop: any }>()
+  const byRow = new Map<string, { key: string; prop: any }>()
   for (const [key, component] of Object.entries<any>(checked.components)) {
-    if (component.displayName !== 'Row') continue
     const id = flattenProps(checked, key, component)[PROP]
-    byFile.set(realpathSync(component.filePath), { key, prop: id === undefined ? undefined : checked.props[id] })
+    byRow.set(rowKey(realpathSync(component.filePath), component.displayName), {
+      key,
+      prop: id === undefined ? undefined : checked.props[id],
+    })
   }
 
   const structural = structuralExpectations().rows
   const rows: Row[] = []
   for (const fixture of listFixtures(suiteDir)) {
     const golden: Golden = JSON.parse(readFileSync(fixture.golden, 'utf8'))
-    const found = byFile.get(realpathSync(fixture.file))
+    const found = byRow.get(rowKey(realpathSync(fixture.file), fixture.component))
     rows.push({
       id: fixture.id,
       verdict: rowVerdict(found?.prop, golden),

@@ -1,0 +1,8 @@
+{
+  "checker": {
+    "k": "lit",
+    "value": "select",
+    "of": "string"
+  },
+  "text": "\"select\""
+}

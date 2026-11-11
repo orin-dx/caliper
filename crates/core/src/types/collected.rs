@@ -1710,6 +1710,46 @@ impl DetectionRule {
     }
 }
 
+/// One way a module exports a component (ADR 0027): under an export name, or, for a sub-component attached to an
+/// exported component, through properties of that export.
+///
+/// `export function Card` is `Card`, `export { _Card as Card }` is `Card`, `export default Menu` is `default`, and
+/// `Menu.Item = Item` beside it is `default.Item`: the path starts at the name the module exports the parent under, not
+/// at the parent's local name, so a reader can follow it from the module.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ComponentExport {
+    /// The export name: `default` for the default export.
+    pub name: std::string::String,
+    /// The properties, outermost first, through which an attached sub-component is reached from the export; empty for
+    /// the export itself.
+    pub members: Vec<std::string::String>,
+}
+
+impl ComponentExport {
+    /// The export `name` itself.
+    pub fn named(name: impl Into<std::string::String>) -> Self {
+        Self { name: name.into(), members: Vec::new() }
+    }
+
+    /// The property `member` of this export: where a sub-component attached under that name is reached.
+    #[must_use]
+    pub fn member(&self, member: impl Into<std::string::String>) -> Self {
+        let mut members = self.members.clone();
+        members.push(member.into());
+        Self { name: self.name.clone(), members }
+    }
+}
+
+impl std::fmt::Display for ComponentExport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.name)?;
+        for member in &self.members {
+            write!(f, ".{member}")?;
+        }
+        Ok(())
+    }
+}
+
 /// A component → prop type mapping.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComponentMapping {
@@ -1735,8 +1775,9 @@ pub struct ComponentMapping {
     pub param_defaults: FxHashMap<std::string::String, RawDefault>,
     /// Which extractor rule matched.
     pub rule: DetectionRule,
-    /// Whether its module exports it, directly or as a sub-component attached to an exported component.
-    pub exported: bool,
+    /// How its module exports it, in source order: each export name, or for a sub-component attached to an exported
+    /// component the path through that export. Empty when the module does not export it.
+    pub exports: Vec<ComponentExport>,
     /// For a component built by a generic call (`WrapperTypeArgument`, or a `HocWrapper` call with type arguments),
     /// that call: its result type can add props the selected props type lacks.
     pub wrapper_callee: Option<WrapperCallee>,
@@ -1766,10 +1807,21 @@ impl ComponentMapping {
             span_end,
             param_defaults: FxHashMap::default(),
             rule,
-            exported: false,
+            exports: Vec::new(),
             wrapper_callee: None,
             type_params: Vec::new(),
         }
+    }
+
+    /// Whether this is the component the module's binding `name` declares. An inline sub-component
+    /// (`Parent.Name = (props: P) => …`) has the name but no binding, and another component can have the binding.
+    pub fn is_binding_named(&self, name: &str) -> bool {
+        self.rule != DetectionRule::AttachedSubComponent && self.component_name == name
+    }
+
+    /// Whether its module exports it, directly or as a sub-component attached to an exported component.
+    pub fn exported(&self) -> bool {
+        !self.exports.is_empty()
     }
 
     /// The mapping of no component, for a question about a type asked mid-walk (what a named type's props are, for a
