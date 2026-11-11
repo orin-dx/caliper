@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01Wrw2eV4Z84trMsRnGnq5TX",
+  "agent_id": "a7b14596d3261d10a",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix PR 417 attachment identity finding",
+  "token_usage": {
+    "input_tokens": 208,
+    "cache_creation_tokens": 195480,
+    "cache_read_tokens": 14537925,
+    "output_tokens": 51668,
+    "api_call_count": 103
+  },
+  "started_at": "2026-11-10T14:51:51.688138-08:00",
+  "completed_at": "2026-11-10T15:11:01.00749-08:00"
+}

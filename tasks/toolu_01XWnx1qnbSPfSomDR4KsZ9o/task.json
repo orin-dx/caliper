@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01XWnx1qnbSPfSomDR4KsZ9o",
+  "agent_id": "aa877fc4d89943e87",
+  "subagent_type": "general-purpose",
+  "task_description": "Apply ADR 0027 corrections",
+  "started_at": "2026-11-10T20:49:53.815625-08:00"
+}

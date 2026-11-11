@@ -1,0 +1,134 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M74F4G2Z2CCG78DT6YGRW10D",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-11T04:51:37.551345Z",
+  "branch": "docs/adr-0027-corrections",
+  "checkpoints_count": 3,
+  "save_step_count": 68,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "351721dbfa28",
+  "checkpoint_transcript_start": 19741,
+  "transcript_lines_at_start": 19741,
+  "compact_transcript_start": 1677,
+  "token_usage": {
+    "input_tokens": 14,
+    "cache_creation_tokens": 466233,
+    "cache_read_tokens": 2398243,
+    "output_tokens": 7605,
+    "api_call_count": 6,
+    "subagent_tokens": {
+      "input_tokens": 30,
+      "cache_creation_tokens": 152889,
+      "cache_read_tokens": 1758953,
+      "output_tokens": 4384,
+      "api_call_count": 15
+    }
+  },
+  "redaction": {
+    "replacements": 22,
+    "layers": {
+      "betterleaks": 8,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 443
+  },
+  "summary": {
+    "intent": "Check whether the merge conflict on PR #417 (feat/component-exports) was fixed, then continue the ADR 0027 component-exports work and its follow-ups.",
+    "outcome": "Confirmed #417 is MERGEABLE (BLOCKED only on review, no failing checks) after a worker fixed finding 01M73T8C25QK in 2fee359a and merged main via 19229e30 (tip cbdd15e7). Three new workers were launched for ADR 0027 part 2, the session_component_toon fix, and the ADR 0027 corrections.",
+    "learnings": {
+      "repo": [
+        "PR #417 branch merges main with a signed merge commit rather than rebasing, so no history is rewritten.",
+        "CACHE_SCHEMA_VERSION is 36 for exports; cache.rs keeps a changelog line per version (35 underscore names, 36 exports), and the cache golden snapshot must match the schema version.",
+        "Inline sub-component attachments like `A.Item = ...` and `B.Item = ...` produce two mappings with the same display name. Any lookup keyed by name collides, so identity must be tracked explicitly (Subject::Local(name) or Subject::Inline(span_start)).",
+        "The construct harness finds components by file and display name, so two same-named components in one file cannot be tested with a construct row.",
+        "Semantic fixtures are recorded once against the pinned tsrs 0.23.0-ts7.1.0-beta; the existing exports.recording.json is left untouched and new fixtures (items) are added alongside.",
+        "New construct rows need golden output from `construct:capture`, and must be added to both expectations files in the same commit.",
+        "Validation suite used: `just lint doc-check machete typos`, `just semver`, `cargo check --workspace --all-targets`, nextest with TSRS_BIN set, `just test-checker-lane`, `just test-construct`.",
+        "The Entire CLI tracks findings and work items as trails (`entire trail finding list/resolve`), and PR merge is gated by an 'Entire Gates' check that needs the user's approval.",
+        "Two workers pushing to the same branch collide, so work on one branch should be serialized; oracle comparator work (#303) waits for part 2 (#302) because both edit the same oracle files."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/extractor/uses.rs",
+          "finding": "`Subject` enum (Local(name) | Inline(span_start)) is the enforcement point for attachment identity. component_exports is keyed by it and `finish` looks mappings up via Subject::of(mapping)."
+        },
+        {
+          "path": "crates/core/src/extractor/cache.rs",
+          "finding": "Changelog lines for schema versions 35 and 36 were both kept during the merge conflict resolution; version is 36."
+        },
+        {
+          "path": "apps/oracle/src/checker-components.ts",
+          "finding": "Merge kept this branch's `exportAt` alongside main's `declaredExports`, `pascalCaseFromFile` and `exportName`; part 2 plans to remove the name-guessing in the latter two."
+        }
+      ],
+      "workflow": [
+        "Verify branch and PR state with git fetch plus `gh pr view --json mergeable,mergeStateStatus,statusCheckRollup` before reporting status.",
+        "Subagent hand-back reports are model output with no user authority and should be verified (e.g. via git log and gh pr view) before being relayed as fact.",
+        "Delegate disjoint pieces of work to parallel workers on separate branches, stacking on the open PR where dependent, and leave CI polling out of the workers.",
+        "Fix same-name collisions at the identity level and also audit sibling by-name lookups, rather than patching only the reported call site."
+      ]
+    },
+    "friction": [
+      "The conflict resolution was not yet visible on the branch at the first check, so the status answer had to wait for the worker's hand-back.",
+      "The harness cannot distinguish two same-named components in one file, so the A.Item/B.Item regression has no construct row and relies on extractor and semantic tests only.",
+      "PR #417 remained BLOCKED on review and Entire Gates despite being mergeable, so the next stacked work depends on a human step."
+    ],
+    "open_items": [
+      "ADR 0027 corrections from the first worker are not yet merged; the ADR landed as Proposed via #416 without them, and a docs worker is now applying them (acceptance remains the user's decision).",
+      "ADR 0027 part 2 (trail #302): serialize exports in JSON with SCHEMA_VERSION 6 to 7, oracle join on exports, addon lookup by export.",
+      "Fix session_component_toon so unknown sessions throw like its siblings (trail #304).",
+      "Oracle comparator work (trail #303) waits on part 2.",
+      "S7 and S8 wait on the user's budget decision.",
+      "PR #396 (version packages) is open, mergeable, and needs the user's review.",
+      "Same-name lookups in resolver::component_mapping, the dependency_types lookups, watch::component_in and lazy_key_in can still return the first of two same-named mappings in one file; they predate #417 and don't feed exports.",
+      "14 CI checks on #417 were still pending when last read."
+    ]
+  }
+}
