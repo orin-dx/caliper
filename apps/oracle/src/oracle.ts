@@ -24,13 +24,14 @@ import { readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { API } from 'typescript-beta/sync'
 import { checkCaliperShape, flattenProps, requireComparison } from './caliper-input.ts'
-import { declaredExports, exportName, propsTypeOf } from './checker-components.ts'
+import { declaredExports, listedName, propsTypeOf, type DeclaredExport } from './checker-components.ts'
+import { exportedAs } from './component-join.ts'
 import { nonComponentReason, type ShapeProp } from './component-shape.ts'
 import { checkerNormalizer } from './oracle-checker.ts'
 import { caliperNorm } from './caliper-norm.ts'
 import { compare, VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'
 import { assertSchemaVersion } from './schema-version.ts'
-import { collapsedLayerFiles, loadTool, normComponent, pathKey, universeRecorder } from './tool-universe.ts'
+import { collapsedLayerFiles, loadTool, pathKey, universeRecorder } from './tool-universe.ts'
 
 const KEYS = ['root', 'src', 'tsconfig', 'caliper', 'out', 'files', 'dump', 'rows', 'missing', 'rdt', 'rdg'] as const
 const args: Partial<Record<(typeof KEYS)[number], string>> = {}
@@ -79,13 +80,13 @@ const rel = (path: string) => relative(root, realpathSync(path))
 
 const caliper = assertSchemaVersion(JSON.parse(readFileSync(args.caliper, 'utf8')), 'caliper JSON')
 checkCaliperShape(caliper)
-const caliperByFile = new Map<string, { name: string; key: string; component: any }[]>()
+const caliperByFile = new Map<string, { key: string; component: any }[]>()
 for (const [componentKey, component] of Object.entries<any>(caliper.components)) {
   // Schema 2 lists a component's prop set ids, each a map of prop name to prop id; this reads one map of both.
   component.props = flattenProps(caliper, componentKey, component)
   const key = rel(component.filePath)
   const list = caliperByFile.get(key) ?? []
-  list.push({ name: normComponent(component.displayName), key: componentKey, component })
+  list.push({ key: componentKey, component })
   caliperByFile.set(key, list)
 }
 const rdt = loadTool(args.rdt, rel)
@@ -156,11 +157,12 @@ function judge({
   return verdict
 }
 
-/** Every prop of one exported component the checker finds, against Caliper's component of the same name. */
-function visitExport(exported: any, candidates: { name: string; key: string; component: any }[], file: string): void {
+/** Every prop of one exported component the checker finds, against Caliper's component the module exports under one of
+ * the same names. */
+function visitExport(declaration: DeclaredExport, candidates: { key: string; component: any }[], file: string): void {
   let propsType
   try {
-    propsType = propsTypeOf(checker, exported)
+    propsType = propsTypeOf(checker, declaration.exported)
   } catch {
     totals.failedExports++
     return
@@ -169,7 +171,7 @@ function visitExport(exported: any, candidates: { name: string; key: string; com
   const props = checker.getPropertiesOfType(propsType)
   if (props.length === 0) return
   totals.componentsChecker++
-  const name = exportName(checker, exported)
+  const name = listedName(declaration.exported.name, declaration.declared, file)
   // React's DOM attributes are one inherited layer; ref and key are deliberately absent from Caliper's output.
   const own = props.filter(
     (p: any) =>
@@ -178,7 +180,7 @@ function visitExport(exported: any, candidates: { name: string; key: string; com
       !p.declarations?.some((d: any) => String(d.path).includes('/@types/react/')),
   )
   totals.propsChecker += own.length
-  const matches = candidates.filter((c) => c.name === normComponent(name))
+  const matches = exportedAs(candidates, declaration.names)
   const shape = new Map<string, ShapeProp>(
     props.map((p: any) => [
       p.name,
@@ -249,7 +251,7 @@ for (const file of files) {
   const moduleSymbol = checker.getSymbolOfSourceFile(file)
   if (!moduleSymbol) continue
   const candidates = caliperByFile.get(rel(file)) ?? []
-  for (const exported of declaredExports(checker, moduleSymbol)) visitExport(exported, candidates, file)
+  for (const declaration of declaredExports(checker, moduleSymbol)) visitExport(declaration, candidates, file)
 }
 const compareMs = performance.now() - start
 requireComparison(totals.propsShared, totals.componentsMatched)

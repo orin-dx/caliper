@@ -207,6 +207,15 @@ class RecallIsNotComparedAcrossReferences(unittest.TestCase):
         again = {'corpora': {'antd': self.universe(2, 0)}}
         self.assertEqual(len(weekly.findings(now, again)), 1)
 
+    def test_the_pairing_by_export_is_universe_version_3_and_is_not_compared_with_2(self):
+        self.assertEqual(weekly.UNIVERSE_VERSION, 3)
+        now = {'corpora': {'antd': self.universe(3, 1)}}
+        before = {'corpora': {'antd': self.universe(2, 0)}}
+        self.assertEqual(weekly.findings(now, before), [])
+        self.assertEqual(weekly.changes(now, before), [
+            "antd: the oracle's universe is version 3 now and was version 2 last week, so its props, agreement and wrong "
+            "types are not compared with last week's"])
+
     def test_the_summary_says_the_universe_changed(self):
         now = {'corpora': {'antd': self.universe(2, 0)}}
         before = {'corpora': {'antd': self.universe(None, 0)}}

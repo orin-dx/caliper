@@ -17,17 +17,6 @@ import {
   type UniverseProp,
 } from './tool-score.ts'
 
-export const normComponent = (name: string) =>
-  (
-    name
-      .replace(/ \(.*\)$/, '')
-      .split('/')
-      .at(-1) ?? ''
-  )
-    .split('.')
-    .at(-1)!
-    .replaceAll(/[^A-Za-z0-9]/g, '')
-
 export const pathKey = (path: string) =>
   process.platform === 'darwin' || process.platform === 'win32' ? path.toLowerCase() : path
 
@@ -42,11 +31,12 @@ export const collapsedLayerFiles = (caliper: any, component: any): Set<string> =
       .map((layer: any) => pathKey(String(layer.fileName))),
   )
 
-/** A component as the tools are matched to the checker's: the file and the normalised name. */
-const componentKey = (file: string, name: string) => `${file}\0${normComponent(name)}`
+/** A component as the tools are matched to the checker's: the file and the name the tool lists it under
+ * (`listedName` in src/checker-components.ts). The tools have no exports to match on, so this is the one join by name. */
+const componentKey = (file: string, name: string) => `${file}\0${name}`
 
 export interface ToolDump {
-  /** Props by component; a file with two components of one normalised name merges them, the first prop winning. */
+  /** Props by component; a file with two components of one name merges them, the first prop winning. */
   props: Map<string, Record<string, any>>
   /** Files the tool threw on, as paths relative to the corpus root. */
   failed: Set<string>
@@ -82,7 +72,6 @@ function reported(tool: ToolDump, at: { key: string; prop: string }, norm: (p: a
 
 type Entry = UniverseProp & { caliper: Reported; rdt?: Reported; rdg?: Reported; nonComponent?: ShapeReason }
 interface Match {
-  name: string
   key: string
   component: any
 }
