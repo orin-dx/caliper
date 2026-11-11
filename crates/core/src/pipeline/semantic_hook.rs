@@ -46,10 +46,17 @@ struct AnswerCache {
 
 type Answers = Mutex<AnswerCache>;
 
+/// How long a request for a component the structural pass lists no props for waits for the checker, unless the session
+/// says otherwise ([`SemanticHook::wait_empty`]): an empty answer is not worth showing early, and Chakra's `Button` takes
+/// 0.4 to 0.8 s.
+pub(crate) const DEFAULT_WAIT_EMPTY: Duration = Duration::from_secs(2);
+
 pub(crate) struct SemanticHook {
     provider: Arc<dyn SemanticProvider>,
     /// How long a request waits for the checker before it takes the structural answer.
     wait: Duration,
+    /// How long it waits instead when the structural answer has no props; never less than `wait`.
+    wait_empty: Duration,
     answers: Arc<Answers>,
     /// Set once the checker has been reported unavailable, so a session says so once, not per component.
     warned: AtomicBool,
@@ -57,7 +64,28 @@ pub(crate) struct SemanticHook {
 
 impl SemanticHook {
     pub(crate) fn new(provider: Arc<dyn SemanticProvider>, wait: Duration) -> Self {
-        Self { provider, wait, answers: Arc::new(Mutex::new(AnswerCache::default())), warned: AtomicBool::new(false) }
+        Self {
+            provider,
+            wait,
+            wait_empty: DEFAULT_WAIT_EMPTY,
+            answers: Arc::new(Mutex::new(AnswerCache::default())),
+            warned: AtomicBool::new(false),
+        }
+    }
+
+    /// Sets how long a request for a component with no structural props waits for the checker. A wait at most `wait`
+    /// gives such a component the same wait as every other.
+    pub(crate) fn wait_empty(&mut self, wait_empty: Duration) {
+        self.wait_empty = wait_empty;
+    }
+
+    /// The wait for `answer`: the longer one when the structural pass found no props, since there is nothing to show
+    /// before the checker answers. Any prop, even a degraded one, is an answer worth showing at the short wait.
+    fn wait_for(&self, answer: &ComponentAnswer) -> Duration {
+        match answer.entry.props.is_empty() {
+            true => self.wait_empty.max(self.wait),
+            false => self.wait,
+        }
     }
 
     /// Forget every answer, refuse the ones still being waited for, and tell the checker what changed: a source file
@@ -100,8 +128,9 @@ impl SemanticHook {
                 .collect(),
             react_wanted: react_props_wanted(mode, &answer.entry.props),
         };
+        let wait = self.wait_for(&answer);
         let receiver = self.provider.request(vec![target]);
-        match receiver.recv_timeout(self.wait) {
+        match receiver.recv_timeout(wait) {
             Ok(outcome) => {
                 let Read { answered, once } = read_outcome(&answer.key, outcome);
                 for diagnostic in once {

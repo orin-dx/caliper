@@ -110,6 +110,12 @@ export interface JsExtractOptions {
    * it takes the structural answer (default 150).
    */
   semanticWaitMs?: number
+  /**
+   * Session only, with `semanticTypes: 'on-demand'`: how many milliseconds a request waits for the checker when the
+   * structural pass lists no props for the component (default 2000). A value below `semanticWaitMs` gives such a
+   * component `semanticWaitMs`.
+   */
+  semanticWaitEmptyMs?: number
 }
 
 /** What a lazy session has indexed and resolved so far. `None` for an eager, unknown or uninitialized session. */

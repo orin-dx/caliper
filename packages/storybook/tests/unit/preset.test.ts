@@ -50,6 +50,7 @@ describe('preset', () => {
       semanticTypes: 'on-demand',
       tscPath: '/bin/tsc',
       semanticWaitMs: 7,
+      semanticWaitEmptyMs: 70,
       fallback: 'never',
     } satisfies Record<keyof CaliperStorybookOptions, unknown>
     const [ours] = await experimental_docgenProvider([], options)

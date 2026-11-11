@@ -54,6 +54,12 @@ export interface CaliperStorybookOptions {
   /** How many milliseconds a story waits for the checker before it takes the structural props. Default: `150`. */
   semanticWaitMs?: number
   /**
+   * How many milliseconds a story waits for the checker when caliper-docgen's own pass lists no props for its
+   * component (a `ComponentProps<typeof Button>` of a library it cannot read), since there is nothing to show before
+   * the checker answers. Default: `2000`. A value below `semanticWaitMs` gives such a story `semanticWaitMs`.
+   */
+  semanticWaitEmptyMs?: number
+  /**
    * When a component's resolution reported a warning or an error, its props may be incomplete. `'degraded'` (the
    * default) hands such a component to the next docgen provider, React's own; `'never'` always answers.
    */

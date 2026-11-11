@@ -253,10 +253,23 @@ impl WatchSession {
 
     /// Attach a TypeScript checker that is asked for each component a request names (ADR 0022). [`Self::component`]
     /// then returns the checker's props when it answers within `wait`, the structural ones otherwise, and the checker's
-    /// late answer on the next request of the same, unedited component. Without a checker nothing changes.
+    /// late answer on the next request of the same, unedited component. A component the structural pass lists no props
+    /// for waits up to 2 s instead ([`Self::with_semantic_wait_empty`]). Without a checker nothing changes.
     #[must_use]
     pub fn with_semantic(mut self, provider: Arc<dyn SemanticProvider>, wait: Duration) -> Self {
         self.semantic = Some(super::semantic_hook::SemanticHook::new(provider, wait));
+        self
+    }
+
+    /// How long a request waits for the checker when the structural pass lists no props for the component, in place of
+    /// the default 2 s: with nothing to show, the checker's answer is worth a longer wait. A wait shorter than
+    /// [`Self::with_semantic`]'s gives such a component that one. Call it after [`Self::with_semantic`]; without a
+    /// checker it does nothing.
+    #[must_use]
+    pub fn with_semantic_wait_empty(mut self, wait: Duration) -> Self {
+        if let Some(hook) = &mut self.semantic {
+            hook.wait_empty(wait);
+        }
         self
     }
 

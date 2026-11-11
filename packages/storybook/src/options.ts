@@ -37,6 +37,11 @@ export interface SessionOptions {
   tscPath?: string
   /** How many milliseconds a story waits for the checker before it takes the structural props. Default: `150`. */
   semanticWaitMs?: number
+  /**
+   * How many milliseconds a story waits for the checker when caliper-docgen's own pass lists no props for its component.
+   * Default: `2000`.
+   */
+  semanticWaitEmptyMs?: number
 }
 
 /** What the native session is created with: the session's options, with `lazy` decided by the caller. */
@@ -53,5 +58,6 @@ export function toNapiOptions(options: SessionOptions, lazy: boolean): Napi.JsEx
     semanticTypes: options.semanticTypes,
     tscPath: options.tscPath,
     semanticWaitMs: options.semanticWaitMs,
+    semanticWaitEmptyMs: options.semanticWaitEmptyMs,
   }
 }

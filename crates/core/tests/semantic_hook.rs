@@ -783,6 +783,89 @@ fn a_late_fallback_reason_is_reported_by_the_request_that_finds_it() {
     assert!(served.iter().any(|message| message.contains("could not be formed")), "{served:?}");
 }
 
+/// The structural pass cannot find `Thing`, so it lists no props for `Empty` (as for `ComponentProps<typeof Button>`
+/// of a package it does not model): the checker is the only answer worth showing.
+const EMPTY: &str = "import type { ComponentProps } from \"react\";\nimport { Thing } from \"./missing\";\n\
+                     export function Empty(props: ComponentProps<typeof Thing>) { return null; }";
+
+fn structural_answer(project: &Project, key: &str) -> caliper_docgen_core::pipeline::ComponentAnswer {
+    structural_session(project, PipelineOptions::default().html_attributes).component(key).unwrap()
+}
+
+#[test]
+fn a_component_with_no_structural_props_waits_for_the_checker_past_the_short_wait() {
+    let project = project(&[("Empty.tsx", EMPTY)]);
+    assert_eq!(structural_answer(&project, "Empty").entry.props.len(), 0, "the structural pass lists nothing");
+    let checker = Fake::new(Duration::from_millis(300), finds_size);
+    let session = session(&project, checker.clone(), Duration::from_millis(10));
+
+    let answer = session.component("Empty").unwrap();
+
+    assert_eq!(answer.entry.props.keys().cloned().collect::<Vec<_>>(), ["label", "size"]);
+    let notes: Vec<&str> = answer
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::SemanticBackend)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(notes, ["1 component(s) resolved by the TypeScript checker"]);
+    assert_eq!(checker.requests(), 1);
+}
+
+#[test]
+fn a_component_with_structural_props_answers_at_the_short_wait_exactly_as_before() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let structural = structural_answer(&project, "Button");
+    let checker = Fake::new(Duration::from_millis(300), finds_size);
+    let session = session(&project, checker.clone(), Duration::from_millis(10));
+
+    let answer = session.component("Button").unwrap();
+
+    assert_eq!(answer.entry, structural.entry);
+    let mut expected = structural.diagnostics.clone();
+    let mut pending = caliper_docgen_core::types::Diagnostic::new(
+        DiagnosticSeverity::Info,
+        DiagnosticCode::SemanticBackend,
+        "the TypeScript checker has not answered yet; the structural props are used, and the checker's replace them \
+         on the next request",
+    );
+    pending.affects = vec!["Button".to_string()];
+    expected.push(pending);
+    assert_eq!(answer.diagnostics, expected);
+}
+
+#[test]
+fn an_answer_slower_than_the_longer_wait_is_kept_with_what_the_checker_said_for_the_next_request() {
+    let project = project(&[("Empty.tsx", EMPTY)]);
+    let checker = Fake::new(Duration::from_millis(300), warns_of_an_unannounced_edit);
+    let session = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() })
+        .with_semantic(checker.clone(), Duration::from_millis(5))
+        .with_semantic_wait_empty(Duration::from_millis(20));
+    drop(session.initialize());
+
+    let early = session.component("Empty").unwrap();
+    assert_eq!(early.entry.props.len(), 0);
+    assert!(early.diagnostics.iter().any(|d| d.message.contains("has not answered yet")), "{:?}", early.diagnostics);
+    std::thread::sleep(Duration::from_millis(900));
+
+    let late = session.component("Empty").unwrap();
+    assert_eq!(late.entry.props.keys().cloned().collect::<Vec<_>>(), ["label", "size"]);
+    assert_eq!(late.diagnostics.iter().filter(|d| d.message == NOT_TOLD).count(), 1, "{:?}", late.diagnostics);
+    assert_eq!(checker.requests(), 1);
+}
+
+#[test]
+fn the_longer_wait_never_shortens_the_wait_every_component_gets() {
+    let project = project(&[("Empty.tsx", EMPTY)]);
+    let checker = Fake::new(Duration::from_millis(300), finds_size);
+    let session = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() })
+        .with_semantic(checker, Duration::from_secs(5))
+        .with_semantic_wait_empty(Duration::ZERO);
+    drop(session.initialize());
+
+    assert_eq!(prop_names(&session, "Empty"), ["label", "size"]);
+}
+
 const MENU: &str = "export interface MenuProps { open: boolean; label: string }
 export interface ItemProps { value: number }
 function Item(props: ItemProps) { return null; }

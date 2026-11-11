@@ -144,6 +144,10 @@ pub struct JsExtractOptions {
     /// Session only, with `semanticTypes: 'on-demand'`: how many milliseconds a request waits for the checker before
     /// it takes the structural answer (default 150).
     pub semantic_wait_ms: Option<u32>,
+    /// Session only, with `semanticTypes: 'on-demand'`: how many milliseconds a request waits for the checker when the
+    /// structural pass lists no props for the component (default 2000). A value below `semanticWaitMs` gives such a
+    /// component `semanticWaitMs`.
+    pub semantic_wait_empty_ms: Option<u32>,
 }
 
 /// How long a request waits for the checker when `semanticWaitMs` is not set: about the first-story budget.
@@ -159,6 +163,7 @@ fn new_session(options: JsExtractOptions) -> napi::Result<Arc<WatchSession>> {
             options.tsconfig_path.clone(),
             options.src_dirs.first().cloned(),
             options.semantic_wait_ms.unwrap_or(DEFAULT_SEMANTIC_WAIT_MS),
+            options.semantic_wait_empty_ms,
         )),
         Some(other) => {
             return Err(napi::Error::from_reason(format!("semanticTypes must be 'off' or 'on-demand', got '{other}'")));
@@ -170,9 +175,13 @@ fn new_session(options: JsExtractOptions) -> napi::Result<Arc<WatchSession>> {
         false => WatchSession::new(pipeline_options),
     };
     let session = match semantic {
-        Some((tsc_path, tsconfig, first_src, wait_ms)) => {
+        Some((tsc_path, tsconfig, first_src, wait_ms, wait_empty_ms)) => {
             let checker = on_demand_checker(tsc_path, tsconfig, first_src);
-            session.with_semantic(checker, std::time::Duration::from_millis(u64::from(wait_ms)))
+            let session = session.with_semantic(checker, std::time::Duration::from_millis(u64::from(wait_ms)));
+            match wait_empty_ms {
+                Some(ms) => session.with_semantic_wait_empty(std::time::Duration::from_millis(u64::from(ms))),
+                None => session,
+            }
         }
         None => session,
     };
@@ -635,6 +644,7 @@ mod tests {
             semantic_types: None,
             tsc_path: None,
             semantic_wait_ms: None,
+            semantic_wait_empty_ms: None,
         }
     }
 
@@ -1048,6 +1058,7 @@ mod tests {
             semantic_types: None,
             tsc_path: None,
             semantic_wait_ms: None,
+            semantic_wait_empty_ms: None,
             ..base_options()
         };
 
@@ -1092,6 +1103,7 @@ mod tests {
             semantic_types: None,
             tsc_path: None,
             semantic_wait_ms: None,
+            semantic_wait_empty_ms: None,
             ..base_options()
         };
 
@@ -1142,6 +1154,7 @@ mod tests {
             semantic_types: None,
             tsc_path: None,
             semantic_wait_ms: None,
+            semantic_wait_empty_ms: None,
             ..base_options()
         };
         let eager = create_session(options(None)).expect("eager session");

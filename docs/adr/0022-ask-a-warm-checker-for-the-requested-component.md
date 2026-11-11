@@ -1,6 +1,6 @@
 # 0022. Ask a warm checker for the requested component
 
-**Status:** Accepted **Date:** 2026-10-26
+**Status:** Accepted **Date:** 2026-10-26 **Amended:** 2026-11-11 (a component the structural pass lists no props for waits up to `semanticWaitEmptyMs`, default 2000)
 
 ## Context
 
@@ -33,12 +33,12 @@ Memory is the addon's; the checker's process is not in the harness figure. With 
 
 A session can have a checker attached (`WatchSession::with_semantic`, a `SemanticProvider` the semantic crate implements). Core owns the trait and the merge; the checker's process, protocol and threads stay in `caliper-docgen-semantic`, so core does no I/O.
 
-- `component(key)` computes the structural answer, asks the checker for that component, and waits up to `semanticWaitMs` (default 150). An answer in time is merged by name: where both have a prop the checker's type, optionality and description win, defaults, tags, `parent` and `declarations` stay structural, and every structural prop the checker did not return stays as the structural pass resolved it. One `Info` provenance diagnostic says so and counts the props kept. A slower checker leaves the structural answer and one `Info` diagnostic saying so; its late answer is kept for the next request.
+- `component(key)` computes the structural answer, asks the checker for that component, and waits up to `semanticWaitMs` (default 150), or up to `semanticWaitEmptyMs` (default 2000, never less than `semanticWaitMs`) when the structural answer lists no props, since it has nothing to show. An answer in time is merged by name: where both have a prop the checker's type, optionality and description win, defaults, tags, `parent` and `declarations` stay structural, and every structural prop the checker did not return stays as the structural pass resolved it. One `Info` provenance diagnostic says so and counts the props kept. A slower checker leaves the structural answer and one `Info` diagnostic saying so; its late answer is kept for the next request.
 - `htmlAttributes` means the same in both engines, because the checker reports what `@types/react` declares (`children`, `aria-*`, handlers, `className`) flagged `reactDeclared`, never filtered on its side, and the session applies the policy once after the merge (`react_types::checker_prop_used`). `full` takes all of them. `curated` and `none` take only those the structural pass already lists among the component's props (`children` through `PropsWithChildren`, or declared by the component), so the curated attributes and the absence in `none` stay the structural pass's. The request asks only for those names (`SemanticTarget::react_wanted`), so a component does not convert hundreds of DOM attributes it would drop. `key` is omitted in every mode, the one constant that says so being `REACT_SPECIAL_PROPS` in `react_types.rs`. `ref` is a prop (React 19 passes it to function components): `curated` and `full` list it for `ComponentProps<"div">`-style props and for `forwardRef` components, and `none` only when the component declares it.
 - Answers are cached in memory by component key and the content hash of its file. An edit is a new question.
 - The checker runs on its own thread with its own runtime, so a caller on any thread can bound its wait. `tsc` starts in the background when the session is created. It is replaced after 64 programs (antd reached 612 MiB after 50) and after a crash; three crashes keep it down for the session.
 - A missing or unpinned `tsc`, a crash or a timeout yields the structural answer and one `Warning` per session. A request never fails because of the checker.
-- The option is `semanticTypes: 'off' | 'on-demand'` on the native session and the Storybook addon, with `tscPath` and `semanticWaitMs`. It is off by default and experimental, as ADR 0007 requires.
+- The option is `semanticTypes: 'off' | 'on-demand'` on the native session and the Storybook addon, with `tscPath`, `semanticWaitMs` and `semanticWaitEmptyMs`. It is off by default and experimental, as ADR 0007 requires.
 
 ## Consequences
 
