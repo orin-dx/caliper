@@ -1,0 +1,108 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M75W60FMHRPNZDZT7RW4QZ8K",
+  "session_id": "4c72440d-a6e2-4bf8-9c73-6f5da1acdec2",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-11T17:59:00.62879Z",
+  "branch": "worktree-docs-align-weekly-2026-11-09",
+  "checkpoints_count": 56,
+  "save_step_count": 33,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "f1264e88a709",
+  "checkpoint_transcript_start": 2114,
+  "transcript_lines_at_start": 2114,
+  "compact_transcript_start": 307,
+  "token_usage": {
+    "input_tokens": 852,
+    "cache_creation_tokens": 3020461,
+    "cache_read_tokens": 212944453,
+    "output_tokens": 466351,
+    "api_call_count": 413,
+    "subagent_tokens": {
+      "input_tokens": 278,
+      "cache_creation_tokens": 804580,
+      "cache_read_tokens": 16690773,
+      "output_tokens": 113341,
+      "api_call_count": 140
+    }
+  },
+  "redaction": {
+    "replacements": 32,
+    "layers": {
+      "betterleaks": 6,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 26,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "session_metrics": {
+    "turn_count": 73
+  },
+  "summary": {
+    "intent": "Prepare a Hacker News-ready article and supporting docs/pages for Caliper (React docgen tool using oxc + the tsrs checker), and bring the pages-site evidence pages (parity, measurement, main Caliper page) and both repos' docs in line with verified, honestly-caveated findings.",
+    "outcome": "Parallel readers produced verified PR ledgers and an ADR 0026 fact sheet; the pages site gained a shared dated data module, a rebuilt measurement page with speed and memory ratios, a chapter-list TOC via DocumentPage, fixed prev/next cards, and new z-index tokens. The pages docs and four Caliper docs were updated, with a signed local commit on a worktree branch. Nothing is pushed or committed in the pages repo, and the article itself is not yet drafted.",
+    "learnings": {
+      "repo": [
+        "ADR 0026: the checker (tsrs) decides types and oxc decides syntax. The structural resolver is a fallback marked with `degradedBy`. tsrs is pinned to an exact build, and the weekly oracle keeps the Go checker so it never grades itself.",
+        "The default has not flipped to checker-first (S8 not done). S4 'checker wins' is done but one gate failed: the Storybook first answer on a large project took 402-562 ms against a 150 ms target.",
+        "Most PRs #329-#363 have empty Entire shadow-PR boilerplate bodies, so substance lives in commit bodies, changesets and docs/measurement.md. Stacked PRs repeatedly merged into parent branches out of order.",
+        "The weekly record counts (component, prop) pairs; a prop shared across 700 components counts 700 times. RDT is scored over every function it lists, including non-components, while Caliper is scored only over reported components. Counts are shown as count plus share of listed props.",
+        "On share, Caliper is worse than RDT on Mantine, React Spectrum and Ant Design for 'less precise', and better only on shadcn/ui and Chakra.",
+        "Nov 9 weekly CI record: Caliper is 16-66x faster than RDT (median 22x) and uses 2.5-5.8x less memory (median 4x). Caliper time is a median of 5 runs and RDT's is a single run. The October 28x figure was a laptop run and must not be mixed with CI numbers.",
+        "Pages repo: tool pages use the system's DocumentPage (chapter rail, footer slot for PageSequence). Sections need width='frame' with a spacing wrapper, and the footer wrapper needs data-reading.",
+        "Pages repo z-index tokens: added zIndex.rail (1) and zIndex.trail (2) to both brands. The chapter list used a literal 1 and the breadcrumb borrowed toggle.raised (also 1), so the list covered the trail's open menu. Site nav still uses literal 10/11 in siteNavParts.ts.",
+        "The Caliper worktree has no node_modules, so oxfmt was run using the main checkout's binary. The Caliper repo requires planning a trail before branches and asking before any push or PR.",
+        "docs/STATUS.md (dated 2026-11-02), docs/measurement.md, docs/performance.md and the README were stale or contradicted the pages, and apps/orin-dx-docs has no Caliper pages."
+      ],
+      "code": [
+        {
+          "path": "docs/adr/0026-the-checker-is-the-type-authority.md",
+          "line": 13,
+          "end_line": 24,
+          "finding": "Design: the checker decides types and oxc decides syntax. oxc re-applies union member order and the structural fallback carries degradedBy. The pin policy requires the construct suite plus a tsrs-vs-Go parity run. In-process linking via tsrs_api::Session was rejected (publish=false, no process isolation, no restart lever)."
+        },
+        {
+          "path": "docs/adr/0026-the-checker-is-the-type-authority.md",
+          "line": 40,
+          "finding": "S4 is marked 'done, one gate failed'. The addon keeps structural-first inside a semanticWaitMs window because the checker is too slow for first paint."
+        },
+        {
+          "path": "apps/orin-dx/src/data/caliperRecord.ts",
+          "finding": "New shared typed module holding the Nov 9 weekly record with its date. The parity, measurement and main Caliper pages and the family metrics all read from it so figures can't drift."
+        },
+        {
+          "path": "apps/orin-dx/src/layouts/CaliperEvidence.astro",
+          "finding": "Rewritten to wrap evidence pages in DocumentPage, with the trail above the document and the hero as the lead."
+        }
+      ],
+      "workflow": null
+    },
+    "friction": [
+      "Read-agent reports were truncated mid-ledger and needed resend requests.",
+      "Many PR bodies are empty shells, so figures had to be recovered from commits and docs, and the trail findings were never read.",
+      "Initial width='text' sections spilled across the chapter rail, and the DocumentPage conversion broke the prev/next cards (they ran edge to edge) and moved source notes after section content.",
+      "Lint and typecheck failures along the way: a wrong chapter-type import path, numeric separators, and a foundations build exit 1 caused by a missing task.",
+      "A z-index collision from a literal 1 and a borrowed token hid the breadcrumb menu.",
+      "The Caliper worktree lacked node_modules, so pnpm tried the registry, and the new tables needed formatter alignment.",
+      "The user's earlier 'agent said it wasn't so right' caveat about counts couldn't be located in the transcript."
+    ],
+    "open_items": [
+      "Draft the Hacker News article and claims ledger once the remaining readers (read-prs-b rest, read-entire, read-docs rest, read-tsrs) report, and decide timing (publish at the decision point vs after S8).",
+      "Cold-start test, reproducibility page, licence (FSL-1.1-MIT) statement and a FAQ for the likely HN questions.",
+      "Caliper-side change to score RDT on the cleaned real-component set and publish the props behind each count; no trail planned yet.",
+      "Plan a trail, then push and open a PR for the local Caliper docs commit, and the pages repo changes (19+ files) are uncommitted and awaiting a branch/commit decision.",
+      "Hero kicker and art/meta slot refactor, awaiting the user's yes; ParityPlot is unused dead code.",
+      "Main Caliper page lacks a 'how it works' section, a react-docgen/RDT comparison, a real TOON sample and a finding-led intro; the roadmap should name the checker-default step and the failed gate.",
+      "Unchecked: other seven tool pages, dark theme, phone-width chapter menu, switcher on other pages; right-hand source notes now sit after sections.",
+      "Optional: add a nav z-index role (10/11 literals), turn off line numbers in TypeBoundaries examples, retitle the 'What sits behind RDT's 289' lede, and reconcile the 204 vs 212 construct-suite rows.",
+      "Add the remaining pages-repo stories (ComparisonBars, TypeBoundaries), update README and MIGRATING.md, and add Caliper docs to the docs site."
+    ]
+  }
+}

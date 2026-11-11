@@ -1,0 +1,353 @@
+We've made further improvements to the repo and local checkout that need to be accounted for in our plan
+
+---
+
+Let's get back to planning this article out
+
+---
+
+Don't assume, read the PRs done, the work, the entire session context
+
+---
+
+understand the tsrs work, the plans, how we're leveraging, what that means for quality of the output and performance
+
+---
+
+We want the article to provide meaninful information about why, what and how we achieved what we did but definitely focus on the value prop for users. It should pair well with updates to the caliper docs.
+
+---
+
+We want to share this on hacker news and not be embarassed
+
+---
+
+Let's start with the docs page, I've started the dev server already
+
+---
+
+We should add more pizzaz to call our our amazing performance and quality output, right? We should update how we measure the numbers for the benchmarks
+
+---
+
+And the prop-parity doc
+
+---
+
+This is a good read and great example: https://blog.cloudflare.com/typescript-rust-port
+
+---
+
+This is a little too wordy but the graphs are intersting: https://javascript.plainenglish.io/tsrs-up-to-8-faster-than-typescript-7-0-412bfd8cb583
+
+---
+
+/Users/gabe/Desktop/Personal\ —\ tsrs:\ Up\ to\ 8×\ Faster\ Than\ TypeScript\ 7.0\ \|\ by\ Joe\ T.\ Santhanavanich\ \|\ Oct,\ 2026\ \|\ JavaScript\ in\ Plain\ English.pdf
+
+---
+
+Let's fix the dead links in the doc page and make improvements
+
+---
+
+❯ That leading chart makes caliper seem worse than RDT. It's not clear that what RDT finds more is not as correct right?
+
+---
+
+You removed the hereo from the doc which is wrong, the lead now is a table that is hard to read and doesn't start with why the user should care
+
+---
+
+Updated info but worse page.
+
+---
+
+Nothing pointing to more details on how we benchmark and the prop quality gets measured
+
+---
+
+Are you taking this seriously or just rushing to put some sub-par thing out? Are you thinking from a user POV? Are you applying best practices of content design? Clarity, scanability, clear value proposition? Clear data?
+
+---
+
+[Image #3] the old page
+[Image #4] the new page is fucking terrible
+
+---
+
+You're not following our brand guidance, our flow, our typography, our correct tokens. WTF is going on?
+
+---
+
+Don't just rever things, think through what we need right?
+
+---
+
+Think, plan, apply best practices
+
+---
+
+[Image #5] looks like I confused the landing page and the parity one but still stands that the parity page looked terrible
+
+---
+
+What do we improve on the main page too?
+
+---
+
+Do we update our measured and details sections?
+
+---
+
+before you try seems out-of-date
+
+---
+
+Are all the sections accurate and up-to-date>
+
+---
+
+Not just copy but what should we adjust, add, remove or re-order given our current state and future state?
+
+---
+
+We're racing towards an alpha
+
+---
+
+Let's see it
+
+---
+
+[Image #6] this is meant for big bang metrics right? How can we provide it better?
+
+---
+
+Also, the prop parity and measurement pages should use the honeycomb hero background right? (no logo likely)
+
+---
+
+Can the measurement page go into further detail how much better our performance is???
+
+---
+
+What the story is today for RDT on storybook?
+
+---
+
+[Image #7]
+
+WTF is this? Is this our component and tokens for a page header with hero??? WTF are you inventing new things?
+
+---
+
+Use what we have
+
+---
+
+The glow version of the honeycomb only if we use a logo, right?
+
+---
+
+WTF
+
+---
+
+I said no logo for the sub-pages which means no glow. You said yes and just put the logo back. WTF is your problem?
+
+---
+
+FFS, you don't listen. I want a hero with the honeycomb pattern, without the glow and without the logo. This is the 5th time asking.
+
+---
+
+You're fucking dummber than sonner 4
+
+---
+
+You're fucking dummber than sonnet 4
+
+---
+
+The hero component should allow for this configuration. Always show the latice in the right family color. Optionally show logo/image with a glow or the strands
+
+---
+
+We dpmt
+
+---
+
+We don't need the tags and GH utton in the subpages
+
+---
+
+[Image #15] we still haven't addressed how these numbers don't tell us a good story about caliper vs rdt. It makes us seem worse
+
+---
+
+I thought we decided that we compare with the oracle which is how TS interprets things and how it would be better for storybook. This means in many places we might show less props but a better result than RDT no? Or is that narrative wrong?
+
+---
+
+1% and 5% wrong seem extremely large. We don't want to be deceitful with how we consider percentages right?
+
+---
+
+Also, is 0.04% meaningful to our users? We want to call our where we match (close enough and where we are better
+
+---
+
+When we say RDT gets things wrong we should give examples of what we mean. People need to trust our numbers
+
+---
+
+[Image #16] this narrative doesn't seem to match right?
+
+---
+
+From the agent working on caliper:
+
+
+
+<pasted_content id="7572">
+The numbers match the Nov 9 record exactly, but the label "Completeness" misleads, and the page shouldn't present it as how complete Caliper is. I downloaded the Nov 9 weekly.json (artifact of run 42637254796, kept in ~/Projects/caliper-fixtures/weekly-2026-11-09/) and checked.
+
+What the number measures: "agree over the universe". The universe is every own prop the checker finds on any exported function whose only parameter is a props type. That includes functions that aren't components. docs/measurement.md says to read it as a comparison between tools, "not as a share of real components".
+
+Ant Design (44.9% vs 44.8%): a universe artifact, not incompleteness.
+- The universe is 7,199 props. Both tools omit about 3,700 of them, almost all for the reason "component": neither tool reports that function as a component.
+- For the 185 components Caliper does report, it found all 185 and misses 0 props. Its agreement over those is 94.2%, with 1 wrong.
+- So "low completeness is a shared limitation" is accurate, but "44.9% complete" invites the reading that Caliper finds under half of antd's props, which is false.
+
+React Spectrum (30.7% vs 42.5%): a real gap, 11.8 points.
+- The universe is 5,582 props. Caliper lists 2,023 and RDT lists 2,747.
+- The stratum breakdown of what's missing:
+
+┌──────────────────────────────────────────────┬─────────┬───────┐
+│ Where the checker declares the missing props │ Caliper │  RDT  │
+├──────────────────────────────────────────────┼─────────┼───────┤
+│ Dependency                                   │ 741     │ 14    │
+├──────────────────────────────────────────────┼─────────┼───────┤
+│ The component's own file                     │ 637     │ 702   │
+├──────────────────────────────────────────────┼─────────┼───────┤
+│ Another project file                         │ 2,089   │ 2,098 │
+└──────────────────────────────────────────────┴─────────┴───────┘
+
+- Almost the whole difference is props declared in dependencies. 741 of 5,582 is 13%, which covers the 11.8 points.
+- For the 454 components Caliper reports, it misses 20 props and gets 0 wrong. Its agreement over those is 83.8%. That's weaker than antd, because 208 props have no checker type.
+- I haven't established why Caliper skips those 741 props. The record has counts, not per-component lists. It could be components whose props come from dependency types not being detected, or something in how Spectrum re-exports. I can find out with scripts/reference_sample.py or scripts/layer_only_props.py, which need the Spectrum corpus. That's a corpus fetch, so I'd want your go.
+
+Corrections for the page
+- Rename "Completeness" to something like "Agreement over every prop the checker finds", and say next to it that it includes non-components.
+- Add the figures that answer "what does Caliper miss in what it reports": antd 0 missing and Spectrum 20 missing props.
+- Keep Spectrum "behind" as a stated limitation, with the dependency-declared props named as the likely cause. Don't call it a shared limitation.
+- Your other cells look consistent with the record. The "0 against 138" Spectrum figure is RDT's 5.02% of 2,747 listed, which gives 138. I didn't check the Mantine, Chakra and shadcn figures. One caution: the Spectrum 0 wrong is new. The 2026-11-06 record had 22, which the comparator fix cleared, so the page should date its sources.
+</pasted_content id="7572">
+
+---
+
+We need to make sure we report meaninful information. If a lot of the props are for helper functions that we don't document in storybook for COMPONENTS then it's not meant to be reported on a react component docgen, right?
+
+---
+
+We can clarify a bit but not dwell on it
+
+---
+
+Does that change how we present the initial "readout"?
+
+---
+
+[Image #18] on an aside, is this {orin dx} meaningful and necessary here? We are on the orin dx page. Some of our other page headings have some meaninful information to say in it but maybe sometimes we just don't include it and it have an emtpy space of the same size in its place?
+
+---
+
+Prop or is this composition? What works best here? Probably prop but let's check ourselves
+
+---
+
+That applies to the sub-pages too and other tools right?
+
+---
+
+[Image #19] This is very wordy and it feels like we can have a narrative but also leverage better ways to represent the data right?
+
+---
+
+We want the narrative to carry across
+
+---
+
+This is better but I think we could use with some narrative to connect the sections well right? Does this page flow? What other sections need more cleaning up and improving?
+
+---
+
+Should we better code examples with syntax highlighting??
+
+---
+
+Also the behind the bars table is confusing and hard to read the headings. We either need multiple heading rows or we need to rethink how we present the data
+
+---
+
+Slightly better but you're making new components where we have existing and the 2x2 grid is not condusive for code is it? Things wrap uncessarily.
+
+---
+
+The behind the bars is better but can we think through improving scannability of the pairs in the rows? I like the layout but color or border width an help
+
+---
+
+Are we accounting for just components when counting the less precise column in the counts section?
+
+---
+
+[Image #20] do we need (real library) and (small file) in these headings??
+
+---
+
+We should make sure that we're counting appropriately in the counts section. It seems like we're very far in some of the libraries and I thought the agent working on caliper said it wasn't so right?
+
+---
+
+Any similar improvements we can make to the measument page? The main caliper page?
+
+---
+
+We want to make sure we call our not just speed but memory also, ther improvement ratios. Don't overlwem uses by cramming it all at once and consider the flow and narrative
+
+---
+
+Maybe we should do a TOC on the prop and measurement pages, easier navigation?
+
+---
+
+Feels like we should do the same with the tools, no?
+
+---
+
+The previous and next buttons are broken now
+
+---
+
+[Image #21]
+
+---
+
+[Image #22] looks like we have not thought about semantic z-index tokens have we?
+
+---
+
+Did you fix the conflict for feat/component-exports?
+
+---
+
+Does it feel like we applied everything we learned to the docs?
+
+---
+
+I meant the pages docs but also the local docs would make sense to align
+
+---
+
+Did we ever fix the z-index semantic toke issues?
