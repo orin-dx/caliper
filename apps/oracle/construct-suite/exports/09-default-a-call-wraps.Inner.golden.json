@@ -4,5 +4,16 @@
     "value": "wrapped",
     "of": "string"
   },
-  "text": "\"wrapped\""
+  "text": "\"wrapped\"",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "exports/09-default-a-call-wraps.tsx"
+    },
+    "order": null
+  }
 }
