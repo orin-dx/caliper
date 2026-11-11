@@ -14,6 +14,14 @@ describe('assertSchemaVersion', () => {
     )
   })
 
+  it("reads version 7, which carries each component's exports, and not version 6, which does not", () => {
+    expect(SUPPORTED_SCHEMA_VERSION).toBe(7)
+    expect(() => assertSchemaVersion({ schemaVersion: 6 }, 'caliper JSON')).toThrow(
+      'The caliper JSON has schema version 6, and the oracle reads version 7. ' +
+        'Run it with a caliper-docgen binary of the same release.',
+    )
+  })
+
   it('treats output without a version as version 1', () => {
     expect(() => assertSchemaVersion({}, 'caliper JSON')).toThrow('has schema version 1,')
   })

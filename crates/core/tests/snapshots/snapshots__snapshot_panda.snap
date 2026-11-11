@@ -10320,7 +10320,13 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "forwardRef",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "Button",
+          "members": []
+        }
+      ]
     }
   },
   "enums": {

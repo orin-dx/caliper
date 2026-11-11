@@ -55,12 +55,7 @@ fn run_fixture(library: &str) -> serde_json::Value {
     let canonical = serde_json::to_string(&output).expect("extraction output must serialize");
     let read: caliper_docgen_core::types::ExtractionOutput =
         serde_json::from_str(&canonical).expect("the canonical JSON must read back");
-    // `exports` joins the canonical JSON with its next schema version (ADR 0027); everything else must read back.
-    let mut written = output.clone();
-    for entry in written.components.values_mut() {
-        entry.exports.clear();
-    }
-    assert_eq!(read, written, "the canonical JSON must read back into the same output");
+    assert_eq!(read, output, "the canonical JSON must read back into the same output");
 
     // Props inline, as each component serializes on its own, so a snapshot diff shows the prop that changed rather
     // than an id.

@@ -1,8 +1,7 @@
 // Validates the canonical JSON the oracle reads, so a renamed key or a dangling id stops the run with its cause
 // instead of shrinking the set of props compared.
 
-/** The canonical JSON shape this oracle reads (`SCHEMA_VERSION` in crates/core/src/types/output.rs). */
-export const SUPPORTED_SCHEMA_VERSION = 6
+import { SUPPORTED_SCHEMA_VERSION } from './schema-version.ts'
 
 /** Throws unless `caliper` has the keys the oracle reads, at the schema version it understands. */
 export function checkCaliperShape(caliper: any): void {
@@ -15,6 +14,9 @@ export function checkCaliperShape(caliper: any): void {
     if (typeof caliper[key] !== 'object' || caliper[key] === null) {
       throw new Error(`caliper output has no "${key}" object`)
     }
+  }
+  for (const [key, component] of Object.entries<any>(caliper.components)) {
+    if (!Array.isArray(component?.exports)) throw new Error(`caliper component ${key} has no "exports" list`)
   }
 }
 

@@ -26,9 +26,36 @@ describe('DocgenSession.find', () => {
     expect(session.keyOf(join(src, 'List.tsx'), 'default')).toBeUndefined()
   })
 
-  it("answers a default export with the file's only component", async () => {
-    const session = await sessionWith({ Card: entry('Card', join(src, 'Card.tsx')) })
+  it('answers a default export with the component the module exports as default', async () => {
+    const session = await sessionWith({ Card: entry('Card', join(src, 'Card.tsx'), ['default']) })
     expect(session.keyOf(join(src, 'Card.tsx'), 'default')).toBe('Card')
+  })
+
+  it('does not answer a default export with the only component of a file that exports none as default', async () => {
+    const session = await sessionWith({ Card: entry('Card', join(src, 'Card.tsx')) })
+    expect(session.keyOf(join(src, 'Card.tsx'), 'default')).toBeUndefined()
+  })
+
+  it('answers an export under another name with the component the module exports under it, not by display name', async () => {
+    const session = await sessionWith({
+      Inner: entry('Inner', join(src, 'Tag.tsx'), ['Tag']),
+      Tag: entry('Tag', join(src, 'Tag.tsx'), []),
+    })
+    expect(session.keyOf(join(src, 'Tag.tsx'), 'Tag')).toBe('Inner')
+    expect(session.keyOfExport(join(src, 'Tag.tsx'), 'Tag')).toBe('Inner')
+    expect(session.keyOf(join(src, 'Tag.tsx'), 'Inner')).toBeUndefined()
+  })
+
+  it('tells a sub-component attached to an export from the export and from a component of its name', async () => {
+    const session = await sessionWith({
+      Menu: entry('Menu', join(src, 'Menu.tsx'), ['default']),
+      Item: entry('Item', join(src, 'Menu.tsx'), ['default.Item']),
+      'Item (own)': entry('Item', join(src, 'Menu.tsx'), ['Item']),
+    })
+    expect(session.keyOfExport(join(src, 'Menu.tsx'), 'default')).toBe('Menu')
+    expect(session.keyOfExport(join(src, 'Menu.tsx'), 'default', ['Item'])).toBe('Item')
+    expect(session.keyOfExport(join(src, 'Menu.tsx'), 'Item')).toBe('Item (own)')
+    expect(session.keyOfExport(join(src, 'Menu.tsx'), 'Missing')).toBeUndefined()
   })
 
   it('follows a barrel to the one component with the exported name, and gives up when two share it', async () => {
@@ -41,56 +68,71 @@ describe('DocgenSession.find', () => {
     expect(session.keyOf(join(src, 'index.ts'), 'Tab')).toBeUndefined()
   })
 
-  it("answers a default export with the component the module's source exports, among several in the file", async () => {
-    writeFileSync(join(real, 'Card.tsx'), 'const ActionNode = () => null\nfunction Card() {}\nexport default Card')
+  it('answers a default export among several components in the file without reading the source', async () => {
+    const path = join(real, 'Missing.tsx')
     const session = await sessionWith({
-      ActionNode: entry('ActionNode', join(real, 'Card.tsx')),
-      Card: entry('Card', join(real, 'Card.tsx')),
+      ActionNode: entry('ActionNode', path, []),
+      Card: entry('Card', path, ['default']),
     })
-    expect(await session.resolveExport(join(real, 'Card.tsx'), 'default')).toBe('Card')
+    expect(await session.resolveExport(path, 'default')).toBe('Card')
   })
 
-  it('answers an export under another name with the component the module renames', async () => {
-    writeFileSync(join(real, 'Tag.tsx'), 'function Inner() {}\nfunction Other() {}\nexport { Inner as Tag, Other }')
+  it('answers an export under another name without reading the source', async () => {
+    const path = join(real, 'Gone.tsx')
     const session = await sessionWith({
-      Inner: entry('Inner', join(real, 'Tag.tsx')),
-      Other: entry('Other', join(real, 'Tag.tsx')),
+      Inner: entry('Inner', path, ['Tag']),
+      Other: entry('Other', path, ['Other']),
     })
-    expect(await session.resolveExport(join(real, 'Tag.tsx'), 'Tag')).toBe('Inner')
-    expect(await session.resolveExport(join(real, 'Tag.tsx'), 'Other')).toBe('Other')
+    expect(await session.resolveExport(path, 'Tag')).toBe('Inner')
+    expect(await session.resolveExport(path, 'Other')).toBe('Other')
+    expect(await session.resolveExport(path, 'Inner')).toBeUndefined()
+  })
+
+  it('answers a declared export whose display name differs from it', async () => {
+    const session = await sessionWith({
+      '@mantine/core/ColorPickerThumb': entry('@mantine/core/ColorPickerThumb', join(real, 'Thumb.tsx'), ['Thumb']),
+    })
+    expect(await session.resolveExport(join(real, 'Thumb.tsx'), 'Thumb')).toBe('@mantine/core/ColorPickerThumb')
+    expect(await session.resolveExport(join(real, 'Thumb.tsx'), 'Hidden')).toBeUndefined()
+  })
+
+  it('does not guess among several components when the export names none of them', async () => {
+    const session = await sessionWith({
+      'ui/Left': entry('ui/Left', join(real, 'Pair.tsx'), ['Left']),
+      'ui/Right': entry('ui/Right', join(real, 'Pair.tsx'), ['Right']),
+    })
+    expect(await session.resolveExport(join(real, 'Pair.tsx'), 'Middle')).toBeUndefined()
+  })
+
+  it('answers a default export a call wraps, which the extractor records for no component, from the source', async () => {
+    writeFileSync(
+      join(real, 'Table.tsx'),
+      'const InternalTable = () => null\nconst Other = () => null\nexport default React.forwardRef(InternalTable) as RefTable',
+    )
+    const session = await sessionWith({
+      InternalTable: entry('InternalTable', join(real, 'Table.tsx'), []),
+      Other: entry('Other', join(real, 'Table.tsx'), []),
+    })
+    expect(await session.resolveExport(join(real, 'Table.tsx'), 'default')).toBe('InternalTable')
   })
 
   it('answers a default import by the name the story gave it only when the source does not say', async () => {
     writeFileSync(join(real, 'Panel.tsx'), 'export default makePanel()')
     const session = await sessionWith({
-      Header: entry('Header', join(real, 'Panel.tsx')),
-      Panel: entry('Panel', join(real, 'Panel.tsx')),
+      Header: entry('Header', join(real, 'Panel.tsx'), []),
+      Panel: entry('Panel', join(real, 'Panel.tsx'), []),
     })
     expect(await session.resolveExport(join(real, 'Panel.tsx'), 'default', 'Panel')).toBe('Panel')
     expect(await session.resolveExport(join(real, 'Panel.tsx'), 'default', 'Footer')).toBeUndefined()
     expect(await session.resolveExport(join(real, 'Panel.tsx'), 'default')).toBeUndefined()
   })
 
-  it("answers a declared export with the file's only component whose display name differs", async () => {
-    writeFileSync(
-      join(real, 'Thumb.tsx'),
-      "export function Thumb() {}\nThumb.displayName = '@mantine/core/ColorPickerThumb'\nexport function helper() {}\nconst Hidden = 1",
-    )
+  it('does not take the story’s name for the default export when the module exports another component as default', async () => {
     const session = await sessionWith({
-      '@mantine/core/ColorPickerThumb': entry('@mantine/core/ColorPickerThumb', join(real, 'Thumb.tsx')),
+      Header: entry('Header', join(real, 'Panel.tsx'), ['default']),
+      Panel: entry('Panel', join(real, 'Panel.tsx'), []),
     })
-    expect(await session.resolveExport(join(real, 'Thumb.tsx'), 'Thumb')).toBe('@mantine/core/ColorPickerThumb')
-    expect(await session.resolveExport(join(real, 'Thumb.tsx'), 'Hidden')).toBeUndefined()
-    expect(await session.resolveExport(join(real, 'Thumb.tsx'), 'Missing')).toBeUndefined()
-  })
-
-  it('does not guess among several components when the export names none of their display names', async () => {
-    writeFileSync(join(real, 'Pair.tsx'), 'export function Left() {}\nexport function Right() {}')
-    const session = await sessionWith({
-      'ui/Left': entry('ui/Left', join(real, 'Pair.tsx')),
-      'ui/Right': entry('ui/Right', join(real, 'Pair.tsx')),
-    })
-    expect(await session.resolveExport(join(real, 'Pair.tsx'), 'Left')).toBeUndefined()
+    expect(await session.resolveExport(join(real, 'Panel.tsx'), 'default', 'Panel')).toBe('Header')
   })
 
   it('lists the components of a file, to say what a failed lookup chose from', async () => {
@@ -117,12 +159,29 @@ describe('DocgenSession.keyOfMember', () => {
       }),
     )
     await session.fresh()
-    expect(session.keyOfMember(['Input'], 'Password', join(src, 'input', 'index.tsx'))).toBe('Input.Password')
-    expect(session.keyOfMember(['default', 'Select'], 'Option', join(src, 'select', 'index.tsx'))).toBe(
-      'Select.Option (select)',
+    const member = (exportName: string, localName: string, property: string, near: string) =>
+      session.keyOfMember({ exportName, localName }, property, join(src, near))
+    expect(member('Input', 'Input', 'Password', 'input/index.tsx')).toBe('Input.Password')
+    expect(member('Select', 'default', 'Option', 'select/index.tsx')).toBe('Select.Option (select)')
+    expect(member('Select', 'Select', 'Option', 'index.tsx')).toBeUndefined()
+    expect(member('Select', 'Select', 'Group', 'select/index.tsx')).toBeUndefined()
+  })
+
+  it('finds the sub-component attached to the export the namespace names, whatever it is called', async () => {
+    const session = new DocgenSession(
+      { srcDirs: [src] },
+      new FakeBinding({
+        components: {
+          Menu: entry('Menu', join(src, 'Menu.tsx'), ['default']),
+          Item: entry('Item', join(src, 'Menu.tsx'), ['default.Item']),
+          'Item (other)': entry('Item', join(src, 'Other.tsx'), ['Item']),
+        },
+      }),
     )
-    expect(session.keyOfMember(['Select'], 'Option', join(src, 'index.tsx'))).toBeUndefined()
-    expect(session.keyOfMember(['Select'], 'Group', join(src, 'select', 'index.tsx'))).toBeUndefined()
+    await session.fresh()
+    const menu = { exportName: 'default', localName: 'Menu' }
+    expect(session.keyOfMember(menu, 'Item', join(src, 'Menu.tsx'))).toBe('Item')
+    expect(session.keyOfMember(menu, 'Gone', join(src, 'Menu.tsx'))).toBeUndefined()
   })
 })
 
@@ -385,7 +444,7 @@ describe('DocgenSession, lazy', () => {
 
 describe('DocgenSession start failures', () => {
   it('starts again on the next request after the native session could not be created', async () => {
-    const binding = new FakeBinding({ components: { Card: entry('Card', join(src, 'Card.tsx')) } })
+    const binding = new FakeBinding({ components: { Card: entry('Card', join(src, 'Card.tsx'), ['default']) } })
     const create = binding.createSession
     binding.createSession = () => {
       throw new Error('no binding for this platform')
@@ -400,7 +459,7 @@ describe('DocgenSession start failures', () => {
   })
 
   it('closes the native session of a start that failed after creating it, and starts a new one next time', async () => {
-    const binding = new FakeBinding({ components: { Card: entry('Card', join(src, 'Card.tsx')) } })
+    const binding = new FakeBinding({ components: { Card: entry('Card', join(src, 'Card.tsx'), ['default']) } })
     const index = binding.initializeSessionIndex
     binding.initializeSessionIndex = async () => {
       throw new Error('index failed')

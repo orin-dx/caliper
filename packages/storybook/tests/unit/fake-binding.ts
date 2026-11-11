@@ -9,7 +9,12 @@ import type {
 import { SUPPORTED_SCHEMA_VERSION } from '../../src/schema.js'
 import type { SessionBinding } from '../../src/session.js'
 
-export function entry(displayName: string, filePath: string): ComponentEntry {
+/** A component of a module that exports it under its own name, unless `exportedAs` says how (`default`, `Menu.Item`). */
+export function entry(displayName: string, filePath: string, exportedAs?: string[]): ComponentEntry {
+  const exports = exportedAs?.map((path) => {
+    const [name, ...members] = path.split('.')
+    return { name, members }
+  }) ?? [{ name: displayName, members: [] }]
   return {
     displayName,
     filePath,
@@ -22,6 +27,8 @@ export function entry(displayName: string, filePath: string): ComponentEntry {
     tags: {},
     methods: [],
     detectedBy: 'functionDeclaration',
+    exported: exports.length > 0,
+    exports,
   }
 }
 

@@ -96,6 +96,9 @@ pub struct ComponentLocation {
     pub file_path: Utf8PathBuf,
     /// The component's name as the extractor found it.
     pub display_name: String,
+    /// How its module exports it ([`ComponentEntry::exports`]): what a host that finds a component by file and export
+    /// reads.
+    pub exports: Vec<ComponentExport>,
 }
 
 /// The dependency layer a context was built over, and the context. Replaced whole when the layer grows: the context's
@@ -576,8 +579,9 @@ impl Revision {
             .iter()
             .flat_map(|(name, group)| {
                 self.group_positions(options, name, true).into_iter().filter_map(|(key, position)| {
-                    let (id, _) = group.get(position)?;
-                    Some(ComponentLocation { key, file_path: id.file.clone(), display_name: id.name.clone() })
+                    let (id, index) = group.get(position)?;
+                    let exports = self.global.component_mappings.get(*index)?.exports.clone();
+                    Some(ComponentLocation { key, file_path: id.file.clone(), display_name: id.name.clone(), exports })
                 })
             })
             .collect();

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Row } from '../src/reference-report.ts'
+import { SUPPORTED_SCHEMA_VERSION } from '../src/schema-version.ts'
 
 const SOURCE = `export type Mode = 'a' | 'b'
 export interface ButtonProps {
@@ -83,17 +84,20 @@ beforeAll(() => {
   const component = (name: string, props: Record<string, string>, members: string[] = []) => ({
     displayName: name,
     filePath: file,
+    exports: [{ name, members: [] }],
     props,
     inheritance: members.length > 0 ? [{ typeName: 'ButtonProps', members }] : [],
   })
   writeFileSync(
     join(dir, 'caliper.json'),
     JSON.stringify({
+      schemaVersion: SUPPORTED_SCHEMA_VERSION,
       components: {
         Button: component('Button', { size: 'size', count: 'count', mode: 'mode' }, ['items']),
         Merged: component('Merged', { count: 'count' }),
         Picked: component('Picked', { count: 'text' }),
       },
+      propSets: {},
       props: {
         size: { type: { kind: 'literalUnion', members: ['small', 'large'] } },
         count: { type: { kind: 'number' } },

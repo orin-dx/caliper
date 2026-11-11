@@ -27,6 +27,15 @@ fn schema_value() -> serde_json::Value {
                 "type": "string",
                 "pattern": "^[0-9a-f]{16}$"
             },
+            "componentExport": {
+                "description": "One way a module exports a component: `Card` for `export function Card` and for `export { _Card as Card }`, `default` for `export default Menu`, and for a sub-component attached to an exported component the export it hangs from with the properties that reach it, so `Menu.Item = Item` beside `export default Menu` is `default` with members `[\"Item\"]`",
+                "type": "object",
+                "required": ["name", "members"],
+                "properties": {
+                    "name": { "type": "string" },
+                    "members": { "type": "array", "items": { "type": "string" } }
+                }
+            },
             "opaqueReason": {
                 "description": "Why a prop type is `opaque`: `type` of the `reason` in an `{ kind: \"opaque\" }` type, with the named fields of its variant",
                 "type": "object",
@@ -103,6 +112,11 @@ fn schema_value() -> serde_json::Value {
                         "exported": {
                             "description": "Whether its module exports it, directly or as a sub-component attached to an exported component",
                             "type": "boolean"
+                        },
+                        "exports": {
+                            "description": "How its module exports it, in source order (ADR 0027). `exported` is whether there are any",
+                            "type": "array",
+                            "items": { "$ref": "#/definitions/componentExport" }
                         }
                     }
                 }
@@ -342,7 +356,10 @@ mod tests {
                 methods: vec![],
                 detected_by: caliper_docgen_core::types::DetectionRule::FunctionDeclaration,
                 exported: true,
-                exports: Vec::new(),
+                exports: vec![
+                    caliper_docgen_core::types::ComponentExport::named("default"),
+                    caliper_docgen_core::types::ComponentExport::named("default").member("Item"),
+                ],
             },
         );
 
@@ -410,6 +427,21 @@ mod tests {
         assert_ne!(button["inheritance"][0]["omitted"], serde_json::json!([]), "omitted must be non-empty");
         assert!(!button["discriminantProp"].is_null(), "discriminantProp must be non-null");
         assert_ne!(button["composes"], serde_json::json!([]), "composes must be non-empty");
+
+        let schema = schema_value();
+        let component_schema = &schema["properties"]["components"]["additionalProperties"]["properties"];
+        assert_eq!(
+            component_schema["exports"]["items"],
+            serde_json::json!({ "$ref": "#/definitions/componentExport" })
+        );
+        let export_fields: Vec<&String> =
+            button["exports"][1].as_object().expect("an export is an object").keys().collect();
+        let described: Vec<&String> = schema["definitions"]["componentExport"]["properties"]
+            .as_object()
+            .expect("componentExport lists its properties")
+            .keys()
+            .collect();
+        assert_eq!(export_fields, described);
         assert_ne!(button["tags"], serde_json::json!({}), "component tags must be non-empty");
 
         let variant = &value["props"][variant_id];

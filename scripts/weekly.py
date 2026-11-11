@@ -41,8 +41,9 @@ RECALL_DROP = 0.02
 REFERENCE_VERSION = 2
 # The universe of the oracle's scores (`oracle.tools`): version 2 counts candidate components only, naming a default export
 # by its declaration; a record without it is version 1, which counted every function the checker takes for a component
-# and named a default export `default`. Raise it when a change moves what the oracle counts.
-UNIVERSE_VERSION = 2
+# and named a default export `default`. Version 3 pairs a checker component with Caliper's by file and export name
+# (ADR 0027) where version 2 paired by a normalised display name. Raise it when a change moves what the oracle counts.
+UNIVERSE_VERSION = 3
 
 
 def norm_name(name):

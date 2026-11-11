@@ -9,7 +9,7 @@
 // out, review? }. `files` is a file of component file paths, one per line (the list src/oracle.ts takes); `caliper` is
 // that corpus's `extract --json`, when a tool is to be scored; `list` is a JSON array of { corpus, file, component, prop }
 // to judge besides the control sample (for example the props two modes differ on). `file` is relative to the corpus
-// root; `component` may be a display name (it is normalized the way the tool's components are). The report says, per
+// root; `component` may be a display name, or the name the component is exported under. The report says, per
 // corpus, how many listed props the checker found and names the ones it did not (`listed`).
 import { readFileSync, writeFileSync } from 'node:fs'
 import { API } from 'typescript-beta/sync'
@@ -22,7 +22,6 @@ import { informative, reviewText, summarize, type Row } from './reference-report
 import { keyOf, stratified, stratumOf, type Candidate } from './reference-sample.ts'
 import { loadTool, type Tool } from './reference-tool.ts'
 import { collect, type Entry, type Universe } from './reference-universe.ts'
-import { normComponent } from './tool-universe.ts'
 
 interface CorpusConfig {
   name: string
@@ -50,6 +49,9 @@ interface Listed {
   component: string
   prop: string
 }
+
+/** The ` (path)` Caliper's output key adds to a name two components share. */
+const KEY_SUFFIX = / \(.*\)$/
 
 const DEFAULT_PER_CORPUS = 100
 const DEFAULT_CAP = 8000
@@ -105,7 +107,7 @@ function judge(entry: Entry, { universe, tool, norm }: Context): Row {
   const ref: Reference = reference(checkerNorm, declared.norm)
   const row: Row = {
     corpus: candidate.corpus,
-    stratum: stratumOf(candidate, entry.listed),
+    stratum: stratumOf(candidate, entry.listedBy !== undefined),
     origin: candidate.origin,
     file: candidate.file,
     component: candidate.component,
@@ -118,7 +120,7 @@ function judge(entry: Entry, { universe, tool, norm }: Context): Row {
   }
   if (ref.kind === 'agreed') Object.assign(row, { basis: ref.basis, why: ref.why })
   if (ref.kind === 'contested') row.pair = `${ref.declared.k}->${ref.checker.k}`
-  const found = tool?.lookup(candidate.file, candidate.component, candidate.prop)
+  const found = tool?.lookup(candidate.file, entry.names, candidate.prop)
   if (found?.found) row.tool = score(found.norm, ref, found.layered)
   return row
 }
@@ -126,8 +128,8 @@ function judge(entry: Entry, { universe, tool, norm }: Context): Row {
 /** The props to judge: every listed one the checker found (the rest are reported by `listedReport`), and the stratified
  * control sample over the other props. */
 function choose(universe: Universe, perCorpus: number, seed: string): Entry[] {
-  const listed = universe.entries.filter((e) => e.listed)
-  const pool = universe.entries.filter((e) => !e.listed)
+  const listed = universe.entries.filter((e) => e.listedBy !== undefined)
+  const pool = universe.entries.filter((e) => e.listedBy === undefined)
   const byKey = new Map(pool.map((e) => [keyOf(e.candidate), e]))
   const sample = stratified(
     pool.map((e) => e.candidate),
@@ -148,11 +150,7 @@ interface ListedReport {
 }
 
 function listedReport(wanted: Set<string>, universe: Universe): ListedReport {
-  const found = new Set(
-    universe.entries
-      .filter((e) => e.listed)
-      .map((e) => keyOf({ ...e.candidate, component: normComponent(e.candidate.component) })),
-  )
+  const found = new Set(universe.entries.map((e) => e.listedBy).filter((key) => key !== undefined))
   const missing = [...wanted]
     .filter((key) => !found.has(key))
     .map((key) => {
@@ -170,7 +168,9 @@ function runCorpus(corpus: CorpusConfig, config: Config, listed: Listed[]): { ro
   const program = api.createProgram(files, options)
   const project = program.getProject()
   const wanted = new Set(
-    listed.filter((l) => l.corpus === corpus.name).map((l) => keyOf({ ...l, component: normComponent(l.component) })),
+    listed
+      .filter((l) => l.corpus === corpus.name)
+      .map((l) => keyOf({ ...l, component: l.component.replace(KEY_SUFFIX, '') })),
   )
   const seed = config.seed ?? 'caliper'
   const tool = corpus.caliper ? loadTool(corpus.caliper, corpus.root) : undefined
@@ -182,7 +182,7 @@ function runCorpus(corpus: CorpusConfig, config: Config, listed: Listed[]): { ro
     wanted,
     cap: config.universeCap ?? DEFAULT_CAP,
     seed,
-    accept: tool && !config.allComponents ? (file, component) => tool.has(file, component) : undefined,
+    accept: tool && !config.allComponents ? (file, names) => tool.has(file, names) : undefined,
   })
   const context: Context = { universe, tool, norm: checkerNormalizer(project.checker) }
   const rows = choose(universe, config.perCorpus ?? DEFAULT_PER_CORPUS, `${seed}:${corpus.name}`).map((entry) =>

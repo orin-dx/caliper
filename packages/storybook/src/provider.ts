@@ -192,7 +192,7 @@ export function createDocgenProvider(
     const owner = resolveMeta(storyFor(csf, storyPath, node.object.name), storyPath)
     if (!('component' in owner) || !owner.component.path) return undefined
     const { path, exportName, localName } = owner.component
-    const key = session.keyOfMember([localName, exportName], node.property.name, path)
+    const key = session.keyOfMember({ exportName, localName }, node.property.name, path)
     return key ? { key, path } : undefined
   }
 

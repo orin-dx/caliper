@@ -1,9 +1,10 @@
 // The deterministic construct suite's pure half (apps/oracle/construct-suite/README.md): which fixtures exist, the verdict
 // one of Caliper's props earns against its golden, and the check of the expectations file. Nothing here runs the checker
 // or Caliper, so tests/construct-suite.test.ts can pin it without either.
-import { readdirSync, readFileSync } from 'node:fs'
+import { readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { caliperNorm } from './caliper-norm.ts'
+import { pathOfExport, exportPathKey, type ComponentExport } from './component-join.ts'
 import { compare, type Norm, type Verdict } from './oracle-compare.ts'
 
 /** The prop every fixture states its type through. */
@@ -108,8 +109,15 @@ export function listFixtures(dir: string): Fixture[] {
   return fixtures.toSorted((a, b) => (a.id < b.id ? -1 : 1))
 }
 
-/** Where Caliper's component for a row is in `components`, keyed by `rowKey`. */
-export const rowKey = (file: string, component: string): string => `${file}#${component}`
+/** Where Caliper's component for a row is, keyed by `rowKey`: the file and the way its module exports it, the same on
+ * both sides, never the display name that two components of a file can share. */
+export const rowKey = (file: string, exportedAs: readonly string[]): string => exportPathKey(file, exportedAs)
+
+/** The `rowKey` of each way the module exports one of Caliper's components. */
+export function rowKeysOf(component: { filePath: string; exports: ComponentExport[] }): string[] {
+  const file = realpathSync(component.filePath)
+  return component.exports.map((e) => rowKey(file, pathOfExport(e)))
+}
 
 /** The verdict for Caliper's prop against the golden. A prop with `degradedBy` that is only `less precise` is an
  * `opaque with marker`: Caliper said it did not evaluate the type. A `wrong` prop stays wrong with or without a marker. */

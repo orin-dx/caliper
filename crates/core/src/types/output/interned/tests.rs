@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::types::{DefaultValue, DetectionRule, DiagnosticCode, DiagnosticSeverity, PropParent, PropType};
+use crate::types::{
+    ComponentExport, DefaultValue, DetectionRule, DiagnosticCode, DiagnosticSeverity, PropParent, PropType,
+};
 
 fn prop(name: &str, default: Option<&str>) -> ParsedProp {
     prop_in(name, default, Some("SizeProps"))
@@ -268,9 +270,32 @@ fn the_canonical_json_reads_back_into_the_same_output() {
         &[prop("size", None)],
     );
     button.inheritance = vec![layer(&["ref"]), layer(&[])];
-    let out = output(vec![button, component("Chip", &[prop("size", Some("sm"))], &[])]);
+    button.exports = vec![ComponentExport::named("default"), ComponentExport::named("Button")];
+    let mut item = component("Item", &[prop("size", None)], &[]);
+    item.exports = vec![ComponentExport::named("default").member("Item")];
+    let mut chip = component("Chip", &[prop("size", Some("sm"))], &[]);
+    chip.exported = false;
+    let out = output(vec![button, item, chip]);
     let read: ExtractionOutput = serde_json::from_str(&serde_json::to_string(&out).unwrap()).unwrap();
     assert_eq!(read, out);
+}
+
+#[test]
+fn a_component_writes_how_its_module_exports_it_and_an_unexported_one_writes_none() {
+    let mut button = component("Button", &[], &[]);
+    button.exports = vec![ComponentExport::named("default"), ComponentExport::named("Button")];
+    let mut item = component("Item", &[], &[]);
+    item.exports = vec![ComponentExport::named("default").member("Item")];
+    let mut chip = component("Chip", &[], &[]);
+    chip.exported = false;
+    let json = serde_json::to_value(output(vec![button, item, chip])).unwrap();
+
+    assert_eq!(
+        json["components"]["Button"]["exports"],
+        json!([{ "name": "default", "members": [] }, { "name": "Button", "members": [] }])
+    );
+    assert_eq!(json["components"]["Item"]["exports"], json!([{ "name": "default", "members": ["Item"] }]));
+    assert_eq!(json["components"]["Chip"]["exports"], json!([]));
 }
 
 /// A canonical document whose one component is `Button` with these `props`, `inheritance` and tables.

@@ -10777,7 +10777,17 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "forwardRefExoticDecl",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "Button",
+          "members": []
+        },
+        {
+          "name": "default",
+          "members": []
+        }
+      ]
     },
     "TextInput": {
       "displayName": "TextInput",
@@ -22291,7 +22301,17 @@ expression: value
       "tags": {},
       "methods": [],
       "detectedBy": "forwardRefExoticDecl",
-      "exported": true
+      "exported": true,
+      "exports": [
+        {
+          "name": "TextInput",
+          "members": []
+        },
+        {
+          "name": "default",
+          "members": []
+        }
+      ]
     }
   },
   "enums": {},

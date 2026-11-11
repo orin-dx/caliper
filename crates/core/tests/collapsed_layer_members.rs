@@ -126,10 +126,5 @@ fn the_canonical_json_writes_a_members_list_id_and_reads_back() {
     assert!(json["components"]["WithSmall"]["inheritance"][0].get("members").is_none());
 
     let read: ExtractionOutput = serde_json::from_value(json).unwrap();
-    // `exports` joins the canonical JSON with its next schema version (ADR 0027); everything else must read back.
-    let mut written = output.components.clone();
-    for entry in written.values_mut() {
-        entry.exports.clear();
-    }
-    assert_eq!(read.components, written);
+    assert_eq!(read.components, output.components);
 }

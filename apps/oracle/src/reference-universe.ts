@@ -4,7 +4,7 @@
 import { realpathSync } from 'node:fs'
 import { relative } from 'node:path'
 import { ObjectFlags, SignatureKind, TypeFlags } from 'typescript-beta/sync'
-import { declaredExports, exportName, propsTypeOf } from './checker-components.ts'
+import { declaredExports, listedName, propsTypeOf } from './checker-components.ts'
 import {
   keyOf,
   seeded,
@@ -14,15 +14,17 @@ import {
   type PropsShape,
   type ValueKind,
 } from './reference-sample.ts'
-import { normComponent, pathKey } from './tool-universe.ts'
+import { pathKey } from './tool-universe.ts'
 
 /** A prop the checker found, with what judging it needs. */
 export interface Entry {
   candidate: Candidate
   symbol: any
   type: any
-  /** Named by the list the run was given, not drawn for the control sample. */
-  listed: boolean
+  /** The key (`keyOf`) of the list entry that names it, when the run was given one: not drawn for the control sample. */
+  listedBy?: string
+  /** Every name the module exports the component under, which a tool's components are found by (src/component-join.ts). */
+  names: string[]
 }
 
 export interface Universe {
@@ -44,10 +46,10 @@ export interface CollectOptions {
   /** Stop adding control-sample candidates once this many are collected; listed props are always kept. */
   cap: number
   seed: string
-  /** Whether a component is one a reader sees. The checker takes any one-parameter function for a component (a style
-   * helper, a context), so with a tool's output given the control sample is drawn from the components the tool reports.
-   * Listed props are kept either way. */
-  accept?: (file: string, component: string) => boolean
+  /** Whether a component is one a reader sees, given the names its module exports it under. The checker takes any
+   * one-parameter function for a component (a style helper, a context), so with a tool's output given the control sample
+   * is drawn from the components the tool reports. Listed props are kept either way. */
+  accept?: (file: string, names: readonly string[]) => boolean
 }
 
 const GENERIC = TypeFlags.TypeParameter | TypeFlags.IndexedAccess | TypeFlags.Conditional | TypeFlags.Substitution
@@ -107,18 +109,25 @@ export function collect(files: string[], options: CollectOptions): Universe {
     if (!mustRead && control >= options.cap) continue
     const moduleSymbol = checker.getSymbolOfSourceFile(file)
     if (!moduleSymbol) continue
-    for (const exported of declaredExports(checker, moduleSymbol)) {
+    for (const declaration of declaredExports(checker, moduleSymbol)) {
       let propsType
       try {
-        propsType = propsTypeOf(checker, exported)
+        propsType = propsTypeOf(checker, declaration.exported)
       } catch {
         continue
       }
       if (!propsType) continue
       const props = checker.getPropertiesOfType(propsType).filter((p: any) => p.name !== 'ref' && p.name !== 'key')
       if (props.length === 0) continue
-      const name = exportName(checker, exported)
-      const accepted = options.accept?.(rel(file), name) ?? true
+      const name = listedName(declaration.exported.name, declaration.declared, file)
+      // A list names a component by what a reader of the tool's output calls it: its display name, which is the
+      // declaration's name or the one it is exported under.
+      const called = new Set([
+        name,
+        ...declaration.names,
+        ...(declaration.declared === undefined ? [] : [declaration.declared]),
+      ])
+      const accepted = options.accept?.(rel(file), declaration.names) ?? true
       if (!accepted && !mustRead) continue
       if (accepted) components++
       const shape = shapeOf(propsType)
@@ -135,11 +144,13 @@ export function collect(files: string[], options: CollectOptions): Universe {
           shape,
           kind: kindOf(checker, types[i]),
         }
-        const listed = options.wanted.has(keyOf({ ...candidate, component: normComponent(name) }))
-        if (!listed && !accepted) continue
-        if (!listed && origin === 'html' && ++html > HTML_PER_COMPONENT) continue
-        entries.push({ candidate, symbol: p, type: types[i], listed })
-        if (!listed) control++
+        const listedBy = [...called]
+          .map((component) => keyOf({ ...candidate, component }))
+          .find((key) => options.wanted.has(key))
+        if (listedBy === undefined && !accepted) continue
+        if (listedBy === undefined && origin === 'html' && ++html > HTML_PER_COMPONENT) continue
+        entries.push({ candidate, symbol: p, type: types[i], listedBy, names: declaration.names })
+        if (listedBy === undefined) control++
       }
     }
   }

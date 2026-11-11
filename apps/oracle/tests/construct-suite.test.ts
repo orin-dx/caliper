@@ -13,6 +13,7 @@ import {
   listFixtures,
   PROP,
   rowKey,
+  rowKeysOf,
   rowVerdict,
   type Expectation,
   type Golden,
@@ -148,16 +149,13 @@ describe.skipIf(!available)('the construct suite against the caliper binary', ()
     const propByRow = new Map<string, any>()
     for (const [key, component] of Object.entries<any>(caliper.components)) {
       const id = flattenProps(caliper, key, component)[PROP]
-      propByRow.set(
-        rowKey(realpathSync(component.filePath), component.displayName),
-        id === undefined ? undefined : caliper.props[id],
-      )
+      for (const row of rowKeysOf(component)) propByRow.set(row, id === undefined ? undefined : caliper.props[id])
     }
 
     const failures: string[] = []
     for (const fixture of listFixtures(suite)) {
       const golden: Golden = JSON.parse(readFileSync(fixture.golden, 'utf8'))
-      const verdict = rowVerdict(propByRow.get(rowKey(realpathSync(fixture.file), fixture.component)), golden)
+      const verdict = rowVerdict(propByRow.get(rowKey(realpathSync(fixture.file), fixture.exportPath)), golden)
       const row = expectations.rows[fixture.id]
       const failure = row && expectationFailure(fixture.id, verdict, row)
       if (failure) failures.push(failure)

@@ -10,7 +10,7 @@
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { API, SignatureKind, SymbolFlags, TypeFlags } from 'typescript-beta/sync'
-import { exportName, propsTypeOf } from './checker-components.ts'
+import { declaredName, listedName, propsTypeOf } from './checker-components.ts'
 
 const KEYS = ['root', 'tsconfig', 'questions', 'corpus', 'out'] as const
 const args: Partial<Record<(typeof KEYS)[number], string>> = {}
@@ -79,7 +79,7 @@ function answer(q: Question): Truth {
   if (!moduleSymbol) return { invalid: `the checker has no module for ${q.file}` }
   const exported = checker
     .getExportsOfModule(moduleSymbol)
-    .find((e: any) => e.name === q.component || (e.name === 'default' && exportName(checker, e) === q.component))
+    .find((e: any) => listedName(e.name, declaredName(checker, e), absolute(q)) === q.component)
   let props: any[] = []
   if (exported) {
     // A checker failure propagates to the caller's `the checker failed` fact instead of reading as no props.

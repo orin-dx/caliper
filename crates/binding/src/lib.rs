@@ -372,7 +372,7 @@ pub async fn initialize_session(session_id: u32, options: JsExtractOptions) -> n
 }
 
 /// Like [`initialize_session`], but returns only what a host needs to find a component and judge whether its props are
-/// complete: `{ components: { key: { filePath, displayName } }, diagnostics }`. The props stay in the session for
+/// complete: `{ components: { key: { filePath, displayName, exports } }, diagnostics }`. The props stay in the session for
 /// [`session_docgen_info`]. A host that documents one component at a time skips serializing and parsing every prop of
 /// every component, which is tens of megabytes when dependencies are loaded.
 #[napi]
@@ -962,10 +962,16 @@ mod tests {
             .expect("components")
             .iter()
             .map(|(key, entry)| {
-                (key.clone(), serde_json::json!({ "filePath": entry["filePath"], "displayName": entry["displayName"] }))
+                let wanted = serde_json::json!({
+                    "filePath": entry["filePath"],
+                    "displayName": entry["displayName"],
+                    "exports": entry["exports"],
+                });
+                (key.clone(), wanted)
             })
             .collect();
         assert_eq!(expected.keys().collect::<Vec<_>>(), ["Button"]);
+        assert_eq!(expected["Button"]["exports"], serde_json::json!([{ "name": "Button", "members": [] }]));
         assert_eq!(index["components"], serde_json::Value::Object(expected));
         assert_eq!(index["diagnostics"], full["diagnostics"]);
     }
@@ -1098,6 +1104,7 @@ mod tests {
             |index: &str| serde_json::from_str::<serde_json::Value>(index).expect("json")["components"].clone();
         assert_eq!(components(&from_lazy), components(&from_eager));
         assert_eq!(components(&from_lazy)["Card"]["displayName"], "Card");
+        assert_eq!(components(&from_lazy)["Card"]["exports"], serde_json::json!([{ "name": "Card", "members": [] }]));
         assert_eq!(session_stats(lazy).expect("lazy stats").resolved, 0, "indexing resolves nothing");
 
         let keys = vec!["Card".to_owned(), "Missing".to_owned()];

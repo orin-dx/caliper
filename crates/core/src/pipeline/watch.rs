@@ -475,6 +475,7 @@ impl WatchSession {
                     key: key.clone(),
                     file_path: entry.file_path.clone(),
                     display_name: entry.display_name.clone(),
+                    exports: entry.exports.clone(),
                 })
                 .collect(),
         }
