@@ -14,7 +14,8 @@
 //! ```
 //!
 //! It copies `tests/fixtures/<fixture>` (default `project`) to a scratch directory, runs the structural pass and the backend on it with
-//! recording on, and writes the calls with the scratch path replaced by `<ROOT>` (see `tests/bin/replay_tsc.rs`). A
+//! recording on, and writes the calls, one compact entry per line, with the scratch path replaced by `<ROOT>` (see
+//! `tests/bin/replay_tsc.rs`, which parses the file as JSON and does not depend on the layout). A
 //! fixture's `modules` directory is copied to `node_modules`, which the repository's ignore rules would not keep.
 
 use caliper_docgen_core::pipeline::{PipelineOptions, extract};
@@ -73,7 +74,9 @@ fn main() {
             "result": { "caseSensitivity": 0, "currentDirectory": root.as_str() }
         }),
     );
-    let text = serde_json::to_string_pretty(&calls).unwrap();
+    // One compact entry per line: a diff shows which calls changed, and the files stay small.
+    let entries: Vec<String> = calls.iter().map(|call| serde_json::to_string(call).unwrap()).collect();
+    let text = format!("[\n{}\n]\n", entries.join(",\n"));
     let text = text.replace(root.as_str(), "<ROOT>").replace(&root.as_str().to_lowercase(), "<root>");
     assert!(!text.to_lowercase().contains("/users/"), "the recording leaks a home directory");
     let target = crate_dir.join("tests/fixtures").join(if fixture == "project" {
