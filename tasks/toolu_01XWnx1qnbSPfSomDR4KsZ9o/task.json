@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01XWnx1qnbSPfSomDR4KsZ9o",
+  "agent_id": "aa877fc4d89943e87",
+  "subagent_type": "general-purpose",
+  "task_description": "Apply ADR 0027 corrections",
+  "token_usage": {
+    "input_tokens": 30,
+    "cache_creation_tokens": 52784,
+    "cache_read_tokens": 952868,
+    "output_tokens": 5197,
+    "api_call_count": 15
+  },
+  "started_at": "2026-11-10T20:49:53.815625-08:00",
+  "completed_at": "2026-11-10T20:52:37.906893-08:00"
+}

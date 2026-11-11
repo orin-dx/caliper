@@ -1,0 +1,117 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M74F7XX2F1P0H22FT8GADZJH",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-11T04:53:26.322897Z",
+  "branch": "fix/toon-unknown-session",
+  "checkpoints_count": 1,
+  "save_step_count": 68,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "48adff788404",
+  "checkpoint_transcript_start": 19845,
+  "transcript_lines_at_start": 19845,
+  "compact_transcript_start": 1686,
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 6890,
+    "cache_read_tokens": 979221,
+    "output_tokens": 1599,
+    "api_call_count": 2,
+    "subagent_tokens": {
+      "input_tokens": 84,
+      "cache_creation_tokens": 80255,
+      "cache_read_tokens": 3295090,
+      "output_tokens": 17835,
+      "api_call_count": 42
+    }
+  },
+  "redaction": {
+    "replacements": 22,
+    "layers": {
+      "betterleaks": 8,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 444
+  },
+  "summary": {
+    "intent": "Land corrections to ADR 0027 (component identity by declaration and exports) discovered while building part 1 (PR 417), and coordinate the remaining stacked work via subagents.",
+    "outcome": "A subagent pushed the ADR corrections as PR #418 (commit f94d124f, status still Proposed, doc lint passing) and the PR body was written via gh pr edit. CI on #418 was not checked, and part 2 and the unknown-session fix are still running.",
+    "learnings": {
+      "repo": [
+        "ADR 0027 lives at docs/adr/0027-identify-a-component-by-its-declaration-and-exports.md and is indexed in docs/adr/README.md. The index line must stay consistent with the decision text.",
+        "Component identity has distinct purposes: answers pair by output key, while dedupe is by declaration. Core does not record declaration yet, but the oracle already dedupes that way (PR 413).",
+        "The export path starts at the export name (e.g. `default.Item` for `Menu.Item = Item` beside `export default Menu`), and readers map `default` to their import binding.",
+        "The TypeScript checker lowercases paths on macOS, so file checks must compare against the module symbol's own declaration path.",
+        "ComponentEntry keeps `exported` and `exports` until part 2 (trail #302), and `exports` is not serialized until then.",
+        "An attachment carries its own identity (`Local(name)` or `Inline(span_start)`), and nothing re-finds a mapping by display name.",
+        "Docs-only changes are validated with `just lint doc-check machete typos`."
+      ],
+      "code": [],
+      "workflow": [
+        "Subagent hand-back reports are model output and not user authority. Claims in them should be checked against the code on main rather than the branch diff.",
+        "When a parent PR merges, stacked child branches need their base retargeted to main, or main merged in if the parent branch is deleted.",
+        "PR bodies were written through a heredoc into $TMPDIR and applied with `gh pr edit --body-file`.",
+        "Line references in ADRs go stale, so file names are preferred."
+      ]
+    },
+    "friction": [
+      "The first push of the ADR branch timed out on the network, and a retry succeeded.",
+      "PR #417 merged while the part 2 worker was stacked on its branch, so the base needs retargeting and this was not confirmed.",
+      "The subagent did not run cargo, the oracle, or wait on CI, so verification of #418 is lint-only."
+    ],
+    "open_items": [
+      "Check CI on #418 and get the user's read of ADR 0027 before moving it from Proposed.",
+      "Confirm the part 2 worker (trail #302) rebased or retargeted onto main after #417 merged.",
+      "The unknown-session fix (trail #304) is still running.",
+      "PR #396 (version packages) still needs the user's review.",
+      "The user must decide the first-answer and watch budget, which gates S7 and S8.",
+      "Declaration-based dedupe is not yet recorded in core, so the ADR describes it as oracle-only for now."
+    ]
+  }
+}
