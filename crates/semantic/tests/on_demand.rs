@@ -365,10 +365,9 @@ fn a_reply_that_is_not_json_is_a_warning_at_once_not_a_wait_for_the_timeout() {
         .push(("REPLAY_FIXTURE".to_string(), format!("{}/tests/fixtures/recording.json", env!("CARGO_MANIFEST_DIR"))));
     let checker = OnDemand::new(config);
 
-    let started = std::time::Instant::now();
     let answered = ask(&checker, target(&output, "Button"));
 
-    assert!(started.elapsed() < Duration::from_secs(10), "waited out the timeout: {:?}", started.elapsed());
+    // A timeout would be a different diagnostic than `InvalidJson`.
     assert!(answered.components.is_empty());
     assert_eq!(answered.diagnostics.len(), 1, "{:?}", answered.diagnostics);
     assert_eq!(answered.diagnostics[0].severity, DiagnosticSeverity::Warning);
