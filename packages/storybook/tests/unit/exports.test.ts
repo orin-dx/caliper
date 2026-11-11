@@ -1,29 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { localNameOf } from '../../src/exports.js'
+import { wrappedDefaultOf } from '../../src/exports.js'
 
-describe('localNameOf', () => {
+describe('wrappedDefaultOf', () => {
   it.each([
-    ['export default Card;', 'Card'],
-    ['export default Card', 'Card'],
-    ['export default function Card(props) {}', 'Card'],
-    ['export default async function Loader() {}', 'Loader'],
-    ['export default class Card extends Component {}', 'Card'],
     ['export default React.forwardRef(InternalTable) as RefInternalTable', 'InternalTable'],
     ['export default memo(forwardRef<HTMLDivElement, Props>(Card))', 'Card'],
-    ['export { Inner as default }', 'Inner'],
-    ['export { Other, Inner as default, More }', 'Inner'],
-  ])('reads the default export of %s', (source, expected) => {
-    expect(localNameOf(source, 'default')).toBe(expected)
+    ['export default memo(Card)', 'Card'],
+  ])('reads the local a call wraps in %s', (source, expected) => {
+    expect(wrappedDefaultOf(source)).toBe(expected)
   })
 
-  it('reads the local name a named export renames', () => {
-    expect(localNameOf('export { Inner as Tag, Other }', 'Tag')).toBe('Inner')
-    expect(localNameOf('export { Inner as Tag, Other }', 'Other')).toBeUndefined()
-  })
-
-  it('says nothing when the source does not name a local', () => {
-    expect(localNameOf('export default makePanel()', 'default')).toBeUndefined()
-    expect(localNameOf('export default { a: 1 }', 'default')).toBeUndefined()
-    expect(localNameOf('export const Card = () => null', 'default')).toBeUndefined()
+  it('says nothing when no call wraps a local', () => {
+    expect(wrappedDefaultOf('export default makePanel()')).toBeUndefined()
+    expect(wrappedDefaultOf('export default { a: 1 }')).toBeUndefined()
+    expect(wrappedDefaultOf('export default Card')).toBeUndefined()
+    expect(wrappedDefaultOf('export { Inner as default }')).toBeUndefined()
+    expect(wrappedDefaultOf('export const Card = () => null')).toBeUndefined()
   })
 })

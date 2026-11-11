@@ -2,10 +2,20 @@ import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import type * as Napi from 'caliper-docgen-napi'
 import type { Diagnostic, IncrementalUpdate, RdtComponentDoc, SessionIndex } from 'caliper-docgen-napi'
-import { declaresExport, localNameOf } from './exports.js'
+import { wrappedDefaultOf } from './exports.js'
 import { Fill } from './fill.js'
 import { toNapiOptions, type SessionOptions } from './options.js'
-import { buildLookups, diagnosticId, incompleteMessages, type ComponentRef, type Lookups } from './lookups.js'
+import {
+  buildLookups,
+  diagnosticId,
+  exportKey,
+  incompleteMessages,
+  only,
+  type ImportName,
+  refOf,
+  type ComponentRef,
+  type Lookups,
+} from './lookups.js'
 import { assertSchemaVersion, expandDiagnostics } from './schema.js'
 
 export type { SessionOptions } from './options.js'
@@ -92,7 +102,7 @@ export class DocgenSession {
     const output = assertSchemaVersion(JSON.parse(json) as SessionIndex, 'session index')
     this.components.clear()
     for (const [key, entry] of Object.entries(output.components)) {
-      this.components.set(key, { filePath: resolve(entry.filePath), displayName: entry.displayName })
+      this.components.set(key, refOf(entry))
     }
     for (const diagnostic of expandDiagnostics(output.diagnostics, output.nameLists)) {
       this.diagnostics.set(diagnosticId(diagnostic), diagnostic)
@@ -107,7 +117,7 @@ export class DocgenSession {
     for (const key of update.removedKeys) this.components.delete(key)
     update.updatedKeys.forEach((key, i) => {
       const entry = update.updatedComponents[i]
-      if (entry) this.components.set(key, { filePath: resolve(entry.filePath), displayName: entry.displayName })
+      if (entry) this.components.set(key, refOf(entry))
     })
     for (const diagnostic of expandDiagnostics(update.removedDiagnostics, update.nameLists)) {
       this.diagnostics.delete(diagnosticId(diagnostic))
@@ -193,45 +203,46 @@ export class DocgenSession {
   }
 
   /**
-   * The key of the component `exportName` names in `path`. A file's only component answers for its default export;
-   * a path with no components (a barrel that re-exports them) falls back to the one component with that name.
+   * The key of the component `path` exports as `exportName` (`default` for the default export), or, with `members`, of
+   * the sub-component reached through them (`Menu.Item` beside `export default Menu` is `default`, `['Item']`).
+   */
+  keyOfExport(path: string, exportName: string, members: readonly string[] = []): string | undefined {
+    const at = exportKey(resolve(path), exportName, members)
+    return only(this.lookups().byExport.get(at))
+  }
+
+  /**
+   * The key of the component `exportName` names in `path`. A path with no components is a barrel that re-exports them,
+   * which `exports` does not record, so it falls back to the one component with that display name.
    */
   keyOf(path: string, exportName: string): string | undefined {
     const { byFile, byName } = this.lookups()
-    const inFile = byFile.get(resolve(path))
-    if (inFile) {
-      const named = inFile.find((key) => this.components.get(key)?.displayName === exportName)
-      if (named) return named
-      return inFile.length === 1 && exportName === 'default' ? inFile[0] : undefined
-    }
-    if (exportName === 'default') return undefined
-    const sameName = byName.get(exportName)
-    return sameName?.length === 1 ? sameName[0] : undefined
+    if (byFile.has(resolve(path))) return this.keyOfExport(path, exportName)
+    return exportName === 'default' ? undefined : only(byName.get(exportName))
   }
 
   /**
-   * `keyOf`, else what the module's source exports under the name (`export default Card`, `export { Inner as Card }`),
-   * else for a default import the component named as the story named it (`importedAs`), else the file's only
-   * component when its source declares that export (the display name may differ).
+   * `keyOf`, else for a default export no component has, the local a call wraps in the source (`export default
+   * React.forwardRef(Inner) as T`), else the component named as the story named its default import (`importedAs`).
    */
   async resolveExport(path: string, exportName: string, importedAs?: string): Promise<string | undefined> {
     const key = this.keyOf(path, exportName)
-    if (key) return key
+    if (key || exportName !== 'default') return key
     const inFile = this.lookups().byFile.get(resolve(path))
     if (!inFile) return undefined
-    const named = (name: string | undefined) => inFile.find((each) => this.components.get(each)?.displayName === name)
+    const named = (name: string | undefined) =>
+      only(inFile.filter((each) => name !== undefined && this.components.get(each)?.displayName === name))
     const source = await readFile(resolve(path), 'utf8').catch(() => '')
-    const sole = inFile.length === 1 && declaresExport(source, exportName) ? inFile[0] : undefined
-    return named(localNameOf(source, exportName)) ?? (exportName === 'default' ? named(importedAs) : sole)
+    return named(wrappedDefaultOf(source)) ?? named(importedAs)
   }
 
-  /**
-   * The key of the sub-component `property` of `namespace` (`Select.Option`): the component with that display name,
-   * the one beside `near` if several share it.
-   */
-  keyOfMember(namespaces: string[], property: string, near: string): string | undefined {
+  /** The key of `namespace.property` (`Select.Option`): attached to the export in `near`, else by display name beside it. */
+  keyOfMember(namespace: ImportName, property: string, near: string): string | undefined {
+    const attached = this.keyOfExport(near, namespace.exportName, [property])
+    if (attached) return attached
     const { byName } = this.lookups()
-    const matches = [...new Set(namespaces.flatMap((namespace) => byName.get(`${namespace}.${property}`) ?? []))]
+    const names = [namespace.localName, namespace.exportName]
+    const matches = [...new Set(names.flatMap((name) => byName.get(`${name}.${property}`) ?? []))]
     if (matches.length <= 1) return matches[0]
     const dir = dirname(resolve(near))
     const beside = matches.filter((key) => dirname(this.components.get(key)?.filePath ?? '') === dir)
