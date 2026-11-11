@@ -665,26 +665,21 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                 _ => None,
             },
         };
-        match local {
-            Some(name) => {
-                self.record_exported_local(name, "default");
-                // `export default Tooltip`: the module's default is `Tooltip`, which `finish` turns into a re-export
-                // when it is an import, as `export { Tooltip as default }` is.
-                self.pending_local_exports.push((self.data.exports.len(), name.to_owned()));
-                self.data.exports.push(LexedExport::LocalDeclaration {
-                    name: "default".to_owned(),
-                    is_type_only: false,
-                    declared_as: Some(name.to_owned()),
-                });
-            }
-            None => {
-                if let Some(name) = super::component::pascal_case_from_file_stem(&self.file_path) {
-                    self.record_exported_local(&name, "default");
-                }
-            }
+        if let Some(name) = local {
+            self.record_exported_local(name, "default");
+            // `export default Tooltip`: the module's default is `Tooltip`, which `finish` turns into a re-export
+            // when it is an import, as `export { Tooltip as default }` is.
+            self.pending_local_exports.push((self.data.exports.len(), name.to_owned()));
+            self.data.exports.push(LexedExport::LocalDeclaration {
+                name: "default".to_owned(),
+                is_type_only: false,
+                declared_as: Some(name.to_owned()),
+            });
         }
         // An anonymous default export has no binding name, so the component is named after its file, as
-        // `try_anonymous_default_export_component` already does for `export default function(props: Props) {}`.
+        // `try_anonymous_default_export_component` already does for `export default function(props: Props) {}`. It is
+        // no binding, so its export is its own and a component of the file with that name is another.
+        let mut is_a_component = false;
         if self.is_tsx {
             match &node.declaration {
                 ExportDefaultDeclarationKind::FunctionDeclaration(func) if func.id.is_none() => {
@@ -694,7 +689,8 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                     if let Some(name) = super::component::pascal_case_from_file_stem(&self.file_path)
                         && let Some(mapping) = self.try_class_component(class, &name)
                     {
-                        self.data.component_mappings.push(mapping);
+                        self.anonymous_default = Some(mapping.span_start);
+                        self.data.component_mappings.push(mapping.without_binding());
                     }
                 }
                 // `export default (props: P) => …`, `export default memo(function Badge(…))`,
@@ -707,13 +703,23 @@ impl<'a, 'src> Visit<'a> for SourceDataCollector<'src> {
                         self.decline_reason = None;
                         self.argument_declined = false;
                         if let Some(mapping) = self.detect_component(&binding, &name) {
-                            self.data.component_mappings.push(mapping);
-                        } else {
-                            self.try_record_wrapper_call(&binding, &name);
+                            self.anonymous_default = Some(mapping.span_start);
+                            self.data.component_mappings.push(mapping.without_binding());
+                            is_a_component = true;
+                        } else if self.try_record_wrapper_call(&binding, &name) {
+                            self.anonymous_default = Some(node.span.start);
+                            is_a_component = true;
                         }
                     }
                 }
             }
+        }
+        // `export default React.forwardRef(Inner) as T`: the default is the component the call wraps.
+        if !is_a_component
+            && let Some(expression) = node.declaration.as_expression()
+            && let Some(wrapped) = self.component_wrapped_by(expression)
+        {
+            self.record_exported_local(&wrapped, "default");
         }
         walk::walk_export_default_declaration(self, node);
     }

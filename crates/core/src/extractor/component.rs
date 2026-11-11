@@ -580,6 +580,7 @@ impl<'src> SourceDataCollector<'src> {
 
         let (description, tags) = self.find_jsdoc_with_tags(func.span.start);
         let param_defaults = self.extract_param_defaults(&func.params);
+        self.anonymous_default = Some(func.span.start);
         self.data.component_mappings.push(
             ComponentMapping::new(
                 name,
@@ -589,6 +590,7 @@ impl<'src> SourceDataCollector<'src> {
                 func.span.end,
                 DetectionRule::AnonymousDefaultExport,
             )
+            .without_binding()
             .with_props_type_args(type_args)
             .with_doc(description, tags)
             .with_param_defaults(param_defaults),

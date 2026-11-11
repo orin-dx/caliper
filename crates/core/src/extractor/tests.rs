@@ -3365,3 +3365,105 @@ fn a_function_body_interface_keeps_its_type_names_as_written() {
     assert_eq!(type_of("Props", "value"), "T");
     assert_eq!(type_of("Row", "item"), "Item");
 }
+
+/// Each component of a file as (name, props type, exports), sorted by name.
+fn identities(path: &str, source: &str) -> Vec<(String, String, Vec<String>)> {
+    let data = parse_file(Utf8Path::new(path), source);
+    let mut found: Vec<(String, String, Vec<String>)> = data
+        .component_mappings
+        .iter()
+        .map(|m| {
+            (
+                m.component_name.to_string(),
+                m.props_type_name.to_string(),
+                m.exports.iter().map(ToString::to_string).collect(),
+            )
+        })
+        .collect();
+    found.sort_unstable();
+    found
+}
+
+fn identity(name: &str, props: &str, exports: &[&str]) -> (String, String, Vec<String>) {
+    (name.to_owned(), props.to_owned(), exports.iter().map(ToString::to_string).collect())
+}
+
+#[test]
+fn an_anonymous_default_is_its_own_component_beside_a_named_export_of_its_file_stem() {
+    let expected = vec![identity("E", "NamedProps", &["E"]), identity("E (default)", "DefaultProps", &["default"])];
+    let forward_ref = "import { forwardRef } from 'react';\ninterface NamedProps { a: string }\ninterface DefaultProps { b: string }\n";
+    for (label, body) in [
+        (
+            "forwardRef default after the named export",
+            "export const E = forwardRef<HTMLDivElement, NamedProps>((props, ref) => <div ref={ref} />);\n\
+             export default forwardRef<HTMLDivElement, DefaultProps>((props, ref) => <i ref={ref} />);\n",
+        ),
+        (
+            "forwardRef default before the named export",
+            "export default forwardRef<HTMLDivElement, DefaultProps>((props, ref) => <i ref={ref} />);\n\
+             export const E = forwardRef<HTMLDivElement, NamedProps>((props, ref) => <div ref={ref} />);\n",
+        ),
+        (
+            "function default",
+            "export function E(props: NamedProps) { return <div />; }\n\
+             export default function (props: DefaultProps) { return <i />; }\n",
+        ),
+        (
+            "arrow default",
+            "export const E = (props: NamedProps) => <div />;\nexport default (props: DefaultProps) => <i />;\n",
+        ),
+        (
+            "memo default",
+            "import { memo } from 'react';\nexport const E = (props: NamedProps) => <div />;\n\
+             export default memo(function (props: DefaultProps) { return <i />; });\n",
+        ),
+        (
+            "class default",
+            "import { Component } from 'react';\nexport const E = (props: NamedProps) => <div />;\n\
+             export default class extends Component<DefaultProps> { render() { return <i />; } }\n",
+        ),
+    ] {
+        let source = format!("{forward_ref}{body}");
+        assert_eq!(identities("/test/E.tsx", &source), expected, "{label}");
+    }
+}
+
+#[test]
+fn an_anonymous_default_keeps_the_stem_name_when_no_component_of_the_file_has_it() {
+    let source = "interface P { a: string }\nexport const Other = (props: P) => <b />;\n\
+                  export default function (props: P) { return <i />; }\n";
+    assert_eq!(
+        identities("/test/E.tsx", source),
+        vec![identity("E", "P", &["default"]), identity("Other", "P", &["Other"])]
+    );
+}
+
+#[test]
+fn a_default_export_a_call_wraps_is_an_export_of_the_component_it_wraps() {
+    let table = "import * as React from 'react';\ninterface P { a: string }\nconst InternalTable = (props: P) => <div />;\n\
+                 export default React.forwardRef(InternalTable) as RefTable;\n";
+    assert_eq!(identities("/test/Table.tsx", table), vec![identity("InternalTable", "P", &["default"])]);
+
+    let nested = "import { memo, forwardRef } from 'react';\ninterface P { a: string }\nconst Card = (props: P) => <div />;\n\
+                  export default memo(forwardRef(Card));\n";
+    assert_eq!(identities("/test/Wrapped.tsx", nested), vec![identity("Card", "P", &["default"])]);
+    assert_eq!(identities("/test/Card.tsx", nested), vec![identity("Card", "P", &["default"])]);
+    let typed = "import { memo, forwardRef } from 'react';\ninterface P { a: string }\ninterface Q { b: string }\n\
+                 const Card = (props: Q) => <div />;\nexport default memo(forwardRef<HTMLDivElement, P>(Card));\n";
+    assert_eq!(
+        identities("/test/Card.tsx", typed),
+        vec![identity("Card", "Q", &[]), identity("Card (default)", "P", &["default"])]
+    );
+
+    let beside = "import * as React from 'react';\ninterface P { a: string }\ninterface Q { b: string }\n\
+                  export const Table = (props: Q) => <div />;\nconst InternalTable = (props: P) => <div />;\n\
+                  export default React.forwardRef(InternalTable) as RefTable;\n";
+    assert_eq!(
+        identities("/test/Table.tsx", beside),
+        vec![identity("InternalTable", "P", &["default"]), identity("Table", "Q", &["Table"])]
+    );
+
+    let not_a_wrapper =
+        "interface P { a: string }\nconst Inner = (props: P) => <div />;\nexport default makePanel(Inner);\n";
+    assert_eq!(identities("/test/Panel.tsx", not_a_wrapper), vec![identity("Inner", "P", &[])]);
+}
