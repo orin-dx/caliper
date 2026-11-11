@@ -63,7 +63,7 @@ fn finds_size(target: &SemanticTarget) -> SemanticOutcome {
     };
     SemanticOutcome {
         components: vec![SemanticComponent {
-            composes: Vec::new(),
+            composes: Some(Vec::new()),
             key: target.key.clone(),
             props: vec![
                 prop("label", PropType::String),
@@ -94,7 +94,7 @@ fn reports_react_props(target: &SemanticTarget) -> SemanticOutcome {
     };
     SemanticOutcome {
         components: vec![SemanticComponent {
-            composes: Vec::new(),
+            composes: Some(Vec::new()),
             key: target.key.clone(),
             props: vec![
                 prop("label", PropType::String, false),
@@ -176,7 +176,7 @@ fn a_checker_that_answers_in_time_replaces_the_structural_props_and_says_so() {
 fn cannot_read_label(target: &SemanticTarget) -> SemanticOutcome {
     SemanticOutcome {
         components: vec![SemanticComponent {
-            composes: Vec::new(),
+            composes: Some(Vec::new()),
             key: target.key.clone(),
             props: vec![Arc::new(SemanticProp {
                 name: "label".to_string(),
@@ -397,7 +397,7 @@ fn types_file_outcome(target: &SemanticTarget, text: &str) -> SemanticOutcome {
     let version = format!("v{}", names.len());
     SemanticOutcome {
         components: vec![SemanticComponent {
-            composes: Vec::new(),
+            composes: Some(Vec::new()),
             key: target.key.clone(),
             props: names
                 .into_iter()
@@ -526,7 +526,7 @@ fn answers_every_prop(target: &SemanticTarget) -> SemanticOutcome {
     };
     SemanticOutcome {
         components: vec![SemanticComponent {
-            composes: Vec::new(),
+            composes: Some(Vec::new()),
             key: target.key.clone(),
             props: vec![prop("label", PropType::String), prop("item", PropType::StringLiteral("a".into()))],
         }],
@@ -577,7 +577,7 @@ fn label_size_and_class_name(target: &SemanticTarget) -> SemanticOutcome {
     };
     SemanticOutcome {
         components: vec![SemanticComponent {
-            composes: Vec::new(),
+            composes: Some(Vec::new()),
             key: target.key.clone(),
             props: vec![
                 prop("label", PropType::StringLiteral("ok".into()), false),
@@ -894,7 +894,7 @@ fn a_default_export_beside_a_named_export_of_its_file_name_is_asked_for_by_its_o
 fn answers_for_menu(_: &SemanticTarget) -> SemanticOutcome {
     SemanticOutcome {
         components: vec![SemanticComponent {
-            composes: Vec::new(),
+            composes: Some(Vec::new()),
             key: "Menu".to_string(),
             props: vec![Arc::new(SemanticProp {
                 name: "label".to_string(),

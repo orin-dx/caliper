@@ -108,9 +108,11 @@ pub struct SemanticComponent {
     /// Declared props in declaration order, with the `@types/react` ones the request asked for.
     pub props: Vec<Arc<SemanticProp>>,
     /// The `@types/react` types the props type is made of (`RefAttributes`, `HTMLAttributes` under an `Omit`), by
-    /// name, in the order the props type names them: what the checker leaves to the inheritance layers. It replaces the
-    /// structural `composes`, which also lists the types the structural pass could not follow and the checker did.
-    pub composes: Vec<String>,
+    /// name, in the order the props type names them: what the checker leaves to the inheritance layers. `Some` replaces
+    /// the structural `composes`, which also lists the types the structural pass could not follow and the checker did,
+    /// and `Some` of an empty list says the props type is made of none. `None` says the checker could not tell (a type
+    /// it cannot read the bases of), and the structural `composes` stays.
+    pub composes: Option<Vec<String>>,
 }
 
 /// A component the backend left to the structural result, and why.
@@ -206,7 +208,7 @@ pub fn apply_semantic_props(
 ) -> usize {
     // The whole-project merge replaces the props and leaves `@types/react`'s to the inheritance layers.
     let own = semantic.props.iter().filter(|prop| !prop.react_declared);
-    replace_props(entry, own, &semantic.composes, Unanswered::Drop, shared).unread
+    replace_props(entry, own, semantic.composes.as_deref(), Unanswered::Drop, shared).unread
 }
 
 /// How a merge went for one component.
@@ -222,14 +224,15 @@ pub struct MergedProps {
 
 /// Merges the checker's `props` into `entry` by name: the checker's type, optionality, description, tags, `parent` and
 /// `declarations` win where both have a prop, and every structural prop the checker did not return stays as the
-/// structural pass resolved it. `composes` replaces the entry's ([`SemanticComponent::composes`]). A prop whose checker
+/// structural pass resolved it. `composes` replaces the entry's when the checker decided it, and an undecided one leaves
+/// the structural `composes` ([`SemanticComponent::composes`]). A prop whose checker
 /// type holds an `opaque` part, where the structural type holds none, keeps the structural type and adds the checker's
 /// reasons to its `degradedBy`: the checker's answer there is a placeholder, and the structural one is not confirmed,
 /// so it is marked. A type the checker only cut at a limit (`truncated`) is still its answer.
 pub fn merge_semantic_props<'a>(
     entry: &mut ComponentEntry,
     props: impl Iterator<Item = &'a Arc<SemanticProp>>,
-    composes: &[String],
+    composes: Option<&[String]>,
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
 ) -> MergedProps {
     replace_props(entry, props, composes, Unanswered::Keep, shared)
@@ -273,7 +276,7 @@ enum Unanswered {
 fn replace_props<'a>(
     entry: &mut ComponentEntry,
     props_in: impl Iterator<Item = &'a Arc<SemanticProp>>,
-    composes: &[String],
+    composes: Option<&[String]>,
     unanswered: Unanswered,
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
 ) -> MergedProps {
@@ -334,7 +337,9 @@ fn replace_props<'a>(
         }
     }
     entry.props = props;
-    entry.composes = composes.to_vec();
+    if let Some(composes) = composes {
+        entry.composes = composes.to_vec();
+    }
     MergedProps { kept, unread }
 }
 

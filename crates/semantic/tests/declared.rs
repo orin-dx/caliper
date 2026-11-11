@@ -77,8 +77,10 @@ fn tsrs_bin() -> Option<Utf8PathBuf> {
 }
 
 /// Each prop of each component as `(component, prop) -> (parent, declarations, tags)`, and each component's `composes`.
-type Facts =
-    (BTreeMap<(String, String), (Option<PropParent>, Vec<PropParent>, BTreeMap<String, String>)>, Vec<Vec<String>>);
+type Facts = (
+    BTreeMap<(String, String), (Option<PropParent>, Vec<PropParent>, BTreeMap<String, String>)>,
+    Vec<Option<Vec<String>>>,
+);
 
 fn facts(outcome: &SemanticOutcome) -> Facts {
     let mut props = BTreeMap::new();
@@ -115,7 +117,8 @@ fn expected(root: &Utf8PathBuf) -> Facts {
         (key("Picked", "inline"), declared("PickedProps", "Button.tsx", &[])),
     ]);
     // In key order: Button, Card, Picked.
-    let composes = vec![vec!["HTMLAttributes".to_string(), "RefAttributes".to_string()], vec![], vec![]];
+    let composes =
+        vec![Some(vec!["HTMLAttributes".to_string(), "RefAttributes".to_string()]), Some(vec![]), Some(vec![])];
     (props, composes)
 }
 

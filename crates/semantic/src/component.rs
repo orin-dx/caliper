@@ -24,7 +24,7 @@ pub(crate) enum Answer {
 pub(crate) struct Props {
     pub(crate) props: Vec<Arc<SemanticProp>>,
     /// See [`caliper_docgen_core::types::semantic::SemanticComponent::composes`].
-    pub(crate) composes: Vec<String>,
+    pub(crate) composes: Option<Vec<String>>,
 }
 
 /// What `@types/react` declares (`key`, `ref`, `children` on `PropsWithChildren`, HTML attributes). Reported with the

@@ -64,7 +64,7 @@ fn semantic_prop(name: &str, description: &str, required: bool) -> Arc<SemanticP
 }
 
 fn button(props: Vec<Arc<SemanticProp>>) -> SemanticComponent {
-    SemanticComponent { key: "Button".to_string(), props, composes: Vec::new() }
+    SemanticComponent { key: "Button".to_string(), props, composes: Some(Vec::new()) }
 }
 
 #[test]
@@ -171,7 +171,7 @@ fn composes_is_the_checkers_in_the_whole_project_merge_and_in_a_session_merge() 
     let mut out = output();
     out.components.get_mut("Button").unwrap().composes = vec!["AriaLabelingProps".to_string()];
     let mut answered = button(vec![semantic_prop("label", "", true)]);
-    answered.composes = vec!["RefAttributes".to_string()];
+    answered.composes = Some(vec!["RefAttributes".to_string()]);
 
     merge_semantic(&mut out, SemanticOutcome { components: vec![answered.clone()], ..Default::default() });
     assert_eq!(out.components["Button"].composes, ["RefAttributes"]);
@@ -179,8 +179,28 @@ fn composes_is_the_checkers_in_the_whole_project_merge_and_in_a_session_merge() 
     let mut session = output();
     let entry = session.components.get_mut("Button").unwrap();
     entry.composes = vec!["AriaLabelingProps".to_string()];
-    merge_semantic_props(entry, answered.props.iter(), &answered.composes, &mut FxHashMap::default());
+    merge_semantic_props(entry, answered.props.iter(), answered.composes.as_deref(), &mut FxHashMap::default());
     assert_eq!(entry.composes, ["RefAttributes"]);
+}
+
+#[test]
+fn composes_the_checker_could_not_decide_keeps_the_structural_one_and_a_decided_empty_one_replaces_it() {
+    let structural = vec!["AriaLabelingProps".to_string()];
+    for (checker, expected) in [(None, structural.clone()), (Some(Vec::new()), Vec::new())] {
+        let mut answered = button(vec![semantic_prop("label", "", true)]);
+        answered.composes = checker;
+
+        let mut out = output();
+        out.components.get_mut("Button").unwrap().composes = structural.clone();
+        merge_semantic(&mut out, SemanticOutcome { components: vec![answered.clone()], ..Default::default() });
+        assert_eq!(out.components["Button"].composes, expected, "whole-project merge of {:?}", answered.composes);
+
+        let mut session = output();
+        let entry = session.components.get_mut("Button").unwrap();
+        entry.composes = structural.clone();
+        merge_semantic_props(entry, answered.props.iter(), answered.composes.as_deref(), &mut FxHashMap::default());
+        assert_eq!(entry.composes, expected, "session merge of {:?}", answered.composes);
+    }
 }
 
 fn typed(name: &str, prop_type: PropType) -> Arc<SemanticProp> {
@@ -261,7 +281,7 @@ fn a_session_merge_counts_the_props_that_kept_their_structural_type() {
     let entry = out.components.get_mut("Button").unwrap();
     let answer = [typed("label", unresolved_type("Missing")), typed("size", PropType::String)];
 
-    let merged = merge_semantic_props(entry, answer.iter(), &[], &mut FxHashMap::default());
+    let merged = merge_semantic_props(entry, answer.iter(), Some(&[]), &mut FxHashMap::default());
 
     assert_eq!(merged, MergedProps { kept: 1, unread: 1 });
     assert_eq!(entry.props["label"].prop_type, PropType::Any);
@@ -376,7 +396,7 @@ fn merged_props_that_come_out_equal_are_one_allocation() {
     let card = SemanticComponent {
         key: "Card".to_string(),
         props: vec![semantic_prop("tone", "", true)],
-        composes: Vec::new(),
+        composes: Some(Vec::new()),
     };
     let tone_on_button = button(vec![semantic_prop("tone", "", true)]);
 
@@ -398,7 +418,7 @@ fn an_answer_merges_into_the_entry_its_key_names_not_the_first_with_the_same_fil
     let answer = SemanticComponent {
         key: "Card~2".to_string(),
         props: vec![semantic_prop("tone", "", true)],
-        composes: Vec::new(),
+        composes: Some(Vec::new()),
     };
     let fallback = SemanticFallback { key: "Card".to_string(), reason: "why".to_string() };
     merge_semantic(
