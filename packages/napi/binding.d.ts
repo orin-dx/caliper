@@ -179,7 +179,9 @@ export declare function sessionStats(sessionId: number): JsLazyStats | null
 /**
  * Resolves `count` components spread evenly over the session's keys, without returning them: a lazy session then
  * holds the dependency declarations and resolver memos that components share, so the first request a host answers
- * does not load them. Runs off the calling thread and returns how many components it resolved. An eager session, an
- * unknown session and a count of 0 resolve nothing.
+ * does not load them. With `semanticTypes: 'on-demand'` it asks the checker for each at background priority, after any
+ * story someone opened, and does not wait for it: the answers are kept for the stories that follow. Runs off the
+ * calling thread and returns how many components it resolved. An eager session, an unknown session and a count of 0
+ * resolve nothing.
  */
 export declare function sessionWarmUp(sessionId: number, count: number): Promise<number>

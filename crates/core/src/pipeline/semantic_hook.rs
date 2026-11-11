@@ -5,15 +5,18 @@
 //! its props over the structural ones. A checker that is slower than the budget leaves the structural answer in
 //! place, and its late answer is kept for the next request of the same, unedited component.
 //!
+//! There is one request in flight per component and version of its file: a caller that finds one waits on it instead
+//! of asking again, and a caller someone is waiting for raises a background request it joins to interactive, so a
+//! story asked while its own prefetch runs is answered when the prefetch is.
+//!
 //! An answer describes the component's props as the checker read them, which depends on every file the component
 //! imports, not only its own. So the session drops every answer when any source file changes
-//! ([`SemanticHook::invalidate`]), and an answer that was still on its way then is not kept. The same call tells the
-//! checker which files changed, since a warm one answers from what it read before (ADR 0026 S6).
+//! ([`SemanticHook::invalidate`]), and an answer that was still on its way then is neither kept nor joined. The same
+//! call tells the checker which files changed, since a warm one answers from what it read before (ADR 0026 S6).
 
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
 use rustc_hash::{FxHashMap, FxHasher};
@@ -23,28 +26,80 @@ use crate::pipeline::HtmlAttributeMode;
 use crate::react_types::{checker_prop_used, react_props_wanted};
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use crate::types::semantic::{
-    MergedProps, SemanticComponent, SemanticFallback, SemanticOutcome, SemanticProp, SemanticProvider, SemanticTarget,
-    SourceChange, merge_semantic_props, unread_diagnostic,
+    Delivery, MergedProps, Priority, SemanticComponent, SemanticFallback, SemanticOutcome, SemanticProp,
+    SemanticProvider, SemanticTarget, SharedPriority, SourceChange, merge_semantic_props, unread_diagnostic,
 };
 
 /// What one request of the checker made of a component: the component it found, if any, and what the checker said
 /// about the request itself (an edit it was not told about, why a component kept its structural result). Both are the
-/// answer, so a late answer and every request the cache serves it to carry both.
+/// answer, so a late answer, a joined one and every request the cache serves it to carry both.
 #[derive(Clone, Default)]
 struct Answered {
     component: Option<Arc<SemanticComponent>>,
     diagnostics: Vec<Diagnostic>,
 }
 
-/// What the checker said about one component at one version of its file, and the generation they belong to.
+/// What became of one request to the checker, for every caller that waited on it.
+#[derive(Clone)]
+enum Settled {
+    /// The checker answered: what is kept for the component, and what an unavailable checker says once per session.
+    Answered { answered: Answered, once: Vec<Diagnostic> },
+    /// The checker stopped without answering.
+    Stopped,
+}
+
+/// A request in flight. Every caller for the same component and version of its file waits on it instead of asking the
+/// checker again.
+struct Pending {
+    /// What the checker answers it at; a caller someone is waiting for raises it on joining.
+    priority: SharedPriority,
+    settled: Mutex<Option<Settled>>,
+    ready: Condvar,
+}
+
+impl Pending {
+    fn new(priority: Priority) -> Self {
+        Self { priority: SharedPriority::new(priority), settled: Mutex::new(None), ready: Condvar::new() }
+    }
+
+    fn settle(&self, settled: Settled) {
+        *self.settled.lock().unwrap_or_else(PoisonError::into_inner) = Some(settled);
+        self.ready.notify_all();
+    }
+
+    /// What became of the request, if that is known within `wait`.
+    fn wait(&self, wait: Duration) -> Option<Settled> {
+        let settled = self.settled.lock().unwrap_or_else(PoisonError::into_inner);
+        let (settled, _) = self
+            .ready
+            .wait_timeout_while(settled, wait, |settled| settled.is_none())
+            .unwrap_or_else(PoisonError::into_inner);
+        settled.clone()
+    }
+}
+
+/// What the checker said about one component at one version of its file, what it is still being asked, and the
+/// generation they belong to.
 #[derive(Default)]
 struct AnswerCache {
     /// Raised by every [`SemanticHook::invalidate`]; an answer asked for under an earlier one is not stored.
     generation: u64,
     answers: FxHashMap<(String, u64), Answered>,
+    /// Requests in flight under the current generation, by the same key as `answers`.
+    pending: FxHashMap<(String, u64), Arc<Pending>>,
 }
 
 type Answers = Mutex<AnswerCache>;
+
+/// Where a request finds its answer.
+enum Found {
+    /// An answer kept from an earlier request.
+    Cached(Answered),
+    /// A request already in flight, to wait on.
+    Joined(Arc<Pending>),
+    /// Nothing: this caller asks, and others join it.
+    Asking(Arc<Pending>),
+}
 
 /// How long a request for a component the structural pass lists no props for waits for the checker, unless the session
 /// says otherwise ([`SemanticHook::wait_empty`]): an empty answer is not worth showing early, and Chakra's `Button` takes
@@ -79,41 +134,125 @@ impl SemanticHook {
         self.wait_empty = wait_empty;
     }
 
-    /// The wait for `answer`: the longer one when the structural pass found no props, since there is nothing to show
-    /// before the checker answers. Any prop, even a degraded one, is an answer worth showing at the short wait.
-    fn wait_for(&self, answer: &ComponentAnswer) -> Duration {
-        match answer.entry.props.is_empty() {
-            true => self.wait_empty.max(self.wait),
-            false => self.wait,
+    /// The wait for `answer`. Nobody waits for a background request: its answer is kept for the request that follows.
+    /// Someone does for an interactive one, and longer when the structural pass found no props, since there is nothing
+    /// to show before the checker answers. Any prop, even a degraded one, is an answer worth showing at the short wait.
+    fn wait_for(&self, answer: &ComponentAnswer, priority: Priority) -> Duration {
+        match (priority, answer.entry.props.is_empty()) {
+            (Priority::Background, _) => Duration::ZERO,
+            (Priority::Interactive, true) => self.wait_empty.max(self.wait),
+            (Priority::Interactive, false) => self.wait,
         }
     }
 
     /// Forget every answer, refuse the ones still being waited for, and tell the checker what changed: a source file
     /// changed, and the checker's props for any component can depend on it. The next request of each component asks
-    /// the checker again, after it has been told.
+    /// the checker again, after it has been told, rather than joining a request asked before the change.
     pub(crate) fn invalidate(&self, change: SourceChange) {
         let mut cache = self.answers.lock().unwrap_or_else(PoisonError::into_inner);
         cache.generation += 1;
         cache.answers.clear();
+        cache.pending.clear();
         self.provider.changed(change);
     }
 
-    /// `answer` with the checker's props, when it has them.
-    pub(crate) fn refine(&self, mut answer: ComponentAnswer, mode: HtmlAttributeMode) -> ComponentAnswer {
+    /// `answer` with the checker's props, when it has them within the wait `priority` gives it.
+    pub(crate) fn refine(
+        &self,
+        mut answer: ComponentAnswer,
+        mode: HtmlAttributeMode,
+        priority: Priority,
+    ) -> ComponentAnswer {
         let stamp = std::fs::read(&answer.entry.file_path).map(|bytes| {
             let mut hasher = FxHasher::default();
             bytes.hash(&mut hasher);
             hasher.finish()
         });
         let cache_key = stamp.ok().map(|stamp| (answer.key.clone(), stamp));
-        let generation = self.generation();
 
-        if let Some(cached) = cache_key.as_ref().and_then(|key| self.cached(key)) {
-            answer.diagnostics.extend(cached.diagnostics);
-            self.apply(&mut answer, cached.component.as_ref(), mode);
-            return answer;
+        let (found, generation) = self.find(cache_key.as_ref(), priority);
+        let pending = match found {
+            Found::Cached(cached) => {
+                answer.diagnostics.extend(cached.diagnostics);
+                self.apply(&mut answer, cached.component.as_ref(), mode);
+                return answer;
+            }
+            Found::Joined(pending) => pending,
+            Found::Asking(pending) => {
+                self.ask(&answer, mode, &pending, cache_key, generation);
+                pending
+            }
+        };
+
+        match pending.wait(self.wait_for(&answer, priority)) {
+            Some(Settled::Answered { answered, once }) => {
+                for diagnostic in once {
+                    if !self.warned.swap(true, Ordering::Relaxed) {
+                        answer.diagnostics.push(diagnostic);
+                    }
+                }
+                answer.diagnostics.extend(answered.diagnostics);
+                self.apply(&mut answer, answered.component.as_ref(), mode);
+            }
+            Some(Settled::Stopped) => {
+                let mut stopped = Diagnostic::new(
+                    DiagnosticSeverity::Warning,
+                    DiagnosticCode::SemanticBackend,
+                    "the TypeScript checker stopped without answering; the structural props are used",
+                );
+                stopped.affects = vec![answer.key.clone()];
+                answer.diagnostics.push(stopped);
+            }
+            None => {
+                let mut pending = Diagnostic::new(
+                    DiagnosticSeverity::Info,
+                    DiagnosticCode::SemanticBackend,
+                    "the TypeScript checker has not answered yet; the structural props are used, and the checker's \
+                     replace them on the next request",
+                );
+                pending.affects = vec![answer.key.clone()];
+                answer.diagnostics.push(pending);
+            }
         }
+        answer
+    }
 
+    /// The kept answer for `key`, else the request in flight for it (raised when someone waits for this one), else a
+    /// new request this caller makes, registered so the next caller joins it. One lock, so two callers never both ask.
+    /// A file that could not be read has no key: its request is neither kept nor joined.
+    fn find(&self, key: Option<&(String, u64)>, priority: Priority) -> (Found, u64) {
+        let mut cache = self.answers.lock().unwrap_or_else(PoisonError::into_inner);
+        let generation = cache.generation;
+        if let Some(key) = key {
+            if let Some(cached) = cache.answers.get(key) {
+                return (Found::Cached(cached.clone()), generation);
+            }
+            if let Some(pending) = cache.pending.get(key) {
+                match priority {
+                    Priority::Interactive => pending.priority.raise(),
+                    Priority::Background => {}
+                }
+                return (Found::Joined(pending.clone()), generation);
+            }
+        }
+        let pending = Arc::new(Pending::new(priority));
+        if let Some(key) = key {
+            cache.pending.insert(key.clone(), pending.clone());
+        }
+        (Found::Asking(pending), generation)
+    }
+
+    /// Asks the checker for `answer`'s component. Its outcome settles `pending` for every caller waiting on it and is
+    /// kept for the next request, unless the cache was invalidated since `generation`. Called without the cache's lock,
+    /// since a provider may deliver at once.
+    fn ask(
+        &self,
+        answer: &ComponentAnswer,
+        mode: HtmlAttributeMode,
+        pending: &Arc<Pending>,
+        key: Option<(String, u64)>,
+        generation: u64,
+    ) {
         let target = SemanticTarget {
             key: answer.key.clone(),
             file_path: answer.entry.file_path.clone(),
@@ -128,78 +267,31 @@ impl SemanticHook {
                 .collect(),
             react_wanted: react_props_wanted(mode, &answer.entry.props),
         };
-        let wait = self.wait_for(&answer);
-        let receiver = self.provider.request(vec![target]);
-        match receiver.recv_timeout(wait) {
-            Ok(outcome) => {
-                let Read { answered, once } = read_outcome(&answer.key, outcome);
-                for diagnostic in once {
-                    if !self.warned.swap(true, Ordering::Relaxed) {
-                        answer.diagnostics.push(diagnostic);
-                    }
-                }
-                answer.diagnostics.extend(answered.diagnostics.iter().cloned());
-                let component = answered.component.clone();
-                if let Some(key) = cache_key {
-                    self.store(key, generation, answered);
-                }
-                self.apply(&mut answer, component.as_ref(), mode);
-            }
-            Err(RecvTimeoutError::Timeout) => {
-                self.keep_late_answer(receiver, &answer, cache_key, generation);
-                let mut pending = Diagnostic::new(
-                    DiagnosticSeverity::Info,
-                    DiagnosticCode::SemanticBackend,
-                    "the TypeScript checker has not answered yet; the structural props are used, and the checker's \
-                     replace them on the next request",
-                );
-                pending.affects = vec![answer.key.clone()];
-                answer.diagnostics.push(pending);
-            }
-            Err(RecvTimeoutError::Disconnected) => {
-                let mut stopped = Diagnostic::new(
-                    DiagnosticSeverity::Warning,
-                    DiagnosticCode::SemanticBackend,
-                    "the TypeScript checker stopped without answering; the structural props are used",
-                );
-                stopped.affects = vec![answer.key.clone()];
-                answer.diagnostics.push(stopped);
-            }
-        }
-        answer
-    }
-
-    fn generation(&self) -> u64 {
-        self.answers.lock().unwrap_or_else(PoisonError::into_inner).generation
-    }
-
-    fn cached(&self, key: &(String, u64)) -> Option<Answered> {
-        self.answers.lock().unwrap_or_else(PoisonError::into_inner).answers.get(key).cloned()
-    }
-
-    fn store(&self, key: (String, u64), generation: u64, answered: Answered) {
-        store(&self.answers, key, generation, answered);
-    }
-
-    /// Waits for an answer that missed its budget on a thread of its own, so the next request finds it.
-    fn keep_late_answer(
-        &self,
-        receiver: Receiver<SemanticOutcome>,
-        answer: &ComponentAnswer,
-        cache_key: Option<(String, u64)>,
-        generation: u64,
-    ) {
-        let Some(key) = cache_key else { return };
         let answers = self.answers.clone();
         let asked = answer.key.clone();
-        std::thread::Builder::new()
-            .name("caliper-late-answer".to_string())
-            .spawn(move || {
-                if let Ok(outcome) = receiver.recv() {
-                    store(&answers, key, generation, read_outcome(&asked, outcome).answered);
+        let settling = pending.clone();
+        let delivery = Delivery::new(move |outcome| {
+            let settled = match outcome {
+                Some(outcome) => {
+                    let Read { answered, once } = read_outcome(&asked, outcome);
+                    Settled::Answered { answered, once }
                 }
-            })
-            .ok();
+                None => Settled::Stopped,
+            };
+            if let Some(key) = key {
+                let mut cache = answers.lock().unwrap_or_else(PoisonError::into_inner);
+                if cache.pending.get(&key).is_some_and(|registered| Arc::ptr_eq(registered, &settling)) {
+                    cache.pending.remove(&key);
+                }
+                if let Settled::Answered { answered, .. } = &settled
+                    && cache.generation == generation
+                {
+                    cache.answers.insert(key, answered.clone());
+                }
+            }
+            settling.settle(settled);
+        });
+        self.provider.request_at(vec![target], pending.priority.clone(), delivery);
     }
 
     fn apply(&self, answer: &mut ComponentAnswer, component: Option<&Arc<SemanticComponent>>, mode: HtmlAttributeMode) {
@@ -242,14 +334,6 @@ impl SemanticHook {
         if unread > 0 {
             answer.diagnostics.push(unread_diagnostic(unread, vec![answer.key.clone()]));
         }
-    }
-}
-
-/// Keeps `answered` for `key` unless the cache was invalidated since the question was asked.
-fn store(answers: &Answers, key: (String, u64), generation: u64, answered: Answered) {
-    let mut cache = answers.lock().unwrap_or_else(PoisonError::into_inner);
-    if cache.generation == generation {
-        cache.answers.insert(key, answered);
     }
 }
 

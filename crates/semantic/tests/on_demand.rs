@@ -5,7 +5,9 @@
 use std::time::Duration;
 
 use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, WatchSession, extract};
-use caliper_docgen_core::types::semantic::{SemanticOutcome, SemanticProvider, SemanticTarget};
+use caliper_docgen_core::types::semantic::{
+    Delivery, Priority, SemanticOutcome, SemanticProvider, SemanticTarget, SharedPriority,
+};
 use caliper_docgen_core::types::{DiagnosticSeverity, ExtractionOutput, PropType};
 use caliper_docgen_semantic::{OnDemand, OnDemandConfig, Recycles, targets_of};
 use camino::Utf8PathBuf;
@@ -55,6 +57,57 @@ fn target(output: &ExtractionOutput, name: &str) -> SemanticTarget {
 
 fn ask(checker: &OnDemand, target: SemanticTarget) -> SemanticOutcome {
     checker.request(vec![target]).recv_timeout(Duration::from_secs(30)).expect("the checker answers")
+}
+
+fn ask_in_background(checker: &OnDemand, target: SemanticTarget) -> SemanticOutcome {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let delivery = Delivery::new(move |outcome| {
+        sender.send(outcome).ok();
+    });
+    checker.request_at(vec![target], SharedPriority::new(Priority::Background), delivery);
+    receiver.recv_timeout(Duration::from_secs(30)).expect("a delivery").expect("the checker answers")
+}
+
+/// A story asked while background requests wait is answered before them. `REPLAY_HOLD` keeps the checker starting
+/// until every request is queued; the answers arrive in the order the one worker gives them.
+#[test]
+fn a_story_asked_behind_queued_background_requests_is_answered_before_them() {
+    let project = project(true);
+    let output = structural(&project);
+    let hold = project.root.join("hold");
+    let mut config = OnDemandConfig::new(project.root.clone());
+    config.expected_versions = &[FAKE_VERSION];
+    config.request_timeout = Duration::from_secs(20);
+    config
+        .extra_env
+        .push(("REPLAY_FIXTURE".to_string(), format!("{}/tests/fixtures/recording.json", env!("CARGO_MANIFEST_DIR"))));
+    config.extra_env.push(("REPLAY_HOLD".to_string(), hold.to_string()));
+    let checker = OnDemand::new(config);
+    checker.warm_up();
+    let (sender, answered) = std::sync::mpsc::channel();
+    let queue = |name: &'static str, priority: Priority| {
+        let sender = sender.clone();
+        let delivery = Delivery::new(move |outcome| {
+            sender.send((name, outcome)).ok();
+        });
+        checker.request_at(vec![target(&output, name)], SharedPriority::new(priority), delivery);
+    };
+    for _ in 0..3 {
+        queue("Button", Priority::Background);
+    }
+    queue("Other", Priority::Interactive);
+
+    std::fs::write(&hold, "").unwrap();
+    let order: Vec<&str> = (0..4)
+        .map(|_| {
+            let (name, outcome) = answered.recv_timeout(Duration::from_secs(30)).expect("an answer");
+            let outcome = outcome.expect("the checker answered");
+            assert_eq!(outcome.components.len(), 1, "{name}: {:?}", outcome.diagnostics);
+            name
+        })
+        .collect();
+
+    assert_eq!(order, ["Other", "Button", "Button", "Button"]);
 }
 
 #[test]
@@ -319,10 +372,14 @@ fn a_checker_that_has_built_its_programs_is_replaced_and_counted_as_worn() {
     let checker = OnDemand::new(config);
     assert_eq!((checker.recycles(), checker.process_id()), (Recycles::default(), None));
 
-    // 64 programs is one process's allowance, so the 65th request is the first answered by a second process.
+    // 64 programs is one process's allowance, so the 65th request is the first answered by a second process, whatever
+    // priority each was asked at.
     let mut last = None;
     for round in 0..65 {
-        let answered = ask(&checker, target(&output, "Button"));
+        let answered = match round % 2 {
+            0 => ask(&checker, target(&output, "Button")),
+            _ => ask_in_background(&checker, target(&output, "Button")),
+        };
         assert_eq!(answered.components.len(), 1, "request {round}");
         let process = checker.process_id();
         assert_eq!(process != last, round == 0 || round == 64, "request {round}");

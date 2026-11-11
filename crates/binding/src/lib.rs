@@ -499,8 +499,10 @@ pub fn session_component_toon(session_id: u32, key: String) -> napi::Result<Opti
 
 /// Resolves `count` components spread evenly over the session's keys, without returning them: a lazy session then
 /// holds the dependency declarations and resolver memos that components share, so the first request a host answers
-/// does not load them. Runs off the calling thread and returns how many components it resolved. An eager session, an
-/// unknown session and a count of 0 resolve nothing.
+/// does not load them. With `semanticTypes: 'on-demand'` it asks the checker for each at background priority, after any
+/// story someone opened, and does not wait for it: the answers are kept for the stories that follow. Runs off the
+/// calling thread and returns how many components it resolved. An eager session, an unknown session and a count of 0
+/// resolve nothing.
 #[napi]
 pub async fn session_warm_up(session_id: u32, count: u32) -> napi::Result<u32> {
     tokio::task::spawn_blocking(move || {
@@ -512,7 +514,7 @@ pub async fn session_warm_up(session_id: u32, count: u32) -> napi::Result<u32> {
             let keys = session.component_keys();
             let wanted = (count as usize).min(keys.len());
             let spread: Vec<String> = (0..wanted).filter_map(|n| keys.get(n * keys.len() / wanted).cloned()).collect();
-            session.components(&spread).into_iter().flatten().count() as u32
+            session.components_in_background(&spread).into_iter().flatten().count() as u32
         }) {
             Ok(resolved) => Ok(resolved),
             Err(diag) => Err(napi::Error::from_reason(diag.to_string())),

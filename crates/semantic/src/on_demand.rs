@@ -14,18 +14,26 @@
 //! The process runs on its own thread with its own runtime, so a caller on any thread (a NAPI worker, a rayon task)
 //! never nests runtimes and can bound how long it waits. A failure to start or a crash yields an outcome with no
 //! components and one diagnostic, never an error; after [`MAX_RESTARTS`] crashes the checker stays down.
+//!
+//! Requests wait in two queues: an interactive one (a story someone opened) is answered before any background one (a
+//! warm-up, a fill, a prefetch), first come first served within each, and a background request a caller raised while
+//! it waited moves to the interactive queue. So that background work is never starved, after [`INTERACTIVE_STREAK`]
+//! interactive answers in a row while background requests wait, the oldest of them goes next.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime};
 
-use caliper_docgen_core::types::semantic::{SemanticOutcome, SemanticProvider, SemanticTarget, SourceChange};
+use caliper_docgen_core::types::semantic::{
+    Delivery, Priority, SemanticOutcome, SemanticProvider, SemanticTarget, SharedPriority, SourceChange,
+};
 use caliper_docgen_core::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use caliper_docgen_tsc_client::{Client, Supervisor};
 use camino::Utf8PathBuf;
 use rustc_hash::{FxHashMap, FxHashSet};
+use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::rpc::{CallError, Rpc};
@@ -34,6 +42,10 @@ use crate::{SUPPORTED_VERSIONS, SemanticRequest, answer_on, group_by_file, root_
 
 /// How many files an unannounced-edit warning names before it counts the rest.
 const UNTOLD_NAMED: usize = 5;
+
+/// Interactive answers in a row the checker gives while background requests wait, before the oldest background request
+/// goes next: once first in its queue, a background request waits behind at most this many interactive ones.
+const INTERACTIVE_STREAK: u32 = 4;
 
 /// Crashes the checker may have before it stays down for the session.
 const MAX_RESTARTS: u32 = 3;
@@ -146,10 +158,65 @@ enum Job {
     Warm,
     /// Files changed on disk; queued before any request that may read them.
     Changed(SourceChange),
-    Answer {
-        targets: Vec<SemanticTarget>,
-        reply: mpsc::SyncSender<SemanticOutcome>,
-    },
+    Answer(Asked),
+}
+
+/// One request waiting for the checker.
+struct Asked {
+    targets: Vec<SemanticTarget>,
+    priority: SharedPriority,
+    delivery: Delivery,
+}
+
+/// The requests waiting for the checker, in two queues by priority, first in first out within each. A request is
+/// filed by its priority when it arrives and moved to the interactive queue when a caller raised it while it waited.
+/// After [`INTERACTIVE_STREAK`] interactive requests in a row while the background queue is not empty, the next is
+/// the oldest background request.
+struct Queue<T> {
+    interactive: VecDeque<(T, SharedPriority)>,
+    background: VecDeque<(T, SharedPriority)>,
+    /// Interactive requests taken in a row while a background one waited.
+    streak: u32,
+}
+
+impl<T> Default for Queue<T> {
+    fn default() -> Self {
+        Self { interactive: VecDeque::new(), background: VecDeque::new(), streak: 0 }
+    }
+}
+
+impl<T> Queue<T> {
+    fn push(&mut self, item: T, priority: SharedPriority) {
+        match priority.get() {
+            Priority::Interactive => self.interactive.push_back((item, priority)),
+            Priority::Background => self.background.push_back((item, priority)),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.interactive.is_empty() && self.background.is_empty()
+    }
+
+    /// The request the checker answers next.
+    fn next(&mut self) -> Option<T> {
+        let (raised, waiting): (VecDeque<_>, VecDeque<_>) = std::mem::take(&mut self.background)
+            .into_iter()
+            .partition(|(_, priority)| priority.get() == Priority::Interactive);
+        self.interactive.extend(raised);
+        self.background = waiting;
+        let starving = self.streak >= INTERACTIVE_STREAK;
+        let (next, streak) = match (self.interactive.pop_front(), self.background.is_empty()) {
+            (Some(interactive), true) => (Some(interactive), 0),
+            (Some(interactive), false) if !starving => (Some(interactive), self.streak + 1),
+            (Some(interactive), false) => {
+                self.interactive.push_front(interactive);
+                (self.background.pop_front(), 0)
+            }
+            (None, _) => (self.background.pop_front(), 0),
+        };
+        self.streak = streak;
+        next.map(|(item, _)| item)
+    }
 }
 
 /// A warm `tsc` that answers for the components it is asked about. Dropping it stops the process.
@@ -220,19 +287,27 @@ impl OnDemand {
 impl SemanticProvider for OnDemand {
     fn request(&self, targets: Vec<SemanticTarget>) -> mpsc::Receiver<SemanticOutcome> {
         let (reply, receiver) = mpsc::sync_channel(1);
+        let delivery = Delivery::new(move |outcome| {
+            // `None` drops the sender, which the receiver reads as a checker that stopped without answering.
+            if let Some(outcome) = outcome {
+                reply.send(outcome).ok();
+            }
+        });
+        self.request_at(targets, SharedPriority::new(Priority::Interactive), delivery);
+        receiver
+    }
+
+    fn request_at(&self, targets: Vec<SemanticTarget>, priority: SharedPriority, delivery: Delivery) {
         match &self.jobs {
             Some(jobs) => {
-                if let Err(refused) = jobs.send(Job::Answer { targets, reply })
-                    && let Job::Answer { reply, .. } = refused.0
+                if let Err(refused) = jobs.send(Job::Answer(Asked { targets, priority, delivery }))
+                    && let Job::Answer(asked) = refused.0
                 {
-                    reply.send(SemanticOutcome::unavailable("the checker thread has stopped")).ok();
+                    asked.delivery.deliver(Some(SemanticOutcome::unavailable("the checker thread has stopped")));
                 }
             }
-            None => {
-                reply.send(SemanticOutcome::unavailable("could not start the checker thread")).ok();
-            }
+            None => delivery.deliver(Some(SemanticOutcome::unavailable("could not start the checker thread"))),
         }
-        receiver
     }
 
     fn changed(&self, change: SourceChange) {
@@ -263,8 +338,9 @@ fn worker(config: OnDemandConfig, mut queue: UnboundedReceiver<Job>, gauges: Arc
         Err(error) => {
             let reason = format!("could not start an async runtime: {error}");
             while let Some(job) = queue.blocking_recv() {
-                if let Job::Answer { reply, .. } = job {
-                    reply.send(SemanticOutcome::unavailable(reason.clone())).ok();
+                match job {
+                    Job::Answer(asked) => asked.delivery.deliver(Some(SemanticOutcome::unavailable(reason.clone()))),
+                    Job::Warm | Job::Changed(_) => {}
                 }
             }
             return;
@@ -272,18 +348,33 @@ fn worker(config: OnDemandConfig, mut queue: UnboundedReceiver<Job>, gauges: Arc
     };
     runtime.block_on(async move {
         let mut checker = Checker { gauges, ..Checker::default() };
-        while let Some(job) = queue.recv().await {
-            match job {
-                Job::Warm => {
-                    checker.ensure(&config).await.ok();
-                }
-                Job::Changed(change) => checker.told(change).await,
-                Job::Answer { targets, reply } => {
-                    reply.send(checker.answer(&config, targets).await).ok();
-                    // After the reply, so the caller never waits for the memory check or the replacement.
-                    checker.maintain(&config).await;
+        let mut waiting = Queue::default();
+        let mut open = true;
+        loop {
+            // Every job sent so far is taken before the next request is picked, so the queues hold every request that
+            // waits, and a change is applied before any request sent after it.
+            if waiting.is_empty() && open {
+                match queue.recv().await {
+                    Some(job) => checker.take(&config, job, &mut waiting).await,
+                    None => open = false,
                 }
             }
+            while open {
+                match queue.try_recv() {
+                    Ok(job) => checker.take(&config, job, &mut waiting).await,
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => open = false,
+                }
+            }
+            let Some(asked) = waiting.next() else {
+                match open {
+                    true => continue,
+                    false => break,
+                }
+            };
+            asked.delivery.deliver(Some(checker.answer(&config, asked.targets).await));
+            // After the reply, so the caller never waits for the memory check or the replacement.
+            checker.maintain(&config).await;
         }
         if let Some(supervisor) = checker.supervisor.take() {
             supervisor.shutdown().await.ok();
@@ -340,6 +431,20 @@ fn untold_warning(files: &[Utf8PathBuf]) -> Diagnostic {
 }
 
 impl Checker {
+    /// Acts on a job as it arrives: starts the process, applies a change, or files a request by its priority.
+    async fn take(&mut self, config: &OnDemandConfig, job: Job, waiting: &mut Queue<Asked>) {
+        match job {
+            Job::Warm => {
+                self.ensure(config).await.ok();
+            }
+            Job::Changed(change) => self.told(change).await,
+            Job::Answer(asked) => {
+                let priority = asked.priority.clone();
+                waiting.push(asked, priority);
+            }
+        }
+    }
+
     async fn ensure(&mut self, config: &OnDemandConfig) -> Result<(), String> {
         if let Some(reason) = &self.down {
             return Err(reason.clone());
@@ -544,7 +649,76 @@ impl Checker {
 
 #[cfg(test)]
 mod tests {
-    use super::resident_mib;
+    use caliper_docgen_core::types::semantic::{Priority, SharedPriority};
+
+    use super::{INTERACTIVE_STREAK, Queue, resident_mib};
+
+    fn drain(queue: &mut Queue<&'static str>) -> Vec<&'static str> {
+        std::iter::from_fn(|| queue.next()).collect()
+    }
+
+    fn push(queue: &mut Queue<&'static str>, item: &'static str, priority: Priority) -> SharedPriority {
+        let priority = SharedPriority::new(priority);
+        queue.push(item, priority.clone());
+        priority
+    }
+
+    #[test]
+    fn an_interactive_request_goes_before_every_background_one_and_each_queue_keeps_its_order() {
+        let mut queue = Queue::default();
+        push(&mut queue, "fill 1", Priority::Background);
+        push(&mut queue, "fill 2", Priority::Background);
+        push(&mut queue, "story 1", Priority::Interactive);
+        push(&mut queue, "fill 3", Priority::Background);
+        push(&mut queue, "story 2", Priority::Interactive);
+
+        assert_eq!(drain(&mut queue), ["story 1", "story 2", "fill 1", "fill 2", "fill 3"]);
+    }
+
+    #[test]
+    fn a_background_request_raised_while_it_waits_goes_with_the_interactive_ones() {
+        let mut queue = Queue::default();
+        push(&mut queue, "fill 1", Priority::Background);
+        let prefetch = push(&mut queue, "prefetch of the story", Priority::Background);
+        push(&mut queue, "story", Priority::Interactive);
+
+        prefetch.raise();
+
+        assert_eq!(drain(&mut queue), ["story", "prefetch of the story", "fill 1"]);
+    }
+
+    #[test]
+    fn a_waiting_background_request_goes_after_a_bounded_run_of_interactive_ones() {
+        assert_eq!(INTERACTIVE_STREAK, 4);
+        let mut queue = Queue::default();
+        push(&mut queue, "fill 1", Priority::Background);
+        push(&mut queue, "fill 2", Priority::Background);
+        for story in ["story 1", "story 2", "story 3", "story 4", "story 5", "story 6", "story 7", "story 8", "story 9"]
+        {
+            push(&mut queue, story, Priority::Interactive);
+        }
+
+        assert_eq!(
+            drain(&mut queue),
+            [
+                "story 1", "story 2", "story 3", "story 4", "fill 1", "story 5", "story 6", "story 7", "story 8",
+                "fill 2", "story 9"
+            ]
+        );
+    }
+
+    #[test]
+    fn interactive_requests_with_no_background_waiting_do_not_count_toward_the_bound() {
+        let mut queue = Queue::default();
+        for story in ["story 1", "story 2", "story 3", "story 4", "story 5"] {
+            push(&mut queue, story, Priority::Interactive);
+            assert_eq!(queue.next(), Some(story));
+        }
+        push(&mut queue, "fill", Priority::Background);
+        push(&mut queue, "story 6", Priority::Interactive);
+
+        assert_eq!(drain(&mut queue), ["story 6", "fill"]);
+    }
 
     #[test]
     fn a_running_process_has_resident_memory() {

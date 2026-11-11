@@ -9,7 +9,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
-use crate::types::semantic::{SemanticProvider, SourceChange};
+use crate::types::semantic::{Priority, SemanticProvider, SourceChange};
 use crate::types::*;
 
 use super::discover::{discover_dirs, discover_files};
@@ -405,13 +405,14 @@ impl WatchSession {
             }
             false => revision.published_component(key),
         };
-        self.refined(answer)
+        self.refined(answer, Priority::Interactive)
     }
 
-    /// `answer` with the attached checker's props, when there is a checker and it answers in time.
-    fn refined(&self, answer: Option<ComponentAnswer>) -> Option<ComponentAnswer> {
+    /// `answer` with the attached checker's props, when there is a checker and it answers within the wait `priority`
+    /// gives it.
+    fn refined(&self, answer: Option<ComponentAnswer>, priority: Priority) -> Option<ComponentAnswer> {
         match (&self.semantic, answer) {
-            (Some(hook), Some(answer)) => Some(hook.refine(answer, self.options.html_attributes)),
+            (Some(hook), Some(answer)) => Some(hook.refine(answer, self.options.html_attributes, priority)),
             (_, answer) => answer,
         }
     }
@@ -452,15 +453,27 @@ impl WatchSession {
 
     /// [`Self::component`] for each of `keys`, resolved in parallel.
     pub fn components(&self, keys: &[String]) -> Vec<Option<ComponentAnswer>> {
+        self.components_at(keys, Priority::Interactive)
+    }
+
+    /// [`Self::components`] for work nobody waits for yet: a warm-up, a fill, a prefetch of the components stories
+    /// name. With a checker attached, each is asked for at [`Priority::Background`] and not waited for, so the call
+    /// returns the structural answers; the checker answers them after every request someone waits for, and keeps its
+    /// answers for the requests that follow. A request for a component already being asked joins that request.
+    pub fn components_in_background(&self, keys: &[String]) -> Vec<Option<ComponentAnswer>> {
+        self.components_at(keys, Priority::Background)
+    }
+
+    fn components_at(&self, keys: &[String], priority: Priority) -> Vec<Option<ComponentAnswer>> {
         use rayon::prelude::*;
         let Some(revision) = self.current.load_full() else { return vec![None; keys.len()] };
         match revision.is_lazy() {
             true => {
                 let answers = revision.lazy_components(&self.options, keys);
                 revision.load_whole_demand_in_background(&self.options);
-                answers.into_iter().map(|answer| self.refined(answer)).collect()
+                answers.into_iter().map(|answer| self.refined(answer, priority)).collect()
             }
-            false => keys.par_iter().map(|key| self.refined(revision.published_component(key))).collect(),
+            false => keys.par_iter().map(|key| self.refined(revision.published_component(key), priority)).collect(),
         }
     }
 

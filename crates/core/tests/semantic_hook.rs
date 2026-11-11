@@ -955,3 +955,29 @@ fn an_answer_for_another_component_of_the_same_file_is_not_merged() {
         assert_eq!(checker, Vec::<&String>::new(), "{path}");
     }
 }
+
+/// A story asked while the checker is still answering the same question (its prefetch, or another story of the same
+/// component) waits for that answer instead of queueing the question again behind it.
+#[test]
+fn a_request_for_a_component_the_checker_is_already_answering_joins_that_request() {
+    let project = project(&[("Button.tsx", BUTTON)]);
+    let checker = Fake::new(Duration::from_millis(500), warns_of_an_unannounced_edit);
+    let session = Arc::new(session(&project, checker.clone(), Duration::from_secs(5)));
+    let first = {
+        let session = session.clone();
+        std::thread::spawn(move || session.component("Button").unwrap())
+    };
+    while checker.requests() == 0 {
+        std::thread::yield_now();
+    }
+
+    let joined = session.component("Button").unwrap();
+
+    assert_eq!(checker.requests(), 1, "the second caller asked again");
+    let first = first.join().unwrap();
+    for (caller, answer) in [("first", &first), ("joined", &joined)] {
+        assert_eq!(answer.entry.props.keys().cloned().collect::<Vec<_>>(), ["label", "size"], "{caller}");
+        assert_eq!(answer.diagnostics.iter().filter(|d| d.message == NOT_TOLD).count(), 1, "{caller}");
+    }
+    assert_eq!(joined, first);
+}
