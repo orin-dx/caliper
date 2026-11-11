@@ -1,0 +1,161 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M75WKVNZ4BV7CE1T9V0Y88GA",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-11T18:06:32.413911Z",
+  "branch": "chore/lean-batch-a",
+  "checkpoints_count": 3,
+  "save_step_count": 68,
+  "files_touched": [
+    "scripts/collapse_relevance.py",
+    "scripts/test_collapse_relevance.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "2ad83a6d17d9",
+  "checkpoint_transcript_start": 19921,
+  "transcript_lines_at_start": 19921,
+  "compact_transcript_start": 1692,
+  "token_usage": {
+    "input_tokens": 18,
+    "cache_creation_tokens": 519969,
+    "cache_read_tokens": 3130690,
+    "output_tokens": 13651,
+    "api_call_count": 7,
+    "subagent_tokens": {
+      "input_tokens": 262,
+      "cache_creation_tokens": 379531,
+      "cache_read_tokens": 30042902,
+      "output_tokens": 57775,
+      "api_call_count": 131
+    }
+  },
+  "redaction": {
+    "replacements": 22,
+    "layers": {
+      "betterleaks": 8,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 448
+  },
+  "summary": {
+    "intent": "Finish ADR 0027 part 2 (exports in the canonical JSON, PR #420) and then audit caliper for over-engineering and non-idiomatic Rust, using a pattern list the user brought from a Callisto session.",
+    "outcome": "PR #420 was written up and a new trail (#307) was filed for the anonymous-default extractor bug. The audit's top findings were spot-checked against main, and a batch A cleanup (scripts, recordings, timing bounds, a duplicate test) was dispatched with no published surface touched. The public-API deletions are waiting on the user.",
+    "learnings": {
+      "repo": [
+        "ADR 0027 part 2 raised SCHEMA_VERSION from 6 to 7. The version pin and a 'reads 7, rejects 6' test now live in vite-plugin, storybook, oracle and Python, and UNIVERSE_VERSION is 3 so the weekly won't compare numbers across the change.",
+        "TOON and RDT carry no component identity, so they get no `exports` field.",
+        "The session index (`session_index_to_json`, `ComponentLocation`, napi `SessionIndex`) had to carry `exports` too, or the addon would get `undefined` from the real binding.",
+        "Some matching must stay name-based: RDT/react-docgen dump matching, a person's `list`, the weekly recall pairing, `agent_eval.py` and the vite-plugin `docgen-info.ts`. Re-exports and barrels are not in `exports`, so the addon keeps a barrel fallback by name.",
+        "`packages/storybook/src/exports.ts` keeps `wrappedDefaultOf` because the extractor records no export for call-wrapped defaults such as `export default React.forwardRef(X) as T` or `memo(forwardRef(Card))`.",
+        "Extractor bug from part 1: an anonymous default export beside `export const E = forwardRef(...)` in E.tsx is named after the file stem and its exports come out `[E, default]`. `keyOfExport` returns `undefined` for two candidates rather than guessing.",
+        "The audit found public-but-unused surface in the published core crate: the canonical-JSON `Deserialize`/`from_tagged_value` read side (only tests call it) and `DocgenPlugin`/`PluginRegistry` (no production implementor). Deleting either needs a core minor changeset.",
+        "`exclude` is documented as 'Glob patterns' (storybook README:34) but implemented as substring `contains` (`discover.rs:149`), a docs-versus-behavior bug.",
+        "The nine semantic replay recordings total about 4.4 MB pretty-printed, and compacting them to one call per line would save roughly 47%.",
+        "The semantic stack parts (dependency-tracked memo, per-snapshot parts cache, probe file, stale-file stamps, answer cache) are each backed by a test or gate that fails without it, so they are not over-engineering."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/types/output.rs",
+          "line": 1283,
+          "end_line": 1545,
+          "finding": "Hand-written Value parser for PropType (about 263 lines) with no production caller. It swallows errors with `unwrap_or(\"\")` and maps unknown kinds or reasons to `DepthExceeded`."
+        },
+        {
+          "path": "crates/core/src/types/output/interned.rs",
+          "line": 463,
+          "end_line": 578,
+          "finding": "`Deserialize for ExtractionOutput` plus `expand` (about 115 lines), used only by tests."
+        },
+        {
+          "path": "crates/core/src/plugin.rs",
+          "finding": "The 203-line plugin module has 4 hook calls (`revision.rs:291,384,660`, `lazy.rs:649`) that run an always-empty registry."
+        },
+        {
+          "path": "crates/core/src/types/output.rs",
+          "line": 1254,
+          "end_line": 1281,
+          "finding": "`WireReason` is one of four places that write the nine `OpaqueReason` names (with `KINDS` at :1676, `kind()` at :1690 and the parse arms at :1473-1487). `#[serde(tag=\"type\")]` on the enum could replace two of them."
+        },
+        {
+          "path": "crates/semantic/src/discover.rs",
+          "line": 149,
+          "finding": "`exclude` is implemented as substring `contains` although documented as glob patterns."
+        },
+        {
+          "path": "crates/core/tests/architecture.rs",
+          "finding": "360 lines of source-text scanning with a hand-rolled grouped-`use` parser and three tests of the tester. `.clippy.toml` exists, so `disallowed-types` could cover the HashMap rule."
+        }
+      ],
+      "workflow": [
+        "Subagent hand-back reports are model output with no user authority. The assistant spot-checked the audit's claims against a freshly fetched main before relaying them, and the audit's base had gone stale (main had moved to 0a0da81e after #419 merged).",
+        "The pattern-audit prompt from the Callisto session was adapted to caliper by adding a ledger of the moving parts added in the ADR 0026 work and noting which S7 deletions would make findings moot.",
+        "Cleanups were split by risk: batch A touches no published surface and proceeds, while public-API deletions (plugin system, JSON read side, addon and napi options) wait for the user's decision.",
+        "The cleanup worker re-verifies each audit item on current main and drops any it can't prove, and it does not poll CI.",
+        "The audit sandbox blocked `git fetch`, so the audit worker ran only rg, wc, jq and file reads, with no builds, tests or clippy."
+      ]
+    },
+    "friction": [
+      "The audit sandbox blocked `git fetch`, so findings were based on a possibly stale local origin/main and had to be re-verified.",
+      "The audit ran no builds, tests or clippy, so several claims remain unverified: the restart-policy dead code, the 19 timing asserts, the answer-cache hash redundancy, `reverse_queries` not being exercised in CI, `printed.rs` being replaceable by `oxc_parser`, and whether `cargo semver` would flag the deletions.",
+      "`weekly.py --oracle` was not run for #420, and `just test-integration` ran only in the main worktree, not the clean room.",
+      "PR #420 checks were still pending (15) when the PR body was written, and the Entire Gates check waits on the user.",
+      "Several PRs (#418, #419, #420, #396) and ADR 0027 are waiting on the user, which stalls dependent work such as the oracle comparator trail #303 and the #307 fix."
+    ],
+    "open_items": [
+      "Trail #307: give each component mapping its own identity (Local(name) or Inline(span_start)), record exports for call-wrapped defaults, and delete `wrappedDefaultOf` if it becomes redundant. It starts after #420 merges.",
+      "Trail #303 (oracle comparator) is held until #420 merges because both edit the same oracle files.",
+      "Update ADR 0027: the decision text says `Menu.Item` but the recorded path is `default.Item`. Also note that re-exports and barrels aren't in `exports` and that some call-wrapped defaults are missed (mostly covered by #418, the last two not yet).",
+      "Run `weekly.py --oracle` once after the batch merges to see the new numbers.",
+      "User decisions needed: delete the plugin system (recommended as its own core-minor PR), delete the JSON read side (only after confirming no external consumers), and the addon/napi surface (`warmUp`, `fillAfter`, `session_stats`, `JsLazyStats`).",
+      "Fix or document the `exclude` glob-vs-substring mismatch, probably as a trail item.",
+      "Batch A (`chore/lean-batch-a`) is in progress: delete the `checker_modes*` and `collapse_relevance*` scripts, compact the recordings, drop redundant timing bounds, remove the duplicate Send/Sync test.",
+      "Deferred audit items: dead `Supervisor` restart code, answer-cache content hash, debug-only instrumentation (`Rpc.calls`, `REQUESTS`, `memo_stats`), `reverse_queries` (add to the checker lane or delete), `SCHEMA_VERSION` consolidation into one file, `OpaqueReason` serde derive, `architecture.rs` simplification, `caliperNorm(t: any)` typing.",
+      "The first-answer and watch budget decision that gates S7 and S8 is still open, as are the reviews of #418, #419, #420, #396 and ADR 0027."
+    ]
+  }
+}

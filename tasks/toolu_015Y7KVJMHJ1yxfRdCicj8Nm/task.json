@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_015Y7KVJMHJ1yxfRdCicj8Nm",
+  "agent_id": "a44502eebb7437769",
+  "subagent_type": "general-purpose",
+  "task_description": "ADR 0027 part 2: exports in JSON, oracle and addon",
+  "token_usage": {
+    "input_tokens": 376,
+    "cache_creation_tokens": 446918,
+    "cache_read_tokens": 50427486,
+    "output_tokens": 129045,
+    "api_call_count": 188
+  },
+  "started_at": "2026-11-10T20:49:51.435083-08:00",
+  "completed_at": "2026-11-10T21:23:03.644407-08:00"
+}
