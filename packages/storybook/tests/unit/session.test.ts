@@ -1,15 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { SUPPORTED_SCHEMA_VERSION } from '../../src/schema.js'
 import { DocgenSession } from '../../src/session.js'
 import { FakeBinding, entry, rdtDoc, warning } from './fake-binding.js'
 
 const src = join('/project', 'src')
-// Modules whose source the session reads to tell which component an export names.
-const real = mkdtempSync(join(tmpdir(), 'caliper-sb-session-'))
-afterAll(() => rmSync(real, { recursive: true, force: true }))
 
 describe('DocgenSession.find', () => {
   function sessionWith(components: Record<string, ReturnType<typeof entry>>): Promise<DocgenSession> {
@@ -68,71 +63,81 @@ describe('DocgenSession.find', () => {
     expect(session.keyOf(join(src, 'index.ts'), 'Tab')).toBeUndefined()
   })
 
-  it('answers a default export among several components in the file without reading the source', async () => {
-    const path = join(real, 'Missing.tsx')
+  it('answers a default export among several components in the file', async () => {
+    const path = join(src, 'Missing.tsx')
     const session = await sessionWith({
       ActionNode: entry('ActionNode', path, []),
       Card: entry('Card', path, ['default']),
     })
-    expect(await session.resolveExport(path, 'default')).toBe('Card')
+    expect(session.resolveExport(path, 'default')).toBe('Card')
   })
 
-  it('answers an export under another name without reading the source', async () => {
-    const path = join(real, 'Gone.tsx')
+  it('answers an export under another name', async () => {
+    const path = join(src, 'Gone.tsx')
     const session = await sessionWith({
       Inner: entry('Inner', path, ['Tag']),
       Other: entry('Other', path, ['Other']),
     })
-    expect(await session.resolveExport(path, 'Tag')).toBe('Inner')
-    expect(await session.resolveExport(path, 'Other')).toBe('Other')
-    expect(await session.resolveExport(path, 'Inner')).toBeUndefined()
+    expect(session.resolveExport(path, 'Tag')).toBe('Inner')
+    expect(session.resolveExport(path, 'Other')).toBe('Other')
+    expect(session.resolveExport(path, 'Inner')).toBeUndefined()
   })
 
   it('answers a declared export whose display name differs from it', async () => {
     const session = await sessionWith({
-      '@mantine/core/ColorPickerThumb': entry('@mantine/core/ColorPickerThumb', join(real, 'Thumb.tsx'), ['Thumb']),
+      '@mantine/core/ColorPickerThumb': entry('@mantine/core/ColorPickerThumb', join(src, 'Thumb.tsx'), ['Thumb']),
     })
-    expect(await session.resolveExport(join(real, 'Thumb.tsx'), 'Thumb')).toBe('@mantine/core/ColorPickerThumb')
-    expect(await session.resolveExport(join(real, 'Thumb.tsx'), 'Hidden')).toBeUndefined()
+    expect(session.resolveExport(join(src, 'Thumb.tsx'), 'Thumb')).toBe('@mantine/core/ColorPickerThumb')
+    expect(session.resolveExport(join(src, 'Thumb.tsx'), 'Hidden')).toBeUndefined()
   })
 
   it('does not guess among several components when the export names none of them', async () => {
     const session = await sessionWith({
-      'ui/Left': entry('ui/Left', join(real, 'Pair.tsx'), ['Left']),
-      'ui/Right': entry('ui/Right', join(real, 'Pair.tsx'), ['Right']),
+      'ui/Left': entry('ui/Left', join(src, 'Pair.tsx'), ['Left']),
+      'ui/Right': entry('ui/Right', join(src, 'Pair.tsx'), ['Right']),
     })
-    expect(await session.resolveExport(join(real, 'Pair.tsx'), 'Middle')).toBeUndefined()
+    expect(session.resolveExport(join(src, 'Pair.tsx'), 'Middle')).toBeUndefined()
   })
 
-  it('answers a default export a call wraps, which the extractor records for no component, from the source', async () => {
-    writeFileSync(
-      join(real, 'Table.tsx'),
-      'const InternalTable = () => null\nconst Other = () => null\nexport default React.forwardRef(InternalTable) as RefTable',
-    )
+  it('answers a default export a call wraps as the component the extractor records it for', async () => {
+    const path = join(src, 'Table.tsx')
     const session = await sessionWith({
-      InternalTable: entry('InternalTable', join(real, 'Table.tsx'), []),
-      Other: entry('Other', join(real, 'Table.tsx'), []),
+      InternalTable: entry('InternalTable', path, ['default']),
+      Other: entry('Other', path, []),
     })
-    expect(await session.resolveExport(join(real, 'Table.tsx'), 'default')).toBe('InternalTable')
+    expect(session.resolveExport(path, 'default')).toBe('InternalTable')
   })
 
-  it('answers a default import by the name the story gave it only when the source does not say', async () => {
-    writeFileSync(join(real, 'Panel.tsx'), 'export default makePanel()')
+  it('tells an anonymous default export from a named export of its file name', async () => {
+    const path = join(src, 'E.tsx')
     const session = await sessionWith({
-      Header: entry('Header', join(real, 'Panel.tsx'), []),
-      Panel: entry('Panel', join(real, 'Panel.tsx'), []),
+      E: entry('E', path, ['E']),
+      'E (default)': entry('E (default)', path, ['default']),
     })
-    expect(await session.resolveExport(join(real, 'Panel.tsx'), 'default', 'Panel')).toBe('Panel')
-    expect(await session.resolveExport(join(real, 'Panel.tsx'), 'default', 'Footer')).toBeUndefined()
-    expect(await session.resolveExport(join(real, 'Panel.tsx'), 'default')).toBeUndefined()
+    expect(session.keyOfExport(path, 'E')).toBe('E')
+    expect(session.keyOfExport(path, 'default')).toBe('E (default)')
+    expect(session.resolveExport(path, 'E')).toBe('E')
+    expect(session.resolveExport(path, 'default')).toBe('E (default)')
+  })
+
+  it('answers a default import by the name the story gave it only when the module records no default export', async () => {
+    const path = join(src, 'Panel.tsx')
+    const session = await sessionWith({
+      Header: entry('Header', path, []),
+      Panel: entry('Panel', path, []),
+    })
+    expect(session.resolveExport(path, 'default', 'Panel')).toBe('Panel')
+    expect(session.resolveExport(path, 'default', 'Footer')).toBeUndefined()
+    expect(session.resolveExport(path, 'default')).toBeUndefined()
   })
 
   it('does not take the story’s name for the default export when the module exports another component as default', async () => {
+    const path = join(src, 'Panel.tsx')
     const session = await sessionWith({
-      Header: entry('Header', join(real, 'Panel.tsx'), ['default']),
-      Panel: entry('Panel', join(real, 'Panel.tsx'), []),
+      Header: entry('Header', path, ['default']),
+      Panel: entry('Panel', path, []),
     })
-    expect(await session.resolveExport(join(real, 'Panel.tsx'), 'default', 'Panel')).toBe('Header')
+    expect(session.resolveExport(path, 'default', 'Panel')).toBe('Header')
   })
 
   it('lists the components of a file, to say what a failed lookup chose from', async () => {
