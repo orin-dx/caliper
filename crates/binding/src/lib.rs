@@ -473,13 +473,13 @@ pub fn session_component_answers(session_id: u32, keys: Vec<String>) -> napi::Re
 /// One component as TOON, the compact text an agent reads (`render_component_slice_toon` in the core crate): its prop table
 /// with each prop's declaring type, why a prop's type is partly a guess, its inherited layers, and the warnings and
 /// errors that say its props may be incomplete. For an in-process host that answers one question about one component
-/// and has no use for a project's whole output. `null` when the session has no component under `key`. A lazy session
-/// resolves the component now.
+/// and has no use for a project's whole output. `null` when the session has no component under `key`; errors for an
+/// unknown or closed session. A lazy session resolves the component now.
 #[napi]
 pub fn session_component_toon(session_id: u32, key: String) -> napi::Result<Option<String>> {
     match caliper_docgen_core::panic_guard::contain_panic("session_component_toon", move || {
-        let session = SESSIONS.get(&session_id).map(|session| session.clone());
-        let answer = session.and_then(|session| session.components(&[key]).into_iter().next().flatten());
+        let session = live_session(session_id)?;
+        let answer = session.components(&[key]).into_iter().next().flatten();
         Ok(answer
             .map(|answer| caliper_docgen_core::toon::render_component_slice_toon(&answer.entry, &answer.diagnostics)))
     }) {
@@ -721,6 +721,7 @@ mod tests {
         assert_eq!(session_docgen_info(id, vec!["Button".into()]).expect_err("closed").reason, unknown);
         assert_eq!(session_component_answers(id, vec!["Button".into()]).expect_err("closed").reason, unknown);
         assert_eq!(session_component_keys(id).expect_err("closed").reason, unknown);
+        assert_eq!(session_component_toon(id, "Button".into()).expect_err("closed").reason, unknown);
     }
 
     #[test]
@@ -996,8 +997,9 @@ mod tests {
     }
 
     #[test]
-    fn a_component_slice_of_an_unknown_session_or_key_is_none() {
-        assert_eq!(session_component_toon(next_session_id(), "Button".into()).expect("slice"), None);
+    fn a_component_slice_of_an_unknown_session_is_an_error() {
+        let err = session_component_toon(next_session_id(), "Button".into()).expect_err("unknown session");
+        assert!(err.reason.starts_with("Unknown session"), "{}", err.reason);
     }
 
     #[tokio::test]
