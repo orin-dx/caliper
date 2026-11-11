@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_017b7EmBUiFCyGkZ5W34H5oy",
+  "agent_id": "a55b6d9cb48f258fa",
+  "subagent_type": "general-purpose",
+  "task_description": "Investigate addon first-answer seam",
+  "token_usage": {
+    "input_tokens": 218,
+    "cache_creation_tokens": 241082,
+    "cache_read_tokens": 19059338,
+    "output_tokens": 80505,
+    "api_call_count": 109
+  },
+  "started_at": "2026-11-11T13:06:33.629804-08:00",
+  "completed_at": "2026-11-11T13:33:47.982345-08:00"
+}

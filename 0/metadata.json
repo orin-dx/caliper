@@ -1,0 +1,147 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M768T8HPC3A5M6H1MWCDCVKP",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-11T21:39:42.446923Z",
+  "branch": "fix-425",
+  "checkpoints_count": 1,
+  "save_step_count": 68,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "d0a6feee3d51",
+  "checkpoint_transcript_start": 20625,
+  "transcript_lines_at_start": 20625,
+  "compact_transcript_start": 1740,
+  "token_usage": {
+    "input_tokens": 10,
+    "cache_creation_tokens": 21154,
+    "cache_read_tokens": 2610637,
+    "output_tokens": 7494,
+    "api_call_count": 4,
+    "subagent_tokens": {
+      "input_tokens": 150,
+      "cache_creation_tokens": 121704,
+      "cache_read_tokens": 11193909,
+      "output_tokens": 45285,
+      "api_call_count": 75
+    }
+  },
+  "redaction": {
+    "replacements": 22,
+    "layers": {
+      "betterleaks": 8,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 459
+  },
+  "summary": {
+    "intent": "Land the fix for the PR 423 review finding (exclude-pattern directory semantics) and plan follow-up work from the seam investigation so the first Chakra component answer from the checker is correct and fast enough.",
+    "outcome": "The PR 423 fix landed as 059cb9a6 with three new tests and the PR body updated. Five follow-up trail tasks (#328-#333) were created, and a worker was started on the wait-and-join branch (feat/wait-and-join) covering #329 and #330.",
+    "learnings": {
+      "repo": [
+        "Exclude matching must go through one enforcement point: excluded(relative, kind: EntryKind, ..) in crates/core/src/pipeline/discover.rs, with a required File/Dir enum and no default. It tests every path prefix as a directory, so an excluded parent takes its whole subtree and a `!` cannot re-include inside it (gitignore semantics).",
+        "discover_files, discover_dirs and is_source_file must agree on every exclude list. A nine-list consistency test enforces this, and the watcher only calls discover_dirs and discover_files.",
+        "is_source_file (callers revision.rs ~513 and watch/lazy.rs ~280) ignores .gitignore and hidden-file handling that the walkers apply, so a gitignored changed path is still extracted by update_file. Tracked as trail #328.",
+        "Resolution configs should be dropped only when their parent directory is excluded, not by user excludes like `*`. Directories named like source files (X.tsx) must not be returned as files, and .stories/.test/.spec name rules apply to files only.",
+        "Chakra performance: the structural path has props for only 140 of 938 components, so ChakraButton answers at 160 ms with 0 props under the default 150 ms semanticWaitMs. The checker returns 1,138 props in about 0.4-0.8 s, and cold conversion costs 346-372 ms.",
+        "The checker queue is FIFO. A request for a component already in flight queues behind the first instead of joining it, so a story asked during its own prefetch took 983-3,476 ms.",
+        "538 Chakra condition maps share one constraint. A scratch memo keyed by (constraint, map symbol) cut requests from 4,590 to 4,054 and was byte-identical on 97 components, but only with the guard (more than 40 props, none project-declared, no signatures). The unguarded version changed MuiTextField's output.",
+        "Storybook 11 starts the docgen worker on the first extract, so nothing in the worker can run earlier. The addon's warmUp resolves 8 components spread over all keys, not the ones the stories use.",
+        "tsrs has no upstream request for this, and a tsrs-only request would split the protocol from the Go checker."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/pipeline/discover.rs",
+          "finding": "excluded() is now the single enforcement point for exclude semantics, taking an EntryKind (File/Dir). Call sites: visit and discover_dirs pass the real kind, and is_source_file uses File and returns false for directories."
+        },
+        {
+          "path": "crates/core/src/pipeline/revision.rs",
+          "line": 513,
+          "finding": "Calls is_source_file, which lacks the .gitignore and hidden-file handling that discovery applies."
+        },
+        {
+          "path": "crates/core/src/pipeline/watch/lazy.rs",
+          "line": 280,
+          "finding": "Calls is_source_file, which lacks the .gitignore and hidden-file handling that discovery applies."
+        },
+        {
+          "path": "crates/core/src/pipeline/semantic_hook.rs",
+          "finding": "Target of trails #329 and #330: wait longer for the checker on an empty structural answer, and keep one pending request per (key, file hash) so later callers join it."
+        },
+        {
+          "path": "crates/semantic/src/on_demand.rs",
+          "finding": "Needs two queues with interactive requests ahead of background ones (trail #330)."
+        }
+      ],
+      "workflow": [
+        "Write tests before the source change and confirm they fail on base. The worker re-ran the watch test on base via git checkout of the file instead of stashing.",
+        "Delegate independent work to subagents with explicit verification commands (just lint doc-check machete typos, just semver, cargo check, nextest, test-napi, test-ts). Treat subagent reports as reports rather than user approval.",
+        "Count requests with a recording runner instead of wall-clock when the machine is under load (load 20-48 made times upper bounds).",
+        "Sequence work that touches the same file: trail #331 waits for PR 426 to merge because it edits convert.rs, and S7a2/S7b wait for the same reason.",
+        "Record out-of-scope findings as trail tasks with intent, change and gate sections instead of expanding the PR."
+      ]
+    },
+    "friction": [
+      "The shared machine was at load 20-48, so timings were only upper bounds.",
+      "The worker did not wait for CI after pushing, so CI status is unverified.",
+      "TSRS_BIN was not set in the worker's shell, though nothing it ran used it.",
+      "Oracle and corpus runs were not run, as instructed.",
+      "Chakra cold first-answer cost cannot be brought under 150 ms by any single lever."
+    ],
+    "open_items": [
+      "Trail #328: unify is_source_file with the walkers' .gitignore and hidden-file handling, with a consistency test.",
+      "Trail #329 (high): wait up to about 2 s for the checker when the structural answer is empty. This is the S8 prerequisite.",
+      "Trail #330: join in-flight checker requests and put the open story first. Both #329 and #330 are in progress on feat/wait-and-join.",
+      "Trail #331: condition-map memo, then per-prop documentation cache. Blocked on PR 426 (S7a) merging.",
+      "Trail #332: spike for startup prefetch through Storybook's docgen service. Needs the in-flight join first.",
+      "Trail #333: reword the ADR 0026 S4/S6 budgets. Needs the owner's decision: keep 150 ms for prefetched or cached stories and record the cold first answer as measured rather than gated.",
+      "Open PRs and workers: #423 (updated, CI not confirmed), #425 (Object.assign fix worker still running), #426 (S7a draft), #396.",
+      "S7a2 and S7b are deferred until #426 merges."
+    ]
+  }
+}

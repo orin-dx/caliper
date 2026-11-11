@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01KudgyGx8scdhtpyjWkigZc",
+  "agent_id": "a2e804c0ff99b5c6b",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix PR 423 directory matcher finding",
+  "token_usage": {
+    "input_tokens": 72,
+    "cache_creation_tokens": 98612,
+    "cache_read_tokens": 3406858,
+    "output_tokens": 27965,
+    "api_call_count": 36
+  },
+  "started_at": "2026-11-11T13:24:26.947838-08:00",
+  "completed_at": "2026-11-11T13:33:39.013925-08:00"
+}
