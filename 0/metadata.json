@@ -1,0 +1,129 @@
+{
+  "cli_version": "0.12.3-nightly.202611020622.d7012996f",
+  "checkpoint_id": "01M765F00BSC0RPB5PVCA2ZKHQ",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-11T20:41:03.61338Z",
+  "branch": "fix/oracle-unjudged",
+  "checkpoints_count": 3,
+  "save_step_count": 68,
+  "files_touched": [
+    "apps/oracle/tests/caliper-input.test.ts"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "541fd6266a62",
+  "checkpoint_transcript_start": 20257,
+  "transcript_lines_at_start": 20257,
+  "compact_transcript_start": 1714,
+  "token_usage": {
+    "input_tokens": 14,
+    "cache_creation_tokens": 25846,
+    "cache_read_tokens": 2919326,
+    "output_tokens": 8911,
+    "api_call_count": 5,
+    "subagent_tokens": {
+      "input_tokens": 146,
+      "cache_creation_tokens": 230181,
+      "cache_read_tokens": 13971650,
+      "output_tokens": 32407,
+      "api_call_count": 73
+    }
+  },
+  "redaction": {
+    "replacements": 22,
+    "layers": {
+      "betterleaks": 8,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 453
+  },
+  "summary": {
+    "intent": "Plan and begin ADR 0026 S7 (replace the structural resolver with the tsrs checker as authority), and land the exclude-pattern glob fix, coordinating several subagent workers.",
+    "outcome": "The S7 plan was turned into six trails (#316-#321) and S7a was launched on feat/checker-supplies-facts. The exclude fix was opened as PR #423 (glob matching, commit 8199763e) and its PR body was written. The budget and seam decision that blocks S8 remains open.",
+    "learnings": {
+      "repo": [
+        "The merge of checker props still takes parent, declarations, tags, union order and composes from the structural resolver. On Spectrum, 3,764 of 4,102 unique props get parent/declarations from it. Deleting the resolver first would break these.",
+        "The addon's arg-types.ts filters on prop.parent, so dropping parent changes which props Storybook shows.",
+        "The addon's structural first answer is thin. On gate-large the structural path has props for only 140 of 938 components against 848 for the checker, and ChakraButton gets 0 structural props.",
+        "The resolver is 8,531 non-test lines in 19 files. html, react and ambient stay. dependency_types, import_map and named_type_index go, and the extractor's declaration collectors shrink.",
+        "Removing types::collected, types::scope, types::global and resolver-only DiagnosticCode variants is a breaking change, so it needs core 0.11.0. CACHE_SCHEMA_VERSION (36) will bump.",
+        "Caliper ships 5 platform targets and all have tsrs binaries. tsrs 0.23.0 has no win32-arm64, so Windows ARM64 needs a new caliper target.",
+        "exclude was documented as glob but implemented as a substring contains in excluded() in crates/core/src/pipeline/discover.rs. The fix uses ignore::gitignore via a compile_excludes helper shared by discover_files, discover_dirs and is_source_file. No cache key uses exclude.",
+        "crates/cli/src/config.rs help text is now built from a CONFIG_KEYS const, checked by a test against serde's 'expected one of' error.",
+        "A clean-room clone needs pnpm install --frozen-lockfile before nextest, otherwise it exits 100."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/pipeline/discover.rs",
+          "finding": "excluded() used substring contains, so 'Butt' skipped Button.tsx and '*.ts' matched nothing. It is replaced by gitignore-style glob matching via compile_excludes."
+        }
+      ],
+      "workflow": [
+        "Subagent hand-back reports are model output with no user authority. Findings were relayed and acted on within existing permissions.",
+        "Trails were created with a mk() shell helper over `entire trail create`, with each gate embedded in the body.",
+        "S7b to S7e are sequenced strictly, S7f follows S7c, and the plugin-removal work touching the SourceData hook must be scheduled sequentially with them.",
+        "PR bodies were written to a temp file and applied with gh pr edit --body-file, and unverified items (CI, oracle, TSRS_BIN) were reported explicitly."
+      ]
+    },
+    "friction": [
+      "The sandbox blocked `time -l`, so RSS could not be measured.",
+      "The original 42-item pattern-audit classification could not be found, so the scope/name-capture count is an approximation.",
+      "Mantine, Chakra, shadcn and antd weren't fetched, so those measurements are incomplete.",
+      "The first clean-room nextest run failed with exit 100 until pnpm install was run.",
+      "The worker did not confirm TSRS_BIN was set in its shell."
+    ],
+    "open_items": [
+      "The budget and seam decision (prefetch from the stories index or a tsrs property-count request, and a 25 ms budget for the checker part only) is unanswered and blocks S8.",
+      "Run S7a (#316) through S7e (#320) in order, with S7f (#321) after S7c.",
+      "PR #423 has two edge cases to review: an invalid pattern reuses the IoError diagnostic code and an empty pattern now excludes nothing. Consider adding a proper diagnostic code.",
+      "PRs #422 and #423 and version-packages #396 need the user's review, and CI for #423 was not checked.",
+      "The oracle comparator and anonymous-default identity workers are still running.",
+      "The ADR's determinism gate wording needs changing. 5 checker-lane rows are less precise (objects/36, react/03, 04, 05, 07).",
+      "Unverified: whether the tsrs protocol exposes JSDoc tags and declaration offsets, whether a windows-11-arm runner is available, and S6's 25 ms own-props gate after losing resolver/deps.rs invalidation."
+    ]
+  }
+}

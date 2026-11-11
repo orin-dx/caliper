@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01CK4mdVTtGNno74B9HvBez9",
+  "agent_id": "a0bce3c04a689c765",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix exclude glob versus substring",
+  "token_usage": {
+    "input_tokens": 94,
+    "cache_creation_tokens": 105020,
+    "cache_read_tokens": 4421279,
+    "output_tokens": 27660,
+    "api_call_count": 46
+  },
+  "started_at": "2026-11-11T12:20:19.716447-08:00",
+  "completed_at": "2026-11-11T12:35:56.298538-08:00"
+}
