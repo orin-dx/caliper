@@ -108,7 +108,8 @@ fn live_session(session_id: u32) -> napi::Result<Arc<WatchSession>> {
 pub struct JsExtractOptions {
     /// Source directories to scan.
     pub src_dirs: Vec<String>,
-    /// Extra glob-like patterns to exclude (on top of built-in: stories, tests, snapshots).
+    /// Extra gitignore-style glob patterns to exclude, relative to each source directory (on top of built-in: stories,
+    /// tests, snapshots).
     pub exclude: Option<Vec<String>>,
     /// `'full'` (the default) lists all of an element's attributes, `'curated'` a compact subset, `'none'` none.
     #[napi(ts_type = "'curated' | 'full' | 'none'")]

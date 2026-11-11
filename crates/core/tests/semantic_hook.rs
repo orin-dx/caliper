@@ -915,6 +915,40 @@ fn a_session_asks_for_a_component_by_its_key_and_its_exports_eager_or_lazy() {
     }
 }
 
+const E_WITH_DEFAULT: &str = "export interface NamedProps { named: string }
+export interface DefaultProps { fallback: string }
+export const E = (props: NamedProps) => null;
+export default function (props: DefaultProps) { return null; }";
+
+/// An anonymous default export is named after its file, which a named export can be too: each is asked for by its own
+/// key, the named one as `E` and the default as `default`, so neither is given the other's props.
+#[test]
+fn a_default_export_beside_a_named_export_of_its_file_name_is_asked_for_by_its_own_key() {
+    let project = project(&[("E.tsx", E_WITH_DEFAULT)]);
+    for lazy in [false, true] {
+        let options = PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() };
+        let recorder = Arc::new(Recorder(std::sync::Mutex::new(Vec::new())));
+        let session = if lazy { WatchSession::lazy(options) } else { WatchSession::new(options) }
+            .with_semantic(recorder.clone(), Duration::from_millis(1));
+        drop(session.initialize());
+        drop(session.component("E"));
+        drop(session.component("E (default)"));
+
+        let asked: Vec<(String, Vec<String>)> = recorder
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|t| (t.key.clone(), t.exports.iter().map(ToString::to_string).collect()))
+            .collect();
+        assert_eq!(
+            asked,
+            [("E".to_string(), vec!["E".to_string()]), ("E (default)".to_string(), vec!["default".to_string()])],
+            "lazy: {lazy}"
+        );
+    }
+}
+
 /// An outcome that answers for `Menu`, and gives `Menu` a fallback reason, whatever was asked.
 fn answers_for_menu(_: &SemanticTarget) -> SemanticOutcome {
     SemanticOutcome {

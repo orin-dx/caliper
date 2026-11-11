@@ -31,7 +31,7 @@ Before answering, the provider compares every source file's mtime and size with 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `srcDirs` | `['src']` | Directories to extract from, relative to Storybook's working directory. |
-| `exclude` |  | Glob patterns to skip. |
+| `exclude` |  | Glob patterns to skip, gitignore-style and relative to each source directory: `**/*.fixture.tsx`, `legacy/`. A bare name such as `Button` matches only a file or folder named exactly that. |
 | `tsconfigPath` |  | tsconfig for path aliases. |
 | `skipHtmlProps` | `false` | Leave out the HTML attributes a component inherits from its element. |
 | `htmlAttributes` | `full` | `full` lists all of the HTML attributes, `curated` a compact subset (handlers, `aria-*`, `ref`, common attributes), `none` none. Wins over `skipHtmlProps`. |

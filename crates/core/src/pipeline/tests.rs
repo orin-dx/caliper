@@ -1,4 +1,4 @@
-use super::discover::discover_files;
+use super::discover::{discover_dirs, discover_files, is_source_file};
 use super::*;
 use std::fs;
 use tempfile::TempDir;
@@ -2448,30 +2448,24 @@ fn test_triple_duplicate_declaration_produces_exactly_two_entries() {
     );
 }
 
-// ── SPEC-PIPELINE-001 AC-022: exclude_patterns entries containing
-// glob-invalid characters are inert (plain substring match).
+// ── exclude_patterns are gitignore-style globs on the path inside the source directory.
 
 #[test]
-fn test_exclude_patterns_with_glob_invalid_characters_are_inert() {
+fn test_exclude_patterns_with_an_invalid_glob_exclude_nothing_and_are_reported() {
     let tmp = TempDir::new().unwrap();
     write_file(&tmp, "Button.tsx", "export const Button = () => null;");
 
     let dir = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
-    let (files, diagnostics) = discover_files(&[dir], &["[unclosed*".to_string()]);
+    let (files, diagnostics) = discover_files(&[dir], &["{a".to_string()]);
 
     let names: Vec<&str> = files.iter().map(|f| f.file_name().unwrap()).collect();
-    assert!(
-        names.contains(&"Button.tsx"),
-        "a glob-invalid pattern that doesn't literally match must not exclude anything, got {names:?}"
-    );
-    assert!(diagnostics.is_empty(), "no error/panic expected for a glob-invalid but harmless pattern");
+    assert_eq!(names, ["Button.tsx"]);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert!(diagnostics[0].message.contains("{a"), "{}", diagnostics[0].message);
 }
 
-// ── SPEC-PIPELINE-001 AC-023: an empty-string exclude_patterns entry
-// excludes every file (str::contains("") is always true).
-
 #[test]
-fn test_exclude_patterns_empty_string_excludes_everything() {
+fn test_exclude_patterns_empty_string_excludes_nothing() {
     let tmp = TempDir::new().unwrap();
     write_file(&tmp, "Button.tsx", "export const Button = () => null;");
     write_file(&tmp, "Widget.tsx", "export const Widget = () => null;");
@@ -2479,8 +2473,177 @@ fn test_exclude_patterns_empty_string_excludes_everything() {
     let dir = Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap();
     let (files, diagnostics) = discover_files(&[dir], &["".to_string()]);
 
-    assert!(files.is_empty(), "an empty-string pattern should exclude every file, got {files:?}");
+    assert_eq!(files.len(), 2, "{files:?}");
     assert!(diagnostics.is_empty());
+}
+
+#[test]
+fn test_exclude_patterns_are_globs_not_substrings() {
+    const FILES: [&str; 6] =
+        ["Button.tsx", "Card.ts", "legacy/Old.tsx", "legacy/deep/Older.tsx", "ui/Button.tsx", "ui/Panel.tsx"];
+    let cases: [(&str, &[&str]); 9] = [
+        ("*.ts", &["Card.ts"]),
+        ("Button.*", &["Button.tsx", "ui/Button.tsx"]),
+        ("legacy/", &["legacy/Old.tsx", "legacy/deep/Older.tsx"]),
+        ("**/deep/**", &["legacy/deep/Older.tsx"]),
+        ("ui/*.tsx", &["ui/Button.tsx", "ui/Panel.tsx"]),
+        ("/Button.tsx", &["Button.tsx"]),
+        ("**/Old*.tsx", &["legacy/Old.tsx", "legacy/deep/Older.tsx"]),
+        // These matched as substrings of the path before; as globs they name no file or directory.
+        ("Butt", &[]),
+        ("legacy", &["legacy/Old.tsx", "legacy/deep/Older.tsx"]),
+    ];
+    for (pattern, gone) in cases {
+        let tmp = TempDir::new().unwrap();
+        for name in FILES {
+            let path = tmp.path().join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "export const X = () => null;").unwrap();
+        }
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let (found, diagnostics) = discover_files(std::slice::from_ref(&root), &[pattern.to_string()]);
+        let mut found: Vec<String> = found.iter().map(|f| f.strip_prefix(&root).unwrap().to_string()).collect();
+        found.sort();
+        let mut expected: Vec<String> = FILES.iter().filter(|f| !gone.contains(f)).map(ToString::to_string).collect();
+        expected.sort();
+        assert_eq!(found, expected, "pattern {pattern:?}");
+        assert!(diagnostics.is_empty(), "pattern {pattern:?}: {diagnostics:?}");
+    }
+}
+
+// Discovery, the directory walk the watcher stamps, and the watcher's per-path check must give one answer.
+#[test]
+fn discovery_the_directory_walk_and_the_watcher_agree_on_every_exclude_list() {
+    const FILES: [&str; 9] = [
+        "Button.tsx",
+        "Card.ts",
+        "legacy/Old.tsx",
+        "legacy/deep/Older.tsx",
+        "ui/Button.tsx",
+        "ui/Button.stories.tsx",
+        "ui/forms/Input.tsx",
+        "notes/readme.md",
+        "ui/forms/data.json",
+    ];
+    const CONFIGS: [&str; 3] = ["tsconfig.json", "legacy/tsconfig.json", "ui/tsconfig.json"];
+    const ALL_DIRS: [&str; 6] = [".", "legacy", "legacy/deep", "notes", "ui", "ui/forms"];
+    // (exclude list, files kept, directories kept, configs kept)
+    type Case = (&'static [&'static str], &'static [&'static str], &'static [&'static str], &'static [&'static str]);
+    let cases: [Case; 9] = [
+        (
+            &[],
+            &[
+                "Button.tsx",
+                "Card.ts",
+                "legacy/Old.tsx",
+                "legacy/deep/Older.tsx",
+                "ui/Button.tsx",
+                "ui/forms/Input.tsx",
+            ],
+            &ALL_DIRS,
+            &CONFIGS,
+        ),
+        // A directory is not matched by a file rule, so `!*/` keeps every directory and `!*.tsx` the components in them.
+        (
+            &["*", "!*/", "!*.tsx"],
+            &["Button.tsx", "legacy/Old.tsx", "legacy/deep/Older.tsx", "ui/Button.tsx", "ui/forms/Input.tsx"],
+            &ALL_DIRS,
+            &CONFIGS,
+        ),
+        (&["*", "!*/"], &[], &ALL_DIRS, &CONFIGS),
+        (&["*.tsx"], &["Card.ts"], &ALL_DIRS, &CONFIGS),
+        // A negation cannot bring back anything inside an excluded directory, as in gitignore.
+        (
+            &["legacy/", "!*.tsx"],
+            &["Button.tsx", "Card.ts", "ui/Button.tsx", "ui/forms/Input.tsx"],
+            &[".", "notes", "ui", "ui/forms"],
+            &["tsconfig.json", "ui/tsconfig.json"],
+        ),
+        (
+            &["legacy/", "!legacy/deep/"],
+            &["Button.tsx", "Card.ts", "ui/Button.tsx", "ui/forms/Input.tsx"],
+            &[".", "notes", "ui", "ui/forms"],
+            &["tsconfig.json", "ui/tsconfig.json"],
+        ),
+        // A directory excluded by `ui/*` can be named again, and what is inside it comes back.
+        (
+            &["ui/*", "!ui/forms/"],
+            &["Button.tsx", "Card.ts", "legacy/Old.tsx", "legacy/deep/Older.tsx", "ui/forms/Input.tsx"],
+            &[".", "legacy", "legacy/deep", "notes", "ui", "ui/forms"],
+            &CONFIGS,
+        ),
+        (
+            &["notes/"],
+            &[
+                "Button.tsx",
+                "Card.ts",
+                "legacy/Old.tsx",
+                "legacy/deep/Older.tsx",
+                "ui/Button.tsx",
+                "ui/forms/Input.tsx",
+            ],
+            &[".", "legacy", "legacy/deep", "ui", "ui/forms"],
+            &CONFIGS,
+        ),
+        (
+            &["ui/"],
+            &["Button.tsx", "Card.ts", "legacy/Old.tsx", "legacy/deep/Older.tsx"],
+            &[".", "legacy", "legacy/deep", "notes"],
+            &["tsconfig.json", "legacy/tsconfig.json"],
+        ),
+    ];
+    for (patterns, files_kept, dirs_kept, configs_kept) in cases {
+        let tmp = TempDir::new().unwrap();
+        for name in FILES.iter().chain(&CONFIGS) {
+            let path = tmp.path().join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "export const X = () => null;").unwrap();
+        }
+        let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+        let patterns: Vec<String> = patterns.iter().map(ToString::to_string).collect();
+        let relative = |paths: &[Utf8PathBuf]| -> Vec<String> {
+            let mut paths: Vec<String> = paths
+                .iter()
+                .map(|p| p.strip_prefix(&root).map_or_else(|_| p.to_string(), ToString::to_string))
+                .map(|p| if p.is_empty() { ".".to_string() } else { p })
+                .collect();
+            paths.sort();
+            paths
+        };
+        let sorted = |names: &[&str]| -> Vec<String> {
+            let mut names: Vec<String> = names.iter().map(ToString::to_string).collect();
+            names.sort();
+            names
+        };
+
+        let (files, _) = discover_files(std::slice::from_ref(&root), &patterns);
+        let (dirs, configs) = discover_dirs(std::slice::from_ref(&root), &patterns, |name| name == "tsconfig.json");
+
+        assert_eq!(relative(&files), sorted(files_kept), "files for {patterns:?}");
+        assert_eq!(relative(&dirs), sorted(dirs_kept), "directories for {patterns:?}");
+        assert_eq!(relative(&configs), sorted(configs_kept), "configs for {patterns:?}");
+        for name in FILES.iter().filter(|name| name.ends_with(".ts") || name.ends_with(".tsx")) {
+            let path = root.join(name);
+            assert_eq!(
+                is_source_file(&path, std::slice::from_ref(&root), &patterns),
+                files.contains(&path),
+                "is_source_file({name}) for {patterns:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_directory_named_like_a_source_file_is_not_a_source_file() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("Weird.tsx")).unwrap();
+    write_file(&tmp, "Weird.tsx/Inner.tsx", "export const Inner = () => null;");
+    let root = Utf8PathBuf::from_path_buf(tmp.path().canonicalize().unwrap()).unwrap();
+
+    let (files, _) = discover_files(std::slice::from_ref(&root), &[]);
+
+    assert_eq!(files, [root.join("Weird.tsx/Inner.tsx")]);
+    assert!(!is_source_file(&root.join("Weird.tsx"), std::slice::from_ref(&root), &[]));
 }
 
 #[test]

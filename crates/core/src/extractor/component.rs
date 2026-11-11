@@ -7,7 +7,7 @@ use oxc_ast::ast::*;
 
 use crate::types::{CollectedTypeAlias, ComponentMapping, DetectionRule, DiagnosticCode};
 
-use super::evidence::{FunctionShape, renders};
+use super::evidence::{FunctionShape, Scope, renders};
 use super::{ReactApi, SourceDataCollector, is_pascal_case};
 
 /// Peel any wrapping `as X` casts, `satisfies X` checks or `!` assertions down to the real
@@ -580,6 +580,7 @@ impl<'src> SourceDataCollector<'src> {
 
         let (description, tags) = self.find_jsdoc_with_tags(func.span.start);
         let param_defaults = self.extract_param_defaults(&func.params);
+        self.anonymous_default = Some(func.span.start);
         self.data.component_mappings.push(
             ComponentMapping::new(
                 name,
@@ -589,6 +590,7 @@ impl<'src> SourceDataCollector<'src> {
                 func.span.end,
                 DetectionRule::AnonymousDefaultExport,
             )
+            .without_binding()
             .with_props_type_args(type_args)
             .with_doc(description, tags)
             .with_param_defaults(param_defaults),
@@ -719,8 +721,8 @@ impl<'src> SourceDataCollector<'src> {
     fn alias_shape<'a>(&mut self, decl: &Binding<'_, 'a>) -> Option<(String, Option<AliasCall>)> {
         let init = decl.init.as_ref()?;
         let (inner, call) = match peel_expr(init) {
-            Expression::CallExpression(call) => match call.arguments.first() {
-                Some(Argument::Identifier(id)) => (id.name.as_str().to_owned(), Some(&**call)),
+            Expression::CallExpression(call) => match aliased_component(call) {
+                Some(Expression::Identifier(id)) => (id.name.as_str().to_owned(), Some(&**call)),
                 _ => return None,
             },
             Expression::Identifier(id) => (id.name.as_str().to_owned(), None),
@@ -734,9 +736,7 @@ impl<'src> SourceDataCollector<'src> {
         // `getDisplayName(Card)` has the same shape as `memo(Card)` but returns a string; only a call that follows the
         // component-wrapper conventions produces a component.
         // `Object.assign(Impl, { Item })` returns `Impl` itself with the statics attached.
-        let wrapper = super::evidence::Scope::is_react_wrapper(&*self, call)
-            || is_component_wrapper_call(call)
-            || super::uses::is_object_assign_call(call);
+        let wrapper = is_component_alias_call(&*self, call);
         // `forwardRef(Inner)` makes a component that takes a `ref` even when `Inner` is a plain typed function.
         Some((inner, Some(AliasCall { wrapper, forward_ref: self.is_forward_ref_call(call) })))
     }
@@ -903,10 +903,35 @@ impl<'src> SourceDataCollector<'src> {
     }
 }
 
-/// Whether a call wrapping a component returns a component, by React's own wrappers and the ecosystem's conventions:
+/// Whether a call wrapping a component returns a component: React's `memo` and `forwardRef` as the file binds them,
+/// or the ecosystem's conventions.
+pub(super) fn is_component_wrapper(scope: &dyn Scope, call: &CallExpression<'_>) -> bool {
+    scope.is_react_wrapper(call) || is_component_wrapper_call(call)
+}
+
+/// Whether a call returns the component it is given, so that what it is bound or exported as is that component: a
+/// component wrapper, or `Object.assign(Impl, { Item })`, which returns `Impl` with the statics attached. The one place
+/// that says which calls make an alias of a component; [`aliased_component`] says which argument it is.
+pub(super) fn is_component_alias_call(scope: &dyn Scope, call: &CallExpression<'_>) -> bool {
+    is_component_wrapper(scope, call) || is_object_assign_call(call)
+}
+
+/// The argument of a component alias call that is the component: the first.
+pub(super) fn aliased_component<'a, 'b>(call: &'b CallExpression<'a>) -> Option<&'b Expression<'a>> {
+    call.arguments.first()?.as_expression().map(peel_expr)
+}
+
+/// Whether the call is `Object.assign(...)`.
+pub(super) fn is_object_assign_call(call: &CallExpression<'_>) -> bool {
+    matches!(&call.callee, Expression::StaticMemberExpression(callee)
+        if callee.property.name == "assign"
+            && matches!(&callee.object, Expression::Identifier(object) if object.name == "Object"))
+}
+
+/// Whether a call wrapping a component returns a component, by the ecosystem's conventions:
 /// `memo`, anything named like `forwardRef`, `withX(...)` higher-order components, `createXComponent(...)` factories,
 /// `observer`, and curried wrappers such as `connect(...)(Component)` or `styled(...)(Component)`.
-pub(super) fn is_component_wrapper_call(call: &CallExpression<'_>) -> bool {
+fn is_component_wrapper_call(call: &CallExpression<'_>) -> bool {
     // `(forwardRef as forwardRefType)(X)` is React Aria's spelling of `forwardRef(X)`.
     let callee = match peel_expr(&call.callee) {
         Expression::Identifier(id) => id.name.as_str(),

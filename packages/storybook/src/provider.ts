@@ -151,16 +151,12 @@ export function createDocgenProvider(
   }
 
   /** The session key and file `target`'s component points at, or an error that says what the session had instead. */
-  async function locate(
-    session: DocgenSession,
-    target: CsfFile,
-    storyPath: string,
-  ): Promise<{ key: string; path: string }> {
+  function locate(session: DocgenSession, target: CsfFile, storyPath: string): { key: string; path: string } {
     const resolution = resolveMeta(target, storyPath)
     if ('component' in resolution) {
       const { path, exportName, localName } = resolution.component
       if (!path) throw new Error(`no file for the import of ${exportName}`)
-      const key = await session.resolveExport(path, exportName, localName)
+      const key = session.resolveExport(path, exportName, localName)
       if (key) return { key, path }
       // Storybook follows `Select.Option` into the module that declares `Option` and answers with that local name, which
       // caliper may know as `Select.Option`.
@@ -208,7 +204,7 @@ export function createDocgenProvider(
   ): Promise<{ key: string; path: string; doc: RdtComponentDoc }> {
     const target = name ? storyFor(csf, storyPath, name) : csf
     const session = await getSession()
-    const { key, path } = await locate(session, target, storyPath)
+    const { key, path } = locate(session, target, storyPath)
     const { doc, degradedBy } = session.documentation(key)
     if (fallback === 'degraded' && degradedBy.length > 0) {
       const reason = degradedBy.join('; ')

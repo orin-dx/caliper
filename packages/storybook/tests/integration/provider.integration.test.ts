@@ -101,6 +101,12 @@ describe.skipIf(!bindingAvailable)('provider in a worker thread', () => {
     expect(Object.keys(payload.subcomponents.ListItem.argTypes).toSorted()).toEqual(['bullet', 'children', 'selected'])
   })
 
+  it('documents the component a default export of Object.assign attaches its statics to', async () => {
+    const payload = await request('Menu')
+    expect(payload.error).toBeUndefined()
+    expect(Object.keys(payload.argTypes)).toEqual(['open'])
+  })
+
   it('documents a subcomponent that is a member of a named import', async () => {
     const payload = await request('Picker')
     expect(Object.keys(payload.argTypes)).toEqual(['children'])
