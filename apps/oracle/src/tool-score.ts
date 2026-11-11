@@ -6,7 +6,8 @@
 // src/oracle.ts and src/tool-universe.ts filter them). A tool's prop is `listed` when the tool reports it, and gets
 // the same verdict the oracle gives Caliper (src/oracle-compare.ts); otherwise it is `missing`, for one of three
 // reasons, and counted by where the checker says the prop is declared.
-import { compare, VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'
+import { compare, type Norm } from './oracle-compare.ts'
+import { AGREE, VERDICTS, type Verdict } from './vocabulary.ts'
 
 /** Where a prop the tool does not list is declared, by the checker's first declaration. */
 export const STRATA = ['same_file', 'other_project_file', 'dependency', 'unknown'] as const
@@ -88,7 +89,7 @@ export function scoreTool<T extends UniverseProp>(universe: readonly T[], pick: 
       })
     }
   }
-  const agree = verdicts.identical + verdicts.spelled
+  const agree = AGREE.reduce((n, verdict) => n + verdicts[verdict], 0)
   return {
     universe: universe.length,
     listed,

@@ -11,6 +11,10 @@
 //                      left unexpanded, a lost optional or rest parameter, a missing field)
 //   wrong              Caliper's type describes something else
 //   checker any/error  the checker itself has no type (an unresolved import, `any`, or `unknown` where Caliper has one)
+//   not judged         the checker side stopped short of the type (cut at the depth limit, or a kind src/oracle-checker.ts
+//                      does not read): nothing was compared, so it counts toward neither agreement nor `wrong`
+//
+// The names are src/vocabulary.ts's.
 //
 // Checker types are normalized once per type id and verdicts made once per (Caliper prop, checker type), so Chakra's
 // ~470,000 props cost a few thousand distinct comparisons.
@@ -29,9 +33,11 @@ import { exportedAs } from './component-join.ts'
 import { nonComponentReason, type ShapeProp } from './component-shape.ts'
 import { checkerNormalizer } from './oracle-checker.ts'
 import { caliperNorm } from './caliper-norm.ts'
-import { compare, VERDICTS, type Norm, type Verdict } from './oracle-compare.ts'
+import { compare, type Norm } from './oracle-compare.ts'
+import { isReactTypes } from './path-class.ts'
 import { assertSchemaVersion } from './schema-version.ts'
 import { collapsedLayerFiles, loadTool, pathKey, universeRecorder } from './tool-universe.ts'
+import { VERDICTS, type Verdict } from './vocabulary.ts'
 
 const KEYS = ['root', 'src', 'tsconfig', 'caliper', 'out', 'files', 'dump', 'rows', 'missing', 'rdt', 'rdg'] as const
 const args: Partial<Record<(typeof KEYS)[number], string>> = {}
@@ -174,10 +180,7 @@ function visitExport(declaration: DeclaredExport, candidates: { key: string; com
   const name = listedName(declaration.exported.name, declaration.declared, file)
   // React's DOM attributes are one inherited layer; ref and key are deliberately absent from Caliper's output.
   const own = props.filter(
-    (p: any) =>
-      p.name !== 'ref' &&
-      p.name !== 'key' &&
-      !p.declarations?.some((d: any) => String(d.path).includes('/@types/react/')),
+    (p: any) => p.name !== 'ref' && p.name !== 'key' && !p.declarations?.some((d: any) => isReactTypes(String(d.path))),
   )
   totals.propsChecker += own.length
   const matches = exportedAs(candidates, declaration.names)

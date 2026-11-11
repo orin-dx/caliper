@@ -234,6 +234,22 @@ class OracleTools(unittest.TestCase):
         self.assertNotIn('examples', out['tools']['rdt'])
         self.assertEqual(out['tools']['rdt']['listed'], 9)
 
+    def test_a_prop_the_oracle_did_not_judge_is_shared_but_neither_agrees_nor_is_wrong(self):
+        with tempfile.TemporaryDirectory() as work:
+            def fake_run(command, **kwargs):
+                if '--out' in command:
+                    with open(command[command.index('--out') + 1], 'w') as f:
+                        f.write(json.dumps({'props_shared': 16,
+                                            'verdicts': {'identical': 6, 'spelled': 2, 'less precise': 4, 'wrong': 1,
+                                                         'checker any/error': 1, 'not judged': 2},
+                                            'tools': {'caliper': score()}, 'tools_all_functions': {'caliper': score()},
+                                            'universe_excluded': EXCLUDED}))
+                return subprocess.CompletedProcess(command, 0)
+
+            with mock.patch.object(weekly.subprocess, 'run', side_effect=fake_run):
+                out = weekly.oracle('bin', 'antd', os.path.join(work, 'src'), work, work, '/w/rdt.json', '/w/rdg.json')
+        self.assertEqual((out['shared_props'], out['agree'], out['wrong']), (16, 0.5, 1 / 16))
+
     def test_the_record_keeps_the_universe_before_the_shape_rules_beside_the_one_after_them(self):
         with tempfile.TemporaryDirectory() as work:
             def fake_run(command, **kwargs):

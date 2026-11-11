@@ -10,7 +10,7 @@ One line per ADR, with what it guards. Add a line when you add an ADR.
 - [2. Hand-write Serialize/Deserialize for PropType instead of deriving it](0002-manual-serialize-for-prop-type.md) — do not derive them on `PropType` or `CollectedType`.
 - [3. Cache the DTS parse cache with positional (not named) MessagePack](0003-positional-msgpack-cache-encoding.md) — do not reorder, insert or remove `SourceData` fields without bumping `CACHE_SCHEMA_VERSION`.
 - 4. Defer full type-checker integration — removed: superseded by 0006. The gap list and gates are in `docs/type-checker-integration.md`.
-- [5. Contain panics at a single, per-item boundary](0005-panic-containment-boundary.md) — route anything reachable from a rayon `.map()`, a `DocgenPlugin` hook or a NAPI entry point through `contain_panic`.
+- [5. Contain panics at a single, per-item boundary](0005-panic-containment-boundary.md) — route anything reachable from a rayon `.map()` or a NAPI entry point through `contain_panic`.
 - [6. Run the TypeScript backend as a second resolver](0006-semantic-backend-as-second-resolver.md) — do not patch `Opaque` leaves, give `crates/core` a compiler process (it does file I/O but spawns nothing), or route the backend through NAPI.
 - [7. Let the backend discover components, always compile it in, and keep structural as the default](0007-backend-discovers-components-and-compiles-in.md) — do not feature-gate the backend crate, run it by default, or let it replace a structural entry on a clash. Discovery is not yet implemented.
 - 8. Discard the parse cache whenever the build that wrote it differs — removed: the invalidation policy of one cache, not a new structure. It lives in `docs/architecture/pipeline-orchestration.md` ("Locked design decisions").

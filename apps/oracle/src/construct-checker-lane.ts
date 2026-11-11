@@ -20,7 +20,7 @@ import {
   structuralExpectations,
   type Row,
 } from './construct-checker-run.ts'
-import { GREEN } from './construct-suite.ts'
+import { isAgreement } from './vocabulary.ts'
 
 if (process.env.CALIPER_SEMANTIC !== '1') {
   console.error('construct-checker-lane: set CALIPER_SEMANTIC=1 (and TSRS_BIN) to run the suite through the checker.')
@@ -49,7 +49,7 @@ const { elapsedMs, rows } = run
 
 const checkerRows = rows.filter((row) => row.answered)
 const structuralRows = rows.filter((row) => !row.answered)
-const green = (row: Row) => GREEN.includes(row.verdict)
+const green = (row: Row) => isAgreement(row.verdict)
 console.log(
   `checker path over ${rows.length} rows in ${elapsedMs} ms: ${checkerRows.length} answered by the checker, ${structuralRows.length} kept their structural result`,
 )
@@ -66,7 +66,7 @@ for (const row of checkerRows.filter((r) => !green(r))) {
 }
 console.log('')
 console.log('Rows the checker answered that the structural result did not get green (improvements):')
-for (const row of checkerRows.filter((r) => green(r) && !r.structural.every((v) => GREEN.includes(v)))) {
+for (const row of checkerRows.filter((r) => green(r) && !r.structural.every((v) => isAgreement(v)))) {
   console.log(`  ${row.id}: ${row.verdict} (structural: ${row.structural.join('/')})`)
 }
 console.log('')

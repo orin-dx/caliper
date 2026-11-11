@@ -12,7 +12,6 @@ import {
   factDifferences,
   factFailures,
   listFixtures,
-  ORDER,
   PROP,
   rowKey,
   rowKeysOf,
@@ -20,8 +19,8 @@ import {
   type Expectation,
   type FactName,
   type Golden,
-  type RowVerdict,
 } from './construct-suite.ts'
+import { ROW_VERDICTS, type RowVerdict } from './vocabulary.ts'
 
 export const suiteDir = realpathSync(join(import.meta.dirname, '..', 'construct-suite'))
 
@@ -130,8 +129,8 @@ export function runCheckerLane(bin: string, tsrs: string): LaneRun {
   return { elapsedMs, rows, backendProblem }
 }
 
-/** The worst verdict an expectation allows, as a rank in ORDER (higher is worse). */
-const worstAllowed = (row: Expectation) => Math.max(...row.verdicts.map((v) => ORDER.indexOf(v)))
+/** The worst verdict an expectation allows, as a rank in ROW_VERDICTS (higher is worse). */
+const worstAllowed = (row: Expectation) => Math.max(...row.verdicts.map((v) => ROW_VERDICTS.indexOf(v)))
 
 /** ADR 0026's S4 gate, from the two expectation files alone: the checker path equals the structural path on every row
  * except listed improvements. A row whose checker verdicts rank below the structural ones is a regression unless its

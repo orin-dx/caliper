@@ -39,7 +39,7 @@ describe('scoreTool', () => {
       universe: 5,
       listed: 2,
       missing: 3,
-      verdicts: { identical: 1, spelled: 0, 'less precise': 0, wrong: 1, 'checker any/error': 0 },
+      verdicts: { identical: 1, spelled: 0, 'less precise': 0, wrong: 1, 'checker any/error': 0, 'not judged': 0 },
       agree_universe: 0.2,
       agree_listed: 0.5,
       wrong_listed: 0.5,
@@ -70,6 +70,25 @@ describe('scoreTool', () => {
     expect(score.components_found).toBe(2)
   })
 
+  it('counts a prop the checker side did not evaluate as not judged, never as agreement', () => {
+    expect.hasAssertions()
+    const unevaluated: UniverseProp[] = [
+      { component: 'a.tsx\0Button', prop: 'slot', stratum: 'same_file', checker: { k: 'opaque' } },
+      { component: 'a.tsx\0Button', prop: 'label', stratum: 'same_file', checker: prim('string') },
+    ]
+    const score = scoreTool(unevaluated, () => prim('string'))
+
+    expect(score.verdicts).toStrictEqual({
+      identical: 1,
+      spelled: 0,
+      'less precise': 0,
+      wrong: 0,
+      'checker any/error': 0,
+      'not judged': 1,
+    })
+    expect(score).toMatchObject({ agree_universe: 0.5, agree_listed: 0.5, wrong_listed: 0 })
+  })
+
   it('scores an empty universe as zero, not NaN', () => {
     expect.hasAssertions()
     expect(scoreTool([], () => 'component')).toMatchObject({ universe: 0, agree_universe: 0, agree_listed: 0 })
@@ -93,7 +112,7 @@ describe('scoreReported', () => {
     expect(score).toMatchObject({
       universe: 4,
       listed: 2,
-      verdicts: { identical: 1, spelled: 0, 'less precise': 0, wrong: 1, 'checker any/error': 0 },
+      verdicts: { identical: 1, spelled: 0, 'less precise': 0, wrong: 1, 'checker any/error': 0, 'not judged': 0 },
       missing_by_reason: { component: 0, failed_file: 0, prop: 1, collapsed: 1 },
       components: 1,
       components_found: 1,

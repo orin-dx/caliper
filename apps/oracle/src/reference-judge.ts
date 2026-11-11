@@ -5,7 +5,8 @@
 // (src/reference-declared.ts). They are held to the existing comparison (src/oracle-compare.ts), B as the "tool" and A as
 // the "checker": identical or spelled is agreement, B looser than A is B saying less (so A stands alone), and B
 // contradicting A is a contest a person settles.
-import { compare, type Norm, type Verdict } from './oracle-compare.ts'
+import { compare, type Norm } from './oracle-compare.ts'
+import { isAgreement, type Outcome } from './vocabulary.ts'
 
 /** Which methods stand behind a reference. */
 export type Basis = 'both' | 'checker' | 'declaration'
@@ -15,11 +16,6 @@ export type Reference =
   | { kind: 'agreed'; basis: Basis; norm: Norm; why?: 'abstained' | 'looser' }
   | { kind: 'contested'; checker: Norm; declared: Norm }
   | { kind: 'none' }
-
-/** What a prop's reference looks like to a reader, apart from the types themselves. */
-export type Outcome = 'correct' | 'less precise' | 'wrong' | 'contested' | 'no reference' | 'layer' | 'missing'
-
-export const OUTCOMES: Outcome[] = ['correct', 'less precise', 'wrong', 'contested', 'no reference', 'layer', 'missing']
 
 export interface Scored {
   outcome: Outcome
@@ -85,11 +81,9 @@ function mentionsName(n: Norm): boolean {
   }
 }
 
-/** A type the checker has nothing to say with: an error, `any`, or a top-level `unknown`. */
-const uninformative = (n: Norm) => n.k === 'error' || (n.k === 'prim' && (n.name === 'any' || n.name === 'unknown'))
-
-const AGREE = new Set<Verdict>(['identical', 'spelled'])
-const agrees = (verdict: Verdict) => AGREE.has(verdict)
+/** A type the checker has nothing to say with: an error, `any`, a top-level `unknown`, or a type it did not evaluate. */
+const uninformative = (n: Norm) =>
+  n.k === 'error' || n.k === 'opaque' || (n.k === 'prim' && (n.name === 'any' || n.name === 'unknown'))
 
 /** One reference from method A (always has a type) and method B (absent when it abstained). */
 export function reference(checker: Norm, declared: Norm | undefined): Reference {
@@ -99,7 +93,9 @@ export function reference(checker: Norm, declared: Norm | undefined): Reference 
   }
   if (!hasA) return { kind: 'agreed', basis: 'declaration', norm: named(declared), why: 'abstained' }
   const verdict = compare(declared, checker)
-  if (agrees(verdict)) return { kind: 'agreed', basis: 'both', norm: checker }
+  // Part of the checker's type was not evaluated, so only the declaration says what it is.
+  if (verdict === 'not judged') return { kind: 'agreed', basis: 'declaration', norm: named(declared), why: 'abstained' }
+  if (isAgreement(verdict)) return { kind: 'agreed', basis: 'both', norm: checker }
   // The declaration is looser than the checker's type (a name or an unbound parameter the checker evaluated): B said less.
   if (verdict === 'less precise') return { kind: 'agreed', basis: 'checker', norm: checker, why: 'looser' }
   return { kind: 'contested', checker, declared }
@@ -111,14 +107,14 @@ export function score(tool: Norm | undefined, ref: Reference, layered: boolean):
   if (tool === undefined) return { outcome: layered ? 'layer' : 'missing' }
   if (ref.kind === 'none') return { outcome: 'no reference' }
   if (ref.kind === 'contested') {
-    const vsChecker = agrees(compare(tool, ref.checker))
-    const vsDeclared = agrees(compare(tool, ref.declared))
+    const vsChecker = isAgreement(compare(tool, ref.checker))
+    const vsDeclared = isAgreement(compare(tool, ref.declared))
     if (vsChecker === vsDeclared) return { outcome: 'contested', leans: undefined }
     return { outcome: 'contested', leans: vsChecker ? 'checker' : 'declaration' }
   }
   const verdict = compare(tool, ref.norm)
-  if (verdict === 'checker any/error') return { outcome: 'no reference' }
-  if (agrees(verdict)) return { outcome: 'correct', basis: ref.basis }
+  if (verdict === 'checker any/error' || verdict === 'not judged') return { outcome: 'no reference' }
+  if (isAgreement(verdict)) return { outcome: 'correct', basis: ref.basis }
   // A declaration standing alone names types it cannot see into, so a mismatch with one is not proof of a wrong type.
   const blind = ref.basis === 'declaration' && mentionsName(ref.norm)
   return { outcome: verdict === 'less precise' || blind ? 'less precise' : 'wrong', basis: ref.basis }

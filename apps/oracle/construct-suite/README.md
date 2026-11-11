@@ -91,6 +91,9 @@ Verdicts come from `compare` in `../src/oracle-compare.ts`, the weekly oracle's 
 - `less precise`, `wrong`, `missing`: Caliper's type is looser, describes something else, or the prop is not listed.
 - `opaque with marker`: less precise, and Caliper said so (`degradedBy` on the prop). A marked type is honest; an unmarked `less precise` is a silent loss. A `wrong` type stays `wrong` with a marker.
 - `checker any/error`: the golden itself has no type. That is a broken fixture, not a result.
+- `not judged`: the golden's type was cut or is a kind the checker normalizer does not read, so nothing was compared. A broken fixture too; it used to read `identical`.
+
+The row verdicts and their order are `ROW_VERDICTS` in `../src/vocabulary.ts`.
 
 A row is green or a documented gap. A gap lists the verdicts it may have, none of them green, and a `gap` reason. The test fails when a row moves either way: worse is a regression; better means the gap closed, so update the expectation (to green, dropping `gap`). A gap never allows `identical` or `spelled`, so an improvement cannot pass unnoticed.
 

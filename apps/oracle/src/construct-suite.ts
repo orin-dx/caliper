@@ -5,28 +5,12 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { caliperNorm } from './caliper-norm.ts'
 import { pathOfExport, exportPathKey, type ComponentExport } from './component-join.ts'
-import { compare, type Norm, type Verdict } from './oracle-compare.ts'
+import type { PropType } from '../../../packages/napi/index.d.ts'
+import { compare, type Norm } from './oracle-compare.ts'
+import { isAgreement, ROW_VERDICTS, type RowVerdict } from './vocabulary.ts'
 
 /** The prop every fixture states its type through. */
 export const PROP = 'p'
-
-/** What the suite says about a row: the comparison's verdict, plus the two cases it cannot make. `opaque with marker`
- * is a type Caliper left unevaluated and said so (`degradedBy`); `missing` is a prop Caliper did not list. */
-export type RowVerdict = Verdict | 'opaque with marker' | 'missing'
-
-export const GREEN: RowVerdict[] = ['identical', 'spelled']
-
-/** Best to worst. A row whose verdict moved down this list got worse; up, better. `checker any/error` is a fixture
- * problem (the golden has no type), ranked last so it never reads as an improvement. */
-export const ORDER: RowVerdict[] = [
-  'identical',
-  'spelled',
-  'opaque with marker',
-  'less precise',
-  'wrong',
-  'missing',
-  'checker any/error',
-]
 
 /** What `--check` and the test read back from `<name>.golden.json`. */
 export interface Golden {
@@ -144,7 +128,7 @@ export function rowKeysOf(component: { filePath: string; exports: ComponentExpor
 
 /** The verdict for Caliper's prop against the golden. A prop with `degradedBy` that is only `less precise` is an
  * `opaque with marker`: Caliper said it did not evaluate the type. A `wrong` prop stays wrong with or without a marker. */
-export function rowVerdict(prop: { type: unknown; degradedBy?: unknown } | undefined, golden: Golden): RowVerdict {
+export function rowVerdict(prop: { type: PropType; degradedBy?: unknown } | undefined, golden: Golden): RowVerdict {
   if (prop === undefined) return 'missing'
   const verdict = compare(caliperNorm(prop.type), golden.checker)
   const marked = Array.isArray(prop.degradedBy) && prop.degradedBy.length > 0
@@ -185,7 +169,7 @@ function keepsOrder(type: any, written: Norm[]): boolean {
   if (type?.kind !== 'union' || !Array.isArray(type.members)) return true
   const members = type.members.map((member: any) => caliperNorm(member))
   const positions = written
-    .map((member) => members.findIndex((mine: Norm) => GREEN.includes(compare(mine, member))))
+    .map((member) => members.findIndex((mine: Norm) => isAgreement(compare(mine, member))))
     .filter((position) => position >= 0)
   return positions.every((position, index) => index === 0 || position > positions[index - 1]!)
 }
@@ -216,10 +200,10 @@ export function expectationProblems(ids: string[], rows: Record<string, Expectat
       problems.push(`${id}: "verdicts" must list at least one verdict`)
       continue
     }
-    const unknown = row.verdicts.filter((v) => !ORDER.includes(v))
+    const unknown = row.verdicts.filter((v) => !ROW_VERDICTS.includes(v))
     if (unknown.length > 0) problems.push(`${id}: unknown verdict ${unknown.join(', ')}`)
-    const green = row.verdicts.every((v) => GREEN.includes(v))
-    const anyGreen = row.verdicts.some((v) => GREEN.includes(v))
+    const green = row.verdicts.every((v) => isAgreement(v))
+    const anyGreen = row.verdicts.some((v) => isAgreement(v))
     if (green && row.gap !== undefined) problems.push(`${id}: a green row carries no "gap"`)
     if (!green && anyGreen) {
       problems.push(`${id}: a gap must not allow identical or spelled, or an improvement goes unnoticed`)
@@ -251,10 +235,11 @@ export function factFailures(id: string, differing: FactName[], row: Expectation
   ]
 }
 
+const rank = (v: RowVerdict) => ROW_VERDICTS.indexOf(v)
+
 /** Null when `verdict` is allowed; otherwise what moved, for the failure message. */
 export function expectationFailure(id: string, verdict: RowVerdict, row: Expectation): string | null {
   if (row.verdicts.includes(verdict)) return null
-  const rank = (v: RowVerdict) => ORDER.indexOf(v)
   const here = rank(verdict)
   let direction = 'unexpected'
   if (here < Math.min(...row.verdicts.map(rank))) direction = 'better than expected: update expectations.json'

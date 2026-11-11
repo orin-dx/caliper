@@ -263,7 +263,7 @@ Pass only the files you need as roots. The API's checker is lazy, and diagnostic
 - **`crates/core`** owns the semantic result type, the merge and the diagnostics. It has no I/O, no async and no protocol types. The merge lives here because `OpaqueDetail` and `ParsedProp` internals are `pub(crate)`.
 - **Backend crate** (`crates/semantic`, always compiled in and enabled at run time, ADR 0007) spawns `tsc --api` through `crates/tsc-client`, runs the algorithm, and handles timeouts. Core never depends on it: the CLI runs the backend and calls core's `merge_semantic`.
 - **CLI and NAPI** only switch it on. Neither calls JS.
-- **Not a `DocgenPlugin`.** The hook is synchronous and runs on the cold path only. `WatchSession::update_file` skips plugins.
+- **Cold path only.** The hook is synchronous and runs on the cold path; `WatchSession::update_file` does not run it.
 - **Failure** leaves the structural result and adds a diagnostic. It never fails extraction.
 - **Determinism.** Reversing the query order changed no union order across 16 props in 3 files (2026-09-20). Whether canonical output sorts unions is open (below).
 

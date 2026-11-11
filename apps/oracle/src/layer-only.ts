@@ -8,6 +8,7 @@
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { layerMembers, listedProps } from './canonical.ts'
+import { isReactTypes } from './path-class.ts'
 
 /** One prop a collapsed layer names and the component does not list. */
 export interface LayerOnly {
@@ -48,7 +49,7 @@ export const GLOBAL_ATTRIBUTES = new Set([
   'nonce',
 ])
 
-const DOM_FILE = /\/@types\/react\/|\/@react-types\/shared\/src\/dom\.d\.[cm]?ts$/
+const REACT_ARIA_DOM_FILE = /\/@react-types\/shared\/src\/dom\.d\.[cm]?ts$/
 const DOM_TYPE =
   /^(GlobalDOMEvents|DOMAttributes|AriaAttributes|AllHTMLAttributes|SVGAttributes|\w*HTMLAttributes|Aria\w*Attributes)$/
 const STYLE_TYPE =
@@ -88,7 +89,8 @@ export function layerOnly(caliper: any): LayerOnly[] {
  *   5. dependency api    anything else a collapsed layer names
  */
 export function classify(item: Pick<LayerOnly, 'layer' | 'layerFile' | 'prop'>): { kind: Kind; why: Why } {
-  if (DOM_FILE.test(item.layerFile)) return { kind: 'ambient', why: 'dom file' }
+  if (isReactTypes(item.layerFile) || REACT_ARIA_DOM_FILE.test(item.layerFile))
+    return { kind: 'ambient', why: 'dom file' }
   if (DOM_TYPE.test(item.layer)) return { kind: 'ambient', why: 'dom type' }
   if (STYLE_TYPE.test(item.layer)) return { kind: 'ambient', why: 'style type' }
   if (GLOBAL_ATTRIBUTES.has(item.prop) || /^(aria|data)-/.test(item.prop))

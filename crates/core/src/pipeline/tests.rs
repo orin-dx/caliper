@@ -138,10 +138,8 @@ fn write_file(dir: &TempDir, name: &str, content: &str) -> Utf8PathBuf {
 
 // ── a_panic_during_parse_phase_degrades_to_a_diagnostic_not_a_crash ──────
 //
-// No plugin system exists in this codebase yet to inject a panic via a
-// hook (that's a separate, later task), so this drives the real Phase 2
-// rayon closure via the sentinel filename it checks for under
-// `#[cfg(test)]` (see the `PARSE_PANIC_TEST_SENTINEL` check above).
+// This drives the real Phase 2 rayon closure via the sentinel filename it
+// checks for under `#[cfg(test)]` (see the `PARSE_PANIC_TEST_SENTINEL` check above).
 
 #[test]
 fn a_panic_during_parse_phase_degrades_to_a_diagnostic_not_a_crash() {
@@ -626,48 +624,6 @@ export function Child(props: Extended) { return null; }
             prop("title", "string", false, "", "Native"),
         ]
     );
-}
-
-struct RedescribeButtonTone;
-
-impl crate::plugin::DocgenPlugin for RedescribeButtonTone {
-    fn name(&self) -> &str {
-        "redescribe-button-tone"
-    }
-
-    fn on_component_resolved(&self, entry: &mut ComponentEntry) {
-        if entry.display_name == "Button"
-            && let Some(tone) = entry.props.get_mut("tone")
-        {
-            std::sync::Arc::make_mut(tone).description = "Button's tone".into();
-        }
-    }
-}
-
-#[test]
-fn a_plugin_changing_an_inherited_prop_changes_it_for_that_component_only() {
-    let tmp = TempDir::new().unwrap();
-    write_file(
-        &tmp,
-        "Comp.tsx",
-        r#"
-interface Base { /** shared tone */ tone?: string }
-interface ButtonProps extends Base { a?: string }
-interface ChipProps extends Base { b?: string }
-export function Button(props: ButtonProps) { return null; }
-export function Chip(props: ChipProps) { return null; }
-"#,
-    );
-    let mut options = PipelineOptions {
-        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
-        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
-        ..Default::default()
-    };
-    options.plugins.register(RedescribeButtonTone);
-    let output = extract(&options);
-
-    let description = |component: &str| output.components[component].props["tone"].description.as_str();
-    assert_eq!((description("Button"), description("Chip")), ("Button's tone", "shared tone"));
 }
 
 // ── literal-union alias props: bare members, never pre-quoted ────────────
@@ -1657,108 +1613,6 @@ fn test_watch_session_update() {
         update.affected_files.contains(&canonical_button_path),
         "changed file should always appear in affected_files"
     );
-}
-
-#[test]
-fn test_pipeline_plugin_execution() {
-    use crate::plugin::{DocgenPlugin, PluginRegistry};
-    use crate::types::ComponentEntry;
-
-    struct TestPlugin;
-    impl DocgenPlugin for TestPlugin {
-        fn name(&self) -> &str {
-            "test-plugin"
-        }
-        fn on_component_resolved(&self, entry: &mut ComponentEntry) {
-            entry.composes.push("PluginAdded".into());
-        }
-    }
-
-    let tmp = TempDir::new().unwrap();
-    write_file(&tmp, "Button.tsx", "export function Button(props: { label: string }) { return null; }\n");
-
-    let mut plugins = PluginRegistry::new();
-    plugins.register(TestPlugin);
-
-    let options = PipelineOptions {
-        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
-        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
-        plugins,
-        ..Default::default()
-    };
-
-    let output = extract(&options);
-    let button = output.components.get("Button").expect("Button component not found");
-    assert_eq!(button.composes, vec!["PluginAdded"]);
-}
-
-#[test]
-fn a_panicking_plugin_hook_degrades_to_a_diagnostic_and_other_work_still_completes() {
-    use crate::plugin::{DocgenPlugin, PluginRegistry};
-    use crate::types::ComponentEntry;
-
-    struct AlwaysPanicsPlugin;
-    impl DocgenPlugin for AlwaysPanicsPlugin {
-        fn name(&self) -> &str {
-            "always-panics"
-        }
-        fn on_component_resolved(&self, _entry: &mut ComponentEntry) {
-            panic!("boom");
-        }
-    }
-
-    struct WellBehavedPlugin;
-    impl DocgenPlugin for WellBehavedPlugin {
-        fn name(&self) -> &str {
-            "well-behaved"
-        }
-        fn on_component_resolved(&self, entry: &mut ComponentEntry) {
-            entry.composes.push("PluginAdded".into());
-        }
-    }
-
-    let tmp = TempDir::new().unwrap();
-    write_file(&tmp, "Button.tsx", "export function Button(props: { label: string }) { return null; }\n");
-    write_file(&tmp, "Card.tsx", "export function Card(props: { title: string }) { return null; }\n");
-
-    let mut plugins = PluginRegistry::new();
-    plugins.register(AlwaysPanicsPlugin);
-    plugins.register(WellBehavedPlugin);
-
-    let options = PipelineOptions {
-        src_dirs: vec![Utf8PathBuf::from_path_buf(tmp.path().to_owned()).unwrap()],
-        cache_dir: Some(Utf8PathBuf::from_path_buf(tmp.path().join("cache")).unwrap()),
-        plugins,
-        ..Default::default()
-    };
-
-    // Must not panic the test process — that's the whole point.
-    let output = extract(&options);
-
-    let panic_diagnostics: Vec<_> =
-        output.diagnostics.iter().filter(|d| d.code == DiagnosticCode::InternalPanic).collect();
-    // The identical panic from both components is one diagnostic listing both.
-    assert_eq!(
-        panic_diagnostics.iter().map(|d| d.affects.clone()).collect::<Vec<_>>(),
-        vec![vec!["Button".to_string(), "Card".to_string()]],
-        "got {:?}",
-        output.diagnostics
-    );
-    assert!(
-        panic_diagnostics.iter().all(|d| d.message.contains("always-panics")),
-        "each diagnostic should name the panicking plugin, got {panic_diagnostics:?}"
-    );
-
-    // Both components must still be present — the panicking plugin's hook
-    // failure on one entry must not drop that entry, nor prevent the
-    // sibling entry from being processed.
-    let button = output.components.get("Button").expect("Button component not found");
-    let card = output.components.get("Card").expect("Card component not found");
-
-    // The well-behaved plugin, registered after the panicking one, must
-    // still have run for both entries.
-    assert_eq!(button.composes, vec!["PluginAdded"]);
-    assert_eq!(card.composes, vec!["PluginAdded"]);
 }
 
 // ── test_duplicate_component_declarations_in_one_file_emit_a_collision_diagnostic ─

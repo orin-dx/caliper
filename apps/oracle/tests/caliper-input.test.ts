@@ -54,6 +54,7 @@ describe('the oracle input checks', () => {
     const fn = (optional: boolean, rest: boolean) =>
       caliperNorm({
         kind: 'function',
+        typeParams: [],
         params: [{ name: 'a', type: { kind: 'string' }, optional, rest }],
         returnType: { kind: 'void' },
       })

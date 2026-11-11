@@ -3,20 +3,19 @@
 // notion of a component, so the oracle's universe (src/tool-universe.ts) uses these to count only candidates.
 //
 // scripts/weekly.py `exclusion` applies the same rules to RDT's entries for the recall reference. The patterns are in
-// src/component-shape.json, which both read, and both run the cases of tests/fixtures/component-shape-cases.json, so a
-// change to one that is not made to the other fails a test.
+// src/component-shape.json, and the paths they read (a lib file, `@types/react`) are classed by src/path-classes.json;
+// both files are read by both, and both run the cases of tests/fixtures/component-shape-cases.json, so a change to one
+// that is not made to the other fails a test.
 import { readFileSync } from 'node:fs'
+import { isLibFile, isReactTypes } from './path-class.ts'
 
 interface Rules {
-  libFile: string
-  reactDirectory: string
   hook: string
   contextValueProps: string[]
   promiseType: string
 }
 
 const rules: Rules = JSON.parse(readFileSync(new URL('component-shape.json', import.meta.url), 'utf8'))
-const LIB_FILE = new RegExp(rules.libFile)
 const HOOK = new RegExp(rules.hook)
 const PROMISE = new RegExp(rules.promiseType)
 
@@ -65,8 +64,8 @@ export function nonComponentReason(
   props: ReadonlyMap<string, ShapeProp>,
 ): ShapeReason | undefined {
   const all = [...props.values()]
-  const inReact = (p: ShapeProp) => (p.path ?? '').includes(rules.reactDirectory)
-  if (all.filter((p) => LIB_FILE.test(p.path ?? '')).length * 2 > all.length) return 'lib_members'
+  const inReact = (p: ShapeProp) => isReactTypes(p.path ?? '')
+  if (all.filter((p) => isLibFile(p.path ?? '')).length * 2 > all.length) return 'lib_members'
   if (HOOK.test(name)) return 'hook'
   if (
     props.has('value') &&

@@ -1,7 +1,6 @@
 //! Single sanctioned panic-containment boundary (see ADR 0005).
 //!
-//! Every panic reachable from a rayon `.map()`, a `DocgenPlugin` hook, or a
-//! NAPI entry point crosses this function on its way to becoming a
+//! Every panic reachable from a rayon `.map()` or a NAPI entry point crosses this function on its way to becoming a
 //! `Diagnostic` instead of aborting a batch, killing the whole pipeline, or
 //! poisoning a session lock.
 
@@ -12,7 +11,7 @@ use crate::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 ///
 /// Wraps `f` in `AssertUnwindSafe` internally rather than requiring callers
 /// to prove unwind-safety themselves. This codebase's data (`SourceData`,
-/// `ComponentEntry`, plugin state) has no interior mutability (`Cell`,
+/// `ComponentEntry`) has no interior mutability (`Cell`,
 /// `RefCell`) that could leave a torn, observable half-write behind after a
 /// caught panic — the whole operation is abandoned and its output discarded
 /// (or its `&mut` target left exactly as it was before the panicking call),

@@ -15,6 +15,7 @@ Each class below has four parts: what differs, why we think Caliper is better (o
 - **less precise**: Caliper's type is looser, unevaluated, or spelled in a way the comparator has not seen.
 - **wrong**: Caliper's type describes something else.
 - **checker any/error**: the checker has no type (unresolved import, `any`).
+- **not judged**: the oracle did not evaluate the checker's type, so nothing was compared (`docs/measurement.md`, `oracle.universe_version` 4). The measurements below were taken before it existed and counted such props as identical.
 
 `agree` is identical plus spelled over the shared props. It is the looser number: `less precise` hides real imprecision and, as the classes below show, some real errors. `wrong` is the number that matters, and the gate: the weekly issue opens above 0.1% of the judged props (`docs/measurement.md`, "The headline"). `wrong` both over-triggers (a comparator artifact, classes 1 to 3) and under-triggers (silent wrong answers scored `less precise`, class 5), so read it with this page.
 
