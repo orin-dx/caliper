@@ -567,7 +567,11 @@ impl Checker {
                         Err(CallError::Rejected(message)) => {
                             tracing::debug!(%message, "the checker could not update its snapshot; building a fresh one");
                         }
-                        Err(fatal) => return Err(fatal),
+                        Err(fatal) => {
+                            // The kept snapshot is no longer held anywhere else: release it before giving up on it.
+                            live.rpc.release().await;
+                            return Err(fatal);
+                        }
                     }
                 } else {
                     tracing::warn!(files = ?drift.untold, "files changed that the checker was not told about");

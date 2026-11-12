@@ -322,7 +322,19 @@ struct Failure {
 trait Served {
     /// Answers one request with its JSON text.
     fn handle(&self, method: &str, params: &[u8]) -> Result<String, Failure>;
+    /// Releases the snapshot an answer of `method` made, when that answer will not reach the caller, who could then
+    /// never release it.
+    fn discard(&self, method: &str, answer: &str);
     fn close(&self);
+}
+
+/// The snapshot an answer of `method` made: `createSnapshot` and `updateSnapshot` each make one, which lives until it
+/// is released.
+fn snapshot_made(method: &str, answer: &str) -> Option<u64> {
+    if !matches!(method, "createSnapshot" | "updateSnapshot") {
+        return None;
+    }
+    serde_json::from_str::<Value>(answer).ok()?.get("snapshot")?.as_u64()
 }
 
 /// A `tsrs` session over the disk, where every file is measured before the session reads it.
@@ -366,7 +378,11 @@ impl Served for TsrsSession {
         self.take_refused();
         let answered = self.session.handle_request(method, params);
         if let Some((file, depth)) = self.take_refused().into_iter().next() {
-            // The session answered without the file, which it took for missing: not an answer to give.
+            // The session answered without the file, which it took for missing: not an answer to give, and a snapshot
+            // it made for it would be held with no one to release it.
+            if let Ok(Response::Json(text)) = &answered {
+                self.discard(method, text);
+            }
             let message = format!(
                 "{file} nests brackets {depth} deep, more than the {MAX_NESTING} the built-in checker reads without \
                  risking a stack overflow; its components keep their structural answer"
@@ -383,6 +399,15 @@ impl Served for TsrsSession {
                 // `tsrs_api` catches a panic in a handler and reports it as an internal error that says so.
                 let panicked = error.kind == ErrorKind::Internal && message.starts_with("panic: ");
                 Err(Failure { message, panicked })
+            }
+        }
+    }
+
+    fn discard(&self, method: &str, answer: &str) {
+        if let Some(snapshot) = snapshot_made(method, answer) {
+            let params = serde_json::json!({ "snapshot": snapshot }).to_string();
+            if let Err(error) = self.session.handle_request("release", params.as_bytes()) {
+                tracing::debug!(snapshot, %error, "could not release the snapshot of an answer nobody receives");
             }
         }
     }
@@ -416,7 +441,10 @@ fn serve<S: Served>(open: impl FnOnce() -> S, queue: &mpsc::Receiver<Job>, ended
             });
         match answered {
             Ok(text) => {
-                asked.reply.send(Ok(text)).ok();
+                // A caller that stopped waiting meanwhile (its deadline passed) never learns of a snapshot this made.
+                if let Err(Ok(unread)) = asked.reply.send(Ok(text)) {
+                    session.discard(&asked.method, &unread);
+                }
             }
             Err(Failure { message, panicked }) => {
                 if panicked {
@@ -572,6 +600,8 @@ mod tests {
             }
         }
 
+        fn discard(&self, _method: &str, _answer: &str) {}
+
         fn close(&self) {
             self.closed.fetch_add(1, Ordering::Relaxed);
         }
@@ -581,6 +611,57 @@ mod tests {
         let closed = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let session = Fake { closed: Arc::clone(&closed) };
         (Backend::InProcess(InProcess::spawn(move || session).unwrap()), closed)
+    }
+
+    /// Each discarded answer's method and the snapshot it made.
+    type Discarded = Arc<Mutex<Vec<(String, Option<u64>)>>>;
+
+    /// Stands in for a session whose snapshots take longer than the caller waits; records what it was told to discard.
+    struct Slow {
+        discarded: Discarded,
+    }
+
+    impl Served for Slow {
+        fn handle(&self, method: &str, _params: &[u8]) -> Result<String, Failure> {
+            std::thread::sleep(Duration::from_millis(300));
+            Ok(match method {
+                "createSnapshot" => r#"{"snapshot":7,"projects":[]}"#.to_string(),
+                _ => r#"{"snapshot":8}"#.to_string(),
+            })
+        }
+
+        fn discard(&self, method: &str, answer: &str) {
+            self.discarded.lock().unwrap().push((method.to_string(), snapshot_made(method, answer)));
+        }
+
+        fn close(&self) {}
+    }
+
+    /// A snapshot made for a caller that stopped waiting is released: the caller never learns its id. An answer that
+    /// made none (any other method) has nothing to release.
+    #[test]
+    fn a_snapshot_made_after_its_caller_stopped_waiting_is_released() {
+        let runtime = runtime();
+        let discarded = Arc::default();
+        let session = Slow { discarded: Arc::clone(&discarded) };
+        let checker = Backend::InProcess(InProcess::spawn(move || session).unwrap());
+        let client = checker.client();
+
+        // The second waits until the first is done (300 ms) and is taken, then stops waiting before its own is.
+        for (method, wait) in [("createSnapshot", 100), ("getTypeOfSymbol", 350)] {
+            let late = runtime.block_on(client.request_raw(method, Value::Null, Duration::from_millis(wait)));
+            assert!(matches!(late, Err(TscClientError::Timeout { .. })), "{late:?}");
+        }
+        let waited = std::time::Instant::now();
+        while discarded.lock().unwrap().len() < 2 && waited.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert_eq!(
+            *discarded.lock().unwrap(),
+            [("createSnapshot".to_string(), Some(7)), ("getTypeOfSymbol".to_string(), None)]
+        );
+        runtime.block_on(checker.shutdown());
     }
 
     /// A panic, escaped or caught by `tsrs`, is an error to its request; the session is closed and not asked again,
@@ -638,6 +719,55 @@ mod tests {
         assert_eq!(nesting("type F = Array<Array<() => void>> | ((a: [string]) => void)"), 3);
         assert_eq!(nesting(")))]]}}} {"), 1);
         assert_eq!(nesting(&format!("{}x{}", "{ a: ".repeat(30), " }".repeat(30))), 30);
+    }
+
+    /// A snapshot a refused request made is released before the error goes back, since its id never reaches the caller,
+    /// who could not release it: a refused `createSnapshot` or `updateSnapshot` leaves nothing behind. Snapshot ids are
+    /// numbered in order, so the refused ones lie between the snapshots that were answered; releasing one of them again
+    /// must fail as releasing an unknown snapshot does.
+    #[test]
+    fn a_snapshot_made_by_a_refused_request_is_released_and_the_ones_answered_are_kept() {
+        let runtime = runtime();
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8Path::from_path(dir.path()).unwrap().canonicalize_utf8().unwrap();
+        let depth = MAX_NESTING + 1;
+        std::fs::write(
+            root.join("deep.ts"),
+            format!("export type Deep = {}string{};\n", "{ a: ".repeat(depth), " }".repeat(depth)),
+        )
+        .unwrap();
+        let (importer, shallow) = (root.join("importer.ts"), root.join("shallow.ts"));
+        std::fs::write(&importer, "export const n = 1;\n").unwrap();
+        std::fs::write(&shallow, "export const m = 2;\n").unwrap();
+        let checker = Backend::InProcess(InProcess::start(&root).unwrap());
+        let client = checker.client();
+        let snapshot = |scope: &Value| scope["snapshot"].as_u64().unwrap();
+
+        let kept = runtime.block_on(program_on_disk(&client, &importer)).unwrap();
+        // The importer now reads the deep file: the update that is told so is refused.
+        std::fs::write(&importer, "import type { Deep } from './deep';\nexport type D = Deep;\n").unwrap();
+        let changes = json!({ "fileNotifications": { "changed": [importer], "deleted": [] }, "ensurePrograms": true });
+        let updated = runtime.block_on(ask(
+            &client,
+            "updateSnapshot",
+            json!({ "snapshot": kept["snapshot"], "changes": changes }),
+        ));
+        let created = runtime.block_on(program_on_disk(&client, &importer));
+        let after = runtime.block_on(program_on_disk(&client, &shallow)).unwrap();
+
+        assert!(matches!(updated, Err(TscClientError::RpcError { .. })), "{updated:?}");
+        assert!(matches!(created, Err(TscClientError::RpcError { .. })), "{created:?}");
+        assert_eq!(snapshot(&after), snapshot(&kept) + 3, "two snapshots were made in between");
+        for refused in [snapshot(&kept) + 1, snapshot(&kept) + 2] {
+            let again = runtime.block_on(ask(&client, "release", json!({ "snapshot": refused })));
+            assert!(again.is_err(), "snapshot {refused} of a refused request is still held");
+        }
+        // What the caller was answered it still holds, and releases itself.
+        for answered in [&kept, &after] {
+            let released = runtime.block_on(ask(&client, "release", json!({ "snapshot": answered["snapshot"] })));
+            assert!(released.is_ok(), "{released:?}");
+        }
+        runtime.block_on(checker.shutdown());
     }
 
     /// A file nested deeper than the bound is not read: the request that read it fails and names it, and the session

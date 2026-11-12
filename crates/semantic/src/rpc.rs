@@ -434,12 +434,12 @@ impl Rpc {
     /// This session bound to the snapshot `createSnapshot` makes from `params`, and to its one project.
     async fn created(mut self, params: Value) -> Result<Rpc, CallError> {
         let response: SnapshotResponse = decode(&self.call("createSnapshot", params).await?)?;
-        let project = response
-            .projects
-            .into_iter()
-            .next()
-            .ok_or_else(|| CallError::Rejected("createSnapshot returned no project".to_string()))?;
         self.snapshot = response.snapshot;
+        let Some(project) = response.projects.into_iter().next() else {
+            // Nothing will hold this snapshot to release it later.
+            self.release().await;
+            return Err(CallError::Rejected("createSnapshot returned no project".to_string()));
+        };
         self.project = project.id;
         Ok(self)
     }
