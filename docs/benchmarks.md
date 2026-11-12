@@ -205,7 +205,7 @@ Confirmed still accurate against current code during this report — see `docs/t
 
 ```bash
 # Rust-internal numbers
-cargo bench -p caliper-docgen-core                    # per-fixture cold + incremental, criterion (`just bench-criterion`)
+cargo bench -p caliper-docgen-core                    # per-fixture cold + incremental, criterion
 
 # Whole-library speed and memory, this checkout against origin/main
 just bench                                              # Mantine and Chakra, median of 9 (see measurement.md)

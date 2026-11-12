@@ -7,7 +7,6 @@ install-tools:
     cargo install cargo-nextest --locked
     cargo install cargo-llvm-cov --locked
     cargo install cargo-machete --locked
-    cargo install cargo-mutants --locked
     cargo install cargo-semver-checks --locked
     rustup component add llvm-tools-preview
 
@@ -34,11 +33,6 @@ semver:
 # Build with the minimum supported Rust version declared in Cargo.toml.
 msrv:
     cargo +$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml) check --workspace --exclude caliper-docgen-napi --locked
-
-# Install all dependencies
-install:
-    pnpm install
-    cargo fetch
 
 # Build all projects. Rust crates build via one workspace-wide cargo
 # invocation, not `moon run :build` — that fans out one `cargo build -p`
@@ -133,10 +127,6 @@ test-construct:
 verify-install pm="pnpm":
     scripts/verify-install.sh {{ pm }}
 
-# Run the criterion benchmarks (single fixtures); `just bench` compares a whole library against main
-bench-criterion:
-    cargo bench --workspace --exclude caliper-docgen-napi
-
 # Rust and TypeScript line coverage; with a threshold, fails if either is below it
 coverage threshold="": (coverage-rust threshold) (coverage-ts threshold)
 
@@ -155,10 +145,6 @@ coverage-ts threshold="":
     pnpm --filter caliper-docgen-vite-plugin exec vitest run --coverage {{ if threshold != "" { "--coverage.thresholds.lines=" + threshold } else { "" } }}
     pnpm --filter caliper-docgen-storybook exec vitest run --coverage {{ if threshold != "" { "--coverage.thresholds.lines=" + threshold } else { "" } }}
 
-# Rust coverage report, opened in the browser
-coverage-html:
-    cargo llvm-cov nextest --workspace --exclude caliper-docgen-napi --locked --html --open
-
 # Documentation build check (warnings, including broken intra-doc links,
 # treated as errors)
 doc-check:
@@ -167,10 +153,6 @@ doc-check:
 # Unused-dependency check
 machete:
     cargo machete
-
-# Mutation testing sweep — slow, run on demand, not part of `just ci`
-mutants:
-    cargo mutants --workspace --exclude caliper-docgen-napi
 
 ts_src := "'packages/vite-plugin/src/**/*.ts' 'packages/vite-plugin/tests/**/*.ts' 'packages/vite-plugin/vitest.config.ts' 'packages/storybook/src/**/*.ts' 'packages/storybook/tests/**/*.ts' 'packages/storybook/*.config.ts' 'packages/napi/*.d.ts' 'packages/cli/bin/**/*.js' 'apps/oracle/src/**/*.ts' 'apps/oracle/tests/**/*.ts'"
 ts_src_only := "'packages/vite-plugin/src' 'packages/vite-plugin/vitest.config.ts' 'packages/storybook/src' 'packages/storybook/vitest.config.ts' 'packages/napi/*.d.ts' 'packages/cli/bin/**/*.js' 'apps/oracle/src'"
@@ -222,23 +204,3 @@ ci: lint test deny typos zizmor doc-check machete semver msrv (coverage "90")
 # Time and memory of this checkout (or a branch) against origin/main on Mantine and Chakra; see docs/measurement.md.
 bench *args:
     python3 scripts/bench.py {{args}}
-
-# Clean build artifacts
-clean:
-    moon clean
-    cargo clean
-    rm -rf node_modules
-
-# Setup toolchain via proto
-setup:
-    proto install
-    pnpm install
-    moon sync vcs-hooks
-
-# Run moon commands
-moon *args:
-    moon {{args}}
-
-# Run cargo commands
-cargo *args:
-    cargo {{args}}
