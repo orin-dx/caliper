@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_011QDYCzbJkwnf8dSsKYb8WA",
+  "agent_id": "af559ea0630d71741",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix weekly regression rule noise for issue 279",
+  "token_usage": {
+    "input_tokens": 68,
+    "cache_creation_tokens": 76711,
+    "cache_read_tokens": 2656304,
+    "output_tokens": 17113,
+    "api_call_count": 34
+  },
+  "started_at": "2026-11-11T17:12:53.840744-08:00",
+  "completed_at": "2026-11-11T17:17:00.877753-08:00"
+}
