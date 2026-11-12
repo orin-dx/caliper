@@ -1,6 +1,6 @@
 # 0022. Ask a warm checker for the requested component
 
-**Status:** Accepted **Date:** 2026-10-26 **Amended:** 2026-11-11 (a component the structural pass lists no props for waits up to `semanticWaitEmptyMs`, default 2000; one request in flight per component and file version, joined by later callers; interactive requests before background ones)
+**Status:** Accepted **Date:** 2026-10-26 **Amended:** 2026-11-11 (a component the structural pass lists no props for waits up to `semanticWaitEmptyMs`, default 2000; one request in flight per component and file version, joined by later callers; interactive requests before background ones; the addon asks for the opening story when `storybook dev` starts)
 
 ## Context
 
@@ -45,7 +45,7 @@ A session can have a checker attached (`WatchSession::with_semantic`, a `Semanti
 
 - A story gets the checker's props when the checker is warm and answers inside the wait: usually the first story on Mantine, shadcn, antd and Spectrum (82 to 137 ms), and later stories on those at 21 to 41 ms each. That is above the 5 to 20 ms a story can afford, so a story that is not cached takes the structural answer when the checker is busy. Chakra's 534 ms per component never fits the wait; its answer arrives for the next request.
 - The gain is where the structural pass is behind: shadcn's props more than double. On Mantine, Chakra and Spectrum the checker adds nothing, and the mode only costs a process.
-- Batching a request to 8 files costs 6 to 9 ms per component (Chakra 259), 32 files 2 to 8 ms (Chakra 108). A prefetch of the components a project's stories name would make most requests cache hits; it is not built here.
+- Batching a request to 8 files costs 6 to 9 ms per component (Chakra 259), 32 files 2 to 8 ms (Chakra 108). A prefetch of the components a project's stories name would make most requests cache hits; it is not built here. The addon prefetches the opening story only (`prefetchStories`, default 1, amended 2026-11-11): when `storybook dev` starts it asks Storybook's docgen service for that component, so the browser finds the checker's answer stored when it asks (see [gate measurements](../gate-measurements.md#startup-prefetch-trail-332)).
 - The cache is in memory. Reading and writing it under `node_modules/.cache` across runs is the next step, keyed by file hash, tsconfig and lockfile hash, and TypeScript version.
 - The pin to `7.1.0-beta` stays until TypeScript 7.1 is stable; a version range and a startup `--version` check replace it then.
 - Peak memory is a `tsc` process of 157 to 612 MiB next to the session. The 64-program replacement bounds it; a memory cap by RSS is not built.
