@@ -43,6 +43,11 @@ export interface CaliperStorybookOptions {
    */
   fillAfter?: number
   /**
+   * When the dev server starts, document the components of this many first stories through Storybook's docgen
+   * service, before a browser asks. Default: `1`, the story Storybook opens. `0` waits for the browser.
+   */
+  prefetchStories?: number
+  /**
    * Ask TypeScript's 7.1 checker for each component a story names (experimental). `'off'` (the default) never starts
    * it. `'on-demand'` keeps one `tsc` warm in the background, asks it for exactly the requested component, and uses
    * the structural props when it is slower than `semanticWaitMs`; its answer is kept for the next request. Needs
