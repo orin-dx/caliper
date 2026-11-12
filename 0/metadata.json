@@ -1,0 +1,151 @@
+{
+  "cli_version": "0.13.3-nightly.202611110616.7aed2fb15",
+  "checkpoint_id": "01M78MSZ5ZBTTVPBSVNGK1DB7W",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-12T19:47:46.599498Z",
+  "branch": "perf/checker-extract-speed",
+  "checkpoints_count": 13,
+  "save_step_count": 1,
+  "files_touched": [
+    "crates/semantic/src/component.rs",
+    "crates/semantic/src/convert.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "7436c3e8f87a",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0,
+    "subagent_tokens": {
+      "input_tokens": 4,
+      "cache_creation_tokens": 4381,
+      "cache_read_tokens": 663902,
+      "output_tokens": 1203,
+      "api_call_count": 2
+    }
+  },
+  "redaction": {
+    "replacements": 35,
+    "layers": {
+      "betterleaks": 21,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 549
+  },
+  "summary": {
+    "intent": "Drive Caliper toward a v1 alpha by creating and executing six Entire trails (comparison, perf, detection, recall, types, release flow), then follow-on work: making the tsrs checker the default and keeping Caliper at least 2-3x faster than react-docgen-typescript.",
+    "outcome": "Trails 153-158 were created and workers produced stacked draft PRs (#280-#283 for oracle/weekly, #441 checker-default, #442 weekly on checker). The #440 leak fix was verified in code. The trail 154 perf branches and trail 158 release-flow worker report are not yet pushed. The checker extract speed worker crashed on an API error and was resumed, with no RDT-vs-checker numbers yet.",
+    "learnings": {
+      "repo": [
+        "Nothing in the repo defined 'v1 alpha'; the user supplied a plan file outside the repo at ~/.claude/projects/-Users-gabe-Projects-caliper/plan/next-trails-2026-11-02.md.",
+        "Workflow is trails before branches: workers commit locally and GPG-sign; the coordinator pushes, links with `entire trail link --base <parent>` before any PR exists, then edits PR titles/bodies keeping the Entire marker.",
+        "Stacked branches cannot share a parent, so oracle/three-tools-report needs both weekly and oracle stacks merged first.",
+        "Callisto is already at latest (0.16.0 per research; CI uses 0.20.0). Release v0.9.0 published tags only, with no GitHub Releases because callisto.toml lacks `github-release` in publish-to.",
+        "Callisto's attestation check expects a signer workflow named `callisto-release.yml`, so release.yml likely needs renaming (unverified in source). Product package must be a Cargo package (cargo/caliper-docgen) because an npm bin can't be an artifact product (E304).",
+        "The Homebrew tap reads tag npm/caliper-docgen@x.y.z, so tag-template should stay unset.",
+        "Release run failure E148 was a stale release-PR snapshot race in the version-pr step; a re-run or next push fixes it and nothing was lost.",
+        "react-docgen's default importer follows imports (the old 'reads each file alone' docs claim was wrong), and it throws on 17-21% of files in antd and shadcn.",
+        "antd recall reached 92.1% (186/202), short of the ~95% target; the remaining unpaired items are factories, compound members and the like, not pairing cases.",
+        "The checker default costs about 6 s and ~970 MiB on gate-large (938 components) versus 0.09-0.10 s with --no-checker; the 17-39x speed claim over RDT is now only valid for --no-checker.",
+        "The Storybook addon is already structural-first with the checker answering within semanticWaitMs (150 ms) and prefetches the first story, but lacks a live upgrade of an open story.",
+        "Sessions held a copy of every prop per checker answer (~6.7 MiB per component); AnswerCache::shared in core/src/pipeline/semantic_hook.rs fixes it.",
+        "UNIVERSE_VERSION in scripts/weekly.py was bumped to 5 to avoid a false 'wrong types rose' issue when the weekly switched to the checker."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/checker.rs",
+          "line": 378,
+          "end_line": 384,
+          "finding": "A refused createSnapshot/updateSnapshot response now calls discard() to release the snapshot the answer created; previously the ID was dropped and the snapshot leaked. A timed-out caller's snapshot is released near line 446."
+        },
+        {
+          "path": "scripts/headline.py",
+          "finding": "BUDGETS for the five weekly corpora are set to {'ms': None, 'rss_mib': None} ('record on first run'); a run over a None budget opens no issue."
+        },
+        {
+          "path": "core/src/pipeline/semantic_hook.rs",
+          "finding": "AnswerCache::shared dedupes identical props across checker answers and resets when session answers are dropped on a source change."
+        }
+      ],
+      "workflow": [
+        "Sandbox denies writes to the job tmp dir and ~/.local/share/entire (Brain lock); use $TMPDIR instead. `tsx` fails on its IPC socket under the sandbox, so use `node` (type stripping).",
+        "The permission classifier blocked `entire trail finding resolve` as an external write; the user must run it or authorize it.",
+        "Peer and subagent messages are not user approval; the coordinator verified remote SHAs with git ls-remote before linking.",
+        "Machine load of 5-21 made timing noisy; compare only interleaved runs measured side by side.",
+        "A user /stop on a subagent restarted it from the transcript; a later API outage failed it, so workers should commit and push early."
+      ]
+    },
+    "friction": [
+      "Brain brief failed because of a sandbox write-lock denial and was never retried.",
+      "The sandbox blocked the job tmp dir and `tsx`.",
+      "The classifier blocked resolving Entire finding 01M778W5HQ7T, leaving it showing open.",
+      "The first callisto-gap report was truncated and had to be re-requested.",
+      "The weekly worker could not reproduce the plan's antd denominator of ~195 (got 202).",
+      "Mantine, Chakra and Spectrum corpora are not installed locally, so rules and budgets could not be validated on them.",
+      "The speed worker was accidentally stopped, restarted, then died on an API error (ENOTFOUND) with uncommitted work.",
+      "Local callisto is too old for callisto.toml, so `callisto status --check` could not be run.",
+      "`build:napi` regenerates unrelated changes in packages/napi/index.js that must be reverted each time."
+    ],
+    "open_items": [
+      "Trail 158: the t158-release worker's report is pending; the workflow rename to callisto-release.yml, the E148 retry and the release rehearsal on a scratch repo are unresolved.",
+      "Trail 154: only two of three perf branches exist, and they miss the 141 ms / 275 MiB baseline; these are unpushed.",
+      "Checker-default extract speed: no RDT-vs-checker measurement yet; the worker must commit and push, prove byte-identical output, and run the gates against the user's 2-3x bar.",
+      "Merge #440 then #441 (the user's call), then slice 4 (delete the process route, crates/tsc-client and the typescript@beta fallback), then the single oracle run and the speed headline reword.",
+      "Storybook live upgrade of open stories and wider prefetch worker is awaiting the user's go-ahead.",
+      "Trails 155 and 156 (a serial stack) and oracle/three-tools-report are not started.",
+      "The fix/weekly-caliper-key-collisions branch was skipped; it needs a distinct Caliper key per component.",
+      "Spectrum's 1.09% oracle wrong-rate is uninvestigated, and Mantine/Chakra/Spectrum validation needs a CI weekly run.",
+      "Corpus budgets are to be set after the first two scheduled checker runs (1.5x time, 1.25x memory).",
+      "Entire finding 01M778W5HQ7T on #440 still needs resolving.",
+      "The user has not answered the release-flow choices for product package, binaries and attestations (the plan's recommendations are assumed)."
+    ]
+  }
+}
