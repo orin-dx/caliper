@@ -9,11 +9,12 @@ use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
 use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, WatchSession};
-use caliper_docgen_core::types::semantic::{
-    SemanticComponent, SemanticOutcome, SemanticProp, SemanticProvider, SemanticTarget, SourceChange,
-};
+use caliper_docgen_core::types::semantic::{SemanticOutcome, SemanticProvider, SemanticTarget, SourceChange};
 use caliper_docgen_core::types::{ComponentExport, DiagnosticCode, DiagnosticSeverity, PropType};
 use camino::Utf8PathBuf;
+
+mod support;
+use support::{semantic_component, semantic_prop};
 
 const BUTTON: &str = "export function Button(props: { label: string }) { return null; }";
 const CARD: &str = "export function Card(props: { title: string }) { return null; }";
@@ -49,30 +50,18 @@ impl SemanticProvider for Fake {
 
 /// The checker finds a prop the structural pass cannot see: `size`, typed as a union of two literals.
 fn finds_size(target: &SemanticTarget) -> SemanticOutcome {
-    let prop = |name: &str, prop_type: PropType| {
-        Arc::new(SemanticProp {
-            name: name.to_string(),
-            prop_type,
-            required: false,
-            description: String::new(),
-            react_declared: false,
-            tags: Default::default(),
-            parent: None,
-            declarations: Vec::new(),
-        })
-    };
+    let prop = |name: &str, prop_type: PropType| semantic_prop(name, prop_type, false, false);
     SemanticOutcome {
-        components: vec![SemanticComponent {
-            composes: Some(Vec::new()),
-            key: target.key.clone(),
-            props: vec![
+        components: vec![semantic_component(
+            &target.key,
+            vec![
                 prop("label", PropType::String),
                 prop(
                     "size",
                     PropType::Union(vec![PropType::StringLiteral("sm".into()), PropType::StringLiteral("lg".into())]),
                 ),
             ],
-        }],
+        )],
         ..SemanticOutcome::default()
     }
 }
@@ -80,23 +69,12 @@ fn finds_size(target: &SemanticTarget) -> SemanticOutcome {
 /// The checker reports the component's `label` and, as `tsc` does without a filter, everything `@types/react` declares:
 /// `children` as a string (so the checker's type is visible), `className`, `id`, and the `key` and `ref` React adds.
 fn reports_react_props(target: &SemanticTarget) -> SemanticOutcome {
-    let prop = |name: &str, prop_type: PropType, react_declared: bool| {
-        Arc::new(SemanticProp {
-            name: name.to_string(),
-            prop_type,
-            required: false,
-            description: String::new(),
-            react_declared,
-            tags: Default::default(),
-            parent: None,
-            declarations: Vec::new(),
-        })
-    };
+    let prop =
+        |name: &str, prop_type: PropType, react_declared: bool| semantic_prop(name, prop_type, false, react_declared);
     SemanticOutcome {
-        components: vec![SemanticComponent {
-            composes: Some(Vec::new()),
-            key: target.key.clone(),
-            props: vec![
+        components: vec![semantic_component(
+            &target.key,
+            vec![
                 prop("label", PropType::String, false),
                 prop("children", PropType::String, true),
                 prop("className", PropType::String, true),
@@ -104,7 +82,7 @@ fn reports_react_props(target: &SemanticTarget) -> SemanticOutcome {
                 prop("key", PropType::String, true),
                 prop("ref", PropType::String, true),
             ],
-        }],
+        )],
         ..SemanticOutcome::default()
     }
 }
@@ -175,20 +153,10 @@ fn a_checker_that_answers_in_time_replaces_the_structural_props_and_says_so() {
 /// The checker could not read `label` (an import it did not resolve): its answer there is a placeholder.
 fn cannot_read_label(target: &SemanticTarget) -> SemanticOutcome {
     SemanticOutcome {
-        components: vec![SemanticComponent {
-            composes: Some(Vec::new()),
-            key: target.key.clone(),
-            props: vec![Arc::new(SemanticProp {
-                name: "label".to_string(),
-                prop_type: caliper_docgen_core::types::semantic::unresolved_type("Label"),
-                required: true,
-                description: String::new(),
-                react_declared: false,
-                tags: Default::default(),
-                parent: None,
-                declarations: Vec::new(),
-            })],
-        }],
+        components: vec![semantic_component(
+            &target.key,
+            vec![semantic_prop("label", caliper_docgen_core::types::semantic::unresolved_type("Label"), true, false)],
+        )],
         ..SemanticOutcome::default()
     }
 }
@@ -396,25 +364,13 @@ fn types_file_outcome(target: &SemanticTarget, text: &str) -> SemanticOutcome {
         .collect();
     let version = format!("v{}", names.len());
     SemanticOutcome {
-        components: vec![SemanticComponent {
-            composes: Some(Vec::new()),
-            key: target.key.clone(),
-            props: names
+        components: vec![semantic_component(
+            &target.key,
+            names
                 .into_iter()
-                .map(|name| {
-                    Arc::new(SemanticProp {
-                        name,
-                        prop_type: PropType::StringLiteral(version.clone()),
-                        required: false,
-                        description: String::new(),
-                        react_declared: false,
-                        tags: Default::default(),
-                        parent: None,
-                        declarations: Vec::new(),
-                    })
-                })
+                .map(|name| semantic_prop(&name, PropType::StringLiteral(version.clone()), false, false))
                 .collect(),
-        }],
+        )],
         ..SemanticOutcome::default()
     }
 }
@@ -512,24 +468,12 @@ fn opaque_type_diagnostics(answer: &caliper_docgen_core::pipeline::ComponentAnsw
 
 /// The checker answers for `label` and `item`: nothing the structural pass left opaque is left over.
 fn answers_every_prop(target: &SemanticTarget) -> SemanticOutcome {
-    let prop = |name: &str, prop_type: PropType| {
-        Arc::new(SemanticProp {
-            name: name.to_string(),
-            prop_type,
-            required: true,
-            description: String::new(),
-            react_declared: false,
-            tags: Default::default(),
-            parent: None,
-            declarations: Vec::new(),
-        })
-    };
+    let prop = |name: &str, prop_type: PropType| semantic_prop(name, prop_type, true, false);
     SemanticOutcome {
-        components: vec![SemanticComponent {
-            composes: Some(Vec::new()),
-            key: target.key.clone(),
-            props: vec![prop("label", PropType::String), prop("item", PropType::StringLiteral("a".into()))],
-        }],
+        components: vec![semantic_component(
+            &target.key,
+            vec![prop("label", PropType::String), prop("item", PropType::StringLiteral("a".into()))],
+        )],
         ..SemanticOutcome::default()
     }
 }
@@ -563,28 +507,17 @@ const DEFAULTED: &str =
 /// The checker returns `label` (a different type from the source's `string`), a prop of its own (`size`), and one of
 /// `@types/react`'s (`className`).
 fn label_size_and_class_name(target: &SemanticTarget) -> SemanticOutcome {
-    let prop = |name: &str, prop_type: PropType, react_declared: bool| {
-        Arc::new(SemanticProp {
-            name: name.to_string(),
-            prop_type,
-            required: false,
-            description: String::new(),
-            react_declared,
-            tags: Default::default(),
-            parent: None,
-            declarations: Vec::new(),
-        })
-    };
+    let prop =
+        |name: &str, prop_type: PropType, react_declared: bool| semantic_prop(name, prop_type, false, react_declared);
     SemanticOutcome {
-        components: vec![SemanticComponent {
-            composes: Some(Vec::new()),
-            key: target.key.clone(),
-            props: vec![
+        components: vec![semantic_component(
+            &target.key,
+            vec![
                 prop("label", PropType::StringLiteral("ok".into()), false),
                 prop("size", PropType::Number, false),
                 prop("className", PropType::String, true),
             ],
-        }],
+        )],
         ..SemanticOutcome::default()
     }
 }
@@ -976,20 +909,7 @@ fn a_default_export_beside_a_named_export_of_its_file_name_is_asked_for_by_its_o
 /// An outcome that answers for `Menu`, and gives `Menu` a fallback reason, whatever was asked.
 fn answers_for_menu(_: &SemanticTarget) -> SemanticOutcome {
     SemanticOutcome {
-        components: vec![SemanticComponent {
-            composes: Some(Vec::new()),
-            key: "Menu".to_string(),
-            props: vec![Arc::new(SemanticProp {
-                name: "label".to_string(),
-                prop_type: PropType::String,
-                required: true,
-                description: String::new(),
-                react_declared: false,
-                tags: Default::default(),
-                parent: None,
-                declarations: Vec::new(),
-            })],
-        }],
+        components: vec![semantic_component("Menu", vec![semantic_prop("label", PropType::String, true, false)])],
         fallbacks: vec![caliper_docgen_core::types::semantic::SemanticFallback {
             key: "Menu".to_string(),
             reason: "about Menu".to_string(),
