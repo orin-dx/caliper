@@ -40,7 +40,8 @@ use rustc_hash::FxHashMap;
 use crate::declared::Declared;
 use crate::printed::{Marker, SignatureMarkers, signature_markers, tuple_labels};
 use crate::rpc::{
-    CallError, CompactSymbol, ObjectMembers, Rpc, SignatureInfo, SignatureKind, SymbolInfo, TypeInfo, decode, flag,
+    CallError, CompactSymbol, IndexInfo, ObjectMembers, Rpc, SignatureInfo, SignatureKind, SymbolInfo, TypeInfo,
+    decode, flag,
 };
 use serde_json::value::RawValue;
 
@@ -66,6 +67,59 @@ enum Gate<T> {
 }
 
 type Converted<'a> = Pin<Box<dyn Future<Output = Result<PropType, CallError>> + Send + 'a>>;
+
+/// What an object's members are known as when its type is entered.
+enum Listed {
+    /// The checker was asked for them.
+    Members(ObjectMembers),
+    /// How many properties an earlier map over the same keys had, none of them the project's (see [`State::maps`]). It
+    /// is only handed out where that is more than the budget allows, so the type is cut and no list is needed.
+    Counted(usize),
+}
+
+/// What [`Converter::over_budget`] reads of the members of an object it cuts.
+struct Excess {
+    /// The type has call or construct signatures.
+    signatures: bool,
+    /// How many of its properties the project did not declare.
+    outside: usize,
+    /// The properties the project declared.
+    own: Vec<SymbolInfo>,
+    indexes: Vec<IndexInfo>,
+}
+
+impl Excess {
+    fn of(members: ObjectMembers) -> Self {
+        let ObjectMembers { calls, constructs, properties, indexes } = members;
+        let (own, outside): (Vec<SymbolInfo>, Vec<SymbolInfo>) = properties.into_iter().partition(is_own);
+        Excess { signatures: !calls.is_empty() || !constructs.is_empty(), outside: outside.len(), own, indexes }
+    }
+
+    fn counted(outside: usize) -> Self {
+        Excess { signatures: false, outside, own: Vec::new(), indexes: Vec::new() }
+    }
+}
+
+/// What a map is remembered by: its constraint, as the checker's type handle, and the symbol that declares it.
+type MapKey = (u64, CompactSymbol);
+
+/// The key of a mapped type whose property count another map over the same keys can answer for: one no name stands for
+/// (an alias's arguments, `Partial<A>`, are what its properties come from, and the key holds none), with no `as` clause
+/// (which would rename the keys).
+fn map_key(info: &TypeInfo, origin: Option<&Origin>) -> Option<MapKey> {
+    if origin.is_some() || info.object_flags & flag::OBJECT_MAPPED == 0 || info.name_type.is_some() {
+        return None;
+    }
+    Some((info.constraint_type?, info.symbol.clone()?))
+}
+
+/// The number of properties of a map's listed members to remember, when the cut of another map over the same keys needs
+/// no more of them: the project declared none, so none is listed, and the map has no signature and no index signature,
+/// whose types are another map's own.
+fn settled_count(members: &ObjectMembers) -> Option<usize> {
+    let bare = members.calls.is_empty() && members.constructs.is_empty() && members.indexes.is_empty();
+    (bare && members.properties.iter().all(|property| !is_own(property))).then_some(members.properties.len())
+}
 
 /// Where a type sits: how deep, and which named instantiations (an alias or interface with its type arguments, as the
 /// checker's type handle) enclose it, outermost first.
@@ -351,6 +405,10 @@ struct State {
     parts: PartsSeen,
     /// Where props are declared ([`crate::declared`]), kept for the snapshot like the rest.
     declared: crate::declared::Memo,
+    /// A map's property count by [`MapKey`]: a map without `as` has one property per key of its constraint and a cut reads
+    /// only that count, so a [`settled_count`] list stands for every map of its key (docs/type-checker-integration.md,
+    /// "Condition maps", says when that is exact). The handles are valid inside this snapshot only.
+    maps: Mutex<FxHashMap<MapKey, usize>>,
     hits: AtomicU64,
     misses: AtomicU64,
 }
@@ -480,6 +538,17 @@ impl Converter {
             }
             Ok(converted)
         })
+    }
+
+    /// How many properties the maps of `key` have, when one of them was listed and [`settled_count`] took it.
+    fn settled(&self, key: &MapKey) -> Option<usize> {
+        self.state.maps.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(key).copied()
+    }
+
+    fn settle(&self, key: MapKey, members: &ObjectMembers) {
+        if let Some(count) = settled_count(members) {
+            self.state.maps.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(key, count);
+        }
     }
 
     /// The entry for the type at this depth that holds inside the instantiations enclosing it, if there is one.
@@ -972,14 +1041,27 @@ impl Converter {
             return self.named_type(info, origin, cx).await;
         }
         // The width is not counted at the gate: only the members that are not the project's own are, below.
+        let key = map_key(info, origin.as_ref());
         let gate = self
             .enter(info, origin.as_ref(), cx, [usize::MAX; 2], || async {
-                Ok((self.rpc.object_members(info.id).await?, 0))
+                let Some(key) = key else { return Ok((Listed::Members(self.rpc.object_members(info.id).await?), 0)) };
+                if let Some(outside) = self.settled(&key).filter(|outside| *outside > cx.limit(MAX_FIELDS)) {
+                    return Ok((Listed::Counted(outside), 0));
+                }
+                let members = self.rpc.object_members(info.id).await?;
+                self.settle(key, &members);
+                Ok((Listed::Members(members), 0))
             })
             .await?;
-        let (members, inner) = match gate {
+        let (listed, inner) = match gate {
             Gate::Stop(stopped) => return Ok(stopped),
             Gate::Open { parts, inner } => (parts, inner),
+        };
+        let members = match listed {
+            Listed::Members(members) => members,
+            Listed::Counted(outside) => {
+                return self.over_budget(info, origin.as_ref(), Excess::counted(outside), cx, &inner).await;
+            }
         };
         if let Some(origin) = boundary
             && !members.properties.is_empty()
@@ -988,7 +1070,7 @@ impl Converter {
         }
         let outside = members.properties.iter().filter(|property| !is_own(property)).count();
         if outside > cx.limit(MAX_FIELDS) {
-            return self.over_budget(info, origin.as_ref(), members, cx, &inner).await;
+            return self.over_budget(info, origin.as_ref(), Excess::of(members), cx, &inner).await;
         }
         let ObjectMembers { calls, constructs, properties, indexes } = members;
 
@@ -1028,15 +1110,14 @@ impl Converter {
         &self,
         info: &TypeInfo,
         origin: Option<&Origin>,
-        members: ObjectMembers,
+        excess: Excess,
         cx: &Cx,
         inner: &Cx,
     ) -> Result<PropType, CallError> {
-        let ObjectMembers { calls, constructs, properties, indexes } = members;
-        let cut =
-            TruncationLimit::Members { total: to_u32(properties.iter().filter(|property| !is_own(property)).count()) };
+        let Excess { signatures, outside, own, indexes } = excess;
+        let cut = TruncationLimit::Members { total: to_u32(outside) };
         // A type with signatures is a function with properties: its shape is not a set of fields to split.
-        if !calls.is_empty() || !constructs.is_empty() {
+        if signatures {
             return self.truncated(info, origin, cut).await;
         }
         if let Some(origin) = origin
@@ -1052,7 +1133,6 @@ impl Converter {
         } else {
             None
         };
-        let own: Vec<SymbolInfo> = properties.into_iter().filter(is_own).collect();
         let mut parts = Vec::new();
         if !own.is_empty() || !indexes.is_empty() {
             parts.push(PropType::Object(self.fields(&own, &indexes, inner).await?));
@@ -1229,7 +1309,7 @@ impl Converter {
     async fn fields(
         &self,
         properties: &[SymbolInfo],
-        indexes: &[crate::rpc::IndexInfo],
+        indexes: &[IndexInfo],
         cx: &Cx,
     ) -> Result<Vec<ObjectField>, CallError> {
         let references: Vec<_> = properties.iter().map(|property| &property.reference).collect();
@@ -1444,5 +1524,90 @@ mod tests {
         for flags in [flag::UNION, flag::TYPE_PARAMETER, flag::CONDITIONAL, flag::INDEXED_ACCESS, flag::STRING] {
             assert_eq!(BasesOf::of(&type_of(flags, 0)), BasesOf::Unknown, "flags {flags}");
         }
+    }
+
+    fn map_of(extra: serde_json::Value) -> TypeInfo {
+        let mut info = serde_json::json!({
+            "id": 9,
+            "flags": flag::OBJECT,
+            "objectFlags": flag::OBJECT_MAPPED,
+            "constraintType": 935,
+            "symbol": { "id": 1963 },
+        });
+        info.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        serde_json::from_value(info).unwrap()
+    }
+
+    fn origin_named(name: &str) -> Origin {
+        Origin { name: name.to_string(), file: "/p/node_modules/dep/index.d.ts".to_string(), alias: true }
+    }
+
+    #[test]
+    fn a_map_is_remembered_by_its_constraint_and_its_symbol() {
+        let key = map_key(&map_of(serde_json::json!({})), None).unwrap();
+
+        assert_eq!(key, (935, CompactSymbol { id: 1963, file: None }));
+        assert_eq!(map_key(&map_of(serde_json::json!({ "id": 10, "templateType": 4 })), None), Some(key));
+    }
+
+    #[test]
+    fn a_map_with_a_name_type_a_name_or_no_constraint_is_not_remembered() {
+        assert_eq!(map_key(&map_of(serde_json::json!({ "nameType": 7 })), None), None);
+        assert_eq!(map_key(&map_of(serde_json::json!({})), Some(&origin_named("Partial"))), None);
+        assert_eq!(map_key(&map_of(serde_json::json!({ "constraintType": null })), None), None);
+        assert_eq!(map_key(&map_of(serde_json::json!({ "symbol": null })), None), None);
+        assert_eq!(map_key(&type_of(flag::OBJECT, flag::OBJECT_INTERFACE), None), None);
+    }
+
+    fn members(properties: &[&str], extra: serde_json::Value) -> ObjectMembers {
+        let property = |file: &str| serde_json::json!({ "reference": {}, "name": "k", "flags": 4, "declarations": [format!("8.173.{file}")] });
+        let mut listed = serde_json::json!({
+            "calls": [],
+            "constructs": [],
+            "properties": properties.iter().map(|file| property(file)).collect::<Vec<_>>(),
+            "indexes": [],
+        });
+        listed.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        ObjectMembers {
+            calls: serde_json::from_value(listed["calls"].clone()).unwrap(),
+            constructs: serde_json::from_value(listed["constructs"].clone()).unwrap(),
+            properties: serde_json::from_value(listed["properties"].clone()).unwrap(),
+            indexes: serde_json::from_value(listed["indexes"].clone()).unwrap(),
+        }
+    }
+
+    const DEPENDENCY: &str = "/p/node_modules/dep/index.d.ts";
+    const PROJECT: &str = "/p/src/theme.ts";
+
+    #[test]
+    fn the_count_of_a_list_with_nothing_of_the_projects_is_remembered() {
+        assert_eq!(settled_count(&members(&[DEPENDENCY; 45], serde_json::json!({}))), Some(45));
+        assert_eq!(settled_count(&members(&[], serde_json::json!({}))), Some(0));
+    }
+
+    #[test]
+    fn a_list_with_a_property_the_project_declares_a_signature_or_an_index_signature_is_not() {
+        let mut declared = vec![DEPENDENCY; 44];
+        declared.push(PROJECT);
+        assert_eq!(settled_count(&members(&declared, serde_json::json!({}))), None);
+
+        let signature = serde_json::json!([{ "id": 3 }]);
+        for kind in ["calls", "constructs"] {
+            let listed = members(&[DEPENDENCY; 45], serde_json::json!({ kind: signature }));
+            assert_eq!(settled_count(&listed), None, "{kind}");
+        }
+        let index = serde_json::json!([{ "keyType": { "id": 1, "flags": flag::STRING }, "valueType": { "id": 2, "flags": flag::STRING } }]);
+        assert_eq!(settled_count(&members(&[DEPENDENCY; 45], serde_json::json!({ "indexes": index }))), None);
+    }
+
+    #[test]
+    fn a_cut_reads_the_same_of_a_remembered_count_as_of_the_list_it_was_counted_from() {
+        let listed = Excess::of(members(&[DEPENDENCY; 45], serde_json::json!({})));
+        let counted = Excess::counted(45);
+
+        assert_eq!(
+            (listed.signatures, listed.outside, listed.own.len(), listed.indexes.len()),
+            (counted.signatures, counted.outside, counted.own.len(), counted.indexes.len())
+        );
     }
 }
