@@ -9,11 +9,13 @@ use std::time::Duration;
 
 use caliper_docgen_core::pipeline::{ComponentAnswer, PipelineOptions, WatchSession};
 use caliper_docgen_core::types::semantic::{
-    Delivery, Priority, SemanticComponent, SemanticOutcome, SemanticProp, SemanticProvider, SemanticTarget,
-    SharedPriority,
+    Delivery, Priority, SemanticOutcome, SemanticProvider, SemanticTarget, SharedPriority,
 };
 use caliper_docgen_core::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity, PropType};
 use camino::Utf8PathBuf;
+
+mod support;
+use support::{semantic_component, semantic_prop};
 
 const BUTTON: &str = "export function Button(props: { label: string }) { return null; }";
 const CARD: &str = "export function Card(props: { title: string }) { return null; }";
@@ -82,21 +84,10 @@ impl SemanticProvider for Queued {
 
 fn outcome(target: &SemanticTarget, names: &[&str], diagnostics: Vec<Diagnostic>) -> SemanticOutcome {
     SemanticOutcome {
-        components: vec![SemanticComponent {
-            key: target.key.clone(),
-            props: names
-                .iter()
-                .map(|name| {
-                    Arc::new(SemanticProp {
-                        name: (*name).to_string(),
-                        prop_type: PropType::String,
-                        required: false,
-                        description: String::new(),
-                        react_declared: false,
-                    })
-                })
-                .collect(),
-        }],
+        components: vec![semantic_component(
+            &target.key,
+            names.iter().map(|name| semantic_prop(name, PropType::String, false, false)).collect(),
+        )],
         fallbacks: Vec::new(),
         diagnostics,
     }
