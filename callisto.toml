@@ -40,11 +40,6 @@ package = "cargo/caliper-docgen"
 target = "aarch64-unknown-linux-gnu"
 asset-name = "caliper-docgen-aarch64-unknown-linux-gnu.tar.gz"
 
-[[release.artifact]]
-package = "cargo/caliper-docgen"
-target = "x86_64-pc-windows-msvc"
-asset-name = "caliper-docgen-x86_64-pc-windows-msvc.tar.gz"
-
 [[package]]
 match = "cargo/caliper-docgen-core"
 publish-to = ["crates-io"]

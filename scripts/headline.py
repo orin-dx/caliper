@@ -71,6 +71,22 @@ def share(h, kind):
     return h[kind] / h['props'] if h['props'] else 0.0
 
 
+def own_peak(entry):
+    """Caliper's peak memory of a whole run, or None when the record cannot say it: absent, or the same figure to the MiB as
+    both comparison tools' on the corpus. Three tools never peak together, so that figure is one process-wide maximum read for
+    every run (the 2026-11-02 record, GitHub issue 279, read 1901 MiB for shadcn, antd and spectrum, each tool), not Caliper's."""
+    peak = (entry.get('caliper') or {}).get('rss_mib')
+    others = [(entry.get(tool) or {}).get('rss_mib') for tool in ('rdt', 'react_docgen')]
+    if peak is None or all(other == peak for other in others):
+        return None
+    return peak
+
+
+def own_metric(entry, key):
+    """Caliper's own `key` ('ms' or 'rss_mib') of a corpus entry, or None when it is absent or not Caliper's own."""
+    return own_peak(entry) if key == 'rss_mib' else (entry.get('caliper') or {}).get(key)
+
+
 def findings(name, entry, previous):
     """What opens the issue for one corpus: a wrong type above the gate or higher than last week, or a whole run over a
     budget. `previous` is the corpus entry of the last record, or None."""
@@ -86,10 +102,10 @@ def findings(name, entry, previous):
                        f"{100 * rate:.2f}%{was}; the gate is {100 * WRONG_GATE:.1f}%")
         elif rose:
             out.append(f"{name}: wrong types rose to {h['wrong']:,} of {judged(h):,}, {100 * rate:.2f}%{was}")
-    caliper = entry.get('caliper') or {}
     for key, budget in BUDGETS.items():
-        if key in caliper and caliper[key] > budget:
-            out.append(f"{name}: a whole run's {BUDGET_LABELS[key]} is {caliper[key]:,} {BUDGET_UNITS[key]}, over the "
+        value = own_metric(entry, key)
+        if value is not None and value > budget:
+            out.append(f"{name}: a whole run's {BUDGET_LABELS[key]} is {value:,} {BUDGET_UNITS[key]}, over the "
                        f"{budget:,} {BUDGET_UNITS[key]} budget")
     return out
 

@@ -1,7 +1,7 @@
 // How the oracles find a component with TypeScript 7.1's checker: the props type of an exported function or class, and
 // the names it is exported under. The rule is react-docgen-typescript's (an exported function whose only or `props`
-// parameter is the props type), so src/oracle.ts, src/agent-truth.ts and src/reference.ts must all agree on it; they
-// share this file so they cannot drift.
+// parameter is the props type), so src/oracle.ts and src/agent-truth.ts must both agree on it; they share
+// this file so they cannot drift.
 import { SignatureKind, SymbolFlags } from 'typescript-beta/sync'
 
 /** The props type of a component export, the way react-docgen-typescript finds it. */
@@ -79,8 +79,8 @@ export function declaredExports(checker: any, moduleSymbol: any): DeclaredExport
 
 /** What react-docgen-typescript and react-docgen call a component, which they know only by name: the name it is
  * exported under, and for a default export the declaration's own name, else the file's, or its directory's for an
- * `index`, as react-docgen-typescript does. Only the tools' dumps (src/tool-universe.ts) and a person's list of
- * components to judge (src/reference.ts) are matched on it; Caliper's components are matched by their exports. */
+ * `index`, as react-docgen-typescript does. Only the tools' dumps (src/tool-universe.ts) are matched on it; Caliper's
+ * components are matched by their exports. */
 export function listedName(exportName: string, declared: string | undefined, file: string): string {
   if (exportName !== 'default') return exportName
   if (declared !== undefined) return declared

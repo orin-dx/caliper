@@ -10,7 +10,7 @@ const { existsSync } = require('node:fs')
 const { join, sep } = require('node:path')
 const { spawnSync } = require('node:child_process')
 
-const BINARY_NAME = process.platform === 'win32' ? 'caliper-docgen.exe' : 'caliper-docgen'
+const BINARY_NAME = 'caliper-docgen'
 
 function platformPackageName() {
   const { platform, arch } = process
@@ -18,7 +18,6 @@ function platformPackageName() {
     if (arch === 'arm64') return 'caliper-docgen-darwin-arm64'
     if (arch === 'x64') return 'caliper-docgen-darwin-x64'
   }
-  if (platform === 'win32' && arch === 'x64') return 'caliper-docgen-win32-x64-msvc'
   if (platform === 'linux') {
     const isMusl = !process.report?.getReport()?.header?.glibcVersionRuntime
     if (arch === 'x64' && !isMusl) return 'caliper-docgen-linux-x64-gnu'

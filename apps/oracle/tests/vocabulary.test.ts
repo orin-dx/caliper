@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { compare, prim } from '../src/oracle-compare.ts'
-import { AGREE, OUTCOMES, ROW_VERDICTS, SEVERITY, VERDICTS, vocabulary } from '../src/vocabulary.ts'
+import { AGREE, ROW_VERDICTS, SEVERITY, VERDICTS, vocabulary } from '../src/vocabulary.ts'
 
 const written = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'src', 'vocabulary.json'), 'utf8'))
 
@@ -23,7 +23,6 @@ describe('the verdict vocabulary', () => {
       'opaque with marker',
       'missing',
     ])
-    expect(new Set(OUTCOMES).size).toBe(OUTCOMES.length)
   })
 
   it('every verdict the comparison can give is in the list', () => {

@@ -27,7 +27,8 @@ use crate::react_types::{checker_prop_used, react_props_wanted};
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use crate::types::semantic::{
     Delivery, MergedProps, Priority, SemanticComponent, SemanticFallback, SemanticOutcome, SemanticProp,
-    SemanticProvider, SemanticTarget, SharedPriority, SourceChange, merge_semantic_props, unread_diagnostic,
+    SemanticProvider, SemanticTarget, SharedPriority, SourceChange, Superseding, drop_superseded, merge_semantic_props,
+    unread_diagnostic,
 };
 
 /// What one request of the checker made of a component: the component it found, if any, and what the checker said
@@ -173,8 +174,7 @@ impl SemanticHook {
         let (found, generation) = self.find(cache_key.as_ref(), priority);
         let pending = match found {
             Found::Cached(cached) => {
-                answer.diagnostics.extend(cached.diagnostics);
-                self.apply(&mut answer, cached.component.as_ref(), mode);
+                self.apply(&mut answer, cached, mode);
                 return answer;
             }
             Found::Joined(pending) => pending,
@@ -191,8 +191,7 @@ impl SemanticHook {
                         answer.diagnostics.push(diagnostic);
                     }
                 }
-                answer.diagnostics.extend(answered.diagnostics);
-                self.apply(&mut answer, answered.component.as_ref(), mode);
+                self.apply(&mut answer, answered, mode);
             }
             Some(Settled::Stopped) => {
                 let mut stopped = Diagnostic::new(
@@ -294,34 +293,35 @@ impl SemanticHook {
         self.provider.request_at(vec![target], pending.priority.clone(), delivery);
     }
 
-    fn apply(&self, answer: &mut ComponentAnswer, component: Option<&Arc<SemanticComponent>>, mode: HtmlAttributeMode) {
-        let Some(component) = component else { return };
+    /// Merges what the checker made of the component into `answer`: its props, if it found the component, then what it
+    /// said about the request. The structural diagnostics its props supersede go first, so the checker's are never
+    /// read as structural.
+    fn apply(&self, answer: &mut ComponentAnswer, answered: Answered, mode: HtmlAttributeMode) {
+        let Answered { component, diagnostics } = answered;
+        let Some(component) = component else {
+            answer.diagnostics.extend(diagnostics);
+            return;
+        };
         let structural = answer.entry.props.clone();
         let used: Vec<&Arc<SemanticProp>> = component
             .props
             .iter()
             .filter(|prop| checker_prop_used(mode, &prop.name, prop.react_declared, &structural))
             .collect();
-        // A degrade diagnostic names the component, not the prop, so it can only go once no structural prop is left
-        // that it could be about: one the checker did not return keeps its structural type, opaque or not.
-        let still_degraded = structural
+        // A structural prop the checker did not return keeps its structural type, opaque or not, and a structural
+        // diagnostic naming the component may be about it.
+        let structural_left = structural
             .iter()
             .any(|(name, prop)| prop.prop_type.holds_opaque() && !used.iter().any(|answered| answered.name == *name));
-        let MergedProps { kept, unread, diagnostics } = merge_semantic_props(
+        let MergedProps { kept, unread, diagnostics: syntax } = merge_semantic_props(
             &mut answer.entry,
             used.into_iter(),
             component.composes.as_deref(),
             &mut FxHashMap::default(),
         );
-        if !still_degraded {
-            // A structural diagnostic about a prop the checker now answers for would be stale.
-            answer.diagnostics.retain(|diagnostic| {
-                !matches!(
-                    diagnostic.code,
-                    DiagnosticCode::OpaqueType | DiagnosticCode::MaxDepthExceeded | DiagnosticCode::CircularReference
-                )
-            });
-        }
+        let superseding = Superseding::new(&answer.key, &answer.entry, structural_left);
+        drop_superseded(&mut answer.diagnostics, &[superseding]);
+        answer.diagnostics.extend(diagnostics);
         let mut provenance = Diagnostic::new(
             DiagnosticSeverity::Info,
             DiagnosticCode::SemanticBackend,
@@ -335,7 +335,7 @@ impl SemanticHook {
         );
         provenance.affects = vec![answer.key.clone()];
         answer.diagnostics.push(provenance);
-        answer.diagnostics.extend(diagnostics);
+        answer.diagnostics.extend(syntax);
         if unread > 0 {
             answer.diagnostics.push(unread_diagnostic(unread, vec![answer.key.clone()]));
         }

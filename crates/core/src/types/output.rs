@@ -1,7 +1,7 @@
 //! Semantic output types produced by the resolver (Phase 3).
 
 use camino::Utf8PathBuf;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -78,7 +78,7 @@ pub(crate) fn severity_rank(severity: &DiagnosticSeverity) -> u8 {
 }
 
 /// One step in a component's resolved inheritance chain.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InheritedLayer {
     /// Type name as declared: "ButtonHTMLAttributes", "ButtonBaseProps", "ThemingProps"
@@ -94,12 +94,12 @@ pub struct InheritedLayer {
     pub total_props: u32,
     /// For a collapsed source, the names of the props it declares, which the output otherwise leaves out (only the
     /// notable ones are listed as props). Empty for a layer whose props are expanded.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub members: Vec<String>,
 }
 
 /// A single React component with its resolved props.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ComponentEntry {
     /// Display name of the component
@@ -170,7 +170,7 @@ impl ComponentEntry {
 ///     declarations: vec![],
 /// };
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParsedProp {
     /// Prop name
@@ -195,7 +195,7 @@ pub struct ParsedProp {
     /// type the resolver evaluated in full. Derived from `prop_type`, so it never disagrees with it, with one addition:
     /// a prop the TypeScript checker could not read keeps its structural type, and lists after that type's own kinds
     /// the kinds of what the checker could not read, since the checker did not confirm the type.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub degraded_by: Vec<String>,
     /// Private, zero-sized, and unconstructible outside this module — its
     /// only purpose is to make a bare `ParsedProp { .. }` struct literal
@@ -326,7 +326,7 @@ mod parsed_prop_tests {
 }
 
 /// Default value for a prop.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DefaultValue {
     /// String representation of the default value
@@ -337,7 +337,7 @@ pub struct DefaultValue {
 
 /// Where a prop was declared — enables RDT propFilter compatibility.
 /// The canonical RDT pattern: `prop => !prop.parent.fileName.includes('node_modules')`
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PropParent {
     /// Name of the interface/type alias that declared this prop
@@ -542,6 +542,7 @@ impl OpaqueDetail {
         diagnostic: Diagnostic,
     ) -> PropType {
         state.diagnostics.push(diagnostic);
+        #[allow(clippy::disallowed_methods, reason = "the diagnostic is pushed on the line above")]
         Self::new(raw, reason)
     }
 
@@ -1082,7 +1083,7 @@ impl serde::Serialize for PropType {
             PropType::Opaque(OpaqueDetail { raw, reason }) => {
                 map.serialize_entry("kind", "opaque")?;
                 map.serialize_entry("raw", raw)?;
-                map.serialize_entry("reason", &WireReason(reason))?;
+                map.serialize_entry("reason", reason)?;
             }
         }
         map.end()
@@ -1090,7 +1091,7 @@ impl serde::Serialize for PropType {
 }
 
 /// A number, with NaN and the infinities as the strings `"NaN"`, `"Infinity"` and `"-Infinity"`: JSON numbers cannot
-/// hold them (serde_json would write `null`, which reads back as 0). `read_number` reads it back.
+/// hold them (serde_json would write `null`).
 struct WireNumber(f64);
 
 impl serde::Serialize for WireNumber {
@@ -1249,316 +1250,6 @@ impl serde::Serialize for WireFields<'_> {
     }
 }
 
-/// An `OpaqueReason` as `{ type, ...fields }`.
-struct WireReason<'a>(&'a OpaqueReason);
-
-impl serde::Serialize for WireReason<'_> {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
-
-        let mut map = serializer.serialize_map(None)?;
-        match self.0 {
-            OpaqueReason::ConditionalType => map.serialize_entry("type", "conditionalType")?,
-            OpaqueReason::MappedType => map.serialize_entry("type", "mappedType")?,
-            OpaqueReason::ModuleAugmentation => map.serialize_entry("type", "moduleAugmentation")?,
-            OpaqueReason::RuntimeDependent { function_name } => {
-                map.serialize_entry("type", "runtimeDependent")?;
-                map.serialize_entry("functionName", function_name)?;
-            }
-            OpaqueReason::UnresolvableImport { specifier } => {
-                map.serialize_entry("type", "unresolvableImport")?;
-                map.serialize_entry("specifier", specifier)?;
-            }
-            OpaqueReason::PandaCodegenMissing => map.serialize_entry("type", "pandaCodegenMissing")?,
-            OpaqueReason::DepthExceeded => map.serialize_entry("type", "depthExceeded")?,
-            OpaqueReason::IndexedAccess { expression } => {
-                map.serialize_entry("type", "indexedAccess")?;
-                map.serialize_entry("expression", expression)?;
-            }
-            OpaqueReason::UnsupportedExpression => map.serialize_entry("type", "unsupportedExpression")?,
-        }
-        map.end()
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for PropType {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error;
-        let v = serde_json::Value::deserialize(deserializer)?;
-        Self::from_tagged_value(&v).map_err(D::Error::custom)
-    }
-}
-
-impl PropType {
-    fn from_tagged_value(v: &serde_json::Value) -> Result<Self, std::string::String> {
-        let kind = v
-            .get("kind")
-            .and_then(|k| k.as_str())
-            .ok_or_else(|| "missing 'kind' field in PropType JSON".to_string())?;
-        match kind {
-            "string" => Ok(PropType::String),
-            "number" => Ok(PropType::Number),
-            "boolean" => Ok(PropType::Boolean),
-            "null" => Ok(PropType::Null),
-            "undefined" => Ok(PropType::Undefined),
-            "any" => Ok(PropType::Any),
-            "never" => Ok(PropType::Never),
-            "unknown" => Ok(PropType::Unknown),
-            "void" => Ok(PropType::Void),
-            "bigint" => Ok(PropType::BigInt),
-            "reactNode" | "react_node" => Ok(PropType::ReactNode),
-            "cssProperties" | "css_properties" => Ok(PropType::CssProperties),
-            "elementType" | "element_type" => Ok(PropType::ElementType),
-            "sxProps" | "sx_props" => Ok(PropType::SxProps),
-            "stringLiteral" | "string_literal" => {
-                let s = v["value"].as_str().unwrap_or("").to_owned();
-                Ok(PropType::StringLiteral(s))
-            }
-            "numberLiteral" | "number_literal" => Ok(PropType::NumberLiteral(read_number(v.get("value")))),
-            "boolLiteral" | "bool_literal" => {
-                let b = v["value"].as_bool().unwrap_or(false);
-                Ok(PropType::BoolLiteral(b))
-            }
-            "bigintLiteral" => {
-                let text = v["value"].as_str().unwrap_or("");
-                let value =
-                    BigIntValue::parse(text).ok_or_else(|| format!("'{text}' is not a bigint literal's value"))?;
-                Ok(PropType::BigIntLiteral(value))
-            }
-            "uniqueSymbol" => Ok(PropType::UniqueSymbol { name: v["name"].as_str().unwrap_or("").into() }),
-            "enumMember" => {
-                let value = match Self::from_tagged_value(&v["value"])? {
-                    PropType::StringLiteral(s) => EnumMemberValue::String(s),
-                    PropType::NumberLiteral(n) => EnumMemberValue::Number(n),
-                    other => {
-                        return Err(format!("an enum member's value is a string or number literal, not {other:?}"));
-                    }
-                };
-                Ok(PropType::EnumMember {
-                    enum_name: v["enum"].as_str().unwrap_or("").into(),
-                    member: v["member"].as_str().unwrap_or("").into(),
-                    value,
-                })
-            }
-            "templateLiteral" => {
-                let parts = v["parts"]
-                    .as_array()
-                    .map(|a| {
-                        a.iter()
-                            .map(|part| match (part.get("text").and_then(|t| t.as_str()), part.get("type")) {
-                                (Some(text), _) => Ok(TemplatePart::Text(text.to_owned())),
-                                (None, Some(ty)) => Ok(TemplatePart::Type(Self::from_tagged_value(ty)?)),
-                                (None, None) => Err("a template literal part has neither 'text' nor 'type'".to_owned()),
-                            })
-                            .collect::<Result<Vec<_>, std::string::String>>()
-                    })
-                    .unwrap_or(Ok(vec![]))?;
-                Ok(PropType::TemplateLiteral(parts))
-            }
-            "callable" => {
-                let signatures = v["signatures"]
-                    .as_array()
-                    .map(|a| {
-                        a.iter()
-                            .map(|s| {
-                                Ok(CallSignature {
-                                    kind: if s["construct"].as_bool().unwrap_or(false) {
-                                        SignatureKind::Construct
-                                    } else {
-                                        SignatureKind::Call
-                                    },
-                                    type_params: read_type_params(&s["typeParams"]),
-                                    params: Self::read_params(&s["params"])?,
-                                    return_type: Self::from_tagged_value(&s["returnType"])?,
-                                })
-                            })
-                            .collect::<Result<Vec<_>, std::string::String>>()
-                    })
-                    .unwrap_or(Ok(vec![]))?;
-                Ok(PropType::Callable { signatures, fields: Self::read_fields(&v["fields"])? })
-            }
-            "recursive" => Ok(PropType::Recursive {
-                name: v["name"].as_str().unwrap_or("").into(),
-                args: Self::read_list(&v["args"])?,
-            }),
-            "truncated" => {
-                let limit = match v["limit"]["type"].as_str() {
-                    Some("members") => TruncationLimit::Members {
-                        total: v["limit"]["total"].as_u64().and_then(|n| u32::try_from(n).ok()).unwrap_or(0),
-                    },
-                    Some("depth") => TruncationLimit::Depth,
-                    other => return Err(format!("unknown truncation limit {other:?}")),
-                };
-                Ok(PropType::Truncated { text: v["text"].as_str().unwrap_or("").to_owned(), limit })
-            }
-            "union" => {
-                let members = v["members"]
-                    .as_array()
-                    .map(|a| a.iter().map(Self::from_tagged_value).collect::<Result<Vec<_>, _>>())
-                    .unwrap_or(Ok(vec![]))?;
-                Ok(PropType::Union(members))
-            }
-            "intersection" => {
-                let members = v["members"]
-                    .as_array()
-                    .map(|a| a.iter().map(Self::from_tagged_value).collect::<Result<Vec<_>, _>>())
-                    .unwrap_or(Ok(vec![]))?;
-                Ok(PropType::Intersection(members))
-            }
-            "array" => {
-                let inner = Self::from_tagged_value(&v["element"])?;
-                Ok(PropType::Array(Box::new(inner)))
-            }
-            "tuple" => {
-                let elements = v["elements"]
-                    .as_array()
-                    .map(|a| {
-                        a.iter()
-                            .map(|e| {
-                                let modifier = e["modifier"].as_str();
-                                let kind = TupleElementKind::from_modifier(modifier)
-                                    .ok_or_else(|| format!("unknown tuple element modifier {modifier:?}"))?;
-                                let label = match e["label"].as_str() {
-                                    Some(label) => Some(
-                                        TupleLabel::new(label)
-                                            .ok_or_else(|| format!("'{label}' is not a tuple element label"))?,
-                                    ),
-                                    None => None,
-                                };
-                                Ok(TupleElement { element_type: Self::from_tagged_value(&e["type"])?, kind, label })
-                            })
-                            .collect::<Result<Vec<_>, std::string::String>>()
-                    })
-                    .unwrap_or(Ok(vec![]))?;
-                Ok(PropType::Tuple(elements))
-            }
-            "readonly" => {
-                let inner = Self::from_tagged_value(&v["element"])?;
-                Ok(PropType::Readonly(Box::new(inner)))
-            }
-            "object" => Ok(PropType::Object(Self::read_fields(&v["fields"])?)),
-            "named" => {
-                let name = v["name"].as_str().unwrap_or("").into();
-                Ok(PropType::Named { name, args: Self::read_list(&v["args"])? })
-            }
-            "function" => {
-                let type_params = read_type_params(&v["typeParams"]);
-                let params = Self::read_params(&v["params"])?;
-                let return_type = Box::new(Self::from_tagged_value(&v["returnType"])?);
-                Ok(PropType::Function { type_params, params, return_type })
-            }
-            "ref" => {
-                let name = v["name"].as_str().unwrap_or("Ref").to_owned();
-                let element = v["element"].as_str().map(|s| s.to_owned());
-                Ok(PropType::Ref { name, element })
-            }
-            "htmlAttributes" | "html_attributes" => {
-                let element = v["element"].as_str().unwrap_or("div").to_owned();
-                let omitted = v["omitted"]
-                    .as_array()
-                    .map(|a| a.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()).collect())
-                    .unwrap_or_default();
-                Ok(PropType::HtmlAttributes { element, omitted })
-            }
-            "literalUnion" | "literal_union" => {
-                let members = v["members"]
-                    .as_array()
-                    .map(|a| a.iter().filter_map(|v| v.as_str()).map(|s| s.to_owned()).collect())
-                    .unwrap_or_default();
-                let has_default = v["hasDefault"].as_bool().or_else(|| v["has_default"].as_bool()).unwrap_or(false);
-                Ok(PropType::LiteralUnion { members, has_default })
-            }
-            "opaque" => {
-                let raw = v["raw"].as_str().unwrap_or("").to_owned();
-                let reason = match v["reason"]["type"].as_str().unwrap_or("depthExceeded") {
-                    "conditionalType" => OpaqueReason::ConditionalType,
-                    "mappedType" => OpaqueReason::MappedType,
-                    "moduleAugmentation" => OpaqueReason::ModuleAugmentation,
-                    "runtimeDependent" => OpaqueReason::RuntimeDependent {
-                        function_name: v["reason"]["functionName"].as_str().unwrap_or("").to_owned(),
-                    },
-                    "unresolvableImport" => OpaqueReason::UnresolvableImport {
-                        specifier: v["reason"]["specifier"].as_str().unwrap_or("").to_owned(),
-                    },
-                    "pandaCodegenMissing" => OpaqueReason::PandaCodegenMissing,
-                    "indexedAccess" => OpaqueReason::IndexedAccess {
-                        expression: v["reason"]["expression"].as_str().unwrap_or("").to_owned(),
-                    },
-                    "unsupportedExpression" => OpaqueReason::UnsupportedExpression,
-                    _ => OpaqueReason::DepthExceeded,
-                };
-                Ok(OpaqueDetail::new(raw, reason))
-            }
-            other => Ok(OpaqueDetail::new(format!("unknown PropType kind: {}", other), OpaqueReason::DepthExceeded)),
-        }
-    }
-
-    /// A JSON array of types; a missing one is empty.
-    fn read_list(v: &serde_json::Value) -> Result<Vec<PropType>, std::string::String> {
-        v.as_array().map(|a| a.iter().map(Self::from_tagged_value).collect()).unwrap_or(Ok(vec![]))
-    }
-
-    /// An object type's fields, as `WireFields` writes them.
-    fn read_fields(v: &serde_json::Value) -> Result<Vec<ObjectField>, std::string::String> {
-        v.as_array()
-            .map(|a| {
-                a.iter()
-                    .map(|f| {
-                        Ok(ObjectField {
-                            name: f["name"].as_str().unwrap_or("").to_owned(),
-                            prop_type: Self::from_tagged_value(&f["propType"])?,
-                            required: f["required"].as_bool().unwrap_or(false),
-                            description: f["description"].as_str().unwrap_or("").to_owned(),
-                            readonly: f["readonly"].as_bool().unwrap_or(false),
-                            index_key: match f.get("indexKey") {
-                                Some(key) => Some(Box::new(Self::from_tagged_value(key)?)),
-                                None => None,
-                            },
-                        })
-                    })
-                    .collect()
-            })
-            .unwrap_or(Ok(vec![]))
-    }
-
-    /// A signature's parameters.
-    fn read_params(v: &serde_json::Value) -> Result<Vec<FunctionParam>, std::string::String> {
-        v.as_array()
-            .map(|a| {
-                a.iter()
-                    .map(|p| {
-                        Ok(FunctionParam {
-                            name: p["name"].as_str().map(str::to_owned),
-                            param_type: Self::from_tagged_value(&p["type"])?,
-                            optional: p["optional"].as_bool().unwrap_or(false),
-                            rest: p["rest"].as_bool().unwrap_or(false),
-                        })
-                    })
-                    .collect()
-            })
-            .unwrap_or(Ok(vec![]))
-    }
-}
-
-/// A signature's type parameter names.
-fn read_type_params(v: &serde_json::Value) -> Vec<std::string::String> {
-    v.as_array().map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_owned)).collect()).unwrap_or_default()
-}
-
-/// A number as `WireNumber` writes it; a missing or unreadable one is 0.
-fn read_number(v: Option<&serde_json::Value>) -> f64 {
-    match v {
-        Some(val) if val.is_string() => match val.as_str().unwrap_or("") {
-            "NaN" => f64::NAN,
-            "Infinity" => f64::INFINITY,
-            "-Infinity" => f64::NEG_INFINITY,
-            _ => 0.0,
-        },
-        Some(val) => val.as_f64().unwrap_or(0.0),
-        None => 0.0,
-    }
-}
-
 /// Feed `hasher` an object type's fields.
 fn hash_fields<H: std::hash::Hasher>(fields: &[ObjectField], hasher: &mut H) {
     use std::hash::Hash;
@@ -1637,8 +1328,8 @@ fn is_valid_identifier(name: &str) -> bool {
 }
 
 /// Why a type could not be resolved.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum OpaqueReason {
     /// TypeScript conditional type — needs type checker
     ConditionalType,
@@ -1729,7 +1420,7 @@ impl PropType {
 pub(crate) const TRUNCATED_KIND: &str = "truncated";
 
 /// One parameter of a [`PropType::Function`].
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FunctionParam {
     /// `None` for a destructured parameter, which has no single name.
     pub name: Option<std::string::String>,
@@ -1737,10 +1428,10 @@ pub struct FunctionParam {
     #[serde(rename = "type")]
     pub param_type: PropType,
     /// The parameter is written `name?: T`.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub optional: bool,
     /// The parameter is the rest parameter `...name: T[]`; its `type` is the array type as written.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub rest: bool,
 }
 
@@ -1839,17 +1530,6 @@ impl TupleElementKind {
             Self::Optional => Some("optional"),
             Self::Rest => Some("rest"),
             Self::Variadic => Some("variadic"),
-        }
-    }
-
-    /// The kind a `modifier` names; `None` for an unknown one.
-    fn from_modifier(modifier: Option<&str>) -> Option<Self> {
-        match modifier {
-            None => Some(Self::Required),
-            Some("optional") => Some(Self::Optional),
-            Some("rest") => Some(Self::Rest),
-            Some("variadic") => Some(Self::Variadic),
-            Some(_) => None,
         }
     }
 }
@@ -1951,7 +1631,7 @@ pub enum TruncationLimit {
 }
 
 /// A field in an object type.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectField {
     /// The field's name; for an index signature, the key parameter's (`key` in `[key: string]: T`).
@@ -1963,10 +1643,10 @@ pub struct ObjectField {
     /// The field's JSDoc description, empty when it has none.
     pub description: std::string::String,
     /// The field is written `readonly name: T`.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub readonly: bool,
     /// Set for an index signature `[name: K]: T`: the key type `K`. The field's `prop_type` is the value type `T`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub index_key: Option<Box<PropType>>,
 }
 
@@ -2011,7 +1691,7 @@ impl ObjectField {
 ///
 /// Four of them (`components_skipped`, `tier1_count`, `tier3_count`, `opaque_count`) are part of the output shape but
 /// the pipeline does not set them: they are always `0` in a real run.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtractionStats {
     /// How many components the output holds.

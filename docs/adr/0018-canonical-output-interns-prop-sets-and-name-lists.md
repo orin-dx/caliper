@@ -14,7 +14,7 @@ Canonical JSON version 2 writes each repeated list once and refers to it by id.
 - **Name lists.** An inheritance layer's `omitted` and a diagnostic's `affects` are ids into a `nameLists` table. A diagnostic with no `affects` has no field, as before.
 - **Ids** are 64-bit FNV-1a hashes written as 16 hex digits, like prop ids: of a set's (name, prop id) entries in name order, and of a list's names in order. The same content has the same id in every output and update, so a client merges tables. Two different sets or lists with one id fail serialization.
 - **Update and index.** `IncrementalUpdate` carries `propSets` and `nameLists` with every entry its components and diagnostics refer to. The session index (`initializeSessionIndex`) carries `nameLists` for its diagnostics.
-- **Reading.** `ExtractionOutput`'s `Deserialize` expands the ids back, so the Rust types stay inline as in ADR 0009. A name in two sets, or an id missing from its table, fails naming it.
+- **Reading.** The Rust types stay inline as in ADR 0009 and only write the tables; the TypeScript readers expand the ids. (`ExtractionOutput` once had a `Deserialize` that expanded them; nothing read it, and it was removed.)
 - `notableInherited` stays a name-to-prop-id map: it is 159 KB on Chakra. `--format rdt`, `--format storybook` and `--format toon` are unchanged.
 
 `SCHEMA_VERSION` is 2 (ADR 0017).

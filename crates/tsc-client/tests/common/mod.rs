@@ -36,17 +36,6 @@ pub fn spawn_count(cwd: &camino::Utf8Path) -> usize {
     std::fs::read_to_string(cwd.join("fake-tsc-spawns.log")).map_or(0, |contents| contents.lines().count())
 }
 
-/// Waits until the fake has logged at least `at_least` spawns, then lets a spawn that should not have happened show
-/// up. A child that is slow to start may not have logged yet when a short-deadline request has already returned.
-pub async fn settled_spawn_count(cwd: &camino::Utf8Path, at_least: usize) -> usize {
-    let give_up = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while spawn_count(cwd) < at_least && std::time::Instant::now() < give_up {
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    spawn_count(cwd)
-}
-
 /// Builds the `node_modules/typescript/{package.json,bin/tsc}` layout with the given
 /// version string and a copy of the real `fake-tsc` binary at `bin/tsc`. Returns
 /// `(tsc_path, cwd)`.
@@ -58,7 +47,7 @@ pub fn layout_with_version(dir: &tempfile::TempDir, version: &str) -> (Utf8PathB
         .expect("write package.json");
 
     let fake_tsc_src = std::path::PathBuf::from(env!("CARGO_BIN_EXE_fake-tsc"));
-    let tsc_dest = bin_dir.join(if cfg!(windows) { "tsc.exe" } else { "tsc" });
+    let tsc_dest = bin_dir.join("tsc");
     std::fs::copy(&fake_tsc_src, &tsc_dest).expect("copy fake-tsc binary into place");
 
     (
@@ -95,7 +84,7 @@ pub fn layout_without_binary(dir: &tempfile::TempDir, version: &str) -> (Utf8Pat
     std::fs::create_dir_all(&typescript_dir).expect("create node_modules/typescript");
     std::fs::write(typescript_dir.join("package.json"), format!(r#"{{"version": "{version}"}}"#))
         .expect("write package.json");
-    let tsc_path = typescript_dir.join("bin").join(if cfg!(windows) { "tsc.exe" } else { "tsc" });
+    let tsc_path = typescript_dir.join("bin").join("tsc");
     (
         Utf8PathBuf::from_path_buf(tsc_path).expect("temp path is UTF-8"),
         Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("temp path is UTF-8"),

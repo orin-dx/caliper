@@ -121,20 +121,6 @@ export interface JsExtractOptions {
   semanticWaitEmptyMs?: number
 }
 
-/** What a lazy session has indexed and resolved so far. `None` for an eager, unknown or uninitialized session. */
-export interface JsLazyStats {
-  /** The number of the session's current revision, one higher for every change that produced a new one. */
-  revision: number
-  /** Source files the session holds. */
-  files: number
-  /** Components found by parsing. */
-  components: number
-  /** Components resolved since the last edit that could change them. */
-  resolved: number
-  /** Dependency declaration files loaded for the names resolved components reached. */
-  dependencyFiles: number
-}
-
 /**
  * The tsconfigs, `package.json` files and lockfiles above the session's source directories: a watcher adds them, and
  * passes a change to one to `extractFileIncremental` like any other file, which rebuilds the session. Empty for an
@@ -161,23 +147,11 @@ export declare function sessionComponentAnswers(sessionId: number, keys: Array<s
 export declare function sessionComponentToon(sessionId: number, key: string): string | null
 
 /**
- * Every component key `sessionDocgenInfo` answers, sorted. A lazy session resolves only imported-member aliases to
- * decide; the rest come from parsing alone. Empty for an uninitialized session; errors for an unknown or closed one.
- */
-export declare function sessionComponentKeys(sessionId: number): Array<string>
-
-/**
  * The session's components with these keys as react-docgen-typescript documents them (`__docgenInfo`, which
  * Storybook converts to argTypes), as a JSON object keyed by component key. A key the session doesn't have is left
  * out; so is every key before the session is initialized. Errors for an unknown or closed session.
  */
 export declare function sessionDocgenInfo(sessionId: number, keys: Array<string>): string
-
-/**
- * What a lazy session has indexed and resolved so far, as [`JsLazyStats`]. `null` for an eager, unknown or
- * uninitialized session.
- */
-export declare function sessionStats(sessionId: number): JsLazyStats | null
 
 /**
  * Resolves `count` components spread evenly over the session's keys, without returning them: a lazy session then

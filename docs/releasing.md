@@ -27,10 +27,10 @@ The workflow file must stay named `callisto-release.yml`. Callisto verifies each
 | Output | Where | Notes |
 | --- | --- | --- |
 | Crates | crates.io | `caliper-docgen-core`, `-tsc-client`, `-semantic`, `caliper-docgen` |
-| npm packages | npm, with provenance | CLI wrapper and its five platform packages, napi binding and its platform packages, Vite plugin, Storybook addon |
+| npm packages | npm, with provenance | CLI wrapper and its four platform packages, napi binding and its platform packages, Vite plugin, Storybook addon |
 | Tags | this repository | One per package, such as `cargo/caliper-docgen@x.y.z` and `npm/caliper-docgen@x.y.z` |
 | GitHub Release | this repository | One per version, on the tag `cargo/caliper-docgen@x.y.z`; notes are the `## x.y.z` section of `crates/cli/CHANGELOG.md` |
-| CLI binaries | the GitHub Release | `caliper-docgen-<target>.tar.gz` for `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` and `x86_64-pc-windows-msvc`; each holds the binary at the archive root |
+| CLI binaries | the GitHub Release | `caliper-docgen-<target>.tar.gz` for `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`; each holds the binary at the archive root |
 
 Tag names do not change. The Homebrew tap reads the `npm/caliper-docgen@x.y.z` tag (`CONTRIBUTING.md`, Releases).
 

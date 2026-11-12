@@ -1,19 +1,12 @@
 # Storybook parity
 
-`packages/storybook/scripts/storybook-parity.mjs` measures the Storybook addon against Storybook's own docgen on real repositories: how often the addon hands a component on, what it documents that Storybook doesn't, where the two disagree, and what each costs. It is not run in CI; it needs the corpora `scripts/corpora.py setup` fetches, installed, plus the native binding.
-
-```bash
-pnpm --filter caliper-docgen-storybook build
-node packages/storybook/scripts/storybook-parity.mjs --corpora .corpora/repos --sample 120 --out report/storybook-parity
-```
-
-Output: `<out>.json` (every number) and `<out>.md` (tables). Storybook writes its cache into each corpus's `node_modules/.cache`, so the run needs write access there.
+What the Storybook addon adds to, and costs against, Storybook's own docgen on real repositories: how often the addon hands a component on, what it documents that Storybook doesn't, where the two disagree, and what each costs. The numbers below were measured by hand on the corpora `scripts/corpora.py setup` fetches, installed, and are the record; the measurement is not run in CI or in the weekly. `scripts/weekly.py` records the addon's configuration of the resolver (`collapse` `none`) against the checker, and `just bench` its time and memory.
 
 ## What is compared
 
 | Side | How it runs |
 | --- | --- |
-| Storybook's docgen | `@storybook/react`'s own `docgen-worker.js` (react-component-meta), unmodified, called as a middleware. It needs the TypeScript 5/6 compiler API, so `typescript` is redirected to `apps/oracle`'s TypeScript 6 (`--typescript` overrides); this package's TypeScript 7 has none. |
+| Storybook's docgen | `@storybook/react`'s own `docgen-worker.js` (react-component-meta), unmodified, called as a middleware. It needs the TypeScript 5/6 compiler API, so `typescript` is redirected to `apps/oracle`'s TypeScript 6; this package's TypeScript 7 has none. |
 | The addon | `dist/provider.js`, the real `createDocgenProvider`, with Storybook's `meta.component` resolver and argTypes converter. |
 
 Variants of the addon:
@@ -35,7 +28,7 @@ Two story sets per corpus:
 
 Per story, both sides' argTypes are reduced to control kind (`type.name`), options, required, type text, default and whether a description exists, then diffed prop by prop. **Extra props** are props only the addon lists. The report also has the session-level fallback rate: components whose extraction carries a warning or error, over all components, without any story.
 
-The report sorts every disagreement in a table of **deliberate** differences and ones **for review** (`DOM_ATTRIBUTE` and `normalizeType` in the script):
+The report sorts every disagreement in a table of **deliberate** differences and ones **for review**:
 
 - Deliberate: extra props that are DOM, React or ARIA attributes (the addon's `htmlAttributes: 'full'` default, `packages/storybook/src/options.ts`; `HtmlAttributeMode` in `crates/core/src/types/options.rs`), extra props inherited from a library, type text that differs only in quotes, spacing, `undefined` or union order, and Storybook-listed DOM attributes the addon left out on purpose.
 - For review: props Storybook lists that aren't DOM attributes, type text that differs beyond formatting, `required` differing, and defaults only Storybook has. Each is listed by story and prop in the Markdown (the first 12) and in full in the JSON (`details`).
@@ -63,7 +56,7 @@ Spectrum is left out: its install here resolves few dependencies (1323 of 1702 c
 
 Both codes cause it. Of the components that would newly be handed on, `INDEXED_ACCESS_OPAQUE` is on 196 (Mantine), 596 (Chakra), 1369 (shadcn) and 57 (antd), and `OPAQUE_TYPE` on 227, 595, 354 and 120. The messages behind them are mostly not the component's own props: React's `DO_NOT_USE_OR_YOU_WILL_BE_FIRED_EXPERIMENTAL_REACT_NODES[keyof ...]` indexed access that every component with DOM attributes carries, mapped types over style props (342,465 on Chakra), and conditional types in Mantine's theme. Leaving those out and counting only standalone `keyof`, unparsable raw types and other indexed accesses still hands on 213 of 351 (Mantine), 577 of 678 (Chakra), 74 of 1914 (shadcn, 3.9%) and 23 of 285 (antd, 8.1%) in addition to today's.
 
-What a hand-off costs, the same sampled components through Storybook's own docgen and the addon (`storybook-parity.mjs --variants caliper`, Apple silicon): the first request, which builds Storybook's TypeScript program, takes 0.8 s (Mantine, 6 stories), 2.5 s (antd, 41) and 3.0 s (shadcn, 56), against 92 to 136 ms for the addon's session; the later requests take 1 to 20 ms on either side. Peak RSS is 439 to 1153 MB against 185 to 339 MB. A handed-on component is answered by Storybook's docgen, so the first Storybook load pays that program build as it did before the addon.
+What a hand-off costs, the same sampled components through Storybook's own docgen and the addon (the `caliper` variant, Apple silicon): the first request, which builds Storybook's TypeScript program, takes 0.8 s (Mantine, 6 stories), 2.5 s (antd, 41) and 3.0 s (shadcn, 56), against 92 to 136 ms for the addon's session; the later requests take 1 to 20 ms on either side. Peak RSS is 439 to 1153 MB against 185 to 339 MB. A handed-on component is answered by Storybook's docgen, so the first Storybook load pays that program build as it did before the addon.
 
 Decision: leave the rule as it is. Counting opaque props as incomplete would hand on 51% to 91% of components on four of five corpora, which is the addon doing nothing for most of them, to fix a control on the few props that are opaque. A per-prop answer (keep the addon's props, take Storybook's for the opaque ones) cannot be built in this package: the RDT `docgenInfo` the session returns gives an opaque prop the same shape as any other (its `type.name` is the raw type text) and a diagnostic names no prop, so the addon cannot tell which prop to replace. That needs the extractor to mark the prop, which is a `crates/core` change. Until then an opaque prop keeps the `object` control with its type text in the table.
 
@@ -93,7 +86,7 @@ Against Storybook's docgen (`caliper`, sampled components):
 
 What this says: **few defects, many deliberate differences.** The 14,795 extras on shadcn are DOM attributes by design (`htmlAttributes: 'none'` takes them to a handful). Of the props Storybook lists, the addon lacks one (antd `Masonry` `children`, from `PropsWithChildren<T>`). The review lists in the JSON hold the rest: `required` on `Segmented.options` (the addon marks it optional, Storybook required), 17 shadcn defaults Storybook reports that the addon doesn't (recharts' `ChartTooltip` ones among them), and type text that differs beyond the normaliser. Read from `details.type`, most of that last group is how the two print a type, not what it is: a `React.` qualifier or not (37 of 79 on shadcn, 82 of 257 on antd), `x?: T` against `x?: T | undefined`, `Array<T>` against `T[]`, and a long type cut short; the rest is for a person to read. The sampled antd stories dropped from 84 to 67 when the generator stopped importing a file's default export under another component's name; before that, 13 of the 14 "missing" antd props were `Wrapper` compared against `useNotification`.
 
-**Why the degraded rate fell from 42.1% / 27.4% to 4.8% / 4.0%.** The earlier numbers are right for their commit: this harness run against `e31ccb27` (main through #155) gives 42.1% (797 of 1892) for shadcn and 27.4% (68 of 248) for antd, with 13,244 props on shadcn, as recorded below. The rule did not change (a warning or error that affects the component). The extractor did: from then to now the leading reasons on shadcn went from 382 `Cannot find the component … whose props are referenced` and 344 `cannot be used as a component` to 75 and 1, and the `Cannot resolve type … unexpanded named reference` warnings from 197 to 15. Resolver work in that period (Radix and Base UI members, polymorphic factory results, `Pick` and `Record` of React bases, wrapper-call props) is the likely cause; I did not bisect which change removed which warning. The props listed grew from 13,244 to 392,427 at the same time (`htmlAttributes` full and dependencies loaded by default), so the two rates measure different amounts of work.
+**Why the degraded rate fell from 42.1% / 27.4% to 4.8% / 4.0%.** The earlier numbers are right for their commit: the same measurement against `e31ccb27` (main through #155) gives 42.1% (797 of 1892) for shadcn and 27.4% (68 of 248) for antd, with 13,244 props on shadcn, as recorded below. The rule did not change (a warning or error that affects the component). The extractor did: from then to now the leading reasons on shadcn went from 382 `Cannot find the component … whose props are referenced` and 344 `cannot be used as a component` to 75 and 1, and the `Cannot resolve type … unexpanded named reference` warnings from 197 to 15. Resolver work in that period (Radix and Base UI members, polymorphic factory results, `Pick` and `Record` of React bases, wrapper-call props) is the likely cause; I did not bisect which change removed which warning. The props listed grew from 13,244 to 392,427 at the same time (`htmlAttributes` full and dependencies loaded by default), so the two rates measure different amounts of work.
 
 ### 2026-10-24, main through #152 plus the addon options of #155
 

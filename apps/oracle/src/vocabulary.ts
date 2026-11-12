@@ -30,16 +30,11 @@ export const ROW_VERDICTS = [
 ] as const
 export type RowVerdict = (typeof ROW_VERDICTS)[number]
 
-/** What a prop's reference looks like to a reader (src/reference-judge.ts). */
-export const OUTCOMES = ['correct', 'less precise', 'wrong', 'contested', 'no reference', 'layer', 'missing'] as const
-export type Outcome = (typeof OUTCOMES)[number]
-
 export const vocabulary = {
   verdicts: VERDICTS,
   agree: AGREE,
   severity: SEVERITY,
   rowVerdicts: ROW_VERDICTS,
-  outcomes: OUTCOMES,
 }
 
 export const isAgreement = (verdict: string): boolean => AGREE.some((agreed) => agreed === verdict)

@@ -18,6 +18,7 @@ const OPTION_KEY_SET = {
   lazy: true,
   warmUp: true,
   fillAfter: true,
+  prefetchStories: true,
   semanticTypes: true,
   tscPath: true,
   semanticWaitMs: true,

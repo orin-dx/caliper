@@ -1,7 +1,101 @@
 import { existsSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { logger } from 'storybook/internal/node-logger'
+import type { IndexEntry, StoryIndex } from 'storybook/internal/types'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CaliperStorybookOptions } from '../../src/index.js'
-import { experimental_docgenProvider, isDocgenProviderEnabled } from '../../src/preset.js'
+import { experimental_devServer, experimental_docgenProvider, isDocgenProviderEnabled } from '../../src/preset.js'
+
+/** Storybook's docgen service as the preset finds it: every `getService` call, and the extractions asked of it. */
+const core = vi.hoisted(() => ({
+  services: [] as string[],
+  extracted: [] as string[],
+  missing: false,
+}))
+
+vi.mock('storybook/internal/core-server', () => ({
+  getService: (id: string, options: { internal?: boolean }) => {
+    core.services.push(`${id} internal=${String(options.internal)}`)
+    if (core.missing) throw new Error(`no service ${id}`)
+    return {
+      commands: {
+        extractDocgen: async (input: { id: string }) => {
+          core.extracted.push(input.id)
+          return { id: input.id }
+        },
+      },
+    }
+  },
+}))
+
+function story(id: string): IndexEntry {
+  const title = id.split('--')[0]!
+  return { type: 'story', subtype: 'story', id, name: id, title, importPath: `./src/${title}.stories.tsx` }
+}
+
+const stories: StoryIndex = {
+  v: 5,
+  entries: Object.fromEntries(
+    ['button--primary', 'button--ghost', 'card--basic', 'menu--basic'].map((id) => [id, story(id)]),
+  ),
+}
+
+function devServerOptions(extra: CaliperStorybookOptions = {}) {
+  const asked: string[] = []
+  return {
+    asked,
+    options: {
+      ...extra,
+      presets: {
+        apply: async (extension: 'storyIndexGenerator') => {
+          asked.push(extension)
+          return { getIndex: async () => stories }
+        },
+      },
+    },
+  }
+}
+
+afterEach(() => {
+  core.services.length = 0
+  core.extracted.length = 0
+  core.missing = false
+  vi.restoreAllMocks()
+})
+
+describe('prefetch at dev server start', () => {
+  it("documents the opening story's component through Storybook's docgen service by default", async () => {
+    const app = { name: 'app' }
+    const { options, asked } = devServerOptions()
+    expect(await experimental_devServer(app, options)).toBe(app)
+    await vi.waitFor(() => expect(core.extracted).toEqual(['button']))
+    expect(core.services).toEqual(['core/docgen internal=true'])
+    expect(asked).toEqual(['storyIndexGenerator'])
+  })
+
+  it('documents the first `prefetchStories` components in index order', async () => {
+    await experimental_devServer({}, devServerOptions({ prefetchStories: 2 }).options)
+    await vi.waitFor(() => expect(core.extracted).toEqual(['button', 'card']))
+  })
+
+  it('asks nothing with `prefetchStories: 0`', async () => {
+    const { options, asked } = devServerOptions({ prefetchStories: 0 })
+    await experimental_devServer({}, options)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(core.services).toEqual([])
+    expect(asked).toEqual([])
+  })
+
+  it('logs and returns the app when Storybook has no docgen service', async () => {
+    core.missing = true
+    const debug = vi.spyOn(logger, 'debug').mockImplementation(() => {})
+    const app = { name: 'app' }
+    expect(await experimental_devServer(app, devServerOptions().options)).toBe(app)
+    await vi.waitFor(() =>
+      expect(debug).toHaveBeenCalledWith('[caliper-docgen] prefetch stopped: no service core/docgen'),
+    )
+    expect(core.extracted).toEqual([])
+  })
+})
 
 describe('preset', () => {
   it('registers the provider after existing ones, with only cloneable options', async () => {
@@ -47,6 +141,7 @@ describe('preset', () => {
       lazy: false,
       warmUp: true,
       fillAfter: 5,
+      prefetchStories: 3,
       semanticTypes: 'on-demand',
       tscPath: '/bin/tsc',
       semanticWaitMs: 7,
@@ -55,6 +150,13 @@ describe('preset', () => {
     } satisfies Record<keyof CaliperStorybookOptions, unknown>
     const [ours] = await experimental_docgenProvider([], options)
     expect(ours?.options).toEqual(options)
+  })
+
+  it("leaves out Storybook's own cache, which shares the options object with the addon's", async () => {
+    const storybookCache = { get: async () => undefined, set: async () => undefined }
+    const [ours] = await experimental_docgenProvider([], { srcDirs: ['lib'], cache: storybookCache })
+    expect(ours?.options).toHaveProperty('cache', undefined)
+    expect(structuredClone(ours?.options)).toEqual({ srcDirs: ['lib'] })
   })
 
   it('turns on the docgen server', async () => {
