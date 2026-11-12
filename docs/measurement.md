@@ -144,21 +144,17 @@ Recall against RDT stays information. A local run on antd and shadcn at the comm
 
 **Which configuration this describes.** The CLI, the NAPI binding and the Vite plugin collapse by default (`collapseInheritedProps: 'dependencies'`). The Storybook addon does not: it defaults to `'none'` (`packages/storybook/src/provider.ts`), which lists every inherited prop with its type, so in a Storybook props table no prop is layer-only. What follows describes what a default CLI, NAPI or agent consumer gets; the addon's configuration is the fully expanded run, reported beside it.
 
-A collapsed inheritance layer (a dependency source declaring more than 30 props, `docs/architecture/resolver-type-resolution.md`, "Collapse") reaches a reader as a list of names, `inheritance[].members`, with no types. `scripts/layer_only_props.py` (`apps/oracle/src/layer-only.ts`) takes every such prop that the component's `props` and `notableInherited` do not list, over all components of a corpus, and sorts it into two classes by a rule that reads only the layer's file, the layer's type name and the prop's name. The first clause that fits decides:
+A collapsed inheritance layer (a dependency source declaring more than 30 props, `docs/architecture/resolver-type-resolution.md`, "Collapse") reaches a reader as a list of names, `inheritance[].members`, with no types. A classifier measured every such prop that the component's `props` and `notableInherited` do not list, over all components of a corpus, and sorts it into two classes by a rule that reads only the layer's file, the layer's type name and the prop's name. The first clause that fits decides:
 
 1. **dom file** → ambient. The layer is declared in `@types/react`, or in react-aria's `@react-types/shared/src/dom.d.ts`.
 2. **dom type** → ambient. The layer's type is `GlobalDOMEvents`, `DOMAttributes`, `AriaAttributes`, `AllHTMLAttributes`, `SVGAttributes`, `*HTMLAttributes` or `Aria*Attributes`.
 3. **style type** → ambient. The layer's type is `*StyleProps`, `SystemProps`, or `Space|Layout|Color|Typography|Border|Flex|Grid|Position|Shadow|Background` followed by `Props`.
-4. **global attribute** → ambient. The prop is one every element has (`GLOBAL_ATTRIBUTES` in `layer-only.ts`: `className`, `style`, `id`, `title`, `lang`, `dir`, `hidden`, `tabIndex`, `role`, `slot`, …), or starts `aria-` or `data-`. `value`, `defaultValue`, `type`, `name` and `disabled` are not in it: they are element-specific, and a dependency's component often uses them as its own API.
+4. **global attribute** → ambient. The prop is one every element has (`GLOBAL_ATTRIBUTES` in `crates/core/src/resolver/ambient.rs`: `className`, `style`, `id`, `title`, `lang`, `dir`, `hidden`, `tabIndex`, `role`, `slot`, …), or starts `aria-` or `data-`. `value`, `defaultValue`, `type`, `name` and `disabled` are not in it: they are element-specific, and a dependency's component often uses them as its own API.
 5. **dependency api** → API. Anything else a collapsed layer names: the modes, state and composition props of a dependency's component.
 
-The 20 API props that matter most are chosen by category first (state, then mode, composition, constraint, data, other, by the prop's name), then by the number of components it is layer-only in. The report gives each its declaring layer, its declared type (read from the layer's `.d.ts`), and why it matters.
+The 20 API props that matter most were chosen by category first (state, then mode, composition, constraint, data, other, by the prop's name), then by the number of components it is layer-only in.
 
-```bash
-scripts/layer_only_props.py --bin target/release/caliper-docgen --corpus antd --corpus shadcn [--runs 3]
-```
-
-Measured on antd and shadcn (Mantine, Chakra and Spectrum are not run). These figures predate the last change to the count: an `Omit` now drops the omitted props from a collapsed layer's `members` (`resolver/alias.rs`), and `expandedDependencySources` skips collapsed sources that list a curated `className`. The layer-only, API and "listed in full" rows, and the "ambient by clause 1 to 3" figure of 13 the proposal below relies on, have not been re-measured since; re-run `scripts/layer_only_props.py` before quoting them.
+Measured once, by hand, on antd and shadcn (Mantine, Chakra and Spectrum were not run); the classifier is not kept, and its rule is `crates/core/src/resolver/ambient.rs`. These figures predate the last change to the count: an `Omit` now drops the omitted props from a collapsed layer's `members` (`resolver/alias.rs`), and `expandedDependencySources` skips collapsed sources that list a curated `className`. The layer-only, API and "listed in full" rows, and the "ambient by clause 1 to 3" figure of 13 the proposal below relies on, have not been re-measured since, so quote them as of that commit.
 
 |                                                     |      antd |      shadcn |
 | --------------------------------------------------- | --------: | ----------: |
@@ -261,7 +257,7 @@ RDT's memory is its process's peak RSS and its time excludes Node's start; Calip
 
 ## Collapse by relevance, 2026-11-02
 
-A dependency source used to collapse into a layer of names once it declared more than 30 props. It now collapses when it is ambient (DOM and ARIA attribute families, style systems; clauses in `crates/core/src/resolver/ambient.rs`) and past 30 props, or when it is not ambient but past 200 props (`LARGE_API_SOURCE`). Every other dependency source is listed with its types. The rule is checked by a fixture of the verdicts of the oracle's classifier (`crates/core/src/resolver/ambient_parity.json`); that classifier is `apps/oracle/src/layer-only.ts`, and its write-up is "Layer-only props" above.
+A dependency source used to collapse into a layer of names once it declared more than 30 props. It now collapses when it is ambient (DOM and ARIA attribute families, style systems; clauses in `crates/core/src/resolver/ambient.rs`) and past 30 props, or when it is not ambient but past 200 props (`LARGE_API_SOURCE`). Every other dependency source is listed with its types. The rule is checked by a fixture of the verdicts of the oracle's classifier (`crates/core/src/resolver/ambient_parity.json`); that classifier's write-up is "Layer-only props" above.
 
 **Who it changes.** The Storybook addon runs with `collapseInheritedProps: none` (`packages/storybook/src/provider.ts`), which lists every inherited prop, so the rule does not change what the addon shows. The output is byte-identical between the two builds on all five corpora in that mode. The rule changes the CLI and NAPI default, and so what agents and TOON readers see.
 

@@ -3,9 +3,9 @@
 //! which is the API a dependency's component exposes (its modes, state and composition).
 //!
 //! Which clause fits reads only the source's file, its type name and a prop's name; the resolver adds its size (below). It
-//! is the rule measured on the `measure/layer-only-props` branch (`apps/oracle/src/layer-only.ts` and the "Layer-only
-//! props" section of `docs/measurement.md`, neither on this branch yet); the test
-//! `the_rule_gives_the_clause_the_oracles_classifier_gives` keeps this module equal to that classifier. The first clause that fits decides:
+//! is the rule measured in the "Layer-only props" section of `docs/measurement.md`; the test
+//! `the_rule_gives_the_clause_the_oracles_classifier_gives` keeps this module equal to that classifier's recorded
+//! verdicts. The first clause that fits decides:
 //!
 //! 1. **dom file**: the source's file is `@types/react`, or react-aria's `@react-types/shared/src/dom.d.ts`
 //! 2. **dom type**: the source's type is a DOM family: `GlobalDOMEvents`, `DOMAttributes`, `AriaAttributes`,
@@ -188,13 +188,11 @@ mod tests {
         assert_eq!(classify(file, type_name, prop), expected);
     }
 
-    /// `ambient_parity.json` holds the verdict of the oracle's TypeScript classifier (`classify` in
-    /// `apps/oracle/src/layer-only.ts` on the `measure/layer-only-props` branch) for every distinct (file, type, prop) a
-    /// collapsed layer names on antd and shadcn, plus synthetic edge cases (`/p/node_modules/x/index.d.ts`) for the
-    /// style-system and DOM-type clauses, which those two corpora do not exercise (the verdicts are the classifier's,
-    /// not written by hand). Chakra, Mantine and Spectrum are not in the data. This module must give the same clause
-    /// for each. To regenerate: run that classifier over `extract --json` outputs of antd and shadcn and over the
-    /// edge-case list, and write rows of `file`, `type`, `prop`, `kind` and `why`.
+    /// `ambient_parity.json` holds the verdicts of the TypeScript classifier of the "Layer-only props" measurement
+    /// (`docs/measurement.md`) for every distinct (file, type, prop) a collapsed layer names on antd and shadcn, plus
+    /// synthetic edge cases (`/p/node_modules/x/index.d.ts`) for the style-system and DOM-type clauses, which those two
+    /// corpora do not exercise (the verdicts are the classifier's, not written by hand). Chakra, Mantine and Spectrum
+    /// are not in the data. This module must give the same clause for each.
     #[test]
     fn the_rule_gives_the_clause_the_oracles_classifier_gives() {
         let rows: Vec<serde_json::Value> = serde_json::from_str(include_str!("ambient_parity.json")).unwrap();
