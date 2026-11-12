@@ -1,0 +1,110 @@
+{
+  "cli_version": "0.13.3-nightly.202611110616.7aed2fb15",
+  "checkpoint_id": "01M76Q7WD17VCH3HGBWGKK20QE",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-12T01:51:42.951402Z",
+  "branch": "feat/ship-tsrs-optional-dependency",
+  "checkpoints_count": 2,
+  "save_step_count": 69,
+  "files_touched": [
+    ".github/workflows/ci.yml",
+    "justfile",
+    "scripts/verify-checker-install.sh"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "47d9023a8fca",
+  "checkpoint_transcript_start": 22297,
+  "transcript_lines_at_start": 22297,
+  "compact_transcript_start": 1871,
+  "token_usage": {
+    "input_tokens": 2,
+    "cache_creation_tokens": 7695,
+    "cache_read_tokens": 866207,
+    "output_tokens": 1276,
+    "api_call_count": 1,
+    "subagent_tokens": {
+      "input_tokens": 12,
+      "cache_creation_tokens": 34784,
+      "cache_read_tokens": 762779,
+      "output_tokens": 1259,
+      "api_call_count": 6
+    }
+  },
+  "redaction": {
+    "replacements": 26,
+    "layers": {
+      "betterleaks": 12,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 491
+  },
+  "summary": {
+    "intent": "Prove that a startup prefetch can make Storybook's first docgen request land with the component props already available, and keep PRs #428, #430, #431 and #432 mergeable with main.",
+    "outcome": "The prefetch works in a real Storybook 11 dev server and is on PR #432 with an option and a patch changeset. #428, #430 and #431 were merged with main with no conflicts. A second defect was split out to trail #367 with a worker running. Review and merge of #428, #430, #431, #432 and #396 are waiting on the user.",
+    "learnings": {
+      "repo": [
+        "The addon could not start in any real `storybook dev`: Storybook passes its own `cache` object to the native session as the addon's boolean `cache`, and the session refuses it. This is fixed in #432 with a patch changeset.",
+        "With the default `fallback: 'degraded'`, ChakraButton goes to React's docgen even when the checker answered. The structural \"Cannot find the component 'Button'\" warning stays on the merged answer and the provider reads it as degraded. The prefetch measurements used `fallback: 'never'`.",
+        "The fix for #367 is in core, in the provenance of diagnostics: diagnostics the checker superseded drop, and ones about what the checker couldn't read stay. It adds an exhaustive `DiagnosticCode` classification with no wildcard arm, so a new code forces a decision.",
+        "The prefetch hooks in through a preset's `experimental_devServer`, which Storybook runs before the builders start. It asks `core/docgen` for the opening story's component.",
+        "`prefetchStories` defaults to 1. Prefetching 3 held about 200 MiB more at idle and slowed a story opened at startup.",
+        "The store has no Storybook 11 builder, so the harness used builder-vite 10.6.2 with its mock extraction stubbed.",
+        "Timing: the browser's first docgen request comes about 2.2 s after server start, and about 1.2 s after the prefetch starts. A cold ChakraButton through the prefetch takes about 1.0 s. Memory overhead is +17 to +22 MiB at peak, inside the 30 MiB limit.",
+        "Whichever of #428 and #431 merges second will overlap in `docs/measurement.md`."
+      ],
+      "code": [],
+      "workflow": [
+        "A worker waiting on its own background work will resend the same report and spend tokens, so stop it once its result is recorded.",
+        "BLOCKED on the PRs is the expected review and Entire Gates block, not a conflict.",
+        "Tests that depend on an external binary can silently return early when it is missing. #430's real-tsrs test did not run because there is no `tsrs` binary and `TSRS_BIN` was unset, so its CI is the real check."
+      ]
+    },
+    "friction": null,
+    "open_items": null
+  }
+}
