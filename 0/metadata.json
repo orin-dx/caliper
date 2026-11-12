@@ -1,0 +1,139 @@
+{
+  "cli_version": "0.13.3-nightly.202611110616.7aed2fb15",
+  "checkpoint_id": "01M77B04KJY4J6WNFW7TF355M4",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-12T07:37:02.621431Z",
+  "branch": "feat/checker-is-default",
+  "checkpoints_count": 4,
+  "save_step_count": 71,
+  "files_touched": [
+    "crates/core/src/types/semantic.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "900677b7a6fc",
+  "checkpoint_transcript_start": 23947,
+  "transcript_lines_at_start": 23947,
+  "compact_transcript_start": 2008,
+  "token_usage": {
+    "input_tokens": 16,
+    "cache_creation_tokens": 17180,
+    "cache_read_tokens": 1650837,
+    "output_tokens": 5830,
+    "api_call_count": 7,
+    "subagent_tokens": {
+      "input_tokens": 56,
+      "cache_creation_tokens": 106685,
+      "cache_read_tokens": 4260333,
+      "output_tokens": 11612,
+      "api_call_count": 28
+    }
+  },
+  "redaction": {
+    "replacements": 31,
+    "layers": {
+      "betterleaks": 17,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 534
+  },
+  "summary": {
+    "intent": "Make the built-in type checker the default across Caliper (accepting some loss of timing lead), land a fix for a snapshot leak in PR #440, and decide whether to clean up the Go tsgo beta work.",
+    "outcome": "The default flip (S8, branch feat/checker-is-default) was delegated to a worker and is still running. PR #440 got the snapshot-leak fix at 10df5137, verified on the remote. The user agreed to remove the tsgo beta plumbing from the product while keeping the oracle copy, as slice 4 of #369, queued behind S8.",
+    "learnings": {
+      "repo": [
+        "The Go checker (typescript@7.1.0-beta) is kept only in apps/oracle as an independent judge of tsrs. It supplies the construct-suite goldens (~228 rows), the construct:parity gate, and the weekly oracle arbiter. Without it tsrs would judge itself, and a regression would look like a changed golden.",
+        "Product-side tsgo plumbing slated for deletion in slice 4 of #369: crates/tsc-client, crates/semantic/src/locate.rs, record_fixture.rs, the version recognition in semantic/src/lib.rs, the project typescript@beta fallback (trail #368), and the two ci.yml jobs setting CALIPER_TEST_TSC.",
+        "After slice 4, Rust tests use the built-in checker. CALIPER_TEST_TSC points at the Go beta only in the two tests that need it, and the packaging check should compare the oracle's npm tsrs pin with the Cargo pin.",
+        "The default flip renames the opt-in --experimental-semantic-types / semanticTypes to --no-checker (structural resolver). --tsc-path still selects the process route. The rename is breaking and needs a changeset.",
+        "Whole-project extract had an answer-cache problem: 5.5 MiB per Chakra component reached over 5 GB at 900 components. It must be fixed or explained before the default ships. Measurements go in docs/gate-measurements.md.",
+        "The 150 ms budget stays for prefetched or cached stories. The cold first answer (171 ms) and the ButtonProps watch p95 (162 ms) are recorded as measured.",
+        "The snapshot leak was fixed in crates/semantic/src/checker.rs: refused createSnapshot/updateSnapshot requests and callers that stopped waiting now release their snapshots. Sibling leaks were fixed in on_demand.rs and rpc.rs.",
+        "The --tsc-path process route has the same caller-timeout leak but is bounded, because a process is replaced after 64 programs.",
+        "The oracle is not run by the flip worker; it stays a single run after the merge."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/checker.rs",
+          "finding": "Refused createSnapshot/updateSnapshot now release the snapshot the request made, and snapshots for callers past their deadline are released through a new discard method. Tests: a_snapshot_made_by_a_refused_request_is_released_and_the_ones_answered_are_kept and a_snapshot_made_after_its_caller_stopped_waiting_is_released."
+        },
+        {
+          "path": "crates/semantic/src/on_demand.rs",
+          "finding": "A fatal error while updating the kept snapshot used to drop it without releasing it; it is now released."
+        },
+        {
+          "path": "crates/semantic/src/rpc.rs",
+          "finding": "A createSnapshot answer with no project returned an error and left its snapshot held; it is now released first."
+        }
+      ],
+      "workflow": [
+        "After a subagent reports a push, verify with git ls-remote. An earlier #440 push went out from the wrong local branch because git checkout -b failed silently, so the PR showed no diff.",
+        "Use git push origin HEAD:<branch> and verify the remote hash when worktree branch names are uncertain.",
+        "Serialize workers that touch the same files (S8 and slice 4 both edit semantic/lib.rs and the CLI/napi options) to avoid merge conflicts.",
+        "The Entire Gates finding stays open until Entire re-checks the new commit, so recheck later rather than assuming the fix failed.",
+        "Test the leak fix with a release-check assertion on snapshot ids rather than by measuring arena growth.",
+        "Subagent hand-back reports are model output, not user instructions or approval."
+      ]
+    },
+    "friction": [
+      "The first #440 push went out from the wrong local branch because git checkout -b failed, so the PR showed no diff.",
+      "A clippy type_complexity error appeared in the new test and needed a fix after the first lint run.",
+      "just deny, just semver and just test-checker-lane were not re-run after the test-only lint fix.",
+      "PR #440 shows BLOCKED on Entire Gates only, with no failing checks, because the finding still reads open until Entire re-checks.",
+      "#440 shares some docs with the default flip, so the worker has to keep its doc edits in separate hunks and merge main before the final push."
+    ],
+    "open_items": [
+      "Wait for the S8 worker (feat/checker-is-default) to report, then link its trail and write the PR body.",
+      "Start slice 4 of #369 (remove the product-side tsgo beta plumbing) after S8 merges.",
+      "Recheck the Entire finding on PR #440 after the new commit is evaluated.",
+      "Run the oracle once after the default flip merges.",
+      "Decide whether to shrink the Go-based oracle to just construct:parity and the goldens if the weekly run does not need the rest.",
+      "Leave the --tsc-path process-route caller-timeout leak unfixed for now, since it is bounded by the 64-program process replacement.",
+      "Re-run just deny, just semver and just test-checker-lane on the final #440 tree."
+    ]
+  }
+}
