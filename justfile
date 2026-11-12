@@ -59,7 +59,7 @@ test-rust:
 test-napi:
     cargo nextest run -p caliper-docgen-napi --locked
 
-# Run the Python tests for the weekly and agent-eval scripts (standard library only, no dependencies)
+# Run the Python tests for the scripts (standard library only, no dependencies)
 test-py:
     python3 -m unittest discover -s scripts -p 'test_*.py'
 

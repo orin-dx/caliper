@@ -200,6 +200,22 @@ just bench my-branch       # a branch
 
 The 1.10× and 1.20× thresholds come from a calibration made when the bench ran with `--no-cache --no-load-dependencies` (with nothing changed, the ratio stayed inside 1.04 for time, 95th percentile of 100 trials per corpus on CI and a laptop, and inside 1.12 for memory on CI runners). The bench now runs the addon's configuration (dependencies loaded, warm cache) and that calibration has not been repeated for it, so the noise band may differ. More than 1.10× in time or 1.20× in memory is a starting point for looking. Nothing enforces that. Run it before a resolver change goes up for review, and say in the pull request when a cost is intended.
 
+## Scripts and their callers
+
+Every `sh`, `py` and `mjs` script in the repository has a caller in a CI job, the weekly or a documented recipe. A measurement run once is recorded in this directory's documents, not committed as a script.
+
+- `scripts/weekly.py`: the `weekly` workflow (`.github/workflows/weekly.yml`).
+- `scripts/agent_eval.py` and `scripts/agent_questions.json`: `weekly.py --agent-eval`.
+- `scripts/headline.py`: `weekly.py`.
+- `scripts/corpora.py`: the `weekly` workflow (`setup`), `weekly.py`, `agent_eval.py` and `bench.py`.
+- `scripts/oracle_data.py` and `scripts/schema_version.py`: `weekly.py`, `headline.py` and `agent_eval.py`. A Rust test (`crates/cli/src/commands/schema.rs`) holds `schema_version.py` to the version Rust writes.
+- `scripts/rdt.mjs` and `scripts/rdg.mjs`: `weekly.py`.
+- `scripts/bench.py`: `just bench`, the local check above.
+- `scripts/gate_fixtures.mjs`: `just gate-measure`, the memory, determinism, first-answer and watch gates of ADR 0026 (`docs/gate-measurements.md`).
+- `scripts/verify-install.sh`: `just verify-install`, the `Install` CI job.
+- `scripts/check-packaging.mjs`: `just lint`, the `Lint` CI job. `scripts/napi-loader-version.mjs`: `build:napi` in `packages/napi`.
+- `scripts/test_*.py`: `just test-py`, the `Test / Python scripts` CI job.
+
 ## Checker modes
 
 The experimental TypeScript 7.1 checker modes were measured once, by hand, against the structural default on the corpora `scripts/corpora.py` sets up. The measurement is not repeated and is not part of the weekly record; the results below are its record.
