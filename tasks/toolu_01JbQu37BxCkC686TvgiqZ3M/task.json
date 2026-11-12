@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01JbQu37BxCkC686TvgiqZ3M",
+  "agent_id": "a5f172543c4943462",
+  "subagent_type": "general-purpose",
+  "task_description": "Condition-map member memo and doc cache",
+  "token_usage": {
+    "input_tokens": 274,
+    "cache_creation_tokens": 298907,
+    "cache_read_tokens": 31240368,
+    "output_tokens": 103008,
+    "api_call_count": 137
+  },
+  "started_at": "2026-11-11T16:57:36.973778-08:00",
+  "completed_at": "2026-11-11T17:39:06.313428-08:00"
+}
