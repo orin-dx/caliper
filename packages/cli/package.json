@@ -19,7 +19,8 @@
     "caliper-docgen": "./bin/cli.js"
   },
   "files": [
-    "bin"
+    "bin",
+    "NOTICE"
   ],
   "optionalDependencies": {
     "caliper-docgen-darwin-arm64": "0.10.0",

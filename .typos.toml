@@ -8,3 +8,7 @@ ratatui = "ratatui"
 beng = "beng"
 # onSeeked is React's media event handler
 Seeked = "Seeked"
+
+[files]
+# Third-party notices are copied unchanged.
+extend-exclude = ["packages/*/NOTICE"]
