@@ -1,0 +1,50 @@
+{
+  "cli_version": "0.13.3-nightly.202611110616.7aed2fb15",
+  "checkpoint_id": "01M76RQG6Q7AHYB8G0C9VT1AHX",
+  "strategy": "manual-commit",
+  "branch": "fix/superseded-structural-diagnostics",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/core/src/types/semantic.rs",
+    "docs/type-checker-integration.md",
+    "packages/storybook/README.md",
+    "packages/storybook/src/index.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 8169,
+    "cache_read_tokens": 1845509,
+    "output_tokens": 2483,
+    "api_call_count": 2,
+    "subagent_tokens": {
+      "input_tokens": 28,
+      "cache_creation_tokens": 11737,
+      "cache_read_tokens": 2340775,
+      "output_tokens": 8248,
+      "api_call_count": 14
+    }
+  },
+  "redaction": {
+    "replacements": 26,
+    "layers": {
+      "betterleaks": 12,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}

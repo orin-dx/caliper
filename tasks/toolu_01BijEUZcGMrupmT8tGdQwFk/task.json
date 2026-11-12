@@ -1,0 +1,7 @@
+{
+  "tool_use_id": "toolu_01BijEUZcGMrupmT8tGdQwFk",
+  "agent_id": "af0251ec47c214c91",
+  "subagent_type": "general-purpose",
+  "task_description": "Spike: link published tsrs crates in-process",
+  "started_at": "2026-11-11T18:01:54.141766-08:00"
+}

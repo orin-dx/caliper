@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01KpEZKTsLPDBE25WWdLG9jB",
+  "agent_id": "a19b659f470d32d2c",
+  "subagent_type": "general-purpose",
+  "task_description": "Drop Windows support entirely",
+  "token_usage": {
+    "input_tokens": 70,
+    "cache_creation_tokens": 82804,
+    "cache_read_tokens": 2510039,
+    "output_tokens": 10360,
+    "api_call_count": 35
+  },
+  "started_at": "2026-11-11T18:01:55.866867-08:00",
+  "completed_at": "2026-11-11T18:07:40.708885-08:00"
+}
