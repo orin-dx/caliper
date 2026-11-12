@@ -963,3 +963,69 @@ fn a_request_for_a_component_the_checker_is_already_answering_joins_that_request
     }
     assert_eq!(joined, first);
 }
+
+/// The structural pass resolves `./thing` but finds no component `Thing` in it, as for Chakra's `Button`, which a
+/// factory it does not model makes: it warns that it cannot find the component and lists no props.
+const FROM_A_FACTORY: &str = "import type { ComponentProps } from \"react\";\nimport { Thing } from \"./thing\";\n\
+                              export function Wrapper(props: ComponentProps<typeof Thing>) { return null; }";
+const THING: &str = "declare function make(): unknown;\nexport const Thing = make();";
+
+fn unresolvable(answer: &caliper_docgen_core::pipeline::ComponentAnswer) -> Vec<(DiagnosticSeverity, String)> {
+    answer
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::UnresolvableImport)
+        .map(|d| (d.severity.clone(), d.message.clone()))
+        .collect()
+}
+
+#[test]
+fn the_structural_cannot_find_the_component_warning_goes_once_the_checker_answers_the_component() {
+    let project = project(&[("Wrapper.tsx", FROM_A_FACTORY), ("thing.ts", THING)]);
+    let structural = structural_answer(&project, "Wrapper");
+    let cannot_find = format!(
+        "Cannot find the component 'Thing' whose props are referenced from '{}'",
+        project.root.join("Wrapper.tsx")
+    );
+    assert_eq!(unresolvable(&structural), [(DiagnosticSeverity::Warning, cannot_find)]);
+
+    let in_time = session(&project, Fake::new(Duration::ZERO, finds_size), Duration::from_secs(5));
+    let late = WatchSession::lazy(PipelineOptions { src_dirs: vec![project.root.clone()], ..Default::default() })
+        .with_semantic(Fake::new(Duration::from_millis(300), finds_size), Duration::from_millis(5))
+        .with_semantic_wait_empty(Duration::from_millis(10));
+    drop(late.initialize());
+    let early = late.component("Wrapper").unwrap();
+    assert_eq!(unresolvable(&early), unresolvable(&structural), "the checker has not answered: the structural answer");
+    std::thread::sleep(Duration::from_millis(900));
+
+    for (path, session) in [("in time", &in_time), ("cached", &in_time), ("late", &late)] {
+        let answer = session.component("Wrapper").unwrap();
+        assert_eq!(answer.entry.props.keys().cloned().collect::<Vec<_>>(), ["label", "size"], "{path}");
+        assert_eq!(unresolvable(&answer), [], "{path}");
+        let warnings: Vec<&str> = answer
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity != DiagnosticSeverity::Info)
+            .map(|d| d.message.as_str())
+            .collect();
+        assert_eq!(warnings, Vec::<&str>::new(), "{path}");
+    }
+}
+
+/// `Label` comes from a module that does not exist, so neither pass can resolve it.
+const UNRESOLVED_LABEL: &str =
+    "import type { Label } from \"./missing\";\nexport function Button(props: { label: Label }) { return null; }";
+
+#[test]
+fn an_unresolvable_import_the_checker_cannot_resolve_either_keeps_its_warning_and_the_props_marker() {
+    let project = project(&[("Button.tsx", UNRESOLVED_LABEL)]);
+    let structural = structural_answer(&project, "Button");
+    assert!(!unresolvable(&structural).is_empty(), "{:?}", structural.diagnostics);
+
+    let checked =
+        session(&project, Fake::new(Duration::ZERO, cannot_read_label), Duration::from_secs(5)).component("Button");
+    let checked = checked.unwrap();
+
+    assert_eq!(checked.entry.props["label"].degraded_by, ["unresolvableImport"]);
+    assert_eq!(unresolvable(&checked), unresolvable(&structural));
+}

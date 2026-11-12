@@ -13,7 +13,7 @@ use rustc_hash::{FxHashMap, FxHasher};
 mod order;
 
 use crate::types::collected::ComponentExport;
-use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
+use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity, Superseded};
 use crate::types::output::{
     ComponentEntry, ExtractionOutput, OpaqueDetail, OpaqueReason, ParsedProp, PropParent, PropType, TRUNCATED_KIND,
 };
@@ -363,6 +363,53 @@ pub(crate) fn unread_diagnostic(props: usize, affects: Vec<String>) -> Diagnosti
     diagnostic
 }
 
+/// A component the checker answered for, as [`drop_superseded`] reads it.
+pub(crate) struct Superseding<'a> {
+    key: &'a str,
+    /// A structural prop the checker did not return still holds a part the structural pass could not read, which a
+    /// structural diagnostic naming the component may be about.
+    structural_left: bool,
+    /// A prop of the merged answer holds a name the checker could not resolve either.
+    unresolved: bool,
+}
+
+impl<'a> Superseding<'a> {
+    /// `key`'s component as `merged` holds it after the checker's props were merged in. `structural_left` says whether a
+    /// structural prop the checker did not return still holds a part the structural pass could not read.
+    pub(crate) fn new(key: &'a str, merged: &ComponentEntry, structural_left: bool) -> Self {
+        let unresolved_kind = OpaqueReason::UnresolvableImport { specifier: String::new() }.kind();
+        let unresolved = merged.props.values().any(|prop| prop.degraded_by.iter().any(|kind| kind == unresolved_kind));
+        Self { key, structural_left, unresolved }
+    }
+
+    fn supersedes(&self, superseded: Superseded) -> bool {
+        match superseded {
+            Superseded::No => false,
+            Superseded::Yes => !self.structural_left,
+            Superseded::UnlessUnresolvedByChecker => !self.structural_left && !self.unresolved,
+        }
+    }
+}
+
+/// Takes the components the checker answered for out of the `affects` of each structural diagnostic its answer
+/// supersedes ([`DiagnosticCode::superseded_by_checker`]), and drops a diagnostic left affecting no component. A
+/// diagnostic that affected none (a file's, the run's) is about no component's props and stays. Both merges call it
+/// before the checker's own diagnostics join `diagnostics`, so it reads only the structural pass's.
+pub(crate) fn drop_superseded(diagnostics: &mut Vec<Diagnostic>, answered: &[Superseding<'_>]) {
+    if answered.is_empty() {
+        return;
+    }
+    let by_key: FxHashMap<&str, &Superseding<'_>> = answered.iter().map(|answer| (answer.key, answer)).collect();
+    diagnostics.retain_mut(|diagnostic| {
+        if diagnostic.affects.is_empty() {
+            return true;
+        }
+        let superseded = diagnostic.code.superseded_by_checker();
+        diagnostic.affects.retain(|key| by_key.get(key.as_str()).is_none_or(|answer| !answer.supersedes(superseded)));
+        !diagnostic.affects.is_empty()
+    });
+}
+
 /// What a merge does with a structural prop the checker did not return.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Unanswered {
@@ -449,7 +496,9 @@ fn replace_props<'a>(
 /// else the structural pass; a default value stays structural (the checker has no initializer for a destructured
 /// parameter), and so does a union's member order where the structural pass resolved the same union (the checker sorts
 /// members). Inheritance layers, curated inherited props and `discriminantProp` stay structural. Components the checker
-/// did not answer for keep their structural result untouched.
+/// did not answer for keep their structural result untouched. A structural diagnostic stops naming a component the
+/// checker answered for when the answer supersedes it ([`DiagnosticCode::superseded_by_checker`]), and goes once it
+/// names none.
 ///
 /// Records provenance as `Info` diagnostics whose `affects` lists the output keys, so the canonical JSON gains no
 /// field: one for the components the checker resolved, one per fallback reason.
@@ -467,20 +516,13 @@ pub fn merge_semantic(output: &mut ExtractionOutput, outcome: SemanticOutcome) {
         }
         merged_keys.push(semantic.key);
     }
+    // The whole-project merge drops every structural prop the checker did not return, so none is left over.
+    let answered: Vec<Superseding<'_>> =
+        merged_keys.iter().filter_map(|key| Some(Superseding::new(key, output.components.get(key)?, false))).collect();
+    drop_superseded(&mut output.diagnostics, &answered);
     output.diagnostics.extend(diagnostics);
 
-    // A structural diagnostic about a prop the checker now answers for would be stale; the resolved component keeps
-    // none of its degrade diagnostics.
     if !merged_keys.is_empty() {
-        output.diagnostics.retain(|diagnostic| {
-            let degrade = matches!(
-                diagnostic.code,
-                DiagnosticCode::OpaqueType | DiagnosticCode::MaxDepthExceeded | DiagnosticCode::CircularReference
-            );
-            !(degrade
-                && !diagnostic.affects.is_empty()
-                && diagnostic.affects.iter().all(|key| merged_keys.contains(key)))
-        });
         merged_keys.sort();
         let mut provenance = Diagnostic::new(
             DiagnosticSeverity::Info,

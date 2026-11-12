@@ -10,7 +10,7 @@
 //    Rust backend compiles in. Every manifest that installs it must name that exact version:
 //    each platform package's one optional dependency on the matching `@tsrs/<platform>` (the
 //    Rust lookup finds it beside the binary), and apps/oracle's `tsrs`, which the checker lane
-//    and the parity run use. No other package may depend on tsrs.
+//    and the parity run use. No other package may depend on tsrs, apart from a devDependency at the pin for its own tests.
 // Regenerate the loader with `pnpm --filter caliper-docgen-napi build:napi`.
 import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -74,7 +74,10 @@ for (const dir of ['packages/cli/npm', 'packages/napi/npm']) {
 }
 
 for (const dir of readdirSync(join(root, 'packages'))) {
-  const found = tsrsDependencies(readJson(`packages/${dir}/package.json`))
+  // A devDependency at the pin is for the package's own tests; consumers do not install it.
+  const found = tsrsDependencies(readJson(`packages/${dir}/package.json`)).filter(
+    (dependency) => dependency !== `devDependencies tsrs@${tsrsPin}`,
+  )
   if (found.length > 0) {
     problems.push(
       `packages/${dir}/package.json depends on ${found.join(', ')}; only the platform packages install tsrs, beside their binary`,
