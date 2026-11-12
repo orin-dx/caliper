@@ -1,0 +1,42 @@
+{
+  "tool_use_id": "toolu_013xAiBa1Prd5uDrDnBf2PPD",
+  "agent_id": "ae0606ec48ae7447f",
+  "subagent_type": "general-purpose",
+  "task_description": "S8a ship tsrs as optional dependency",
+  "files": [
+    ".changeset/checker-installed-alongside.md",
+    ".github/dependabot.yml",
+    ".github/workflows/ci.yml",
+    "README.md",
+    "crates/binding/Cargo.toml",
+    "crates/binding/src/lib.rs",
+    "crates/cli/src/commands/extract.rs",
+    "crates/cli/src/main.rs",
+    "crates/cli/tests/commands.rs",
+    "crates/core/src/types/semantic.rs",
+    "crates/core/tests/semantic_join.rs",
+    "crates/semantic/src/lib.rs",
+    "crates/semantic/src/locate.rs",
+    "crates/semantic/src/on_demand.rs",
+    "docs/adr/0026-the-checker-is-the-type-authority.md",
+    "docs/type-checker-integration.md",
+    "justfile",
+    "packages/cli/README.md",
+    "packages/napi/README.md",
+    "packages/napi/binding.d.ts",
+    "packages/storybook/README.md",
+    "packages/storybook/src/index.ts",
+    "packages/storybook/src/options.ts",
+    "scripts/check-packaging.mjs",
+    "scripts/verify-checker-install.sh"
+  ],
+  "token_usage": {
+    "input_tokens": 272,
+    "cache_creation_tokens": 315089,
+    "cache_read_tokens": 29659680,
+    "output_tokens": 105812,
+    "api_call_count": 135
+  },
+  "started_at": "2026-11-11T17:17:35.9102-08:00",
+  "completed_at": "2026-11-11T17:44:50.78866-08:00"
+}
