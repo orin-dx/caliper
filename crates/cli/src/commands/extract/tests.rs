@@ -18,6 +18,7 @@ fn args_for(src: &str, json: bool) -> crate::ExtractArgs {
         experimental_semantic_types: false,
         tsc_path: None,
         semantic_timeout_ms: crate::DEFAULT_SEMANTIC_TIMEOUT_MS,
+        no_resolver_facts: false,
     }
 }
 
@@ -483,6 +484,7 @@ export function Button(props: ButtonProps) { return null; }
         experimental_semantic_types: false,
         tsc_path: None,
         semantic_timeout_ms: crate::DEFAULT_SEMANTIC_TIMEOUT_MS,
+        no_resolver_facts: false,
     };
 
     assert_eq!(cmd_extract(args, false, None).unwrap(), 0);
@@ -586,6 +588,7 @@ fn extract_with_semantic_flag(tmp: &tempfile::TempDir, semantic: bool) -> serde_
         experimental_semantic_types: semantic,
         tsc_path: semantic.then(|| tmp.path().join("no-such-tsc").to_str().unwrap().to_owned()),
         semantic_timeout_ms: crate::DEFAULT_SEMANTIC_TIMEOUT_MS,
+        no_resolver_facts: false,
     };
 
     assert_eq!(cmd_extract(args, true, None).unwrap(), 0);
@@ -655,6 +658,7 @@ fn a_checker_that_never_answers_is_given_up_after_the_semantic_timeout() {
         experimental_semantic_types: true,
         tsc_path: Some(tsc.to_str().unwrap().to_owned()),
         semantic_timeout_ms: 300,
+        no_resolver_facts: false,
     };
 
     let started = std::time::Instant::now();

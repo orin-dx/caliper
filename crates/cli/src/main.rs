@@ -128,15 +128,14 @@ pub struct ExtractArgs {
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 
-    /// Experimental: ask TypeScript 7.1's `tsc --api` (or `tsrs`) for every component's props in one program and wait
-    /// for the answer, which replaces the structural one prop by prop; the structural result stands wherever the
+    /// Experimental: ask the built-in TypeScript 7.1 checker (`tsrs`) for every component's props in one program and
+    /// wait for the answer, which replaces the structural one prop by prop; the structural result stands wherever the
     /// checker cannot answer (off by default)
     #[arg(long)]
     pub experimental_semantic_types: bool,
 
-    /// The checker binary `--experimental-semantic-types` runs (`tsc` or `tsrs`), instead of the pinned
-    /// `@tsrs/<platform>` installed with caliper-docgen, else the nearest `node_modules/typescript/bin/tsc` or
-    /// `node_modules/tsrs/bin/tsrs`
+    /// A checker binary for `--experimental-semantic-types` to run instead of the built-in one: `typescript@7.1`'s
+    /// `tsc`, or `tsrs`
     #[arg(long, requires = "experimental_semantic_types")]
     pub tsc_path: Option<String>,
 
@@ -144,6 +143,11 @@ pub struct ExtractArgs {
     /// milliseconds, before the run takes the structural result with one warning
     #[arg(long, requires = "experimental_semantic_types", default_value_t = DEFAULT_SEMANTIC_TIMEOUT_MS)]
     pub semantic_timeout_ms: u64,
+
+    /// Test-only (ADR 0026's S7 gates): with `--experimental-semantic-types`, take no fact the checker lacks from the
+    /// structural resolver: defaults and union member order come from the source's syntax alone
+    #[arg(long, hide = true, requires = "experimental_semantic_types")]
+    pub no_resolver_facts: bool,
 }
 
 /// `--semantic-timeout-ms` when not given: ADR 0026's proposed 10 s. A hung checker is caught that fast, and it bounds

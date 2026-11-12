@@ -1,8 +1,9 @@
 //! A warm checker that answers for the components a session asks about, one request at a time.
 //!
 //! The one-shot [`crate::resolve`] roots a single program at every component's file. A Storybook session asks about
-//! one component per story, so this keeps one `tsc --api` process alive, starts it on the first request, and roots a
-//! small program at just the requested files: the checker loads what those files import, not the project.
+//! one component per story, so this keeps one checker warm (the built-in one, or a `tsc --api` process for an explicit
+//! `tsc_path`), starts it on the first request, and roots a small program at just the requested files: the checker
+//! loads what those files import, not the project.
 //!
 //! The snapshot of that program is kept between requests (ADR 0026 S6). The next request brings it up to date with
 //! `updateSnapshot`, which re-reads only the files the session announced as changed ([`SemanticProvider::changed`]) and
@@ -11,9 +12,14 @@
 //! read ([`crate::stamps`]): one that changed unannounced makes the answer come from a fresh snapshot, with a warning
 //! that names it.
 //!
-//! The process runs on its own thread with its own runtime, so a caller on any thread (a NAPI worker, a rayon task)
+//! The worker runs on its own thread with its own runtime, so a caller on any thread (a NAPI worker, a rayon task)
 //! never nests runtimes and can bound how long it waits. A failure to start or a crash yields an outcome with no
 //! components and one diagnostic, never an error; after [`MAX_RESTARTS`] crashes the checker stays down.
+//!
+//! A checker is replaced after [`MAX_REQUESTS_PER_PROCESS`] programs, and a checker process also when its resident
+//! memory passes [`OnDemandConfig::max_rss_mib`]. The built-in checker is replaced by a fresh session on the same
+//! program count, which drops what the old one held. Its memory is this process's, which the allocator keeps for reuse
+//! rather than returning, and which a host such as Storybook also counts, so the memory bound is not applied to it.
 //!
 //! Requests wait in two queues: an interactive one (a story someone opened) is answered before any background one (a
 //! warm-up, a fill, a prefetch), first come first served within each, and a background request a caller raised while
@@ -30,15 +36,15 @@ use caliper_docgen_core::types::semantic::{
     Delivery, Priority, SemanticOutcome, SemanticProvider, SemanticTarget, SharedPriority, SourceChange,
 };
 use caliper_docgen_core::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
-use caliper_docgen_tsc_client::{Client, Supervisor};
 use camino::Utf8PathBuf;
 use rustc_hash::{FxHashMap, FxHashSet};
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
+use crate::checker::{Backend, Client};
 use crate::rpc::{CallError, Rpc};
 use crate::stamps::{self, Stamp};
-use crate::{SUPPORTED_VERSIONS, SemanticRequest, answer_on, group_by_file, root_files, supervisor_config};
+use crate::{SUPPORTED_VERSIONS, SemanticRequest, answer_on, group_by_file, root_files, start_checker};
 
 /// How many files an unannounced-edit warning names before it counts the rest.
 const UNTOLD_NAMED: usize = 5;
@@ -50,8 +56,8 @@ const INTERACTIVE_STREAK: u32 = 4;
 /// Crashes the checker may have before it stays down for the session.
 const MAX_RESTARTS: u32 = 3;
 
-/// Programs one `tsc` process builds before it is replaced. Its memory grows with every program it has loaded
-/// (measured: antd reached 600 MiB after 50 single-component programs), and a fresh process costs 30 to 70 ms.
+/// Programs one checker builds before it is replaced. Its memory grows with every program it has loaded (measured:
+/// antd reached 600 MiB after 50 single-component programs), and a fresh process costs 30 to 70 ms.
 const MAX_REQUESTS_PER_PROCESS: u32 = 64;
 
 /// Resident memory, in MiB, past which a `tsc` process is replaced between requests. Measured single-component programs
@@ -65,41 +71,38 @@ const RSS_CHECK_EVERY: u32 = 4;
 /// worker to finish on its own. Closing a session must not wait for a 60 s request.
 const DEFAULT_SHUTDOWN_WAIT: Duration = Duration::from_secs(5);
 
-/// How a warm [`OnDemand`] checker starts and is kept: where to find `tsc`, how long to wait on it, and when to replace
-/// its process.
+/// How a warm [`OnDemand`] checker starts and is kept: which checker, how long to wait on it, and when to replace it.
 #[derive(Debug, Clone)]
 pub struct OnDemandConfig {
-    /// Where `tsc` finds `node_modules`; its `--cwd`, and where the search for `typescript` starts.
+    /// Where the checker finds `node_modules`: its working directory.
     pub project_root: Utf8PathBuf,
     /// A tsconfig whose compiler options the checker uses (read with `parseConfigFile`); with none, a default set.
     pub tsconfig: Option<Utf8PathBuf>,
-    /// An explicit `tsc` binary, instead of the pinned `tsrs` or `node_modules/typescript/bin/tsc` above `project_root`.
+    /// A checker binary to run as a `tsc --api` process (`typescript@7.1`'s `tsc`, or `tsrs`) instead of the built-in
+    /// checker.
     pub tsc_path: Option<Utf8PathBuf>,
-    /// The directory of the running Caliper binary, or why it is unknown: the pinned `@tsrs/<platform>` is looked for
-    /// in the nearest `node_modules` at or above it, before the project's own checker.
-    pub binary_dir: Result<Utf8PathBuf, String>,
-    /// Bound on each request to the checker, and on its start-up handshake.
+    /// Bound on each request to the checker, and on a checker process's start-up handshake.
     pub request_timeout: Duration,
-    /// The `typescript` versions the checker may report; one that is not among them is a start-up failure.
+    /// The versions a checker binary's `package.json` may declare; one that is not among them is a start-up failure.
+    /// The built-in checker is pinned and not checked.
     pub expected_versions: &'static [&'static str],
-    /// Resident memory of the `tsc` process, in MiB, past which it is replaced after a request. A request that needs
-    /// more finishes first: the bound is between requests, not inside one.
+    /// Resident memory of a checker process, in MiB, past which it is replaced after a request. A request that needs
+    /// more finishes first: the bound is between requests, not inside one. The built-in checker is not bound by it.
     pub max_rss_mib: u64,
     /// How long dropping the checker waits for a request in progress before it lets the worker finish alone.
     pub shutdown_wait: Duration,
-    /// Environment for the `tsc` process; the tests use it to pick a replay scenario.
+    /// Environment for a checker process; the tests use it to pick a replay scenario.
     pub extra_env: Vec<(String, String)>,
 }
 
 impl OnDemandConfig {
     /// A configuration for `project_root` with a 60 second request timeout, the supported versions, a 768 MiB memory
-    /// bound, a 5 second shutdown wait, and no explicit tsconfig, `tsc` path or binary directory.
+    /// bound, a 5 second shutdown wait, and no explicit tsconfig or `tsc` path.
     pub fn new(project_root: Utf8PathBuf) -> Self {
         Self {
             project_root,
             tsconfig: None,
             tsc_path: None,
-            binary_dir: Err(crate::NO_BINARY_DIR.to_owned()),
             request_timeout: Duration::from_secs(60),
             expected_versions: SUPPORTED_VERSIONS,
             max_rss_mib: DEFAULT_MAX_RSS_MIB,
@@ -127,10 +130,10 @@ fn resident_mib(pid: u32) -> Option<u64> {
     Some(kib / 1024)
 }
 
-/// How often a warm checker's process was replaced on purpose, by cause (crashes are not counted).
+/// How often a warm checker was replaced on purpose, by cause (crashes are not counted).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Recycles {
-    /// Replaced after building the most programs one process is allowed.
+    /// Replaced after building the most programs one checker is allowed.
     pub worn: u32,
     /// Replaced after its resident memory passed [`OnDemandConfig::max_rss_mib`].
     pub bloated: u32,
@@ -223,18 +226,18 @@ impl<T> Queue<T> {
     }
 }
 
-/// A warm `tsc` that answers for the components it is asked about. Dropping it stops the process.
+/// A warm checker that answers for the components it is asked about. Dropping it stops the checker.
 pub struct OnDemand {
     jobs: Option<UnboundedSender<Job>>,
     thread: Option<JoinHandle<()>>,
-    /// Receives once when the worker has stopped `tsc` and is about to exit.
+    /// Receives once when the worker has stopped the checker and is about to exit.
     stopped: std::sync::Mutex<Option<mpsc::Receiver<()>>>,
     shutdown_wait: Duration,
     gauges: Arc<Gauges>,
 }
 
 impl OnDemand {
-    /// Starts the worker thread. The `tsc` process itself starts on the first request, or on [`OnDemand::warm_up`].
+    /// Starts the worker thread. The checker itself starts on the first request, or on [`OnDemand::warm_up`].
     pub fn new(config: OnDemandConfig) -> Self {
         let shutdown_wait = config.shutdown_wait;
         let (jobs, queue) = unbounded_channel();
@@ -257,7 +260,7 @@ impl OnDemand {
         }
     }
 
-    /// How many times the process has been replaced so far, by cause. A replacement happens after the reply it
+    /// How many times the checker has been replaced so far, by cause. A replacement happens after the reply it
     /// follows, so read this after the next request to see the last one.
     pub fn recycles(&self) -> Recycles {
         Recycles {
@@ -274,13 +277,13 @@ impl OnDemand {
         }
     }
 
-    /// The operating system's id of the `tsc` process that answered the last request, `None` before the first one.
-    /// Read after a reply, it is the process that built that answer.
+    /// The operating system's id of the checker process that answered the last request, `None` before the first one and
+    /// for the built-in checker. Read after a reply, it is the process that built that answer.
     pub fn process_id(&self) -> Option<u32> {
         Some(self.gauges.process.load(Ordering::Relaxed)).filter(|pid| *pid != 0)
     }
 
-    /// Starts `tsc` in the background so the first request does not pay for it.
+    /// Starts the checker in the background so the first request does not pay for it.
     pub fn warm_up(&self) {
         if let Some(jobs) = &self.jobs {
             jobs.send(Job::Warm).ok();
@@ -323,8 +326,8 @@ impl SemanticProvider for OnDemand {
 
 impl Drop for OnDemand {
     fn drop(&mut self) {
-        // Closing the queue ends the worker loop, which shuts `tsc` down before the thread exits. A worker still inside
-        // a long request is left to finish it: `tsc` stops when it does, or with this process.
+        // Closing the queue ends the worker loop, which stops the checker before the thread exits. A worker still inside
+        // a long request is left to finish it: the checker stops when it does, or with this process.
         self.jobs.take();
         let receiver = self.stopped.get_mut().ok().and_then(Option::take);
         let stopped = receiver.is_none_or(|receiver| receiver.recv_timeout(self.shutdown_wait).is_ok());
@@ -380,19 +383,19 @@ fn worker(config: OnDemandConfig, mut queue: UnboundedReceiver<Job>, gauges: Arc
             // After the reply, so the caller never waits for the memory check or the replacement.
             checker.maintain(&config).await;
         }
-        if let Some(supervisor) = checker.supervisor.take() {
-            supervisor.shutdown().await.ok();
+        if let Some(backend) = checker.backend.take() {
+            backend.shutdown().await;
         }
     });
 }
 
 #[derive(Default)]
 struct Checker {
-    supervisor: Option<Supervisor>,
-    /// Compiler options read once from the tsconfig for the running process.
+    backend: Option<Backend>,
+    /// Compiler options read once from the tsconfig for the running checker.
     options: Option<serde_json::Value>,
     restarts: u32,
-    /// Requests the running process has answered.
+    /// Requests the running checker has answered.
     served: u32,
     /// Why the checker cannot be used for the rest of the session.
     down: Option<String>,
@@ -453,9 +456,9 @@ impl Checker {
         if let Some(reason) = &self.down {
             return Err(reason.clone());
         }
-        if self.supervisor.as_ref().is_some_and(|supervisor| !supervisor.is_alive()) {
-            if let Some(dead) = self.supervisor.take() {
-                dead.shutdown().await.ok();
+        if self.backend.as_ref().is_some_and(|backend| !backend.is_alive()) {
+            if let Some(dead) = self.backend.take() {
+                dead.shutdown().await;
             }
             self.options = None;
             self.live = None;
@@ -465,12 +468,11 @@ impl Checker {
                 return Err(self.stay_down("the checker kept crashing".to_string()));
             }
         }
-        if self.supervisor.is_none() {
+        if self.backend.is_none() {
             let request = SemanticRequest {
                 project_root: config.project_root.clone(),
                 tsconfig: config.tsconfig.clone(),
                 tsc_path: config.tsc_path.clone(),
-                binary_dir: config.binary_dir.clone(),
                 targets: Vec::new(),
                 request_timeout: config.request_timeout,
                 expected_versions: config.expected_versions,
@@ -478,21 +480,17 @@ impl Checker {
                 extra_env: config.extra_env.clone(),
                 reverse_queries: false,
             };
-            let started = supervisor_config(&request).map_err(|reason| self.stay_down(reason))?;
-            let supervisor = match Supervisor::spawn(started).await {
-                Ok(supervisor) => supervisor,
-                Err(error) => return Err(self.stay_down(error.to_string())),
-            };
+            let backend = start_checker(&request).await.map_err(|reason| self.stay_down(reason))?;
             // Initialize the session and read the compiler options once; every request after builds only its program.
             let tsconfig = config.tsconfig.as_ref().map(|path| path.as_str());
-            match Rpc::prepare(&supervisor.client(), config.request_timeout, tsconfig).await {
+            match Rpc::prepare(&backend.client(), config.request_timeout, tsconfig).await {
                 Ok(options) => self.options = Some(options),
                 Err(error) => {
-                    supervisor.shutdown().await.ok();
+                    backend.shutdown().await;
                     return Err(self.stay_down(format!("the checker did not initialize: {error}")));
                 }
             }
-            self.supervisor = Some(supervisor);
+            self.backend = Some(backend);
         }
         Ok(())
     }
@@ -506,14 +504,13 @@ impl Checker {
         if let Err(reason) = self.ensure(config).await {
             return SemanticOutcome::unavailable(reason);
         }
-        let Some(supervisor) = self.supervisor.as_ref() else {
+        let Some(backend) = self.backend.as_ref() else {
             return SemanticOutcome::unavailable("the checker is not running");
         };
-        let (client, process) = (supervisor.client(), supervisor.process_id());
+        let (client, process) = (backend.client(), backend.process_id());
         let mut request = SemanticRequest::new(config.project_root.clone(), targets);
         request.tsconfig = config.tsconfig.clone();
         request.tsc_path = config.tsc_path.clone();
-        request.binary_dir = config.binary_dir.clone();
         request.request_timeout = config.request_timeout;
         request.expected_versions = config.expected_versions;
         request.extra_env.clone_from(&config.extra_env);
@@ -626,24 +623,24 @@ impl Checker {
         }
     }
 
-    /// Replaces the process when it has built enough programs or grown past the memory bound, and otherwise stamps
-    /// the snapshot it keeps. A planned replacement, not a crash: the next request starts a fresh process.
+    /// Replaces the checker when it has built enough programs or (a process) grown past the memory bound, and otherwise
+    /// stamps the snapshot it keeps. A planned replacement, not a crash: the next request starts a fresh checker.
     async fn maintain(&mut self, config: &OnDemandConfig) {
-        let Some(supervisor) = self.supervisor.as_ref() else { return };
+        let Some(backend) = self.backend.as_ref() else { return };
         let worn = self.served >= MAX_REQUESTS_PER_PROCESS;
         let resident = (!worn && self.served.is_multiple_of(RSS_CHECK_EVERY))
-            .then(|| supervisor.process_id().and_then(resident_mib))
+            .then(|| backend.process_id().and_then(resident_mib))
             .flatten();
         let bloated = resident.is_some_and(|mib| mib > config.max_rss_mib);
         if worn || bloated {
             let (count, cause) = if worn { (&self.gauges.worn, "worn") } else { (&self.gauges.bloated, "bloated") };
             count.fetch_add(1, Ordering::Relaxed);
-            tracing::debug!(cause, served = self.served, resident_mib = ?resident, "replacing the checker process");
-            // The snapshot goes with the process; the next one reads every file from the disk.
+            tracing::debug!(cause, served = self.served, resident_mib = ?resident, "replacing the checker");
+            // The snapshot goes with the checker; the next one reads every file from the disk.
             self.live = None;
             self.told.clear();
-            if let Some(old) = self.supervisor.take() {
-                old.shutdown().await.ok();
+            if let Some(old) = self.backend.take() {
+                old.shutdown().await;
             }
             self.options = None;
             self.served = 0;

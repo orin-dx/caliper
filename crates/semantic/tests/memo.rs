@@ -1,14 +1,17 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stderr)]
 //! What the conversion memo costs and what it may not change. Two fixture projects, each replayed from its recording
-//! (`memo.recording.json`, `cycles.recording.json`, made by the `record_fixture` example) and, when `TSRS_BIN` names a
-//! real `tsrs`, asked live, forward and last to first:
+//! (`memo.recording.json`, `cycles.recording.json`, made by the `record_fixture` example) and asked live (the
+//! built-in checker, or the `tsrs` binary `TSRS_BIN` names), forward and last to first:
 //!
 //! - `memo`: one big type under many different enclosing types. The number of round trips to the checker is held to a
 //!   bound, so a memo keyed by the whole enclosing context (which converts the type again under each) fails, and a
 //!   type converted again at another depth does not ask for its members or type arguments again;
 //! - `cycles`: a type reached both inside a cycle and outside it, in either order, is a back-reference only where the
-//!   type it points to encloses it, so a memo that reused a conversion across contexts it depends on fails.
+//!   type it points to encloses it, so a memo that reused a conversion across contexts it depends on fails;
+//! - `maps`: condition maps over one constraint, asked for their properties once when none is the project's and each
+//!   for its own when the project declares them or they fit the budget.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use caliper_docgen_core::pipeline::{PipelineOptions, extract};
@@ -47,13 +50,9 @@ fn structural(project: &Project) -> ExtractionOutput {
     extract(&PipelineOptions { src_dirs: vec![project.root.clone()], ..PipelineOptions::default() })
 }
 
-#[allow(clippy::print_stderr, reason = "a skipped test says so, since a silent skip looks like a pass")]
+/// The `tsrs` binary `TSRS_BIN` names, to run as a process; `None` asks the built-in checker.
 fn tsrs_bin() -> Option<Utf8PathBuf> {
-    let bin = std::env::var("TSRS_BIN").ok().filter(|bin| !bin.is_empty());
-    if bin.is_none() {
-        eprintln!("skipped: TSRS_BIN is not set");
-    }
-    bin.map(Utf8PathBuf::from)
+    std::env::var("TSRS_BIN").ok().filter(|bin| !bin.is_empty()).map(Utf8PathBuf::from)
 }
 
 /// The outcome of one run, and the calls the backend made to the checker.
@@ -65,7 +64,7 @@ struct Run {
 }
 
 /// Asks the checker about every component of `fixture`: replayed, or live (`reverse`: asked last to first).
-fn run(fixture: &str, live: Option<(&Utf8PathBuf, bool)>) -> Run {
+fn run(fixture: &str, live: Option<(&Option<Utf8PathBuf>, bool)>) -> Run {
     let project = project(fixture, live.is_none());
     let output = structural(&project);
     let calls = project.root.join("calls.json");
@@ -74,6 +73,7 @@ fn run(fixture: &str, live: Option<(&Utf8PathBuf, bool)>) -> Run {
     request.record_to = Some(calls.clone());
     match live {
         None => {
+            request.tsc_path = Some(project.root.join("node_modules/typescript/bin/tsc"));
             request.expected_versions = &[FAKE_VERSION];
             request.extra_env.push((
                 "REPLAY_FIXTURE".to_string(),
@@ -81,7 +81,7 @@ fn run(fixture: &str, live: Option<(&Utf8PathBuf, bool)>) -> Run {
             ));
         }
         Some((bin, reverse)) => {
-            request.tsc_path = Some(bin.clone());
+            request.tsc_path = bin.clone();
             request.reverse_queries = reverse;
         }
     }
@@ -92,10 +92,10 @@ fn run(fixture: &str, live: Option<(&Utf8PathBuf, bool)>) -> Run {
     Run { outcome, round_trips: recorded.len(), calls: recorded }
 }
 
-/// Every way to ask: replayed, and with `TSRS_BIN` live, first to last and last to first.
+/// Every way to ask: replayed, and live, first to last and last to first.
 fn each_way(fixture: &str, check: impl Fn(&Run, &str)) {
     check(&run(fixture, None), "replayed");
-    let Some(bin) = tsrs_bin() else { return };
+    let bin = tsrs_bin();
     for reverse in [false, true] {
         check(&run(fixture, Some((&bin, reverse))), if reverse { "live, last to first" } else { "live" });
     }
@@ -210,5 +210,101 @@ fn a_type_inside_and_outside_a_cycle_is_a_back_reference_only_inside() {
                 assert_eq!(&prop_type(&run.outcome, component, prop), want, "{how}: {component}.{prop}");
             }
         }
+    });
+}
+
+/// How many times the checker was asked for the property list of a type, by the name of the first property it answered.
+fn property_lists(calls: &[Value]) -> BTreeMap<String, usize> {
+    let mut lists = BTreeMap::new();
+    let mut count = |answer: &Value| {
+        if let Some(first) = answer.get(0).and_then(|property| property["name"].as_str()) {
+            *lists.entry(first.to_string()).or_insert(0) += 1;
+        }
+    };
+    for call in calls {
+        match call["method"].as_str() {
+            Some("getPropertiesOfType") => count(&call["result"]),
+            Some("batchRequests") => {
+                let asked = call["params"]["requests"].as_array().into_iter().flatten();
+                let answered = call["result"]["responses"].as_array().into_iter().flatten();
+                for (request, response) in asked.zip(answered) {
+                    if request["method"] == "getPropertiesOfType" {
+                        count(&response["result"]);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    lists
+}
+
+/// The second member of a prop's union: the condition map written beside the value type.
+fn condition_map(outcome: &SemanticOutcome, component: &str, prop: &str) -> Value {
+    let ty = prop_type(outcome, component, prop);
+    ty.pointer("/members/1").unwrap_or_else(|| panic!("{component}.{prop} has a map: {ty}")).clone()
+}
+
+/// A dependency's condition maps share one constraint (Chakra's `ConditionalValue<V>` is `{ [K in keyof Conditions]?: V
+/// }` for every `V`: 538 of them in `ButtonProps`, 31 MB of property lists). A map the converter cuts as too wide needs
+/// the number of properties and that the project declares none, which the first one's list already said: the others
+/// do not ask for theirs, and each is still cut with its own printed type.
+#[test]
+fn a_second_condition_map_over_the_same_constraint_does_not_ask_for_its_properties() {
+    each_way("maps", |run, how| {
+        let lists = property_lists(&run.calls);
+        assert_eq!(lists.get("c01"), Some(&1), "{how}: three maps over `keyof Conditions`, one list: {lists:?}");
+
+        for (prop, value) in [("a", "string"), ("b", "number"), ("c", "boolean")] {
+            let map = condition_map(&run.outcome, "Shared", prop);
+            assert_eq!(map["kind"], "truncated", "{how}: {prop}");
+            assert_eq!(map["limit"], json!({ "type": "members", "total": 45 }), "{how}: {prop}");
+            let text = map["text"].as_str().unwrap();
+            assert!(
+                text.starts_with(&format!("{{ c01?: {value} | undefined;")),
+                "{how}: {prop} is printed as it is: {text}"
+            );
+        }
+    });
+}
+
+/// What the reuse may not do. A map whose properties the project declares is listed whole whatever another map over
+/// the same keys was; a map within the budget is converted from its own properties, whose types are its own. Neither
+/// shares a list.
+#[test]
+fn the_properties_of_a_map_the_project_declares_or_that_fits_the_budget_are_not_shared() {
+    each_way("maps", |run, how| {
+        let lists = property_lists(&run.calls);
+        assert_eq!(lists.get("m01"), Some(&2), "{how}: the project's own properties, one list each: {lists:?}");
+        assert_eq!(lists.get("l1"), Some(&2), "{how}: three properties fit the budget, one list each: {lists:?}");
+
+        for (prop, value) in [("a", json!({ "kind": "string" })), ("b", json!({ "kind": "number" }))] {
+            let owned = condition_map(&run.outcome, "Owned", prop);
+            let fields = owned["fields"].as_array().unwrap_or_else(|| panic!("{how}: Owned.{prop} is listed: {owned}"));
+            assert_eq!(fields.len(), 45, "{how}: Owned.{prop}");
+            assert!(fields.iter().all(|field| field["propType"] == value), "{how}: Owned.{prop}");
+
+            let small = condition_map(&run.outcome, "Small", prop);
+            let fields = small["fields"].as_array().unwrap_or_else(|| panic!("{how}: Small.{prop} is listed: {small}"));
+            let names: Vec<&str> = fields.iter().filter_map(|field| field["name"].as_str()).collect();
+            assert_eq!(names, ["l1", "l2", "l3"], "{how}: Small.{prop}");
+            assert!(fields.iter().all(|field| field["propType"] == value), "{how}: Small.{prop}");
+        }
+    });
+}
+
+/// What the reuse may not do either: a map's keys and symbol do not say who declares its properties. `Wrapped<T>` maps
+/// over the keys of whatever `T` it is given, so `Wrapped<Theirs>` (a dependency's) and `Wrapped<Ours>` (the project's,
+/// the same 45 keys) are one key. The count of the first stands for neither the second's declarations nor its fields:
+/// what the project declared is never cut.
+#[test]
+fn a_map_over_a_type_parameter_is_listed_when_the_project_may_declare_its_properties() {
+    each_way("maps", |run, how| {
+        let theirs = condition_map(&run.outcome, "Generic", "a");
+        assert_eq!(theirs["kind"], "truncated", "{how}: a dependency's keys are cut: {theirs}");
+
+        let ours = condition_map(&run.outcome, "Generic", "b");
+        let fields = ours["fields"].as_array().unwrap_or_else(|| panic!("{how}: the project's are listed: {ours}"));
+        assert_eq!(fields.len(), 45, "{how}");
     });
 }

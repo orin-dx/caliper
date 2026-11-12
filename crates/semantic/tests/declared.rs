@@ -1,8 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stderr)]
 //! Where the checker says each prop is declared (ADR 0026 S7a): `parent`, `declarations`, tags and `composes` come from
 //! its answer, not from the structural prop of the same name. The `declared` fixture, replayed from
-//! `declared.recording.json` (made by the `record_fixture` example against the pinned `tsrs`) and, when `TSRS_BIN`
-//! names a real `tsrs`, asked live:
+//! `declared.recording.json` (made by the `record_fixture` example against the pinned `tsrs`) and asked live
+//! (the built-in checker, or the `tsrs` binary `TSRS_BIN` names):
 //!
 //! - `Button`: `tone` declared in `ButtonProps` in `Button.tsx`, `size` in `BaseProps` in `Base.ts`, each with its
 //!   tags; it is made of React's `HTMLAttributes` (under an `Omit`) and `RefAttributes`;
@@ -48,12 +48,13 @@ fn structural(project: &Project) -> ExtractionOutput {
     extract(&PipelineOptions { src_dirs: vec![project.root.clone()], ..PipelineOptions::default() })
 }
 
-fn answer(project: &Project, output: &ExtractionOutput, real: Option<&Utf8PathBuf>) -> SemanticOutcome {
+fn answer(project: &Project, output: &ExtractionOutput, real: Option<&Option<Utf8PathBuf>>) -> SemanticOutcome {
     let mut request = SemanticRequest::new(project.root.clone(), targets_of(output));
     request.request_timeout = Duration::from_secs(60);
     match real {
-        Some(bin) => request.tsc_path = Some(bin.clone()),
+        Some(bin) => request.tsc_path = bin.clone(),
         None => {
+            request.tsc_path = Some(project.root.join("node_modules/typescript/bin/tsc"));
             request.expected_versions = &[FAKE_VERSION];
             request.extra_env.push((
                 "REPLAY_FIXTURE".to_string(),
@@ -67,13 +68,9 @@ fn answer(project: &Project, output: &ExtractionOutput, real: Option<&Utf8PathBu
     outcome
 }
 
-#[allow(clippy::print_stderr, reason = "a skipped test says so, since a silent skip looks like a pass")]
+/// The `tsrs` binary `TSRS_BIN` names, to run as a process; `None` asks the built-in checker.
 fn tsrs_bin() -> Option<Utf8PathBuf> {
-    let bin = std::env::var("TSRS_BIN").ok().filter(|bin| !bin.is_empty());
-    if bin.is_none() {
-        eprintln!("skipped: TSRS_BIN is not set");
-    }
-    bin.map(Utf8PathBuf::from)
+    std::env::var("TSRS_BIN").ok().filter(|bin| !bin.is_empty()).map(Utf8PathBuf::from)
 }
 
 /// Each prop of each component as `(component, prop) -> (parent, declarations, tags)`, and each component's `composes`.
@@ -122,7 +119,7 @@ fn expected(root: &Utf8PathBuf) -> Facts {
     (props, composes)
 }
 
-fn assert_declared(real: Option<&Utf8PathBuf>) {
+fn assert_declared(real: Option<&Option<Utf8PathBuf>>) {
     let project = project(real.is_none());
     let mut output = structural(&project);
     let outcome = answer(&project, &output, real);
@@ -145,6 +142,6 @@ fn parent_declarations_tags_and_composes_are_the_checkers_replayed() {
 
 #[test]
 fn parent_declarations_tags_and_composes_are_the_checkers_from_a_real_tsrs() {
-    let Some(bin) = tsrs_bin() else { return };
+    let bin = tsrs_bin();
     assert_declared(Some(&bin));
 }

@@ -313,7 +313,7 @@ impl SemanticHook {
         let structural_left = structural
             .iter()
             .any(|(name, prop)| prop.prop_type.holds_opaque() && !used.iter().any(|answered| answered.name == *name));
-        let MergedProps { kept, unread } = merge_semantic_props(
+        let MergedProps { kept, unread, diagnostics: syntax } = merge_semantic_props(
             &mut answer.entry,
             used.into_iter(),
             component.composes.as_deref(),
@@ -335,6 +335,7 @@ impl SemanticHook {
         );
         provenance.affects = vec![answer.key.clone()];
         answer.diagnostics.push(provenance);
+        answer.diagnostics.extend(syntax);
         if unread > 0 {
             answer.diagnostics.push(unread_diagnostic(unread, vec![answer.key.clone()]));
         }

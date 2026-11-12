@@ -23,9 +23,6 @@
   "files": [
     "caliper-docgen"
   ],
-  "optionalDependencies": {
-    "@tsrs/darwin-arm64": "0.23.0-ts7.1.0-beta"
-  },
   "license": "FSL-1.1-MIT",
   "repository": {
     "type": "git",

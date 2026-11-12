@@ -6,7 +6,7 @@ Node.js bindings for [caliper-docgen](https://github.com/orin-dx/caliper), so Ja
 npm install caliper-docgen-napi
 ```
 
-The prebuilt addon for your OS and CPU installs as an optional dependency (`caliper-docgen-napi-darwin-arm64`, `caliper-docgen-napi-linux-x64-gnu`, and so on). That package brings the pinned TypeScript checker, [`tsrs`](https://github.com/oxc-project/tsrs), as its own optional dependency (`@tsrs/<platform>`, 24 to 50 MB unpacked), which a session runs when `semanticTypes: 'on-demand'` is set. It is off by default.
+The prebuilt addon for your OS and CPU installs as an optional dependency (`caliper-docgen-napi-darwin-arm64`, `caliper-docgen-napi-linux-x64-gnu`, and so on).
 
 Most projects want [`caliper-docgen-vite-plugin`](https://www.npmjs.com/package/caliper-docgen-vite-plugin) or the [`caliper-docgen`](https://www.npmjs.com/package/caliper-docgen) CLI, which use this package. The binding returns the canonical output format; a session also gives each component's `__docgenInfo` in the `react-docgen-typescript` shape (`RdtComponentDoc` in `index.d.ts`).
 

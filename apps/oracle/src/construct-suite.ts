@@ -28,7 +28,8 @@ export interface Facts {
   description: string
   /** `getJsDocTags`, by name, the last of a repeated tag winning, each text trimmed. */
   tags: Record<string, string>
-  /** The text of its `@default` (or `@defaultValue`) tag; null with neither. A fixture writes no code default. */
+  /** The default the component's code gives it, as written (a destructured parameter's initializer, else `defaultProps`),
+   * which wins as in react-docgen-typescript; else the text of its `@default` (or `@defaultValue`) tag; else null. */
   default: string | null
   required: boolean
   /** react-docgen-typescript's `parent`: the interface its first declaration is a member of, by name and by file

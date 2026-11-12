@@ -48,13 +48,12 @@ export interface CaliperStorybookOptions {
    */
   prefetchStories?: number
   /**
-   * Ask TypeScript's 7.1 checker for each component a story names (experimental). `'off'` (the default) never starts
-   * it. `'on-demand'` keeps one `tsc` warm in the background, asks it for exactly the requested component, and uses
-   * the structural props when it is slower than `semanticWaitMs`; its answer is kept for the next request. Runs the
-   * pinned `tsrs` installed with the addon, else the project's `typescript@beta` (7.1) or `tsrs`, or `tscPath`.
+   * Ask the built-in TypeScript 7.1 checker for each component a story names (experimental). `'off'` (the default)
+   * never starts it. `'on-demand'` keeps it warm in the background, asks it for exactly the requested component, and
+   * uses the structural props when it is slower than `semanticWaitMs`; its answer is kept for the next request.
    */
   semanticTypes?: 'off' | 'on-demand'
-  /** The `tsc` binary to run, instead of the pinned `tsrs` installed with the addon or the project's own checker. */
+  /** A checker binary to run instead of the built-in one: `typescript@7.1`'s `tsc`, or `tsrs`. */
   tscPath?: string
   /** How many milliseconds a story waits for the checker before it takes the structural props. Default: `150`. */
   semanticWaitMs?: number

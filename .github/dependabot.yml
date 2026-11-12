@@ -57,12 +57,6 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 3
-    # tsrs is pinned on purpose (ADR 0026): a new build must pass the tsrs-against-Go parity run and the construct
-    # suite, then crates/semantic/TSRS_VERSION and every manifest that names it move together
-    # (scripts/check-packaging.mjs). A bump from here would change only one of them.
-    ignore:
-      - dependency-name: "tsrs"
-      - dependency-name: "@tsrs/*"
     groups:
       routine-npm:
         applies-to: version-updates

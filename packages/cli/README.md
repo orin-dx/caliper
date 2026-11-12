@@ -19,8 +19,6 @@ npx caliper-docgen extract --src src --format rdt
 
 This package is a thin wrapper. It runs the prebuilt binary for your platform, installed as an optional dependency (`caliper-docgen-darwin-arm64`, `caliper-docgen-linux-x64-gnu`, and so on). All behavior is in the Rust CLI.
 
-The platform package brings the pinned TypeScript checker, [`tsrs`](https://github.com/oxc-project/tsrs), as its own optional dependency (`@tsrs/<platform>`, 24 to 50 MB unpacked). `extract --experimental-semantic-types` runs it, and is off by default. `--tsc-path` picks another checker; without the package (Windows on Arm has none) the run uses the project's `typescript@beta` or `tsrs`, and otherwise keeps its own types with a warning that says what to install.
-
 Docs, benchmarks and migration notes: [orin-dx.com/tools/caliper](https://orin-dx.com/tools/caliper/). Source: [github.com/orin-dx/caliper](https://github.com/orin-dx/caliper).
 
 ## License

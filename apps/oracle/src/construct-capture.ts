@@ -37,7 +37,41 @@ function writtenUnion(typeNode: any): any[] | null {
   return node?.kind === SyntaxKind.UnionType ? [...node.types] : null
 }
 
-function factsOf(prop: any): Facts {
+/** The default the component's own code gives prop `p`, as written: the initializer of `p` in the object pattern of its
+ * first parameter, else the value of `p` in a `<name>.defaultProps = { … }` statement of its file. Null for neither. */
+function codeDefault(exported: any): string | null {
+  const symbol = exported.flags & SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported
+  const declaration: any = symbol.declarations?.[0]?.resolve()
+  const pattern = declaration?.parameters?.[0]?.name
+  if (pattern?.kind === SyntaxKind.ObjectBindingPattern) {
+    for (const element of pattern.elements) {
+      if ((element.propertyName ?? element.name)?.text === PROP && element.initializer) {
+        return element.initializer.getText()
+      }
+    }
+  }
+  const name = declaration?.name?.text
+  for (const statement of declaration?.getSourceFile()?.statements ?? []) {
+    const assigned = statement.kind === SyntaxKind.ExpressionStatement ? statement.expression : undefined
+    const target = assigned?.kind === SyntaxKind.BinaryExpression ? assigned.left : undefined
+    if (
+      target?.kind !== SyntaxKind.PropertyAccessExpression ||
+      target.name.text !== 'defaultProps' ||
+      target.expression.text !== name ||
+      assigned.right.kind !== SyntaxKind.ObjectLiteralExpression
+    ) {
+      continue
+    }
+    for (const property of assigned.right.properties) {
+      if (property.kind === SyntaxKind.PropertyAssignment && property.name.text === PROP) {
+        return property.initializer.getText()
+      }
+    }
+  }
+  return null
+}
+
+function factsOf(prop: any, exported: any): Facts {
   const tags: Record<string, string> = {}
   for (const tag of checker.getJsDocTagsOfSymbol(prop)) tags[tag.name] = (tag.text ?? '').trim()
   const declaration: any = prop.declarations?.[0]?.resolve()
@@ -46,7 +80,7 @@ function factsOf(prop: any): Facts {
   return {
     description: checker.getDocumentationCommentOfSymbol(prop),
     tags,
-    default: tags.default ?? tags.defaultValue ?? null,
+    default: codeDefault(exported) ?? tags.default ?? tags.defaultValue ?? null,
     required: (prop.flags & SymbolFlags.Optional) === 0,
     parent:
       parent?.kind === SyntaxKind.InterfaceDeclaration
@@ -64,7 +98,7 @@ function capture(fixture: Fixture): Golden {
   const prop = propsType && checker.getPropertyOfType(propsType, PROP)
   if (!prop) throw new Error(`${fixture.id}: ${fixture.component} has no prop ${PROP}`)
   const type = checker.getTypeOfSymbol(prop)
-  return { checker: norm(type), text: checker.typeToString(type), facts: factsOf(prop) }
+  return { checker: norm(type), text: checker.typeToString(type), facts: factsOf(prop, exported) }
 }
 
 // A unique-symbol key is named `__@tag@<symbol id>` and the id depends on the other files in the program, so adding a

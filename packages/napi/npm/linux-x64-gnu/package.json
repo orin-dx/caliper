@@ -21,9 +21,6 @@
   "bugs": {
     "url": "https://github.com/orin-dx/caliper/issues"
   },
-  "optionalDependencies": {
-    "@tsrs/linux-x64-gnu": "0.23.0-ts7.1.0-beta"
-  },
   "license": "FSL-1.1-MIT",
   "os": [
     "linux"

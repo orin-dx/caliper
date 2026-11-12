@@ -11,12 +11,17 @@ use camino::Utf8PathBuf;
 use rustc_hash::{FxHashMap, FxHasher};
 
 mod order;
+mod syntax;
 
+use crate::extractor::written::WrittenMember;
 use crate::types::collected::ComponentExport;
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity, Superseded};
 use crate::types::output::{
-    ComponentEntry, ExtractionOutput, OpaqueDetail, OpaqueReason, ParsedProp, PropParent, PropType, TRUNCATED_KIND,
+    ComponentEntry, DefaultValue, ExtractionOutput, OpaqueDetail, OpaqueReason, ParsedProp, PropParent, PropType,
+    TRUNCATED_KIND,
 };
+use order::Placed;
+use syntax::SourceSyntax;
 
 /// The type of a name the checker could not resolve (an import that does not resolve, a name declared nowhere), which
 /// the checker answers with its error type: an `any` that is not a written `any`. It is `opaque` with the reason
@@ -289,29 +294,45 @@ impl SemanticOutcome {
             format!("TypeScript checker backend unavailable: {}", reason.into()),
         )
         .with_help(
-            "The structural result is used instead. The npm packages install the pinned `tsrs` as an optional \
-             dependency; otherwise install `tsrs` or `typescript@beta` (7.1), or pass `--tsc-path`.",
+            "The structural result is used instead. The checker is built in; `--tsc-path` (`tscPath`) runs a checker \
+             binary instead (`typescript@7.1`'s `tsc`, or `tsrs`).",
         );
         Self { diagnostics: vec![diagnostic], ..Self::default() }
     }
 }
 
-/// Replaces `entry`'s props and `composes` with the checker's, keeping what only the structural pass has (a default
-/// value, and a description or tags when the checker has none). A prop whose type the checker could not read keeps its
-/// structural type, marked (see [`merge_semantic_props`]). `shared` interns identical props across the components of
-/// one merge. Returns how many props kept their structural type that way.
-pub fn apply_semantic_props(
+/// Whether a merge may take a fact the checker does not supply from the structural resolver's answer for the same prop.
+///
+/// `Off` is the test-only mode of ADR 0026's S7 gates (`extract --no-resolver-facts`, which the construct suite's
+/// checker lane runs): the merged facts come from the checker and oxc's syntax alone, as they will once the resolver is
+/// deleted (S7e). S7a2 covers `defaultValue` and union member order; S7b extends it to the other facts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ResolverFacts {
+    /// Where oxc's syntax does not tell, the structural answer does.
+    #[default]
+    Used,
+    /// The structural answer is not read for these facts.
+    Off,
+}
+
+/// Replaces `entry`'s props and `composes` with the checker's, keeping a description or tags only the structural pass
+/// has, for the whole-project merge. Facts are read as [`merge_semantic_props`] reads them, from `syntax` and as
+/// `resolver` allows.
+fn apply_props(
     entry: &mut ComponentEntry,
     semantic: &SemanticComponent,
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
-) -> usize {
+    syntax: &SourceSyntax,
+    resolver: ResolverFacts,
+) -> MergedProps {
     // The whole-project merge replaces the props and leaves `@types/react`'s to the inheritance layers.
     let own = semantic.props.iter().filter(|prop| !prop.react_declared);
-    replace_props(entry, own, semantic.composes.as_deref(), Unanswered::Drop, shared).unread
+    let merge = Merge { composes: semantic.composes.as_deref(), unanswered: Unanswered::Drop, syntax, resolver };
+    replace_props(entry, own, &merge, shared)
 }
 
 /// How a merge went for one component.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct MergedProps {
     /// Structural props the checker did not return, kept as the structural pass resolved them.
     pub kept: usize,
@@ -319,6 +340,8 @@ pub struct MergedProps {
     /// conditional type it left open), where the structural pass read the type in full. They keep the structural type,
     /// and their `degradedBy` also lists what the checker could not read.
     pub unread: usize,
+    /// A source file the merge could not read for the defaults and union order of the answer.
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 /// Merges the checker's `props` into `entry` by name: the checker's type, optionality, description, tags, `parent` and
@@ -328,13 +351,23 @@ pub struct MergedProps {
 /// type holds an `opaque` part, where the structural type holds none, keeps the structural type and adds the checker's
 /// reasons to its `degradedBy`: the checker's answer there is a placeholder, and the structural one is not confirmed,
 /// so it is marked. A type the checker only cut at a limit (`truncated`) is still its answer.
+///
+/// Two facts the checker does not have come from oxc's syntax, read from the files the answer names: a prop's default
+/// (the component's code: a destructured parameter's initializer, `defaultProps`; else the checker's `@default` tag)
+/// and the order of a union's members (the order its declaration writes them in). The structural answer gives them
+/// where the syntax does not tell ([`ResolverFacts::Used`]).
 pub fn merge_semantic_props<'a>(
     entry: &mut ComponentEntry,
     props: impl Iterator<Item = &'a Arc<SemanticProp>>,
     composes: Option<&[String]>,
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
 ) -> MergedProps {
-    replace_props(entry, props, composes, Unanswered::Keep, shared)
+    let props: Vec<Arc<SemanticProp>> = props.cloned().collect();
+    let syntax = SourceSyntax::read(std::iter::once((&*entry, props.as_slice())));
+    let merge = Merge { composes, unanswered: Unanswered::Keep, syntax: &syntax, resolver: ResolverFacts::Used };
+    let mut merged = replace_props(entry, props.iter(), &merge, shared);
+    merged.diagnostics = syntax.diagnostics;
+    merged
 }
 
 /// The kinds of what the checker could not read in `checker`, when the structural type `structural` read everything:
@@ -419,13 +452,73 @@ enum Unanswered {
     Keep,
 }
 
+/// How one merge reads what the checker does not answer.
+struct Merge<'a> {
+    composes: Option<&'a [String]>,
+    unanswered: Unanswered,
+    syntax: &'a SourceSyntax,
+    resolver: ResolverFacts,
+}
+
+/// A prop's default: the component's code default for it, else the checker's `@default` (or `@defaultValue`) tag, else
+/// with [`ResolverFacts::Used`] the structural default. The code wins over the tag, as in react-docgen-typescript.
+fn default_of(
+    code: Option<&DefaultValue>,
+    checker_tags: &BTreeMap<String, String>,
+    structural: Option<&ParsedProp>,
+    resolver: ResolverFacts,
+) -> Option<DefaultValue> {
+    if let Some(code) = code {
+        return Some(code.clone());
+    }
+    let tag = checker_tags.get("default").or_else(|| checker_tags.get("defaultValue"));
+    if let Some(tag) = tag {
+        return Some(DefaultValue { value: tag.trim().to_owned(), computed: false });
+    }
+    match resolver {
+        ResolverFacts::Used => structural.and_then(|structural| structural.default_value.clone()),
+        ResolverFacts::Off => None,
+    }
+}
+
+/// The checker's type with its union members in declared order: the order the declaration writes them in where it
+/// states every member, else the structural union's order where that placed any member (with
+/// [`ResolverFacts::Used`]), else the written order of the members the declaration does state. Neither leaves the
+/// checker's order. A structural order that placed members is kept even where it is the checker's own: the partial
+/// written order would put the members it does not state last, where they may not have been written.
+fn declared_order(
+    checker: PropType,
+    written: Option<&[WrittenMember]>,
+    structural: Option<&ParsedProp>,
+    resolver: ResolverFacts,
+) -> PropType {
+    let structural = match resolver {
+        ResolverFacts::Used => structural,
+        ResolverFacts::Off => None,
+    };
+    // The structural order also reaches the unions nested in members, which the written one does not.
+    let (ordered, placed) = match structural {
+        Some(structural) => {
+            let placed = order::places_any(&checker, &structural.prop_type);
+            (order::in_declared_order(checker, &structural.prop_type), placed)
+        }
+        None => (checker, false),
+    };
+    match written.and_then(|written| order::in_written_order(&ordered, written)) {
+        Some((in_written, Placed::All)) => in_written,
+        Some((in_written, Placed::Some)) if !placed => in_written,
+        Some(_) | None => ordered,
+    }
+}
+
 fn replace_props<'a>(
     entry: &mut ComponentEntry,
     props_in: impl Iterator<Item = &'a Arc<SemanticProp>>,
-    composes: Option<&[String]>,
-    unanswered: Unanswered,
+    merge: &Merge<'_>,
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
 ) -> MergedProps {
+    let Merge { composes, unanswered, syntax, resolver } = *merge;
+    let code_defaults = syntax.code_defaults(entry);
     let mut props: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
     let mut unread = 0;
     for prop in props_in {
@@ -441,19 +534,23 @@ fn replace_props<'a>(
             prop.tags.clone()
         };
         let unread_kinds = structural.map(|s| unread_by_checker(&prop.prop_type, &s.prop_type)).unwrap_or_default();
-        // The checker sorts a union's members; where the structural pass resolved the same union, its order is the
-        // declared one.
         let prop_type = match structural {
             Some(structural) if !unread_kinds.is_empty() => structural.prop_type.clone(),
-            Some(structural) => order::in_declared_order(prop.prop_type.clone(), &structural.prop_type),
-            None => prop.prop_type.clone(),
+            Some(_) | None => {
+                declared_order(prop.prop_type.clone(), syntax.written(entry, prop), structural.map(|s| &**s), resolver)
+            }
         };
         unread += usize::from(!unread_kinds.is_empty());
         let merged = ParsedProp::new(
             prop.name.clone(),
             prop_type,
             prop.required,
-            structural.and_then(|s| s.default_value.clone()),
+            default_of(
+                code_defaults.and_then(|defaults| defaults.get(&prop.name)),
+                &prop.tags,
+                structural.map(|s| &**s),
+                resolver,
+            ),
             description,
             tags,
             prop.parent.clone(),
@@ -486,30 +583,40 @@ fn replace_props<'a>(
     if let Some(composes) = composes {
         entry.composes = composes.to_vec();
     }
-    MergedProps { kept, unread }
+    MergedProps { kept, unread, diagnostics: Vec::new() }
 }
 
 /// Merge the checker's props over `output`, component by component.
 ///
 /// Per `docs/type-checker-integration.md`: the checker decides which props exist, their types, whether they are
 /// required, `parent`, `declarations` and the component's `composes`; a description and tags come from the checker,
-/// else the structural pass; a default value stays structural (the checker has no initializer for a destructured
-/// parameter), and so does a union's member order where the structural pass resolved the same union (the checker sorts
-/// members). Inheritance layers, curated inherited props and `discriminantProp` stay structural. Components the checker
-/// did not answer for keep their structural result untouched. A structural diagnostic stops naming a component the
-/// checker answered for when the answer supersedes it ([`DiagnosticCode::superseded_by_checker`]), and goes once it
-/// names none.
+/// else the structural pass; a default value and a union's member order come from oxc's syntax, else the structural
+/// pass ([`merge_semantic_props`]). Inheritance layers, curated inherited props and `discriminantProp` stay structural.
+/// Components the checker did not answer for keep their structural result untouched. A structural diagnostic stops
+/// naming a component the checker answered for when the answer supersedes it
+/// ([`DiagnosticCode::superseded_by_checker`]), and goes once it names none.
 ///
 /// Records provenance as `Info` diagnostics whose `affects` lists the output keys, so the canonical JSON gains no
 /// field: one for the components the checker resolved, one per fallback reason.
 pub fn merge_semantic(output: &mut ExtractionOutput, outcome: SemanticOutcome) {
+    merge_semantic_with(output, outcome, ResolverFacts::Used);
+}
+
+/// [`merge_semantic`], taking the facts the checker does not supply from the structural answer only as `resolver`
+/// allows.
+pub fn merge_semantic_with(output: &mut ExtractionOutput, outcome: SemanticOutcome, resolver: ResolverFacts) {
     let SemanticOutcome { components, fallbacks, diagnostics } = outcome;
+    let syntax = SourceSyntax::read(
+        components
+            .iter()
+            .filter_map(|semantic| Some((output.components.get(&semantic.key)?, semantic.props.as_slice()))),
+    );
     let mut merged_keys = Vec::new();
     let (mut unread_keys, mut unread_props) = (Vec::new(), 0);
     let mut shared: FxHashMap<u64, Vec<Arc<ParsedProp>>> = FxHashMap::default();
     for semantic in components {
         let Some(entry) = output.components.get_mut(&semantic.key) else { continue };
-        let unread = apply_semantic_props(entry, &semantic, &mut shared);
+        let unread = apply_props(entry, &semantic, &mut shared, &syntax, resolver).unread;
         if unread > 0 {
             unread_props += unread;
             unread_keys.push(semantic.key.clone());
@@ -521,6 +628,7 @@ pub fn merge_semantic(output: &mut ExtractionOutput, outcome: SemanticOutcome) {
         merged_keys.iter().filter_map(|key| Some(Superseding::new(key, output.components.get(key)?, false))).collect();
     drop_superseded(&mut output.diagnostics, &answered);
     output.diagnostics.extend(diagnostics);
+    output.diagnostics.extend(syntax.diagnostics);
 
     if !merged_keys.is_empty() {
         merged_keys.sort();
