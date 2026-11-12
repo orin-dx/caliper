@@ -339,8 +339,8 @@ impl Rpc {
     /// A snapshot of `count` programs over the same `root_files` (one when `count` is at most one), in a session it
     /// initializes first ([`Rpc::prepare`]), with one session bound to each program: a checker that answers requests
     /// about different programs at once ([`crate::checker::InProcess`]) answers the sessions in parallel. The programs
-    /// read the same files, so each answers what any other would. They share the request counts and the recording; [`Rpc::release`] on the first releases the
-    /// snapshot, and with it every program.
+    /// read the same files, so each answers what any other would. They share the request counts and the recording;
+    /// [`Rpc::release`] on the first releases the snapshot, and with it every program.
     pub(crate) async fn open_programs(
         client: Client,
         deadline: Duration,

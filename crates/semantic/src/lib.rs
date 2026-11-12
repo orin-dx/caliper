@@ -139,8 +139,8 @@ impl SemanticRequest {
 }
 
 /// Resolves the request's components with the checker. Blocks; builds its own runtime, so it must not be called from
-/// inside one. The runtime has [`CONVERTER_THREADS`] threads: the checker answers one request at a time on a thread of
-/// its own, and while it does, the answers it gave the other files in flight are read and converted on these.
+/// inside one. The runtime has up to four threads: the built-in checker answers two programs at once, each on a thread
+/// of its own, and while it does, the answers it gave the other files in flight are read and converted on these.
 pub fn resolve(request: SemanticRequest) -> SemanticOutcome {
     let threads = std::thread::available_parallelism().map_or(1, |count| count.get().min(CONVERTER_THREADS));
     let built = tokio::runtime::Builder::new_multi_thread().worker_threads(threads).enable_all().build();

@@ -362,6 +362,9 @@ type Memo = Mutex<FxHashMap<(u64, u8), Vec<Arc<Entry>>>>;
 /// again on each use, which costs a fraction of the round trip, and is several times smaller than the read lists.
 type PartsSeen = Mutex<FxHashMap<(u64, Parts), Arc<RawValue>>>;
 
+/// The props answered so far, by the hash of their [`PropKey`] and then the key itself.
+type KeptProps = Mutex<FxHashMap<u64, Vec<(PropKey, Arc<SemanticProp>)>>>;
+
 /// Everything a component's prop is made of ([`crate::component::props_of_type`]): its property's name, optionality and
 /// declarations, the symbol it is a member of (its JSDoc's key when it has no declaration: the symbol itself), its type's
 /// handle, and which of its JSDoc the component asks for. Two props of one snapshot with equal keys are the same prop: the
@@ -453,7 +456,7 @@ struct State {
     /// "Condition maps", says when that is exact). The handles are valid inside this snapshot only.
     maps: Mutex<FxHashMap<MapKey, usize>>,
     /// The props answered so far ([`crate::component::props_of_type`]), by what makes one ([`PropKey`]).
-    props: Mutex<FxHashMap<u64, Vec<(PropKey, Arc<SemanticProp>)>>>,
+    props: KeptProps,
     hits: AtomicU64,
     misses: AtomicU64,
 }
