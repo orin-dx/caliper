@@ -2,16 +2,18 @@
 //!
 //! The checker builds a union's members sorted by kind, then by value, so `"sm" | "md" | "lg"` comes back as
 //! `"lg" | "md" | "sm"`; the order the author wrote is not in its answer, and it is the order a Storybook control lists
-//! its options in. The structural pass reads the same union from the type node and keeps the order it was written in
-//! (`PropType::Union`: "the members in declaration order"). So where both resolved the same union, the structural
-//! order is the declared one.
+//! its options in. Two sources give it back, and the merge picks between them (`declared_order` in the parent module):
 //!
-//! It applies when the structural pass resolved the prop: a union in a file the extractor parsed, or one from a
-//! dependency that was loaded. A union the structural pass left opaque, or a prop it has no entry for, keeps the
-//! checker's order and carries no marker. Only a reorder is made: no member is added, dropped or changed. The checker's
-//! answer is not in the source's order, so oxc's syntax would have to supply it once the structural pass is gone, and
-//! the checker names no position to find a declaration's type node by (ADR 0026, S7a).
+//! - **oxc's syntax** ([`in_written_order`]): the union the prop's declaration writes, read from the file the checker
+//!   names (`crate::extractor::written`). It orders the top-level union only, and a member written as a name the file
+//!   does not declare (an import) places nothing: the members it stands for keep their place after the placed ones.
+//! - **the structural resolver** ([`in_declared_order`]): where the structural pass resolved the same union, its order
+//!   is the declared one, nested unions included. It goes with the resolver (ADR 0026, S7e).
+//!
+//! Only a reorder is made: no member is added, dropped or changed. A union neither source orders keeps the checker's
+//! order (by kind, then value): not alphabetical, and not marked.
 
+use crate::extractor::written::{MemberKind, WrittenMember};
 use crate::types::output::{ObjectField, PropType};
 
 /// `checker` with the members of every union it shares with `declared` put in `declared`'s order.
@@ -59,6 +61,96 @@ pub(super) fn in_declared_order(checker: PropType, declared: &PropType) -> PropT
             return_type: Box::new(in_declared_order(*return_type, declared_return)),
         },
         (other, _) => other,
+    }
+}
+
+/// How many of a union's members the written order placed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Placed {
+    All,
+    Some,
+}
+
+/// `checker`'s union with the members `written` states put in its order, then the others in their order in `checker`.
+/// A member is placed by the written member that states it (a literal, a keyword, a name it answers to), else by kind
+/// when the written union has one member of that kind and the checker one unplaced member of it. `None` when `checker`
+/// is not a union or `written` places none of its members.
+pub(super) fn in_written_order(checker: &PropType, written: &[WrittenMember]) -> Option<(PropType, Placed)> {
+    let PropType::Union(members) = checker else { return None };
+    let mut places: Vec<Option<usize>> =
+        members.iter().map(|member| written.iter().position(|candidate| states(candidate, member))).collect();
+    for index in 0..members.len() {
+        if places[index].is_some() {
+            continue;
+        }
+        let Some(kind) = kind_of(&members[index]) else { continue };
+        let unplaced_of_kind = members
+            .iter()
+            .zip(&places)
+            .filter(|(member, place)| place.is_none() && kind_of(member) == Some(kind))
+            .count();
+        let mut slots = written.iter().enumerate().filter(|(_, candidate)| **candidate == WrittenMember::Kind(kind));
+        if let (Some((slot, _)), None) = (slots.next(), slots.next())
+            && unplaced_of_kind == 1
+        {
+            places[index] = Some(slot);
+        }
+    }
+    if places.iter().all(Option::is_none) {
+        return None;
+    }
+    let placed = if places.iter().all(Option::is_some) { Placed::All } else { Placed::Some };
+    let (mut known, unknown): (Vec<_>, Vec<_>) =
+        members.iter().cloned().zip(places).partition(|(_, place)| place.is_some());
+    known.sort_by_key(|(_, place)| *place);
+    Some((PropType::Union(known.into_iter().chain(unknown).map(|(member, _)| member).collect()), placed))
+}
+
+/// Whether the written member `written` states the checker's member `member`.
+fn states(written: &WrittenMember, member: &PropType) -> bool {
+    match written {
+        // `boolean` is `true | false` to the checker; the source may have written either.
+        WrittenMember::Type(written) => {
+            written == member || (*member == PropType::Boolean && matches!(written, PropType::BoolLiteral(_)))
+        }
+        WrittenMember::Name(name) => answers_to(member, name),
+        WrittenMember::Kind(_) => false,
+    }
+}
+
+/// Whether the checker's member is the type the source names `written` (`React.ReactNode`, `Size.Small`), by the name
+/// without the namespace it was written through: the checker names the declaration.
+fn answers_to(member: &PropType, written: &str) -> bool {
+    let bare = |name: &str| name.rsplit('.').next().unwrap_or(name).to_owned();
+    let written_bare = bare(written);
+    match member {
+        PropType::Named { name, .. } | PropType::Recursive { name, .. } => bare(name) == written_bare,
+        PropType::EnumMember { enum_name, member, .. } => {
+            written.strip_suffix(member.as_str()).and_then(|head| head.strip_suffix('.')).map(bare)
+                == Some(bare(enum_name))
+        }
+        PropType::Ref { name, .. } => *name == written_bare,
+        PropType::ReactNode => {
+            matches!(written_bare.as_str(), "ReactNode" | "ReactElement") || written == "JSX.Element"
+        }
+        PropType::CssProperties => written_bare == "CSSProperties",
+        PropType::ElementType => written_bare == "ElementType",
+        _ => false,
+    }
+}
+
+/// The kind a member written only by its kind has on the checker's side.
+fn kind_of(member: &PropType) -> Option<MemberKind> {
+    match member {
+        PropType::Function { .. } => Some(MemberKind::Function),
+        PropType::Callable { .. } => Some(MemberKind::Callable),
+        PropType::Object(_) => Some(MemberKind::Object),
+        PropType::Array(_) => Some(MemberKind::Array),
+        PropType::Tuple(_) => Some(MemberKind::Tuple),
+        PropType::Readonly(_) => Some(MemberKind::Readonly),
+        PropType::Intersection(_) => Some(MemberKind::Intersection),
+        PropType::TemplateLiteral(_) => Some(MemberKind::Template),
+        _ => None,
     }
 }
 
@@ -223,6 +315,85 @@ mod tests {
         let checker = PropType::Union(vec![PropType::Boolean, lit("a")]);
         let declared = PropType::Union(vec![lit("a"), PropType::BoolLiteral(true), PropType::BoolLiteral(false)]);
         assert_eq!(in_declared_order(checker, &declared), PropType::Union(vec![lit("a"), PropType::Boolean]));
+    }
+
+    fn name(text: &str) -> WrittenMember {
+        WrittenMember::Name(text.into())
+    }
+
+    fn written(members: &[&str]) -> Vec<WrittenMember> {
+        members.iter().map(|member| WrittenMember::Type(lit(member))).collect()
+    }
+
+    #[test]
+    fn the_written_union_gives_the_order_of_the_members_it_states() {
+        assert_eq!(
+            in_written_order(&union(&["lg", "md", "sm"]), &written(&["sm", "md", "lg"])),
+            Some((union(&["sm", "md", "lg"]), Placed::All))
+        );
+    }
+
+    #[test]
+    fn a_member_written_as_an_imported_name_places_nothing_and_its_members_go_last() {
+        // `p: 'z' | Size | 'a'` with `Size` imported: the checker flattened it to "b" and "c".
+        let written = vec![WrittenMember::Type(lit("z")), name("Size"), WrittenMember::Type(lit("a"))];
+        assert_eq!(
+            in_written_order(&union(&["a", "b", "c", "z"]), &written),
+            Some((union(&["z", "a", "b", "c"]), Placed::Some))
+        );
+        assert_eq!(in_written_order(&union(&["b", "c"]), &[name("Size"), name("Other")]), None);
+    }
+
+    #[test]
+    fn a_member_written_by_kind_is_placed_when_its_kind_is_unique() {
+        let function =
+            PropType::Function { type_params: vec![], params: vec![], return_type: Box::new(PropType::Void) };
+        let checker = PropType::Union(vec![PropType::ReactNode, function.clone()]);
+        let written = vec![WrittenMember::Kind(MemberKind::Function), name("React.ReactNode")];
+        assert_eq!(
+            in_written_order(&checker, &written),
+            Some((PropType::Union(vec![function, PropType::ReactNode]), Placed::All))
+        );
+        // Two objects written and two answered: which is which is not known, so neither is placed.
+        let object = |field: &str| PropType::Object(vec![ObjectField::new(field, PropType::String, true, "")]);
+        let checker = PropType::Union(vec![object("b"), object("a"), lit("x")]);
+        let written = vec![
+            WrittenMember::Kind(MemberKind::Object),
+            WrittenMember::Kind(MemberKind::Object),
+            WrittenMember::Type(lit("x")),
+        ];
+        assert_eq!(
+            in_written_order(&checker, &written),
+            Some((PropType::Union(vec![lit("x"), object("b"), object("a")]), Placed::Some))
+        );
+    }
+
+    #[test]
+    fn an_enum_member_and_boolean_answer_to_what_the_source_wrote() {
+        let member = |name: &str, value: &str| PropType::EnumMember {
+            enum_name: "Size".into(),
+            member: name.into(),
+            value: crate::types::output::EnumMemberValue::String(value.into()),
+        };
+        let checker = PropType::Union(vec![member("Large", "large"), member("Small", "small"), PropType::Boolean]);
+        let written = vec![
+            WrittenMember::Type(PropType::BoolLiteral(false)),
+            name("Size.Small"),
+            name("Size.Large"),
+            WrittenMember::Type(PropType::BoolLiteral(true)),
+        ];
+        assert_eq!(
+            in_written_order(&checker, &written),
+            Some((
+                PropType::Union(vec![PropType::Boolean, member("Small", "small"), member("Large", "large")]),
+                Placed::All
+            ))
+        );
+    }
+
+    #[test]
+    fn a_type_that_is_no_union_is_not_ordered() {
+        assert_eq!(in_written_order(&lit("a"), &written(&["a", "b"])), None);
     }
 
     #[test]

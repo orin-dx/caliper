@@ -69,7 +69,7 @@ The test runs one `extract` over this directory with the weekly's canonical opti
 Besides the type, a golden holds the `facts` both lanes are held to on every row (`Facts` and `factDifferences` in `../src/construct-suite.ts`), each captured from the Go checker and its AST:
 
 - `description` (`getDocumentationComment`) and `tags` (`getJsDocTags`, by name, the last of a repeated tag winning, text trimmed);
-- `default`: the text of `@default` or `@defaultValue`, else null (a fixture writes no code default);
+- `default`: the default the component's code gives the prop as written (a destructured parameter's initializer, else `defaultProps`), else the text of `@default` or `@defaultValue`, else null;
 - `required`: the property is not optional;
 - `parent`: react-docgen-typescript's, the interface the prop's first declaration is a member of, by name and by file relative to this directory; null for a member of a type literal;
 - `order`: the members of the union the declaration writes (directly, or through a non-generic alias it names), in written order; null when it writes none. Caliper's union keeps the order when the members it states for them stand in that order.
@@ -127,7 +127,7 @@ A reported difference is a row where tsrs gives a different answer than the Go c
 
 ## The checker lane
 
-ADR 0026's gate before the default flips: the suite through the checker path (`--experimental-semantic-types` with the pinned `tsrs`), held to `checker-expectations.json`, which has the shape of `expectations.json`. Green rows must stay green; every other row is a documented gap with a one-line reason. The lane fails when a row is better or worse than its entry (an improvement means the gap closed: update the entry and drop the `gap`), when the checker did not answer for a row, or when the backend was unavailable.
+ADR 0026's gate before the default flips: the suite through the checker path (`--experimental-semantic-types` with the pinned `tsrs`, and `--no-resolver-facts`, so a default and a union's member order come from the checker and oxc's syntax, not the structural resolver), held to `checker-expectations.json`, which has the shape of `expectations.json`. Green rows must stay green; every other row is a documented gap with a one-line reason. The lane fails when a row is better or worse than its entry (an improvement means the gap closed: update the entry and drop the `gap`), when the checker did not answer for a row, or when the backend was unavailable.
 
 ```sh
 just test-checker-lane   # CI job "Test / Checker lane"

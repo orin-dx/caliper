@@ -92,10 +92,14 @@ fn outcome(target: &SemanticTarget, names: &[&str], diagnostics: Vec<Diagnostic>
                         prop_type: PropType::String,
                         required: false,
                         description: String::new(),
+                        tags: Default::default(),
+                        parent: None,
+                        declarations: Vec::new(),
                         react_declared: false,
                     })
                 })
                 .collect(),
+            composes: None,
         }],
         fallbacks: Vec::new(),
         diagnostics,

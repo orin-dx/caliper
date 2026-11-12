@@ -48,7 +48,12 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
 
     let mut output = caliper_docgen_core::pipeline::extract(&options);
     if options.experimental_semantic_types {
-        apply_semantic_backend(&options, std::time::Duration::from_millis(args.semantic_timeout_ms), &mut output);
+        let resolver = match args.no_resolver_facts {
+            true => caliper_docgen_core::types::semantic::ResolverFacts::Off,
+            false => caliper_docgen_core::types::semantic::ResolverFacts::Used,
+        };
+        let timeout = std::time::Duration::from_millis(args.semantic_timeout_ms);
+        apply_semantic_backend(&options, timeout, resolver, &mut output);
     }
 
     if let Some(pb) = pb {
@@ -93,6 +98,7 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
 fn apply_semantic_backend(
     options: &caliper_docgen_core::pipeline::PipelineOptions,
     timeout: std::time::Duration,
+    resolver: caliper_docgen_core::types::semantic::ResolverFacts,
     output: &mut caliper_docgen_core::types::ExtractionOutput,
 ) {
     let project_root = options
@@ -114,7 +120,7 @@ fn apply_semantic_backend(
     request.tsc_path = options.semantic_tsc_path.clone();
     request.request_timeout = timeout;
     let outcome = caliper_docgen_semantic::resolve(request);
-    caliper_docgen_core::types::semantic::merge_semantic(output, outcome);
+    caliper_docgen_core::types::semantic::merge_semantic_with(output, outcome, resolver);
 }
 
 /// `--format rdt`: react-docgen-typescript's shape, shared with the NAPI binding. Like react-docgen-typescript, only
