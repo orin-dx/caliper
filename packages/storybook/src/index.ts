@@ -43,6 +43,11 @@ export interface CaliperStorybookOptions {
    */
   fillAfter?: number
   /**
+   * When the dev server starts, document the components of this many first stories through Storybook's docgen
+   * service, before a browser asks. Default: `1`, the story Storybook opens. `0` waits for the browser.
+   */
+  prefetchStories?: number
+  /**
    * Ask the built-in TypeScript 7.1 checker for each component a story names (experimental). `'off'` (the default)
    * never starts it. `'on-demand'` keeps it warm in the background, asks it for exactly the requested component, and
    * uses the structural props when it is slower than `semanticWaitMs`; its answer is kept for the next request.
@@ -59,8 +64,12 @@ export interface CaliperStorybookOptions {
    */
   semanticWaitEmptyMs?: number
   /**
-   * When a component's resolution reported a warning or an error, its props may be incomplete. `'degraded'` (the
-   * default) hands such a component to the next docgen provider, React's own; `'never'` always answers.
+   * When a warning or an error stays on a component's answer, its props may be incomplete. `'degraded'` (the default)
+   * hands such a component to the next docgen provider, React's own; `'never'` always answers. Once the checker
+   * (`semanticTypes`) answers for a component, a warning caliper-docgen's own pass reported about what that answer
+   * replaces (a component it could not find, a prop type it could not resolve) is gone from the answer and hands
+   * nothing on; one about what the checker could not read either, or the checker's own (it stopped, it is
+   * unavailable), stays and does.
    */
   fallback?: 'degraded' | 'never'
 }

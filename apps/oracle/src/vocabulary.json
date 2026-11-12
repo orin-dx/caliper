@@ -27,14 +27,5 @@
     "missing",
     "checker any/error",
     "not judged"
-  ],
-  "outcomes": [
-    "correct",
-    "less precise",
-    "wrong",
-    "contested",
-    "no reference",
-    "layer",
-    "missing"
   ]
 }

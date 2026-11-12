@@ -6,3 +6,11 @@ allow-expect-in-tests = true
 allow-panic-in-tests = true
 allow-dbg-in-tests = true
 allow-print-in-tests = true
+
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "its iteration order is random: use BTreeMap for a map that is written out, FxHashMap for an internal one" },
+]
+
+disallowed-methods = [
+    { path = "caliper_docgen_core::types::output::OpaqueDetail::new", reason = "a degraded type pushes a diagnostic: call OpaqueDetail::give_up, or allow this where the reason is known and the diagnostic is pushed elsewhere" },
+]

@@ -4,7 +4,7 @@ How often a component Caliper reports really is one, per detection rule (`detect
 
 ## Method
 
-`scripts/precision-sample.py` runs `extract` on each corpus, groups components by `detectedBy`, and draws up to 25 per rule with a fixed seed. Each item was labelled `component`, `not_component` or `unsure` from its source: a component is something a consumer can render as `<Name />`.
+The sample is drawn by hand, and no script is kept: `extract` on each corpus, components grouped by `detectedBy`, up to 25 per rule with a fixed seed. Each item was labelled `component`, `not_component` or `unsure` from its source: a component is something a consumer can render as `<Name />`.
 
 The 2026-10-21 sample was labelled by four model agents reading each item's snippet and, where needed, the file. Those labels are not yet checked by a human.
 

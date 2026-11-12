@@ -246,6 +246,71 @@ class RecallIsNotComparedAcrossReferences(unittest.TestCase):
         self.assertIn('It is not a measure of correctness', weekly.markdown(now, []))
 
 
+def shape_of_nov_2():
+    """The 2026-11-02 record (GitHub issue 279): one process-wide peak, 1901 MiB, for every tool on shadcn, antd and spectrum,
+    and times that moved 11 to 33% between two runs of the same code."""
+    def corpus(ms, rss, rdt_ms=5000):
+        return {'caliper': {'ms': ms, 'rss_mib': rss}, 'rdt': {'ms': rdt_ms, 'rss_mib': rss},
+                'react_docgen': {'ms': rdt_ms, 'rss_mib': rss}}
+    return {'corpora': {'shadcn': corpus(458, 1901), 'antd': corpus(137, 1901), 'spectrum': corpus(234, 1901)}}
+
+
+class OnlyCaliperOwnNumbersOpenAnIssueForCost(unittest.TestCase):
+    """The issue opens when a whole run of Caliper is over its budget (scripts/headline.py BUDGETS), never because a number
+    moved from last week and never because of another tool's numbers."""
+
+    def test_the_shape_of_issue_279_opens_nothing(self):
+        now, before = shape_of_nov_2(), shape_of_nov_2()
+        before['corpora']['shadcn']['caliper'].update(ms=607 // 2, rss_mib=1593)
+        self.assertEqual(weekly.findings(now, before), [])
+
+    def test_the_time_noise_of_issue_279_is_a_change_and_not_a_finding(self):
+        before = {'corpora': {'shadcn': {'caliper': {'ms': 458, 'rss_mib': 334}}}}
+        now = {'corpora': {'shadcn': {'caliper': {'ms': 607, 'rss_mib': 334}}}}
+        self.assertEqual(weekly.findings(now, before), [])
+        self.assertEqual(weekly.changes(now, before), ['shadcn: time 458 -> 607'])
+
+    def test_a_rise_in_only_the_comparison_tools_is_not_in_the_issue_or_the_changes(self):
+        before, now = shape_of_nov_2(), shape_of_nov_2()
+        for r in (before, now):
+            r['corpora']['antd']['caliper']['rss_mib'] = 152
+        for tool in ('rdt', 'react_docgen'):
+            now['corpora']['antd'][tool].update(ms=60000, rss_mib=5000)
+        self.assertEqual(weekly.findings(now, before), [])
+        self.assertEqual(weekly.changes(now, before), [])
+
+    def test_a_caliper_run_over_a_budget_opens_one_issue_line_per_metric(self):
+        now = shape_of_nov_2()
+        now['corpora']['shadcn']['caliper'].update(ms=2500, rss_mib=700)
+        now['corpora']['shadcn']['rdt']['rss_mib'] = 1394
+        out = weekly.findings(now, {'corpora': {}})
+        self.assertEqual(len(out), 2)
+        self.assertTrue(all(line.startswith('shadcn: a whole run') for line in out))
+
+    def test_one_peak_for_every_tool_is_not_read_as_caliper_s(self):
+        """The 11-02 shape: 1901 MiB for all three tools is the helper's process-wide maximum, so no budget or change is read
+        from it, though a time moving 11 to 33% on its own is still a change."""
+        before = shape_of_nov_2()
+        before['corpora']['shadcn']['caliper'].update(ms=300, rss_mib=1593)
+        before['corpora']['shadcn']['rdt']['rss_mib'] = 1593
+        before['corpora']['shadcn']['react_docgen']['rss_mib'] = 1593
+        self.assertEqual(weekly.findings(shape_of_nov_2(), before), [])
+        self.assertEqual(weekly.changes(shape_of_nov_2(), before), ['shadcn: time 300 -> 458'])
+
+    def test_the_largest_corpus_stays_inside_the_budget_with_its_own_spread(self):
+        """Chakra's peak was 446, 451 and 555 MiB in three records; the budget has to hold all three."""
+        for rss in (446, 451, 555):
+            now = {'corpora': {'chakra': {'caliper': {'ms': 1048, 'rss_mib': rss}}}}
+            self.assertEqual(weekly.findings(now, now), [])
+
+    def test_a_missing_metric_does_not_crash_the_rule(self):
+        before = {'corpora': {'antd': {'caliper': {'ms': 100}}}}
+        now = {'corpora': {'antd': {'caliper': {'rss_mib': 100}}, 'mantine': {}}}
+        self.assertEqual(weekly.findings(now, before), [])
+        self.assertEqual(weekly.changes(now, before), [])
+        self.assertEqual(weekly.changes({'corpora': {'antd': {}}}, {'corpora': {'antd': {'caliper': {'ms': 1}}}}), [])
+
+
 class MeasureHelperErrors(unittest.TestCase):
     def test_command_that_cannot_run_names_itself(self):
         with self.assertRaisesRegex(RuntimeError, r'no-such-command-here exited with 127: cannot run no-such-command-here'):

@@ -10,7 +10,7 @@ The canonical JSON (`ExtractionOutput`, `IncrementalUpdate`, the session index) 
 
 - **Bump** when a reader of the previous version would misread or lose data: a field removed, renamed or retyped, its meaning changed, or references and tables restructured. A new field, a new `detectedBy` value or a new diagnostic code is not a bump; readers must tolerate them.
 - **A bump ships** in a changeset marked breaking for the core crate and every package that reads the JSON.
-- **Readers** (`ExtractionOutput`'s `Deserialize`, `packages/vite-plugin/src/schema.ts`, `packages/storybook/src/schema.ts`) accept their own version, reject any other with an error naming both, and read output with no `schemaVersion` as version 1.
+- **Readers** (`packages/vite-plugin/src/schema.ts`, `packages/storybook/src/schema.ts`; the Rust types only write the canonical JSON) accept their own version, reject any other with an error naming both, and read output with no `schemaVersion` as version 1.
 - `--format rdt`, `--format storybook` and `--format toon` carry no version; they have other tools' shapes. The parse cache has its own `CACHE_SCHEMA_VERSION`.
 
 ## Where this code lives, and why that's not a AGENTS.md violation

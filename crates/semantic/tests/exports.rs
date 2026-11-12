@@ -228,31 +228,3 @@ fn two_inline_sub_components_of_one_name_each_get_their_own_props_from_a_real_ts
     let bin = tsrs_bin();
     two_inline_sub_components_of_one_name_each_get_their_own_props(Some(&bin));
 }
-
-/// A host that reads the canonical JSON back (a stored run) asks the checker about the same exports as one holding the
-/// extractor's output.
-#[test]
-fn targets_of_an_output_read_back_from_json_name_the_same_exports() {
-    let project = project("exports", false);
-    let output = structural(&project);
-    let read: ExtractionOutput = serde_json::from_str(&serde_json::to_string(&output).unwrap()).unwrap();
-
-    let exports = |output: &ExtractionOutput| -> Vec<(String, Vec<String>)> {
-        targets_of(output)
-            .into_iter()
-            .map(|target| (target.key, target.exports.iter().map(ToString::to_string).collect()))
-            .collect()
-    };
-    assert_eq!(
-        exports(&read),
-        owned(&[
-            ("CardImpl", &["Card"]),
-            ("Item", &["default.Item"]),
-            ("Menu", &["default"]),
-            ("Other", &["default"]),
-            ("Tab", &["Tabs.Tab"]),
-            ("Tabs", &["Tabs"]),
-        ])
-    );
-    assert_eq!(targets_of(&read), targets_of(&output));
-}

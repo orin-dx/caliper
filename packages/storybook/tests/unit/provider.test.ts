@@ -173,6 +173,28 @@ describe('createDocgenProvider', () => {
     expect(payload?.argTypes).toEqual({ label: labelArgType })
   })
 
+  it("answers for a component the checker resolved, and hands one on when the checker's own warning stays", async () => {
+    const checker = (message: string, severity: 'info' | 'warning') => ({
+      ...warning(['Button'], severity),
+      code: 'SEMANTIC_BACKEND',
+      message,
+    })
+    const answered = binding()
+    answered.output.diagnostics = [
+      checker('1 component(s) resolved by the TypeScript checker', 'info'),
+      checker('1 prop(s) of 1 component(s) keep their structural type', 'info'),
+    ]
+    const { payload, nextCalls } = await request(answered, story('Button'))
+    expect(nextCalls).toBe(0)
+    expect(payload?.argTypes).toEqual({ label: labelArgType })
+
+    const stopped = binding()
+    stopped.output.diagnostics = [
+      checker('the TypeScript checker stopped without answering; the structural props are used', 'warning'),
+    ]
+    expect(await request(stopped, story('Button'))).toEqual({ payload: NEXT, nextCalls: 1 })
+  })
+
   it('warns once per component handed on, with the reason', async () => {
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {})
     const fake = binding()

@@ -93,9 +93,9 @@ async fn a_clone_held_across_shutdown_reports_session_closed() {
 #[tokio::test]
 async fn shutdown_returns_the_reaped_exit_status() {
     let (_dir, config) = common::spawn_fake("exit_after:1:7");
-    let mut supervisor = Supervisor::spawn(config).await.expect("spawn fake tsc");
+    let supervisor = Supervisor::spawn(config).await.expect("spawn fake tsc");
 
-    let first = supervisor.request("first", json!({}), Duration::from_secs(2)).await;
+    let first = supervisor.client().request("first", json!({}), Duration::from_secs(2)).await;
     assert!(first.is_ok(), "expected the first request to succeed, got {first:?}");
 
     tokio::time::sleep(Duration::from_millis(100)).await;

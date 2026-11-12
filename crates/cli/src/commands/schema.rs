@@ -266,29 +266,20 @@ mod tests {
     }
 
     #[test]
-    fn scripts_and_oracle_read_the_schema_version_rust_writes() {
+    fn every_reader_declares_the_schema_version_rust_writes() {
         let version = caliper_docgen_core::types::SCHEMA_VERSION;
-        let python = read_repo_file("scripts/schema_version.py");
-        assert!(
-            python.lines().any(|line| line == format!("SUPPORTED_SCHEMA_VERSION = {version}")),
-            "scripts/schema_version.py must declare SUPPORTED_SCHEMA_VERSION = {version}"
-        );
-        let oracle = read_repo_file("apps/oracle/src/schema-version.ts");
-        assert!(
-            oracle.lines().any(|line| line == format!("export const SUPPORTED_SCHEMA_VERSION = {version}")),
-            "apps/oracle/src/schema-version.ts must declare SUPPORTED_SCHEMA_VERSION = {version}"
-        );
-    }
-
-    #[test]
-    fn typescript_packages_read_the_schema_version_rust_writes() {
-        let expected =
-            format!("export const SUPPORTED_SCHEMA_VERSION = {}", caliper_docgen_core::types::SCHEMA_VERSION);
-        for package in ["storybook", "vite-plugin"] {
-            let source = read_repo_file(&format!("packages/{package}/src/schema.ts"));
+        let python = format!("SUPPORTED_SCHEMA_VERSION = {version}");
+        let typescript = format!("export const {python}");
+        let readers = [
+            ("scripts/schema_version.py", &python),
+            ("apps/oracle/src/schema-version.ts", &typescript),
+            ("packages/storybook/src/schema.ts", &typescript),
+            ("packages/vite-plugin/src/schema.ts", &typescript),
+        ];
+        for (path, declaration) in readers {
             assert!(
-                source.lines().any(|line| line == expected),
-                "packages/{package}/src/schema.ts must declare `{expected}`"
+                read_repo_file(path).lines().any(|line| line == declaration),
+                "{path} must declare `{declaration}`"
             );
         }
     }

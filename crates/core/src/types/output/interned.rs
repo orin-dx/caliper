@@ -10,10 +10,10 @@ use std::sync::Arc;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use serde::ser::SerializeStruct;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Serialize, Serializer};
 
-use super::{ComponentEntry, ExtractionOutput, ExtractionStats, InheritedLayer, ParsedProp};
-use crate::types::{Diagnostic, EnumEntry};
+use super::{ComponentEntry, ExtractionOutput, InheritedLayer, ParsedProp};
+use crate::types::Diagnostic;
 
 /// A prop's id in the table: the 64-bit FNV-1a hash of its compact JSON, written as 16 hex digits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -458,124 +458,6 @@ impl Serialize for ExtractionOutput {
         out.serialize_field("stats", stats)?;
         out.end()
     }
-}
-
-impl<'de> Deserialize<'de> for ExtractionOutput {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error as _;
-
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Wire {
-            // Output written before the version existed has the shape of version 1.
-            #[serde(default = "first_version")]
-            schema_version: u32,
-            components: BTreeMap<String, serde_json::Value>,
-            props: BTreeMap<String, serde_json::Value>,
-            prop_sets: BTreeMap<String, BTreeMap<String, String>>,
-            name_lists: BTreeMap<String, Vec<String>>,
-            enums: BTreeMap<String, Vec<EnumEntry>>,
-            diagnostics: Vec<serde_json::Value>,
-            stats: ExtractionStats,
-        }
-        fn first_version() -> u32 {
-            1
-        }
-        let Wire { schema_version, components, props, prop_sets, name_lists, enums, diagnostics, stats } =
-            Wire::deserialize(deserializer)?;
-        let tables = ReadTables { props: &props, prop_sets: &prop_sets, name_lists: &name_lists };
-        if schema_version != super::SCHEMA_VERSION {
-            return Err(D::Error::custom(format!(
-                "output schema version {schema_version} is not the version {} this build reads",
-                super::SCHEMA_VERSION
-            )));
-        }
-        let diagnostics = diagnostics
-            .into_iter()
-            .map(|diagnostic| expand_diagnostic(diagnostic, &name_lists).map_err(D::Error::custom))
-            .collect::<Result<_, D::Error>>()?;
-        let components = components
-            .into_iter()
-            .map(|(key, component)| Ok((key, expand(component, &tables).map_err(D::Error::custom)?)))
-            .collect::<Result<_, D::Error>>()?;
-        Ok(ExtractionOutput { components, enums, diagnostics, stats })
-    }
-}
-
-/// Replace a diagnostic's `affects` list id with the names it stands for.
-pub(crate) fn expand_diagnostic(
-    mut diagnostic: serde_json::Value,
-    name_lists: &BTreeMap<String, Vec<String>>,
-) -> Result<Diagnostic, String> {
-    if let Some(affects) = diagnostic.get_mut("affects") {
-        let id = affects.as_str().ok_or_else(|| format!("`affects` holds {affects} where a name list id belongs"))?;
-        let names = name_lists.get(id).ok_or_else(|| format!("name list id {id} is not in the `nameLists` table"))?;
-        *affects = serde_json::json!(names);
-    }
-    serde_json::from_value(diagnostic).map_err(|e| e.to_string())
-}
-
-/// The tables a component's ids point into, as read.
-struct ReadTables<'a> {
-    props: &'a BTreeMap<String, serde_json::Value>,
-    prop_sets: &'a BTreeMap<String, BTreeMap<String, String>>,
-    name_lists: &'a BTreeMap<String, Vec<String>>,
-}
-
-/// Replace a component's prop set ids and omitted-list ids with the props and names they stand for.
-fn expand(mut component: serde_json::Value, tables: &ReadTables<'_>) -> Result<ComponentEntry, String> {
-    let prop =
-        |id: &str| tables.props.get(id).cloned().ok_or_else(|| format!("prop id {id} is not in the `props` table"));
-
-    let Some(serde_json::Value::Array(set_ids)) = component.get("props") else {
-        return Err("`props` holds something other than a list of prop set ids".to_owned());
-    };
-    let mut props = serde_json::Map::new();
-    for set_id in set_ids {
-        let set_id = set_id.as_str().ok_or_else(|| format!("`props` holds {set_id} where a prop set id belongs"))?;
-        let set = tables
-            .prop_sets
-            .get(set_id)
-            .ok_or_else(|| format!("prop set id {set_id} is not in the `propSets` table"))?;
-        for (name, id) in set {
-            if props.insert(name.clone(), prop(id)?).is_some() {
-                return Err(format!("prop `{name}` is in two of the component's prop sets"));
-            }
-        }
-    }
-    component["props"] = serde_json::Value::Object(props);
-
-    if let Some(serde_json::Value::Object(notable)) = component.get_mut("notableInherited") {
-        for value in notable.values_mut() {
-            let id =
-                value.as_str().ok_or_else(|| format!("`notableInherited` holds {value} where a prop id belongs"))?;
-            *value = prop(id)?;
-        }
-    }
-
-    if let Some(serde_json::Value::Array(layers)) = component.get_mut("inheritance") {
-        for layer in layers {
-            let Some(omitted) = layer.get_mut("omitted") else { continue };
-            let id =
-                omitted.as_str().ok_or_else(|| format!("`omitted` holds {omitted} where a name list id belongs"))?;
-            let names = tables
-                .name_lists
-                .get(id)
-                .ok_or_else(|| format!("name list id {id} is not in the `nameLists` table"))?;
-            *omitted = serde_json::json!(names);
-            if let Some(members) = layer.get_mut("members") {
-                let id = members
-                    .as_str()
-                    .ok_or_else(|| format!("`members` holds {members} where a name list id belongs"))?;
-                let names = tables
-                    .name_lists
-                    .get(id)
-                    .ok_or_else(|| format!("name list id {id} is not in the `nameLists` table"))?;
-                *members = serde_json::json!(names);
-            }
-        }
-    }
-    serde_json::from_value(component).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

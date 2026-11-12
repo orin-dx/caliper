@@ -13,7 +13,7 @@
 //! `echo` (default), `never_respond`, `hang_after_n:<N>`, `exit_after:<N>:<code>`,
 //! `crash_immediately:<code>`, `garbage_bytes`, `bad_content_length`,
 //! `oversized_frame:<N>`, `truncated_body`, `invalid_json_reply`, `reorder_ack`, `shutdown_slow:<ms>`, `never_read`,
-//! `fatal_frame_then_alive`, `fatal_frame_once_then_echo`, `notify_then_echo`, `noisy_stderr`.
+//! `fatal_frame_then_alive`, `notify_then_echo`, `noisy_stderr`.
 //!
 //! Every scenario appends its PID as one line to `<cwd>/fake-tsc-spawns.log` at startup, where `<cwd>` is the value of
 //! the `--cwd` argument the supervisor passes. Tests read that file to count spawns.
@@ -37,7 +37,7 @@ fn requests() -> Requests {
 
 #[tokio::main]
 async fn main() {
-    let prior_spawns = log_spawn();
+    log_spawn();
     let scenario = std::env::var("FAKE_TSC_SCENARIO").unwrap_or_else(|_| "echo".to_string());
     let mut parts = scenario.splitn(3, ':');
     let name = parts.next().unwrap_or("echo");
@@ -62,23 +62,20 @@ async fn main() {
         "noisy_stderr" => noisy_stderr().await,
         "never_read" => tokio::time::sleep(Duration::from_secs(3600)).await,
         "fatal_frame_then_alive" => fatal_frame_then_alive().await,
-        "fatal_frame_once_then_echo" if prior_spawns == 0 => fatal_frame_then_alive().await,
         "shutdown_slow" => shutdown_slow(arg1.and_then(|s| s.parse().ok()).unwrap_or(10_000)).await,
         _ => echo().await,
     }
 }
 
-/// Appends this process's PID to `<--cwd>/fake-tsc-spawns.log`. Returns the number of lines already there, so a
-/// scenario can tell which spawn it is. Logging is skipped (returning 0) when the supervisor passed no `--cwd`.
-fn log_spawn() -> usize {
+/// Appends this process's PID to `<--cwd>/fake-tsc-spawns.log`. Logging is skipped when the supervisor passed no
+/// `--cwd`.
+fn log_spawn() {
     let mut args = std::env::args().skip_while(|arg| arg != "--cwd");
-    let Some(cwd) = args.nth(1) else { return 0 };
+    let Some(cwd) = args.nth(1) else { return };
     let path = std::path::Path::new(&cwd).join("fake-tsc-spawns.log");
-    let prior = std::fs::read_to_string(&path).map_or(0, |contents| contents.lines().count());
     if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
         let _ = std::io::Write::write_all(&mut file, format!("{}\n", std::process::id()).as_bytes());
     }
-    prior
 }
 
 fn request_id(request: &serde_json::Value) -> serde_json::Value {

@@ -352,6 +352,86 @@ fn degrade_diagnostics_of_a_resolved_component_are_dropped() {
     assert!(!out.diagnostics.iter().any(|d| d.message == "opaque"));
 }
 
+fn affecting(severity: DiagnosticSeverity, code: DiagnosticCode, message: &str, affects: &[&str]) -> Diagnostic {
+    let mut diagnostic = Diagnostic::new(severity, code, message);
+    diagnostic.affects = affects.iter().map(ToString::to_string).collect();
+    diagnostic
+}
+
+#[test]
+fn the_structural_cannot_find_the_component_warning_goes_once_the_checker_answers_the_component() {
+    let mut out = output();
+    out.diagnostics = vec![affecting(
+        DiagnosticSeverity::Warning,
+        DiagnosticCode::UnresolvableImport,
+        "Cannot find the component 'Button' whose props are referenced from '/src/Button.tsx'",
+        &["Button"],
+    )];
+
+    merge_semantic(&mut out, SemanticOutcome { components: vec![button(vec![])], ..Default::default() });
+
+    let left: Vec<(&str, Vec<String>)> =
+        out.diagnostics.iter().map(|d| (d.message.as_str(), d.affects.clone())).collect();
+    assert_eq!(left, [("1 component(s) resolved by the TypeScript checker", vec!["Button".to_string()])]);
+}
+
+#[test]
+fn a_superseded_diagnostic_shared_with_an_unanswered_component_stays_for_that_component_only() {
+    let mut out = output();
+    out.diagnostics = vec![affecting(
+        DiagnosticSeverity::Warning,
+        DiagnosticCode::UnresolvableImport,
+        "Cannot resolve './theme' from '/src/theme.ts'",
+        &["Button", "Card"],
+    )];
+
+    merge_semantic(&mut out, SemanticOutcome { components: vec![button(vec![])], ..Default::default() });
+
+    let shared: Vec<&Diagnostic> =
+        out.diagnostics.iter().filter(|d| d.code == DiagnosticCode::UnresolvableImport).collect();
+    assert_eq!(shared.len(), 1, "{:?}", out.diagnostics);
+    assert_eq!(shared[0].affects, ["Card"]);
+}
+
+#[test]
+fn an_unresolvable_import_the_checker_cannot_resolve_either_keeps_its_warning_and_the_props_marker() {
+    let mut out = output();
+    let unresolved = affecting(
+        DiagnosticSeverity::Warning,
+        DiagnosticCode::UnresolvableImport,
+        "Cannot resolve type 'Label' in '/src/Button.tsx'",
+        &["Button"],
+    );
+    out.diagnostics = vec![unresolved.clone()];
+
+    merge_semantic(
+        &mut out,
+        SemanticOutcome {
+            components: vec![button(vec![typed("label", unresolved_type("Label"))])],
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(out.components["Button"].props["label"].degraded_by, ["unresolvableImport"]);
+    assert_eq!(out.diagnostics[0], unresolved, "{:?}", out.diagnostics);
+}
+
+#[test]
+fn a_diagnostic_about_what_the_checker_does_not_replace_stays_on_an_answered_component() {
+    let mut out = output();
+    let kept = vec![
+        affecting(DiagnosticSeverity::Warning, DiagnosticCode::JsDocDefaultMismatch, "default", &["Button"]),
+        affecting(DiagnosticSeverity::Info, DiagnosticCode::MissingTypeLibrary, "no @types/react", &["Button"]),
+        affecting(DiagnosticSeverity::Info, DiagnosticCode::DiscriminatedUnion, "discriminant", &["Button"]),
+        affecting(DiagnosticSeverity::Warning, DiagnosticCode::OpaqueType, "a file's, no component's", &[]),
+    ];
+    out.diagnostics = kept.clone();
+
+    merge_semantic(&mut out, SemanticOutcome { components: vec![button(vec![])], ..Default::default() });
+
+    assert_eq!(out.diagnostics[..kept.len()], kept[..]);
+}
+
 #[test]
 fn identical_props_are_shared_between_components_and_a_different_one_is_not() {
     let interner = PropInterner::default();

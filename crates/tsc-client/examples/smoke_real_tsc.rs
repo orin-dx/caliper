@@ -50,10 +50,11 @@ async fn main() {
     let mut config = SupervisorConfig::new(tsc_path, repo_root, expected);
     config.handshake_timeout = Duration::from_secs(30); // generous for a cold nightly spawn
 
-    let mut supervisor = Supervisor::spawn(config).await.expect("spawn real tsc");
+    let supervisor = Supervisor::spawn(config).await.expect("spawn real tsc");
     println!("Spawned. Sending `initialize`...");
 
     let response = supervisor
+        .client()
         .request("initialize", serde_json::json!(null), Duration::from_secs(10))
         .await
         .expect("initialize request");

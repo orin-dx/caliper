@@ -11,7 +11,7 @@ function assertOneOf(name: string, value: unknown, choices: readonly string[]): 
 }
 
 /** Throws for an option value that is not one of its choices: a typo must not silently take another meaning. */
-export function assertValidOptions(options: CaliperStorybookOptions): void {
+export function assertValidOptions(options: Pick<CaliperStorybookOptions, 'fallback' | 'semanticTypes'>): void {
   assertOneOf('fallback', options.fallback, FALLBACKS)
   assertOneOf('semanticTypes', options.semanticTypes, SEMANTIC_TYPES)
 }

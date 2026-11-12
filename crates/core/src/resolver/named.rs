@@ -67,6 +67,7 @@ pub(super) fn resolve_named(
                 code: DiagnosticCode::CircularReference,
                 affects: Vec::new(),
             });
+            #[allow(clippy::disallowed_methods, reason = "the diagnostic above is the one for this reason")]
             return OpaqueDetail::new(name.to_string(), OpaqueReason::DepthExceeded);
         }
         result

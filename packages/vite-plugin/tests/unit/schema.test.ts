@@ -13,14 +13,6 @@ describe('assertSchemaVersion', () => {
     )
   })
 
-  it("reads version 7, which carries each component's exports, and not version 6, which does not", () => {
-    expect(SUPPORTED_SCHEMA_VERSION).toBe(7)
-    expect(() => assertSchemaVersion({ schemaVersion: 6 }, 'output')).toThrow(
-      'The caliper-docgen output has schema version 6, and this package reads version 7. ' +
-        'Update caliper-docgen-vite-plugin and caliper-docgen-napi to the same release.',
-    )
-  })
-
   it('names the version, the one it reads and what to update when the version is different', () => {
     expect(() => assertSchemaVersion({ schemaVersion: SUPPORTED_SCHEMA_VERSION + 1 }, 'update')).toThrow(
       `The caliper-docgen update has schema version ${SUPPORTED_SCHEMA_VERSION + 1}, and this package reads version ${SUPPORTED_SCHEMA_VERSION}. ` +
