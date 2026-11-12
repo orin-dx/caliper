@@ -26,7 +26,7 @@ use crate::pipeline::HtmlAttributeMode;
 use crate::react_types::{checker_prop_used, react_props_wanted};
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use crate::types::semantic::{
-    Delivery, MergedProps, Priority, SemanticComponent, SemanticFallback, SemanticOutcome, SemanticProp,
+    Delivery, MergedProps, Priority, PropInterner, SemanticComponent, SemanticFallback, SemanticOutcome, SemanticProp,
     SemanticProvider, SemanticTarget, SharedPriority, SourceChange, Superseding, drop_superseded, merge_semantic_props,
     unread_diagnostic,
 };
@@ -88,6 +88,19 @@ struct AnswerCache {
     answers: FxHashMap<(String, u64), Answered>,
     /// Requests in flight under the current generation, by the same key as `answers`.
     pending: FxHashMap<(String, u64), Arc<Pending>>,
+    /// The one copy of each prop the kept answers hold, for this generation.
+    props: PropInterner,
+}
+
+impl AnswerCache {
+    /// `component` with each prop the one copy the kept answers share. A design system's components repeat the same
+    /// props (Chakra's about a thousand style props each), and an answer kept with its own copies held about 6.7 MiB
+    /// per Chakra component, so a session that answered a few hundred stories held gigabytes.
+    fn shared(&self, component: Arc<SemanticComponent>) -> Arc<SemanticComponent> {
+        let SemanticComponent { key, props, composes } = Arc::unwrap_or_clone(component);
+        let props = props.into_iter().map(|prop| self.props.share_arc(prop)).collect();
+        Arc::new(SemanticComponent { key, props, composes })
+    }
 }
 
 type Answers = Mutex<AnswerCache>;
@@ -154,6 +167,7 @@ impl SemanticHook {
         cache.generation += 1;
         cache.answers.clear();
         cache.pending.clear();
+        cache.props = PropInterner::default();
         self.provider.changed(change);
     }
 
@@ -270,7 +284,7 @@ impl SemanticHook {
         let asked = answer.key.clone();
         let settling = pending.clone();
         let delivery = Delivery::new(move |outcome| {
-            let settled = match outcome {
+            let mut settled = match outcome {
                 Some(outcome) => {
                     let Read { answered, once } = read_outcome(&asked, outcome);
                     Settled::Answered { answered, once }
@@ -282,9 +296,10 @@ impl SemanticHook {
                 if cache.pending.get(&key).is_some_and(|registered| Arc::ptr_eq(registered, &settling)) {
                     cache.pending.remove(&key);
                 }
-                if let Settled::Answered { answered, .. } = &settled
+                if let Settled::Answered { answered, .. } = &mut settled
                     && cache.generation == generation
                 {
+                    answered.component = answered.component.take().map(|component| cache.shared(component));
                     cache.answers.insert(key, answered.clone());
                 }
             }
@@ -381,4 +396,46 @@ fn read_outcome(asked: &str, outcome: SemanticOutcome) -> Read {
     }
     read.answered.component = components.into_iter().find(|found| found.key == asked).map(Arc::new);
     read
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::PropType;
+
+    fn component(key: &str, names: &[&str]) -> Arc<SemanticComponent> {
+        let props = names
+            .iter()
+            .map(|name| {
+                Arc::new(SemanticProp {
+                    name: (*name).to_owned(),
+                    prop_type: PropType::String,
+                    required: false,
+                    description: String::new(),
+                    tags: Default::default(),
+                    parent: None,
+                    declarations: Vec::new(),
+                    react_declared: false,
+                })
+            })
+            .collect();
+        Arc::new(SemanticComponent { key: key.to_owned(), props, composes: None })
+    }
+
+    #[test]
+    fn kept_answers_share_one_copy_of_an_equal_prop_until_the_cache_is_invalidated() {
+        let mut cache = AnswerCache::default();
+        let first = cache.shared(component("A", &["color", "size"]));
+        let second = cache.shared(component("B", &["color", "label"]));
+
+        assert!(Arc::ptr_eq(&first.props[0], &second.props[0]), "both answers hold the one `color`");
+        assert!(!Arc::ptr_eq(&first.props[1], &second.props[1]));
+        assert_eq!(second.key, "B");
+        assert_eq!(second.props.iter().map(|prop| prop.name.as_str()).collect::<Vec<_>>(), ["color", "label"]);
+
+        // What `invalidate` does to the cache: a later answer no longer reaches the props of the dropped ones.
+        cache.props = PropInterner::default();
+        let third = cache.shared(component("C", &["color"]));
+        assert!(!Arc::ptr_eq(&first.props[0], &third.props[0]));
+    }
 }
