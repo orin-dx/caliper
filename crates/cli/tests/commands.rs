@@ -426,6 +426,55 @@ fn watch_says_when_the_config_enables_a_checker_it_never_runs() {
     }
 }
 
+/// The pinned tsrs the npm platform package installs beside the binary is the checker `extract` starts, with no
+/// `--tsc-path` and no checker in the project. The fake tsrs records that it ran, then never answers.
+#[cfg(unix)]
+#[test]
+fn extract_starts_the_tsrs_installed_beside_its_binary() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = TempDir::new().unwrap();
+    let modules = tmp.path().join("install/node_modules");
+    let binary = modules.join("caliper-docgen-platform/caliper-docgen");
+    std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_caliper-docgen"), &binary).unwrap();
+    let pin = include_str!("../../semantic/TSRS_VERSION").trim();
+    let platforms =
+        ["darwin-arm64", "darwin-x64", "linux-x64-gnu", "linux-x64-musl", "linux-arm64-gnu", "linux-arm64-musl"];
+    for platform in platforms {
+        let package = modules.join("@tsrs").join(platform);
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("package.json"), format!(r#"{{"version": "{pin}"}}"#)).unwrap();
+        std::fs::write(package.join("tsrs"), "#!/bin/sh\ntouch \"$0.ran\"\nexec sleep 30\n").unwrap();
+        std::fs::set_permissions(package.join("tsrs"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let project = tmp.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::write(project.join("Plain.tsx"), "export function Plain(props: { a: string }) { return null; }\n")
+        .unwrap();
+
+    let output = Command::new(&binary)
+        .args(["extract", "--src", project.to_str().unwrap(), "--json", "--no-cache"])
+        .args(["--experimental-semantic-types", "--semantic-timeout-ms", "300"])
+        .env_remove("TSRS_BIN")
+        .output()
+        .unwrap();
+
+    let written: serde_json::Value = serde_json::from_str(&stdout_of(&output)).unwrap();
+    let ran: Vec<&str> =
+        platforms.into_iter().filter(|p| modules.join("@tsrs").join(p).join("tsrs.ran").exists()).collect();
+    assert_eq!(ran.len(), 1, "{ran:?} {written}");
+    let warnings: Vec<&str> = written["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["code"] == "SEMANTIC_BACKEND")
+        .map(|d| d["message"].as_str().unwrap())
+        .collect();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("timed out"), "{warnings:?}");
+}
+
 /// The names of a canonical component's props, sorted, through the prop sets of `written`.
 fn prop_names(written: &serde_json::Value, component: &str) -> Vec<String> {
     let sets = written["components"][component]["props"].as_array().unwrap();

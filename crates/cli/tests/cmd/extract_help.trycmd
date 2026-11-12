@@ -91,7 +91,8 @@ Options:
 
       --tsc-path <TSC_PATH>
           The checker binary `--experimental-semantic-types` runs (`tsc` or
-          `tsrs`), instead of the nearest `node_modules/typescript/bin/tsc` or
+          `tsrs`), instead of the pinned `@tsrs/<platform>` installed with
+          caliper-docgen, else the nearest `node_modules/typescript/bin/tsc` or
           `node_modules/tsrs/bin/tsrs`
 
       --semantic-timeout-ms <SEMANTIC_TIMEOUT_MS>

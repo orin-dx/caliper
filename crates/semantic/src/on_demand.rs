@@ -73,8 +73,11 @@ pub struct OnDemandConfig {
     pub project_root: Utf8PathBuf,
     /// A tsconfig whose compiler options the checker uses (read with `parseConfigFile`); with none, a default set.
     pub tsconfig: Option<Utf8PathBuf>,
-    /// An explicit `tsc` binary, instead of `node_modules/typescript/bin/tsc` above `project_root`.
+    /// An explicit `tsc` binary, instead of the pinned `tsrs` or `node_modules/typescript/bin/tsc` above `project_root`.
     pub tsc_path: Option<Utf8PathBuf>,
+    /// The directory of the running Caliper binary, or why it is unknown: the pinned `@tsrs/<platform>` is looked for
+    /// in the nearest `node_modules` at or above it, before the project's own checker.
+    pub binary_dir: Result<Utf8PathBuf, String>,
     /// Bound on each request to the checker, and on its start-up handshake.
     pub request_timeout: Duration,
     /// The `typescript` versions the checker may report; one that is not among them is a start-up failure.
@@ -90,12 +93,13 @@ pub struct OnDemandConfig {
 
 impl OnDemandConfig {
     /// A configuration for `project_root` with a 60 second request timeout, the supported versions, a 768 MiB memory
-    /// bound, a 5 second shutdown wait, and no explicit tsconfig or `tsc` path.
+    /// bound, a 5 second shutdown wait, and no explicit tsconfig, `tsc` path or binary directory.
     pub fn new(project_root: Utf8PathBuf) -> Self {
         Self {
             project_root,
             tsconfig: None,
             tsc_path: None,
+            binary_dir: Err(crate::NO_BINARY_DIR.to_owned()),
             request_timeout: Duration::from_secs(60),
             expected_versions: SUPPORTED_VERSIONS,
             max_rss_mib: DEFAULT_MAX_RSS_MIB,
@@ -466,6 +470,7 @@ impl Checker {
                 project_root: config.project_root.clone(),
                 tsconfig: config.tsconfig.clone(),
                 tsc_path: config.tsc_path.clone(),
+                binary_dir: config.binary_dir.clone(),
                 targets: Vec::new(),
                 request_timeout: config.request_timeout,
                 expected_versions: config.expected_versions,
@@ -508,6 +513,7 @@ impl Checker {
         let mut request = SemanticRequest::new(config.project_root.clone(), targets);
         request.tsconfig = config.tsconfig.clone();
         request.tsc_path = config.tsc_path.clone();
+        request.binary_dir = config.binary_dir.clone();
         request.request_timeout = config.request_timeout;
         request.expected_versions = config.expected_versions;
         request.extra_env.clone_from(&config.extra_env);

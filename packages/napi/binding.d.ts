@@ -99,13 +99,15 @@ export interface JsExtractOptions {
   lazy?: boolean
   /**
    * Session only: `'on-demand'` asks TypeScript's 7.1 checker for each component a request names, and answers
-   * with the structural props when the checker is slower than `semanticWaitMs` (experimental; ADR 0022). Needs
-   * `typescript@beta` installed or `tscPath`. `'off'` (the default) never starts it.
+   * with the structural props when the checker is slower than `semanticWaitMs` (experimental; ADR 0022). Runs the
+   * pinned `tsrs` installed with this package, else the project's `typescript@beta` or `tsrs`, or `tscPath`. `'off'`
+   * (the default) never starts it.
    */
   semanticTypes?: 'off' | 'on-demand'
   /**
-   * Session only, with `semanticTypes: 'on-demand'`: the `tsc` binary to run, instead of the nearest
-   * `node_modules/typescript/bin/tsc` or `node_modules/tsrs/bin/tsrs`.
+   * Session only, with `semanticTypes: 'on-demand'`: the `tsc` binary to run, instead of the pinned
+   * `@tsrs/<platform>` installed with this package, else the nearest `node_modules/typescript/bin/tsc` or
+   * `node_modules/tsrs/bin/tsrs`.
    */
   tscPath?: string
   /**

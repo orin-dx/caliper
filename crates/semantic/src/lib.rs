@@ -43,11 +43,14 @@ use crate::instantiate::Instantiation;
 use crate::rpc::{CallError, REQUESTS, Rpc};
 
 /// The builds whose protocol this backend was traced against: the `typescript` 7.1 series, from `7.1.0-beta` on, and
-/// the `tsrs` builds listed exactly (`<tsrs version>-ts<typescript version>`), each only while its TypeScript part is
-/// in the series above. The protocol has no version handshake, so the package's `package.json` version and the
-/// initialize call that follows the spawn are the whole check; a build that fails either takes the structural result
-/// with one warning.
-pub const SUPPORTED_VERSIONS: &[&str] = &["7.1", "0.23.0-ts7.1.0-beta"];
+/// the `tsrs` build Caliper pins (`<tsrs version>-ts<typescript version>`, read from `TSRS_VERSION`), only while its
+/// TypeScript part is in the series above. The protocol has no version handshake, so the package's `package.json`
+/// version and the initialize call that follows the spawn are the whole check; a build that fails either takes the
+/// structural result with one warning.
+pub const SUPPORTED_VERSIONS: &[&str] = &["7.1", locate::TSRS_VERSION];
+
+/// Why a request built with `new` does not know where Caliper's binary is.
+const NO_BINARY_DIR: &str = "no binary directory was given";
 
 /// How many files are asked about at once. `tsc` answers requests one at a time; this keeps it from idling on round
 /// trips.
@@ -86,8 +89,11 @@ pub struct SemanticRequest {
     pub project_root: Utf8PathBuf,
     /// A tsconfig whose compiler options the checker uses (read with `parseConfigFile`); with none, a default set.
     pub tsconfig: Option<Utf8PathBuf>,
-    /// An explicit `tsc` binary, instead of `node_modules/typescript/bin/tsc` above `project_root`.
+    /// An explicit `tsc` binary, instead of the pinned `tsrs` or `node_modules/typescript/bin/tsc` above `project_root`.
     pub tsc_path: Option<Utf8PathBuf>,
+    /// The directory of the running Caliper binary, or why it is unknown: the pinned `@tsrs/<platform>` is looked for
+    /// in the nearest `node_modules` at or above it, before the project's own checker.
+    pub binary_dir: Result<Utf8PathBuf, String>,
     /// The components to ask about.
     pub targets: Vec<Target>,
     /// Bound on each request, and on the `tsc` start-up handshake.
@@ -105,12 +111,13 @@ pub struct SemanticRequest {
 
 impl SemanticRequest {
     /// A request for `targets` under `project_root`, with a 60 second timeout, the supported versions, and no
-    /// tsconfig or explicit `tsc` path.
+    /// tsconfig, explicit `tsc` path or binary directory.
     pub fn new(project_root: Utf8PathBuf, targets: Vec<Target>) -> Self {
         Self {
             project_root,
             tsconfig: None,
             tsc_path: None,
+            binary_dir: Err(NO_BINARY_DIR.to_owned()),
             targets,
             request_timeout: Duration::from_secs(60),
             expected_versions: SUPPORTED_VERSIONS,
@@ -152,7 +159,8 @@ fn group_by_file(request: &SemanticRequest) -> (SemanticOutcome, FxHashMap<&Utf8
 }
 
 fn supervisor_config(request: &SemanticRequest) -> Result<SupervisorConfig, String> {
-    let tsc_path = locate::find_tsc(&request.project_root, request.tsc_path.as_deref())?;
+    let binary_dir = request.binary_dir.as_deref().map_err(String::as_str);
+    let tsc_path = locate::find_tsc(&request.project_root, request.tsc_path.as_deref(), binary_dir)?;
     let mut config = SupervisorConfig::new(tsc_path, request.project_root.clone(), request.expected_versions);
     config.handshake_timeout = request.request_timeout;
     config.extra_env.clone_from(&request.extra_env);

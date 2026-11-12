@@ -5,7 +5,7 @@
 #![deny(missing_docs)]
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 
 use camino::Utf8Path;
 use dashmap::DashMap;
@@ -101,6 +101,39 @@ fn live_session(session_id: u32) -> napi::Result<Arc<WatchSession>> {
         .ok_or_else(|| napi::Error::from_reason(format!("Unknown session {session_id}")))
 }
 
+// ─── Where the addon is ───────────────────────────────────────────────────────
+
+/// The directory Node loaded this addon from, or why it is unknown. npm installs the pinned `@tsrs/<platform>` beside
+/// the addon's platform package, so the checker is looked for from here.
+static ADDON_DIR: OnceLock<Result<camino::Utf8PathBuf, String>> = OnceLock::new();
+
+/// Records where Node loaded the addon from, as it loads it.
+#[napi(module_exports)]
+pub fn record_addon_dir(_exports: napi::bindgen_prelude::Object<'_>, env: napi::Env) -> napi::Result<()> {
+    let dir = env.get_module_file_name().map_err(|error| error.to_string()).and_then(|url| file_url_dir(&url));
+    ADDON_DIR.get_or_init(|| dir);
+    Ok(())
+}
+
+/// The directory of the file a `file:` URL names: `file:///a/b%20c/x.node` is `/a/b c`, `file:///C:/a/x.node` is `C:/a`
+/// and `file://host/share/x.node` is `//host/share`.
+fn file_url_dir(url: &str) -> Result<camino::Utf8PathBuf, String> {
+    let rest = url.strip_prefix("file://").ok_or_else(|| format!("{url} is not a file: URL"))?;
+    let decoded =
+        percent_encoding::percent_decode_str(rest).decode_utf8().map_err(|error| format!("{url}: {error}"))?;
+    let path = match decoded.strip_prefix('/') {
+        Some(local) if matches!(local.as_bytes(), [drive, b':', b'/', ..] if drive.is_ascii_alphabetic()) => {
+            local.to_owned()
+        }
+        Some(_) => decoded.into_owned(),
+        None => format!("//{decoded}"),
+    };
+    camino::Utf8Path::new(&path)
+        .parent()
+        .map(camino::Utf8Path::to_path_buf)
+        .ok_or_else(|| format!("{url} names no file in a directory"))
+}
+
 // ─── JsExtractOptions ─────────────────────────────────────────────────────────
 
 /// Options passed from TypeScript — flat struct for easy NAPI marshalling.
@@ -135,12 +168,14 @@ pub struct JsExtractOptions {
     /// returns an output with no components.
     pub lazy: Option<bool>,
     /// Session only: `'on-demand'` asks TypeScript's 7.1 checker for each component a request names, and answers
-    /// with the structural props when the checker is slower than `semanticWaitMs` (experimental; ADR 0022). Needs
-    /// `typescript@beta` installed or `tscPath`. `'off'` (the default) never starts it.
+    /// with the structural props when the checker is slower than `semanticWaitMs` (experimental; ADR 0022). Runs the
+    /// pinned `tsrs` installed with this package, else the project's `typescript@beta` or `tsrs`, or `tscPath`. `'off'`
+    /// (the default) never starts it.
     #[napi(ts_type = "'off' | 'on-demand'")]
     pub semantic_types: Option<String>,
-    /// Session only, with `semanticTypes: 'on-demand'`: the `tsc` binary to run, instead of the nearest
-    /// `node_modules/typescript/bin/tsc` or `node_modules/tsrs/bin/tsrs`.
+    /// Session only, with `semanticTypes: 'on-demand'`: the `tsc` binary to run, instead of the pinned
+    /// `@tsrs/<platform>` installed with this package, else the nearest `node_modules/typescript/bin/tsc` or
+    /// `node_modules/tsrs/bin/tsrs`.
     pub tsc_path: Option<String>,
     /// Session only, with `semanticTypes: 'on-demand'`: how many milliseconds a request waits for the checker before
     /// it takes the structural answer (default 150).
@@ -206,6 +241,7 @@ fn on_demand_checker(
         .map(camino::Utf8PathBuf::from)
         .or_else(|| root.ancestors().map(|dir| dir.join("tsconfig.json")).find(|file| file.is_file()));
     config.tsc_path = tsc_path.map(camino::Utf8PathBuf::from);
+    config.binary_dir = ADDON_DIR.get().cloned().unwrap_or_else(|| Err("the addon was not initialized".to_owned()));
     let checker = caliper_docgen_semantic::OnDemand::new(config);
     checker.warm_up();
     Arc::new(checker)
@@ -648,6 +684,20 @@ mod tests {
             tsc_path: None,
             semantic_wait_ms: None,
             semantic_wait_empty_ms: None,
+        }
+    }
+
+    #[test]
+    fn the_addon_directory_is_read_from_the_file_url_node_reports() {
+        let cases = [
+            ("file:///a/b%20c/x.node", Ok("/a/b c")),
+            ("file:///C:/proj/node_modules/x/x.node", Ok("C:/proj/node_modules/x")),
+            ("file://host/share/x.node", Ok("//host/share")),
+            ("/a/x.node", Err("/a/x.node is not a file: URL")),
+            ("file:///a/%FF/x.node", Err("file:///a/%FF/x.node: invalid utf-8 sequence of 1 bytes from index 3")),
+        ];
+        for (url, expected) in cases {
+            assert_eq!(file_url_dir(url), expected.map(camino::Utf8PathBuf::from).map_err(str::to_owned), "{url}");
         }
     }
 

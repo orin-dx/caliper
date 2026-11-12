@@ -6,6 +6,11 @@
 //    binary). `scripts/napi-loader-version.mjs` rewrites the literal after the build.
 //  - every CLI linux-*-gnu package declares `libc: ["glibc"]` like the napi ones, so
 //    package managers do not hand the glibc binary to a musl host.
+//  - the pinned tsrs (ADR 0026) is stated once, in crates/semantic/TSRS_VERSION, which the
+//    Rust backend compiles in. Every manifest that installs it must name that exact version:
+//    each platform package's one optional dependency on the matching `@tsrs/<platform>` (the
+//    Rust lookup finds it beside the binary), and apps/oracle's `tsrs`, which the checker lane
+//    and the parity run use. No other package may depend on tsrs.
 // Regenerate the loader with `pnpm --filter caliper-docgen-napi build:napi`.
 import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -33,6 +38,47 @@ for (const dir of ['packages/cli/npm', 'packages/napi/npm']) {
     if (JSON.stringify(libc) !== '["glibc"]') {
       problems.push(`${dir}/${name}/package.json has libc ${JSON.stringify(libc)}, expected ["glibc"]`)
     }
+  }
+}
+
+const tsrsPin = readFileSync(join(root, 'crates/semantic/TSRS_VERSION'), 'utf8').trim()
+if (!/^\d+\.\d+\.\d+-ts\d+\.\d+\.\d+/.test(tsrsPin)) {
+  problems.push(`crates/semantic/TSRS_VERSION is '${tsrsPin}', expected an exact tsrs build such as 0.23.0-ts7.1.0-beta`)
+}
+const tsrsDependencies = (pkg) =>
+  ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'].flatMap((field) =>
+    Object.entries(pkg[field] ?? {})
+      .filter(([name]) => name === 'tsrs' || name.startsWith('@tsrs/'))
+      .map(([name, version]) => `${field} ${name}@${version}`),
+  )
+
+const oracle = readJson('apps/oracle/package.json')
+if (JSON.stringify(tsrsDependencies(oracle)) !== JSON.stringify([`devDependencies tsrs@${tsrsPin}`])) {
+  problems.push(
+    `apps/oracle/package.json has ${JSON.stringify(tsrsDependencies(oracle))}, expected devDependencies tsrs@${tsrsPin} (crates/semantic/TSRS_VERSION)`,
+  )
+}
+
+for (const dir of ['packages/cli/npm', 'packages/napi/npm']) {
+  for (const name of readdirSync(join(root, dir))) {
+    const pkg = readJson(`${dir}/${name}/package.json`)
+    const [os, cpu] = [pkg.os?.[0], pkg.cpu?.[0]]
+    const libc = os === 'linux' ? (pkg.libc?.[0] === 'glibc' ? '-gnu' : '-musl') : ''
+    const expected = [`optionalDependencies @tsrs/${os}-${cpu}${libc}@${tsrsPin}`]
+    if (JSON.stringify(tsrsDependencies(pkg)) !== JSON.stringify(expected)) {
+      problems.push(
+        `${dir}/${name}/package.json has ${JSON.stringify(tsrsDependencies(pkg))}, expected ${JSON.stringify(expected)}`,
+      )
+    }
+  }
+}
+
+for (const dir of readdirSync(join(root, 'packages'))) {
+  const found = tsrsDependencies(readJson(`packages/${dir}/package.json`))
+  if (found.length > 0) {
+    problems.push(
+      `packages/${dir}/package.json depends on ${found.join(', ')}; only the platform packages install tsrs, beside their binary`,
+    )
   }
 }
 

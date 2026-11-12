@@ -134,8 +134,9 @@ pub struct ExtractArgs {
     #[arg(long)]
     pub experimental_semantic_types: bool,
 
-    /// The checker binary `--experimental-semantic-types` runs (`tsc` or `tsrs`), instead of the nearest
-    /// `node_modules/typescript/bin/tsc` or `node_modules/tsrs/bin/tsrs`
+    /// The checker binary `--experimental-semantic-types` runs (`tsc` or `tsrs`), instead of the pinned
+    /// `@tsrs/<platform>` installed with caliper-docgen, else the nearest `node_modules/typescript/bin/tsc` or
+    /// `node_modules/tsrs/bin/tsrs`
     #[arg(long, requires = "experimental_semantic_types")]
     pub tsc_path: Option<String>,
 

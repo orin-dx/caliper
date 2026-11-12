@@ -21,6 +21,9 @@
   "bugs": {
     "url": "https://github.com/orin-dx/caliper/issues"
   },
+  "optionalDependencies": {
+    "@tsrs/darwin-arm64": "0.23.0-ts7.1.0-beta"
+  },
   "license": "FSL-1.1-MIT",
   "os": [
     "darwin"

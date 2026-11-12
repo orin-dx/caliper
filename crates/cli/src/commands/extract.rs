@@ -112,9 +112,19 @@ fn apply_semantic_backend(
         .clone()
         .or_else(|| request.project_root.ancestors().map(|dir| dir.join("tsconfig.json")).find(|file| file.is_file()));
     request.tsc_path = options.semantic_tsc_path.clone();
+    request.binary_dir = binary_dir();
     request.request_timeout = timeout;
     let outcome = caliper_docgen_semantic::resolve(request);
     caliper_docgen_core::types::semantic::merge_semantic(output, outcome);
+}
+
+/// The real directory of this executable, where npm installs the pinned `@tsrs/<platform>` beside it. Canonical, because
+/// pnpm links the package into place and keeps its dependencies beside the link's target.
+fn binary_dir() -> Result<camino::Utf8PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    let exe = camino::Utf8PathBuf::from_path_buf(exe).map_err(|exe| format!("{} is not UTF-8", exe.display()))?;
+    let exe = caliper_docgen_core::canonical_path::canonicalize(&exe).map_err(|error| format!("{exe}: {error}"))?;
+    exe.parent().map(camino::Utf8Path::to_path_buf).ok_or_else(|| format!("{exe} has no parent directory"))
 }
 
 /// `--format rdt`: react-docgen-typescript's shape, shared with the NAPI binding. Like react-docgen-typescript, only
