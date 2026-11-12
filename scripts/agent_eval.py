@@ -264,8 +264,8 @@ def relative(path, root):
 def caliper_views(binary, src, root):
     """Caliper's TOON components keyed by (file relative to `root`, name), the diagnostics that say a component's props may
     be incomplete attached to them, and every diagnostic by the file it names."""
-    # The structural resolver's output, as the weekly record's other runs (docs/measurement.md).
-    base = [binary, 'extract', '--src', src, '--html-attributes', 'full', '--quiet', '--load-dependencies', '--no-checker']
+    # The default's output (the checker answers), as the weekly record's other runs (docs/measurement.md).
+    base = [binary, 'extract', '--src', src, '--html-attributes', 'full', '--quiet', '--load-dependencies']
     toon = subprocess.run(base + ['--format', 'toon'], capture_output=True, text=True, check=True).stdout
     raw = subprocess.run(base + ['--json'], capture_output=True, text=True, check=True).stdout
     document = schema_version.check(json.loads(raw[raw.index('{'):]), 'agent_eval')

@@ -4,6 +4,7 @@ Run: python3 scripts/test_headline.py"""
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import headline
@@ -96,12 +97,22 @@ class Findings(unittest.TestCase):
         self.assertEqual(headline.findings('antd', entry(h), entry({**h, 'wrong': 2})), [])
 
     def test_a_whole_run_over_a_budget_opens_an_issue(self):
-        self.assertEqual(headline.findings('chakra', entry(ms=2500, rss_mib=700), None),
-                         ['chakra: a whole run\'s time is 2,500 ms, over the 2,000 ms budget',
-                          "chakra: a whole run's peak memory is 700 MiB, over the 600 MiB budget"])
+        budgets = {'chakra': {'ms': 2000, 'rss_mib': 600}}
+        with mock.patch.dict(headline.BUDGETS, budgets):
+            self.assertEqual(headline.findings('chakra', entry(ms=2500, rss_mib=700), None),
+                             ['chakra: a whole run\'s time is 2,500 ms, over the 2,000 ms budget',
+                              "chakra: a whole run's peak memory is 700 MiB, over the 600 MiB budget"])
 
     def test_a_run_inside_the_budget_is_quiet_however_much_it_drifted(self):
-        self.assertEqual(headline.findings('chakra', entry(ms=2000, rss_mib=600), entry(ms=500, rss_mib=100)), [])
+        with mock.patch.dict(headline.BUDGETS, {'chakra': {'ms': 2000, 'rss_mib': 600}}):
+            self.assertEqual(headline.findings('chakra', entry(ms=2000, rss_mib=600), entry(ms=500, rss_mib=100)), [])
+
+    def test_a_corpus_with_no_budget_is_recorded_and_opens_nothing(self):
+        """No checker run of the five corpora is measured yet: every budget is None, 'record on first run'."""
+        self.assertEqual(set(headline.BUDGETS), {'mantine', 'chakra', 'shadcn', 'antd', 'spectrum'})
+        for name, budget in headline.BUDGETS.items():
+            self.assertEqual(budget, {'ms': None, 'rss_mib': None})
+            self.assertEqual(headline.findings(name, entry(ms=10**6, rss_mib=10**6), None), [])
 
     def test_a_record_without_a_headline_or_without_numbers_is_quiet(self):
         self.assertEqual(headline.findings('antd', {}, None), [])
@@ -129,7 +140,7 @@ class Summary(unittest.TestCase):
 
     def test_the_budgets_and_the_gate_in_the_text_are_the_ones_used(self):
         self.assertIn('more than 0.1% wrong', headline.HOW_TO_READ)
-        self.assertIn('over 2 s or 600 MiB', headline.HOW_TO_READ)
+        self.assertIn('time or memory budget', headline.HOW_TO_READ)
 
 
 class WeeklyUsesIt(unittest.TestCase):
