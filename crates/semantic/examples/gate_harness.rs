@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout, clippy::print_stderr)]
 //! The measurable ADR 0026 gates, through the session a Storybook addon runs: a lazy `WatchSession` asking a warm
-//! `OnDemand` over the project's own `tsc` (`just gate-measure` runs all four).
+//! `OnDemand` over a checker binary, or the built-in checker with `--tsc built-in` (`just gate-measure` runs all four).
 //!
 //!   gate_harness memory       --src DIR --tsc PATH [--edits 650] [--max-rss-mib N]
 //!   gate_harness determinism  --src DIR --tsc PATH [--components 150] [--threads 1,2,4] [--runs 3]
@@ -29,6 +29,10 @@ use camino::Utf8PathBuf;
 
 const CHECKER_NOTE: &str = "resolved by the TypeScript checker";
 
+/// `--tsc built-in` asks the checker linked into this process instead of a binary. It has no process of its own, so
+/// the gates that sample the checker's process report no memory for it.
+const BUILT_IN: &str = "built-in";
+
 fn arg(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).and_then(|at| args.get(at + 1)).cloned()
 }
@@ -42,7 +46,7 @@ fn open(
 ) -> (WatchSession, Arc<OnDemand>) {
     let mut config = OnDemandConfig::new(src.clone());
     config.tsconfig = src.ancestors().map(|dir| dir.join("tsconfig.json")).find(|file| file.is_file());
-    config.tsc_path = Some(Utf8PathBuf::from(tsc));
+    config.tsc_path = (tsc != BUILT_IN).then(|| Utf8PathBuf::from(tsc));
     config.request_timeout = Duration::from_secs(120);
     config.extra_env = env;
     config.max_rss_mib = max_rss_mib.unwrap_or(config.max_rss_mib);

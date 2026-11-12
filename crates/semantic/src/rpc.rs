@@ -1,15 +1,17 @@
-//! Typed calls over one `tsc --api` session. Wire shapes are the ones the official 7.1 client sends (traced against
-//! `7.1.0-beta`); a method this module does not name is not used.
+//! Typed calls over one checker session, linked or a `tsc --api` process ([`crate::checker`]). Wire shapes are the
+//! ones the official 7.1 client sends (traced against `7.1.0-beta`); a method this module does not name is not used.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use caliper_docgen_tsc_client::{Client, TscClientError};
+use caliper_docgen_tsc_client::TscClientError;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
 use serde_json::{Value, json};
+
+use crate::checker::Client;
 
 /// Why a call failed, split by whether the rest of the run can go on.
 #[derive(Debug)]
@@ -253,7 +255,7 @@ tokio::task_local! {
     pub(crate) static REQUESTS: std::sync::Arc<std::sync::atomic::AtomicU64>;
 }
 
-/// One `tsc --api` session bound to a snapshot and project.
+/// One checker session bound to a snapshot and project.
 pub(crate) struct Rpc {
     client: Client,
     deadline: Duration,
@@ -457,14 +459,14 @@ impl Rpc {
         }
         REQUESTS.try_with(|count| count.fetch_add(1, std::sync::atomic::Ordering::Relaxed)).ok();
         let Some(log) = &self.recording else {
-            return Ok(self.client.request_raw(method, params, self.deadline).await.map_err(classify)?.result);
+            return self.client.request_raw(method, params, self.deadline).await.map_err(classify);
         };
         let answer = self.client.request_raw(method, params.clone(), self.deadline).await.map_err(classify)?;
-        let result: Value = decode(&answer.result)?;
+        let result: Value = decode(&answer)?;
         if let Ok(mut log) = log.lock() {
             log.push(json!({ "method": method, "params": params, "result": result }));
         }
-        Ok(answer.result)
+        Ok(answer)
     }
 
     async fn scoped<T: DeserializeOwned>(&self, method: &str, extra: Value) -> Result<T, CallError> {

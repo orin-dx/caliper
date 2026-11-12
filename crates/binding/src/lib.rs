@@ -134,13 +134,13 @@ pub struct JsExtractOptions {
     /// resolve a component when `sessionDocgenInfo` asks for it (off by default; ADR 0016). `initializeSession` then
     /// returns an output with no components.
     pub lazy: Option<bool>,
-    /// Session only: `'on-demand'` asks TypeScript's 7.1 checker for each component a request names, and answers
-    /// with the structural props when the checker is slower than `semanticWaitMs` (experimental; ADR 0022). Needs
-    /// `typescript@beta` installed or `tscPath`. `'off'` (the default) never starts it.
+    /// Session only: `'on-demand'` asks the built-in TypeScript 7.1 checker for each component a request names, and
+    /// answers with the structural props when the checker is slower than `semanticWaitMs` (experimental; ADR 0022).
+    /// `'off'` (the default) never starts it.
     #[napi(ts_type = "'off' | 'on-demand'")]
     pub semantic_types: Option<String>,
-    /// Session only, with `semanticTypes: 'on-demand'`: the `tsc` binary to run, instead of the nearest
-    /// `node_modules/typescript/bin/tsc` or `node_modules/tsrs/bin/tsrs`.
+    /// Session only, with `semanticTypes: 'on-demand'`: a checker binary to run instead of the built-in one
+    /// (`typescript@7.1`'s `tsc`, or `tsrs`).
     pub tsc_path: Option<String>,
     /// Session only, with `semanticTypes: 'on-demand'`: how many milliseconds a request waits for the checker before
     /// it takes the structural answer (default 150).
@@ -189,8 +189,8 @@ fn new_session(options: JsExtractOptions) -> napi::Result<Arc<WatchSession>> {
     Ok(Arc::new(session))
 }
 
-/// A warm `tsc` for the project that holds `first_src`. It starts in the background, so a request that arrives before
-/// it is up takes the structural answer rather than waiting for the process.
+/// A warm checker for the project that holds `first_src`. It starts in the background, so a request that arrives before
+/// it is up takes the structural answer rather than waiting for it.
 fn on_demand_checker(
     tsc_path: Option<String>,
     tsconfig: Option<String>,
