@@ -43,6 +43,7 @@ fn structural(project: &Project) -> ExtractionOutput {
 
 fn checker(project: &Project) -> OnDemand {
     let mut config = OnDemandConfig::new(project.root.clone());
+    config.tsc_path = Some(project.root.join("node_modules/typescript/bin/tsc"));
     config.expected_versions = &[FAKE_VERSION];
     config.request_timeout = Duration::from_secs(20);
     config
@@ -76,6 +77,7 @@ fn a_story_asked_behind_queued_background_requests_is_answered_before_them() {
     let output = structural(&project);
     let hold = project.root.join("hold");
     let mut config = OnDemandConfig::new(project.root.clone());
+    config.tsc_path = Some(project.root.join("node_modules/typescript/bin/tsc"));
     config.expected_versions = &[FAKE_VERSION];
     config.request_timeout = Duration::from_secs(20);
     config
@@ -131,10 +133,11 @@ fn one_warm_checker_answers_the_component_it_is_asked_about_and_then_the_next() 
 }
 
 #[test]
-fn a_project_without_typescript_answers_every_request_with_a_warning_and_no_components() {
+fn a_tsc_path_with_no_binary_answers_every_request_with_a_warning_and_no_components() {
     let project = project(false);
     let output = structural(&project);
     let checker = checker(&project);
+    let missing = project.root.join("node_modules/typescript/bin/tsc");
 
     let first = ask(&checker, target(&output, "Button"));
     let second = ask(&checker, target(&output, "Other"));
@@ -143,12 +146,55 @@ fn a_project_without_typescript_answers_every_request_with_a_warning_and_no_comp
         assert!(outcome.components.is_empty());
         assert_eq!(outcome.diagnostics.len(), 1);
         assert_eq!(outcome.diagnostics[0].severity, DiagnosticSeverity::Warning);
-        assert!(
-            outcome.diagnostics[0].message.contains("no node_modules/typescript/bin/tsc"),
-            "{:?}",
-            outcome.diagnostics
+        assert_eq!(
+            outcome.diagnostics[0].message,
+            format!(
+                "TypeScript checker backend unavailable: no tsc binary at {missing}; pass --tsc-path (tscPath) a `tsc` \
+                 of typescript@7.1 or a `tsrs` binary, or leave it out to use the built-in checker"
+            )
         );
     }
+}
+
+/// Without a `tsc_path` the built-in checker answers, in this process: no process id, and a project with no
+/// `typescript` of its own.
+#[test]
+fn without_a_tsc_path_the_built_in_checker_answers_one_component_and_then_the_next() {
+    let project = project(false);
+    let output = structural(&project);
+    let mut config = OnDemandConfig::new(project.root.clone());
+    config.request_timeout = Duration::from_secs(60);
+    let checker = OnDemand::new(config);
+    checker.warm_up();
+
+    let button = ask(&checker, target(&output, "Button"));
+    let other = ask(&checker, target(&output, "Other"));
+
+    assert_eq!(button.diagnostics, []);
+    let names: Vec<_> = button.components[0].props.iter().map(|prop| prop.name.as_str()).collect();
+    assert_eq!(names, ["label", "size", "disabled", "onClick", "tags", "pair", "box"]);
+    let names: Vec<_> = other.components[0].props.iter().map(|prop| prop.name.as_str()).collect();
+    assert_eq!(names, ["a"]);
+    assert_eq!(checker.process_id(), None);
+}
+
+/// The built-in checker is replaced by a fresh session after its 64 programs, as a process is; the memory bound, which
+/// would count this whole process, is not applied to it.
+#[test]
+fn the_built_in_checker_is_replaced_after_its_programs_and_never_for_memory() {
+    let project = project(false);
+    let output = structural(&project);
+    let mut config = OnDemandConfig::new(project.root.clone());
+    config.request_timeout = Duration::from_secs(60);
+    config.max_rss_mib = 0;
+    let checker = OnDemand::new(config);
+
+    for round in 0..65 {
+        let answered = ask(&checker, target(&output, "Button"));
+        assert_eq!((answered.diagnostics.len(), answered.components.len()), (0, 1), "request {round}");
+    }
+
+    assert_eq!(checker.recycles(), Recycles { worn: 1, bloated: 0 });
 }
 
 #[test]
@@ -163,29 +209,20 @@ fn dropping_the_checker_stops_its_process_and_thread() {
     drop(checker);
 }
 
-/// The real `tsc` the tests below run against, or `None` to skip them. Skipping is for a machine without it: on CI
-/// (`CI` is set) a missing one fails the run.
-#[allow(clippy::print_stderr, reason = "a skipped test says so, since a silent skip looks like a pass")]
-fn real_tsc() -> Option<std::ffi::OsString> {
-    let tsc = std::env::var_os("CALIPER_TEST_TSC");
-    if tsc.is_none() {
-        assert!(
-            std::env::var_os("CI").is_none(),
-            "CALIPER_TEST_TSC must name typescript@7.1's `bin/tsc` on CI, or the real checker is never tested"
-        );
-        eprintln!("skipped: CALIPER_TEST_TSC does not name a typescript@7.1 `tsc`");
-    }
-    tsc
+/// The real checker the tests below run against: the Go `typescript@7.1` as a process when `CALIPER_TEST_TSC` names its
+/// `bin/tsc`, else the built-in one.
+fn real_tsc() -> Option<Utf8PathBuf> {
+    std::env::var("CALIPER_TEST_TSC").ok().filter(|tsc| !tsc.is_empty()).map(Utf8PathBuf::from)
 }
 
-/// Against the real `tsc` (`7.1.0-beta`): set `CALIPER_TEST_TSC` to its `bin/tsc`. Skipped, loudly, when it is not set.
+/// Against a real checker (see [`real_tsc`]).
 #[test]
 fn the_real_checker_answers_the_requested_component() {
-    let Some(tsc) = real_tsc() else { return };
+    let tsc = real_tsc();
     let project = project(false);
     let output = structural(&project);
     let mut config = OnDemandConfig::new(project.root.clone());
-    config.tsc_path = Some(Utf8PathBuf::from(tsc.to_str().unwrap()));
+    config.tsc_path = tsc.clone();
     config.request_timeout = Duration::from_secs(60);
     let checker = OnDemand::new(config);
 
@@ -202,7 +239,7 @@ fn the_real_checker_answers_the_requested_component() {
 /// carries the name the source writes.
 #[test]
 fn the_real_checker_names_props_as_the_source_writes() {
-    let Some(tsc) = real_tsc() else { return };
+    let tsc = real_tsc();
     let dir = tempfile::Builder::new().prefix("Real").tempdir().unwrap();
     let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
     let fixtures = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/markers");
@@ -211,7 +248,7 @@ fn the_real_checker_names_props_as_the_source_writes() {
     }
     let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
     let mut config = OnDemandConfig::new(root.clone());
-    config.tsc_path = Some(Utf8PathBuf::from(tsc.to_str().unwrap()));
+    config.tsc_path = tsc.clone();
     config.request_timeout = Duration::from_secs(60);
     let checker = OnDemand::new(config);
 
@@ -226,7 +263,7 @@ fn the_real_checker_names_props_as_the_source_writes() {
 /// answer keeps both markers, and a parameter typed `string | undefined` is not optional.
 #[test]
 fn the_real_checker_keeps_optional_and_rest_parameters() {
-    let Some(tsc) = real_tsc() else { return };
+    let tsc = real_tsc();
     let dir = tempfile::Builder::new().prefix("Real").tempdir().unwrap();
     let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
     let fixtures = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/markers");
@@ -235,7 +272,7 @@ fn the_real_checker_keeps_optional_and_rest_parameters() {
     }
     let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
     let mut config = OnDemandConfig::new(root.clone());
-    config.tsc_path = Some(Utf8PathBuf::from(tsc.to_str().unwrap()));
+    config.tsc_path = tsc.clone();
     config.request_timeout = Duration::from_secs(60);
     let checker = OnDemand::new(config);
 
@@ -259,7 +296,7 @@ fn the_real_checker_keeps_optional_and_rest_parameters() {
 /// improves types and optionality, and `htmlAttributes` means one thing in both engines.
 #[test]
 fn the_real_checker_lists_the_same_prop_names_as_the_structural_pass_in_every_html_attributes_mode() {
-    let Some(tsc) = real_tsc() else { return };
+    let tsc = real_tsc();
     let react = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../node_modules/@types/react");
     if !react.exists() {
         eprintln!("skipped: {react} is not installed");
@@ -299,7 +336,7 @@ fn the_real_checker_lists_the_same_prop_names_as_the_structural_pass_in_every_ht
         let structural = WatchSession::lazy(options());
         drop(structural.initialize());
         let mut config = OnDemandConfig::new(root.clone());
-        config.tsc_path = Some(Utf8PathBuf::from(tsc.to_str().unwrap()));
+        config.tsc_path = tsc.clone();
         config.request_timeout = Duration::from_secs(60);
         let checked = WatchSession::lazy(options())
             .with_semantic(std::sync::Arc::new(OnDemand::new(config)), Duration::from_secs(60));
@@ -334,6 +371,7 @@ fn a_checker_past_its_memory_bound_is_replaced_between_requests_and_keeps_answer
     let project = project(true);
     let output = structural(&project);
     let mut config = OnDemandConfig::new(project.root.clone());
+    config.tsc_path = Some(project.root.join("node_modules/typescript/bin/tsc"));
     config.expected_versions = &[FAKE_VERSION];
     config.request_timeout = Duration::from_secs(20);
     // Any running process is past a bound of zero, so every fourth request replaces `tsc`.
@@ -363,6 +401,7 @@ fn a_checker_that_has_built_its_programs_is_replaced_and_counted_as_worn() {
     let project = project(true);
     let output = structural(&project);
     let mut config = OnDemandConfig::new(project.root.clone());
+    config.tsc_path = Some(project.root.join("node_modules/typescript/bin/tsc"));
     config.expected_versions = &[FAKE_VERSION];
     config.request_timeout = Duration::from_secs(20);
     config.max_rss_mib = u64::MAX;
@@ -394,6 +433,7 @@ fn dropping_a_checker_stuck_in_a_request_does_not_wait_for_it() {
     let project = project(true);
     let output = structural(&project);
     let mut config = OnDemandConfig::new(project.root.clone());
+    config.tsc_path = Some(project.root.join("node_modules/typescript/bin/tsc"));
     config.expected_versions = &[FAKE_VERSION];
     config.request_timeout = Duration::from_secs(60);
     config.shutdown_wait = Duration::from_millis(300);
@@ -414,6 +454,7 @@ fn a_reply_that_is_not_json_is_a_warning_at_once_not_a_wait_for_the_timeout() {
     let project = project(true);
     let output = structural(&project);
     let mut config = OnDemandConfig::new(project.root.clone());
+    config.tsc_path = Some(project.root.join("node_modules/typescript/bin/tsc"));
     config.expected_versions = &[FAKE_VERSION];
     config.request_timeout = Duration::from_secs(20);
     config.extra_env.push(("REPLAY_SCENARIO".to_string(), "invalid_json".to_string()));

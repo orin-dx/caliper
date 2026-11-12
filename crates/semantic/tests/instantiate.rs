@@ -1,8 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stderr)]
-//! Generic components against a real checker (ADR 0026 S5): `tsrs` when `TSRS_BIN` names its binary, else the Go
-//! `typescript@7.1` when `CALIPER_TEST_TSC` names its `bin/tsc`. Without either every test returns at once, and on CI
-//! (`CI` is set) that is a failure. The fixture is read where it is, so `react` resolves to the workspace's
-//! `@types/react`.
+//! Generic components against a real checker (ADR 0026 S5): a `tsrs` process when `TSRS_BIN` names its binary, else
+//! the Go `typescript@7.1` when `CALIPER_TEST_TSC` names its `bin/tsc`, else the built-in checker. The fixture is read
+//! where it is, so `react` resolves to the workspace's `@types/react`.
 
 use std::time::Duration;
 
@@ -12,24 +11,21 @@ use caliper_docgen_core::types::semantic::SemanticOutcome;
 use caliper_docgen_semantic::{SemanticRequest, resolve, targets_of};
 use camino::Utf8PathBuf;
 
+/// The checker binary to run as a process; `None` asks the built-in checker.
 fn real_checker() -> Option<Utf8PathBuf> {
-    let checker = ["TSRS_BIN", "CALIPER_TEST_TSC"]
+    ["TSRS_BIN", "CALIPER_TEST_TSC"]
         .into_iter()
-        .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()));
-    if checker.is_none() {
-        assert!(std::env::var_os("CI").is_none(), "on CI, TSRS_BIN or CALIPER_TEST_TSC must name a real checker");
-        eprintln!("skipped: neither TSRS_BIN nor CALIPER_TEST_TSC names a real checker");
-    }
-    checker.map(Utf8PathBuf::from)
+        .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))
+        .map(Utf8PathBuf::from)
 }
 
 /// The components of `tests/fixtures/generic` answered by `checker`.
-fn answer(checker: Utf8PathBuf) -> SemanticOutcome {
+fn answer(checker: Option<Utf8PathBuf>) -> SemanticOutcome {
     answer_in("generic", checker)
 }
 
 /// The components of `tests/fixtures/<fixture>` answered by `checker`, with every prop `@types/react` declares asked for.
-fn answer_in(fixture: &str, checker: Utf8PathBuf) -> SemanticOutcome {
+fn answer_in(fixture: &str, checker: Option<Utf8PathBuf>) -> SemanticOutcome {
     let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(fixture);
     let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
     let mut targets = targets_of(&output);
@@ -37,7 +33,7 @@ fn answer_in(fixture: &str, checker: Utf8PathBuf) -> SemanticOutcome {
         target.react_wanted = None;
     }
     let mut request = SemanticRequest::new(root.clone(), targets);
-    request.tsc_path = Some(checker);
+    request.tsc_path = checker;
     request.tsconfig = Some(root.join("tsconfig.json"));
     request.request_timeout = Duration::from_secs(60);
     let outcome = resolve(request);
@@ -56,7 +52,7 @@ fn props<'a>(outcome: &'a SemanticOutcome, name: &str) -> Vec<(&'a str, &'a Prop
 
 #[test]
 fn a_polymorphic_component_is_read_at_its_default_element() {
-    let Some(checker) = real_checker() else { return };
+    let checker = real_checker();
     let outcome = answer(checker);
 
     let poly = props(&outcome, "Poly");
@@ -69,7 +65,7 @@ fn a_polymorphic_component_is_read_at_its_default_element() {
 
 #[test]
 fn a_default_no_other_file_can_name_keeps_the_structural_result_and_says_why() {
-    let Some(checker) = real_checker() else { return };
+    let checker = real_checker();
     let outcome = answer(checker);
 
     let fallback =
@@ -83,7 +79,7 @@ fn a_default_no_other_file_can_name_keeps_the_structural_result_and_says_why() {
 
 #[test]
 fn a_type_parameter_without_a_default_stays_open() {
-    let Some(checker) = real_checker() else { return };
+    let checker = real_checker();
     let outcome = answer(checker);
 
     let listing = props(&outcome, "Listing");
@@ -94,7 +90,7 @@ fn a_type_parameter_without_a_default_stays_open() {
 /// error of any instantiation: the component whose probe is the probe file's first line still reads at its default.
 #[test]
 fn an_error_in_another_file_does_not_reject_a_valid_instantiation() {
-    let Some(checker) = real_checker() else { return };
+    let checker = real_checker();
     let outcome = answer_in("generic-foreign-error", checker);
 
     assert_eq!(outcome.fallbacks.iter().map(|f| (&f.key, &f.reason)).collect::<Vec<_>>(), []);
@@ -107,7 +103,7 @@ fn an_error_in_another_file_does_not_reject_a_valid_instantiation() {
 /// module's interface or keeps its structural result, and never takes the global `FormData`'s members.
 #[test]
 fn a_default_that_names_a_local_type_is_never_read_as_the_global_one_of_that_name() {
-    let Some(checker) = real_checker() else { return };
+    let checker = real_checker();
     let outcome = answer_in("generic-shadowed", checker);
 
     match outcome.components.iter().find(|component| component.key == "Form") {

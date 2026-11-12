@@ -2,8 +2,9 @@
 //! Wide types on the checker path (`tests/fixtures/families`): what the project declares is listed whole however wide,
 //! and what a dependency declares is named. The fixture has an interface of 150 own fields, a package interface of 150
 //! fields, and a `@types/react` stand-in whose DOM attribute interface has over a hundred properties. The answer is
-//! replayed from its recording (`families.recording.json`, made by the `record_fixture` example), always, and when
-//! `TSRS_BIN` names a real `tsrs` it is asked live, first to last and last to first, and must give the same bytes.
+//! replayed from its recording (`families.recording.json`, made by the `record_fixture` example), always, and it is
+//! asked live (the built-in checker, or the `tsrs` binary `TSRS_BIN` names), first to last and last to first, and must
+//! give the same bytes.
 
 use std::time::Duration;
 
@@ -43,12 +44,13 @@ fn structural(project: &Project) -> ExtractionOutput {
     extract(&PipelineOptions { src_dirs: vec![project.root.clone()], ..PipelineOptions::default() })
 }
 
-fn answer(project: &Project, live: Option<(&Utf8PathBuf, bool)>) -> Value {
+fn answer(project: &Project, live: Option<(&Option<Utf8PathBuf>, bool)>) -> Value {
     let output = structural(project);
     let mut request = SemanticRequest::new(project.root.clone(), targets_of(&output));
     request.request_timeout = Duration::from_secs(60);
     match live {
         None => {
+            request.tsc_path = Some(project.root.join("node_modules/typescript/bin/tsc"));
             request.expected_versions = &[FAKE_VERSION];
             request.extra_env.push((
                 "REPLAY_FIXTURE".to_string(),
@@ -56,7 +58,7 @@ fn answer(project: &Project, live: Option<(&Utf8PathBuf, bool)>) -> Value {
             ));
         }
         Some((bin, reverse)) => {
-            request.tsc_path = Some(bin.clone());
+            request.tsc_path = bin.clone();
             request.reverse_queries = reverse;
         }
     }
@@ -89,19 +91,15 @@ fn rendered(outcome: &SemanticOutcome) -> Value {
     json!({ "components": components })
 }
 
-#[allow(clippy::print_stderr, reason = "a skipped test says so, since a silent skip looks like a pass")]
+/// The `tsrs` binary `TSRS_BIN` names, to run as a process; `None` asks the built-in checker.
 fn tsrs_bin() -> Option<Utf8PathBuf> {
-    let bin = std::env::var("TSRS_BIN").ok().filter(|bin| !bin.is_empty());
-    if bin.is_none() {
-        eprintln!("skipped: TSRS_BIN is not set");
-    }
-    bin.map(Utf8PathBuf::from)
+    std::env::var("TSRS_BIN").ok().filter(|bin| !bin.is_empty()).map(Utf8PathBuf::from)
 }
 
-/// The answer replayed and, when `TSRS_BIN` names a real `tsrs`, live both ways round, held to the same checks.
+/// The answer replayed and, from a real `tsrs`, live both ways round, held to the same checks.
 fn answers(check: impl Fn(&Value)) {
     check(&answer(&project(true), None));
-    let Some(bin) = tsrs_bin() else { return };
+    let bin = tsrs_bin();
     let real = project(false);
     for reverse in [false, true] {
         check(&answer(&real, Some((&bin, reverse))));
@@ -139,7 +137,7 @@ fn the_recorded_answers_of_the_checker_convert_to_the_snapshot() {
 
 #[test]
 fn a_real_tsrs_gives_the_snapshot_whichever_way_round_it_is_asked() {
-    let Some(bin) = tsrs_bin() else { return };
+    let bin = tsrs_bin();
     let real = project(false);
     let forward = answer(&real, Some((&bin, false)));
     let reversed = answer(&real, Some((&bin, true)));
