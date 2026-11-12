@@ -46,9 +46,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@ff116694c00f08ce7edc3f1b00ed4fa1d6ffd084 # callisto@0.17.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@aebeedcdaa1dce8f0d9ad1836844ab6be68daf1f # callisto@0.20.0
         with:
-          version: callisto@0.17.0
+          version: callisto@0.20.0
           verification: require
       - id: candidate
         shell: bash
@@ -134,12 +134,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       # Pinned here, not inherited from the action's default.
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@ff116694c00f08ce7edc3f1b00ed4fa1d6ffd084 # callisto@0.17.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@aebeedcdaa1dce8f0d9ad1836844ab6be68daf1f # callisto@0.20.0
         with:
-          version: callisto@0.17.0
+          version: callisto@0.20.0
           verification: require
       - name: Compose, version, and open the release PR
-        uses: orin-dx/callisto/.github/actions/callisto-action@ff116694c00f08ce7edc3f1b00ed4fa1d6ffd084 # callisto@0.17.0
+        uses: orin-dx/callisto/.github/actions/callisto-action@aebeedcdaa1dce8f0d9ad1836844ab6be68daf1f # callisto@0.20.0
         with:
           setup_callisto: 'false'
           branch: main
@@ -162,11 +162,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # A detached checkout of the release commit: a branch checkout stops callisto with E170.
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@ff116694c00f08ce7edc3f1b00ed4fa1d6ffd084 # callisto@0.17.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@aebeedcdaa1dce8f0d9ad1836844ab6be68daf1f # callisto@0.20.0
         with:
-          version: callisto@0.17.0
+          version: callisto@0.20.0
           verification: require
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -354,9 +356,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@ff116694c00f08ce7edc3f1b00ed4fa1d6ffd084 # callisto@0.17.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@aebeedcdaa1dce8f0d9ad1836844ab6be68daf1f # callisto@0.20.0
         with:
-          version: callisto@0.17.0
+          version: callisto@0.20.0
           verification: require
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -413,11 +415,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # A detached checkout of the release commit: a branch checkout stops callisto with E170.
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@ff116694c00f08ce7edc3f1b00ed4fa1d6ffd084 # callisto@0.17.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@aebeedcdaa1dce8f0d9ad1836844ab6be68daf1f # callisto@0.20.0
         with:
-          version: callisto@0.17.0
+          version: callisto@0.20.0
           verification: require
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -560,9 +564,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: orin-dx/callisto/.github/actions/setup-callisto@ff116694c00f08ce7edc3f1b00ed4fa1d6ffd084 # callisto@0.17.0
+      - uses: orin-dx/callisto/.github/actions/setup-callisto@aebeedcdaa1dce8f0d9ad1836844ab6be68daf1f # callisto@0.20.0
         with:
-          version: callisto@0.17.0
+          version: callisto@0.20.0
           verification: require
       - name: Dispatch the oldest unfinished release
         id: pending
