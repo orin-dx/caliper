@@ -1,0 +1,14 @@
+{
+  "tool_use_id": "toolu_017gFV6ED2LpJvUQMmUBXnv4",
+  "agent_id": "a0ddfc2a55affe5f2",
+  "task_description": "Fix #435 union-order findings",
+  "token_usage": {
+    "input_tokens": 140,
+    "cache_creation_tokens": 229718,
+    "cache_read_tokens": 11064118,
+    "output_tokens": 62967,
+    "api_call_count": 69
+  },
+  "started_at": "2026-11-11T21:09:43.400122-08:00",
+  "completed_at": "2026-11-11T21:25:14.767447-08:00"
+}
