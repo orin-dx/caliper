@@ -47,7 +47,9 @@ function push(map: Map<string, string[]>, at: string, key: string): void {
 /**
  * The distinct messages of the warnings and errors among `diagnostics`. Info does not count, opaque props included:
  * counting them would hand on most components of the measured corpora (docs/storybook-parity.md), and the answer
- * names no prop to replace.
+ * names no prop to replace. The session decides which of its own pass's warnings a checker answer superseded and
+ * leaves only the rest on the answer (`DiagnosticCode::superseded_by_checker` in caliper-docgen-core), so what is
+ * read here is what still stands, with the checker's own warnings.
  */
 export function incompleteMessages(diagnostics: Diagnostic[]): string[] {
   return [...new Set(diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').map((d) => d.message))]

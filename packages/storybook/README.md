@@ -45,7 +45,7 @@ Before answering, the provider compares every source file's mtime and size with 
 | `tscPath` | the nearest `node_modules/typescript/bin/tsc`, else `node_modules/tsrs/bin/tsrs` | The `tsc` or `tsrs` binary `semanticTypes: 'on-demand'` runs. |
 | `semanticWaitMs` | `150` | How many milliseconds a story waits for the checker before it takes the usual props. |
 | `semanticWaitEmptyMs` | `2000` | How many milliseconds a story waits for the checker when caliper-docgen's own pass lists no props for its component (for example `ComponentProps<typeof Button>` of a library it cannot read), since there is nothing to show before the checker answers. A value below `semanticWaitMs` gives such a story `semanticWaitMs`. |
-| `fallback` | `degraded` | `degraded`: a component whose extraction reported a warning or error goes to React's docgen; a prop it could only report as opaque (an `info` diagnostic) does not, and shows its type text with an `object` control. `never`: always answer. |
+| `fallback` | `degraded` | `degraded`: a component whose extraction reported a warning or error goes to React's docgen; a prop it could only report as opaque (an `info` diagnostic) does not, and shows its type text with an `object` control. Once the checker answers for a component, a warning about what its answer replaces (a component caliper-docgen could not find, a type it could not resolve) no longer counts; one about what the checker could not read either still does. `never`: always answer. |
 
 A story whose component caliper-docgen can't find goes to React's docgen, which stays registered underneath. Each component handed on is logged once as a warning with the reason (the extraction diagnostics that affect it).
 
