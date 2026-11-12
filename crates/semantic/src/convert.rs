@@ -30,7 +30,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use caliper_docgen_core::react_types::{html_element_for, html_element_from_type_arg, is_intrinsic_tag};
-use caliper_docgen_core::types::semantic::{degraded_type, unresolved_type};
+use caliper_docgen_core::types::semantic::{SemanticProp, degraded_type, unresolved_type};
 use caliper_docgen_core::types::{
     BigIntValue, CallSignature, EnumMemberValue, FunctionParam, ObjectField, OpaqueReason, PropType,
     SignatureKind as Kind, TemplatePart, TruncationLimit, TupleElement, TupleElementKind, TupleLabel,
@@ -362,6 +362,49 @@ type Memo = Mutex<FxHashMap<(u64, u8), Vec<Arc<Entry>>>>;
 /// again on each use, which costs a fraction of the round trip, and is several times smaller than the read lists.
 type PartsSeen = Mutex<FxHashMap<(u64, Parts), Arc<RawValue>>>;
 
+/// Everything a component's prop is made of ([`crate::component::props_of_type`]): its property's name, optionality and
+/// declarations, the symbol it is a member of (its JSDoc's key when it has no declaration: the symbol itself), its type's
+/// handle, and which of its JSDoc the component asks for. Two props of one snapshot with equal keys are the same prop: the
+/// type is converted from the handle alone at the top ([`Converter::convert_roots`]), and where it is declared and its
+/// JSDoc are read from the declarations, the parent and the symbol alone ([`crate::declared`]). Chakra's components
+/// share a thousand style props, each a union converted from the same handle, so a component after the first finds
+/// them here and neither converts, copies nor interns them again.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct PropKey {
+    hash: u64,
+    name: String,
+    optional: bool,
+    type_id: u64,
+    declarations: Vec<String>,
+    parent: Option<CompactSymbol>,
+    /// The symbol, only for a property with no declaration.
+    symbol: Option<String>,
+    description: bool,
+    tags: bool,
+}
+
+impl PropKey {
+    pub(crate) fn of(property: &SymbolInfo, prop_type: &TypeInfo, description: bool, tags: bool) -> Self {
+        use std::hash::{Hash, Hasher};
+        let optional = property.flags & flag::SYMBOL_OPTIONAL != 0;
+        let symbol = property.declarations.is_empty().then(|| property.reference.to_string());
+        let mut hasher = rustc_hash::FxHasher::default();
+        (&property.name, optional, prop_type.id, &property.declarations, &property.parent, &symbol, description, tags)
+            .hash(&mut hasher);
+        PropKey {
+            hash: hasher.finish(),
+            name: property.name.clone(),
+            optional,
+            type_id: prop_type.id,
+            declarations: property.declarations.clone(),
+            parent: property.parent.clone(),
+            symbol,
+            description,
+            tags,
+        }
+    }
+}
+
 /// Which parts of a type [`Converter::parts`] asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Parts {
@@ -409,6 +452,8 @@ struct State {
     /// only that count, so a [`settled_count`] list stands for every map of its key (docs/type-checker-integration.md,
     /// "Condition maps", says when that is exact). The handles are valid inside this snapshot only.
     maps: Mutex<FxHashMap<MapKey, usize>>,
+    /// The props answered so far ([`crate::component::props_of_type`]), by what makes one ([`PropKey`]).
+    props: Mutex<FxHashMap<u64, Vec<(PropKey, Arc<SemanticProp>)>>>,
     hits: AtomicU64,
     misses: AtomicU64,
 }
@@ -437,6 +482,21 @@ impl Converter {
             }
         }
         Ok(slots.into_iter().flatten().collect())
+    }
+
+    /// The prop made earlier in this snapshot from what `key` names, if one was.
+    pub(crate) fn known_prop(&self, key: &PropKey) -> Option<Arc<SemanticProp>> {
+        let props = self.state.props.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        props.get(&key.hash)?.iter().find(|(known, _)| known == key).map(|(_, prop)| prop.clone())
+    }
+
+    /// Keeps `prop` as the prop `key` makes, for the components after this one.
+    pub(crate) fn keep_prop(&self, key: PropKey, prop: Arc<SemanticProp>) {
+        let mut props = self.state.props.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let bucket = props.entry(key.hash).or_default();
+        if !bucket.iter().any(|(known, _)| *known == key) {
+            bucket.push((key, prop));
+        }
     }
 
     /// Memo hits and misses so far, for the debug line.
