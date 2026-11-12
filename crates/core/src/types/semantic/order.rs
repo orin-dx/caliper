@@ -64,6 +64,20 @@ pub(super) fn in_declared_order(checker: PropType, declared: &PropType) -> PropT
     }
 }
 
+/// Whether `declared`, the structural type, gives a place to any member of `checker`'s top-level union: then its order
+/// is the declared one, whether or not it differs from the checker's.
+pub(super) fn places_any(checker: &PropType, declared: &PropType) -> bool {
+    let PropType::Union(members) = checker else { return false };
+    match declared {
+        PropType::Union(order) => members.iter().any(|member| position(member, order).is_some()),
+        PropType::LiteralUnion { members: values, .. } => members.iter().any(|member| match member {
+            PropType::StringLiteral(value) => values.contains(value),
+            _ => false,
+        }),
+        _ => false,
+    }
+}
+
 /// How many of a union's members the written order placed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Placed {
@@ -177,19 +191,7 @@ fn ordered_fields(fields: Vec<ObjectField>, declared: &[ObjectField]) -> Vec<Obj
 /// checker's place for them is its sort, not the source's, and a member the structural pass dropped is most often the
 /// `undefined` or `null` written last. Unchanged when the declaration has none of them.
 fn reorder(members: Vec<PropType>, declared: &[PropType]) -> Vec<PropType> {
-    let bare = |name: &str| name.rsplit('.').next().unwrap_or(name).to_owned();
-    let position = |member: &PropType| {
-        declared.iter().position(|candidate| candidate == member).or_else(|| match member {
-            // `boolean` is `true | false` to the checker; the source may have written either.
-            PropType::Boolean => declared.iter().position(|candidate| matches!(candidate, PropType::BoolLiteral(_))),
-            // The source may name a type through a namespace (`React.Ref`); the checker names the declaration.
-            PropType::Named { name, .. } => declared.iter().position(
-                |candidate| matches!(candidate, PropType::Named { name: written, .. } if bare(written) == bare(name)),
-            ),
-            _ => None,
-        })
-    };
-    let places: Vec<Option<usize>> = members.iter().map(position).collect();
+    let places: Vec<Option<usize>> = members.iter().map(|member| position(member, declared)).collect();
     if places.iter().all(Option::is_none) {
         return members;
     }
@@ -197,6 +199,20 @@ fn reorder(members: Vec<PropType>, declared: &[PropType]) -> Vec<PropType> {
         members.into_iter().zip(places).partition(|(_, place)| place.is_some());
     known.sort_by_key(|(_, place)| *place);
     known.into_iter().chain(unknown).map(|(member, _)| member).collect()
+}
+
+/// The place of the checker's `member` in the structural union `declared`.
+fn position(member: &PropType, declared: &[PropType]) -> Option<usize> {
+    let bare = |name: &str| name.rsplit('.').next().unwrap_or(name).to_owned();
+    declared.iter().position(|candidate| candidate == member).or_else(|| match member {
+        // `boolean` is `true | false` to the checker; the source may have written either.
+        PropType::Boolean => declared.iter().position(|candidate| matches!(candidate, PropType::BoolLiteral(_))),
+        // The source may name a type through a namespace (`React.Ref`); the checker names the declaration.
+        PropType::Named { name, .. } => declared.iter().position(
+            |candidate| matches!(candidate, PropType::Named { name: written, .. } if bare(written) == bare(name)),
+        ),
+        _ => None,
+    })
 }
 
 #[cfg(test)]

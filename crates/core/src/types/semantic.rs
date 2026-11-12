@@ -431,7 +431,8 @@ fn default_of(
 /// The checker's type with its union members in declared order: the order the declaration writes them in where it
 /// states every member, else the structural union's order where that placed any member (with
 /// [`ResolverFacts::Used`]), else the written order of the members the declaration does state. Neither leaves the
-/// checker's order.
+/// checker's order. A structural order that placed members is kept even where it is the checker's own: the partial
+/// written order would put the members it does not state last, where they may not have been written.
 fn declared_order(
     checker: PropType,
     written: Option<&[WrittenMember]>,
@@ -443,17 +444,16 @@ fn declared_order(
         ResolverFacts::Off => None,
     };
     // The structural order also reaches the unions nested in members, which the written one does not.
-    let (ordered, reordered) = match structural {
+    let (ordered, placed) = match structural {
         Some(structural) => {
-            let ordered = order::in_declared_order(checker.clone(), &structural.prop_type);
-            let reordered = ordered != checker;
-            (ordered, reordered)
+            let placed = order::places_any(&checker, &structural.prop_type);
+            (order::in_declared_order(checker, &structural.prop_type), placed)
         }
         None => (checker, false),
     };
     match written.and_then(|written| order::in_written_order(&ordered, written)) {
         Some((in_written, Placed::All)) => in_written,
-        Some((in_written, Placed::Some)) if !reordered => in_written,
+        Some((in_written, Placed::Some)) if !placed => in_written,
         Some(_) | None => ordered,
     }
 }

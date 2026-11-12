@@ -12,8 +12,8 @@ use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
 use super::SemanticProp;
-use crate::extractor::written::{WrittenMember, WrittenUnions, written_unions};
-use crate::types::collected::ComponentExport;
+use crate::extractor::written::{MAX_WRITTEN_MEMBERS, Owner, WrittenMember, WrittenUnions, written_unions};
+use crate::types::collected::{ComponentExport, TypeName};
 use crate::types::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
 use crate::types::output::{ComponentEntry, DefaultValue, PropType};
 
@@ -28,9 +28,32 @@ struct Wanted {
 
 #[derive(Debug, Default)]
 struct FileSyntax {
-    /// Each component the extractor finds in the file: its name, its exports and its code defaults.
-    components: Vec<(String, Vec<ComponentExport>, FxHashMap<String, DefaultValue>)>,
+    components: Vec<ComponentSyntax>,
     unions: WrittenUnions,
+}
+
+/// A component the extractor finds in a file.
+#[derive(Debug)]
+struct ComponentSyntax {
+    name: String,
+    exports: Vec<ComponentExport>,
+    defaults: FxHashMap<String, DefaultValue>,
+    /// The name of the type its props are, as the declaration writes it.
+    props_type: TypeName,
+    /// The bytes of its declaration: a type literal written in an annotation there is (part of) its props type.
+    span: std::ops::Range<u32>,
+}
+
+impl ComponentSyntax {
+    /// Whether a type literal owned by `owner` is (part of) this component's props type: the body of the module-level
+    /// alias its declaration names, or written in its declaration.
+    fn holds(&self, owner: &Owner) -> bool {
+        match owner {
+            Owner::Alias(alias) => *alias == self.props_type,
+            Owner::Annotation(start) => self.span.contains(start),
+            Owner::Interface(_) | Owner::Elsewhere => false,
+        }
+    }
 }
 
 /// The syntax of the files one merge needs, read up front.
@@ -67,6 +90,9 @@ impl SourceSyntax {
         for (path, file) in read {
             match file {
                 Ok(file) => {
+                    if file.unions.declined > 0 {
+                        syntax.diagnostics.push(too_many_members(&path, file.unions.declined));
+                    }
                     syntax.files.insert(path, file);
                 }
                 Err(diagnostic) => syntax.diagnostics.extend(diagnostic),
@@ -78,26 +104,57 @@ impl SourceSyntax {
     /// The defaults `entry`'s own code gives its props: those of the component the extractor finds in its file under
     /// its name and exports. `None` when the file has no such component, or several with different defaults.
     pub(super) fn code_defaults(&self, entry: &ComponentEntry) -> Option<&FxHashMap<String, DefaultValue>> {
-        let file = self.files.get(&entry.file_path)?;
-        let mut found = file
-            .components
-            .iter()
-            .filter(|(name, exports, _)| *name == entry.display_name && *exports == entry.exports)
-            .map(|(_, _, defaults)| defaults);
+        let mut found = self.components(entry)?.map(|component| &component.defaults);
         let first = found.next()?;
         found.all(|other| other == first).then_some(first)
     }
 
+    /// The components of `entry`'s file the extractor finds under its name and exports.
+    fn components<'s, 'e>(
+        &'s self,
+        entry: &'e ComponentEntry,
+    ) -> Option<impl Iterator<Item = &'s ComponentSyntax> + use<'s, 'e>> {
+        let file = self.files.get(&entry.file_path)?;
+        Some(
+            file.components
+                .iter()
+                .filter(|component| component.name == entry.display_name && component.exports == entry.exports),
+        )
+    }
+
     /// The union `prop`'s declaration writes: in its `parent` interface, or for a prop with no parent, in a type literal
-    /// of `entry`'s file. `None` when the file writes none for it, or two different ones.
+    /// of `entry`'s file that is (part of) its component's props type. `None` when the file writes none for it, or two
+    /// different ones: a type literal the props type cannot be shown to be (an imported props type) says nothing.
     pub(super) fn written(&self, entry: &ComponentEntry, prop: &SemanticProp) -> Option<&[WrittenMember]> {
         match &prop.parent {
-            Some(parent) => {
-                self.files.get(Utf8Path::new(&parent.file_name))?.unions.find(Some(&parent.name), &prop.name)
+            Some(parent) => self
+                .files
+                .get(Utf8Path::new(&parent.file_name))?
+                .unions
+                .find(&prop.name, |owner| matches!(owner, Owner::Interface(name) if *name == parent.name)),
+            None => {
+                let components: Vec<&ComponentSyntax> = self.components(entry)?.collect();
+                self.files
+                    .get(&entry.file_path)?
+                    .unions
+                    .find(&prop.name, |owner| components.iter().any(|component| component.holds(owner)))
             }
-            None => self.files.get(&entry.file_path)?.unions.find(None, &prop.name),
         }
     }
+}
+
+/// The diagnostic for the `declined` unions of `path` that state more members than are read.
+fn too_many_members(path: &Utf8Path, declined: usize) -> Diagnostic {
+    let mut diagnostic = Diagnostic::new(
+        DiagnosticSeverity::Info,
+        DiagnosticCode::MaxDepthExceeded,
+        format!(
+            "{declined} union(s) in '{path}' state more than {MAX_WRITTEN_MEMBERS} members through the aliases they \
+             name: their written order is not read, and their members keep the order the merge had otherwise"
+        ),
+    );
+    diagnostic.file = Some(path.to_string());
+    diagnostic
 }
 
 fn read_file(path: &Utf8Path, wanted: Wanted) -> Result<FileSyntax, Option<Diagnostic>> {
@@ -119,13 +176,16 @@ fn read_file(path: &Utf8Path, wanted: Wanted) -> Result<FileSyntax, Option<Diagn
         file.components = crate::extractor::parse_file(path, &source)
             .component_mappings
             .into_iter()
-            .map(|mapping| {
-                let defaults = mapping
+            .map(|mapping| ComponentSyntax {
+                defaults: mapping
                     .param_defaults
                     .into_iter()
                     .map(|(name, raw)| (name, DefaultValue { value: raw.value, computed: raw.computed }))
-                    .collect();
-                (mapping.component_name, mapping.exports, defaults)
+                    .collect(),
+                name: mapping.component_name,
+                exports: mapping.exports,
+                props_type: mapping.props_type_name,
+                span: mapping.span_start..mapping.span_end,
             })
             .collect();
     }

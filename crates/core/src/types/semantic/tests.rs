@@ -440,6 +440,26 @@ fn an_answer_merges_into_the_entry_its_key_names_not_the_first_with_the_same_fil
 }
 
 #[test]
+fn a_partial_written_order_does_not_override_a_structural_order_that_placed_members() {
+    use crate::extractor::written::WrittenMember;
+    let lit = |value: &str| PropType::StringLiteral(value.to_string());
+    let union = |members: &[&str]| PropType::Union(members.iter().map(|member| lit(member)).collect());
+    // `p: Imported | 'z'`, `Imported` = 'a' | 'b' in another file: the structural union's order is the checker's.
+    let written = [WrittenMember::Name("Imported".into()), WrittenMember::Type(lit("z"))];
+    let structural =
+        ParsedProp::new("p".into(), union(&["a", "b", "z"]), true, None, String::new(), BTreeMap::new(), None, vec![]);
+
+    let ordered = declared_order(union(&["a", "b", "z"]), Some(&written), Some(&structural), ResolverFacts::Used);
+
+    assert_eq!(ordered, union(&["a", "b", "z"]));
+    // Without a structural order, the members the declaration writes go first.
+    assert_eq!(
+        declared_order(union(&["a", "b", "z"]), Some(&written), None, ResolverFacts::Used),
+        union(&["z", "a", "b"])
+    );
+}
+
+#[test]
 fn without_the_resolver_a_default_and_a_union_order_come_from_the_syntax_and_the_checker_alone() {
     let lit = |value: &str| PropType::StringLiteral(value.to_string());
     let declared = PropType::Union(vec![lit("sm"), lit("lg")]);

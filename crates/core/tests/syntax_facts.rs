@@ -154,3 +154,45 @@ fn a_union_declared_in_a_file_that_cannot_be_found_keeps_the_checker_order() {
     assert_eq!(output.components["Button"].props["size"].prop_type, union(&["lg", "md", "sm"]));
     assert!(output.diagnostics.iter().all(|d| !d.message.contains("failed to read")), "{:?}", output.diagnostics);
 }
+
+#[test]
+fn a_type_literal_that_does_not_hold_the_components_props_gives_no_order() {
+    let dir = TempDir::new_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let root = Utf8PathBuf::from_path_buf(dir.path().canonicalize().unwrap()).unwrap();
+    // `Props` is imported; `Other` writes a prop of the same name in the other order.
+    std::fs::write(
+        root.join("Card.tsx"),
+        "import type { Props } from './props'\n\
+         type Other = { p: 'b' | 'a' }\n\
+         export const other: Other = { p: 'a' }\n\
+         export function Card(props: Props) {\n  return null\n}\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("props.ts"), "export type Props = { p: 'a' | 'b' }\n").unwrap();
+    let options = PipelineOptions {
+        src_dirs: vec![root.clone()],
+        cache_dir: Some(root.join(".cache")),
+        html_attributes: HtmlAttributeMode::None,
+        ..Default::default()
+    };
+    let mut output = extract(&options);
+    output.components.get_mut("Card").unwrap().props.clear();
+    let prop = Arc::new(SemanticProp {
+        name: "p".to_string(),
+        prop_type: union(&["a", "b"]),
+        required: true,
+        description: String::new(),
+        tags: BTreeMap::new(),
+        parent: None,
+        declarations: Vec::new(),
+        react_declared: false,
+    });
+    let outcome = SemanticOutcome {
+        components: vec![SemanticComponent { key: "Card".to_string(), props: vec![prop], composes: None }],
+        ..Default::default()
+    };
+
+    merge_semantic(&mut output, outcome);
+
+    assert_eq!(output.components["Card"].props["p"].prop_type, union(&["a", "b"]));
+}
