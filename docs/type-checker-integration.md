@@ -61,7 +61,7 @@ The structural result returns immediately. The semantic result follows: the CLI 
 
 ## Slice 1 (experimental, off by default)
 
-`caliper-docgen extract --experimental-semantic-types [--tsc-path PATH]`, or `experimentalSemanticTypes` and `tscPath` in `docgen.config.ts`. `crates/semantic` spawns the project's `node_modules/typescript/bin/tsc --api` or `node_modules/tsrs/bin/tsrs --api` (see "Supported binaries"), builds one program over the files of the components the structural pass found, and asks for each exported function component its call signature's first parameter and that type's properties. The CLI then calls core's `merge_semantic`. Not wired into watch, `check`, `inspect` or the NAPI binding.
+`caliper-docgen extract --experimental-semantic-types [--tsc-path PATH]`, or `experimentalSemanticTypes` and `tscPath` in `docgen.config.ts`. `crates/semantic` spawns the pinned `tsrs` installed with Caliper, else the project's `node_modules/typescript/bin/tsc` or `node_modules/tsrs/bin/tsrs`, with `--api` (see "Supported binaries"), builds one program over the files of the components the structural pass found, and asks for each exported function component its call signature's first parameter and that type's properties. The CLI then calls core's `merge_semantic`. Not wired into watch, `check`, `inspect` or the NAPI binding.
 
 - **Merge:** props present, `type`, `required`, `parent`, `declarations` and the component's `composes` from the checker, and its description and tags where it has them (see "Declarations, tags and composes"); `defaultValue`, inheritance layers, curated inherited props and `discriminantProp` stay structural. The checker is asked for a prop's description only when the structural pass has none (65% of Mantine's requests otherwise). Props `@types/react` declares are excluded by declaring file. Identical merged props are shared, as in the structural result.
 - **Output type:** no new `PropType` variant and no schema change. Primitives, literals, unions (with `boolean` collapsed and `undefined` dropped from optional props), arrays, tuples, inline objects of up to 16 fields and single-signature functions map onto existing variants; `ReactNode`, `ElementType`, `CSSProperties` and `ReactElement` map to their terminals; anything else (named interfaces, enums, generics, overloads, anything past depth 4) is `Named` with the checker's own text. Union members keep the checker's order, which is creation order, not source order.
@@ -90,14 +90,34 @@ Against the oracle (`scripts/weekly.py --oracle`, flag on, `7.1.0-beta`), wrong 
 
 ### Supported binaries
 
-Two packages provide the `--api` server, and both are used through the same client; neither is the default checker (the flag stays opt-in).
+Two packages provide the `--api` server, and both are used through the same client. The checker stays opt-in; when it is on, the pinned `tsrs` installed with Caliper runs unless `--tsc-path` names another.
 
 - **`typescript`** from 7.1 on (`7.1.0-beta`, rc and stable): `node_modules/typescript/bin/tsc`.
 - **`tsrs`** (`oxc-project/tsrs`, a Rust port of the TypeScript 7 checker): `node_modules/tsrs/bin/tsrs`, a Node shim that starts the platform binary from `@tsrs/<platform>`. Traced on the wire against `0.23.0-ts7.1.0-beta`: the same method sequence and the same results as `typescript@7.1.0-beta` on three recordings, and identical canonical output on Chakra, rdt-compat and blueprint.
 
-**Discovery.** `--tsc-path` (or `tscPath`) wins and must exist. Otherwise the search walks up from the project root and takes the first `node_modules` that holds either binary; inside one `node_modules`, `typescript/bin/tsc` comes before `tsrs/bin/tsrs`, so an install that has both keeps using `typescript`. Pass `--tsc-path` to choose `tsrs` there. The platform binary (`node_modules/@tsrs/<platform>/tsrs`) can be given with `--tsc-path` too and starts without Node.
+**Installed with Caliper (ADR 0026, S8).** Each CLI and napi platform package (`caliper-docgen-<platform>`, `caliper-docgen-napi-<platform>`) has one optional dependency, the pinned `@tsrs/<platform>`, so a normal npm or pnpm install puts the checker beside the binary that runs it; the Vite plugin and the Storybook addon get it through the napi package. It sits on the platform package, not on `caliper-docgen` or `caliper-docgen-napi`, because pnpm installs a package's dependencies beside it in its own store directory, and only the platform package's directory is an ancestor of the running binary. The checker stays off by default; installing it changes nothing until the flag or `semanticTypes: 'on-demand'` is set.
 
-**Version rule** (`crates/tsc-client/src/supervisor.rs`, list in `crates/semantic/src/lib.rs`, `SUPPORTED_VERSIONS`). The version is read from the `package.json` of the package that owns the binary: the parent of `bin` for `typescript/bin/tsc` and `tsrs/bin/tsrs`, the binary's own directory for `@tsrs/<platform>/tsrs`. An entry is an exact version or a `major.minor` series. A `tsrs` version reads `<tsrs version>-ts<typescript version>`; it is accepted only when it is listed exactly (today `0.23.0-ts7.1.0-beta`, the build that was traced) and its TypeScript part is also taken by a TypeScript entry (`7.1`). A new `tsrs` release is therefore refused until someone traces it and adds it, as for any other build.
+| Package                 |  Packed | Unpacked |
+| ----------------------- | ------: | -------: |
+| `@tsrs/darwin-arm64`    | 10.5 MB |  23.9 MB |
+| `@tsrs/darwin-x64`      | 11.1 MB |  25.4 MB |
+| `@tsrs/linux-x64-gnu`   | 15.4 MB |  35.2 MB |
+| `@tsrs/linux-arm64-gnu` | 20.4 MB |  43.4 MB |
+| `@tsrs/win32-x64`       | 20.2 MB |  50.2 MB |
+
+Measured from the registry's tarballs of `0.23.0-ts7.1.0-beta` (each holds the binary and the `lib.*.d.ts` files). tsrs also publishes `linux-x64-musl` and `linux-arm64-musl`, which Caliper does not depend on because it ships no musl build, and nothing for `win32-arm64`.
+
+**Discovery** (`crates/semantic/src/locate.rs`, the one lookup for the CLI and the addon):
+
+1. `--tsc-path` (or `tscPath`), which must exist.
+2. The pinned `@tsrs/<platform>/tsrs` (`tsrs.exe` on Windows) in the nearest `node_modules` at or above the directory of the running binary: the CLI executable, through symlinks, or the addon file Node loaded (`node_api_get_module_file_name`). `<platform>` is the target Caliper was built for, `darwin-arm64`, `linux-x64-gnu`, `linux-x64-musl`, `win32-x64` and so on; a glibc build runs only on glibc, so the build's libc is the host's.
+3. The first `node_modules` at or above the project root that holds `typescript/bin/tsc` or `tsrs/bin/tsrs`; inside one, `typescript/bin/tsc` comes first. Pass `--tsc-path` to choose `tsrs` there.
+
+There is no environment variable; `TSRS_BIN` is read only by the tests and the oracle. With none found, the run keeps the structural result with one `SEMANTIC_BACKEND` warning that names the `@tsrs` package and directory it looked in, the project root, and what to install (or that tsrs publishes no binary for the platform, as on Windows on Arm). A `cargo install` has no `@tsrs` package beside it, so it reaches step 3.
+
+**The pin.** `crates/semantic/TSRS_VERSION` is the one place the tsrs build is stated; the backend compiles it into `SUPPORTED_VERSIONS`, and `scripts/check-packaging.mjs` (in `just lint`) fails unless every platform package's `@tsrs` dependency and `apps/oracle`'s `tsrs` name exactly it. Dependabot ignores `tsrs` and `@tsrs/*`: a bump passes the tsrs-against-Go parity run first (ADR 0026). CI's `Install` jobs pack the CLI and napi packages as a release lays them out, install them with npm and pnpm on Node 24 and 26 into a project with no TypeScript, and require `1 component(s) resolved by the TypeScript checker` from both (`just verify-checker-install`).
+
+**Version rule** (`crates/tsc-client/src/supervisor.rs`, list in `crates/semantic/src/lib.rs`, `SUPPORTED_VERSIONS`). The version is read from the `package.json` of the package that owns the binary: the parent of `bin` for `typescript/bin/tsc` and `tsrs/bin/tsrs`, the binary's own directory for `@tsrs/<platform>/tsrs`. An entry is an exact version or a `major.minor` series. A `tsrs` version reads `<tsrs version>-ts<typescript version>`; it is accepted only when it is the pin (today `0.23.0-ts7.1.0-beta`, the build that was traced) and its TypeScript part is also taken by a TypeScript entry (`7.1`). A new `tsrs` release is therefore refused until someone traces it and moves the pin, as for any other build.
 
 The protocol detail that matters for `tsrs` is unchanged from `typescript`: the client sends `createPrograms[].compilerOptions` (the Node client sends `options`; the server accepts both, and `crates/semantic/tests/replay.rs` pins the key). Set `TSRS_BIN` to a `tsrs` binary to run `crates/semantic/tests/tsrs_real.rs` against the real thing; without it the test returns at once.
 

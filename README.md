@@ -75,6 +75,8 @@ npm install --save-dev caliper-docgen-storybook      # Storybook 11 addon
 cargo install caliper-docgen                         # CLI from crates.io
 ```
 
+The npm packages also install the TypeScript checker Caliper pins, [`tsrs`](https://github.com/oxc-project/tsrs), as an optional dependency (`@tsrs/<platform>`, 24 to 50 MB unpacked). It runs only with the experimental checker on (`--experimental-semantic-types`, or the Storybook addon's `semanticTypes: 'on-demand'`), which is off by default. `cargo install` does not bring it; there, and on Windows on Arm where tsrs publishes no binary, the checker is the project's `typescript@beta` or `tsrs`, or `--tsc-path`.
+
 Coming from `react-docgen-typescript`? [`MIGRATING.md`](MIGRATING.md) covers what's compatible today.
 
 ## Quick start

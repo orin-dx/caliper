@@ -30,10 +30,11 @@ export interface SessionOptions {
   /**
    * Ask TypeScript's 7.1 checker for each component a story names (experimental). `'off'` (the default) never starts
    * it; `'on-demand'` keeps one `tsc` warm, asks it for exactly the requested component, and takes the structural
-   * props when it is slower than `semanticWaitMs`. Needs `typescript@beta` installed, or `tscPath`.
+   * props when it is slower than `semanticWaitMs`. Runs the pinned `tsrs` installed with the addon, else the project's
+   * `typescript@beta` or `tsrs`, or `tscPath`.
    */
   semanticTypes?: Napi.JsExtractOptions['semanticTypes']
-  /** The `tsc` binary to run, instead of the nearest `node_modules/typescript/bin/tsc` or `node_modules/tsrs/bin/tsrs`. */
+  /** The `tsc` binary to run, instead of the pinned `tsrs` installed with the addon or the project's own checker. */
   tscPath?: string
   /** How many milliseconds a story waits for the checker before it takes the structural props. Default: `150`. */
   semanticWaitMs?: number
