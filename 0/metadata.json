@@ -1,0 +1,130 @@
+{
+  "cli_version": "0.13.3-nightly.202611110616.7aed2fb15",
+  "checkpoint_id": "01M76QB6WQHNVGHZGK25JD6815",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-12T01:53:33.844616Z",
+  "branch": "feat/oxc-supplies-defaults-and-order",
+  "checkpoints_count": 1,
+  "save_step_count": 69,
+  "files_touched": [
+    "crates/core/tests/semantic_join.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "47528b87691f",
+  "checkpoint_transcript_start": 22344,
+  "transcript_lines_at_start": 22344,
+  "compact_transcript_start": 1875,
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 8649,
+    "cache_read_tokens": 2662163,
+    "output_tokens": 3261,
+    "api_call_count": 3,
+    "subagent_tokens": {
+      "input_tokens": 34,
+      "cache_creation_tokens": 23251,
+      "cache_read_tokens": 5192973,
+      "output_tokens": 10832,
+      "api_call_count": 16
+    }
+  },
+  "redaction": {
+    "replacements": 26,
+    "layers": {
+      "betterleaks": 12,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 493
+  },
+  "summary": {
+    "intent": "Package the pinned tsrs TypeScript checker so it installs alongside Caliper (ADR 0026 S8, trail #280), with a single pin and a single resolution function, without changing any default.",
+    "outcome": "Subagent S8a finished and pushed PR #434 with four signed commits; the PR body was written and no checks are failing, with Entire Gates awaiting the user. The S8a worker was stopped and a summary was given. Only macOS arm64 was exercised locally.",
+    "learnings": {
+      "repo": [
+        "The tsrs pin lives once in crates/semantic/TSRS_VERSION. Rust compiles it into SUPPORTED_VERSIONS, and scripts/check-packaging.mjs (part of `just lint`) fails unless all 10 platform manifests and the oracle's tsrs match it.",
+        "Each CLI and napi platform package (packages/{cli,napi}/npm/<plat>) carries an exact-pinned optional dependency on its matching @tsrs/<plat>. The main packages, vite plugin and storybook addon have none. pnpm installs dependencies in a package's own store directory, and only the platform package's directory sits above the running binary.",
+        "Checker resolution is one function, `find_tsc` in crates/semantic/src/locate.rs, shared by the CLI and napi. Order: --tsc-path/tscPath, then @tsrs/<plat> in the nearest node_modules above the running binary, then the project's typescript/bin/tsc, then tsrs/bin/tsrs. There is no env var.",
+        "The CLI finds its own location via current_exe, and napi via node_api_get_module_file_name (napi9). gnu vs musl is decided at build time.",
+        "Dependabot now ignores tsrs and @tsrs/* because a pin change requires the tsrs-versus-Go parity run (ADR 0026).",
+        "A new public field `binary_dir` on SemanticRequest and OnDemandConfig requires a minor bump for caliper-docgen-semantic (checked via `just semver`).",
+        "The repo has a scripts rule: scripts must have CI callers. verify-checker-install.sh satisfies it via the new install-binaries job and the install matrix (npm/pnpm, Node 24/26).",
+        "No win32-arm64 tsrs package exists. Per-platform packed/unpacked sizes: darwin-arm64 10.5/23.9 MB, darwin-x64 11.1/25.4, linux-x64-gnu 15.4/35.2, linux-arm64-gnu 20.4/43.4, win32-x64 20.2/50.2."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/locate.rs",
+          "finding": "Home of find_tsc, the single checker-resolution function used by both the CLI and napi; it has 19 new unit tests covering lookup and file URLs."
+        },
+        {
+          "path": "crates/core/tests/semantic_join.rs",
+          "finding": "The worker's own edit was dropped in favor of main's version when merging origin/main."
+        }
+      ],
+      "workflow": [
+        "build:napi leaves unrelated drift in index.js and binding.d.ts; revert it and keep only intended hunks.",
+        "After merging origin/main, only a minimal re-check (cargo check and check-packaging) was run rather than the full gate set, and that was disclosed in the PR.",
+        "A mutation test (altering the pin to confirm check-packaging fails) was used to validate the guard.",
+        "The S8a worker was stopped after it reported, to prevent redundant re-reporting."
+      ]
+    },
+    "friction": [
+      "Only macOS arm64 could be tested locally; Linux musl, linux-arm64, Windows and CI itself are unverified.",
+      "The clean-room run was skipped on the user's instruction.",
+      "The bundled tsrs now overrides a project's own typescript@beta, a behavior change for opt-in users.",
+      "build:napi produced unrelated generated-file drift that had to be reverted."
+    ],
+    "open_items": [
+      "Verify the install smoke test on Linux musl, linux-arm64 and Windows through CI.",
+      "Entire Gates on PR #434 is awaiting the user.",
+      "Decide the default flip for the checker, including whether whole-project `extract` should default the checker on or stay structural for batch because of speed.",
+      "S7a2 and the #367 fix are still running.",
+      "Other open PRs awaiting the user: #428, #430, #431, #432, #433 and #396.",
+      "The clean-room run was skipped and could be done later."
+    ]
+  }
+}
