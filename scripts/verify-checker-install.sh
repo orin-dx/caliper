@@ -17,7 +17,7 @@ mkdir "$work/packed" "$work/project"
 
 platform=$(node -p "
   const { platform, arch } = process
-  const libc = platform === 'linux' ? (process.report.getReport().header.glibcVersionRuntime ? '-gnu' : '-musl') : ''
+  const libc = platform === 'linux' ? (process.report.getReport().header.glibcVersionRuntime ? '-gnu' : '-musl') : '';
   \`\${platform}-\${arch}\${libc}\`
 ")
 [ -d "packages/cli/npm/$platform" ] || { echo "no caliper-docgen package for $platform" >&2; exit 1; }
