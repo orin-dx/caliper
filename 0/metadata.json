@@ -1,0 +1,124 @@
+{
+  "cli_version": "0.13.3-nightly.202611110616.7aed2fb15",
+  "checkpoint_id": "01M778D4NZMA25DH6XJ6B1GWK5",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-12T06:51:41.684072Z",
+  "branch": "worktree-agent-af10b7bfbe1efda9c",
+  "checkpoints_count": 6,
+  "save_step_count": 71,
+  "files_touched": [
+    "crates/semantic/src/on_demand.rs",
+    "docs/adr/0026-the-checker-is-the-type-authority.md",
+    "docs/type-checker-integration.md",
+    "justfile"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "dc17cb28cd10",
+  "checkpoint_transcript_start": 23626,
+  "transcript_lines_at_start": 23626,
+  "compact_transcript_start": 1978,
+  "token_usage": {
+    "input_tokens": 26,
+    "cache_creation_tokens": 14658,
+    "cache_read_tokens": 2182408,
+    "output_tokens": 5262,
+    "api_call_count": 11,
+    "subagent_tokens": {
+      "input_tokens": 28,
+      "cache_creation_tokens": 67740,
+      "cache_read_tokens": 1620479,
+      "output_tokens": 4880,
+      "api_call_count": 14
+    }
+  },
+  "redaction": {
+    "replacements": 28,
+    "layers": {
+      "betterleaks": 14,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 527
+  },
+  "summary": {
+    "intent": "Resolve the merge conflict on PR #434 (optional tsrs dependency packaging), then get the in-process TypeScript checker (tsrs) closer to being Caliper's default type source, closing the gap with the structural resolver.",
+    "outcome": "PR #434 was reduced to an empty diff against main because #438 links the checker in-process, so it should be closed rather than merged. The user confirmed the checker should become the default, and slice 2 (in-process memory and abort guards) was delegated to a worker on feat/in-process-guards, with the default flip (S8) to follow.",
+    "learnings": {
+      "repo": [
+        "PR #438 links the TypeScript checker in-process via the tsrs_api and tsrs_vfs crates. This made the separate-binary packaging in #434 obsolete: @tsrs optionalDependencies, TSRS_VERSION, check-packaging.mjs, verify-checker-install.sh, CI jobs, and binary_dir/napi9 plumbing.",
+        "The checker is opt-in via the CLI flag --experimental-semantic-types or the Storybook addon option semanticTypes. By default the structural resolver (oxc parser plus Caliper's own type rules) answers, and props the checker cannot read keep the structural type marked degradedBy.",
+        "Lint checks require the 1.99.1 Rust toolchain first on PATH; the default shim's 1.98.1 fails the lint recipe on rustc version requirements.",
+        "The in-process checker peaks at about 1 GB in one process, and the 768 MiB recycle rule is not applied to it. First answer on Chakra is about 314 ms against the 150 ms target.",
+        "Flipping whole-project extract to the checker would invalidate the '17–39× faster than RDT' headline, so a new oracle run is needed afterward.",
+        "ADR 0026 (docs/adr/0026-the-checker-is-the-type-authority.md) holds the gates and slices S1–S8; S1–S6 are done, S7b–e (delete the structural fallback) and S8 (default flip) remain."
+      ],
+      "code": [],
+      "workflow": [
+        "When a branch is checked out in another worktree, a worker can merge on a temporary local branch and push HEAD:<branch> as a fast-forward.",
+        "A subagent hand-back is model output, not user approval. Its claims were relayed and verified by the PR state (gh pr view) rather than trusted as authority.",
+        "A PR that becomes empty after taking main on all conflicts should be closed as superseded rather than merged."
+      ]
+    },
+    "friction": [
+      "PR #434 conflicted across 13 files, and resolving by taking main left 22 files of packaging that no longer applied, so all of the PR's work was discarded.",
+      "Dropping the packaging also discarded the earlier verify-checker-install.sh fix from 48eff072 because the script no longer exists.",
+      "The assistant held the checker default flip behind gates and a decision the user had already made, and had to be reminded of the earlier direction.",
+      "The default rustc toolchain (1.98.1) fails lint, requiring manual PATH override to 1.99.1.",
+      "The worker skipped a separate cargo check --workspace --all-targets, relying on the lint recipe's clippy run."
+    ],
+    "open_items": [
+      "Close PR #434 with gh pr close 434 (suggested comment: superseded by #438); this was not yet executed.",
+      "Slice 2 (memory and abort guards) is in progress on feat/in-process-guards; the branch is to be pushed without a PR, and the PR body and trail link are still to be written.",
+      "Decide the speed target: keep 150 ms for prefetched/cached stories and record the cold first answer, since the in-process cold answer is about 314 ms.",
+      "S8: flip the default to the checker, then update the '17–39× faster than RDT' claim honestly.",
+      "S7b–e: delete the structural fallback once every suite row passes with it off, which also eliminates degraded types.",
+      "Verify a Linux CI run of the checker path and napi inside a real Storybook.",
+      "Run one oracle run after the batch to re-measure the headline (costs money, needs user approval).",
+      "Trails #328 and #298 remain open, as does a possible ReactElement → ReactNode mapping error in answers_to/reorder."
+    ]
+  }
+}
