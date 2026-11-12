@@ -295,3 +295,19 @@ fn the_properties_of_a_map_the_project_declares_or_that_fits_the_budget_are_not_
         }
     });
 }
+
+/// What the reuse may not do either: a map's keys and symbol do not say who declares its properties. `Wrapped<T>` maps
+/// over the keys of whatever `T` it is given, so `Wrapped<Theirs>` (a dependency's) and `Wrapped<Ours>` (the project's,
+/// the same 45 keys) are one key. The count of the first stands for neither the second's declarations nor its fields:
+/// what the project declared is never cut.
+#[test]
+fn a_map_over_a_type_parameter_is_listed_when_the_project_may_declare_its_properties() {
+    each_way("maps", |run, how| {
+        let theirs = condition_map(&run.outcome, "Generic", "a");
+        assert_eq!(theirs["kind"], "truncated", "{how}: a dependency's keys are cut: {theirs}");
+
+        let ours = condition_map(&run.outcome, "Generic", "b");
+        let fields = ours["fields"].as_array().unwrap_or_else(|| panic!("{how}: the project's are listed: {ours}"));
+        assert_eq!(fields.len(), 45, "{how}");
+    });
+}

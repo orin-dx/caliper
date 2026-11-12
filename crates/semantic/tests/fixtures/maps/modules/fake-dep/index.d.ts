@@ -57,3 +57,52 @@ export interface Little {
 export type Value<V> = V | { [K in keyof Conditions]?: V };
 
 export type Few<V> = V | { [K in keyof Little]?: V };
+
+// The same 45 keys as the project's `Ours`: a map over a type parameter has the provenance of the type it is given.
+export interface Theirs {
+  k01?: boolean;
+  k02?: boolean;
+  k03?: boolean;
+  k04?: boolean;
+  k05?: boolean;
+  k06?: boolean;
+  k07?: boolean;
+  k08?: boolean;
+  k09?: boolean;
+  k10?: boolean;
+  k11?: boolean;
+  k12?: boolean;
+  k13?: boolean;
+  k14?: boolean;
+  k15?: boolean;
+  k16?: boolean;
+  k17?: boolean;
+  k18?: boolean;
+  k19?: boolean;
+  k20?: boolean;
+  k21?: boolean;
+  k22?: boolean;
+  k23?: boolean;
+  k24?: boolean;
+  k25?: boolean;
+  k26?: boolean;
+  k27?: boolean;
+  k28?: boolean;
+  k29?: boolean;
+  k30?: boolean;
+  k31?: boolean;
+  k32?: boolean;
+  k33?: boolean;
+  k34?: boolean;
+  k35?: boolean;
+  k36?: boolean;
+  k37?: boolean;
+  k38?: boolean;
+  k39?: boolean;
+  k40?: boolean;
+  k41?: boolean;
+  k42?: boolean;
+  k43?: boolean;
+  k44?: boolean;
+  k45?: boolean;
+}

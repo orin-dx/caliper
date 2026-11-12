@@ -545,9 +545,27 @@ impl Converter {
         self.state.maps.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(key).copied()
     }
 
-    fn settle(&self, key: MapKey, members: &ObjectMembers) {
-        if let Some(count) = settled_count(members) {
+    /// Remembers the count of a map's listed members for the maps of its key, when [`settled_count`] takes it and the map
+    /// is [`invariant`](Self::invariant): the key does not say who declares the properties of a map that is not.
+    async fn settle(&self, key: MapKey, info: &TypeInfo, members: &ObjectMembers) {
+        if let Some(count) = settled_count(members)
+            && self.invariant(info).await
+        {
             self.state.maps.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(key, count);
+        }
+    }
+
+    /// Whether every map of this one's key and symbol has the same properties declared in the same places: its
+    /// declaration's constraint holds no type parameter, so no instantiation changes it. The checker's answer for the
+    /// map (the keys, as a handle) is then the one the declaration writes (`keyof Conditions`, and a handle is one type
+    /// inside a snapshot); where it is not, the map is homomorphic over a type its instantiation gives (`{ [K in keyof T]?:
+    /// T[K] }`, `{ [P in K]?: T[P] }` with `K extends keyof T`), and two instantiations over the same keys declare
+    /// their properties where their `T` does, a dependency's in one and the project's in the other. When the
+    /// declaration cannot be read, the map is not.
+    async fn invariant(&self, info: &TypeInfo) -> bool {
+        match self.rpc.target_of_type(info.id).await {
+            Ok(target) => target.constraint_type.is_some() && target.constraint_type == info.constraint_type,
+            Err(_) => false,
         }
     }
 
@@ -1049,7 +1067,7 @@ impl Converter {
                     return Ok((Listed::Counted(outside), 0));
                 }
                 let members = self.rpc.object_members(info.id).await?;
-                self.settle(key, &members);
+                self.settle(key, info, &members).await;
                 Ok((Listed::Members(members), 0))
             })
             .await?;
