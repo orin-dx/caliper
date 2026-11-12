@@ -133,6 +133,11 @@ test-construct:
 verify-install pm="pnpm":
     scripts/verify-install.sh {{ pm }}
 
+# Install the packed CLI and napi packages as a release lays them out, with no TypeScript and no TSRS_BIN, and check
+# both find the pinned tsrs installed beside them and that it answers (pm: npm or pnpm; the built CLI binary and addon)
+verify-checker-install pm cli addon:
+    scripts/verify-checker-install.sh {{ pm }} {{ cli }} {{ addon }}
+
 # Run the criterion benchmarks (single fixtures); `just bench` compares a whole library against main
 bench-criterion:
     cargo bench --workspace --exclude caliper-docgen-napi

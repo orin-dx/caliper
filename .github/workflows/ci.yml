@@ -226,8 +226,38 @@ jobs:
             packages/storybook/coverage/lcov.info
           retention-days: 14
 
+  # The release binaries the install jobs pack, built once.
+  install-binaries:
+    name: Install / Build binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: rust
+        run: echo "version=$(sed -n 's/^rust = "\(.*\)"/\1/p' .prototools)" >> "$GITHUB_OUTPUT"
+      - uses: orin-dx/actions/setup-rust@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+        with:
+          auto-install: true
+      - uses: orin-dx/actions/setup-pnpm-cache@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
+      - run: pnpm install --frozen-lockfile
+      - run: cargo build --release --locked -p caliper-docgen
+      - run: pnpm --filter caliper-docgen-napi build:napi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: install-binaries
+          path: |
+            target/release/caliper-docgen
+            packages/napi/caliper_docgen_napi.linux-x64-gnu.node
+          if-no-files-found: error
+          retention-days: 1
+
   install:
     name: Install / Node ${{ matrix.node }} / ${{ matrix.pm }}
+    needs: install-binaries
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -249,6 +279,15 @@ jobs:
       - uses: orin-dx/actions/setup-pnpm-cache@2521888266780dabc7f5fd4c32b02d6ab82849db # v1.1
       - run: pnpm install --frozen-lockfile
       - run: just verify-install ${{ matrix.pm }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: install-binaries
+          path: ${{ runner.temp }}/install-binaries
+      # The CLI and the addon, installed as a release publishes them, find the pinned tsrs beside them and it answers.
+      - run: >-
+          just verify-checker-install ${{ matrix.pm }}
+          "$RUNNER_TEMP/install-binaries/target/release/caliper-docgen"
+          "$RUNNER_TEMP/install-binaries/packages/napi/caliper_docgen_napi.linux-x64-gnu.node"
 
   semver:
     name: SemVer
@@ -326,7 +365,7 @@ jobs:
   # The one check to require in branch protection.
   ci:
     name: CI
-    needs: [lint, test-rust, test-checker-lane, test-napi, test-py, test-ts, test-integration, test-construct, coverage, install, semver, msrv, audit, changesets]
+    needs: [lint, test-rust, test-checker-lane, test-napi, test-py, test-ts, test-integration, test-construct, coverage, install-binaries, install, semver, msrv, audit, changesets]
     if: always()
     runs-on: ubuntu-latest
     steps:
