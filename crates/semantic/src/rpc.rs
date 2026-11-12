@@ -124,6 +124,13 @@ pub(crate) struct TypeInfo {
     /// Ids of the alias's type arguments; `Rpc::alias_type_arguments` fetches them.
     #[serde(default)]
     pub alias_type_arguments: Vec<u64>,
+    /// The keys a mapped type ranges over (`keyof Conditions` in `{ [K in keyof Conditions]?: V }`), as the checker's
+    /// type handle; absent for a type that is not a mapped type.
+    #[serde(default)]
+    pub constraint_type: Option<u64>,
+    /// The `as` clause of a mapped type, which renames its keys; absent when it has none.
+    #[serde(default)]
+    pub name_type: Option<u64>,
 }
 
 impl TypeInfo {
@@ -241,6 +248,7 @@ pub(crate) mod flag {
     pub(crate) const OBJECT_CLASS: u64 = 1;
     pub(crate) const OBJECT_INTERFACE: u64 = 2;
     pub(crate) const OBJECT_REFERENCE: u64 = 4;
+    pub(crate) const OBJECT_MAPPED: u64 = 32;
     /// `TypeFormatFlags` for `typeToString`: `NoTruncation`, `UseAliasDefinedOutsideCurrentScope`,
     /// `AllowUniqueESSymbolType` (the last two are what the checker uses when no flags are given) and `InTypeAlias`.
     pub(crate) const PRINT_EXPANDED: u64 = 1 | 16384 | 1_048_576 | 8_388_608;
