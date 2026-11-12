@@ -75,6 +75,8 @@ npm install --save-dev caliper-docgen-storybook      # Storybook 11 addon
 cargo install caliper-docgen                         # CLI from crates.io
 ```
 
+Supported platforms: macOS (arm64, x64) and Linux glibc (arm64, x64). Windows is not supported; use WSL.
+
 Coming from `react-docgen-typescript`? [`MIGRATING.md`](MIGRATING.md) covers what's compatible today.
 
 ## Quick start
