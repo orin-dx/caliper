@@ -924,7 +924,10 @@ mod streaming_serialize_tests {
                 { "name": "rest", "type": { "kind": "array", "element": { "kind": "boolean" } }, "rest": true },
             ])
         );
-        assert_eq!(signature_with_optional_and_rest().raw_string(), "(a: string, b?: number, ...rest: boolean[]) => void");
+        assert_eq!(
+            signature_with_optional_and_rest().raw_string(),
+            "(a: string, b?: number, ...rest: boolean[]) => void"
+        );
     }
 
     #[test]

@@ -63,15 +63,6 @@ pub enum TscClientError {
         status: Option<std::process::ExitStatus>,
     },
 
-    /// The supervisor restarted `tsc` too often and gave up for good.
-    #[error("tsc restarted {attempts} times within {window:?}; treating as permanently failed")]
-    RestartStormDetected {
-        /// How many restarts happened inside the window.
-        attempts: u32,
-        /// The span those restarts are counted over.
-        window: Duration,
-    },
-
     /// A frame declared a body larger than the cap, so it was not read.
     #[error("oversized frame: declared Content-Length {declared} exceeds the {cap}-byte cap")]
     OversizedFrame {

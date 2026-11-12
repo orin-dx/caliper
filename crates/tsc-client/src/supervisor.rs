@@ -1,21 +1,16 @@
 use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use tokio::io::AsyncBufReadExt;
 use tokio::process::{Child, Command};
 
-use crate::client::{Client, TaggedResponse};
+use crate::client::Client;
 use crate::error::TscClientError;
 
 const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10); // measured 33-72ms; generous headroom
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
-const MAX_RESTARTS: u32 = 3;
-const RESTART_WINDOW: Duration = Duration::from_secs(60);
-const BACKOFF_STEPS: [Duration; 3] =
-    [Duration::from_millis(200), Duration::from_millis(400), Duration::from_millis(800)];
-const BACKOFF_MAX: Duration = Duration::from_secs(5);
 
 /// How a [`Supervisor`] starts `tsc`, how long it waits, and how large a frame it accepts. Build one with
 /// [`SupervisorConfig::new`] and adjust the public fields.
@@ -129,10 +124,7 @@ fn spawn_stderr_drain(stderr: tokio::process::ChildStderr) {
     });
 }
 
-/// Spawns one `tsc --api` process and wires up its transport. Split out from
-/// `Supervisor::spawn`/`restart` so a restart can replace the process/client pair
-/// without losing the restart-attempt bookkeeping a fresh `Supervisor` would
-/// otherwise reset.
+/// Spawns one `tsc --api` process and wires up its transport.
 async fn spawn_process(config: &SupervisorConfig) -> Result<(Child, Client), TscClientError> {
     check_version(&config.tsc_path, config.expected_versions)?;
 
@@ -158,16 +150,10 @@ async fn spawn_process(config: &SupervisorConfig) -> Result<(Child, Client), Tsc
     Ok((child, client))
 }
 
-/// Owns one `tsc --api` child process across its lifetime: spawn, version check,
-/// crash-triggered restart (bounded, to avoid a restart storm), and shutdown/reaping.
+/// Owns one `tsc --api` child process across its lifetime: spawn, version check, and shutdown/reaping.
 pub struct Supervisor {
     child: Child,
     client: Client,
-    config: SupervisorConfig,
-    restart_attempts: Vec<Instant>,
-    /// Set once a restart-storm cap is hit. Terminal — every later call short-circuits
-    /// without touching the process again.
-    failed: bool,
 }
 
 impl Supervisor {
@@ -180,13 +166,13 @@ impl Supervisor {
     /// is not one of the configured `expected_versions`.
     pub async fn spawn(config: SupervisorConfig) -> Result<Self, TscClientError> {
         let (child, client) = spawn_process(&config).await?;
-        Ok(Self { child, client, config, restart_attempts: Vec::new(), failed: false })
+        Ok(Self { child, client })
     }
 
-    /// The current session's low-level handle. Cheap to clone. A clone obtained before a
-    /// supervisor-driven restart fails immediately with the reason its session closed with
-    /// (`Crashed`, `Write`, `Read`, `MalformedFrame` or `OversizedFrame`) — call this again to get the live one. A
-    /// clone held across [`Supervisor::shutdown`] fails with `SessionClosed`.
+    /// The session's low-level handle. Cheap to clone. Once the session ends it fails every request with the reason it
+    /// closed with (`Crashed`, `Write`, `Read`, `MalformedFrame` or `OversizedFrame`); a clone held across
+    /// [`Supervisor::shutdown`] fails with `SessionClosed`. The supervisor never restarts the process: the caller
+    /// spawns a new one.
     pub fn client(&self) -> Client {
         self.client.clone()
     }
@@ -196,70 +182,10 @@ impl Supervisor {
         self.child.id()
     }
 
-    /// True while the current session is open and the supervisor hasn't permanently failed. A crash between calls
-    /// to this method and the next `request()` is still possible — this is a snapshot, not a guarantee.
+    /// True while the session is open. A crash right after this returns is still possible — this is a snapshot, not a
+    /// guarantee.
     pub fn is_alive(&self) -> bool {
-        self.client.closed().is_none() && !self.failed
-    }
-
-    /// Sends a request through the current session. A session that ended before the call is restarted first
-    /// (budget permitting); one that ends during the call is restarted and the call retried once. At most one
-    /// restart per call, so a request lost to a crash is never silently replayed more than once. A `Timeout` on a
-    /// live session restarts nothing.
-    ///
-    /// Worst case is one restart plus one retry: `deadline` applies to each attempt separately, and a restart adds up
-    /// to 800ms of backoff plus the spawn.
-    pub async fn request(
-        &mut self,
-        method: &str,
-        params: serde_json::Value,
-        deadline: Duration,
-    ) -> Result<TaggedResponse, TscClientError> {
-        if self.failed {
-            return Err(self.storm());
-        }
-
-        let restarted_first = self.client.closed().is_some();
-        if restarted_first {
-            self.restart().await?;
-        }
-
-        let result = self.client.request(method, params.clone(), deadline).await;
-        if result.is_err() && !restarted_first && self.client.closed().is_some() {
-            self.restart().await?;
-            return self.client.request(method, params, deadline).await;
-        }
-        result
-    }
-
-    fn storm(&self) -> TscClientError {
-        TscClientError::RestartStormDetected { attempts: self.restart_attempts.len() as u32, window: RESTART_WINDOW }
-    }
-
-    async fn restart(&mut self) -> Result<(), TscClientError> {
-        let now = Instant::now();
-        self.restart_attempts.retain(|attempt| now.duration_since(*attempt) < RESTART_WINDOW);
-
-        if self.restart_attempts.len() as u32 >= MAX_RESTARTS {
-            self.failed = true;
-            return Err(self.storm());
-        }
-
-        let backoff = BACKOFF_STEPS.get(self.restart_attempts.len()).copied().unwrap_or(BACKOFF_MAX);
-        // Counted before the spawn and the backoff: a spawn failure or a caller cancelling this call mid-restart still
-        // burns one attempt, by design.
-        self.restart_attempts.push(now);
-        tokio::time::sleep(backoff).await;
-
-        // Best-effort cleanup of the crashed process before respawning — it may
-        // already be gone, so failures here are expected and ignored.
-        self.child.start_kill().ok();
-        self.child.wait().await.ok();
-
-        let (child, client) = spawn_process(&self.config).await?;
-        self.child = child;
-        self.client = client;
-        Ok(())
+        self.client.closed().is_none()
     }
 
     /// Ends the session and guarantees the child is reaped, never left as a zombie: close the session (fails
