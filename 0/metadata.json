@@ -3,7 +3,7 @@
   "checkpoint_id": "01M76PM71JTD2VW433K8R15JCK",
   "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
   "strategy": "manual-commit",
-  "created_at": "2026-11-12T01:41:02.976765Z",
+  "created_at": "2026-11-12T01:41:18.346353Z",
   "branch": "chore/delete-unused-code",
   "checkpoints_count": 2,
   "save_step_count": 69,
@@ -11,21 +11,21 @@
   "agent": "Claude Code",
   "model": "claude-sonnet-5-5",
   "turn_id": "ecbacbefcfe7",
-  "checkpoint_transcript_start": 21957,
-  "transcript_lines_at_start": 21957,
-  "compact_transcript_start": 1850,
+  "checkpoint_transcript_start": 22002,
+  "transcript_lines_at_start": 22002,
+  "compact_transcript_start": 1854,
   "token_usage": {
-    "input_tokens": 8,
-    "cache_creation_tokens": 14516,
-    "cache_read_tokens": 2471827,
-    "output_tokens": 4055,
-    "api_call_count": 3,
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0,
     "subagent_tokens": {
-      "input_tokens": 42,
-      "cache_creation_tokens": 47748,
-      "cache_read_tokens": 6794966,
-      "output_tokens": 15426,
-      "api_call_count": 21
+      "input_tokens": 52,
+      "cache_creation_tokens": 25704,
+      "cache_read_tokens": 8862239,
+      "output_tokens": 13542,
+      "api_call_count": 26
     }
   },
   "redaction": {
@@ -78,51 +78,5 @@
   ],
   "session_metrics": {
     "turn_count": 488
-  },
-  "summary": {
-    "intent": "Coordinate and report on parallel subagent work: a scripts cleanup (PR #431) and a condition-map memo perf optimization (PR #430), writing PR bodies and summarizing results for the user to decide on merging.",
-    "outcome": "PR #431 (deleted 16 unused scripts, added a 'no new script without a caller' rule) and PR #430 (condition-map memo, ChakraButton first answer 433 to 277 ms) both have bodies written and are awaiting user review. CI results were not seen on either, and #430 has an unresolved memory regression.",
-    "learnings": {
-      "repo": [
-        "origin/main is red: `cargo check --all-targets` fails because crates/core/tests/semantic_join.rs lacks fields added by #426; PR #429 fixes it and must merge first. `just lint` exits 101 only because of this.",
-        "AGENTS.md now has a 'Scripts' rule: no new script without a caller. docs/measurement.md lists each remaining script with its caller.",
-        "Kept scripts all have callers: weekly.py (plus corpora, headline, oracle_data, rdt.mjs, rdg.mjs, agent_eval.py, schema_version.py), bench.py (just bench), gate_fixtures.mjs (just gate-measure), verify-install.sh (CI Install job), check-packaging.mjs and napi-loader-version.mjs (lint and napi build).",
-        "Condition-map memo: `State::maps` in convert.rs is keyed (constraint handle, map symbol) per snapshot and holds only the property count. Reuse requires mapped flag, no alias/name, no `as` clause, no project-declared property/signature/index signature, and count above the budget (40 below a prop, 100 at top level). The unguarded first version changed MuiTextField output.",
-        "Documentation requests are already batched and cached by declaration since S7a, so no second cache was needed (ChakraButton batch: 2,548 sub-requests, 10-11 ms of about 210).",
-        "The tsrs 7.1 API lacks `getModifiersTypeOfMappedType`, so two instances of one unnamed generic map (`keyof T`) with identical keys beyond the budget but different declaring files could in principle differ. Aliased maps are never reused.",
-        "CACHE_SCHEMA_VERSION was unchanged by the memo; recordings are against pinned tsrs 0.23.0-ts7.1.0-beta."
-      ],
-      "code": [
-        {
-          "path": "crates/core/tests/semantic_join.rs",
-          "finding": "Missing fields added by #426 break `cargo check --all-targets` on main; fixed by PR #429. Line numbers not given in the transcript."
-        },
-        {
-          "path": "crates/caliper-docgen-semantic/src/convert.rs",
-          "finding": "Holds `State::maps` memo plus unit tests (including the signature guard case, which must be a unit test since a mapped type cannot have signatures). Line numbers not given."
-        }
-      ],
-      "workflow": [
-        "When main is red, a worker can apply the fix PR's diff uncommitted for local checks and revert before committing, but this limits clean-room verification scope (here the semantic crate only, not the whole workspace).",
-        "Distinguish fix tests (fail on base) from guard tests (pass on base) in PR bodies; the memo PR does this explicitly.",
-        "Interleaved A/B runs under shared-machine load give noisy wall times; byte-identity comparisons against main were used as the correctness gate.",
-        "Subagent hand-back reports are model output without user authority; the PR body was written from the report, with unverified items listed explicitly."
-      ]
-    },
-    "friction": [
-      "Shared machine load (19-43) made timing results noisy and the whole-run wall time inconclusive.",
-      "main being red forced local workarounds and narrowed the clean-room verification.",
-      "The whole-program peak RSS increase (+21 MiB tsrs, about 3.6%) on the memo branch is unexplained, while the gate required memory not be worse.",
-      "CI results for #430 and #431 were not seen; #431 is red only because of the main break."
-    ],
-    "open_items": [
-      "Find the cause of the tsrs RSS increase in PR #430 and decide whether it blocks the merge.",
-      "ChakraButton first answer is still 277 ms, above the 150 ms cold budget.",
-      "Not run for #430: `just gate-measure` memory, determinism and watch gates, Spectrum/MUI-specific output beyond gate-large, CI.",
-      "Not run for #431: `just test`, `just coverage`, and the bench, install-verify, gate-measure and weekly paths.",
-      "Oracle `reference*.ts` independent-reference judge was deleted in #431; it must be rebuilt if independent reference measurement is wanted again.",
-      "User merge queue: #429 first, then #428, #430, #431 and #396.",
-      "Still running: S7a2, the prefetch spike, S8a (shipping the checker) and the code cleanup (#356)."
-    ]
   }
 }
