@@ -1,0 +1,52 @@
+{
+  "cli_version": "0.13.3-nightly.202611110616.7aed2fb15",
+  "checkpoint_id": "01M76QA7CQBTYVE9MG1K74BJQG",
+  "strategy": "manual-commit",
+  "branch": "feat/oxc-supplies-defaults-and-order",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/cli/src/commands/extract.rs",
+    "crates/cli/src/main.rs",
+    "crates/core/src/types/semantic.rs",
+    "crates/core/tests/semantic_join.rs",
+    "docs/adr/0026-the-checker-is-the-type-authority.md",
+    "docs/type-checker-integration.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 9757,
+    "cache_read_tokens": 1751667,
+    "output_tokens": 3360,
+    "api_call_count": 2,
+    "subagent_tokens": {
+      "input_tokens": 24,
+      "cache_creation_tokens": 22241,
+      "cache_read_tokens": 2635380,
+      "output_tokens": 4265,
+      "api_call_count": 12
+    }
+  },
+  "redaction": {
+    "replacements": 26,
+    "layers": {
+      "betterleaks": 12,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
