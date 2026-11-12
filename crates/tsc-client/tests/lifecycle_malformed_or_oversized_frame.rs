@@ -14,12 +14,10 @@ use caliper_docgen_tsc_client::{MalformedFrameReason, Supervisor, TscClientError
 
 async fn expect_malformed(scenario: &str, expected_reason: MalformedFrameReason) {
     let (_dir, config) = common::spawn_fake(scenario);
-    let mut supervisor = Supervisor::spawn(config).await.expect("spawn fake tsc");
+    let supervisor = Supervisor::spawn(config).await.expect("spawn fake tsc");
 
-    // The session ends with the frame error, so the supervisor restarts once and retries against a fresh child that
-    // misbehaves the same way; the caller still sees the variant.
     let start = Instant::now();
-    let result = supervisor.request("ping", serde_json::json!({}), Duration::from_secs(2)).await;
+    let result = supervisor.client().request("ping", serde_json::json!({}), Duration::from_secs(2)).await;
     assert!(start.elapsed() < Duration::from_secs(2), "scenario {scenario:?} took {:?}", start.elapsed());
     match result {
         Err(TscClientError::MalformedFrame { reason }) => {
@@ -48,10 +46,10 @@ async fn a_truncated_body_is_reported_distinctly() {
 #[tokio::test]
 async fn an_oversized_declared_length_is_rejected_before_reading_the_body() {
     let (_dir, config) = common::spawn_fake("oversized_frame:100000000"); // 100 MB, well past the 16 MiB cap
-    let mut supervisor = Supervisor::spawn(config).await.expect("spawn fake tsc");
+    let supervisor = Supervisor::spawn(config).await.expect("spawn fake tsc");
 
     let start = Instant::now();
-    let result = supervisor.request("ping", serde_json::json!({}), Duration::from_secs(2)).await;
+    let result = supervisor.client().request("ping", serde_json::json!({}), Duration::from_secs(2)).await;
     assert!(start.elapsed() < Duration::from_secs(2), "took {:?}", start.elapsed());
     match result {
         Err(TscClientError::OversizedFrame { declared, cap }) => {

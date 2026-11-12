@@ -103,17 +103,16 @@ Two packages provide the `--api` server, and both are used through the same clie
 | `@tsrs/darwin-x64`      | 11.1 MB |  25.4 MB |
 | `@tsrs/linux-x64-gnu`   | 15.4 MB |  35.2 MB |
 | `@tsrs/linux-arm64-gnu` | 20.4 MB |  43.4 MB |
-| `@tsrs/win32-x64`       | 20.2 MB |  50.2 MB |
 
-Measured from the registry's tarballs of `0.23.0-ts7.1.0-beta` (each holds the binary and the `lib.*.d.ts` files). tsrs also publishes `linux-x64-musl` and `linux-arm64-musl`, which Caliper does not depend on because it ships no musl build, and nothing for `win32-arm64`.
+Measured from the registry's tarballs of `0.23.0-ts7.1.0-beta` (each holds the binary and the `lib.*.d.ts` files). tsrs also publishes `linux-x64-musl` and `linux-arm64-musl`, which Caliper does not depend on because it ships no musl build.
 
 **Discovery** (`crates/semantic/src/locate.rs`, the one lookup for the CLI and the addon):
 
 1. `--tsc-path` (or `tscPath`), which must exist.
-2. The pinned `@tsrs/<platform>/tsrs` (`tsrs.exe` on Windows) in the nearest `node_modules` at or above the directory of the running binary: the CLI executable, through symlinks, or the addon file Node loaded (`node_api_get_module_file_name`). `<platform>` is the target Caliper was built for, `darwin-arm64`, `linux-x64-gnu`, `linux-x64-musl`, `win32-x64` and so on; a glibc build runs only on glibc, so the build's libc is the host's.
+2. The pinned `@tsrs/<platform>/tsrs` in the nearest `node_modules` at or above the directory of the running binary: the CLI executable, through symlinks, or the addon file Node loaded (`node_api_get_module_file_name`). `<platform>` is the target Caliper was built for, `darwin-arm64`, `linux-x64-gnu`, `linux-x64-musl` and so on; a glibc build runs only on glibc, so the build's libc is the host's.
 3. The first `node_modules` at or above the project root that holds `typescript/bin/tsc` or `tsrs/bin/tsrs`; inside one, `typescript/bin/tsc` comes first. Pass `--tsc-path` to choose `tsrs` there.
 
-There is no environment variable; `TSRS_BIN` is read only by the tests and the oracle. With none found, the run keeps the structural result with one `SEMANTIC_BACKEND` warning that names the `@tsrs` package and directory it looked in, the project root, and what to install (or that tsrs publishes no binary for the platform, as on Windows on Arm). A `cargo install` has no `@tsrs` package beside it, so it reaches step 3.
+There is no environment variable; `TSRS_BIN` is read only by the tests and the oracle. With none found, the run keeps the structural result with one `SEMANTIC_BACKEND` warning that names the `@tsrs` package and directory it looked in, the project root, and what to install (or that tsrs publishes no binary for the platform). A `cargo install` has no `@tsrs` package beside it, so it reaches step 3.
 
 **The pin.** `crates/semantic/TSRS_VERSION` is the one place the tsrs build is stated; the backend compiles it into `SUPPORTED_VERSIONS`, and `scripts/check-packaging.mjs` (in `just lint`) fails unless every platform package's `@tsrs` dependency and `apps/oracle`'s `tsrs` name exactly it. Dependabot ignores `tsrs` and `@tsrs/*`: a bump passes the tsrs-against-Go parity run first (ADR 0026). CI's `Install` jobs pack the CLI and napi packages as a release lays them out, install them with npm and pnpm on Node 24 and 26 into a project with no TypeScript, and require `1 component(s) resolved by the TypeScript checker` from both (`just verify-checker-install`).
 
@@ -212,7 +211,7 @@ Where a prop is declared, its tags and the component's `composes` come from the 
 | Timeline | The plan ([#63703](https://github.com/microsoft/TypeScript/issues/63703)) put the beta on 2026-10-06; npm published `7.1.0-beta` on 2026-10-20. RC 2026-11-10 and stable 2026-11-24 are still planned |
 | Get it | `npm i typescript@beta` (`7.1.0-beta`) or `@next` (daily `7.1.0-dev`). 7.0.x (`latest`, `7.0.2`) has no API |
 | Launch | `tsc --api [--async] --cwd <dir> --useCaseSensitiveFileNames=<bool>`, plus `--runExternalCode` and `--timing` when asked. With `--async`: JSON-RPC with LSP-style `Content-Length` framing over stdio (`vscode-jsonrpc`), handled concurrently. Without it: msgpack over stdio |
-| msgpack caveats | Each message is a 3-element msgpack array: message type (u8), method (bin) and payload (bin). The server answers one request at a time, so a sync client blocks until the reply. Encoded strings are WTF-8: a lone surrogate from a JS string survives, so a Rust client must not decode them as strict UTF-8. On Windows the sync client passes `--pipe <named pipe>` instead of stdio |
+| msgpack caveats | Each message is a 3-element msgpack array: message type (u8), method (bin) and payload (bin). The server answers one request at a time, so a sync client blocks until the reply. Encoded strings are WTF-8: a lone surrogate from a JS string survives, so a Rust client must not decode them as strict UTF-8 |
 | Stability | The beta's JS entry points are `typescript/sync`, `/async`, `/proto`, `/ast` and `/ast/*`, `/fs`, `/path` and `/vscode`; the root export is only the version. The `unstable/*` names in ADR 0006 were the nightlies' and are gone. The protocol has no version handshake, so pin the build |
 | Positions | UTF-16 code units. OXC offsets are UTF-8 bytes |
 | Surface | 177 methods in `7.1.0-beta` (`APIMethodInfo` in `dist/api/proto.generated.d.ts`), up from 157 on 2026-09-19, mostly with TS 6 checker names. Every call in "The algorithm" is present |
@@ -292,7 +291,7 @@ Pass only the files you need as roots. The API's checker is lazy, and diagnostic
 | Gate | Status |
 | --- | --- |
 | Accuracy against RDT | Passed on 13 components and re-verified on the full 47-component fixture corpus. See Evidence and not verified below |
-| Lifecycle | Client built and tested against a fake tsc and the real nightly (`crates/tsc-client`): missing binary, unsupported version, timeout, crash, restart storm, malformed or oversized frame, partial project failure, shutdown reaping, stale notification. Open: header-size cap, stderr that isn't UTF-8, honoring `handshake_timeout`, recovery after the restart cap trips, whether a restarted request may replay |
+| Lifecycle | Client built and tested against a fake tsc and the real nightly (`crates/tsc-client`): missing binary, unsupported version, timeout, crash, malformed or oversized frame, partial project failure, shutdown reaping, stale notification. The supervisor does not restart a crashed `tsc`: a session that ends stays ended, and `OnDemand` in `crates/semantic` respawns it, at most three times, and its replay test covers a crash falling back with one diagnostic. Open: header-size cap, stderr that isn't UTF-8, honoring `handshake_timeout` |
 | Cost | Measured through the Node client. Repeat with the Rust client |
 | Determinism | Clean and incremental runs must produce the same output |
 | Oracle | Fixed. See below |

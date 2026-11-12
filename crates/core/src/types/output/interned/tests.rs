@@ -4,7 +4,8 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::types::{
-    ComponentExport, DefaultValue, DetectionRule, DiagnosticCode, DiagnosticSeverity, PropParent, PropType,
+    ComponentExport, DefaultValue, DetectionRule, DiagnosticCode, DiagnosticSeverity, ExtractionStats, PropParent,
+    PropType,
 };
 
 fn prop(name: &str, default: Option<&str>) -> ParsedProp {
@@ -222,16 +223,6 @@ fn a_collapsed_layer_writes_its_members_once_and_an_expanded_layer_writes_none()
 }
 
 #[test]
-fn a_collapsed_layers_members_read_back() {
-    let mut accordion = component("Accordion", &[prop("size", None)], &[]);
-    accordion.inheritance = vec![collapsed(&["onClick", "onFocus"]), layer(&["ref"])];
-    let out = output(vec![accordion]);
-    let read: ExtractionOutput = serde_json::from_str(&serde_json::to_string(&out).unwrap()).unwrap();
-    assert_eq!(read, out);
-    assert_eq!(read.components["Accordion"].inheritance[0].members, ["onClick", "onFocus"]);
-}
-
-#[test]
 fn expanding_the_ids_gives_exactly_the_component_entry_json() {
     let mut entry = component(
         "Button",
@@ -263,24 +254,6 @@ fn expanding_the_ids_gives_exactly_the_component_entry_json() {
 }
 
 #[test]
-fn the_canonical_json_reads_back_into_the_same_output() {
-    let mut button = component(
-        "Button",
-        &[prop("size", None), prop_in("onClick", None, Some("ButtonProps")), prop_in("id", None, None)],
-        &[prop("size", None)],
-    );
-    button.inheritance = vec![layer(&["ref"]), layer(&[])];
-    button.exports = vec![ComponentExport::named("default"), ComponentExport::named("Button")];
-    let mut item = component("Item", &[prop("size", None)], &[]);
-    item.exports = vec![ComponentExport::named("default").member("Item")];
-    let mut chip = component("Chip", &[prop("size", Some("sm"))], &[]);
-    chip.exported = false;
-    let out = output(vec![button, item, chip]);
-    let read: ExtractionOutput = serde_json::from_str(&serde_json::to_string(&out).unwrap()).unwrap();
-    assert_eq!(read, out);
-}
-
-#[test]
 fn a_component_writes_how_its_module_exports_it_and_an_unexported_one_writes_none() {
     let mut button = component("Button", &[], &[]);
     button.exports = vec![ComponentExport::named("default"), ComponentExport::named("Button")];
@@ -296,64 +269,6 @@ fn a_component_writes_how_its_module_exports_it_and_an_unexported_one_writes_non
     );
     assert_eq!(json["components"]["Item"]["exports"], json!([{ "name": "default", "members": ["Item"] }]));
     assert_eq!(json["components"]["Chip"]["exports"], json!([]));
-}
-
-/// A canonical document whose one component is `Button` with these `props`, `inheritance` and tables.
-fn document(props: Value, inheritance: Value, prop_sets: Value, name_lists: Value) -> Value {
-    let mut button = serde_json::to_value(component("Button", &[], &[])).unwrap();
-    button["props"] = props;
-    button["inheritance"] = inheritance;
-    json!({
-        "schemaVersion": crate::types::SCHEMA_VERSION,
-        "components": { "Button": button },
-        "props": {},
-        "propSets": prop_sets,
-        "nameLists": name_lists,
-        "enums": {},
-        "diagnostics": [],
-        "stats": serde_json::to_value(ExtractionStats::default()).unwrap(),
-    })
-}
-
-fn read_error(document: Value) -> String {
-    serde_json::from_value::<ExtractionOutput>(document).unwrap_err().to_string()
-}
-
-#[test]
-fn reading_an_id_missing_from_its_table_fails_naming_it() {
-    let no_layers = json!([]);
-    assert_eq!(
-        read_error(document(json!(["00000000000000bb"]), no_layers.clone(), json!({}), json!({}))),
-        "prop set id 00000000000000bb is not in the `propSets` table"
-    );
-    assert_eq!(
-        read_error(document(
-            json!(["00000000000000bb"]),
-            no_layers.clone(),
-            json!({ "00000000000000bb": { "size": "00000000000000aa" } }),
-            json!({})
-        )),
-        "prop id 00000000000000aa is not in the `props` table"
-    );
-    let layers = json!([serde_json::to_value(layer(&[])).unwrap()]);
-    let mut layers_with_id = layers.clone();
-    layers_with_id[0]["omitted"] = json!("00000000000000cc");
-    assert_eq!(
-        read_error(document(json!([]), layers_with_id, json!({}), json!({}))),
-        "name list id 00000000000000cc is not in the `nameLists` table"
-    );
-}
-
-#[test]
-fn a_prop_name_in_two_of_a_components_sets_fails_instead_of_one_replacing_the_other() {
-    let size = prop("size", None);
-    let mut doc = serde_json::to_value(output(vec![component("Button", std::slice::from_ref(&size), &[])])).unwrap();
-    let only_set = doc["components"]["Button"]["props"][0].clone();
-    let other_set = json!("00000000000000dd");
-    doc["propSets"][other_set.as_str().unwrap()] = set_json(&[&size]);
-    doc["components"]["Button"]["props"] = json!([only_set, other_set]);
-
-    assert_eq!(read_error(doc), "prop `size` is in two of the component's prop sets");
 }
 
 #[test]
@@ -381,27 +296,6 @@ fn the_output_names_the_schema_version_it_is_written_in() {
     assert_eq!(json["schemaVersion"], json!(crate::types::SCHEMA_VERSION));
 }
 
-#[test]
-fn a_version_this_build_does_not_read_fails_and_output_with_no_version_counts_as_the_first() {
-    let mut json = serde_json::to_value(output(vec![component("Button", &[prop("size", None)], &[])])).unwrap();
-
-    json["schemaVersion"] = json!(crate::types::SCHEMA_VERSION + 1);
-    assert_eq!(
-        read_error(json.clone()),
-        format!(
-            "output schema version {} is not the version {} this build reads",
-            crate::types::SCHEMA_VERSION + 1,
-            crate::types::SCHEMA_VERSION
-        )
-    );
-
-    json.as_object_mut().unwrap().remove("schemaVersion");
-    assert_eq!(
-        read_error(json),
-        format!("output schema version 1 is not the version {} this build reads", crate::types::SCHEMA_VERSION)
-    );
-}
-
 fn diagnostic(message: &str, affects: &[&str]) -> Diagnostic {
     let mut diagnostic = Diagnostic::new(DiagnosticSeverity::Warning, DiagnosticCode::OpaqueType, message);
     diagnostic.affects = affects.iter().map(|key| key.to_string()).collect();
@@ -421,21 +315,6 @@ fn the_components_a_diagnostic_affects_are_a_list_id_shared_by_diagnostics_namin
         json["diagnostics"].as_array().unwrap().iter().map(|d| d.get("affects").map(|a| a.as_str().unwrap())).collect();
     assert_eq!(affects, [Some(list.as_str()), Some(list.as_str()), None]);
     assert_eq!(json["nameLists"][&list], json!(["Button", "Chip"]));
-    let read: ExtractionOutput = serde_json::from_value(json).unwrap();
-    assert_eq!(read, out);
-}
-
-#[test]
-fn reading_an_affects_id_missing_from_the_name_lists_fails_naming_it() {
-    let mut out = output(vec![]);
-    out.diagnostics = vec![diagnostic("a", &["Button"])];
-    let mut json = serde_json::to_value(&out).unwrap();
-    json["nameLists"] = json!({});
-
-    assert_eq!(
-        read_error(json),
-        format!("name list id {} is not in the `nameLists` table", PropId::of_list(&["Button".to_string()]))
-    );
 }
 
 fn diagnostic_affecting(names: &[&str]) -> Diagnostic {

@@ -561,51 +561,6 @@ pub async fn session_warm_up(session_id: u32, count: u32) -> napi::Result<u32> {
     .map_err(|e| napi::Error::from_reason(e.to_string()))?
 }
 
-/// Every component key `sessionDocgenInfo` answers, sorted. A lazy session resolves only imported-member aliases to
-/// decide; the rest come from parsing alone. Empty for an uninitialized session; errors for an unknown or closed one.
-#[napi]
-pub fn session_component_keys(session_id: u32) -> napi::Result<Vec<String>> {
-    match caliper_docgen_core::panic_guard::contain_panic("session_component_keys", move || {
-        Ok(live_session(session_id)?.component_keys())
-    }) {
-        Ok(result) => result,
-        Err(diag) => Err(napi::Error::from_reason(diag.to_string())),
-    }
-}
-
-/// What a lazy session has indexed and resolved so far. `None` for an eager, unknown or uninitialized session.
-#[napi(object)]
-pub struct JsLazyStats {
-    /// The number of the session's current revision, one higher for every change that produced a new one.
-    pub revision: u32,
-    /// Source files the session holds.
-    pub files: u32,
-    /// Components found by parsing.
-    pub components: u32,
-    /// Components resolved since the last edit that could change them.
-    pub resolved: u32,
-    /// Dependency declaration files loaded for the names resolved components reached.
-    pub dependency_files: u32,
-}
-
-/// What a lazy session has indexed and resolved so far, as [`JsLazyStats`]. `null` for an eager, unknown or
-/// uninitialized session.
-#[napi]
-pub fn session_stats(session_id: u32) -> Option<JsLazyStats> {
-    caliper_docgen_core::panic_guard::contain_panic("session_stats", move || {
-        let stats = SESSIONS.get(&session_id)?.lazy_stats()?;
-        let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
-        Some(JsLazyStats {
-            revision: u32::try_from(stats.revision).unwrap_or(u32::MAX),
-            files: count(stats.files),
-            components: count(stats.components),
-            resolved: count(stats.resolved),
-            dependency_files: count(stats.dependency_files),
-        })
-    })
-    .unwrap_or(None)
-}
-
 /// Bring the session up to date with the files on disk, for a host without a file watcher (a docgen provider in a
 /// worker): stats every file the session read and applies what changed since, rebuilding when a tsconfig,
 /// `package.json` or lockfile changed. Returns JSON string of IncrementalUpdate; the revision is unchanged when nothing
@@ -777,13 +732,11 @@ mod tests {
     #[test]
     fn the_session_queries_error_for_a_closed_session_instead_of_answering_empty() {
         let id = create_session(base_options()).expect("session");
-        assert_eq!(session_component_keys(id).expect("a live session answers"), Vec::<String>::new());
         close_session(id);
 
         let unknown = format!("Unknown session {id}");
         assert_eq!(session_docgen_info(id, vec!["Button".into()]).expect_err("closed").reason, unknown);
         assert_eq!(session_component_answers(id, vec!["Button".into()]).expect_err("closed").reason, unknown);
-        assert_eq!(session_component_keys(id).expect_err("closed").reason, unknown);
         assert_eq!(session_component_toon(id, "Button".into()).expect_err("closed").reason, unknown);
     }
 
@@ -1094,6 +1047,10 @@ mod tests {
         close_session(valid_id);
     }
 
+    fn lazy_stats(session_id: u32) -> Option<caliper_docgen_core::pipeline::LazyStats> {
+        live_session(session_id).expect("live session").lazy_stats()
+    }
+
     #[tokio::test]
     async fn a_lazy_session_documents_a_component_when_asked_exactly_as_an_eager_one_does() {
         let dir = std::env::temp_dir().join(format!("caliper-lazy-{}-{}", std::process::id(), next_session_id()));
@@ -1122,17 +1079,17 @@ mod tests {
 
         assert!(eager_output.contains(r#""Button""#), "an eager session resolves everything up front");
         assert!(!lazy_output.contains(r#""Button""#), "a lazy session resolves nothing up front: {lazy_output}");
-        let stats = session_stats(lazy).expect("lazy stats");
+        let stats = lazy_stats(lazy).expect("lazy stats");
         assert_eq!((stats.components, stats.resolved), (2, 0));
-        assert!(session_stats(eager).is_none());
-        assert_eq!(session_component_keys(lazy).expect("keys"), ["Button", "Card"]);
+        assert!(lazy_stats(eager).is_none());
+        assert_eq!(live_session(lazy).expect("lazy session").component_keys(), ["Button", "Card"]);
 
         let keys = vec!["Button".to_owned(), "Missing".to_owned()];
         let from_eager = session_docgen_info(eager, keys.clone()).expect("eager docgen info");
         let from_lazy = session_docgen_info(lazy, keys).expect("lazy docgen info");
         assert_eq!(from_lazy, from_eager);
         assert!(from_lazy.contains(r#""label""#));
-        assert_eq!(session_stats(lazy).expect("lazy stats").resolved, 1, "Card was never asked for");
+        assert_eq!(lazy_stats(lazy).expect("stats").resolved, 1, "Card was never asked for");
 
         close_session(eager);
         close_session(lazy);
@@ -1170,7 +1127,7 @@ mod tests {
         assert_eq!(components(&from_lazy), components(&from_eager));
         assert_eq!(components(&from_lazy)["Card"]["displayName"], "Card");
         assert_eq!(components(&from_lazy)["Card"]["exports"], serde_json::json!([{ "name": "Card", "members": [] }]));
-        assert_eq!(session_stats(lazy).expect("lazy stats").resolved, 0, "indexing resolves nothing");
+        assert_eq!(lazy_stats(lazy).expect("stats").resolved, 0, "indexing resolves nothing");
 
         let keys = vec!["Card".to_owned(), "Missing".to_owned()];
         let answers = |id| {
@@ -1182,7 +1139,7 @@ mod tests {
         assert_eq!(lazy_answers["Card"]["docgenInfo"]["displayName"], "Card");
         assert_eq!(lazy_answers["Card"]["diagnostics"], serde_json::json!([]));
         assert!(lazy_answers.get("Missing").is_none());
-        assert_eq!(session_stats(lazy).expect("lazy stats").resolved, 1, "Button was never asked for");
+        assert_eq!(lazy_stats(lazy).expect("stats").resolved, 1, "Button was never asked for");
 
         close_session(eager);
         close_session(lazy);
@@ -1216,11 +1173,11 @@ mod tests {
         initialize_session_index(lazy, options(Some(true))).await.expect("lazy index");
 
         assert_eq!(session_warm_up(lazy, 0).await.expect("no warm-up"), 0);
-        assert_eq!(session_stats(lazy).expect("stats").resolved, 0);
+        assert_eq!(lazy_stats(lazy).expect("stats").resolved, 0);
         assert_eq!(session_warm_up(lazy, 2).await.expect("warm-up"), 2);
-        assert_eq!(session_stats(lazy).expect("stats").resolved, 2);
+        assert_eq!(lazy_stats(lazy).expect("stats").resolved, 2);
         assert_eq!(session_warm_up(lazy, 99).await.expect("more than there are"), 4);
-        assert_eq!(session_stats(lazy).expect("stats").resolved, 4);
+        assert_eq!(lazy_stats(lazy).expect("stats").resolved, 4);
         assert_eq!(session_warm_up(eager, 2).await.expect("eager"), 0);
         assert_eq!(session_warm_up(9_999_999, 2).await.expect("unknown"), 0);
 

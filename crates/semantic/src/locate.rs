@@ -29,10 +29,9 @@ impl TsrsPlatform {
             ("linux", "x86_64", "musl") => "linux-x64-musl",
             ("linux", "aarch64", "gnu") => "linux-arm64-gnu",
             ("linux", "aarch64", "musl") => "linux-arm64-musl",
-            ("windows", "x86_64", _) => "win32-x64",
             _ => return Err(format!("tsrs publishes no binary for {os}-{arch}")),
         };
-        Ok(Self { package, exe: if os == "windows" { "tsrs.exe" } else { "tsrs" } })
+        Ok(Self { package, exe: "tsrs" })
     }
 
     /// The package for the target this binary was built for. Its libc is the host's: a glibc build does not run on
@@ -151,8 +150,6 @@ mod tests {
             (("linux", "x86_64", "musl"), Ok(("linux-x64-musl", "tsrs"))),
             (("linux", "aarch64", "gnu"), Ok(("linux-arm64-gnu", "tsrs"))),
             (("linux", "aarch64", "musl"), Ok(("linux-arm64-musl", "tsrs"))),
-            (("windows", "x86_64", "msvc"), Ok(("win32-x64", "tsrs.exe"))),
-            (("windows", "aarch64", "msvc"), Err("tsrs publishes no binary for windows-aarch64")),
             (("freebsd", "x86_64", ""), Err("tsrs publishes no binary for freebsd-x86_64")),
         ];
         for ((os, arch, env), expected) in cases {
@@ -225,17 +222,14 @@ mod tests {
     }
 
     #[test]
-    fn musl_and_windows_find_their_own_package_and_file() {
+    fn musl_finds_its_own_package() {
         let (_dir, root) = tree();
         let binary_dir = root.join("node_modules/caliper-docgen-x");
         touch(&root.join("node_modules/@tsrs/linux-x64-gnu/tsrs"));
         let musl = touch(&root.join("node_modules/@tsrs/linux-x64-musl/tsrs"));
-        touch(&root.join("node_modules/@tsrs/win32-x64/tsrs"));
-        let windows = touch(&root.join("node_modules/@tsrs/win32-x64/tsrs.exe"));
 
         let on = |os, arch, env| find_tsc_on(TsrsPlatform::of(os, arch, env), &root, None, Ok(&binary_dir));
         assert_eq!(on("linux", "x86_64", "musl"), Ok(musl));
-        assert_eq!(on("windows", "x86_64", "msvc"), Ok(windows));
     }
 
     #[test]
@@ -301,12 +295,12 @@ mod tests {
     fn a_platform_tsrs_does_not_publish_for_says_so() {
         let (_dir, root) = tree();
 
-        let error = find_tsc_on(TsrsPlatform::of("windows", "aarch64", "msvc"), &root, None, Ok(&root)).unwrap_err();
+        let error = find_tsc_on(TsrsPlatform::of("freebsd", "x86_64", ""), &root, None, Ok(&root)).unwrap_err();
 
         assert_eq!(
             error,
             format!(
-                "no TypeScript checker: tsrs publishes no binary for windows-aarch64, and there is no \
+                "no TypeScript checker: tsrs publishes no binary for freebsd-x86_64, and there is no \
                  node_modules/typescript/bin/tsc or node_modules/tsrs/bin/tsrs at or above {root}; install `tsrs` or \
                  `typescript@beta` (7.1), or pass --tsc-path"
             )

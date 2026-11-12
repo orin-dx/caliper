@@ -35,7 +35,7 @@ use serde_json::{Value, json};
 /// (`result`); `None` when any request has no recorded answer.
 fn batch_from_parts(recorded: &[Value], params: &Value) -> Option<Value> {
     let mut answered: Vec<(Value, Value)> = Vec::new();
-    let mut offsets: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut offsets: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
     for entry in recorded {
         let method = entry.get("method").and_then(Value::as_str);
         if method != Some("batchRequests") {

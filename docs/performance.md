@@ -45,7 +45,7 @@ RDT (`withCustomConfig`, `shouldExtractLiteralValuesFromEnum`, `shouldRemoveUnde
 
 ## Storybook addon request path, 2026-10-24
 
-Where the addon's time went, and what changed. Method: `packages/storybook/scripts/storybook-parity.mjs --no-baseline`, the `caliper-never` variant (it answers every component), before (`--dist` of the previous build and its binding) interleaved with after, best of 3, Apple silicon. Peak RSS is the child process's.
+Where the addon's time went, and what changed. Method: the `caliper-never` variant of the parity measurement (`docs/storybook-parity.md`), which answers every component, with the previous build and its binding before, interleaved with after, best of 3, Apple silicon. Peak RSS is the child process's.
 
 | Corpus, story set                 | Metric           | Before     | After      |
 | --------------------------------- | ---------------- | ---------- | ---------- |

@@ -18,7 +18,7 @@ mkdir "$work/packed" "$work/project"
 platform=$(node -p "
   const { platform, arch } = process
   const libc = platform === 'linux' ? (process.report.getReport().header.glibcVersionRuntime ? '-gnu' : '-musl') : ''
-  platform === 'win32' ? \`win32-\${arch}-msvc\` : \`\${platform}-\${arch}\${libc}\`
+  \`\${platform}-\${arch}\${libc}\`
 ")
 [ -d "packages/cli/npm/$platform" ] || { echo "no caliper-docgen package for $platform" >&2; exit 1; }
 unset TSRS_BIN
