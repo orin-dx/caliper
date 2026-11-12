@@ -567,10 +567,11 @@ def changes(record, previous):
                        f"{old['oracle'].get('universe_version', 1)} last week, so its props, agreement and wrong types are "
                        "not compared with last week's")
         for key, label in (('ms', 'time'), ('rss_mib', 'peak memory')):
-            if entry['caliper'][key] > SLOWER * old['caliper'][key]:
-                out.append(f"{name}: {label} {old['caliper'][key]} -> {entry['caliper'][key]}")
+            now, before = headline.own_metric(entry, key), headline.own_metric(old, key)
+            if now is not None and before is not None and now > SLOWER * before:
+                out.append(f"{name}: {label} {before} -> {now}")
         for kind in ('components', 'own', 'react', 'own_layers', 'react_layers') if same_reference(record, previous) else ():
-            if kind not in old['recall']['caliper']:
+            if kind not in (old.get('recall') or {}).get('caliper', {}) or kind not in (entry.get('recall') or {}).get('caliper', {}):
                 continue  # a record from before layers were counted
             now, before = rate(entry['recall']['caliper'][kind]), rate(old['recall']['caliper'][kind])
             if now < before - RECALL_DROP:
