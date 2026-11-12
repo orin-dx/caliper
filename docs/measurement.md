@@ -20,15 +20,15 @@ It records, per corpus and tool, the wall time and peak RSS of one whole run (pr
 
 ### The budgets
 
-The checker's whole-project run takes seconds and several hundred MiB to a GiB, so the 2 s and 600 MiB of the structural record no longer apply. No checker run of the five corpora has been measured: they are not installed where the change was made, and fetching them was not part of it. So `BUDGETS` in `scripts/headline.py` holds a `None` for the time and the peak memory of each corpus, **record on first run**: the run reports its numbers in the summary, and a run over nothing opens no issue. The reference for what to expect, from the fixtures of `docs/gate-measurements.md` (release build, default settings, macOS arm64, Apple M5 Max, shared machine at load 5 to 8, 3 interleaved runs, 2026-11-12):
+The checker's whole-project run takes seconds and several hundred MiB to a GiB, so the 2 s and 600 MiB of the structural record no longer apply. No checker run of the five corpora has been measured: they are not installed where the change was made, and fetching them was not part of it. So `BUDGETS` in `scripts/headline.py` holds a `None` for the time and the peak memory of each corpus, **record on first run**: the run reports its numbers in the summary, and a run over nothing opens no issue. The reference for what to expect, from the fixtures of `docs/gate-measurements.md` (release build, default settings, macOS arm64, Apple M5 Max, shared machine at load 4 to 6, 3 interleaved runs, 2026-11-12, after `perf/checker-extract-speed`):
 
-| Fixture                              | Components |           Time |           Peak RSS |
-| ------------------------------------ | ---------: | -------------: | -----------------: |
-| `gate-large`                         |        938 | 5.80 to 6.35 s |     967 to 986 MiB |
-| Chakra wrappers alone                |        787 | 5.22 to 5.41 s |     760 to 777 MiB |
-| three renamed copies of `gate-large` |      2,814 | 14.7 to 15.2 s | 1,046 to 1,050 MiB |
+| Fixture                              | Components |           Time |        Peak RSS |
+| ------------------------------------ | ---------: | -------------: | --------------: |
+| `gate-large`                         |        938 | 1.69 to 2.02 s | up to 1,086 MiB |
+| Chakra wrappers alone                |        787 | 1.32 to 1.38 s |   up to 876 MiB |
+| three renamed copies of `gate-large` |      2,814 | 4.15 s (1 run) |       1,477 MiB |
 
-With the weekly's own settings (`--collapse-inherited-props none`, cache on) `gate-large` took 5.9 to 6.0 s and 1,025 to 1,077 MiB; the on-disk cache does not shorten the checker's pass. Time follows the size of the program the checker loads and memory hardly grows with the component count (one program, equal props interned). A GitHub `ubuntu-latest` runner is slower than that Mac and its RSS is not the same, and no CI run of the checker has been measured, so no ceiling is derived from these numbers for the corpora.
+On the same machine and harness (`program_inputs`, `scripts/rdt.mjs`, `run_once`), RDT took 7.25 s on `gate-large` and 4.10 s on the Chakra wrappers (medians of 3 interleaved runs): the checker's run is 4.0 and 3.0 times as fast, at a third of RDT's memory. Before that branch it took 6.2 and 5.7 s ([Whole-project `extract` against react-docgen-typescript](gate-measurements.md#whole-project-extract-against-react-docgen-typescript-2026-11-12-perfchecker-extract-speed)). With the weekly's own settings (`--collapse-inherited-props none`, cache on) `gate-large` took 1.76 to 2.18 s and up to 1,160 MiB; the on-disk cache does not shorten the checker's pass. A GitHub `ubuntu-latest` runner is slower than that Mac and its RSS is not the same, and no CI run of the checker has been measured, so no ceiling is derived from these numbers for the corpora.
 
 The rule that fills the budgets in, once a scheduled run has recorded the five corpora: take the larger of the first two scheduled runs, set the time budget to 1.5 times it and the peak-memory budget to 1.25 times it, rounded up to the next 0.5 s and 50 MiB, and write them in `BUDGETS` with the dates of the runs. The headroom covers what a shared runner moves on its own (10% or more in time, as `SLOWER` assumes) plus what a corpus's growth adds between the weekly bumps of its pinned commit; a budget is a user-facing limit, not a week-over-week one.
 
