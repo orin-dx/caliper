@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods, reason = "tests build degraded types directly")]
+
 use super::*;
 
 /// A tuple of required, unlabeled elements.

@@ -24,6 +24,10 @@ use crate::types::output::{
 /// also what the reason names (the checker does not say which module specifier was behind it).
 pub fn unresolved_type(written: impl Into<String>) -> PropType {
     let written = written.into();
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the checker's error type is an unresolvable name; the caller reports it"
+    )]
     OpaqueDetail::new(written.clone(), OpaqueReason::UnresolvableImport { specifier: written })
 }
 
@@ -31,6 +35,7 @@ pub fn unresolved_type(written: impl Into<String>) -> PropType {
 /// (its parameters are still open), `keyof T`. It is `opaque` with `reason`, so the prop carries `degradedBy`, and
 /// `raw` is how the checker prints it.
 pub fn degraded_type(raw: impl Into<String>, reason: OpaqueReason) -> PropType {
+    #[allow(clippy::disallowed_methods, reason = "the checker names the reason; the caller reports it")]
     OpaqueDetail::new(raw, reason)
 }
 

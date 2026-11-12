@@ -4,6 +4,11 @@
 //! structurally; a declaration that resolves always wins (precedence). Add one only when that fallback measurably beats
 //! leaving the name unresolved, against react-docgen-typescript on code that uses the library.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a pattern names its own opaque reason; the caller pushes the diagnostic"
+)]
+
 use crate::types::*;
 
 /// Result of recognizing a known type pattern.

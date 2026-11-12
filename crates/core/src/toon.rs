@@ -309,6 +309,7 @@ fn escape_toon_val(val: &str) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods, reason = "tests build degraded types directly")]
 mod tests {
     use super::*;
     use crate::types::{ComponentEntry, ParsedProp};

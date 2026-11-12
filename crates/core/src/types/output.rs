@@ -542,6 +542,7 @@ impl OpaqueDetail {
         diagnostic: Diagnostic,
     ) -> PropType {
         state.diagnostics.push(diagnostic);
+        #[allow(clippy::disallowed_methods, reason = "the diagnostic is pushed on the line above")]
         Self::new(raw, reason)
     }
 
