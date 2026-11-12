@@ -45,8 +45,10 @@ REFERENCE_VERSION = 2
 # and named a default export `default`. Version 3 pairs a checker component with Caliper's by file and export name
 # (ADR 0027) where version 2 paired by a normalised display name. Version 4 scores a prop whose checker type the oracle did
 # not evaluate as `not judged` where version 3 scored it identical, and classes a declaration's path by one rule
-# (apps/oracle/src/path-classes.json). Raise it when a change moves what the oracle counts.
-UNIVERSE_VERSION = 4
+# (apps/oracle/src/path-classes.json). Version 5 extracts with the checker, the default, where version 4 and earlier ran
+# `--no-checker`, so the oracle's props and verdicts are not the same measurement. Raise it when a change moves what the
+# oracle counts.
+UNIVERSE_VERSION = 5
 
 
 def norm_name(name):
@@ -88,10 +90,9 @@ def tool_run(command, out):
 
 def caliper_run(binary, src, runs):
     """Median wall ms and largest peak RSS MiB of `extract --json` in the Storybook addon's configuration (dependencies
-    loaded, inherited props not collapsed), and the JSON's size. Every run here is the structural resolver's
-    (`--no-checker`): the record and its budgets predate the checker default (docs/measurement.md)."""
-    command = [binary, 'extract', '--src', src, '--json', '--load-dependencies', '--collapse-inherited-props', 'none',
-               '--no-checker']
+    loaded, inherited props not collapsed), and the JSON's size. The checker answers, as
+    it does by default (docs/measurement.md)."""
+    command = [binary, 'extract', '--src', src, '--json', '--load-dependencies', '--collapse-inherited-props', 'none']
     with tempfile.TemporaryFile() as out:
         run_once(command, stdout=out)
         size = out.tell()
@@ -103,7 +104,7 @@ def caliper_run(binary, src, runs):
 def caliper_components(binary, src, root):
     """Caliper's components in RDT's format, as (file, name) -> prop names."""
     command = [binary, 'extract', '--src', src, '--format', 'rdt', '--html-attributes', 'full', '--include-unexported',
-               '--quiet', '--load-dependencies', '--collapse-inherited-props', 'none', '--no-checker']
+               '--quiet', '--load-dependencies', '--collapse-inherited-props', 'none']
     out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
     return {(relative(c['filePath'], root), norm_name(c['displayName'])): set(c['props'])
             for c in json.loads(out[out.index('{'):]).values()}
@@ -113,7 +114,7 @@ def caliper_layer_members(binary, src, root):
     """The props Caliper's collapsed inheritance layers hold, as (file, name) -> prop names: the output names them in a
     layer instead of listing them as props, and the canonical JSON is the one that carries the layers."""
     command = [binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported', '--quiet',
-               '--load-dependencies', '--collapse-inherited-props', 'none', '--no-checker']
+               '--load-dependencies', '--collapse-inherited-props', 'none']
     out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
     document = schema_version.check(json.loads(out[out.index('{'):]), 'weekly')
     lists = document.get('nameLists', {})
@@ -470,7 +471,7 @@ def oracle(binary, name, src, root, work, rdt_out, rdg_out):
     caliper_json = os.path.join(work, f'{name}.caliper.json')
     with open(caliper_json, 'w') as f:
         subprocess.run([binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported',
-                        '--load-dependencies', '--collapse-inherited-props', 'none', '--quiet', '--no-checker'],
+                        '--load-dependencies', '--collapse-inherited-props', 'none', '--quiet'],
                        stdout=f, check=True)
     list_file, tsconfig = program_inputs(name, src, work)
     verdicts = os.path.join(work, f'{name}.oracle.json')
