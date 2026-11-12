@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_013brc61x9RLDUnYTBZBaaXN",
+  "agent_id": "a1f9c567bd8080840",
+  "subagent_type": "general-purpose",
+  "task_description": "Fix degraded fallback when checker answered",
+  "token_usage": {
+    "input_tokens": 242,
+    "cache_creation_tokens": 289520,
+    "cache_read_tokens": 25910165,
+    "output_tokens": 87728,
+    "api_call_count": 121
+  },
+  "started_at": "2026-11-11T17:51:00.181438-08:00",
+  "completed_at": "2026-11-11T18:18:32.659719-08:00"
+}
