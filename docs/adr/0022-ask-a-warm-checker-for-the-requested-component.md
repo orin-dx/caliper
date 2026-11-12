@@ -1,6 +1,6 @@
 # 0022. Ask a warm checker for the requested component
 
-**Status:** Accepted **Date:** 2026-10-26 **Amended:** 2026-11-11 (a component the structural pass lists no props for waits up to `semanticWaitEmptyMs`, default 2000; one request in flight per component and file version, joined by later callers; interactive requests before background ones; the addon asks for the opening story when `storybook dev` starts)
+**Status:** Accepted **Date:** 2026-10-26 **Amended:** 2026-11-11 (a component the structural pass lists no props for waits up to `semanticWaitEmptyMs`, default 2000; one request in flight per component and file version, joined by later callers; interactive requests before background ones; the addon asks for the opening story when `storybook dev` starts); 2026-11-12 (ADR 0026 S8: the checker is on by default, and `checker: false` replaces `semanticTypes: 'off' | 'on-demand'` below)
 
 ## Context
 

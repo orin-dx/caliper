@@ -12,11 +12,11 @@ This report has two independent halves: **performance** (how fast) and **output 
 
 ## Tools compared
 
-| Tool                      | Version   | Approach                                         |
-| ------------------------- | --------- | ------------------------------------------------ |
-| `caliper-docgen`          | this repo | OXC parser, no type-checking pass                |
-| `react-docgen-typescript` | 2.2.2     | full `ts.Program` + real TypeScript type checker |
-| `react-docgen`            | 7.1.1     | Babel AST walk, weak native TS support           |
+| Tool | Version | Approach |
+| --- | --- | --- |
+| `caliper-docgen` | this repo | OXC parser, no type-checking pass (measured before the checker became the default: today's `--no-checker`) |
+| `react-docgen-typescript` | 2.2.2 | full `ts.Program` + real TypeScript type checker |
+| `react-docgen` | 7.1.1 | Babel AST walk, weak native TS support |
 
 ---
 

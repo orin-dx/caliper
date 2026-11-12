@@ -1,6 +1,6 @@
 # Performance
 
-How fast Caliper is and what it costs is recorded in `docs/measurement.md`: a weekly run on five pinned corpora, and `just bench` for a change that touches the resolver. The criterion benches (`cargo bench -p caliper-docgen-core`) and `docs/benchmarks.md` cover single fixtures. This page keeps the measurements that explain where the time goes.
+How fast Caliper is and what it costs is recorded in `docs/measurement.md`: a weekly run on five pinned corpora, and `just bench` for a change that touches the resolver. Both measure the structural resolver (`--no-checker`), which is the fallback since the checker became the default (ADR 0026 S8); the checker's cost is in `docs/gate-measurements.md` ("The checker is the default"). The criterion benches (`cargo bench -p caliper-docgen-core`) and `docs/benchmarks.md` cover single fixtures. This page keeps the measurements that explain where the time goes.
 
 The per-pull-request scorecard that used to enforce these numbers is gone. It caught one real regression (Mantine 38% and Chakra 47% slower after a batch of 20 resolver pull requests merged on 2026-10-26, found by the weekly run), and its gates failed on runner noise and on bases that had moved. The figures below came from it and are history, not limits.
 

@@ -8,7 +8,7 @@ npm install caliper-docgen-napi
 
 The prebuilt addon for your OS and CPU installs as an optional dependency (`caliper-docgen-napi-darwin-arm64`, `caliper-docgen-napi-linux-x64-gnu`, and so on).
 
-Most projects want [`caliper-docgen-vite-plugin`](https://www.npmjs.com/package/caliper-docgen-vite-plugin) or the [`caliper-docgen`](https://www.npmjs.com/package/caliper-docgen) CLI, which use this package. The binding returns the canonical output format; a session also gives each component's `__docgenInfo` in the `react-docgen-typescript` shape (`RdtComponentDoc` in `index.d.ts`).
+Most projects want [`caliper-docgen-vite-plugin`](https://www.npmjs.com/package/caliper-docgen-vite-plugin) or the [`caliper-docgen`](https://www.npmjs.com/package/caliper-docgen) CLI, which use this package. The binding returns the canonical output format; a session also gives each component's `__docgenInfo` in the `react-docgen-typescript` shape (`RdtComponentDoc` in `index.d.ts`). A session asks the built-in TypeScript checker for each component a request names and takes the structural props when it is slower than `semanticWaitMs` (150 ms by default); `checker: false` never starts it. `extractAll` is structural.
 
 Project page: [orin-dx.com/tools/caliper](https://orin-dx.com/tools/caliper/). Source: [github.com/orin-dx/caliper](https://github.com/orin-dx/caliper).
 

@@ -1,6 +1,6 @@
 # caliper-docgen-vite-plugin
 
-A Vite plugin that exposes your React components' props on a virtual module and updates it through HMR as you edit.
+A Vite plugin that exposes your React components' props on a virtual module and updates it through HMR as you edit. Its props come from caliper-docgen's structural resolver: unlike the CLI and the Storybook addon, it does not ask the TypeScript checker, since it serves every component at once.
 
 ```bash
 npm install --save-dev caliper-docgen-vite-plugin

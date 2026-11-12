@@ -1,6 +1,6 @@
 # caliper-docgen-core
 
-The extraction library behind [caliper-docgen](https://github.com/orin-dx/caliper). It reads React components from TypeScript with [OXC](https://oxc.rs) and reports their props, with no TypeScript compiler program and no type-checking pass.
+The extraction library behind [caliper-docgen](https://github.com/orin-dx/caliper). It reads React components from TypeScript with [OXC](https://oxc.rs) and reports their props, resolving types structurally from the syntax, with no TypeScript compiler program. The CLI and the Node bindings merge the TypeScript checker's answer over it by default (`caliper-docgen-semantic`); this crate is the structural resolver, the merge, and the fallback.
 
 It parses files in parallel, merges symbols across them, and resolves each component's props. When it can't resolve something it returns a `Diagnostic` instead of failing silently. There is no terminal output and no async, so it embeds cleanly.
 
