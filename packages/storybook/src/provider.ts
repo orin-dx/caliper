@@ -84,6 +84,7 @@ export function createDocgenProvider(
     semanticTypes: options.semanticTypes,
     tscPath: options.tscPath,
     semanticWaitMs: options.semanticWaitMs,
+    semanticWaitEmptyMs: options.semanticWaitEmptyMs,
   }
   // The native binding loads on the first story request, not when Storybook starts the worker.
   let sessionPromise: Promise<DocgenSession> | undefined

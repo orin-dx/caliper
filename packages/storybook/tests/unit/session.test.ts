@@ -314,12 +314,28 @@ describe('DocgenSession.fresh', () => {
     fake.createSession = ((options: unknown) => (seen.push(options), 7)) as never
     await new DocgenSession({ srcDirs: [src] }, fake).fresh()
     await new DocgenSession(
-      { srcDirs: [src], semanticTypes: 'on-demand', tscPath: '/opt/ts/bin/tsc', semanticWaitMs: 80 },
+      {
+        srcDirs: [src],
+        semanticTypes: 'on-demand',
+        tscPath: '/opt/ts/bin/tsc',
+        semanticWaitMs: 80,
+        semanticWaitEmptyMs: 900,
+      },
       fake,
     ).fresh()
-    expect(seen).toMatchObject([
-      { semanticTypes: undefined, tscPath: undefined, semanticWaitMs: undefined },
-      { semanticTypes: 'on-demand', tscPath: '/opt/ts/bin/tsc', semanticWaitMs: 80 },
+    expect(seen).toEqual([
+      expect.objectContaining({
+        semanticTypes: undefined,
+        tscPath: undefined,
+        semanticWaitMs: undefined,
+        semanticWaitEmptyMs: undefined,
+      }),
+      expect.objectContaining({
+        semanticTypes: 'on-demand',
+        tscPath: '/opt/ts/bin/tsc',
+        semanticWaitMs: 80,
+        semanticWaitEmptyMs: 900,
+      }),
     ])
   })
 

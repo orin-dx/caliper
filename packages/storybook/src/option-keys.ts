@@ -21,6 +21,7 @@ const OPTION_KEY_SET = {
   semanticTypes: true,
   tscPath: true,
   semanticWaitMs: true,
+  semanticWaitEmptyMs: true,
   fallback: true,
 } satisfies Record<keyof CaliperStorybookOptions, true>
 

@@ -12,7 +12,8 @@
 //! being silently answered. `REPLAY_SCENARIO=crash` exits at once, `hang` answers nothing, `invalid_json` answers every request after `initialize` with a
 //! well-framed body that is not JSON.
 //!
-//! `REPLAY_LOG` names a file that gets every request, one JSON object per line, as the backend sent it.
+//! `REPLAY_LOG` names a file that gets every request, one JSON object per line, as the backend sent it. `REPLAY_HOLD`
+//! names a file the fake waits for before it answers anything, so a test can queue requests while the checker is busy.
 //!
 //! Paths in the recording are written relative to the project: the project root (`--cwd`) is `<ROOT>`, and its
 //! lower-cased form, which the checker uses as a file's `path` key, is `<root>`. The root must contain an upper-case
@@ -32,6 +33,11 @@ fn main() {
             return;
         }
         _ => {}
+    }
+    if let Ok(hold) = std::env::var("REPLAY_HOLD") {
+        while !std::path::Path::new(&hold).exists() {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
     }
     let invalid_json = std::env::var("REPLAY_SCENARIO").as_deref() == Ok("invalid_json");
     let root = std::env::args().skip_while(|arg| arg != "--cwd").nth(1).unwrap_or_default();

@@ -142,13 +142,106 @@ pub struct SemanticTarget {
 /// has it, so a caller can wait a bounded time and take the structural answer when the checker is slower.
 pub trait SemanticProvider: Send + Sync {
     /// Queues `targets` for the checker and returns at once with the receiver that will yield their
-    /// [`SemanticOutcome`].
+    /// [`SemanticOutcome`]. Someone is waiting for it: the request is [`Priority::Interactive`].
     fn request(&self, targets: Vec<SemanticTarget>) -> std::sync::mpsc::Receiver<SemanticOutcome>;
+
+    /// Queues `targets` at `priority` and returns at once; `delivery` receives the outcome. A checker that answers one
+    /// request at a time answers an interactive request before a background one, and reads `priority` again when it
+    /// picks the next, since a caller that joins a background request may raise it. The default ignores the priority
+    /// and waits for [`Self::request`]'s receiver on a thread of its own.
+    fn request_at(&self, targets: Vec<SemanticTarget>, priority: SharedPriority, delivery: Delivery) {
+        drop(priority);
+        let receiver = self.request(targets);
+        let delivery = Arc::new(Mutex::new(Some(delivery)));
+        let take =
+            |slot: &Mutex<Option<Delivery>>| slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        let waiter = delivery.clone();
+        let waiting = std::thread::Builder::new().name("caliper-checker-answer".to_string()).spawn(move || {
+            let outcome = receiver.recv().ok();
+            if let Some(delivery) = take(&waiter) {
+                delivery.deliver(outcome);
+            }
+        });
+        if let Err(error) = waiting
+            && let Some(delivery) = take(&delivery)
+        {
+            delivery.deliver(Some(SemanticOutcome::unavailable(format!(
+                "could not start a thread to wait for it: {error}"
+            ))));
+        }
+    }
 
     /// Tells the checker that files changed on disk, before any request that may read them is queued. A checker that
     /// keeps what it read (a warm `tsc` holding a snapshot, ADR 0026) reads them again; one that reads every file
     /// afresh for each request needs nothing, which is the default.
     fn changed(&self, _change: SourceChange) {}
+}
+
+/// Who waits for a request to the checker, which decides what a busy checker answers first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Priority {
+    /// A component someone is looking at now: a story that was opened.
+    Interactive,
+    /// Work nobody waits for yet: a warm-up, a fill, a prefetch.
+    Background,
+}
+
+/// The priority of one queued request, shared between the caller and the checker so that a later caller can raise it
+/// ([`SharedPriority::raise`]) while the request waits. Clones share one priority.
+#[derive(Debug, Clone)]
+pub struct SharedPriority(Arc<std::sync::atomic::AtomicBool>);
+
+impl SharedPriority {
+    /// A priority that starts at `priority`.
+    pub fn new(priority: Priority) -> Self {
+        Self(Arc::new(std::sync::atomic::AtomicBool::new(priority == Priority::Interactive)))
+    }
+
+    /// The priority now.
+    pub fn get(&self) -> Priority {
+        match self.0.load(std::sync::atomic::Ordering::Acquire) {
+            true => Priority::Interactive,
+            false => Priority::Background,
+        }
+    }
+
+    /// Makes the request interactive: someone is now waiting for it.
+    pub fn raise(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
+/// Where the outcome of a request made with [`SemanticProvider::request_at`] goes. It is used once: with the outcome,
+/// or with `None` when the checker stopped without answering. Dropping it unused counts as `None`, so a caller is
+/// told even when the request is lost (a worker that stopped, a thread that could not start).
+pub struct Delivery(Option<Box<dyn FnOnce(Option<SemanticOutcome>) + Send>>);
+
+impl Delivery {
+    /// A delivery that hands the outcome to `receive`.
+    pub fn new(receive: impl FnOnce(Option<SemanticOutcome>) + Send + 'static) -> Self {
+        Self(Some(Box::new(receive)))
+    }
+
+    /// Hands over the outcome, or `None` for a checker that stopped without answering.
+    pub fn deliver(mut self, outcome: Option<SemanticOutcome>) {
+        if let Some(receive) = self.0.take() {
+            receive(outcome);
+        }
+    }
+}
+
+impl Drop for Delivery {
+    fn drop(&mut self) {
+        if let Some(receive) = self.0.take() {
+            receive(None);
+        }
+    }
+}
+
+impl std::fmt::Debug for Delivery {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Delivery").field("delivered", &self.0.is_none()).finish()
+    }
 }
 
 /// What changed on disk, as a session tells its checker ([`SemanticProvider::changed`]).
