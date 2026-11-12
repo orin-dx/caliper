@@ -1083,7 +1083,7 @@ impl serde::Serialize for PropType {
             PropType::Opaque(OpaqueDetail { raw, reason }) => {
                 map.serialize_entry("kind", "opaque")?;
                 map.serialize_entry("raw", raw)?;
-                map.serialize_entry("reason", &WireReason(reason))?;
+                map.serialize_entry("reason", reason)?;
             }
         }
         map.end()
@@ -1250,38 +1250,6 @@ impl serde::Serialize for WireFields<'_> {
     }
 }
 
-/// An `OpaqueReason` as `{ type, ...fields }`.
-struct WireReason<'a>(&'a OpaqueReason);
-
-impl serde::Serialize for WireReason<'_> {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
-
-        let mut map = serializer.serialize_map(None)?;
-        match self.0 {
-            OpaqueReason::ConditionalType => map.serialize_entry("type", "conditionalType")?,
-            OpaqueReason::MappedType => map.serialize_entry("type", "mappedType")?,
-            OpaqueReason::ModuleAugmentation => map.serialize_entry("type", "moduleAugmentation")?,
-            OpaqueReason::RuntimeDependent { function_name } => {
-                map.serialize_entry("type", "runtimeDependent")?;
-                map.serialize_entry("functionName", function_name)?;
-            }
-            OpaqueReason::UnresolvableImport { specifier } => {
-                map.serialize_entry("type", "unresolvableImport")?;
-                map.serialize_entry("specifier", specifier)?;
-            }
-            OpaqueReason::PandaCodegenMissing => map.serialize_entry("type", "pandaCodegenMissing")?,
-            OpaqueReason::DepthExceeded => map.serialize_entry("type", "depthExceeded")?,
-            OpaqueReason::IndexedAccess { expression } => {
-                map.serialize_entry("type", "indexedAccess")?;
-                map.serialize_entry("expression", expression)?;
-            }
-            OpaqueReason::UnsupportedExpression => map.serialize_entry("type", "unsupportedExpression")?,
-        }
-        map.end()
-    }
-}
-
 /// Feed `hasher` an object type's fields.
 fn hash_fields<H: std::hash::Hasher>(fields: &[ObjectField], hasher: &mut H) {
     use std::hash::Hash;
@@ -1361,7 +1329,7 @@ fn is_valid_identifier(name: &str) -> bool {
 
 /// Why a type could not be resolved.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum OpaqueReason {
     /// TypeScript conditional type — needs type checker
     ConditionalType,

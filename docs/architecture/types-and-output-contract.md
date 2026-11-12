@@ -80,7 +80,7 @@ The projections decide a literal and an option once: `PropType::literal_kind` sa
 
 **Source:** `docs/adr/0002-manual-serialize-for-prop-type.md`
 
-`PropType` and `CollectedType` do **not** derive `Serialize`/`Deserialize`. `CollectedType` implements both by hand; `PropType` implements only `Serialize`, since nothing reads the canonical JSON back in Rust. `CollectedType` (`crates/core/src/types/collected.rs`) round-trips through a private `to_json_value`/`from_json_value` pair that builds and reads a `serde_json::Value`. `PropType` (`crates/core/src/types/output.rs`) streams its `Serialize` impl straight into the serializer as a map with `kind` first and the fields in a fixed order (an `OpaqueReason` is written by the private `WireReason` as `{ type, ... }`).
+`PropType` and `CollectedType` do **not** derive `Serialize`/`Deserialize`. `CollectedType` implements both by hand; `PropType` implements only `Serialize`, since nothing reads the canonical JSON back in Rust. `CollectedType` (`crates/core/src/types/collected.rs`) round-trips through a private `to_json_value`/`from_json_value` pair that builds and reads a `serde_json::Value`. `PropType` (`crates/core/src/types/output.rs`) streams its `Serialize` impl straight into the serializer as a map with `kind` first and the fields in a fixed order (an `OpaqueReason` derives `Serialize` as `{ type, ... }`).
 
 **Why:** these are recursive enums (`Union(Vec<Self>)`, `Object(Vec<Field>)` where `Field` contains `Self`, `Array(Box<Self>)`, ...). A derived, tagged (`#[serde(tag = "kind")]`) implementation on a recursive enum needed `#![recursion_limit = "2048"]` to compile — each nesting level wraps the generated (de)serializer in another codegen layer, and a real component prop tree blows past the default limit (128). Manual impls sidestep the codegen recursion entirely; they're just recursive Rust functions, which the compiler doesn't limit the same way.
 
@@ -101,7 +101,7 @@ pub enum OpaqueReason {
 }
 ```
 
-`OpaqueReason` derives normally. It isn't recursive — every variant's payload is a `String` or a unit — so it never hit the recursion-limit problem the ADR is about. The _serialization of an `OpaqueReason` value_ is still hand-assembled by `WireReason` (`types/output.rs`, matching each reason to its own `{ type, ... }` shape) when `PropType`'s `Serialize` writes the `Opaque` variant, and hand-parsed in `PropType::from_tagged_value` — but that's because it's embedded inside `PropType`'s own manual impl, not because `OpaqueReason` itself needs one. This is a small, real documentation bug in ADR-0002 worth a one-line fix, independent of anything else in this file.
+`OpaqueReason` derives normally. It isn't recursive — every variant's payload is a `String` or a unit — so it never hit the recursion-limit problem the ADR is about. Its derive is tagged (`#[serde(tag = "type")]`), so `PropType`'s `Serialize` writes the `Opaque` variant's reason as `{ type, ... }` by passing it straight through. This is a small, real documentation bug in ADR-0002 worth a one-line fix, independent of anything else in this file.
 
 Also worth noting as **resolved, not a gap:** the ADR flagged `#![recursion_limit = "2048"]` in `lib.rs` as "left over from the old derive-based design... worth deleting as a follow-up." As of the current source, `crates/core/src/lib.rs` has no `recursion_limit` attribute at all — that follow-up has already happened. The ADR's "Consequences" section is stale on this point too.
 

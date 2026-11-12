@@ -389,38 +389,6 @@ mod number_literal_wire_tests {
     }
 }
 
-mod opaque_reason_wire_tests {
-    use super::*;
-
-    // ── SPEC-TYPES-001 AC-005: OpaqueReason's OWN derived serialize output
-    // differs from the hand-built {"type": ...} shape PropType::to_tagged_value
-    // produces for the same reason — proving to_tagged_value intercepts the
-    // reason before serde's derived impl ever runs on a bare OpaqueReason.
-
-    #[test]
-    fn opaque_reason_bare_derived_serialization_differs_from_the_intercepted_wire_form() {
-        let reason = OpaqueReason::RuntimeDependent { function_name: "getVariant".into() };
-
-        // The bare, derived serde output (serde's default externally-tagged form).
-        let bare = serde_json::to_value(&reason).expect("OpaqueReason derives Serialize directly");
-
-        // The wire form actually used when the reason is embedded in an Opaque PropType.
-        // OpaqueDetail::new returns PropType::Opaque(..) directly, not a bare OpaqueDetail.
-        let pt = OpaqueDetail::new("raw", reason);
-        let wire = to_tagged_value(&pt);
-        let wire_reason = wire.get("reason").expect("expected a 'reason' field in the tagged Opaque JSON");
-
-        assert_ne!(
-            &bare, wire_reason,
-            "OpaqueReason's bare derived form must differ from to_tagged_value's hand-built {{\"type\": ...}} \
-             shape — if these ever match, to_tagged_value's manual construction has become redundant \
-             or, worse, a bare OpaqueReason is leaking through unintercepted"
-        );
-        assert_eq!(wire_reason["type"], "runtimeDependent");
-        assert_eq!(wire_reason["functionName"], "getVariant");
-    }
-}
-
 mod serde_key_casing_tests {
     use super::*;
     use crate::types::diagnostic::DiagnosticCode;
