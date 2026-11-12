@@ -31,5 +31,16 @@
     ],
     "alias": "Both"
   },
-  "text": "Both<boolean, string[]> | undefined"
+  "text": "Both<boolean, string[]> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/27-intersection-in-generic-alias.tsx"
+    },
+    "order": null
+  }
 }

@@ -77,6 +77,7 @@
     "literals/31-intersection-of-unions": {"verdicts":["identical","spelled"]},
     "literals/32-intersection-disjoint": {"verdicts":["identical","spelled"]},
     "literals/33-literal-and-primitive": {"verdicts":["identical","spelled"]},
+    "literals/34-union-declared-order": {"verdicts":["identical","spelled"]},
     "objects/01-optional-property": {"verdicts":["identical","spelled"]},
     "objects/02-readonly-property": {"verdicts":["identical","spelled"]},
     "objects/03-readonly-props-member": {"verdicts":["identical","spelled"]},
@@ -114,6 +115,9 @@
     "objects/35-empty-object": {"verdicts":["identical","spelled"]},
     "objects/36-object-keyword": {"verdicts":["less precise"],"gap":"the `object` keyword is read as a named type `object`, not the non-primitive type"},
     "objects/37-react-member": {"verdicts":["identical","spelled"]},
+    "objects/38-jsdoc-tags": {"verdicts":["identical","spelled"]},
+    "objects/39-inherited-member": {"verdicts":["identical","spelled"]},
+    "objects/40-type-literal-member": {"verdicts":["identical","spelled"]},
     "react/01-reactnode": {"verdicts":["identical","spelled"]},
     "react/02-children-reactnode": {"verdicts":["identical","spelled"]},
     "react/03-reactelement": {"verdicts":["less precise"],"gap":"`ReactElement` collapses to `reactNode`, losing the element shape"},
@@ -225,6 +229,7 @@
     "utility-mapped/32-alias-wrapper-partial": {"verdicts":["identical","spelled"]},
     "utility-mapped/33-alias-chain-utilities": {"verdicts":["identical","spelled"]},
     "utility-mapped/34-template-literal-unions": {"verdicts":["identical","spelled"]},
-    "utility-mapped/35-template-literal-intrinsic": {"verdicts":["identical","spelled"]}
+    "utility-mapped/35-template-literal-intrinsic": {"verdicts":["identical","spelled"]},
+    "utility-mapped/36-picked-member": {"verdicts":["identical","spelled"]}
   }
 }

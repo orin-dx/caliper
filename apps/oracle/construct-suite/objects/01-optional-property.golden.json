@@ -16,5 +16,16 @@
       }
     ]
   },
-  "text": "{ a?: string | undefined; b: number; } | undefined"
+  "text": "{ a?: string | undefined; b: number; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/01-optional-property.tsx"
+    },
+    "order": null
+  }
 }

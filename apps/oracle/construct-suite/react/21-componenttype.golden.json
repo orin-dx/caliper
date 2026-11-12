@@ -31,5 +31,16 @@
     ],
     "alias": "ComponentType"
   },
-  "text": "ComponentType<{ id: string; }> | undefined"
+  "text": "ComponentType<{ id: string; }> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/21-componenttype.tsx"
+    },
+    "order": null
+  }
 }

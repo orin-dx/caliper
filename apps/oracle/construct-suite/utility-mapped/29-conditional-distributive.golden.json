@@ -24,5 +24,16 @@
       }
     ]
   },
-  "text": "string[] | number[] | undefined"
+  "text": "string[] | number[] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/29-conditional-distributive.tsx"
+    },
+    "order": null
+  }
 }

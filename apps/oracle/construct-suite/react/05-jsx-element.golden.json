@@ -19,5 +19,16 @@
     ],
     "alias": "Element"
   },
-  "text": "Element | undefined"
+  "text": "Element | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/05-jsx-element.tsx"
+    },
+    "order": null
+  }
 }

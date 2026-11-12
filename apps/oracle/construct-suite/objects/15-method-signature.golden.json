@@ -15,5 +15,16 @@
       }
     ]
   },
-  "text": "{ onSelect(id: string): void; } | undefined"
+  "text": "{ onSelect(id: string): void; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/15-method-signature.tsx"
+    },
+    "order": null
+  }
 }

@@ -77,6 +77,7 @@
     "literals/31-intersection-of-unions": {"verdicts":["less precise"],"gap":"The intersection of two literal unions is kept as an intersection; the checker reduces it to `\"b\" | \"c\"`."},
     "literals/32-intersection-disjoint": {"verdicts":["less precise"],"gap":"The intersection `\"a\" & \"b\"` is kept as an intersection; the checker reduces it to `never`."},
     "literals/33-literal-and-primitive": {"verdicts":["less precise"],"gap":"The intersection `string & (\"x\" | \"y\")` is kept as an intersection; the checker reduces it to `\"x\" | \"y\"`."},
+    "literals/34-union-declared-order": {"verdicts":["identical","spelled"]},
     "objects/01-optional-property": {"verdicts":["identical","spelled"]},
     "objects/02-readonly-property": {"verdicts":["identical","spelled"]},
     "objects/03-readonly-props-member": {"verdicts":["identical","spelled"]},
@@ -114,6 +115,9 @@
     "objects/35-empty-object": {"verdicts":["identical","spelled"]},
     "objects/36-object-keyword": {"verdicts":["less precise"],"gap":"The non-primitive `object` keyword is emitted as a named reference `object`, not a primitive kind."},
     "objects/37-react-member": {"verdicts":["identical","spelled"]},
+    "objects/38-jsdoc-tags": {"verdicts":["identical","spelled"]},
+    "objects/39-inherited-member": {"verdicts":["identical","spelled"]},
+    "objects/40-type-literal-member": {"verdicts":["identical","spelled"]},
     "react/01-reactnode": {"verdicts":["identical","spelled"]},
     "react/02-children-reactnode": {"verdicts":["identical","spelled"]},
     "react/03-reactelement": {"verdicts":["less precise"],"gap":"`React.ReactElement` collapses to the `reactNode` kind, which is wider (it also admits strings, numbers, null)."},
@@ -225,6 +229,7 @@
     "utility-mapped/32-alias-wrapper-partial": {"verdicts":["identical","spelled"]},
     "utility-mapped/33-alias-chain-utilities": {"verdicts":["less precise"],"gap":"The alias chain `Readonly<Pick<Partial<B>, ...>>` shows as an unevaluated `Pick<Partial<B>, \"a\" | \"b\">`: the outer `Readonly` is dropped and nothing is evaluated."},
     "utility-mapped/34-template-literal-unions": {"verdicts":["identical","spelled"]},
-    "utility-mapped/35-template-literal-intrinsic": {"verdicts":["identical","spelled"]}
+    "utility-mapped/35-template-literal-intrinsic": {"verdicts":["identical","spelled"]},
+    "utility-mapped/36-picked-member": {"verdicts":["identical","spelled"]}
   }
 }

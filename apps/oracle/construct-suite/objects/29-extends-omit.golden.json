@@ -18,5 +18,16 @@
     ],
     "alias": "Rest"
   },
-  "text": "Rest | undefined"
+  "text": "Rest | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/29-extends-omit.tsx"
+    },
+    "order": null
+  }
 }

@@ -1,11 +1,13 @@
 // Writes (or, with --check, verifies) the golden files of the deterministic construct suite: for every fixture under
 // construct-suite/, the type TypeScript 7.1's checker gives prop `p` of each row's component (the exported `Row`, or
-// the components a fixture lists), normalized as src/oracle.ts normalizes it. One program holds all fixtures.
+// the components a fixture lists), normalized as src/oracle.ts normalizes it, and the facts about the prop both lanes
+// are held to (`Facts`). One program holds all fixtures.
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { API } from 'typescript-beta/sync'
+import { join, relative } from 'node:path'
+import { SyntaxKind } from 'typescript-beta/ast'
+import { API, SymbolFlags } from 'typescript-beta/sync'
 import { exportAt, propsTypeOf } from './checker-components.ts'
-import { listFixtures, PROP, type Fixture, type Golden } from './construct-suite.ts'
+import { listFixtures, PROP, type Facts, type Fixture, type Golden } from './construct-suite.ts'
 import { checkerNormalizer } from './oracle-checker.ts'
 
 const suite = realpathSync(join(import.meta.dirname, '..', 'construct-suite'))
@@ -21,6 +23,39 @@ const program = api.createProgram([...new Set(fixtures.map((f) => f.file))], opt
 const { checker } = program.getProject()
 const norm = checkerNormalizer(checker)
 
+/** The union a declaration writes for its type: the type node itself, or the type of the non-generic alias it names. */
+function writtenUnion(typeNode: any): any[] | null {
+  let node = typeNode
+  if (node?.kind === SyntaxKind.TypeReference) {
+    const alias = checker.getSymbolAtLocation(node.typeName)
+    const declaration: any =
+      alias && alias.flags & SymbolFlags.TypeAlias ? alias.declarations?.[0]?.resolve() : undefined
+    if (declaration?.kind === SyntaxKind.TypeAliasDeclaration && declaration.typeParameters === undefined) {
+      node = declaration.type
+    }
+  }
+  return node?.kind === SyntaxKind.UnionType ? [...node.types] : null
+}
+
+function factsOf(prop: any): Facts {
+  const tags: Record<string, string> = {}
+  for (const tag of checker.getJsDocTagsOfSymbol(prop)) tags[tag.name] = (tag.text ?? '').trim()
+  const declaration: any = prop.declarations?.[0]?.resolve()
+  const parent = declaration?.parent
+  const members = writtenUnion(declaration?.type)
+  return {
+    description: checker.getDocumentationCommentOfSymbol(prop),
+    tags,
+    default: tags.default ?? tags.defaultValue ?? null,
+    required: (prop.flags & SymbolFlags.Optional) === 0,
+    parent:
+      parent?.kind === SyntaxKind.InterfaceDeclaration
+        ? { name: parent.name.text, file: relative(suite, realpathSync(parent.getSourceFile().fileName)) }
+        : null,
+    order: members && members.map((member) => norm(checker.getTypeFromTypeNode(member))),
+  }
+}
+
 function capture(fixture: Fixture): Golden {
   const moduleSymbol = checker.getSymbolOfSourceFile(fixture.file)
   const exported = moduleSymbol && exportAt(checker, moduleSymbol, fixture.exportPath)
@@ -29,7 +64,7 @@ function capture(fixture: Fixture): Golden {
   const prop = propsType && checker.getPropertyOfType(propsType, PROP)
   if (!prop) throw new Error(`${fixture.id}: ${fixture.component} has no prop ${PROP}`)
   const type = checker.getTypeOfSymbol(prop)
-  return { checker: norm(type), text: checker.typeToString(type) }
+  return { checker: norm(type), text: checker.typeToString(type), facts: factsOf(prop) }
 }
 
 // A unique-symbol key is named `__@tag@<symbol id>` and the id depends on the other files in the program, so adding a

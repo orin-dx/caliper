@@ -25,5 +25,16 @@
       }
     ]
   },
-  "text": "{ (value: number): string; new (value: number): { n: number; }; } | undefined"
+  "text": "{ (value: number): string; new (value: number): { n: number; }; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/14-call-and-construct.tsx"
+    },
+    "order": null
+  }
 }

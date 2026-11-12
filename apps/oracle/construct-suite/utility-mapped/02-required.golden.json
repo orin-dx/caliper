@@ -18,5 +18,16 @@
     ],
     "alias": "Required"
   },
-  "text": "Required<Base> | undefined"
+  "text": "Required<Base> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/02-required.tsx"
+    },
+    "order": null
+  }
 }

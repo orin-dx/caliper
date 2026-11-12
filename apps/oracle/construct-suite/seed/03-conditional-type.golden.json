@@ -3,5 +3,16 @@
     "k": "prim",
     "name": "string"
   },
-  "text": "string"
+  "text": "string",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "seed/03-conditional-type.tsx"
+    },
+    "order": null
+  }
 }

@@ -18,5 +18,16 @@
     ],
     "alias": "Frozen"
   },
-  "text": "Frozen<Base> | undefined"
+  "text": "Frozen<Base> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/25-mapped-plus-modifiers.tsx"
+    },
+    "order": null
+  }
 }

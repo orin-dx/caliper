@@ -46,5 +46,16 @@
       }
     ]
   },
-  "text": "ForwardedRef<HTMLButtonElement> | undefined"
+  "text": "ForwardedRef<HTMLButtonElement> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/18-forwardedref.tsx"
+    },
+    "order": null
+  }
 }

@@ -19,5 +19,16 @@
     ],
     "alias": "Mode"
   },
-  "text": "Mode | undefined"
+  "text": "Mode | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/19-const-enum.tsx"
+    },
+    "order": null
+  }
 }

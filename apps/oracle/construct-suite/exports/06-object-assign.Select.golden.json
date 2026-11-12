@@ -4,5 +4,16 @@
     "value": "select",
     "of": "string"
   },
-  "text": "\"select\""
+  "text": "\"select\"",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "SelectProps",
+      "file": "exports/06-object-assign.tsx"
+    },
+    "order": null
+  }
 }

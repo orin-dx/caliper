@@ -45,5 +45,16 @@
       }
     ]
   },
-  "text": "[string | number, boolean | null] | undefined"
+  "text": "[string | number, boolean | null] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/28-tuple-union-elements.tsx"
+    },
+    "order": null
+  }
 }

@@ -21,5 +21,16 @@
       }
     ]
   },
-  "text": "readonly [string, number] | undefined"
+  "text": "readonly [string, number] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/23-tuple-readonly.tsx"
+    },
+    "order": null
+  }
 }

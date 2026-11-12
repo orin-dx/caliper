@@ -324,5 +324,16 @@
     ],
     "alias": "PolyProps"
   },
-  "text": "PolyProps<\"a\"> | undefined"
+  "text": "PolyProps<\"a\"> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/11-polymorphic-omit.tsx"
+    },
+    "order": null
+  }
 }

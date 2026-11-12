@@ -19,5 +19,16 @@
     ],
     "alias": "Both"
   },
-  "text": "Both | undefined"
+  "text": "Both | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/27-interface-extends-multiple.tsx"
+    },
+    "order": null
+  }
 }

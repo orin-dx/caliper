@@ -17,5 +17,16 @@
       }
     ]
   },
-  "text": "{ readonly [key: string]: boolean; } | undefined"
+  "text": "{ readonly [key: string]: boolean; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/09-readonly-index.tsx"
+    },
+    "order": null
+  }
 }

@@ -1,0 +1,29 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "prim",
+        "name": "number"
+      }
+    ]
+  },
+  "text": "number | undefined",
+  "facts": {
+    "description": "Picked from the base.",
+    "tags": {
+      "since": "1.0"
+    },
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Base",
+      "file": "utility-mapped/36-picked-member.tsx"
+    },
+    "order": null
+  }
+}

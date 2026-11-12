@@ -15,5 +15,16 @@
       }
     ]
   },
-  "text": "{ a?: { b?: { c?: { d: string; } | undefined; } | undefined; } | undefined; } | undefined"
+  "text": "{ a?: { b?: { c?: { d: string; } | undefined; } | undefined; } | undefined; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/25-deep-nested.tsx"
+    },
+    "order": null
+  }
 }

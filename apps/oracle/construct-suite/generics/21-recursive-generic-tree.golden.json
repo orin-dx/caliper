@@ -18,5 +18,16 @@
     ],
     "alias": "TreeNode"
   },
-  "text": "TreeNode<string> | undefined"
+  "text": "TreeNode<string> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/21-recursive-generic-tree.tsx"
+    },
+    "order": null
+  }
 }

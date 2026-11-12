@@ -36,5 +36,16 @@
       }
     ]
   },
-  "text": "[id: string, flag?: boolean | undefined] | undefined"
+  "text": "[id: string, flag?: boolean | undefined] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/12-parameters.tsx"
+    },
+    "order": null
+  }
 }

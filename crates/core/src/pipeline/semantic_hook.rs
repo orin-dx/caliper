@@ -307,8 +307,12 @@ impl SemanticHook {
         let still_degraded = structural
             .iter()
             .any(|(name, prop)| prop.prop_type.holds_opaque() && !used.iter().any(|answered| answered.name == *name));
-        let MergedProps { kept, unread } =
-            merge_semantic_props(&mut answer.entry, used.into_iter(), &mut FxHashMap::default());
+        let MergedProps { kept, unread } = merge_semantic_props(
+            &mut answer.entry,
+            used.into_iter(),
+            component.composes.as_deref(),
+            &mut FxHashMap::default(),
+        );
         if !still_degraded {
             // A structural diagnostic about a prop the checker now answers for would be stale.
             answer.diagnostics.retain(|diagnostic| {

@@ -1,8 +1,8 @@
 // The deterministic construct suite's pure half (apps/oracle/construct-suite/README.md): which fixtures exist, the verdict
 // one of Caliper's props earns against its golden, and the check of the expectations file. Nothing here runs the checker
 // or Caliper, so tests/construct-suite.test.ts can pin it without either.
-import { readdirSync, readFileSync, realpathSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { join, relative } from 'node:path'
 import { caliperNorm } from './caliper-norm.ts'
 import { pathOfExport, exportPathKey, type ComponentExport } from './component-join.ts'
 import type { PropType } from '../../../packages/napi/index.d.ts'
@@ -18,7 +18,30 @@ export interface Golden {
   checker: Norm
   /** `checker.typeToString` of the same type, for the reader of a diff. */
   text: string
+  /** What else the checker states about prop `p`, compared on every row in both lanes (`factDifferences`). */
+  facts: Facts
 }
+
+/** The facts about a prop besides its type that both lanes are held to, as the checker (and its AST) states them. */
+export interface Facts {
+  /** `getDocumentationComment`. */
+  description: string
+  /** `getJsDocTags`, by name, the last of a repeated tag winning, each text trimmed. */
+  tags: Record<string, string>
+  /** The text of its `@default` (or `@defaultValue`) tag; null with neither. A fixture writes no code default. */
+  default: string | null
+  required: boolean
+  /** react-docgen-typescript's `parent`: the interface its first declaration is a member of, by name and by file
+   * relative to the suite; null for a member of a type literal. */
+  parent: { name: string; file: string } | null
+  /** The members of the union its declaration writes, in written order (through a non-generic alias it names), each
+   * normalized as `checker` is; null when it writes no union. */
+  order: Norm[] | null
+}
+
+export type FactName = keyof Facts
+
+export const FACTS: FactName[] = ['description', 'tags', 'default', 'required', 'parent', 'order']
 
 /** One row: a component of a fixture file. A file holds one row (`Row`, exported as `Row`) unless it lists its
  * components (`componentsOf`). */
@@ -112,11 +135,53 @@ export function rowVerdict(prop: { type: PropType; degradedBy?: unknown } | unde
   return marked && verdict === 'less precise' ? 'opaque with marker' : verdict
 }
 
+/** The facts of Caliper's prop that differ from the golden's, in `FACTS` order. A prop Caliper did not list has no
+ * facts to compare (its verdict is `missing`). `suite` is the suite's real path, which a golden's `parent.file` is
+ * relative to. A union's order differs when two of Caliper's members that each state one written member stand in the
+ * other order; members it does not state one for are the type verdict's business. */
+export function factDifferences(prop: any | undefined, golden: Golden, suite: string): FactName[] {
+  if (prop === undefined) return []
+  const { facts } = golden
+  const caliperParent = prop.parent
+    ? { name: prop.parent.name, file: relative(suite, onDisk(prop.parent.fileName)) }
+    : null
+  const same: Record<FactName, boolean> = {
+    description: (prop.description ?? '') === facts.description,
+    tags: sameRecord(prop.tags ?? {}, facts.tags),
+    default: (prop.defaultValue?.value ?? null) === facts.default,
+    required: prop.required === facts.required,
+    parent: JSON.stringify(caliperParent) === JSON.stringify(facts.parent),
+    order: facts.order === null || keepsOrder(prop.type, facts.order),
+  }
+  return FACTS.filter((fact) => !same[fact])
+}
+
+/** The real path of a file that exists; any other path as it is, so it differs from the golden's instead of throwing. */
+const onDisk = (file: string): string => (existsSync(file) ? realpathSync(file) : file)
+
+function sameRecord(a: Record<string, string>, b: Record<string, string>): boolean {
+  const keys = Object.keys(a).toSorted()
+  return JSON.stringify(keys) === JSON.stringify(Object.keys(b).toSorted()) && keys.every((key) => a[key] === b[key])
+}
+
+/** Whether Caliper's union states the written members it has in their written order. */
+function keepsOrder(type: any, written: Norm[]): boolean {
+  if (type?.kind !== 'union' || !Array.isArray(type.members)) return true
+  const members = type.members.map((member: any) => caliperNorm(member))
+  const positions = written
+    .map((member) => members.findIndex((mine: Norm) => isAgreement(compare(mine, member))))
+    .filter((position) => position >= 0)
+  return positions.every((position, index) => index === 0 || position > positions[index - 1]!)
+}
+
 export interface Expectation {
   /** The verdicts the row may have; the test fails on any other. */
   verdicts: RowVerdict[]
   /** Why Caliper falls short of the checker here. Present exactly on a documented gap. */
   gap?: string
+  /** The facts (`factDifferences`) Caliper may state differently from the golden, each with the reason. The test fails
+   * on any other difference, and on a listed fact that no longer differs. */
+  facts?: Partial<Record<FactName, string>>
   /** checker-expectations.json only: why the checker path's answer is accepted although its verdict ranks below the
    * structural path's for the same row (see `againstStructural` in src/construct-checker-run.ts). */
   improvement?: string
@@ -146,10 +211,28 @@ export function expectationProblems(ids: string[], rows: Record<string, Expectat
     if (!anyGreen && (typeof row.gap !== 'string' || row.gap.trim() === '')) {
       problems.push(`${id}: a row that is not identical or spelled is a documented gap and needs a "gap" reason`)
     }
+    for (const [fact, reason] of Object.entries(row.facts ?? {})) {
+      if (!FACTS.includes(fact as FactName)) problems.push(`${id}: unknown fact ${fact}`)
+      if (typeof reason !== 'string' || reason.trim() === '') problems.push(`${id}: the fact ${fact} needs a reason`)
+    }
   }
   const known = new Set(ids)
   for (const id of Object.keys(rows)) if (!known.has(id)) problems.push(`${id}: expectation without a fixture`)
   return problems
+}
+
+/** What is wrong with a row's facts against its expectation: a fact that differs and is not listed (a regression), and
+ * a listed fact that no longer differs (update the expectation). Empty when they agree. */
+export function factFailures(id: string, differing: FactName[], row: Expectation): string[] {
+  const listed = Object.keys(row.facts ?? {}) as FactName[]
+  return [
+    ...differing
+      .filter((fact) => !listed.includes(fact))
+      .map((fact) => `${id}: ${fact} differs from the golden (a regression, or list it under "facts" with the reason)`),
+    ...listed
+      .filter((fact) => !differing.includes(fact))
+      .map((fact) => `${id}: ${fact} no longer differs from the golden: remove it from "facts"`),
+  ]
 }
 
 const rank = (v: RowVerdict) => ROW_VERDICTS.indexOf(v)

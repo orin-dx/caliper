@@ -28,5 +28,16 @@
       }
     ]
   },
-  "text": "\"bottom-left\" | \"bottom-right\" | \"top-left\" | \"top-right\" | undefined"
+  "text": "\"bottom-left\" | \"bottom-right\" | \"top-left\" | \"top-right\" | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/34-template-literal-unions.tsx"
+    },
+    "order": null
+  }
 }

@@ -12,5 +12,16 @@
       }
     ]
   },
-  "text": "number | undefined"
+  "text": "number | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Base",
+      "file": "generics/14-extends-instantiated-generic.tsx"
+    },
+    "order": null
+  }
 }

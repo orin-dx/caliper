@@ -75,5 +75,85 @@
     ],
     "alias": "ReactNode"
   },
-  "text": "ReactNode"
+  "text": "ReactNode",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/01-reactnode.tsx"
+    },
+    "order": [
+      {
+        "k": "object",
+        "fields": [
+          "key",
+          "props",
+          "type"
+        ],
+        "index": false,
+        "alias": "ReactElement"
+      },
+      {
+        "k": "prim",
+        "name": "string"
+      },
+      {
+        "k": "prim",
+        "name": "number"
+      },
+      {
+        "k": "prim",
+        "name": "bigint"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "__@iterator"
+        ],
+        "index": false,
+        "alias": "Iterable"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "children",
+          "key",
+          "props",
+          "type"
+        ],
+        "index": false,
+        "alias": "ReactPortal"
+      },
+      {
+        "k": "prim",
+        "name": "boolean"
+      },
+      {
+        "k": "prim",
+        "name": "null"
+      },
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "prim",
+        "name": "never"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "__@toStringTag",
+          "catch",
+          "finally",
+          "then"
+        ],
+        "index": false,
+        "alias": "Promise"
+      }
+    ]
+  }
 }

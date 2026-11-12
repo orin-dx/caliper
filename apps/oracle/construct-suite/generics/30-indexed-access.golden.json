@@ -18,5 +18,16 @@
       }
     ]
   },
-  "text": "\"lg\" | \"sm\" | undefined"
+  "text": "\"lg\" | \"sm\" | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/30-indexed-access.tsx"
+    },
+    "order": null
+  }
 }

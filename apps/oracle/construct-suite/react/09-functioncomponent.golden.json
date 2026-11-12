@@ -18,5 +18,16 @@
     ],
     "alias": "FunctionComponent"
   },
-  "text": "FunctionComponent<{ title: string; }> | undefined"
+  "text": "FunctionComponent<{ title: string; }> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/09-functioncomponent.tsx"
+    },
+    "order": null
+  }
 }

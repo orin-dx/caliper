@@ -18,5 +18,16 @@
     ],
     "alias": "Pick"
   },
-  "text": "Pick<Base, \"a\" | \"c\"> | undefined"
+  "text": "Pick<Base, \"a\" | \"c\"> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/04-pick.tsx"
+    },
+    "order": null
+  }
 }

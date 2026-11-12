@@ -18,5 +18,16 @@
     ],
     "alias": "Shape"
   },
-  "text": "Shape | undefined"
+  "text": "Shape | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/34-type-alias-object.tsx"
+    },
+    "order": null
+  }
 }

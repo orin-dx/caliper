@@ -30,5 +30,39 @@
       }
     ]
   },
-  "text": "[number] | [number, number] | undefined"
+  "text": "[number] | [number, number] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/29-union-of-tuples.tsx"
+    },
+    "order": [
+      {
+        "k": "tuple",
+        "elements": [
+          {
+            "k": "prim",
+            "name": "number"
+          }
+        ]
+      },
+      {
+        "k": "tuple",
+        "elements": [
+          {
+            "k": "prim",
+            "name": "number"
+          },
+          {
+            "k": "prim",
+            "name": "number"
+          }
+        ]
+      }
+    ]
+  }
 }

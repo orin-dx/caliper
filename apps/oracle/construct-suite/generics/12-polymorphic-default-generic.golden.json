@@ -306,5 +306,16 @@
       }
     ]
   },
-  "text": "({ as?: \"div\" | undefined; } & Omit<DetailedHTMLProps<HTMLAttributes<HTMLDivElement>, HTMLDivElement>, \"ref\">) | undefined"
+  "text": "({ as?: \"div\" | undefined; } & Omit<DetailedHTMLProps<HTMLAttributes<HTMLDivElement>, HTMLDivElement>, \"ref\">) | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/12-polymorphic-default-generic.tsx"
+    },
+    "order": null
+  }
 }

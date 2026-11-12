@@ -13,5 +13,16 @@
       }
     ]
   },
-  "text": "true | undefined"
+  "text": "true | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/05-boolean-literal.tsx"
+    },
+    "order": null
+  }
 }

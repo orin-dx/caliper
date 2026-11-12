@@ -18,5 +18,31 @@
       }
     ]
   },
-  "text": "\"a\" | \"b\" | undefined"
+  "text": "\"a\" | \"b\" | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/25-union-never.tsx"
+    },
+    "order": [
+      {
+        "k": "lit",
+        "value": "a",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "b",
+        "of": "string"
+      },
+      {
+        "k": "prim",
+        "name": "never"
+      }
+    ]
+  }
 }

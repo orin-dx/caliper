@@ -18,5 +18,16 @@
     ],
     "alias": "Omit"
   },
-  "text": "Omit<Base, \"b\"> | undefined"
+  "text": "Omit<Base, \"b\"> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/05-omit.tsx"
+    },
+    "order": null
+  }
 }

@@ -4,5 +4,16 @@
     "value": "one",
     "of": "string"
   },
-  "text": "\"one\""
+  "text": "\"one\"",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "exports/01-default-and-named.tsx"
+    },
+    "order": null
+  }
 }

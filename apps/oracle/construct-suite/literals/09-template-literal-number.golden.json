@@ -12,5 +12,16 @@
       }
     ]
   },
-  "text": "`${number}px` | undefined"
+  "text": "`${number}px` | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/09-template-literal-number.tsx"
+    },
+    "order": null
+  }
 }

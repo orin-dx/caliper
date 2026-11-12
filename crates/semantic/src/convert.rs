@@ -37,6 +37,7 @@ use caliper_docgen_core::types::{
 };
 use rustc_hash::FxHashMap;
 
+use crate::declared::Declared;
 use crate::printed::{Marker, SignatureMarkers, signature_markers, tuple_labels};
 use crate::rpc::{
     CallError, CompactSymbol, ObjectMembers, Rpc, SignatureInfo, SignatureKind, SymbolInfo, TypeInfo, decode, flag,
@@ -224,11 +225,39 @@ fn is_tag(member: &TypeInfo) -> bool {
         && member.value.as_ref().and_then(|value| value.as_str()).is_some_and(is_intrinsic_tag)
 }
 
-/// Whether the checker states the base types of this type: the declaration of a class or interface does, in its own
-/// terms. An instantiation of a generic one (`Box<string>`, only a reference) does not state them in terms of its
-/// arguments, so what it inherits cannot be listed from its bases.
+/// Whether the checker states the base types of this type in its own terms: the declaration of a class or interface
+/// does. An instantiation of a generic one (`Box<string>`, only a reference) does not state them in terms of its
+/// arguments, so a traversal that keeps the arguments cannot list what it inherits; one that wants only names reads the
+/// generic type instead ([`Converter::named_bases`]).
 fn states_bases(info: &TypeInfo) -> bool {
     info.object_flags & (flag::OBJECT_CLASS | flag::OBJECT_INTERFACE) != 0
+}
+
+/// Where the base types of a type are to be asked, from what the checker says of the type itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BasesOf {
+    /// A class or interface declaration: the checker states them ([`states_bases`]).
+    Itself,
+    /// An instantiation of a generic type: its generic target states them.
+    Generic,
+    /// An object type no class or interface declares (a type literal, a mapped type): it has none.
+    None,
+    /// A union, a type parameter or any other type the checker was not asked about: whether it has bases is not known.
+    Unknown,
+}
+
+impl BasesOf {
+    fn of(info: &TypeInfo) -> Self {
+        if states_bases(info) {
+            Self::Itself
+        } else if info.object_flags & flag::OBJECT_REFERENCE != 0 {
+            Self::Generic
+        } else if info.flags & flag::OBJECT != 0 {
+            Self::None
+        } else {
+            Self::Unknown
+        }
+    }
 }
 
 fn file_in_dependency(file: &str) -> bool {
@@ -320,6 +349,8 @@ struct State {
     /// most of their types: kept per component, a program of every Chakra component answered 16 at a time held 16
     /// copies of the same style props' members.
     parts: PartsSeen,
+    /// Where props are declared ([`crate::declared`]), kept for the snapshot like the rest.
+    declared: crate::declared::Memo,
     hits: AtomicU64,
     misses: AtomicU64,
 }
@@ -358,6 +389,71 @@ impl Converter {
     /// The own types of a component's props, from the top.
     pub(crate) async fn convert_roots(&self, infos: &[TypeInfo]) -> Result<Vec<PropType>, CallError> {
         self.convert_all(infos, &Cx::default()).await
+    }
+
+    /// Where each prop of `asked` is declared and what its JSDoc says ([`crate::declared`]).
+    pub(crate) async fn declared(&self, asked: &[crate::declared::Asked<'_>]) -> Result<Vec<Declared>, CallError> {
+        crate::declared::declared(&self.rpc, &self.state.declared, asked).await
+    }
+
+    /// The `@types/react` types a props type is made of, by name, in the order it names them: its bases and the members
+    /// of an intersection, seen through the project's and dependencies' own types and through a lib utility (`Omit`,
+    /// `Pick`) to what it applies to. A React type is found by where it is declared, as [`Origin::react_terminal`]
+    /// finds React's terminals, and is not looked into. `None` when a type on the way has bases the checker cannot be
+    /// asked for ([`Self::named_bases`]): the list would not be the answer, and an empty one would say there are none.
+    pub(crate) async fn composes(&self, props_type: &TypeInfo) -> Result<Option<Vec<String>>, CallError> {
+        let mut names: Vec<String> = Vec::new();
+        let mut seen: Vec<u64> = Vec::new();
+        let mut pending = vec![props_type.clone()];
+        while let Some(info) = pending.pop() {
+            if seen.contains(&info.id) {
+                continue;
+            }
+            seen.push(info.id);
+            let origin = self.origin(&info).await?;
+            if let Some(origin) = &origin {
+                if origin.in_react() {
+                    if !names.contains(&origin.name) {
+                        names.push(origin.name.clone());
+                    }
+                    continue;
+                }
+                if origin.alias && origin.in_lib() && UTILITIES.contains(&origin.name.as_str()) {
+                    pending.extend(self.rpc.alias_type_arguments(info.id).await?.into_iter().take(1));
+                    continue;
+                }
+            }
+            let parts = if info.flags & flag::INTERSECTION != 0 {
+                self.parts(info.id, Parts::Members).await?
+            } else {
+                let Some(bases) = self.named_bases(&info).await? else { return Ok(None) };
+                bases
+            };
+            // Last first onto the stack, so they are taken in the order the type names them.
+            pending.extend(parts.into_iter().rev());
+        }
+        Ok(Some(names))
+    }
+
+    /// The base types of `info` for a traversal that wants their names and not their arguments. The checker states the
+    /// bases of the declaration of a class or interface; an instantiation of a generic one (`Props<string>`, only a
+    /// reference) has none of its own, so they are read from the generic type it instantiates, which names the same
+    /// types over its own type parameters. `None` when the checker cannot be asked ([`BasesOf::Unknown`]). A traversal
+    /// that keeps the arguments of what it finds ([`Self::base_layers`]) cannot read them this way, since
+    /// `HTMLAttributes<T>` is not `HTMLAttributes<HTMLDivElement>`, and tests [`states_bases`] of the type itself.
+    async fn named_bases(&self, info: &TypeInfo) -> Result<Option<Vec<TypeInfo>>, CallError> {
+        match BasesOf::of(info) {
+            BasesOf::Itself => Ok(Some(self.rpc.base_types(info.id).await?)),
+            BasesOf::Generic => {
+                let target = self.rpc.target_of_type(info.id).await?;
+                match BasesOf::of(&target) {
+                    BasesOf::Itself => Ok(Some(self.rpc.base_types(target.id).await?)),
+                    _ => Ok(info.is_tuple_type.then(Vec::new)),
+                }
+            }
+            BasesOf::None => Ok(Some(Vec::new())),
+            BasesOf::Unknown => Ok(None),
+        }
     }
 
     fn convert<'a>(&'a self, info: &'a TypeInfo, cx: &'a Cx) -> Converted<'a> {
@@ -1324,5 +1420,29 @@ pub(crate) fn without_undefined(prop_type: PropType, optional: bool) -> PropType
             if kept.len() == 1 { kept.swap_remove(0) } else { PropType::Union(kept) }
         }
         other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn type_of(flags: u64, object_flags: u64) -> TypeInfo {
+        serde_json::from_value(serde_json::json!({ "id": 1, "flags": flags, "objectFlags": object_flags })).unwrap()
+    }
+
+    #[test]
+    fn the_bases_of_a_declaration_are_its_own_and_those_of_an_instantiation_are_its_generic_targets() {
+        assert_eq!(BasesOf::of(&type_of(flag::OBJECT, flag::OBJECT_INTERFACE)), BasesOf::Itself);
+        assert_eq!(BasesOf::of(&type_of(flag::OBJECT, flag::OBJECT_CLASS)), BasesOf::Itself);
+        assert_eq!(BasesOf::of(&type_of(flag::OBJECT, flag::OBJECT_REFERENCE)), BasesOf::Generic);
+    }
+
+    #[test]
+    fn a_type_literal_has_no_bases_and_a_type_that_is_not_an_object_is_not_known_to() {
+        assert_eq!(BasesOf::of(&type_of(flag::OBJECT, 16)), BasesOf::None);
+        for flags in [flag::UNION, flag::TYPE_PARAMETER, flag::CONDITIONAL, flag::INDEXED_ACCESS, flag::STRING] {
+            assert_eq!(BasesOf::of(&type_of(flags, 0)), BasesOf::Unknown, "flags {flags}");
+        }
     }
 }

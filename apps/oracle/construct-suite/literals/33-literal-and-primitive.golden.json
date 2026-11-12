@@ -18,5 +18,16 @@
       }
     ]
   },
-  "text": "\"x\" | \"y\" | undefined"
+  "text": "\"x\" | \"y\" | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/33-literal-and-primitive.tsx"
+    },
+    "order": null
+  }
 }

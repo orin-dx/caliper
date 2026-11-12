@@ -19,5 +19,16 @@
     ],
     "alias": "Flags"
   },
-  "text": "Flags | undefined"
+  "text": "Flags | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/23-mapped-basic.tsx"
+    },
+    "order": null
+  }
 }

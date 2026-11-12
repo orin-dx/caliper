@@ -318,5 +318,16 @@
     ],
     "alias": "PolyProps"
   },
-  "text": "PolyProps<\"button\"> | undefined"
+  "text": "PolyProps<\"button\"> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/10-polymorphic-as.tsx"
+    },
+    "order": null
+  }
 }

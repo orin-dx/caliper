@@ -19,5 +19,16 @@
     ],
     "alias": "ReactElement"
   },
-  "text": "ReactElement<{ label: string; }, \"div\"> | undefined"
+  "text": "ReactElement<{ label: string; }, \"div\"> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/04-reactelement-generic.tsx"
+    },
+    "order": null
+  }
 }

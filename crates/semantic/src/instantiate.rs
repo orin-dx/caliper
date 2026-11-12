@@ -25,7 +25,7 @@
 
 use std::sync::Arc;
 
-use caliper_docgen_core::types::semantic::{PropInterner, SemanticComponent, SemanticOutcome, SemanticProp};
+use caliper_docgen_core::types::semantic::{PropInterner, SemanticComponent, SemanticOutcome};
 use camino::Utf8Path;
 use rustc_hash::FxHashMap;
 
@@ -208,7 +208,9 @@ async fn answer_layered(
             }
         };
         match read {
-            Ok(props) => outcome.components.push(SemanticComponent { key: target.key.clone(), props }),
+            Ok(component::Props { props, composes }) => {
+                outcome.components.push(SemanticComponent { key: target.key.clone(), props, composes });
+            }
             Err(reason) => outcome.fallbacks.push(fallback_of(target, &reason)),
         }
     }
@@ -221,7 +223,7 @@ async fn read_probe(
     interner: &PropInterner,
     symbol: &serde_json::Value,
     target: &Target,
-) -> Result<Result<Vec<Arc<SemanticProp>>, String>, CallError> {
+) -> Result<Result<component::Props, String>, CallError> {
     let props_type = layered.declared_type_of_symbol(symbol).await?;
     component::props_of_type(layered, converter, interner, &props_type, target).await
 }

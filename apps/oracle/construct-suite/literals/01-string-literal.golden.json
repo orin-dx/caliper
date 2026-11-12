@@ -13,5 +13,16 @@
       }
     ]
   },
-  "text": "\"primary\" | undefined"
+  "text": "\"primary\" | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/01-string-literal.tsx"
+    },
+    "order": null
+  }
 }

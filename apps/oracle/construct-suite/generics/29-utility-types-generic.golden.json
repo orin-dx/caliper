@@ -29,5 +29,16 @@
       }
     ]
   },
-  "text": "(Partial<Pick<T, \"name\">> & Omit<T, \"name\">) | undefined"
+  "text": "(Partial<Pick<T, \"name\">> & Omit<T, \"name\">) | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/29-utility-types-generic.tsx"
+    },
+    "order": null
+  }
 }

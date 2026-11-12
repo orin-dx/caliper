@@ -27,5 +27,36 @@
       }
     ]
   },
-  "text": "ForwardRefExoticComponent<{ m: string; }> | NamedExoticComponent<{ n: number; }> | undefined"
+  "text": "ForwardRefExoticComponent<{ m: string; }> | NamedExoticComponent<{ n: number; }> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/32-memo-exotic-component.tsx"
+    },
+    "order": [
+      {
+        "k": "object",
+        "fields": [
+          "$$typeof",
+          "displayName"
+        ],
+        "index": false,
+        "alias": "NamedExoticComponent"
+      },
+      {
+        "k": "object",
+        "fields": [
+          "$$typeof",
+          "displayName",
+          "propTypes"
+        ],
+        "index": false,
+        "alias": "ForwardRefExoticComponent"
+      }
+    ]
+  }
 }

@@ -13,5 +13,16 @@
       }
     ]
   },
-  "text": "\"numeric\" | undefined"
+  "text": "\"numeric\" | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/31-conditional-nested.tsx"
+    },
+    "order": null
+  }
 }

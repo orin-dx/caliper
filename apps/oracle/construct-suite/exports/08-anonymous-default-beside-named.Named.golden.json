@@ -4,5 +4,16 @@
     "value": "named",
     "of": "string"
   },
-  "text": "\"named\""
+  "text": "\"named\"",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "NamedProps",
+      "file": "exports/08-anonymous-default-beside-named.tsx"
+    },
+    "order": null
+  }
 }

@@ -7,5 +7,16 @@
     },
     "alias": "Array"
   },
-  "text": "string[]"
+  "text": "string[]",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/31-required-array-prop.tsx"
+    },
+    "order": null
+  }
 }

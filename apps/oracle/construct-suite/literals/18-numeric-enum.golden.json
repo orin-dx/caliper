@@ -24,5 +24,16 @@
     ],
     "alias": "Level"
   },
-  "text": "Level | undefined"
+  "text": "Level | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/18-numeric-enum.tsx"
+    },
+    "order": null
+  }
 }

@@ -25,5 +25,16 @@
       }
     ]
   },
-  "text": "((this: { id: string; }, value: number) => void) | undefined"
+  "text": "((this: { id: string; }, value: number) => void) | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/18-this-parameter.tsx"
+    },
+    "order": null
+  }
 }

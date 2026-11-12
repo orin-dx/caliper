@@ -45,5 +45,16 @@
     ],
     "alias": "Responsive"
   },
-  "text": "Responsive<string | number> | undefined"
+  "text": "Responsive<string | number> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/28-responsive-style-prop.tsx"
+    },
+    "order": null
+  }
 }

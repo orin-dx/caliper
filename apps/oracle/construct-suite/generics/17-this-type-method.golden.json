@@ -18,5 +18,16 @@
     ],
     "alias": "Chain"
   },
-  "text": "Chain | undefined"
+  "text": "Chain | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/17-this-type-method.tsx"
+    },
+    "order": null
+  }
 }

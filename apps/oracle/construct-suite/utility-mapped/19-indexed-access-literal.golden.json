@@ -15,5 +15,16 @@
       }
     ]
   },
-  "text": "{ x: number; } | undefined"
+  "text": "{ x: number; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/19-indexed-access-literal.tsx"
+    },
+    "order": null
+  }
 }

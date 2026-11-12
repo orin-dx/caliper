@@ -19,5 +19,16 @@
     ],
     "alias": "Intent"
   },
-  "text": "Intent | undefined"
+  "text": "Intent | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/17-string-enum.tsx"
+    },
+    "order": null
+  }
 }

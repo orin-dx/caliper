@@ -18,5 +18,16 @@
     ],
     "alias": "Partial"
   },
-  "text": "Partial<Base> | undefined"
+  "text": "Partial<Base> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/01-partial.tsx"
+    },
+    "order": null
+  }
 }

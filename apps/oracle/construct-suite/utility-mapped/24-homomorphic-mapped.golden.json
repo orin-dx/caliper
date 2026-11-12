@@ -18,5 +18,16 @@
     ],
     "alias": "Wrapped"
   },
-  "text": "Wrapped<Base> | undefined"
+  "text": "Wrapped<Base> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/24-homomorphic-mapped.tsx"
+    },
+    "order": null
+  }
 }

@@ -47,6 +47,18 @@ pub(crate) struct SymbolInfo {
     pub flags: u64,
     #[serde(default)]
     pub declarations: Vec<String>,
+    /// The symbol it is a member of: the interface or type literal that declares a property. Absent for a property a
+    /// mapped type or an intersection made (`Omit<Base, "x">`, `A & B`), whose declarations still name the original.
+    #[serde(default)]
+    pub parent: Option<CompactSymbol>,
+}
+
+/// A JSDoc tag as `getJsDocTags` renders it: `@since 2.0` is `since` and `"2.0"`.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct JsDocTag {
+    pub name: String,
+    #[serde(default)]
+    pub text: Option<String>,
 }
 
 /// A symbol as another response embeds it: the id, and the node id of the file that owns it. The full symbol is one
@@ -217,6 +229,7 @@ pub(crate) mod flag {
     pub(crate) const CONDITIONAL: u64 = 67108864;
     pub(crate) const UNION: u64 = 134217728;
     pub(crate) const INTERSECTION: u64 = 268435456;
+    pub(crate) const SYMBOL_INTERFACE: u64 = 64;
     pub(crate) const SYMBOL_ALIAS: u64 = 2097152;
     pub(crate) const SYMBOL_OPTIONAL: u64 = 16777216;
     /// `SignatureFlags.HasRestParameter`: the signature's last parameter is a rest parameter. The beta sets it for
@@ -634,10 +647,6 @@ impl Rpc {
     /// it stands for (`(value?: string) => void`, not `Handler`), and a long type is printed to its end.
     pub(crate) async fn type_to_string_expanded(&self, type_id: u64) -> Result<String, CallError> {
         self.scoped("typeToString", json!({ "type": type_id, "flags": flag::PRINT_EXPANDED })).await
-    }
-
-    pub(crate) async fn documentation(&self, symbol: &Value) -> Result<String, CallError> {
-        self.scoped("getDocumentationComment", json!({ "symbol": symbol })).await
     }
 }
 

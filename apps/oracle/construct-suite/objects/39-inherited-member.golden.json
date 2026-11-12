@@ -1,0 +1,18 @@
+{
+  "checker": {
+    "k": "prim",
+    "name": "string"
+  },
+  "text": "string",
+  "facts": {
+    "description": "From the base.",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Base",
+      "file": "objects/39-inherited-member.tsx"
+    },
+    "order": null
+  }
+}

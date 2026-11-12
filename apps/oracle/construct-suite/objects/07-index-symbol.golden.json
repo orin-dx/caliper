@@ -17,5 +17,16 @@
       }
     ]
   },
-  "text": "{ [key: symbol]: number; } | undefined"
+  "text": "{ [key: symbol]: number; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/07-index-symbol.tsx"
+    },
+    "order": null
+  }
 }

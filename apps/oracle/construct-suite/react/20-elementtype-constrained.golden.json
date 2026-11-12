@@ -921,5 +921,16 @@
     ],
     "alias": "ElementType"
   },
-  "text": "ElementType<{ className?: string | undefined; }, keyof IntrinsicElements> | undefined"
+  "text": "ElementType<{ className?: string | undefined; }, keyof IntrinsicElements> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/20-elementtype-constrained.tsx"
+    },
+    "order": null
+  }
 }

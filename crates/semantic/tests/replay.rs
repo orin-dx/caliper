@@ -115,11 +115,11 @@ fn function_components_get_the_checkers_props_merged_over_the_structural_ones() 
     );
     assert_eq!(prop(&output, "Button", "tags").prop_type, PropType::Array(Box::new(PropType::String)));
 
-    // The checker orders union members by creation, not by source.
+    // The checker sorts union members; the merge puts them back in the order the alias writes them.
     let size = prop(&output, "Button", "size");
     assert_eq!(
         size.prop_type,
-        PropType::Union(vec![PropType::StringLiteral("lg".to_string()), PropType::StringLiteral("sm".to_string())])
+        PropType::Union(vec![PropType::StringLiteral("sm".to_string()), PropType::StringLiteral("lg".to_string())])
     );
     assert!(!size.required);
     assert_eq!(size.default_value, Some(DefaultValue { value: "\"sm\"".to_string(), computed: false }));

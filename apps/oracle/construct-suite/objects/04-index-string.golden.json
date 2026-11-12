@@ -17,5 +17,16 @@
       }
     ]
   },
-  "text": "{ [key: string]: number; } | undefined"
+  "text": "{ [key: string]: number; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/04-index-string.tsx"
+    },
+    "order": null
+  }
 }

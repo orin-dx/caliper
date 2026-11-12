@@ -23,5 +23,16 @@
       }
     ]
   },
-  "text": "(() => Promise<T[]>) | undefined"
+  "text": "(() => Promise<T[]>) | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/32-promise-array-generic.tsx"
+    },
+    "order": null
+  }
 }

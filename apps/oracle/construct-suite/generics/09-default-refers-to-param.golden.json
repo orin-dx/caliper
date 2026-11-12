@@ -17,5 +17,16 @@
     ],
     "alias": "Array"
   },
-  "text": "number[] | undefined"
+  "text": "number[] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/09-default-refers-to-param.tsx"
+    },
+    "order": null
+  }
 }

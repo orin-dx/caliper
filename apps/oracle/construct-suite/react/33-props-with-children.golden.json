@@ -29,5 +29,16 @@
     ],
     "alias": "PropsWithChildren"
   },
-  "text": "PropsWithChildren<{ tone: \"info\" | \"warn\"; }> | undefined"
+  "text": "PropsWithChildren<{ tone: \"info\" | \"warn\"; }> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/33-props-with-children.tsx"
+    },
+    "order": null
+  }
 }

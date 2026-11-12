@@ -29,5 +29,16 @@
       }
     ]
   },
-  "text": "(A<string> & B<number>) | undefined"
+  "text": "(A<string> & B<number>) | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/26-intersection-generic-aliases.tsx"
+    },
+    "order": null
+  }
 }

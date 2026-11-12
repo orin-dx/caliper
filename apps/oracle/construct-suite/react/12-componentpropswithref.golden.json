@@ -339,5 +339,16 @@
     ],
     "alias": "DetailedHTMLProps"
   },
-  "text": "DetailedHTMLProps<InputHTMLAttributes<HTMLInputElement>, HTMLInputElement> | undefined"
+  "text": "DetailedHTMLProps<InputHTMLAttributes<HTMLInputElement>, HTMLInputElement> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/12-componentpropswithref.tsx"
+    },
+    "order": null
+  }
 }

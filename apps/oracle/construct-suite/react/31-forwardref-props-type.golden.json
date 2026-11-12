@@ -30,5 +30,16 @@
       }
     ]
   },
-  "text": "(InnerProps & RefAttributes<HTMLButtonElement>) | undefined"
+  "text": "(InnerProps & RefAttributes<HTMLButtonElement>) | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/31-forwardref-props-type.tsx"
+    },
+    "order": null
+  }
 }

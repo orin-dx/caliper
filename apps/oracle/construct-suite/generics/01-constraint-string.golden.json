@@ -16,5 +16,16 @@
       }
     ]
   },
-  "text": "T | undefined"
+  "text": "T | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/01-constraint-string.tsx"
+    },
+    "order": null
+  }
 }

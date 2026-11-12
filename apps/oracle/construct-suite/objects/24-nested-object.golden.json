@@ -16,5 +16,16 @@
       }
     ]
   },
-  "text": "{ size: { width: number; height: number; }; pos?: { x: number; y: number; } | undefined; } | undefined"
+  "text": "{ size: { width: number; height: number; }; pos?: { x: number; y: number; } | undefined; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/24-nested-object.tsx"
+    },
+    "order": null
+  }
 }

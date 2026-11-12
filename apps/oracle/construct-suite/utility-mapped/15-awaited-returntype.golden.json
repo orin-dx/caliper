@@ -15,5 +15,16 @@
       }
     ]
   },
-  "text": "{ items: string[]; } | undefined"
+  "text": "{ items: string[]; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/15-awaited-returntype.tsx"
+    },
+    "order": null
+  }
 }

@@ -295,5 +295,16 @@
     ],
     "alias": "BoxProps"
   },
-  "text": "BoxProps | undefined"
+  "text": "BoxProps | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/34-interface-extends-htmlattributes.tsx"
+    },
+    "order": null
+  }
 }

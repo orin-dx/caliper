@@ -21,5 +21,16 @@
     ],
     "alias": "Array"
   },
-  "text": "Item[] | undefined"
+  "text": "Item[] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/12-array-of-named-alias.tsx"
+    },
+    "order": null
+  }
 }

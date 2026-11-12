@@ -17,5 +17,16 @@
     ],
     "alias": "Array"
   },
-  "text": "string[] | undefined"
+  "text": "string[] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Base",
+      "file": "generics/15-generic-extends-generic.tsx"
+    },
+    "order": null
+  }
 }

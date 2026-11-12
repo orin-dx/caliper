@@ -8,7 +8,9 @@
 //!
 //! It applies when the structural pass resolved the prop: a union in a file the extractor parsed, or one from a
 //! dependency that was loaded. A union the structural pass left opaque, or a prop it has no entry for, keeps the
-//! checker's order and carries no marker. Only a reorder is made: no member is added, dropped or changed.
+//! checker's order and carries no marker. Only a reorder is made: no member is added, dropped or changed. The checker's
+//! answer is not in the source's order, so oxc's syntax would have to supply it once the structural pass is gone, and
+//! the checker names no position to find a declaration's type node by (ADR 0026, S7a).
 
 use crate::types::output::{ObjectField, PropType};
 
@@ -16,6 +18,11 @@ use crate::types::output::{ObjectField, PropType};
 pub(super) fn in_declared_order(checker: PropType, declared: &PropType) -> PropType {
     match (checker, declared) {
         (PropType::Union(members), PropType::Union(order)) => PropType::Union(reorder(members, order)),
+        // A union of string literals the structural pass keeps as their values (`type Size = "sm" | "lg"`).
+        (PropType::Union(members), PropType::LiteralUnion { members: values, .. }) => {
+            let order: Vec<PropType> = values.iter().map(|value| PropType::StringLiteral(value.clone())).collect();
+            PropType::Union(reorder(members, &order))
+        }
         (PropType::Array(inner), PropType::Array(declared)) => {
             PropType::Array(Box::new(in_declared_order(*inner, declared)))
         }
@@ -74,31 +81,30 @@ fn ordered_fields(fields: Vec<ObjectField>, declared: &[ObjectField]) -> Vec<Obj
         .collect()
 }
 
-/// The members the declaration also has, put in its order; a member it does not have stays where the checker put it.
-/// Unchanged when the declaration has none of them.
+/// The members the declaration also has, in its order, then the members it does not have, in the checker's order: the
+/// checker's place for them is its sort, not the source's, and a member the structural pass dropped is most often the
+/// `undefined` or `null` written last. Unchanged when the declaration has none of them.
 fn reorder(members: Vec<PropType>, declared: &[PropType]) -> Vec<PropType> {
+    let bare = |name: &str| name.rsplit('.').next().unwrap_or(name).to_owned();
     let position = |member: &PropType| {
         declared.iter().position(|candidate| candidate == member).or_else(|| match member {
             // `boolean` is `true | false` to the checker; the source may have written either.
             PropType::Boolean => declared.iter().position(|candidate| matches!(candidate, PropType::BoolLiteral(_))),
+            // The source may name a type through a namespace (`React.Ref`); the checker names the declaration.
+            PropType::Named { name, .. } => declared.iter().position(
+                |candidate| matches!(candidate, PropType::Named { name: written, .. } if bare(written) == bare(name)),
+            ),
             _ => None,
         })
     };
     let places: Vec<Option<usize>> = members.iter().map(position).collect();
-    // The slots the known members occupy are refilled with them in declared order.
-    let mut known: Vec<(usize, PropType)> = Vec::new();
-    for (place, member) in places.iter().zip(&members) {
-        if let Some(place) = place {
-            known.push((*place, member.clone()));
-        }
+    if places.iter().all(Option::is_none) {
+        return members;
     }
-    known.sort_by_key(|(place, _)| *place);
-    let mut sorted = known.into_iter().map(|(_, member)| member);
-    members
-        .into_iter()
-        .zip(places)
-        .map(|(member, place)| if place.is_some() { sorted.next().unwrap_or(member) } else { member })
-        .collect()
+    let (mut known, unknown): (Vec<_>, Vec<_>) =
+        members.into_iter().zip(places).partition(|(_, place)| place.is_some());
+    known.sort_by_key(|(_, place)| *place);
+    known.into_iter().chain(unknown).map(|(member, _)| member).collect()
 }
 
 #[cfg(test)]
@@ -151,8 +157,16 @@ mod tests {
     }
 
     #[test]
-    fn a_member_the_declaration_lacks_stays_where_the_checker_put_it() {
-        assert_eq!(in_declared_order(union(&["lg", "md", "sm"]), &union(&["sm", "md"])), union(&["lg", "sm", "md"]));
+    fn a_member_the_declaration_lacks_goes_after_the_ones_it_has() {
+        assert_eq!(in_declared_order(union(&["lg", "md", "sm"]), &union(&["sm", "md"])), union(&["sm", "md", "lg"]));
+        // `p: "on" | "off" | null | undefined` on a required prop: the structural pass drops `undefined`, the checker
+        // sorts it first.
+        let checker = PropType::Union(vec![PropType::Undefined, lit("on"), lit("off"), PropType::Null]);
+        let declared = PropType::Union(vec![lit("on"), lit("off"), PropType::Null]);
+        assert_eq!(
+            in_declared_order(checker, &declared),
+            PropType::Union(vec![lit("on"), lit("off"), PropType::Null, PropType::Undefined])
+        );
         // The checker keeps `string & {}` as a member; the structural result writes `string`.
         let checker = PropType::Union(vec![
             lit("green"),
@@ -167,6 +181,30 @@ mod tests {
                 lit("green"),
                 PropType::Intersection(vec![PropType::String, PropType::Object(vec![])]),
             ])
+        );
+    }
+
+    #[test]
+    fn a_union_of_string_literals_kept_as_values_gives_their_order() {
+        let declared = PropType::LiteralUnion {
+            members: vec!["small".into(), "medium".into(), "large".into()],
+            has_default: false,
+        };
+        assert_eq!(
+            in_declared_order(union(&["large", "medium", "small"]), &declared),
+            union(&["small", "medium", "large"])
+        );
+    }
+
+    #[test]
+    fn a_named_member_is_found_by_its_name_without_the_namespace_it_was_written_through() {
+        let named = |name: &str| PropType::Named { name: name.into(), args: vec![] };
+        assert_eq!(
+            in_declared_order(
+                PropType::Union(vec![named("ForwardRefExoticComponent"), named("NamedExoticComponent")]),
+                &PropType::Union(vec![named("React.NamedExoticComponent"), named("React.ForwardRefExoticComponent")]),
+            ),
+            PropType::Union(vec![named("NamedExoticComponent"), named("ForwardRefExoticComponent")])
         );
     }
 

@@ -18,5 +18,16 @@
     ],
     "alias": "Readonly"
   },
-  "text": "Readonly<Base> | undefined"
+  "text": "Readonly<Base> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "utility-mapped/03-readonly.tsx"
+    },
+    "order": null
+  }
 }

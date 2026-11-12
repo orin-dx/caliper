@@ -18,5 +18,16 @@
     ],
     "alias": "FC"
   },
-  "text": "FC<IconProps> | undefined"
+  "text": "FC<IconProps> | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/08-fc-props.tsx"
+    },
+    "order": null
+  }
 }

@@ -12,5 +12,16 @@
       }
     ]
   },
-  "text": "object | undefined"
+  "text": "object | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/36-object-keyword.tsx"
+    },
+    "order": null
+  }
 }

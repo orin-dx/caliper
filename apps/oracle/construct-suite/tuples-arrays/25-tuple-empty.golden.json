@@ -12,5 +12,16 @@
       }
     ]
   },
-  "text": "[] | undefined"
+  "text": "[] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/25-tuple-empty.tsx"
+    },
+    "order": null
+  }
 }

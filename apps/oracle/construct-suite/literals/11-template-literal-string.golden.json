@@ -12,5 +12,16 @@
       }
     ]
   },
-  "text": "`data-${string}` | undefined"
+  "text": "`data-${string}` | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/11-template-literal-string.tsx"
+    },
+    "order": null
+  }
 }

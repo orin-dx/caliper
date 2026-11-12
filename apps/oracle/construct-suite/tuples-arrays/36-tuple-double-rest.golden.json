@@ -26,5 +26,16 @@
     ],
     "alias": "Array"
   },
-  "text": "(string | number)[] | undefined"
+  "text": "(string | number)[] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/36-tuple-double-rest.tsx"
+    },
+    "order": null
+  }
 }

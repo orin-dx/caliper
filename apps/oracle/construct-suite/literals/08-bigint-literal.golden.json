@@ -18,5 +18,27 @@
       }
     ]
   },
-  "text": "10n | 20n | undefined"
+  "text": "10n | 20n | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "literals/08-bigint-literal.tsx"
+    },
+    "order": [
+      {
+        "k": "lit",
+        "value": "10",
+        "of": "bigint"
+      },
+      {
+        "k": "lit",
+        "value": "20",
+        "of": "bigint"
+      }
+    ]
+  }
 }

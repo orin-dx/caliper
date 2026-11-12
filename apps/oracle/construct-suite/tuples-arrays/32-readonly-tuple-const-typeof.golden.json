@@ -23,5 +23,16 @@
       }
     ]
   },
-  "text": "readonly [\"sm\", \"md\"] | undefined"
+  "text": "readonly [\"sm\", \"md\"] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/32-readonly-tuple-const-typeof.tsx"
+    },
+    "order": null
+  }
 }

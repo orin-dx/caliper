@@ -15,5 +15,16 @@
       }
     ]
   },
-  "text": "{ tone: \"a\" | \"b\"; } | undefined"
+  "text": "{ tone: \"a\" | \"b\"; } | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "react/11-componentprops-typeof.tsx"
+    },
+    "order": null
+  }
 }

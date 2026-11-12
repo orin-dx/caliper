@@ -30,5 +30,16 @@
       }
     ]
   },
-  "text": "[string, (number | undefined)?] | undefined"
+  "text": "[string, (number | undefined)?] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/16-tuple-optional-element.tsx"
+    },
+    "order": null
+  }
 }

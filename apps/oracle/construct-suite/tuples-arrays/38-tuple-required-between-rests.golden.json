@@ -36,5 +36,16 @@
     ],
     "alias": "Array"
   },
-  "text": "(string | number | boolean)[] | undefined"
+  "text": "(string | number | boolean)[] | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "tuples-arrays/38-tuple-required-between-rests.tsx"
+    },
+    "order": null
+  }
 }

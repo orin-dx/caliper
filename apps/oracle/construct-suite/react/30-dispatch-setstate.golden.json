@@ -44,5 +44,16 @@
     },
     "alias": "Dispatch"
   },
-  "text": "Dispatch<SetStateAction<string[]>>"
+  "text": "Dispatch<SetStateAction<string[]>>",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": true,
+    "parent": {
+      "name": "Props",
+      "file": "react/30-dispatch-setstate.tsx"
+    },
+    "order": null
+  }
 }

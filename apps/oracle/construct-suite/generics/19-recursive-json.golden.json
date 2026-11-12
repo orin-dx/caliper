@@ -109,5 +109,132 @@
       }
     ]
   },
-  "text": "Json | undefined"
+  "text": "Json | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "generics/19-recursive-json.tsx"
+    },
+    "order": [
+      {
+        "k": "prim",
+        "name": "string"
+      },
+      {
+        "k": "prim",
+        "name": "number"
+      },
+      {
+        "k": "prim",
+        "name": "boolean"
+      },
+      {
+        "k": "prim",
+        "name": "null"
+      },
+      {
+        "k": "array",
+        "element": {
+          "k": "union",
+          "members": [
+            {
+              "k": "prim",
+              "name": "null"
+            },
+            {
+              "k": "prim",
+              "name": "string"
+            },
+            {
+              "k": "prim",
+              "name": "number"
+            },
+            {
+              "k": "lit",
+              "value": "false",
+              "of": "boolean"
+            },
+            {
+              "k": "lit",
+              "value": "true",
+              "of": "boolean"
+            },
+            {
+              "k": "array",
+              "element": {
+                "k": "opaque",
+                "alias": "Json"
+              },
+              "alias": "Array"
+            },
+            {
+              "k": "object",
+              "fields": [],
+              "index": true,
+              "indexValue": {
+                "k": "opaque",
+                "alias": "Json"
+              }
+            }
+          ],
+          "alias": "Json"
+        },
+        "alias": "Array"
+      },
+      {
+        "k": "object",
+        "fields": [],
+        "index": true,
+        "indexValue": {
+          "k": "union",
+          "members": [
+            {
+              "k": "prim",
+              "name": "null"
+            },
+            {
+              "k": "prim",
+              "name": "string"
+            },
+            {
+              "k": "prim",
+              "name": "number"
+            },
+            {
+              "k": "lit",
+              "value": "false",
+              "of": "boolean"
+            },
+            {
+              "k": "lit",
+              "value": "true",
+              "of": "boolean"
+            },
+            {
+              "k": "array",
+              "element": {
+                "k": "opaque",
+                "alias": "Json"
+              },
+              "alias": "Array"
+            },
+            {
+              "k": "object",
+              "fields": [],
+              "index": true,
+              "indexValue": {
+                "k": "opaque",
+                "alias": "Json"
+              }
+            }
+          ],
+          "alias": "Json"
+        }
+      }
+    ]
+  }
 }

@@ -18,5 +18,16 @@
     ],
     "alias": "Item"
   },
-  "text": "Item | undefined"
+  "text": "Item | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/26-interface-extends.tsx"
+    },
+    "order": null
+  }
 }

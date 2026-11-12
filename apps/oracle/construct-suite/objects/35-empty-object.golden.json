@@ -13,5 +13,16 @@
       }
     ]
   },
-  "text": "{} | undefined"
+  "text": "{} | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": {
+      "name": "Props",
+      "file": "objects/35-empty-object.tsx"
+    },
+    "order": null
+  }
 }
