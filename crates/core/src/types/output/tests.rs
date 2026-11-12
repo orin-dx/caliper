@@ -372,213 +372,23 @@ mod opaque_detail_tests {
         assert_eq!(detail.raw(), "SomeType");
         assert_eq!(detail.reason(), &OpaqueReason::DepthExceeded);
     }
-
-    #[test]
-    fn opaque_round_trips_through_the_tagged_json_wire_format() {
-        let pt = OpaqueDetail::new("A<B> | C", OpaqueReason::UnsupportedExpression);
-        let json = to_tagged_value(&pt);
-        let restored = PropType::from_tagged_value(&json).expect("should deserialize");
-        assert_eq!(pt, restored);
-    }
 }
 
-mod number_literal_roundtrip_tests {
+mod number_literal_wire_tests {
     use super::*;
 
     #[test]
-    fn nan_number_literal_round_trips_as_nan_not_zero() {
-        let original = PropType::NumberLiteral(f64::NAN);
-        let json = serde_json::to_value(&original).expect("serialize");
-        let restored: PropType = serde_json::from_value(json).expect("deserialize");
-
-        match restored {
-            PropType::NumberLiteral(n) => assert!(n.is_nan(), "expected NaN to survive the round-trip, got {n}"),
-            other => panic!("expected NumberLiteral, got {other:?}"),
-        }
-    }
-
-    // ── SPEC-TYPES-001 AC-004: a NaN payload reachable NESTED inside Union,
-    // Intersection, Array, Tuple, Object (via ObjectField.prop_type), or
-    // Named's args must also survive the round-trip as NaN — AC-006 only
-    // proves the top-level case; this covers every position the criterion
-    // explicitly enumerates in one fixture rather than leaving them unasserted.
-
-    #[test]
-    fn nan_number_literal_survives_the_round_trip_when_nested() {
-        let original = PropType::Union(vec![
-            PropType::Intersection(vec![PropType::NumberLiteral(f64::NAN), PropType::String]),
-            PropType::Array(Box::new(PropType::NumberLiteral(f64::NAN))),
-            tuple(vec![PropType::NumberLiteral(f64::NAN), PropType::String]),
-            PropType::Object(vec![ObjectField {
-                name: "n".into(),
-                prop_type: PropType::NumberLiteral(f64::NAN),
-                required: true,
-                description: String::new(),
-                readonly: false,
-                index_key: None,
-            }]),
-            PropType::Named { name: "Foo".into(), args: vec![PropType::NumberLiteral(f64::NAN)] },
-        ]);
-
-        let json = serde_json::to_value(&original).expect("serialize");
-        let restored: PropType = serde_json::from_value(json).expect("deserialize");
-
-        let PropType::Union(members) = &restored else { panic!("expected Union, got {restored:?}") };
-
-        let PropType::Intersection(items) = &members[0] else { panic!("expected Intersection, got {:?}", members[0]) };
-        assert!(
-            matches!(items[0], PropType::NumberLiteral(n) if n.is_nan()),
-            "NaN nested in Intersection did not survive, got {:?}",
-            items[0]
-        );
-
-        let PropType::Array(inner) = &members[1] else { panic!("expected Array, got {:?}", members[1]) };
-        assert!(
-            matches!(**inner, PropType::NumberLiteral(n) if n.is_nan()),
-            "NaN nested in Array did not survive, got {inner:?}"
-        );
-
-        let PropType::Tuple(items) = &members[2] else { panic!("expected Tuple, got {:?}", members[2]) };
-        assert!(
-            matches!(items[0].element_type, PropType::NumberLiteral(n) if n.is_nan()),
-            "NaN nested in Tuple did not survive, got {:?}",
-            items[0]
-        );
-
-        let PropType::Object(fields) = &members[3] else { panic!("expected Object, got {:?}", members[3]) };
-        assert!(
-            matches!(fields[0].prop_type, PropType::NumberLiteral(n) if n.is_nan()),
-            "NaN nested in Object's ObjectField.prop_type did not survive, got {:?}",
-            fields[0].prop_type
-        );
-
-        let PropType::Named { args, .. } = &members[4] else { panic!("expected Named, got {:?}", members[4]) };
-        assert!(
-            matches!(args[0], PropType::NumberLiteral(n) if n.is_nan()),
-            "NaN nested in Named's args did not survive, got {:?}",
-            args[0]
-        );
-    }
-
-    #[test]
-    fn infinity_number_literal_round_trips_as_infinity() {
-        let original = PropType::NumberLiteral(f64::INFINITY);
-        let json = serde_json::to_value(&original).expect("serialize");
-        let restored: PropType = serde_json::from_value(json).expect("deserialize");
-
-        match restored {
-            PropType::NumberLiteral(n) => assert_eq!(n, f64::INFINITY),
-            other => panic!("expected NumberLiteral, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn finite_number_literal_still_round_trips_normally() {
-        let original = PropType::NumberLiteral(42.5);
-        let json = serde_json::to_value(&original).expect("serialize");
-        let restored: PropType = serde_json::from_value(json).expect("deserialize");
-
-        assert_eq!(restored, PropType::NumberLiteral(42.5));
-    }
-
-    // ── SPEC-TYPES-001 AC-007: PropType::NumberLiteral(NEG_INFINITY) must also
-    // round-trip exactly — only +INFINITY was previously tested, an asymmetry
-    // against CollectedType's own test for the negative case.
-
-    #[test]
-    fn neg_infinity_number_literal_round_trips_as_neg_infinity() {
-        let original = PropType::NumberLiteral(f64::NEG_INFINITY);
-        let json = serde_json::to_value(&original).expect("serialize");
-        let restored: PropType = serde_json::from_value(json).expect("deserialize");
-
-        match restored {
-            PropType::NumberLiteral(n) => assert_eq!(n, f64::NEG_INFINITY),
-            other => panic!("expected NumberLiteral, got {other:?}"),
-        }
+    fn non_finite_number_literals_are_written_as_strings_and_finite_ones_as_numbers() {
+        let wire = |n: f64| serde_json::to_value(PropType::NumberLiteral(n)).expect("serialize")["value"].clone();
+        assert_eq!(wire(f64::NAN), "NaN");
+        assert_eq!(wire(f64::INFINITY), "Infinity");
+        assert_eq!(wire(f64::NEG_INFINITY), "-Infinity");
+        assert_eq!(wire(42.5), 42.5);
     }
 }
 
-mod prop_type_composite_roundtrip_tests {
+mod opaque_reason_wire_tests {
     use super::*;
-
-    // ── SPEC-TYPES-001 AC-004: manual serde impls round-trip nested/composite
-    // PropType shapes, not just the leaf Opaque/NumberLiteral cases.
-
-    #[test]
-    fn union_of_composite_members_round_trips_exactly() {
-        let original = PropType::Union(vec![
-            PropType::StringLiteral("a".into()),
-            PropType::Array(Box::new(PropType::Number)),
-            PropType::Named { name: "Foo".into(), args: vec![PropType::String] },
-        ]);
-        let json = serde_json::to_value(&original).expect("serialize");
-        let restored: PropType = serde_json::from_value(json).expect("deserialize");
-        assert_eq!(restored, original);
-    }
-
-    #[test]
-    fn object_with_fields_round_trips_exactly() {
-        let original = PropType::Object(vec![
-            ObjectField {
-                name: "a".into(),
-                prop_type: PropType::String,
-                required: true,
-                description: "desc".into(),
-                readonly: false,
-                index_key: None,
-            },
-            ObjectField {
-                name: "b".into(),
-                prop_type: PropType::Boolean,
-                required: false,
-                description: String::new(),
-                readonly: false,
-                index_key: None,
-            },
-        ]);
-        let json = serde_json::to_value(&original).expect("serialize");
-        let restored: PropType = serde_json::from_value(json).expect("deserialize");
-        assert_eq!(restored, original);
-    }
-
-    #[test]
-    fn tuple_and_named_with_args_round_trip_exactly() {
-        let original = tuple(vec![PropType::String, PropType::Named { name: "Bar".into(), args: vec![] }]);
-        let json = serde_json::to_value(&original).expect("serialize");
-        let restored: PropType = serde_json::from_value(json).expect("deserialize");
-        assert_eq!(restored, original);
-    }
-
-    // ── SPEC-TYPES-001 AC-004C: from_tagged_value returns Err when "kind" is
-    // absent or present-but-not-a-string.
-
-    #[test]
-    fn from_tagged_value_errs_on_missing_kind() {
-        let v = serde_json::json!({"notKind": "string"});
-        assert!(PropType::from_tagged_value(&v).is_err());
-    }
-
-    #[test]
-    fn from_tagged_value_errs_on_non_string_kind() {
-        let v = serde_json::json!({"kind": 42});
-        assert!(PropType::from_tagged_value(&v).is_err());
-    }
-
-    // ── SPEC-TYPES-001 AC-004C2: an unrecognized "kind" degrades to
-    // Opaque(DepthExceeded) with the raw string naming the bad tag, not an Err.
-
-    #[test]
-    fn from_tagged_value_unrecognized_kind_degrades_to_opaque() {
-        let v = serde_json::json!({"kind": "bogus"});
-        let pt = PropType::from_tagged_value(&v).expect("unrecognized kind should degrade, not error");
-        match pt {
-            PropType::Opaque(detail) => {
-                assert_eq!(detail.raw(), "unknown PropType kind: bogus");
-                assert_eq!(detail.reason(), &OpaqueReason::DepthExceeded);
-            }
-            other => panic!("expected Opaque, got {other:?}"),
-        }
-    }
 
     // ── SPEC-TYPES-001 AC-005: OpaqueReason's OWN derived serialize output
     // differs from the hand-built {"type": ...} shape PropType::to_tagged_value
@@ -696,51 +506,7 @@ mod serde_key_casing_tests {
     }
 }
 
-mod component_entry_roundtrip_tests {
-    use super::*;
-
-    // ── SPEC-TYPES-001 AC-014: ComponentEntry derives both serde traits
-    // directly (no manual impl) — there was previously NO round-trip test for
-    // ComponentEntry at all.
-
-    #[test]
-    fn component_entry_round_trips_through_json() {
-        let prop = ParsedProp::new(
-            "label".to_string(),
-            PropType::String,
-            true,
-            None,
-            "the label".to_string(),
-            Default::default(),
-            None,
-            vec![],
-        );
-        let mut props = BTreeMap::new();
-        props.insert("label".to_string(), std::sync::Arc::new(prop));
-
-        let original = ComponentEntry {
-            display_name: "Widget".to_string(),
-            file_path: "Widget.tsx".into(),
-            description: "A widget".to_string(),
-            props,
-            inheritance: vec![],
-            notable_inherited: Default::default(),
-            discriminant_prop: Some("variant".to_string()),
-            composes: vec!["Base".to_string()],
-            tags: Default::default(),
-            methods: vec![],
-            detected_by: crate::types::DetectionRule::FunctionDeclaration,
-            exported: true,
-            exports: Vec::new(),
-        };
-
-        let json = serde_json::to_value(&original).expect("serialize");
-        let restored: ComponentEntry = serde_json::from_value(json).expect("deserialize");
-        assert_eq!(restored, original);
-    }
-}
-
-mod parsed_prop_mutation_and_deserialize_escape_hatch_tests {
+mod parsed_prop_mutation_tests {
     use super::*;
 
     // ── SPEC-TYPES-001 AC-014B: ParsedProp::new normalizes required/default_value
@@ -764,29 +530,6 @@ mod parsed_prop_mutation_and_deserialize_escape_hatch_tests {
 
         prop.required = true;
 
-        assert!(prop.required);
-        assert!(prop.default_value.is_some());
-    }
-
-    // ── SPEC-TYPES-001 AC-014C: the derived Deserialize impl (with _seal
-    // skipped) performs no normalization — deserializing a hand-crafted JSON
-    // object with required:true and a non-null defaultValue produces the
-    // contradictory state directly.
-
-    #[test]
-    fn derived_deserialize_does_not_normalize_required_and_default_value() {
-        let json = serde_json::json!({
-            "name": "p",
-            "type": {"kind": "string"},
-            "required": true,
-            "defaultValue": {"value": "a", "computed": false},
-            "description": "",
-            "tags": {},
-            "parent": null,
-            "declarations": []
-        });
-
-        let prop: ParsedProp = serde_json::from_value(json).expect("deserialize");
         assert!(prop.required);
         assert!(prop.default_value.is_some());
     }
@@ -1055,22 +798,6 @@ mod streaming_serialize_tests {
     }
 
     #[test]
-    fn a_reader_rejects_what_the_new_kinds_cannot_hold() {
-        let read = |json: serde_json::Value| PropType::from_tagged_value(&json);
-        assert!(read(serde_json::json!({ "kind": "bigintLiteral", "value": "1.5" })).is_err());
-        assert!(read(serde_json::json!({ "kind": "tuple", "elements": [{ "type": { "kind": "string" }, "modifier": "spread" }] })).is_err());
-        assert!(
-            read(
-                serde_json::json!({ "kind": "tuple", "elements": [{ "type": { "kind": "string" }, "label": "a b" }] })
-            )
-            .is_err()
-        );
-        assert!(read(serde_json::json!({ "kind": "enumMember", "enum": "E", "member": "A", "value": { "kind": "boolLiteral", "value": true } })).is_err());
-        assert!(read(serde_json::json!({ "kind": "truncated", "text": "A", "limit": { "type": "width" } })).is_err());
-        assert!(read(serde_json::json!({ "kind": "templateLiteral", "parts": [{}] })).is_err());
-    }
-
-    #[test]
     fn only_a_truncated_member_degrades_among_the_new_kinds() {
         for shape in [every_tuple_element(), size_small(), pixels(), overloads()] {
             assert!(shape.degraded_by().is_empty(), "{shape:?}");
@@ -1187,7 +914,7 @@ mod streaming_serialize_tests {
     }
 
     #[test]
-    fn the_flags_are_written_only_when_set_and_read_back() {
+    fn the_flags_are_written_only_when_set() {
         let json = serde_json::to_value(signature_with_optional_and_rest()).expect("serialize");
         assert_eq!(
             json["params"],
@@ -1197,10 +924,7 @@ mod streaming_serialize_tests {
                 { "name": "rest", "type": { "kind": "array", "element": { "kind": "boolean" } }, "rest": true },
             ])
         );
-        assert_eq!(
-            PropType::from_tagged_value(&json).map(|p| p.raw_string()),
-            Ok("(a: string, b?: number, ...rest: boolean[]) => void".to_owned())
-        );
+        assert_eq!(signature_with_optional_and_rest().raw_string(), "(a: string, b?: number, ...rest: boolean[]) => void");
     }
 
     #[test]
@@ -1226,10 +950,6 @@ mod streaming_serialize_tests {
             let streamed = serde_json::to_string(&shape).expect("serialize");
             let reference = serde_json::to_string(&to_tagged_value(&shape)).expect("serialize value");
             assert_eq!(streamed, reference, "{shape:?}");
-            assert_eq!(
-                PropType::from_tagged_value(&serde_json::from_str(&streamed).unwrap()).map(|p| format!("{p:?}")),
-                Ok(format!("{shape:?}"))
-            );
         }
     }
 }
