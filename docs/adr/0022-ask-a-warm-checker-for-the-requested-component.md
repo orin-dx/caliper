@@ -18,7 +18,7 @@ The TypeScript 7.1 backend (ADR 0006, 0007) checks the whole project in one run:
 
 Of a 30 to 40 ms request, 20 to 33 ms builds the program and 2 to 11 ms answers the queries. Initializing the session and parsing the tsconfig once per process, instead of per request, took 10 ms off. For the same components the checker reports 893 props where the structural pass reports 387 on shadcn, 828 against 732 on antd, and the same count on Mantine, Chakra and Spectrum.
 
-Through the Storybook harness (`storybook-parity.mjs --variants caliper,caliper-ondemand`, shadcn 95 and antd 83 sampled stories, two runs each, shared machine):
+Through the Storybook parity measurement (`docs/storybook-parity.md`, the `caliper` and `caliper-ondemand` variants, shadcn 95 and antd 83 sampled stories, two runs each, shared machine):
 
 | Corpus | Variant    | First story | Median story |     Total |    Peak RSS | Props Storybook lists that we lack |
 | ------ | ---------- | ----------: | -----------: | --------: | ----------: | ---------------------------------: |
