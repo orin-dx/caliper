@@ -255,17 +255,13 @@ mod tests {
         assert!(line.contains(r#"from "C:\\p\\a\"b.tsx";"#), "{line}");
     }
 
-    /// `TSRS_BIN`, else `CALIPER_TEST_TSC`; `None` skips, which on CI is a failure (as in `tests/instantiate.rs`).
-    #[allow(clippy::print_stderr, reason = "a skipped test says so")]
-    fn real_checker() -> Option<camino::Utf8PathBuf> {
-        let checker = ["TSRS_BIN", "CALIPER_TEST_TSC"]
+    /// The binary `TSRS_BIN`, else `CALIPER_TEST_TSC`, names, run as a process; with neither, the built-in checker (as
+    /// in `tests/instantiate.rs`).
+    fn checker_binary() -> Option<camino::Utf8PathBuf> {
+        ["TSRS_BIN", "CALIPER_TEST_TSC"]
             .into_iter()
-            .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()));
-        if checker.is_none() {
-            assert!(std::env::var_os("CI").is_none(), "on CI, TSRS_BIN or CALIPER_TEST_TSC must name a real checker");
-            eprintln!("skipped: neither TSRS_BIN nor CALIPER_TEST_TSC names a real checker");
-        }
-        checker.map(camino::Utf8PathBuf::from)
+            .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))
+            .map(camino::Utf8PathBuf::from)
     }
 
     /// ADR 0026's S5 gate: `Poly<"div">` has at least 260 props, and `Anchor<"a">`, the same props at another default,
@@ -273,7 +269,6 @@ mod tests {
     #[test]
     #[allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stderr)]
     fn a_polymorphic_component_has_the_props_of_the_element_it_is_instantiated_with() {
-        let Some(checker) = real_checker() else { return };
         let root = camino::Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/generic");
         let file = root.join("Poly.tsx");
         let target = |name: &str| Target {
@@ -289,20 +284,19 @@ mod tests {
             arguments: vec![format!("\"{element}\"")],
         };
         let mut request = crate::SemanticRequest::new(root.clone(), Vec::new());
-        request.tsc_path = Some(checker);
-        let config = crate::supervisor_config(&request).unwrap();
+        request.tsc_path = checker_binary();
         let timeout = std::time::Duration::from_secs(60);
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
 
         let outcome = runtime.block_on(async {
-            let supervisor = caliper_docgen_tsc_client::Supervisor::spawn(config).await.unwrap();
+            let checker = crate::start_checker(&request).await.unwrap();
             let tsconfig = root.join("tsconfig.json");
             let files = [file.to_string()];
-            let rpc = Rpc::open(supervisor.client(), timeout, Some(tsconfig.as_str()), &files, false).await.unwrap();
+            let rpc = Rpc::open(checker.client(), timeout, Some(tsconfig.as_str()), &files, false).await.unwrap();
             let pending = vec![(target("Poly<div>"), at("Poly", "div")), (target("Poly<a>"), at("Anchor", "a"))];
             let outcome = answer(&rpc, &files, &root, &PropInterner::default(), false, pending).await.unwrap();
             rpc.release().await;
-            supervisor.shutdown().await.unwrap();
+            checker.shutdown().await;
             outcome
         });
 

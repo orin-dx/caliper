@@ -35,7 +35,8 @@
     "index.js",
     "index.d.ts",
     "binding.d.ts",
-    "*.node"
+    "*.node",
+    "NOTICE"
   ],
   "optionalDependencies": {
     "caliper-docgen-napi-darwin-arm64": "0.10.0",

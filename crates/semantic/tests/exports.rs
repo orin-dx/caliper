@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stderr)]
 //! The checker asks for a component by the exports the extractor recorded for it (ADR 0027), and never by its display
 //! name or the module's `default`. The `exports` fixture, replayed from `exports.recording.json` (made by the
-//! `record_fixture` example against `typescript@7.1.0-beta`) and, when `TSRS_BIN` names a real `tsrs`, asked live:
+//! `record_fixture` example against `typescript@7.1.0-beta`) and asked live (the built-in checker, or `TSRS_BIN`):
 //!
 //! - `Menu.tsx`: `Menu.Item = Item; export default Menu`. `Item` is `default.Item`, so it has `value`, not `Menu`'s
 //!   `label` and `open`;
@@ -47,12 +47,13 @@ fn structural(project: &Project) -> ExtractionOutput {
     extract(&PipelineOptions { src_dirs: vec![project.root.clone()], ..PipelineOptions::default() })
 }
 
-fn request(project: &Project, targets: Vec<Target>, real: Option<&Utf8PathBuf>) -> SemanticRequest {
+fn request(project: &Project, targets: Vec<Target>, real: Option<&Option<Utf8PathBuf>>) -> SemanticRequest {
     let mut request = SemanticRequest::new(project.root.clone(), targets);
     request.request_timeout = Duration::from_secs(60);
     match real {
-        Some(bin) => request.tsc_path = Some(bin.clone()),
+        Some(bin) => request.tsc_path = bin.clone(),
         None => {
+            request.tsc_path = Some(project.root.join("node_modules/typescript/bin/tsc"));
             request.expected_versions = &[FAKE_VERSION];
             request.extra_env.push((
                 "REPLAY_FIXTURE".to_string(),
@@ -63,13 +64,9 @@ fn request(project: &Project, targets: Vec<Target>, real: Option<&Utf8PathBuf>) 
     request
 }
 
-#[allow(clippy::print_stderr, reason = "a skipped test says so, since a silent skip looks like a pass")]
+/// The `tsrs` binary `TSRS_BIN` names, to run as a process; `None` asks the built-in checker.
 fn tsrs_bin() -> Option<Utf8PathBuf> {
-    let bin = std::env::var("TSRS_BIN").ok().filter(|bin| !bin.is_empty());
-    if bin.is_none() {
-        eprintln!("skipped: TSRS_BIN is not set");
-    }
-    bin.map(Utf8PathBuf::from)
+    std::env::var("TSRS_BIN").ok().filter(|bin| !bin.is_empty()).map(Utf8PathBuf::from)
 }
 
 fn prop_names(output: &ExtractionOutput) -> Vec<(String, Vec<String>)> {
@@ -89,7 +86,7 @@ fn owned(expected: &[(&str, &[&str])]) -> Vec<(String, Vec<String>)> {
     expected.iter().map(|(key, names)| (key.to_string(), names.iter().map(ToString::to_string).collect())).collect()
 }
 
-fn each_component_gets_the_props_of_its_own_export(real: Option<&Utf8PathBuf>) {
+fn each_component_gets_the_props_of_its_own_export(real: Option<&Option<Utf8PathBuf>>) {
     let project = project("exports", real.is_none());
     let mut output = structural(&project);
     let expected = owned(&[
@@ -120,7 +117,7 @@ fn each_component_gets_the_props_of_its_own_export_replayed() {
 
 #[test]
 fn each_component_gets_the_props_of_its_own_export_from_a_real_tsrs() {
-    let Some(bin) = tsrs_bin() else { return };
+    let bin = tsrs_bin();
     each_component_gets_the_props_of_its_own_export(Some(&bin));
 }
 
@@ -155,7 +152,7 @@ fn a_missing_export_keeps_the_structural_result_and_never_falls_back_to_default(
 /// `Menu.tsx` re-exports `Card.tsx`'s default as `Elsewhere`.
 #[test]
 fn an_export_declared_in_another_file_keeps_the_structural_result() {
-    let Some(bin) = tsrs_bin() else { return };
+    let bin = tsrs_bin();
     let project = project("exports", false);
     let mut output = structural(&project);
     output.components.get_mut("Menu").unwrap().exports = vec![ComponentExport::named("Elsewhere")];
@@ -195,7 +192,7 @@ fn components_with_exports(output: &ExtractionOutput) -> Vec<(String, Vec<String
 
 /// `A.Item = …` and `B.Item = …` in one file are two components of one name. Each has the props of its own property,
 /// not the first attached `Item`'s: the checker was asked for `A.Item` and for `B.Item` and no other.
-fn two_inline_sub_components_of_one_name_each_get_their_own_props(real: Option<&Utf8PathBuf>) {
+fn two_inline_sub_components_of_one_name_each_get_their_own_props(real: Option<&Option<Utf8PathBuf>>) {
     let project = project("items", real.is_none());
     let mut output = structural(&project);
     let row = |name: &str, exports: &[&str], props: &[&str]| {
@@ -228,6 +225,6 @@ fn two_inline_sub_components_of_one_name_each_get_their_own_props_replayed() {
 
 #[test]
 fn two_inline_sub_components_of_one_name_each_get_their_own_props_from_a_real_tsrs() {
-    let Some(bin) = tsrs_bin() else { return };
+    let bin = tsrs_bin();
     two_inline_sub_components_of_one_name_each_get_their_own_props(Some(&bin));
 }

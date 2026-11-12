@@ -1,7 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stderr)]
-//! A warm checker kept across edits (ADR 0026 S6), against a real checker: `tsrs` when `TSRS_BIN` names its binary, else
-//! the Go `typescript@7.1` when `CALIPER_TEST_TSC` names its `bin/tsc`. Without either every test returns at once, and on
-//! CI (`CI` is set) that is a failure.
+//! A warm checker kept across edits (ADR 0026 S6), against a real checker: a `tsrs` process when `TSRS_BIN` names its
+//! binary, else the Go `typescript@7.1` when `CALIPER_TEST_TSC` names its `bin/tsc`, else the built-in checker.
 //!
 //! An edit the session announces is read from the kept snapshot brought up to date; one nobody announces is found
 //! before the checker answers from the old text, and the answer comes from the disk with a warning naming the file.
@@ -15,15 +14,12 @@ use caliper_docgen_core::types::{DiagnosticSeverity, ExtractionOutput};
 use caliper_docgen_semantic::{OnDemand, OnDemandConfig, Snapshots, targets_of};
 use camino::{Utf8Path, Utf8PathBuf};
 
+/// The checker binary to run as a process; `None` asks the built-in checker.
 fn real_checker() -> Option<Utf8PathBuf> {
-    let checker = ["TSRS_BIN", "CALIPER_TEST_TSC"]
+    ["TSRS_BIN", "CALIPER_TEST_TSC"]
         .into_iter()
-        .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()));
-    if checker.is_none() {
-        assert!(std::env::var_os("CI").is_none(), "on CI, TSRS_BIN or CALIPER_TEST_TSC must name a real checker");
-        eprintln!("skipped: neither TSRS_BIN nor CALIPER_TEST_TSC names a real checker");
-    }
-    checker.map(Utf8PathBuf::from)
+        .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))
+        .map(Utf8PathBuf::from)
 }
 
 const BUTTON: &str = "import type { Shared } from \"./shared\";\nexport function Button(props: Shared & { label: string }) { return null; }\n";
@@ -65,10 +61,10 @@ impl Project {
         file.set_modified(SystemTime::now() - Duration::from_secs(3600)).unwrap();
     }
 
-    fn checker(&self, tsc: &Utf8Path) -> Arc<OnDemand> {
+    fn checker(&self, tsc: Option<&Utf8Path>) -> Arc<OnDemand> {
         let mut config = OnDemandConfig::new(self.root.clone());
         config.tsconfig = Some(self.file("tsconfig.json"));
-        config.tsc_path = Some(tsc.to_owned());
+        config.tsc_path = tsc.map(Utf8Path::to_owned);
         config.request_timeout = Duration::from_secs(60);
         Arc::new(OnDemand::new(config))
     }
@@ -107,10 +103,10 @@ fn warnings(outcome: &SemanticOutcome) -> Vec<&str> {
 
 #[test]
 fn an_edit_the_checker_is_told_about_is_read_into_the_kept_snapshot() {
-    let Some(tsc) = real_checker() else { return };
+    let tsc = real_checker();
     let project = Project::new();
     let output = project.structural();
-    let checker = project.checker(&tsc);
+    let checker = project.checker(tsc.as_deref());
     assert_eq!(prop_names(&ask(&checker, target(&output, "Button"))), ["shared0", "label"]);
 
     project.write_settled("shared.ts", &shared(1));
@@ -132,10 +128,10 @@ fn an_edit_the_checker_is_told_about_is_read_into_the_kept_snapshot() {
 /// the text the checker read before.
 #[test]
 fn an_edit_the_checker_is_not_told_about_fails_loudly_and_is_answered_from_the_disk() {
-    let Some(tsc) = real_checker() else { return };
+    let tsc = real_checker();
     let project = Project::new();
     let output = project.structural();
-    let checker = project.checker(&tsc);
+    let checker = project.checker(tsc.as_deref());
     assert_eq!(prop_names(&ask(&checker, target(&output, "Button"))), ["shared0", "label"]);
 
     project.write_settled("shared.ts", &shared(1));
@@ -153,7 +149,7 @@ fn an_edit_the_checker_is_not_told_about_fails_loudly_and_is_answered_from_the_d
 /// resolves to the workspace's `@types/react`.
 #[test]
 fn a_generic_component_on_an_updated_snapshot_is_answered_as_on_a_fresh_one() {
-    let Some(tsc) = real_checker() else { return };
+    let tsc = real_checker();
     let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/generic");
     let output = caliper_docgen_core::pipeline::extract(&PipelineOptions {
         src_dirs: vec![root.clone()],
@@ -161,7 +157,7 @@ fn a_generic_component_on_an_updated_snapshot_is_answered_as_on_a_fresh_one() {
     });
     let mut config = OnDemandConfig::new(root.clone());
     config.tsconfig = Some(root.join("tsconfig.json"));
-    config.tsc_path = Some(tsc);
+    config.tsc_path = tsc;
     config.request_timeout = Duration::from_secs(60);
     let checker = OnDemand::new(config);
 
@@ -190,9 +186,9 @@ fn by_checker(answer: &ComponentAnswer) -> bool {
 /// warns, and after the edits every answer equals a fresh session's, in either order of asking.
 #[test]
 fn a_session_tells_its_checker_every_edit_and_answers_as_a_fresh_one_does() {
-    let Some(tsc) = real_checker() else { return };
+    let tsc = real_checker();
     let project = Project::new();
-    let checker = project.checker(&tsc);
+    let checker = project.checker(tsc.as_deref());
     let watched = session(&project, checker.clone());
     drop(watched.component("Button"));
 
@@ -214,7 +210,7 @@ fn a_session_tells_its_checker_every_edit_and_answers_as_a_fresh_one_does() {
     }
     assert_eq!(checker.snapshots().created, 1, "{:?}", checker.snapshots());
 
-    let fresh = session(&project, project.checker(&tsc));
+    let fresh = session(&project, project.checker(tsc.as_deref()));
     let keys = ["Button", "Card"];
     let watched_answers: Vec<_> = keys.iter().map(|key| watched.component(key).unwrap()).collect();
     let fresh_answers: Vec<_> = keys.iter().rev().map(|key| fresh.component(key).unwrap()).rev().collect();
