@@ -1,0 +1,128 @@
+{
+  "cli_version": "0.13.3-nightly.202611110616.7aed2fb15",
+  "checkpoint_id": "01M77972YBV0CPAAH4ZB1CVPSE",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-12T07:05:52.931273Z",
+  "branch": "worktree-agent-af10b7bfbe1efda9c",
+  "checkpoints_count": 3,
+  "save_step_count": 71,
+  "files_touched": [
+    "crates/semantic/src/on_demand.rs",
+    "docs/type-checker-integration.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "d243cd55bd94",
+  "checkpoint_transcript_start": 23781,
+  "transcript_lines_at_start": 23781,
+  "compact_transcript_start": 1995,
+  "token_usage": {
+    "input_tokens": 22,
+    "cache_creation_tokens": 16990,
+    "cache_read_tokens": 2185161,
+    "output_tokens": 6608,
+    "api_call_count": 10,
+    "subagent_tokens": {
+      "input_tokens": 406,
+      "cache_creation_tokens": 713723,
+      "cache_read_tokens": 53304243,
+      "output_tokens": 164297,
+      "api_call_count": 203
+    }
+  },
+  "redaction": {
+    "replacements": 31,
+    "layers": {
+      "betterleaks": 17,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 530
+  },
+  "summary": {
+    "intent": "Land slice 2 of trail #369 (in-process guards for the built-in tsrs checker) as a PR, address a review finding on it, and decide whether to run the oracle and whether the checker will solve outstanding problems.",
+    "outcome": "PR #440 (feat/in-process-guards) was opened as a draft after the first push didn't reach the remote, with its title and body written. A worker was dispatched to fix the leaked-snapshot review finding. The user was advised to defer the oracle until after merging #440 and flipping the default checker.",
+    "learnings": {
+      "repo": [
+        "The built-in tsrs checker is opt-in; flipping the default is tracked as S8, and the oracle should run only after the flip so its numbers reflect what users get.",
+        "In-process, host RSS cannot measure the checker because Caliper's own answer cache costs about 5.5 MiB per Chakra component (5.3 GB at 900 components). The guard instead reads tsrs arena residency via mincore (about 6 ms per read), using the tsrs_core =0.24.0 dependency.",
+        "Replacing the built-in checker session makes memory worse in-process: closing returns only part of the arenas and the next session re-parses every file. The built-in checker is therefore never replaced, and past max_rss_mib (768) it falls back to structural answers with a SEMANTIC_BACKEND warning.",
+        "tsrs's 256 MiB parse threads overflow the stack and abort the host at 300k to 1M nesting depending on shape. The file system is wrapped to refuse files nested more than 20,000 brackets deep, falling back to structural with a warning naming the file.",
+        "just gate-measure now runs --tsc built-in. just test-checker-lane also runs the 10,000-deep test in release.",
+        "Gate misses for the default flip remain: first answer is 171 ms against a 150 ms budget, and ButtonProps watch p95 is 162 ms against 25 ms. Whole-project extract gets slower, so the '17–39× faster than RDT' claim won't hold as written."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/checker.rs",
+          "line": 374,
+          "finding": "On createSnapshot/updateSnapshot for a program importing an over-nested file, this branch discards the successful response with the new snapshot ID while keeping the session alive. The snapshot can't be released (rpc.rs:414-448), so repeated refusals leak retained programs until the memory bound disables the checker. The fix is to release the snapshot or close the session before returning the error."
+        }
+      ],
+      "workflow": [
+        "Verify a push with git ls-remote against local HEAD; the first push of feat/in-process-guards never reached the remote, so the PR showed no diff.",
+        "When a PR doesn't appear after pushing, check GitHub status and rate limits before assuming an outage. Here GitHub was up and the push had simply not landed.",
+        "Subagent reports list 'not verified' items. These are good predictors of review findings, as the snapshot leak was.",
+        "Run the deterministic checker lane on the construct suite as a free baseline before spending on the oracle."
+      ]
+    },
+    "friction": [
+      "The first push of feat/in-process-guards silently didn't reach the remote, so the PR showed no diff and looked like a GitHub outage.",
+      "The trail link and PR lookup needed several sleeps and retries before PR #440 appeared.",
+      "The first-answer and ButtonProps watch gates still fail, blocking a confident default flip."
+    ],
+    "open_items": [
+      "Fix the leaked snapshot on refused over-nested files (worker in progress): release the snapshot, add a test that fails on the old head, and audit other early-return paths.",
+      "Caliper's answer cache grows about 5.5 MiB per Chakra component and is unfixed; it is a memory risk for the default flip.",
+      "Flip the built-in checker to the default (S8) after merging #440, then run the oracle once, pending user approval of the spend.",
+      "Meet the first-answer (150 ms) and ButtonProps watch (25 ms) budgets, or revisit them.",
+      "Measure Linux mincore cost (4 KiB pages) and run a live Storybook/Node session under the new rules.",
+      "Arrow chains, conditional types and long + chains are not bounded by the depth guard.",
+      "No real input makes tsrs panic inside a handler, so panic-recovery tests use a stand-in session.",
+      "Update the '17–39× faster than RDT' claim and document that headline numbers move after the flip.",
+      "PR #440 is still a draft and its CI hasn't been checked."
+    ]
+  }
+}
