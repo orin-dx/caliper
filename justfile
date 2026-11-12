@@ -93,6 +93,8 @@ test-checker-lane:
     cargo test --locked -p caliper-docgen-semantic --test instantiate
     # S6's gate on tsrs: a kept snapshot brought up to date, and an edit nobody announced caught loudly.
     cargo test --locked -p caliper-docgen-semantic --test watch
+    # The built-in checker's stack holds a type 10,000 deep without aborting its host (trail 369): release only.
+    cargo test --release --locked -p caliper-docgen-semantic --lib a_type_nested_ten_thousand_deep -- --ignored --exact checker::tests::a_type_nested_ten_thousand_deep_is_printed_in_full
 
 # Build the native binding and run the Vite plugin against it
 test-integration:
@@ -100,7 +102,7 @@ test-integration:
     NAPI_BINARY_REQUIRED=true pnpm --filter caliper-docgen-vite-plugin test:integration
     NAPI_BINARY_REQUIRED=true pnpm --filter caliper-docgen-storybook test:integration
 
-# Measure ADR 0026's memory, determinism, first-answer and watch gates against the pinned tsrs
+# Measure ADR 0026's memory, determinism, first-answer and watch gates on the built-in checker, as the addon runs it
 # (docs/gate-measurements.md). Builds the large project outside the repository (GATE_FIXTURES, default
 # ~/Projects/caliper-fixtures/gate-large), so it needs the network or a warm pnpm store; `just gate-measure --runs 3`
 # passes options to every gate. Takes minutes, runs every gate, and fails if any failed.
@@ -110,10 +112,9 @@ gate-measure *args:
     fixtures="${GATE_FIXTURES:-$HOME/Projects/caliper-fixtures/gate-large}"
     node scripts/gate_fixtures.mjs "$fixtures"
     cargo build --release --locked -p caliper-docgen-semantic --example gate_harness
-    TSRS_BIN="$(pnpm --silent --filter caliper-docgen-oracle exec tsx src/tsrs-bin.ts)"
     failed=0
     for gate in memory determinism first-answer watch; do
-        target/release/examples/gate_harness "$gate" --src "$fixtures/src" --tsc "$TSRS_BIN" {{ args }} || failed=1
+        target/release/examples/gate_harness "$gate" --src "$fixtures/src" --tsc built-in {{ args }} || failed=1
     done
     exit "$failed"
 

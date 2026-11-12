@@ -14,12 +14,15 @@
 //!
 //! The worker runs on its own thread with its own runtime, so a caller on any thread (a NAPI worker, a rayon task)
 //! never nests runtimes and can bound how long it waits. A failure to start or a crash yields an outcome with no
-//! components and one diagnostic, never an error; after [`MAX_RESTARTS`] crashes the checker stays down.
+//! components and one diagnostic, never an error; after [`MAX_RESTARTS`] crashes the checker stays down. A panic in
+//! the built-in checker counts as a crash: its session is not asked again, and a fresh one starts.
 //!
-//! A checker is replaced after [`MAX_REQUESTS_PER_PROCESS`] programs, and a checker process also when its resident
-//! memory passes [`OnDemandConfig::max_rss_mib`]. The built-in checker is replaced by a fresh session on the same
-//! program count, which drops what the old one held. Its memory is this process's, which the allocator keeps for reuse
-//! rather than returning, and which a host such as Storybook also counts, so the memory bound is not applied to it.
+//! What a checker holds is bounded by [`OnDemandConfig::max_rss_mib`] ([`Backend::memory_mib`]). A checker process is
+//! replaced past it, which gives its memory back, and also after [`MAX_REQUESTS_PER_PROCESS`] programs. The built-in
+//! checker's memory is read from its arenas, which leave out the host's (Node, Storybook), and it is never replaced: a
+//! closed session gives back only part of its arenas, and a fresh one parses every file again, so a replacement raises
+//! what this process holds (measured in `docs/gate-measurements.md`). Past the bound it stays down instead, and its
+//! components keep their structural answer with a warning that says why.
 //!
 //! Requests wait in two queues: an interactive one (a story someone opened) is answered before any background one (a
 //! warm-up, a fill, a prefetch), first come first served within each, and a background request a caller raised while
@@ -56,15 +59,18 @@ const INTERACTIVE_STREAK: u32 = 4;
 /// Crashes the checker may have before it stays down for the session.
 const MAX_RESTARTS: u32 = 3;
 
-/// Programs one checker builds before it is replaced. Its memory grows with every program it has loaded (measured:
-/// antd reached 600 MiB after 50 single-component programs), and a fresh process costs 30 to 70 ms.
+/// Programs one checker process builds before it is replaced. Its memory grows with every program it has loaded
+/// (measured: antd reached 600 MiB after 50 single-component programs), and a fresh process costs 30 to 70 ms.
 const MAX_REQUESTS_PER_PROCESS: u32 = 64;
 
-/// Resident memory, in MiB, past which a `tsc` process is replaced between requests. Measured single-component programs
-/// peak at 157 to 612 MiB (antd the highest); a process past this has loaded more than a story session needs.
+/// What a checker may hold, in MiB, between requests: a `tsc` process past it is replaced, and the built-in checker past
+/// it (measured by its arenas) stops for the session. Single-component programs peak at 157 to 612 MiB in a process
+/// (antd the highest), and the built-in checker's arenas at 46 MiB over 2,000 Chakra edits and 165 MiB over 937 Chakra
+/// and MUI components; past this, a checker has loaded more than a story session needs.
 const DEFAULT_MAX_RSS_MIB: u64 = 768;
 
-/// How many requests pass between memory checks: each reads the process table, which costs a few milliseconds.
+/// How many requests pass between memory checks: each reads the process table, or the arenas' pages, which costs a
+/// few milliseconds. The built-in checker is also checked after its first program.
 const RSS_CHECK_EVERY: u32 = 4;
 
 /// How long dropping a checker waits, by default, for its worker to finish a request and stop `tsc`, before leaving the
@@ -86,10 +92,13 @@ pub struct OnDemandConfig {
     /// The versions a checker binary's `package.json` may declare; one that is not among them is a start-up failure.
     /// The built-in checker is pinned and not checked.
     pub expected_versions: &'static [&'static str],
-    /// Resident memory of a checker process, in MiB, past which it is replaced after a request. A request that needs
-    /// more finishes first: the bound is between requests, not inside one. The built-in checker is not bound by it.
+    /// What a checker may hold, in MiB, read after a request: a checker process's resident memory, replaced past it, or
+    /// the built-in checker's arenas (the part of this process's memory the `tsrs` crates allocated), which stops for
+    /// the session past it, its components keeping their structural answer with a warning. A request that needs more
+    /// finishes first: the bound is between requests, not inside one.
     pub max_rss_mib: u64,
-    /// How long dropping the checker waits for a request in progress before it lets the worker finish alone.
+    /// How long dropping the checker waits for a request in progress before it lets the worker finish alone, and how
+    /// long a built-in checker that panicked or went past its memory bound is given to close its session.
     pub shutdown_wait: Duration,
     /// Environment for a checker process; the tests use it to pick a replay scenario.
     pub extra_env: Vec<(String, String)>,
@@ -112,30 +121,12 @@ impl OnDemandConfig {
     }
 }
 
-/// The resident memory of a process in MiB: `/proc` where it exists, else `ps`. `None` when neither answers.
-fn resident_mib(pid: u32) -> Option<u64> {
-    let kib = match std::fs::read_to_string(format!("/proc/{pid}/status")) {
-        Ok(status) => status
-            .lines()
-            .find_map(|line| line.strip_prefix("VmRSS:"))?
-            .split_whitespace()
-            .next()?
-            .parse::<u64>()
-            .ok()?,
-        Err(_) => {
-            let output = std::process::Command::new("ps").args(["-o", "rss=", "-p", &pid.to_string()]).output().ok()?;
-            String::from_utf8_lossy(&output.stdout).trim().parse::<u64>().ok()?
-        }
-    };
-    Some(kib / 1024)
-}
-
 /// How often a warm checker was replaced on purpose, by cause (crashes are not counted).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Recycles {
-    /// Replaced after building the most programs one checker is allowed.
+    /// A checker process replaced after building the most programs one process is allowed.
     pub worn: u32,
-    /// Replaced after its resident memory passed [`OnDemandConfig::max_rss_mib`].
+    /// A checker process replaced after its resident memory passed [`OnDemandConfig::max_rss_mib`].
     pub bloated: u32,
 }
 
@@ -458,7 +449,7 @@ impl Checker {
         }
         if self.backend.as_ref().is_some_and(|backend| !backend.is_alive()) {
             if let Some(dead) = self.backend.take() {
-                dead.shutdown().await;
+                dead.shutdown_within(config.shutdown_wait).await;
             }
             self.options = None;
             self.live = None;
@@ -481,6 +472,8 @@ impl Checker {
                 reverse_queries: false,
             };
             let backend = start_checker(&request).await.map_err(|reason| self.stay_down(reason))?;
+            // A checker started after a crash counts its own programs.
+            self.served = 0;
             // Initialize the session and read the compiler options once; every request after builds only its program.
             let tsconfig = config.tsconfig.as_ref().map(|path| path.as_str());
             match Rpc::prepare(&backend.client(), config.request_timeout, tsconfig).await {
@@ -623,24 +616,44 @@ impl Checker {
         }
     }
 
-    /// Replaces the checker when it has built enough programs or (a process) grown past the memory bound, and otherwise
-    /// stamps the snapshot it keeps. A planned replacement, not a crash: the next request starts a fresh checker.
+    /// Replaces a checker process when it has grown past the memory bound or built enough programs, stops the built-in
+    /// checker for the session past the bound (see [`Upkeep`]), and otherwise stamps the snapshot it keeps. A planned
+    /// replacement, not a crash: the next request starts a fresh checker.
     async fn maintain(&mut self, config: &OnDemandConfig) {
         let Some(backend) = self.backend.as_ref() else { return };
-        let worn = self.served >= MAX_REQUESTS_PER_PROCESS;
-        let resident = (!worn && self.served.is_multiple_of(RSS_CHECK_EVERY))
-            .then(|| backend.process_id().and_then(resident_mib))
-            .flatten();
-        let bloated = resident.is_some_and(|mib| mib > config.max_rss_mib);
-        if worn || bloated {
+        let linked = backend.is_linked();
+        let held = Upkeep::checks_memory(linked, self.served).then(|| backend.memory_mib()).flatten();
+        let upkeep = Upkeep::decide(linked, self.served, held, config.max_rss_mib);
+        if upkeep == Upkeep::Down {
+            let mib = held.unwrap_or_default();
+            tracing::warn!(
+                held_mib = mib,
+                bound_mib = config.max_rss_mib,
+                "the built-in checker is past its memory bound"
+            );
+            self.live = None;
+            self.told.clear();
+            if let Some(old) = self.backend.take() {
+                old.shutdown_within(config.shutdown_wait).await;
+            }
+            self.options = None;
+            self.stay_down(format!(
+                "the built-in checker held {mib} MiB, more than its {} MiB bound (`max_rss_mib`), and this process \
+                 keeps that memory, so components keep their structural answer for the rest of the session",
+                config.max_rss_mib
+            ));
+            return;
+        }
+        let worn = upkeep == Upkeep::Worn;
+        if worn || upkeep == Upkeep::Bloated {
             let (count, cause) = if worn { (&self.gauges.worn, "worn") } else { (&self.gauges.bloated, "bloated") };
             count.fetch_add(1, Ordering::Relaxed);
-            tracing::debug!(cause, served = self.served, resident_mib = ?resident, "replacing the checker");
+            tracing::debug!(cause, served = self.served, held_mib = ?held, "replacing the checker");
             // The snapshot goes with the checker; the next one reads every file from the disk.
             self.live = None;
             self.told.clear();
             if let Some(old) = self.backend.take() {
-                old.shutdown().await;
+                old.shutdown_within(config.shutdown_wait).await;
             }
             self.options = None;
             self.served = 0;
@@ -650,11 +663,74 @@ impl Checker {
     }
 }
 
+/// What becomes of a checker after a reply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Upkeep {
+    /// It keeps answering.
+    Keep,
+    /// A process replaced after [`MAX_REQUESTS_PER_PROCESS`] programs.
+    Worn,
+    /// A process replaced because it holds more than the memory bound.
+    Bloated,
+    /// The built-in checker holds more than the memory bound, which a replacement would not give back: it stays down
+    /// for the session.
+    Down,
+}
+
+impl Upkeep {
+    /// Whether to read what the checker holds after its `served`th program: every [`RSS_CHECK_EVERY`]th, and for the
+    /// built-in checker also the first, so that one program past the bound is caught at once.
+    fn checks_memory(linked: bool, served: u32) -> bool {
+        if !linked && served >= MAX_REQUESTS_PER_PROCESS {
+            // Replaced whatever it holds.
+            return false;
+        }
+        served.is_multiple_of(RSS_CHECK_EVERY) || (linked && served == 1)
+    }
+
+    fn decide(linked: bool, served: u32, held_mib: Option<u64>, bound_mib: u64) -> Upkeep {
+        let over = held_mib.is_some_and(|mib| mib > bound_mib);
+        match (linked, over) {
+            (false, _) if served >= MAX_REQUESTS_PER_PROCESS => Upkeep::Worn,
+            (false, true) => Upkeep::Bloated,
+            (true, true) => Upkeep::Down,
+            (_, false) => Upkeep::Keep,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use caliper_docgen_core::types::semantic::{Priority, SharedPriority};
 
-    use super::{INTERACTIVE_STREAK, Queue, resident_mib};
+    use super::{INTERACTIVE_STREAK, MAX_REQUESTS_PER_PROCESS, Queue, RSS_CHECK_EVERY, Upkeep};
+
+    #[test]
+    fn a_process_is_replaced_after_its_programs_or_past_the_bound_and_the_built_in_checker_stops_past_the_bound() {
+        assert_eq!((MAX_REQUESTS_PER_PROCESS, RSS_CHECK_EVERY), (64, 4));
+        // A process: worn after 64 programs, bloated past the bound whenever it is read.
+        assert_eq!(Upkeep::decide(false, 63, None, 768), Upkeep::Keep);
+        assert_eq!(Upkeep::decide(false, 64, None, 768), Upkeep::Worn);
+        assert_eq!(Upkeep::decide(false, 64, Some(800), 768), Upkeep::Worn);
+        assert_eq!(Upkeep::decide(false, 8, Some(800), 768), Upkeep::Bloated);
+        assert_eq!(Upkeep::decide(false, 8, Some(768), 768), Upkeep::Keep);
+        // The built-in checker: never replaced; down past the bound, after its first program or any later one.
+        assert_eq!(Upkeep::decide(true, 64, Some(100), 768), Upkeep::Keep);
+        assert_eq!(Upkeep::decide(true, 640, None, 768), Upkeep::Keep);
+        assert_eq!(Upkeep::decide(true, 1, Some(800), 768), Upkeep::Down);
+        assert_eq!(Upkeep::decide(true, 8, Some(800), 768), Upkeep::Down);
+        assert_eq!(Upkeep::decide(true, 8, Some(768), 768), Upkeep::Keep);
+    }
+
+    #[test]
+    fn the_built_in_checker_is_read_after_its_first_program_and_every_fourth_a_process_every_fourth() {
+        let read = |linked| (1..=9).filter(|served| Upkeep::checks_memory(linked, *served)).collect::<Vec<_>>();
+        assert_eq!(read(true), [1, 4, 8]);
+        assert_eq!(read(false), [4, 8]);
+        // A process due for replacement is not read: it goes whatever it holds.
+        assert!(!Upkeep::checks_memory(false, MAX_REQUESTS_PER_PROCESS));
+        assert!(Upkeep::checks_memory(true, MAX_REQUESTS_PER_PROCESS));
+    }
 
     fn drain(queue: &mut Queue<&'static str>) -> Vec<&'static str> {
         std::iter::from_fn(|| queue.next()).collect()
@@ -721,16 +797,5 @@ mod tests {
         push(&mut queue, "story 6", Priority::Interactive);
 
         assert_eq!(drain(&mut queue), ["story 6", "fill"]);
-    }
-
-    #[test]
-    fn a_running_process_has_resident_memory() {
-        let mib = resident_mib(std::process::id()).expect("this process is listed");
-        assert!((1..16_384).contains(&mib), "{mib} MiB");
-    }
-
-    #[test]
-    fn a_process_that_does_not_exist_has_none() {
-        assert_eq!(resident_mib(u32::MAX - 1), None);
     }
 }
