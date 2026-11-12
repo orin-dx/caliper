@@ -1,6 +1,6 @@
 use miette::Result;
 
-use crate::commands::extract::apply_semantic_backend;
+use crate::commands::extract::apply_checker;
 use crate::config::{BuildOptionsArgs, build_options};
 use crate::output::print_component;
 
@@ -17,11 +17,7 @@ pub fn cmd_inspect(args: crate::InspectArgs, config_path: Option<&str>) -> Resul
         collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
     let mut output = caliper_docgen_core::pipeline::extract(&options);
-    if options.checker && !args.no_checker {
-        let timeout = std::time::Duration::from_millis(crate::DEFAULT_SEMANTIC_TIMEOUT_MS);
-        let resolver = caliper_docgen_core::types::semantic::ResolverFacts::Used;
-        apply_semantic_backend(&options, timeout, resolver, Some(&args.component), &mut output);
-    }
+    apply_checker(&options, args.no_checker, Some(&args.component), &mut output);
 
     let component = output.components.get(&args.component).ok_or_else(|| {
         miette::miette!(

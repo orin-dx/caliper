@@ -1,6 +1,6 @@
 use miette::{IntoDiagnostic, Result};
 
-use crate::commands::extract::apply_semantic_backend;
+use crate::commands::extract::apply_checker;
 use crate::config::{BuildOptionsArgs, build_options};
 use crate::output::{print_diagnostics, print_summary};
 
@@ -20,11 +20,7 @@ pub fn cmd_check(args: crate::CheckArgs, quiet: bool, config_path: Option<&str>)
         collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
     let mut output = caliper_docgen_core::pipeline::extract(&options);
-    if options.checker && !args.no_checker {
-        let timeout = std::time::Duration::from_millis(crate::DEFAULT_SEMANTIC_TIMEOUT_MS);
-        let resolver = caliper_docgen_core::types::semantic::ResolverFacts::Used;
-        apply_semantic_backend(&options, timeout, resolver, None, &mut output);
-    }
+    apply_checker(&options, args.no_checker, None, &mut output);
 
     if args.json {
         println!("{}", serde_json::to_string(&output.diagnostics).into_diagnostic()?);

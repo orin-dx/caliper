@@ -1,4 +1,4 @@
-//! What the experimental TypeScript checker backend hands back, and how it merges over the structural result.
+//! What the TypeScript checker backend (on by default, ADR 0026) hands back, and how it merges over the structural result.
 //!
 //! The backend (`caliper-docgen-semantic`) owns the process, the protocol and the checker walk; this module owns only
 //! the result shape and the merge rules of `docs/type-checker-integration.md`, so `crates/core` stays free of I/O.
