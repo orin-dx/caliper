@@ -1,0 +1,135 @@
+{
+  "cli_version": "0.13.3-nightly.202611110616.7aed2fb15",
+  "checkpoint_id": "01M78MS4FNDKP0WH0DG1D2CW5W",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-12T19:47:15.978135Z",
+  "branch": "perf/checker-extract-speed",
+  "checkpoints_count": 13,
+  "save_step_count": 74,
+  "files_touched": [
+    "crates/core/src/types/semantic.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "7436c3e8f87a",
+  "checkpoint_transcript_start": 24175,
+  "transcript_lines_at_start": 24175,
+  "compact_transcript_start": 2026,
+  "token_usage": {
+    "input_tokens": 54,
+    "cache_creation_tokens": 551766,
+    "cache_read_tokens": 7204649,
+    "output_tokens": 18785,
+    "api_call_count": 28,
+    "subagent_tokens": {
+      "input_tokens": 316,
+      "cache_creation_tokens": 715408,
+      "cache_read_tokens": 27950060,
+      "output_tokens": 105960,
+      "api_call_count": 159
+    }
+  },
+  "redaction": {
+    "replacements": 35,
+    "layers": {
+      "betterleaks": 21,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 549
+  },
+  "summary": {
+    "intent": "Land the weekly benchmark switch to the checker default (PR #442), address review findings (#238 snapshot leak), and make checker-default extract at least 2-3x faster than react-docgen-typescript while keeping Storybook fast.",
+    "outcome": "PR #442 was written up and merged into #441's branch, the snapshot-leak fix (10df5137) was confirmed on the guards branch, and a perf worker was started and restarted after a failure. The RDT-versus-checker speed numbers are not yet reported, and the worker had uncommitted changes at the end.",
+    "learnings": {
+      "repo": [
+        "The weekly, agent_eval.py and bench.py now run the default checker; UNIVERSE_VERSION was bumped to 5 in scripts/weekly.py so the first checker record is not compared against the structural wrong-rate baseline and does not open a false 'wrong types rose' issue.",
+        "BUDGETS in scripts/headline.py are {'ms': None, 'rss_mib': None} for all five corpora (mantine, chakra, shadcn, antd, spectrum) until measured in CI; a None budget opens no issue. Headroom rule in docs/measurement.md: after two scheduled runs, take the larger, set time to 1.5x and memory to 1.25x, rounded up to the next 0.5 s and 50 MiB.",
+        "Checker-path measurements (macOS arm64, release, --no-cache): gate-large (938 components) 5.8-6.35 s and about 970-990 MiB; Chakra-only (787) 5.2-5.4 s and about 760-780 MiB; 3x gate-large 14.7-15.2 s and about 1,050 MiB. The on-disk cache does not shorten the checker pass.",
+        "The Storybook addon already shows structural props immediately and waits up to semanticWaitMs (150 ms) for the checker. It also prefetches the first story at startup (prefetchStories=1). Missing: live upgrade of an open story when the checker finishes late, and prefetch beyond one story.",
+        "The 'budget' term has two meanings in the docs: the weekly resource ceiling on Caliper's extract cost, and the ADR 0026 latency budget of 150 ms for the first Storybook answer (cold measured 171 ms).",
+        "Docs record RDT at about 10.4 s per run with no incremental mode; the 17-39x faster-than-RDT claim applies only to --no-checker. There is no checker-versus-RDT figure yet.",
+        "Checker cost profile: about 37 µs per request and 141 ms for the 3,776 ChakraButton requests; the first-answer cost dominates, and the work runs single-threaded.",
+        "The #238 snapshot leak was fixed in 10df5137 on feat/in-process-guards: a refused createSnapshot/updateSnapshot now releases its snapshot via discard() in crates/semantic/src/checker.rs, with sibling fixes in on_demand.rs and rpc.rs."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/checker.rs",
+          "line": 378,
+          "end_line": 384,
+          "finding": "The refusal path for an over-nested file now calls discard(), releasing the snapshot created by the answer that was dropped; before, the ID was lost and the snapshot could never be released."
+        },
+        {
+          "path": "crates/semantic/src/checker.rs",
+          "line": 446,
+          "finding": "A snapshot made for a caller that stopped waiting is now released."
+        }
+      ],
+      "workflow": [
+        "The classifier blocks `entire trail finding resolve` as an external write, so the agent could only report the finding as addressed and give the user the command to run.",
+        "A subagent hand-back message carries no user authority; the assistant verified the pushed SHA with git ls-remote before writing the PR body.",
+        "A subagent that dies mid-task can be restarted from its transcript and should be told to commit and push first, verifying the remote SHA, so work is not lost again.",
+        "Merge order for the stacked PRs is #440, then #441 (which carries #442), then slice 4, then the oracle run."
+      ]
+    },
+    "friction": [
+      "The user's accidental /stop hit the speed worker, which then auto-restarted and later failed with an API ENOTFOUND error, leaving uncommitted changes in its worktree.",
+      "The Entire finding for #440 still shows open after the fix, and the assistant could not resolve it because the classifier blocked the write.",
+      "PR #442 showed an UNSTABLE merge state when the PR body was written, and the cause was not investigated.",
+      "The 6 s and about 1 GB checker cost made the earlier speed lead over RDT uncertain, and no same-corpus RDT comparison existed."
+    ],
+    "open_items": [
+      "Speed worker on perf/checker-extract-speed must commit and push, prove byte-identical output against the current checker default (gate-large and Chakra-only), run construct:parity, determinism and the 600-edit memory gate, and re-measure RDT against Caliper over 3 runs.",
+      "Link the trail and write the PR body for the speed branch when it reports; do not merge it until the identity proof is back.",
+      "Storybook live-upgrade of an open story plus wider prefetch is waiting on the user's go and on #441 merging.",
+      "Merge #440 and #441, after which slice 4 can delete the process route, crates/tsc-client and the project typescript@beta fallback.",
+      "Run the single oracle pass and reword the speed headline to match the measured checker-versus-RDT ratio.",
+      "Record the corpus budgets after two scheduled weekly runs.",
+      "Resolve the Entire finding 01M778W5HQ7T once it is confirmed or the user allows it.",
+      "Close or ignore PR #434, which is already merged as an empty change."
+    ]
+  }
+}

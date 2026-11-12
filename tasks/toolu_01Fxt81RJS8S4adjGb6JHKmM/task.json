@@ -1,0 +1,14 @@
+{
+  "tool_use_id": "toolu_01Fxt81RJS8S4adjGb6JHKmM",
+  "agent_id": "aed2d7748791ef6ec",
+  "task_description": "Make checker-default extract 2-3x faster than RDT",
+  "token_usage": {
+    "input_tokens": 244,
+    "cache_creation_tokens": 658206,
+    "cache_read_tokens": 24621263,
+    "output_tokens": 84952,
+    "api_call_count": 123
+  },
+  "started_at": "2026-11-12T09:41:34.973976-08:00",
+  "completed_at": "2026-11-12T09:49:20.449857-08:00"
+}

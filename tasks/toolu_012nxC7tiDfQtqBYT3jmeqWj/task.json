@@ -1,0 +1,14 @@
+{
+  "tool_use_id": "toolu_012nxC7tiDfQtqBYT3jmeqWj",
+  "agent_id": "ad3d4b6b3faa8fa61",
+  "task_description": "Weekly records checker default",
+  "token_usage": {
+    "input_tokens": 78,
+    "cache_creation_tokens": 122480,
+    "cache_read_tokens": 3700922,
+    "output_tokens": 21832,
+    "api_call_count": 39
+  },
+  "started_at": "2026-11-11T23:56:51.084938-08:00",
+  "completed_at": "2026-11-12T00:04:25.363194-08:00"
+}
