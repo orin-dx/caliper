@@ -12567,3 +12567,7 @@ Is the first-answer agent still running? 2.5 hrs in?
 ---
 
 What about the others?
+
+---
+
+cleanup what is finished
