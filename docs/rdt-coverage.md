@@ -385,7 +385,7 @@ No fixture ships a real static `defaultProps` assignment today — `fixtures/blu
 
 ### Fixed: `typeof` a literal const, `keyof typeof` an object const, `true | false`, and a props type asserted on the export (2026-11-02)
 
-**Found by:** the Storybook parity report on antd (`packages/storybook/scripts/storybook-parity.mjs`, `docs/storybook-parity.md`), against Storybook's docgen.
+**Found by:** the Storybook parity report on antd (`docs/storybook-parity.md`), against Storybook's docgen.
 
 Previously: antd Cascader's `showCheckedStrategy?: typeof SHOW_PARENT | typeof SHOW_CHILD` (constants declared `const SHOW_PARENT = 'SHOW_PARENT'` or `declare const SHOW_PARENT: "SHOW_PARENT"`) stayed the named references `typeof SHOW_PARENT`; Result's `status?: keyof typeof IconMap` was opaque; a union of `true` and `false` read `false | true` where TypeScript prints `boolean`; and Masonry, declared with `forwardRef<Ref, MasonryProps>` and exported as `Masonry as (<T>(props: PropsWithChildren<MasonryProps<T>> & RefAttributes<Ref>) => ReactElement)`, lacked `children`.
 
