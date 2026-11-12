@@ -272,7 +272,7 @@ Pass only the files you need as roots. The API's checker is lazy, and diagnostic
 | Gate | Status |
 | --- | --- |
 | Accuracy against RDT | Passed on 13 components and re-verified on the full 47-component fixture corpus. See Evidence and not verified below |
-| Lifecycle | Client built and tested against a fake tsc and the real nightly (`crates/tsc-client`): missing binary, unsupported version, timeout, crash, restart storm, malformed or oversized frame, partial project failure, shutdown reaping, stale notification. Open: header-size cap, stderr that isn't UTF-8, honoring `handshake_timeout`, recovery after the restart cap trips, whether a restarted request may replay |
+| Lifecycle | Client built and tested against a fake tsc and the real nightly (`crates/tsc-client`): missing binary, unsupported version, timeout, crash, malformed or oversized frame, partial project failure, shutdown reaping, stale notification. The supervisor does not restart a crashed `tsc`: a session that ends stays ended, and `OnDemand` in `crates/semantic` respawns it, at most three times, and its replay test covers a crash falling back with one diagnostic. Open: header-size cap, stderr that isn't UTF-8, honoring `handshake_timeout` |
 | Cost | Measured through the Node client. Repeat with the Rust client |
 | Determinism | Clean and incremental runs must produce the same output |
 | Oracle | Fixed. See below |

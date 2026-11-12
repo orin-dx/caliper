@@ -30,10 +30,9 @@ async fn repeated_timeouts_leave_the_session_usable() {
 #[tokio::test]
 async fn a_request_the_child_never_answers_times_out() {
     let (_dir, config) = common::spawn_fake("never_respond");
-    let cwd = config.cwd.clone();
-    let mut supervisor = Supervisor::spawn(config).await.expect("spawn fake tsc");
+    let supervisor = Supervisor::spawn(config).await.expect("spawn fake tsc");
 
-    let result = supervisor.request("ping", serde_json::json!({}), Duration::from_millis(150)).await;
+    let result = supervisor.client().request("ping", serde_json::json!({}), Duration::from_millis(150)).await;
     match result {
         Err(TscClientError::Timeout { method, after }) => {
             assert_eq!(method, "ping");
@@ -43,8 +42,7 @@ async fn a_request_the_child_never_answers_times_out() {
         Ok(response) => panic!("expected Timeout, got a response: {response:?}"),
     }
 
-    // A timeout on a live session is not a restart trigger.
-    assert_eq!(common::settled_spawn_count(&cwd, 1).await, 1);
+    assert!(supervisor.is_alive(), "a timeout must not end the session");
 
     supervisor.shutdown().await.expect("shutdown");
 }

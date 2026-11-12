@@ -3,7 +3,7 @@
 //! Standalone: this crate has no dependency on `caliper-docgen-core`; `caliper-docgen-semantic` is the crate that
 //! consumes it. It exists to satisfy the Lifecycle gate in
 //! `docs/type-checker-integration.md` ("Gates before it ships") — missing binary,
-//! unsupported version, timeout, crash, restart storm, malformed/oversized frame,
+//! unsupported version, timeout, crash, malformed/oversized frame,
 //! partial project failure, shutdown reaping, stale notification — before any of the
 //! actual `typescript/unstable/*` checker methods get wired up to a merge step.
 //!
@@ -16,8 +16,8 @@
 //!   back partial frames that desync tsc's decoder and wedge every clone.
 //! - The closed state is set once, with a reason, by reader exit, a write failure or `Supervisor::shutdown`. Setting it
 //!   fails every pending waiter and stops the writer, so stdin closes even while `Client` clones live.
-//! - The supervisor decides restarts from the closed state alone. Matching error variants or polling task handles lets
-//!   a session end without a restart, as a fatal frame from a live child once did.
+//! - The session is over when its closed state is set, and only then. Matching error variants or polling task handles
+//!   lets a session end unnoticed, as a fatal frame from a live child once did.
 //!
 //! This crate deliberately has no `crates/core`-style panic containment
 //! (`panic_guard::contain_panic`): that exists to contain panics from caller-supplied

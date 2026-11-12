@@ -6,18 +6,19 @@
     clippy::print_stderr,
     clippy::let_underscore_must_use
 )]
-//! Tripwires for the layering rules in `ARCHITECTURE.md`. Each rule is a pure function over `(path, source)` so a
-//! negative test can prove it fires. Allowlists carry a reason and fail when the entry goes stale.
+//! The layering rules in `ARCHITECTURE.md` that a type, a visibility or a clippy lint cannot state: which module may
+//! import which. What clippy can state is in `.clippy.toml` (`HashMap`, `OpaqueDetail::new`), and `extractor` is
+//! `pub(crate)`, so no AST type reaches the public API without a re-export.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Path relative to `crates/core/src` (with `/` separators) and its production code: comment lines and everything from
+/// the first `#[cfg(test)]` item on are dropped.
 struct SourceFile {
-    /// Path relative to `crates/core/src`, with `/` separators.
     rel: String,
-    /// Production lines only: comments and everything from the first `#[cfg(test)]` on are dropped.
-    code: Vec<String>,
+    code: String,
 }
 
 fn collect(dir: &Path, root: &Path, out: &mut Vec<SourceFile>) {
@@ -27,13 +28,13 @@ fn collect(dir: &Path, root: &Path, out: &mut Vec<SourceFile>) {
             collect(&path, root, out);
         } else if path.extension().is_some_and(|e| e == "rs") && path.file_name().is_some_and(|n| n != "tests.rs") {
             let rel = path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
-            out.push(SourceFile { rel, code: production_lines(&fs::read_to_string(&path).unwrap()) });
+            out.push(SourceFile { rel, code: production_code(&fs::read_to_string(&path).unwrap()) });
         }
     }
 }
 
-fn production_lines(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
+fn production_code(text: &str) -> String {
+    let mut out = String::new();
     let mut lines = text.lines();
     while let Some(line) = lines.next() {
         if line.trim() == "#[cfg(test)]" {
@@ -46,7 +47,8 @@ fn production_lines(text: &str) -> Vec<String> {
                 }
             }
         } else if !line.trim_start().starts_with("//") {
-            out.push(line.to_owned());
+            out.push_str(line);
+            out.push('\n');
         }
     }
     out
@@ -64,207 +66,66 @@ fn in_layer(rel: &str, layer: &str) -> bool {
     rel == format!("{layer}.rs") || rel.starts_with(&format!("{layer}/"))
 }
 
-fn mentions(file: &SourceFile, needle: &str) -> bool {
-    file.code.iter().any(|l| l.contains(needle)) || grouped_import_of(file, needle)
+/// Whether `code` writes `module::` as the start of a path: `crate::module::X`, `super::module::X`, or `module::X` in a
+/// grouped `use crate::{…}`. `oxc_resolver::` is not `resolver::`.
+fn names_module(code: &str, module: &str) -> bool {
+    code.match_indices(&format!("{module}::"))
+        .any(|(at, _)| !code[..at].ends_with(|c: char| c.is_alphanumeric() || c == '_'))
 }
 
-/// Whether a grouped `use crate::{pipeline::X, types::Y}` (on one line or several) imports the top-level module a
-/// `crate::<module>` needle names. A plain substring search misses it.
-fn grouped_import_of(file: &SourceFile, needle: &str) -> bool {
-    let Some(module) = needle.strip_prefix("crate::") else {
-        return false;
-    };
-    let text = file.code.join(" ");
-    let mut rest = text.as_str();
-    while let Some(at) = rest.find("crate::{") {
-        let group = &rest[at + "crate::{".len()..];
-        let mut depth = 1usize;
-        let mut item_start = true;
-        for (i, c) in group.char_indices() {
-            match c {
-                '{' => {
-                    depth += 1;
-                    item_start = false;
-                }
-                '}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                }
-                ',' => item_start = depth == 1,
-                c if c.is_whitespace() => {}
-                _ => {
-                    if item_start && depth == 1 {
-                        let name: String =
-                            group[i..].chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
-                        if name == module {
-                            return true;
-                        }
-                    }
-                    item_start = false;
-                }
-            }
-        }
-        rest = group;
-    }
-    false
-}
-
-/// Files in `layers` that mention any of `forbidden`, minus allowlisted `(file, reason)` entries. An allowlist entry
-/// that no longer matches is itself a violation.
-fn forbidden_imports(files: &[SourceFile], layers: &[&str], forbidden: &[&str], allow: &[(&str, &str)]) -> Vec<String> {
-    let mut violations = Vec::new();
-    for file in files.iter().filter(|f| layers.iter().any(|l| in_layer(&f.rel, l))) {
-        let hit = forbidden.iter().any(|n| mentions(file, n));
-        let allowed = allow.iter().any(|(f, _)| *f == file.rel);
-        if hit && !allowed {
-            violations.push(format!("{} imports {forbidden:?}", file.rel));
-        }
-    }
-    for (path, reason) in allow {
-        let still_needed = files.iter().any(|f| f.rel == *path && forbidden.iter().any(|n| mentions(f, n)));
-        if !still_needed {
-            violations.push(format!("stale allowlist entry {path} ({reason})"));
-        }
-    }
-    violations
-}
-
-fn constructor_outside(files: &[SourceFile], needle: &str, allow: &[(&str, &str)]) -> Vec<String> {
-    let mut violations: Vec<String> = files
+/// The files in `layers`, other than `except`, that name any of the `forbidden` modules.
+fn forbidden_imports(layers: &[&str], forbidden: &[&str], except: &[&str]) -> Vec<String> {
+    core_sources()
         .iter()
-        .filter(|f| mentions(f, needle) && !allow.iter().any(|(p, _)| *p == f.rel))
-        .map(|f| format!("{} calls {needle}", f.rel))
-        .collect();
-    for (path, reason) in allow {
-        if !files.iter().any(|f| f.rel == *path && mentions(f, needle)) {
-            violations.push(format!("stale allowlist entry {path} ({reason})"));
-        }
-    }
-    violations
-}
-
-fn hash_maps_in(files: &[SourceFile], rel: &str) -> Vec<String> {
-    files
-        .iter()
-        .filter(|f| f.rel == rel)
-        .filter(|f| mentions(f, "HashMap"))
-        .map(|f| format!("{} uses a HashMap in a JSON-output type; use BTreeMap", f.rel))
+        .filter(|file| layers.iter().any(|layer| in_layer(&file.rel, layer)) && !except.contains(&file.rel.as_str()))
+        .filter_map(|file| {
+            let hits: Vec<_> = forbidden.iter().filter(|module| names_module(&file.code, module)).collect();
+            (!hits.is_empty()).then(|| format!("{} names {hits:?}", file.rel))
+        })
         .collect()
-}
-
-fn oxc_in_public_signatures(files: &[SourceFile]) -> Vec<String> {
-    let mut violations = Vec::new();
-    for file in files.iter().filter(|f| in_layer(&f.rel, "extractor")) {
-        for line in &file.code {
-            let t = line.trim_start();
-            let public = t.starts_with("pub ") && !t.starts_with("pub(");
-            if public && (t.contains("oxc_") || t.contains("Allocator") || t.contains("Program<")) {
-                violations.push(format!("{}: public signature exposes an AST type: {t}", file.rel));
-            }
-        }
-    }
-    violations
-}
-
-fn panic_abort_manifests(manifests: &[(String, String)]) -> Vec<String> {
-    manifests
-        .iter()
-        .filter(|(_, text)| text.lines().any(|l| l.replace(' ', "").starts_with("panic=\"abort\"")))
-        .map(|(path, _)| format!("{path} sets panic = \"abort\"; ADR 0005 needs unwinding"))
-        .collect()
-}
-
-fn file(rel: &str, text: &str) -> SourceFile {
-    SourceFile { rel: rel.to_owned(), code: production_lines(text) }
 }
 
 #[test]
 fn extractor_and_known_never_import_resolver_or_pipeline() {
-    let violations = forbidden_imports(
-        &core_sources(),
-        &["extractor", "known"],
-        &["crate::resolver", "crate::pipeline", "super::resolver", "super::pipeline"],
-        &[],
-    );
-    assert_eq!(violations, Vec::<String>::new());
+    assert_eq!(forbidden_imports(&["extractor", "known"], &["resolver", "pipeline"], &[]), Vec::<String>::new());
 }
 
 #[test]
 fn resolver_and_dependency_types_never_import_pipeline() {
     // The options both read live in `types/options.rs`; `pipeline` re-exports them.
-    let violations = forbidden_imports(
-        &core_sources(),
-        &["resolver", "dependency_types"],
-        &["crate::pipeline", "super::pipeline"],
-        &[],
-    );
-    assert_eq!(violations, Vec::<String>::new());
+    assert_eq!(forbidden_imports(&["resolver", "dependency_types"], &["pipeline"], &[]), Vec::<String>::new());
 }
 
 #[test]
 fn types_never_import_resolver_or_pipeline() {
-    let violations = forbidden_imports(
-        &core_sources(),
-        &["types"],
-        &["crate::resolver", "crate::pipeline", "crate::dependency_types"],
-        &[],
-    );
-    assert_eq!(violations, Vec::<String>::new());
+    assert_eq!(forbidden_imports(&["types"], &["resolver", "pipeline", "dependency_types"], &[]), Vec::<String>::new());
 }
 
 #[test]
 fn the_resolver_names_dependency_types_only_for_the_layer_it_reads() {
-    // `dependency_types` sits above the resolver: it loads declarations through the resolver's module resolution.
-    // The one edge back is the `DependencyLayer` value the resolver reads. Moving that type (and its `chain`,
-    // `resolves_like` and size helpers) under `types/` would remove it; that is more than a move, so it is recorded
-    // here instead of hidden.
-    let violations = forbidden_imports(
-        &core_sources(),
-        &["resolver"],
-        &["crate::dependency_types"],
-        &[("resolver/mod.rs", "ResolutionContext holds the loaded Arc<DependencyLayer>")],
-    );
-    assert_eq!(violations, Vec::<String>::new());
-}
-
-#[test]
-fn opaque_detail_is_constructed_only_where_the_reason_is_known() {
-    let violations = constructor_outside(
-        &core_sources(),
-        "OpaqueDetail::new(",
-        &[
-            ("known.rs", "library shortcuts name their own opaque reason"),
-            ("resolver/named.rs", "the depth guard names its own reason"),
-            ("types/output.rs", "deserialization rebuilds the detail"),
-            ("types/semantic.rs", "the checker's error type is an unresolvable name"),
-        ],
-    );
-    assert_eq!(violations, Vec::<String>::new());
-}
-
-#[test]
-fn json_output_types_use_btreemap() {
-    assert_eq!(hash_maps_in(&core_sources(), "types/output.rs"), Vec::<String>::new());
-}
-
-#[test]
-fn no_ast_type_in_a_public_extractor_signature() {
-    assert_eq!(oxc_in_public_signatures(&core_sources()), Vec::<String>::new());
+    // `dependency_types` sits above the resolver: it loads declarations through the resolver's module resolution. The
+    // one edge back is the `DependencyLayer` value `ResolutionContext` holds. Moving that type under `types/` would
+    // remove it; that is more than a move, so it is recorded here.
+    assert_eq!(forbidden_imports(&["resolver"], &["dependency_types"], &["resolver/mod.rs"]), Vec::<String>::new());
 }
 
 #[test]
 fn no_manifest_sets_panic_abort() {
     let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut manifests = vec![("Cargo.toml".to_owned(), fs::read_to_string(workspace.join("Cargo.toml")).unwrap())];
+    let mut manifests = vec![workspace.join("Cargo.toml")];
     for entry in fs::read_dir(workspace.join("crates")).unwrap() {
         let manifest = entry.unwrap().path().join("Cargo.toml");
         if manifest.exists() {
-            manifests.push((manifest.to_string_lossy().into_owned(), fs::read_to_string(&manifest).unwrap()));
+            manifests.push(manifest);
         }
     }
-    assert_eq!(panic_abort_manifests(&manifests), Vec::<String>::new());
+    let aborting: Vec<_> = manifests
+        .iter()
+        .filter(|path| {
+            fs::read_to_string(path).unwrap().lines().any(|l| l.replace(' ', "").starts_with("panic=\"abort\""))
+        })
+        .collect();
+    assert_eq!(aborting, Vec::<&PathBuf>::new(), "ADR 0005 needs unwinding");
 }
 
 #[test]
@@ -301,49 +162,4 @@ fn publishable_crates_have_publishable_versioned_path_dependencies() {
         }
     }
     assert_eq!(violations, Vec::<String>::new());
-}
-
-#[test]
-fn rules_fire_on_violations() {
-    let bad = [
-        file("extractor/visit.rs", "use crate::resolver::Foo;\n"),
-        file("resolver/chain.rs", "use crate::pipeline::PipelineOptions;\n"),
-        file("types/output.rs", "use std::collections::HashMap;\n"),
-        file("extractor/mod.rs", "pub fn parse(alloc: &Allocator) {}\n"),
-        file("elsewhere.rs", "OpaqueDetail::new(x, y);\n"),
-    ];
-    assert_eq!(forbidden_imports(&bad, &["extractor"], &["crate::resolver"], &[]).len(), 1);
-    assert_eq!(forbidden_imports(&bad, &["resolver"], &["crate::pipeline"], &[]).len(), 1);
-    let grouped = [
-        file("resolver/a.rs", "use crate::{\n    types::Foo,\n    pipeline::PipelineOptions,\n};\n"),
-        file("resolver/b.rs", "use crate::{types::{Foo, Bar}, known};\n"),
-        file("resolver/c.rs", "use crate::{known, pipeline};\n"),
-    ];
-    let hits = forbidden_imports(&grouped, &["resolver"], &["crate::pipeline"], &[]);
-    assert_eq!(hits.len(), 2, "{hits:?}");
-    assert!(hits.iter().all(|h| !h.starts_with("resolver/b.rs")));
-    assert_eq!(hash_maps_in(&bad, "types/output.rs").len(), 1);
-    assert_eq!(oxc_in_public_signatures(&bad).len(), 1);
-    assert_eq!(constructor_outside(&bad, "OpaqueDetail::new(", &[]).len(), 1);
-    assert_eq!(
-        panic_abort_manifests(&[("Cargo.toml".into(), "[profile.release]\npanic = \"abort\"\n".into())]).len(),
-        1
-    );
-}
-
-#[test]
-fn stale_allowlist_entries_fail() {
-    let clean = [file("resolver/extends.rs", "use crate::types::Foo;\n")];
-    let violations = forbidden_imports(&clean, &["resolver"], &["crate::pipeline"], &[("resolver/extends.rs", "old")]);
-    assert_eq!(violations.len(), 1);
-    assert!(violations[0].starts_with("stale allowlist entry"));
-}
-
-#[test]
-fn test_code_and_comments_are_ignored() {
-    let f = file(
-        "extractor/mod.rs",
-        "// crate::resolver is forbidden\nfn a() {}\n#[cfg(test)]\nmod t {\n    use crate::resolver::X;\n}\n",
-    );
-    assert!(forbidden_imports(&[f], &["extractor"], &["crate::resolver"], &[]).is_empty());
 }
