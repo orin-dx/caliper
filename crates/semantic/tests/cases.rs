@@ -5,8 +5,9 @@
 //!
 //! - replayed from its recording (`cases.recording.json`), always: the converter's output over exactly the answers the
 //!   real checker gave, with no binary;
-//! - against a real `tsrs` when `TSRS_BIN` names one, which also holds the answer to be the same when the checker is
-//!   asked last to first (type handles change with the order of queries; the answer may not);
+//! - against a real `tsrs` (the built-in checker, or the binary `TSRS_BIN` names), which also holds the answer to be
+//!   the same when the checker is asked last to first (type handles change with the order of queries; the answer may
+//!   not);
 //! - merged over the structural result, which puts a union's members back in the order they were written in.
 //!
 //! Refresh the recording and the snapshot with `cargo run -p caliper-docgen-semantic --example record_fixture --
@@ -52,7 +53,7 @@ fn structural(project: &Project) -> ExtractionOutput {
 
 enum Checker {
     Replay,
-    Real { bin: Utf8PathBuf, reverse: bool },
+    Real { bin: Option<Utf8PathBuf>, reverse: bool },
 }
 
 /// How long a conversion may take before the test says it does not end (a type that contains itself must not hang it).
@@ -71,6 +72,7 @@ fn request_for(project: &Project, output: &ExtractionOutput, checker: &Checker) 
     request.request_timeout = Duration::from_secs(60);
     match checker {
         Checker::Replay => {
+            request.tsc_path = Some(project.root.join("node_modules/typescript/bin/tsc"));
             request.expected_versions = &[FAKE_VERSION];
             request.extra_env.push((
                 "REPLAY_FIXTURE".to_string(),
@@ -78,7 +80,7 @@ fn request_for(project: &Project, output: &ExtractionOutput, checker: &Checker) 
             ));
         }
         Checker::Real { bin, reverse } => {
-            request.tsc_path = Some(bin.clone());
+            request.tsc_path = bin.clone();
             request.reverse_queries = *reverse;
         }
     }
@@ -119,13 +121,9 @@ fn rendered(outcome: &SemanticOutcome) -> Value {
     json!({ "components": components, "fallbacks": fallbacks })
 }
 
-#[allow(clippy::print_stderr, reason = "a skipped test says so, since a silent skip looks like a pass")]
+/// The `tsrs` binary `TSRS_BIN` names, to run as a process; `None` asks the built-in checker.
 fn tsrs_bin() -> Option<Utf8PathBuf> {
-    let bin = std::env::var("TSRS_BIN").ok().filter(|bin| !bin.is_empty());
-    if bin.is_none() {
-        eprintln!("skipped: TSRS_BIN is not set");
-    }
-    bin.map(Utf8PathBuf::from)
+    std::env::var("TSRS_BIN").ok().filter(|bin| !bin.is_empty()).map(Utf8PathBuf::from)
 }
 
 fn prop_type(rendered: &Value, component: &str, prop: &str) -> Value {
@@ -149,7 +147,7 @@ fn the_recorded_answers_of_the_checker_convert_to_the_snapshot() {
 
 #[test]
 fn a_real_tsrs_gives_the_snapshot() {
-    let Some(bin) = tsrs_bin() else { return };
+    let bin = tsrs_bin();
     let project = project(false);
     let output = structural(&project);
 
@@ -163,7 +161,7 @@ fn a_real_tsrs_gives_the_snapshot() {
 /// sorted by them. The answer must not show it.
 #[test]
 fn asking_the_checker_last_to_first_gives_the_same_bytes() {
-    let Some(bin) = tsrs_bin() else { return };
+    let bin = tsrs_bin();
     let project = project(false);
     let output = structural(&project);
 
@@ -267,13 +265,13 @@ fn within(value: &Value, pointer: &str) -> Value {
     value.pointer(pointer).unwrap_or_else(|| panic!("{pointer} is in {value}")).clone()
 }
 
-/// The answer replayed, and when `TSRS_BIN` names a real `tsrs` asked first to last and last to first.
+/// The answer replayed, and from a real `tsrs` asked first to last and last to first.
 fn answers(check: impl Fn(&Value)) {
     let replayed = project(true);
     let output = structural(&replayed);
     check(&rendered(&answer(&replayed, &output, &Checker::Replay)));
 
-    let Some(bin) = tsrs_bin() else { return };
+    let bin = tsrs_bin();
     let real = project(false);
     let output = structural(&real);
     for reverse in [false, true] {

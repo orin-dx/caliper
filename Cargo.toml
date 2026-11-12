@@ -51,6 +51,11 @@ oxc_str           = "0.157"
 oxc_syntax        = "0.157"
 oxc_resolver      = "11"
 
+# The TypeScript checker the semantic backend links (ADR 0026). Exact pins: a bump is a parity check against the Go
+# checker, never a lockfile refresh.
+tsrs_api          = "=0.24.0"
+tsrs_vfs          = "=0.24.0"
+
 # Core data
 compact_str       = { version = "0.10", features = ["serde"] }
 rustc-hash        = "2.1"

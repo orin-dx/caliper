@@ -1,8 +1,10 @@
 //! Experimental TypeScript 7.1 checker backend (`--experimental-semantic-types`).
 //!
-//! Spawns `tsc --api` (through `caliper-docgen-tsc-client`), asks it for the props of each component the structural
-//! pass found, and hands `caliper-docgen-core` a [`SemanticOutcome`] to merge (ADR 0006, ADR 0007). It is always
-//! compiled in and enabled at run time. Any failure to start or finish (no `tsc`, an unpinned version, a crash, a
+//! Asks TypeScript's checker for the props of each component the structural pass found, and hands
+//! `caliper-docgen-core` a [`SemanticOutcome`] to merge (ADR 0006, ADR 0007). The checker is the `tsrs` crates, linked
+//! in and run on a thread of their own; an explicit `tsc_path` runs that binary as a `tsc --api` process instead
+//! (through `caliper-docgen-tsc-client`), which is how the tests and the parity gate run the Go checker. It is always
+//! compiled in and enabled at run time. Any failure to start or finish (a missing or unpinned binary, a crash, a
 //! timeout) yields an outcome with no components and one diagnostic, never an error: the structural result is
 //! complete on its own.
 //!
@@ -13,6 +15,7 @@
 
 #![deny(missing_docs)]
 
+mod checker;
 mod component;
 mod convert;
 mod declared;
@@ -31,26 +34,26 @@ use std::time::Duration;
 
 use caliper_docgen_core::types::ExtractionOutput;
 use caliper_docgen_core::types::semantic::{PropInterner, SemanticComponent, SemanticFallback, SemanticOutcome};
-use caliper_docgen_tsc_client::{Supervisor, SupervisorConfig};
 use camino::{Utf8Path, Utf8PathBuf};
 use rustc_hash::FxHashMap;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
+use crate::checker::{Backend, Start};
 use crate::component::Answer;
 use crate::convert::Converter;
 use crate::instantiate::Instantiation;
 use crate::rpc::{CallError, REQUESTS, Rpc};
 
-/// The builds whose protocol this backend was traced against: the `typescript` 7.1 series, from `7.1.0-beta` on, and
-/// the `tsrs` builds listed exactly (`<tsrs version>-ts<typescript version>`), each only while its TypeScript part is
-/// in the series above. The protocol has no version handshake, so the package's `package.json` version and the
-/// initialize call that follows the spawn are the whole check; a build that fails either takes the structural result
-/// with one warning.
+/// The checker binaries a `tsc_path` may name, the builds whose protocol this backend was traced against (the built-in
+/// checker is pinned in `Cargo.toml` instead): the `typescript` 7.1 series, from `7.1.0-beta` on, and the `tsrs` builds
+/// listed exactly (`<tsrs version>-ts<typescript version>`), each only while its TypeScript part is in the series above.
+/// The protocol has no version handshake, so the package's `package.json` version and the initialize call that follows
+/// the spawn are the whole check; a build that fails either takes the structural result with one warning.
 pub const SUPPORTED_VERSIONS: &[&str] = &["7.1", "0.23.0-ts7.1.0-beta"];
 
-/// How many files are asked about at once. `tsc` answers requests one at a time; this keeps it from idling on round
-/// trips.
+/// How many files are asked about at once. The checker answers requests one at a time; this keeps it from idling
+/// between them.
 const FILES_IN_FLIGHT: usize = 16;
 
 /// A component the structural pass found.
@@ -78,25 +81,27 @@ pub fn targets_of(output: &ExtractionOutput) -> Vec<Target> {
         .collect()
 }
 
-/// One whole-project request to the checker: the components to answer for, and how to reach `tsc`. Built with
+/// One whole-project request to the checker: the components to answer for, and which checker to ask. Built with
 /// [`SemanticRequest::new`] and answered by [`resolve`].
 #[derive(Debug, Clone)]
 pub struct SemanticRequest {
-    /// Where `tsc` finds `node_modules`; its `--cwd`, and where the search for `typescript` starts.
+    /// Where the checker finds `node_modules`: its working directory.
     pub project_root: Utf8PathBuf,
     /// A tsconfig whose compiler options the checker uses (read with `parseConfigFile`); with none, a default set.
     pub tsconfig: Option<Utf8PathBuf>,
-    /// An explicit `tsc` binary, instead of `node_modules/typescript/bin/tsc` above `project_root`.
+    /// A checker binary to run as a `tsc --api` process (`typescript@7.1`'s `tsc`, or `tsrs`) instead of the built-in
+    /// checker.
     pub tsc_path: Option<Utf8PathBuf>,
     /// The components to ask about.
     pub targets: Vec<Target>,
-    /// Bound on each request, and on the `tsc` start-up handshake.
+    /// Bound on each request, and on a checker process's start-up handshake.
     pub request_timeout: Duration,
-    /// The `typescript` versions the checker may report; one that is not among them is a start-up failure.
+    /// The versions a checker binary's `package.json` may declare; one that is not among them is a start-up failure.
+    /// The built-in checker is pinned and not checked.
     pub expected_versions: &'static [&'static str],
     /// Write every request and its answer here as JSON, to refresh the replay fixture the tests use.
     pub record_to: Option<Utf8PathBuf>,
-    /// Environment for the `tsc` process; the tests use it to pick a replay scenario.
+    /// Environment for a checker process; the tests use it to pick a replay scenario.
     pub extra_env: Vec<(String, String)>,
     /// Ask the checker about a component's props, and about the members of each type, last to first. The answer must
     /// not change: no id the checker hands out, and so no order of queries, may show in it. The tests set this.
@@ -151,28 +156,28 @@ fn group_by_file(request: &SemanticRequest) -> (SemanticOutcome, FxHashMap<&Utf8
     (outcome, by_file, order)
 }
 
-fn supervisor_config(request: &SemanticRequest) -> Result<SupervisorConfig, String> {
-    let tsc_path = locate::find_tsc(&request.project_root, request.tsc_path.as_deref())?;
-    let mut config = SupervisorConfig::new(tsc_path, request.project_root.clone(), request.expected_versions);
-    config.handshake_timeout = request.request_timeout;
-    config.extra_env.clone_from(&request.extra_env);
-    Ok(config)
+/// The checker `request` names: its `tsc_path` as a process, else the built-in one.
+async fn start_checker(request: &SemanticRequest) -> Result<Backend, String> {
+    Backend::start(Start {
+        project_root: &request.project_root,
+        tsc_path: request.tsc_path.as_deref(),
+        expected_versions: request.expected_versions,
+        timeout: request.request_timeout,
+        extra_env: &request.extra_env,
+    })
+    .await
 }
 
 async fn run(request: SemanticRequest) -> SemanticOutcome {
     if request.targets.iter().all(|target| target.exports.is_empty()) {
         return group_by_file(&request).0;
     }
-    let config = match supervisor_config(&request) {
-        Ok(config) => config,
+    let checker = match start_checker(&request).await {
+        Ok(checker) => checker,
         Err(reason) => return SemanticOutcome::unavailable(reason),
     };
-    let supervisor = match Supervisor::spawn(config).await {
-        Ok(supervisor) => supervisor,
-        Err(error) => return SemanticOutcome::unavailable(error.to_string()),
-    };
-    let outcome = answer_with(&supervisor, &request).await;
-    supervisor.shutdown().await.ok();
+    let outcome = answer_with(&checker, &request).await;
+    checker.shutdown().await;
     outcome
 }
 
@@ -183,7 +188,7 @@ fn root_files(request: &SemanticRequest) -> Vec<String> {
 
 /// Answers the request's targets with a checker that is already running: one program rooted at their files, released
 /// once they are answered.
-async fn answer_with(supervisor: &Supervisor, request: &SemanticRequest) -> SemanticOutcome {
+async fn answer_with(checker: &Backend, request: &SemanticRequest) -> SemanticOutcome {
     let files = root_files(request);
     if files.is_empty() {
         return group_by_file(request).0;
@@ -191,7 +196,7 @@ async fn answer_with(supervisor: &Supervisor, request: &SemanticRequest) -> Sema
     let started = std::time::Instant::now();
     let tsconfig = request.tsconfig.as_ref().map(|path| path.as_str());
     let opened =
-        Rpc::open(supervisor.client(), request.request_timeout, tsconfig, &files, request.record_to.is_some()).await;
+        Rpc::open(checker.client(), request.request_timeout, tsconfig, &files, request.record_to.is_some()).await;
     let rpc = match opened {
         Ok(rpc) => Arc::new(rpc),
         Err(error) => return SemanticOutcome::unavailable(format!("the checker stopped answering: {error}")),

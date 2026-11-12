@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout, clippy::print_stderr)]
 //! The measurable ADR 0026 gates, through the session a Storybook addon runs: a lazy `WatchSession` asking a warm
-//! `OnDemand` over the project's own `tsc` (`just gate-measure` runs all four).
+//! `OnDemand` over a checker binary, or the built-in checker with `--tsc built-in` (`just gate-measure` runs all four).
 //!
 //!   gate_harness memory       --src DIR --tsc PATH [--edits 650] [--max-rss-mib N]
 //!   gate_harness determinism  --src DIR --tsc PATH [--components 150] [--threads 1,2,4] [--runs 3]
@@ -13,7 +13,8 @@
 //! `memory` rewrites one component's file, tells the session, and asks for the component, `--edits` times; it samples the
 //! checker's PID and resident memory after every answer and prints the recycles, the peak, and whether the last answer
 //! equals a fresh session's. `determinism` asks a fresh checker for the same components under each `RAYON_NUM_THREADS`
-//! (tsrs's `--api` has no checker-count flag; see docs/gate-measurements.md), `--runs` times each, alternating the query
+//! (the built-in checker reads it once per process, so each of its variants runs in a re-executed copy of this binary
+//! with the variable set, and fails if the copy did not see the requested count; tsrs's `--api` has no checker-count flag; see docs/gate-measurements.md), `--runs` times each, alternating the query
 //! order, and byte-compares every output. Each prints one JSON line and exits 1 on a failed check.
 use std::collections::BTreeSet;
 use std::process::Command;
@@ -29,6 +30,10 @@ use camino::Utf8PathBuf;
 
 const CHECKER_NOTE: &str = "resolved by the TypeScript checker";
 
+/// `--tsc built-in` asks the checker linked into this process instead of a binary. It has no process of its own, so
+/// the gates that sample the checker's process report no memory for it.
+const BUILT_IN: &str = "built-in";
+
 fn arg(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).and_then(|at| args.get(at + 1)).cloned()
 }
@@ -40,9 +45,15 @@ fn open(
     env: Vec<(String, String)>,
     max_rss_mib: Option<u64>,
 ) -> (WatchSession, Arc<OnDemand>) {
+    // The built-in checker runs in this process and starts without `extra_env`; a setting it needs goes in the
+    // environment before this call. Refuse rather than run under a setting that was silently dropped.
+    assert!(
+        tsc != BUILT_IN || env.is_empty(),
+        "--tsc built-in ignores extra_env; set the variable in the process environment instead"
+    );
     let mut config = OnDemandConfig::new(src.clone());
     config.tsconfig = src.ancestors().map(|dir| dir.join("tsconfig.json")).find(|file| file.is_file());
-    config.tsc_path = Some(Utf8PathBuf::from(tsc));
+    config.tsc_path = (tsc != BUILT_IN).then(|| Utf8PathBuf::from(tsc));
     config.request_timeout = Duration::from_secs(120);
     config.extra_env = env;
     config.max_rss_mib = max_rss_mib.unwrap_or(config.max_rss_mib);
@@ -130,57 +141,149 @@ fn memory(src: &Utf8PathBuf, tsc: &str, edits: usize, max_rss_mib: Option<u64>) 
     ok
 }
 
-fn determinism(src: &Utf8PathBuf, tsc: &str, components: usize, threads: &[String], runs: usize) -> bool {
+/// One determinism variant: every sampled component asked of a fresh checker, in `keys` order or reversed.
+struct Variant {
+    /// What the process saw as `RAYON_NUM_THREADS`, the setting tsrs reads once, when its first worker pool starts.
+    applied: Option<String>,
+    hash: u64,
+    bytes: usize,
+    structural: Vec<String>,
+    asked: usize,
+    most_threads: usize,
+}
+
+fn sample_keys(src: &Utf8PathBuf, tsc: &str, components: usize) -> Vec<String> {
     let (probe, _checker) = open(src, tsc, Vec::new(), None);
     let mut keys = probe.component_keys();
     keys.retain(|key| key != "GateEdited");
     keys.sort();
     let step = (keys.len() / components.max(1)).max(1);
-    let keys: Vec<String> = keys.into_iter().step_by(step).take(components).collect();
-    drop(probe);
-    let mut reference: Option<String> = None;
-    let (mut ok, mut variants) = (true, Vec::new());
+    keys.into_iter().step_by(step).take(components).collect()
+}
+
+/// Asks one fresh checker for `keys`. A checker binary gets `env`; the built-in checker takes none (see [`open`]), so
+/// its settings must already be in this process's environment.
+fn run_variant(src: &Utf8PathBuf, tsc: &str, keys: &[String], run: usize, env: Vec<(String, String)>) -> Variant {
+    let (session, checker) = open(src, tsc, env, None);
+    let mut order = keys.to_vec();
+    if run % 2 == 1 {
+        order.reverse();
+    }
+    let (mut text, mut structural, mut most_threads) = (Vec::new(), Vec::new(), 0);
+    for key in &order {
+        let answer = session.component(key).expect("a sampled key is a component");
+        if !by_checker(&answer) {
+            structural.push(key.clone());
+        }
+        text.push((
+            key.clone(),
+            format!("{}\n{:?}", serde_json::to_string(&answer.entry).unwrap(), answer.diagnostics),
+        ));
+        let pid = if tsc == BUILT_IN { Some(std::process::id()) } else { checker.process_id() };
+        if let Some((_, count)) = pid.and_then(process_stats) {
+            most_threads = most_threads.max(count);
+        }
+    }
+    text.sort();
+    let bytes = text.iter().map(|(key, body)| format!("{key}\n{body}\n")).collect::<String>();
+    structural.sort();
+    let mut hasher = std::hash::DefaultHasher::new();
+    std::hash::Hash::hash(&bytes, &mut hasher);
+    Variant {
+        applied: std::env::var("RAYON_NUM_THREADS").ok(),
+        hash: std::hash::Hasher::finish(&hasher),
+        bytes: bytes.len(),
+        asked: order.len(),
+        structural,
+        most_threads,
+    }
+}
+
+/// `determinism-variant`: one built-in variant in this process, started with `RAYON_NUM_THREADS` set by the caller.
+/// Fails unless the process was started with the requested count, so a variant can never be labelled with a setting it
+/// did not run under.
+fn determinism_variant(src: &Utf8PathBuf, components: usize, count: &str, run: usize) -> bool {
+    let applied = std::env::var("RAYON_NUM_THREADS").ok();
+    if applied.as_deref() != Some(count) {
+        eprintln!("requested {count} threads but RAYON_NUM_THREADS is {applied:?}: the setting was not applied");
+        return false;
+    }
+    let keys = sample_keys(src, BUILT_IN, components);
+    let variant = run_variant(src, BUILT_IN, &keys, run, Vec::new());
+    println!(
+        "{}",
+        serde_json::json!({
+            "applied": variant.applied, "hash": variant.hash, "bytes": variant.bytes, "components": keys.len(),
+            "answeredByChecker": variant.asked - variant.structural.len(), "structuralOnly": variant.structural,
+            "maxProcessThreads": variant.most_threads,
+        })
+    );
+    true
+}
+
+/// A built-in variant in a fresh copy of this binary: tsrs reads the count once per process, so it cannot change inside
+/// one. `None` when the child fails or reports a count other than the one asked for.
+fn built_in_variant(src: &Utf8PathBuf, components: usize, count: &str, run: usize) -> Option<serde_json::Value> {
+    let output = Command::new(std::env::current_exe().expect("the harness's own path"))
+        .args([
+            "determinism-variant",
+            "--src",
+            src.as_str(),
+            "--tsc",
+            BUILT_IN,
+            "--components",
+            &components.to_string(),
+        ])
+        .args(["--threads", count, "--run", &run.to_string()])
+        .env("RAYON_NUM_THREADS", count)
+        .stderr(std::process::Stdio::inherit())
+        .output()
+        .ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    (output.status.success() && value["applied"] == count).then_some(value)
+}
+
+fn determinism(src: &Utf8PathBuf, tsc: &str, components: usize, threads: &[String], runs: usize) -> bool {
+    let keys = (tsc != BUILT_IN).then(|| sample_keys(src, tsc, components));
+    let mut reference: Option<u64> = None;
+    let (mut ok, mut variants, mut sampled) = (true, Vec::new(), 0);
     for count in threads {
         for run in 0..runs {
-            let env = vec![("RAYON_NUM_THREADS".to_string(), count.clone())];
-            let (session, checker) = open(src, tsc, env, None);
-            let mut order = keys.clone();
-            if run % 2 == 1 {
-                order.reverse();
-            }
-            let (mut text, mut structural, mut most_threads) = (Vec::new(), Vec::new(), 0);
-            for key in &order {
-                let answer = session.component(key).expect("a sampled key is a component");
-                if !by_checker(&answer) {
-                    structural.push(key.clone());
+            let reversed = run % 2 == 1;
+            let found = match &keys {
+                Some(keys) => {
+                    let env = vec![("RAYON_NUM_THREADS".to_string(), count.clone())];
+                    let v = run_variant(src, tsc, keys, run, env);
+                    sampled = keys.len();
+                    Some((v.hash, v.bytes, v.asked - v.structural.len(), format!("{:?}", v.structural), v.most_threads))
                 }
-                text.push((
-                    key.clone(),
-                    format!("{}\n{:?}", serde_json::to_string(&answer.entry).unwrap(), answer.diagnostics),
-                ));
-                if let Some((_, count)) = checker.process_id().and_then(process_stats) {
-                    most_threads = most_threads.max(count);
-                }
-            }
-            text.sort();
-            let bytes = text.iter().map(|(key, body)| format!("{key}\n{body}\n")).collect::<String>();
-            let same = reference.get_or_insert_with(|| bytes.clone()) == &bytes;
+                None => built_in_variant(src, components, count, run).map(|v| {
+                    sampled = v["components"].as_u64().unwrap_or(0) as usize;
+                    (
+                        v["hash"].as_u64().unwrap_or(0),
+                        v["bytes"].as_u64().unwrap_or(0) as usize,
+                        v["answeredByChecker"].as_u64().unwrap_or(0) as usize,
+                        v["structuralOnly"].to_string(),
+                        v["maxProcessThreads"].as_u64().unwrap_or(0) as usize,
+                    )
+                }),
+            };
+            let Some((hash, bytes, answered, structural, most_threads)) = found else {
+                ok = false;
+                variants.push(format!("{{\"threads\":{count},\"run\":{run},\"applied\":false}}"));
+                continue;
+            };
+            let same = *reference.get_or_insert(hash) == hash;
             // A component the checker declines keeps its structural answer; that is deterministic too, and is listed.
             ok &= same;
-            structural.sort();
             variants.push(format!(
-                "{{\"threads\":{count},\"run\":{run},\"reversed\":{},\"bytes\":{},\"answeredByChecker\":{},\"structuralOnly\":{structural:?},\"maxProcessThreads\":{most_threads},\"equalsFirst\":{same}}}",
-                run % 2 == 1,
-                bytes.len(),
-                order.len() - structural.len()
+                "{{\"threads\":{count},\"run\":{run},\"reversed\":{reversed},\"bytes\":{bytes},\"answeredByChecker\":{answered},\"structuralOnly\":{structural},\"maxProcessThreads\":{most_threads},\"applied\":true,\"equalsFirst\":{same}}}"
             ));
         }
     }
-    println!(
-        "{{\"gate\":\"determinism\",\"components\":{},\"variants\":[{}],\"ok\":{ok}}}",
-        keys.len(),
-        variants.join(",")
-    );
+    // Nothing sampled compares nothing.
+    ok &= sampled > 0;
+    println!("{{\"gate\":\"determinism\",\"components\":{sampled},\"variants\":[{}],\"ok\":{ok}}}", variants.join(","));
     ok
 }
 
@@ -370,6 +473,12 @@ fn main() {
                 number("--runs", 3),
             )
         }
+        Some("determinism-variant") => determinism_variant(
+            &src,
+            number("--components", 150),
+            &arg(&args, "--threads").expect("--threads"),
+            number("--run", 0),
+        ),
         Some("watch") => watch(
             &src,
             &tsc,

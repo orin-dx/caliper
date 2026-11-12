@@ -1,12 +1,12 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The backend end to end against `replay-tsc`, which answers from a recording of the real `7.1.0-beta`
-//! (`tests/fixtures/recording.json`, refreshed by the `record_fixture` example), and the fallbacks that must never be
-//! errors: no `tsc`, an unpinned version, a crash, a hang.
+//! (`tests/fixtures/recording.json`, refreshed by the `record_fixture` example) and runs as the `tsc_path` process, and
+//! the fallbacks that must never be errors: a missing binary, an unpinned version, a crash, a hang.
 
 use std::time::Duration;
 
 use caliper_docgen_core::pipeline::{PipelineOptions, extract};
-use caliper_docgen_core::types::semantic::{SemanticOutcome, merge_semantic};
+use caliper_docgen_core::types::semantic::{SemanticFallback, SemanticOutcome, merge_semantic};
 use caliper_docgen_core::types::{
     DefaultValue, DiagnosticCode, DiagnosticSeverity, ExtractionOutput, FunctionParam, ParsedProp, PropType,
 };
@@ -60,6 +60,7 @@ fn request_replaying(
     recording: &str,
 ) -> SemanticRequest {
     let mut request = SemanticRequest::new(project.root.clone(), targets_of(output));
+    request.tsc_path = Some(project.root.join("node_modules/typescript/bin/tsc"));
     request.expected_versions = &[FAKE_VERSION];
     request.request_timeout = Duration::from_secs(20);
     request
@@ -296,12 +297,43 @@ fn assert_falls_back(project: &Project, request: SemanticRequest, output: &Extra
     let _ = project;
 }
 
+/// Without a `tsc_path` the built-in checker answers, whatever the project installs: this one has no `typescript`.
 #[test]
-fn no_typescript_installed_falls_back_with_one_diagnostic() {
+fn without_a_tsc_path_the_built_in_checker_answers_a_project_without_typescript() {
+    let project = project(false);
+    let mut output = structural(&project);
+    let mut request = request(&project, &output, None);
+    request.tsc_path = None;
+
+    let outcome = resolve(request);
+    assert_eq!(outcome.diagnostics, []);
+    assert_eq!(
+        outcome.fallbacks,
+        [SemanticFallback { key: "Hidden".to_string(), reason: "not exported by its module".to_string() }]
+    );
+    merge_semantic(&mut output, outcome);
+
+    let names: Vec<_> = output.components["Button"].props.keys().map(String::as_str).collect();
+    assert_eq!(names, ["box", "disabled", "label", "onClick", "pair", "size", "tags"]);
+    assert_eq!(prop(&output, "Button", "tags").prop_type, PropType::Array(Box::new(PropType::String)));
+    assert_eq!(prop(&output, "Other", "a").prop_type, PropType::Number);
+}
+
+#[test]
+fn a_tsc_path_with_no_binary_falls_back_with_one_diagnostic_that_says_what_to_pass() {
     let project = project(false);
     let output = structural(&project);
-    // The scratch directory sits inside the system temp dir, which could itself have a node_modules above it.
-    assert_falls_back(&project, request(&project, &output, None), &output, "no node_modules/typescript/bin/tsc");
+    let missing = project.root.join("node_modules/typescript/bin/tsc");
+
+    assert_falls_back(
+        &project,
+        request(&project, &output, None),
+        &output,
+        &format!(
+            "no tsc binary at {missing}; pass --tsc-path (tscPath) a `tsc` of typescript@7.1 or a `tsrs` binary, or \
+             leave it out to use the built-in checker"
+        ),
+    );
 }
 
 #[test]
