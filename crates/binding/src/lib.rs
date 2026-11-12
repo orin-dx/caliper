@@ -134,42 +134,37 @@ pub struct JsExtractOptions {
     /// resolve a component when `sessionDocgenInfo` asks for it (off by default; ADR 0016). `initializeSession` then
     /// returns an output with no components.
     pub lazy: Option<bool>,
-    /// Session only: `'on-demand'` asks the built-in TypeScript 7.1 checker for each component a request names, and
-    /// answers with the structural props when the checker is slower than `semanticWaitMs` (experimental; ADR 0022).
-    /// `'off'` (the default) never starts it.
-    #[napi(ts_type = "'off' | 'on-demand'")]
-    pub semantic_types: Option<String>,
-    /// Session only, with `semanticTypes: 'on-demand'`: a checker binary to run instead of the built-in one
-    /// (`typescript@7.1`'s `tsc`, or `tsrs`).
+    /// Session only: keep the built-in TypeScript checker warm and ask it for each component a request names, which
+    /// answers with the structural props when the checker is slower than `semanticWaitMs` (ADR 0022, ADR 0026). On by
+    /// default; `false` never starts it, so the structural resolver answers alone. `extractAll` does not ask it.
+    pub checker: Option<bool>,
+    /// Session only, with the checker on: a checker binary to run instead of the built-in one (`typescript@7.1`'s
+    /// `tsc`, or `tsrs`).
     pub tsc_path: Option<String>,
-    /// Session only, with `semanticTypes: 'on-demand'`: how many milliseconds a request waits for the checker before
-    /// it takes the structural answer (default 150).
+    /// Session only, with the checker on: how many milliseconds a request waits for the checker before it takes the
+    /// structural answer (default 150).
     pub semantic_wait_ms: Option<u32>,
-    /// Session only, with `semanticTypes: 'on-demand'`: how many milliseconds a request waits for the checker when the
-    /// structural pass lists no props for the component (default 2000). A value below `semanticWaitMs` gives such a
-    /// component `semanticWaitMs`.
+    /// Session only, with the checker on: how many milliseconds a request waits for the checker when the structural
+    /// pass lists no props for the component (default 2000). A value below `semanticWaitMs` gives such a component
+    /// `semanticWaitMs`.
     pub semantic_wait_empty_ms: Option<u32>,
 }
 
 /// How long a request waits for the checker when `semanticWaitMs` is not set: about the first-story budget.
 const DEFAULT_SEMANTIC_WAIT_MS: u32 = 150;
 
-/// An empty session for `options`: lazy when they say so, with a checker attached when they ask for one.
+/// An empty session for `options`: lazy when they say so, with a checker attached unless they turn it off.
 fn new_session(options: JsExtractOptions) -> napi::Result<Arc<WatchSession>> {
     let lazy = options.lazy.unwrap_or(false);
-    let semantic = match options.semantic_types.as_deref() {
-        None | Some("off") => None,
-        Some("on-demand") => Some((
+    let semantic = options.checker.unwrap_or(true).then(|| {
+        (
             options.tsc_path.clone(),
             options.tsconfig_path.clone(),
             options.src_dirs.first().cloned(),
             options.semantic_wait_ms.unwrap_or(DEFAULT_SEMANTIC_WAIT_MS),
             options.semantic_wait_empty_ms,
-        )),
-        Some(other) => {
-            return Err(napi::Error::from_reason(format!("semanticTypes must be 'off' or 'on-demand', got '{other}'")));
-        }
-    };
+        )
+    });
     let pipeline_options = PipelineOptions::try_from(options).map_err(napi::Error::from_reason)?;
     let session = match lazy {
         true => WatchSession::lazy(pipeline_options),
@@ -500,7 +495,7 @@ pub fn session_component_toon(session_id: u32, key: String) -> napi::Result<Opti
 
 /// Resolves `count` components spread evenly over the session's keys, without returning them: a lazy session then
 /// holds the dependency declarations and resolver memos that components share, so the first request a host answers
-/// does not load them. With `semanticTypes: 'on-demand'` it asks the checker for each at background priority, after any
+/// does not load them. With the checker on (the default) it asks the checker for each at background priority, after any
 /// story someone opened, and does not wait for it: the answers are kept for the stories that follow. Runs off the
 /// calling thread and returns how many components it resolved. An eager session, an unknown session and a count of 0
 /// resolve nothing.
@@ -599,11 +594,22 @@ mod tests {
             load_dependencies: None,
             collapse_inherited_props: None,
             lazy: None,
-            semantic_types: None,
+            checker: None,
             tsc_path: None,
             semantic_wait_ms: None,
             semantic_wait_empty_ms: None,
         }
+    }
+
+    #[test]
+    fn a_session_asks_the_checker_unless_told_not_to() {
+        let attached = |checker: Option<bool>| {
+            let session = new_session(JsExtractOptions { checker, ..base_options() }).expect("session");
+            format!("{session:?}").contains("with_semantic: true")
+        };
+        assert!(attached(None), "the checker is on by default");
+        assert!(attached(Some(true)));
+        assert!(!attached(Some(false)), "`checker: false` leaves the structural resolver alone");
     }
 
     #[test]
@@ -1015,7 +1021,8 @@ mod tests {
             src_dirs: vec![dir.to_string_lossy().into_owned()],
             cache_dir: Some(dir.join("cache").to_string_lossy().into_owned()),
             lazy,
-            semantic_types: None,
+            // These hold the structural session's own answers, which the checker's would replace within its wait.
+            checker: Some(false),
             tsc_path: None,
             semantic_wait_ms: None,
             semantic_wait_empty_ms: None,
@@ -1060,7 +1067,8 @@ mod tests {
             src_dirs: vec![dir.to_string_lossy().into_owned()],
             cache_dir: Some(dir.join("cache").to_string_lossy().into_owned()),
             lazy,
-            semantic_types: None,
+            // These hold the structural session's own answers, which the checker's would replace within its wait.
+            checker: Some(false),
             tsc_path: None,
             semantic_wait_ms: None,
             semantic_wait_empty_ms: None,
@@ -1111,7 +1119,8 @@ mod tests {
             src_dirs: vec![dir.to_string_lossy().into_owned()],
             cache_dir: Some(dir.join("cache").to_string_lossy().into_owned()),
             lazy,
-            semantic_types: None,
+            // These hold the structural session's own answers, which the checker's would replace within its wait.
+            checker: Some(false),
             tsc_path: None,
             semantic_wait_ms: None,
             semantic_wait_empty_ms: None,

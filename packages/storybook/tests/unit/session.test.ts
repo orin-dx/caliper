@@ -308,34 +308,30 @@ describe('DocgenSession.fresh', () => {
     expect(seen[1]).toMatchObject({ htmlAttributes: 'full' })
   })
 
-  it('asks the binding for an on-demand checker only when told to, with the binary and the wait', async () => {
+  it('leaves the checker to the binding, which starts it by default, and passes its binary and wait', async () => {
     const fake = new FakeBinding({})
     const seen: unknown[] = []
     fake.createSession = ((options: unknown) => (seen.push(options), 7)) as never
     await new DocgenSession({ srcDirs: [src] }, fake).fresh()
     await new DocgenSession(
-      {
-        srcDirs: [src],
-        semanticTypes: 'on-demand',
-        tscPath: '/opt/ts/bin/tsc',
-        semanticWaitMs: 80,
-        semanticWaitEmptyMs: 900,
-      },
+      { srcDirs: [src], tscPath: '/opt/ts/bin/tsc', semanticWaitMs: 80, semanticWaitEmptyMs: 900 },
       fake,
     ).fresh()
+    await new DocgenSession({ srcDirs: [src], checker: false }, fake).fresh()
     expect(seen).toEqual([
       expect.objectContaining({
-        semanticTypes: undefined,
+        checker: undefined,
         tscPath: undefined,
         semanticWaitMs: undefined,
         semanticWaitEmptyMs: undefined,
       }),
       expect.objectContaining({
-        semanticTypes: 'on-demand',
+        checker: undefined,
         tscPath: '/opt/ts/bin/tsc',
         semanticWaitMs: 80,
         semanticWaitEmptyMs: 900,
       }),
+      expect.objectContaining({ checker: false }),
     ])
   })
 

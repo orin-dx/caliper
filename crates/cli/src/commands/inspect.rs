@@ -1,6 +1,7 @@
 use miette::Result;
 
-use crate::config::{BuildOptionsArgs, build_options, warn_ignored_semantic_config};
+use crate::commands::extract::apply_semantic_backend;
+use crate::config::{BuildOptionsArgs, build_options};
 use crate::output::print_component;
 
 pub fn cmd_inspect(args: crate::InspectArgs, config_path: Option<&str>) -> Result<i32> {
@@ -15,8 +16,12 @@ pub fn cmd_inspect(args: crate::InspectArgs, config_path: Option<&str>) -> Resul
         no_load_dependencies: args.no_load_dependencies,
         collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
-    warn_ignored_semantic_config("inspect", &options, false);
-    let output = caliper_docgen_core::pipeline::extract(&options);
+    let mut output = caliper_docgen_core::pipeline::extract(&options);
+    if options.checker && !args.no_checker {
+        let timeout = std::time::Duration::from_millis(crate::DEFAULT_SEMANTIC_TIMEOUT_MS);
+        let resolver = caliper_docgen_core::types::semantic::ResolverFacts::Used;
+        apply_semantic_backend(&options, timeout, resolver, Some(&args.component), &mut output);
+    }
 
     let component = output.components.get(&args.component).ok_or_else(|| {
         miette::miette!(
@@ -65,6 +70,7 @@ export interface BrokenProps {
             load_dependencies: false,
             no_load_dependencies: false,
             collapse_inherited_props: None,
+            no_checker: true,
         };
         let code = cmd_inspect(args, None).expect("cmd_inspect should find Comp and not error");
         assert_eq!(
@@ -93,6 +99,7 @@ export interface BrokenProps {
             load_dependencies: false,
             no_load_dependencies: false,
             collapse_inherited_props: None,
+            no_checker: true,
         };
         let code = cmd_inspect(args, None).expect("cmd_inspect should find Comp and not error");
         assert_eq!(code, 0, "expected exit code 0 for a clean run");
@@ -119,6 +126,7 @@ export interface BrokenProps {
             load_dependencies: false,
             no_load_dependencies: false,
             collapse_inherited_props: None,
+            no_checker: true,
         };
         let err = cmd_inspect(args, None).expect_err("expected an Err for a component that doesn't exist");
         let message = format!("{err:?}");

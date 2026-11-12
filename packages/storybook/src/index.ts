@@ -48,11 +48,11 @@ export interface CaliperStorybookOptions {
    */
   prefetchStories?: number
   /**
-   * Ask the built-in TypeScript 7.1 checker for each component a story names (experimental). `'off'` (the default)
-   * never starts it. `'on-demand'` keeps it warm in the background, asks it for exactly the requested component, and
-   * uses the structural props when it is slower than `semanticWaitMs`; its answer is kept for the next request.
+   * Ask the built-in TypeScript checker for each component a story names. Default: `true`: it is kept warm in the
+   * background, asked for exactly the requested component, and the structural props stand when it is slower than
+   * `semanticWaitMs`; its answer is kept for the next request. `false` never starts it.
    */
-  semanticTypes?: 'off' | 'on-demand'
+  checker?: boolean
   /** A checker binary to run instead of the built-in one: `typescript@7.1`'s `tsc`, or `tsrs`. */
   tscPath?: string
   /** How many milliseconds a story waits for the checker before it takes the structural props. Default: `150`. */
@@ -66,7 +66,7 @@ export interface CaliperStorybookOptions {
   /**
    * When a warning or an error stays on a component's answer, its props may be incomplete. `'degraded'` (the default)
    * hands such a component to the next docgen provider, React's own; `'never'` always answers. Once the checker
-   * (`semanticTypes`) answers for a component, a warning caliper-docgen's own pass reported about what that answer
+   * (`checker`) answers for a component, a warning caliper-docgen's own pass reported about what that answer
    * replaces (a component it could not find, a prop type it could not resolve) is gone from the answer and hands
    * nothing on; one about what the checker could not read either, or the checker's own (it stopped, it is
    * unavailable), stays and does.

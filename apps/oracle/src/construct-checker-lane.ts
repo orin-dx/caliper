@@ -1,4 +1,4 @@
-// The construct suite through the checker path (ADR 0026): `caliper-docgen extract --experimental-semantic-types` with a
+// The construct suite through the checker path (ADR 0026): `caliper-docgen extract` (the checker is on by default) with a
 // `tsrs` binary over apps/oracle/construct-suite, and each row's verdict against its golden. It is a gate on
 // construct-suite/checker-expectations.json: it prints the report, then exits 1 when a row is better or worse than the
 // expectation allows (an improvement means the gap closed: update the file), when the checker did not answer for a row,

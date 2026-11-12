@@ -3,8 +3,8 @@
 import { cpSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
 import type { DocgenPayload } from 'storybook/internal/types'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -42,16 +42,6 @@ function ask(to: Worker, title: string, importPath: string): Promise<DocgenPaylo
 
 function request(title: string): Promise<Record<string, any>> {
   return ask(worker, title, `./src/stories/${title}.stories.tsx`)
-}
-
-/** The pinned tsrs binary for this machine, as the `tsrs` package selects it; `TSRS_BIN` wins when set. */
-async function tsrsBinary(): Promise<string> {
-  if (process.env.TSRS_BIN) return process.env.TSRS_BIN
-  const pkg = createRequire(import.meta.url).resolve('tsrs/package.json')
-  const resolver = (await import(pathToFileURL(join(dirname(pkg), 'lib', 'getExePath.js')).href)) as {
-    default: () => string
-  }
-  return resolver.default()
 }
 
 describe.skipIf(!bindingAvailable)('provider in a worker thread', () => {
@@ -147,17 +137,13 @@ describe.skipIf(!bindingAvailable)('provider in a worker thread', () => {
 // `@types/react` resolves for both passes.
 const checkerProject = fileURLToPath(new URL('../fixtures/checker', import.meta.url))
 
-describe.skipIf(!bindingAvailable)('provider with the checker and the default fallback', () => {
+// No option turns the checker on: the built-in one answers by default.
+describe.skipIf(!bindingAvailable)('provider with the default checker and the default fallback', () => {
   let checked: Worker
 
-  beforeAll(async () => {
+  beforeAll(() => {
     checked = new Worker(new URL('fixtures/provider-worker.mjs', import.meta.url), {
-      workerData: {
-        srcDirs: [join(checkerProject, 'src')],
-        semanticTypes: 'on-demand',
-        tscPath: await tsrsBinary(),
-        semanticWaitEmptyMs: 10_000,
-      },
+      workerData: { srcDirs: [join(checkerProject, 'src')], semanticWaitEmptyMs: 10_000 },
     })
   })
 

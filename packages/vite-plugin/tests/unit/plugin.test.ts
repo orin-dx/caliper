@@ -122,6 +122,10 @@ describe('caliperDocgen', () => {
       expect(napi.createSession).toHaveBeenCalledWith(expect.objectContaining({ srcDirs: ['/project/src'] }))
     })
 
+    it('keeps the session structural: the plugin never waits for the checker the binding starts by default', () => {
+      expect(napi.createSession).toHaveBeenCalledWith(expect.objectContaining({ checker: false }))
+    })
+
     // createSession runs synchronously inside configResolved. Per the Rust
     // binding's own contract this can legitimately throw (a bad htmlAttributes
     // value, malformed option JSON reaching the NAPI boundary) — it must

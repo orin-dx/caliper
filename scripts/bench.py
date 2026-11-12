@@ -35,9 +35,10 @@ def build(manifest_dir, target_dir, destination):
 
 def extract_command(binary, src, cache_dir):
     """The addon's configuration (packages/storybook/src/provider.ts): dependencies loaded, the cache on, and
-    inherited props never collapsed. Each side keeps its own cache directory so one build never reads the other's."""
+    inherited props never collapsed. Each side keeps its own cache directory so one build never reads the other's. The
+    structural resolver alone (`--no-checker`): this bench is for a change to it."""
     return [binary, 'extract', '--src', src, '--json', '--load-dependencies', '--collapse-inherited-props', 'none',
-            '--cache-dir', cache_dir]
+            '--cache-dir', cache_dir, '--no-checker']
 
 
 def main():

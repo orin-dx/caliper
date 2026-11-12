@@ -142,7 +142,7 @@ describe('preset', () => {
       warmUp: true,
       fillAfter: 5,
       prefetchStories: 3,
-      semanticTypes: 'on-demand',
+      checker: false,
       tscPath: '/bin/tsc',
       semanticWaitMs: 7,
       semanticWaitEmptyMs: 70,

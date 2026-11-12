@@ -88,8 +88,10 @@ def tool_run(command, out):
 
 def caliper_run(binary, src, runs):
     """Median wall ms and largest peak RSS MiB of `extract --json` in the Storybook addon's configuration (dependencies
-    loaded, inherited props not collapsed), and the JSON's size."""
-    command = [binary, 'extract', '--src', src, '--json', '--load-dependencies', '--collapse-inherited-props', 'none']
+    loaded, inherited props not collapsed), and the JSON's size. Every run here is the structural resolver's
+    (`--no-checker`): the record and its budgets predate the checker default (docs/measurement.md)."""
+    command = [binary, 'extract', '--src', src, '--json', '--load-dependencies', '--collapse-inherited-props', 'none',
+               '--no-checker']
     with tempfile.TemporaryFile() as out:
         run_once(command, stdout=out)
         size = out.tell()
@@ -101,7 +103,7 @@ def caliper_run(binary, src, runs):
 def caliper_components(binary, src, root):
     """Caliper's components in RDT's format, as (file, name) -> prop names."""
     command = [binary, 'extract', '--src', src, '--format', 'rdt', '--html-attributes', 'full', '--include-unexported',
-               '--quiet', '--load-dependencies', '--collapse-inherited-props', 'none']
+               '--quiet', '--load-dependencies', '--collapse-inherited-props', 'none', '--no-checker']
     out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
     return {(relative(c['filePath'], root), norm_name(c['displayName'])): set(c['props'])
             for c in json.loads(out[out.index('{'):]).values()}
@@ -111,7 +113,7 @@ def caliper_layer_members(binary, src, root):
     """The props Caliper's collapsed inheritance layers hold, as (file, name) -> prop names: the output names them in a
     layer instead of listing them as props, and the canonical JSON is the one that carries the layers."""
     command = [binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported', '--quiet',
-               '--load-dependencies', '--collapse-inherited-props', 'none']
+               '--load-dependencies', '--collapse-inherited-props', 'none', '--no-checker']
     out = subprocess.run(command, capture_output=True, text=True, check=True).stdout
     document = schema_version.check(json.loads(out[out.index('{'):]), 'weekly')
     lists = document.get('nameLists', {})
@@ -468,7 +470,8 @@ def oracle(binary, name, src, root, work, rdt_out, rdg_out):
     caliper_json = os.path.join(work, f'{name}.caliper.json')
     with open(caliper_json, 'w') as f:
         subprocess.run([binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported',
-                        '--load-dependencies', '--collapse-inherited-props', 'none', '--quiet'], stdout=f, check=True)
+                        '--load-dependencies', '--collapse-inherited-props', 'none', '--quiet', '--no-checker'],
+                       stdout=f, check=True)
     list_file, tsconfig = program_inputs(name, src, work)
     verdicts = os.path.join(work, f'{name}.oracle.json')
     subprocess.run(['pnpm', '--dir', os.path.join(ROOT, 'apps', 'oracle'), 'exec', 'tsx', 'src/oracle.ts', '--root', root,

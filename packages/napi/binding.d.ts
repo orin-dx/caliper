@@ -47,7 +47,7 @@ export declare function initializeSession(sessionId: number, options: JsExtractO
 
 /**
  * Like [`initialize_session`], but returns only what a host needs to find a component and judge whether its props are
- * complete: `{ components: { key: { filePath, displayName } }, diagnostics }`. The props stay in the session for
+ * complete: `{ components: { key: { filePath, displayName, exports } }, diagnostics }`. The props stay in the session for
  * [`session_docgen_info`]. A host that documents one component at a time skips serializing and parsing every prop of
  * every component, which is tens of megabytes when dependencies are loaded.
  */
@@ -98,25 +98,25 @@ export interface JsExtractOptions {
    */
   lazy?: boolean
   /**
-   * Session only: `'on-demand'` asks the built-in TypeScript 7.1 checker for each component a request names, and
-   * answers with the structural props when the checker is slower than `semanticWaitMs` (experimental; ADR 0022).
-   * `'off'` (the default) never starts it.
+   * Session only: keep the built-in TypeScript checker warm and ask it for each component a request names, which
+   * answers with the structural props when the checker is slower than `semanticWaitMs` (ADR 0022, ADR 0026). On by
+   * default; `false` never starts it, so the structural resolver answers alone. `extractAll` does not ask it.
    */
-  semanticTypes?: 'off' | 'on-demand'
+  checker?: boolean
   /**
-   * Session only, with `semanticTypes: 'on-demand'`: a checker binary to run instead of the built-in one
-   * (`typescript@7.1`'s `tsc`, or `tsrs`).
+   * Session only, with the checker on: a checker binary to run instead of the built-in one (`typescript@7.1`'s
+   * `tsc`, or `tsrs`).
    */
   tscPath?: string
   /**
-   * Session only, with `semanticTypes: 'on-demand'`: how many milliseconds a request waits for the checker before
-   * it takes the structural answer (default 150).
+   * Session only, with the checker on: how many milliseconds a request waits for the checker before it takes the
+   * structural answer (default 150).
    */
   semanticWaitMs?: number
   /**
-   * Session only, with `semanticTypes: 'on-demand'`: how many milliseconds a request waits for the checker when the
-   * structural pass lists no props for the component (default 2000). A value below `semanticWaitMs` gives such a
-   * component `semanticWaitMs`.
+   * Session only, with the checker on: how many milliseconds a request waits for the checker when the structural
+   * pass lists no props for the component (default 2000). A value below `semanticWaitMs` gives such a component
+   * `semanticWaitMs`.
    */
   semanticWaitEmptyMs?: number
 }
@@ -141,8 +141,8 @@ export declare function sessionComponentAnswers(sessionId: number, keys: Array<s
  * One component as TOON, the compact text an agent reads (`render_component_slice_toon` in the core crate): its prop table
  * with each prop's declaring type, why a prop's type is partly a guess, its inherited layers, and the warnings and
  * errors that say its props may be incomplete. For an in-process host that answers one question about one component
- * and has no use for a project's whole output. `null` when the session has no component under `key`. A lazy session
- * resolves the component now.
+ * and has no use for a project's whole output. `null` when the session has no component under `key`; errors for an
+ * unknown or closed session. A lazy session resolves the component now.
  */
 export declare function sessionComponentToon(sessionId: number, key: string): string | null
 
@@ -156,7 +156,7 @@ export declare function sessionDocgenInfo(sessionId: number, keys: Array<string>
 /**
  * Resolves `count` components spread evenly over the session's keys, without returning them: a lazy session then
  * holds the dependency declarations and resolver memos that components share, so the first request a host answers
- * does not load them. With `semanticTypes: 'on-demand'` it asks the checker for each at background priority, after any
+ * does not load them. With the checker on (the default) it asks the checker for each at background priority, after any
  * story someone opened, and does not wait for it: the answers are kept for the stories that follow. Runs off the
  * calling thread and returns how many components it resolved. An eager session, an unknown session and a count of 0
  * resolve nothing.
