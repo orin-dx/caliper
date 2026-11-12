@@ -411,7 +411,7 @@ mod tests {
         std::fs::write(
             root.join("types.ts"),
             "export type Size = 'sm' | 'md' | 'lg';\n\
-             export interface Base { /** The id. */ id: string; size?: Size; }\n\
+             export interface Base {\n  /** The id. */\n  id: string;\n  size?: Size;\n}\n\
              export type Tree = { label: string; children?: Tree[] };\n\
              export type Styled = Omit<Base, 'id'> & { tone?: 'a' | 'b'; onPick?: (value: Size) => void };\n\
              declare global { interface Augmented { fromTypes?: number } }\n",
@@ -460,5 +460,46 @@ mod tests {
             assert!(names.contains(&"fromLastFile") && names.contains(&"fromTypes"), "{names:?}");
         }
         assert_eq!(one, three);
+    }
+
+    /// A prop the converter keeps for later components is kept by what makes it, including which of its JSDoc was
+    /// asked: a component whose structural pass already described `id` is not handed the description another asked for,
+    /// and the one after it is not handed an empty one. The three are in one file, so they are answered in turn and the
+    /// later ones find the first one's props kept.
+    #[test]
+    fn a_kept_prop_is_one_made_by_the_same_question() {
+        let (_dir, root) = shared_types_project(0);
+        let component = |name: &str| {
+            format!(
+                "export interface {name}Props extends Base {{ own: number }}\nexport function {name}(props: {name}Props) {{ return null; }}\n"
+            )
+        };
+        let text = format!(
+            "import type {{ Base }} from './types';\n{}{}{}",
+            component("C0"),
+            component("C1"),
+            component("C2")
+        );
+        std::fs::write(root.join("All.tsx"), text).unwrap();
+        let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
+        let mut targets = targets_of(&output);
+        for target in &mut targets {
+            target.described.clear();
+        }
+        if let Some(target) = targets.iter_mut().find(|target| target.key == "C1") {
+            target.described.insert("id".to_string());
+        }
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+
+        let outcome = runtime.block_on(run(SemanticRequest::new(root.clone(), targets), Some(1)));
+
+        let description = |key: &str| {
+            let component = outcome.components.iter().find(|component| component.key == key).unwrap();
+            component.props.iter().find(|prop| prop.name == "id").unwrap().description.clone()
+        };
+        assert_eq!(
+            (description("C0"), description("C1"), description("C2")),
+            ("The id.".into(), String::new(), "The id.".into())
+        );
     }
 }
