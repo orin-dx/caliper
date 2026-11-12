@@ -1,6 +1,6 @@
 # Releasing
 
-How a change becomes a published release, and what to check afterwards. Callisto 0.17.0 drives it (`callisto.toml`, `.github/workflows/callisto-release.yml`); its own guide is `docs/releasing.md` in `orin-dx/callisto`.
+How a change becomes a published release, and what to check afterwards. Callisto 0.20.0 drives it (`callisto.toml`, `.github/workflows/callisto-release.yml`); its own guide is `docs/releasing.md` in `orin-dx/callisto`.
 
 ## Flow
 
@@ -20,7 +20,7 @@ How a change becomes a published release, and what to check afterwards. Callisto
 
 The workflow runs on every push to `main`, daily at 05:23 UTC, and on manual dispatch. Every run first asks `callisto release pending` for the oldest merged release commit whose tags or GitHub Release are missing, and finishes that one before anything newer. When none is unfinished, a push to a release commit releases it and any other run refreshes the release pull request.
 
-The workflow file must stay named `callisto-release.yml`. Callisto verifies each asset's attestation against that exact workflow path (`gh attestation verify --signer-workflow <repo>/.github/workflows/callisto-release.yml`), and the path is fixed in Callisto 0.17.0.
+The workflow file must stay named `callisto-release.yml`. Callisto verifies each asset's attestation against that exact workflow path (`gh attestation verify --signer-workflow <repo>/.github/workflows/callisto-release.yml`), and the path is fixed in Callisto 0.20.0.
 
 ## What a release produces
 
