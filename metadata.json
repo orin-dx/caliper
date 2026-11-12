@@ -1,0 +1,58 @@
+{
+  "cli_version": "0.13.3-nightly.202611110616.7aed2fb15",
+  "checkpoint_id": "01M76Q7BEF7299J25QBQ15GK2G",
+  "strategy": "manual-commit",
+  "branch": "feat/ship-tsrs-optional-dependency",
+  "checkpoints_count": 2,
+  "files_touched": [
+    ".github/dependabot.yml",
+    "crates/binding/Cargo.toml",
+    "crates/binding/src/lib.rs",
+    "crates/cli/src/commands/extract.rs",
+    "crates/cli/src/main.rs",
+    "crates/cli/tests/commands.rs",
+    "crates/core/src/types/semantic.rs",
+    "crates/semantic/src/lib.rs",
+    "crates/semantic/src/locate.rs",
+    "crates/semantic/src/on_demand.rs",
+    "packages/napi/binding.d.ts",
+    "scripts/check-packaging.mjs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 9491,
+    "cache_read_tokens": 1716218,
+    "output_tokens": 5270,
+    "api_call_count": 2,
+    "subagent_tokens": {
+      "input_tokens": 50,
+      "cache_creation_tokens": 69782,
+      "cache_read_tokens": 6271248,
+      "output_tokens": 11533,
+      "api_call_count": 25
+    }
+  },
+  "redaction": {
+    "replacements": 26,
+    "layers": {
+      "betterleaks": 12,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}

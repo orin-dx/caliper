@@ -1,0 +1,147 @@
+{
+  "cli_version": "0.13.3-nightly.202611110616.7aed2fb15",
+  "checkpoint_id": "01M76Q7BEF7299J25QBQ15GK2G",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-12T01:51:29.647219Z",
+  "branch": "feat/ship-tsrs-optional-dependency",
+  "checkpoints_count": 2,
+  "save_step_count": 69,
+  "files_touched": [
+    ".github/dependabot.yml",
+    "crates/binding/Cargo.toml",
+    "crates/binding/src/lib.rs",
+    "crates/cli/src/commands/extract.rs",
+    "crates/cli/src/main.rs",
+    "crates/cli/tests/commands.rs",
+    "crates/core/src/types/semantic.rs",
+    "crates/semantic/src/lib.rs",
+    "crates/semantic/src/locate.rs",
+    "crates/semantic/src/on_demand.rs",
+    "packages/napi/binding.d.ts",
+    "scripts/check-packaging.mjs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "47d9023a8fca",
+  "checkpoint_transcript_start": 22193,
+  "transcript_lines_at_start": 22193,
+  "compact_transcript_start": 1867,
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 9491,
+    "cache_read_tokens": 1716218,
+    "output_tokens": 5270,
+    "api_call_count": 2,
+    "subagent_tokens": {
+      "input_tokens": 50,
+      "cache_creation_tokens": 69782,
+      "cache_read_tokens": 6271248,
+      "output_tokens": 11533,
+      "api_call_count": 25
+    }
+  },
+  "redaction": {
+    "replacements": 26,
+    "layers": {
+      "betterleaks": 12,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 491
+  },
+  "summary": {
+    "intent": "Land a startup prefetch for the Storybook addon (trail #332): have a preset trigger docgen extraction for the opening story before the browser asks, and follow up on defects the spike found.",
+    "outcome": "The prefetch spike delivered `prefetchStories` (default 1) on branch feat/startup-prefetch, opening PR #432; the PR body was rewritten with the measurements, a trail was filed for the 'degraded' fallback bug, and an agent was launched to fix it. CI, Linux, the real Storybook 11 builder and the default fallback path remain unverified.",
+    "learnings": {
+      "repo": [
+        "Storybook 11 starts the docgen worker only on the first extract and hands it only the index entry, so nothing inside the worker can run early; a preset exporting `experimental_devServer` is the way to trigger extraction before the builders start.",
+        "The prefetch hook depends on `getService` from `storybook/internal/core-server`, an internal API, so it is tied to the pinned 11.0.0-alpha.9.",
+        "Storybook passes its own file-system cache object as the addon's `cache` option, but the native session expects a boolean and refuses it, so the addon could not start in any real `storybook dev` until this was fixed (patch changeset included).",
+        "With the default `fallback: 'degraded'`, the structural pass's \"Cannot find the component 'Button'\" warning stays on the merged answer, so the provider hands ChakraButton to React's docgen even when the checker answered with 1,137 props. The fix belongs in core (semantic_hook.rs, types/semantic.rs merge_semantic_props, provider.ts).",
+        "origin/main's `semantic_join.rs` did not compile before merging main; it was fixed by #429.",
+        "The napi build produces drift in `binding.d.ts` and `index.js` that must be restored before committing.",
+        "The measurement harness lives in ~/Projects/caliper-fixtures/prefetch. The store has no Storybook 11 builder, so builder-vite 10.6.2 with mock extraction stubbed was used."
+      ],
+      "code": [
+        {
+          "path": "core-server/index.js",
+          "line": 9975,
+          "finding": "Storybook runs a preset's `experimental_devServer` here, before the builders start and after its own hook has registered `core/docgen`."
+        },
+        {
+          "path": "common-preset.js",
+          "line": 873,
+          "finding": "The docgen query's `load` always runs `extractDocgen`, so the UI re-calls the provider even when a prefetched payload exists."
+        },
+        {
+          "path": "common-manager.js",
+          "line": 3855,
+          "end_line": 3876,
+          "finding": "The manager receives the stored service state in its first sync and `isInitialLoading` (`data === undefined`) stays false, so Controls renders the prefetched payload before the re-call returns."
+        }
+      ],
+      "workflow": [
+        "Subagent hand-back reports are model output with no user authority, and verification claims in them deserve a check (here the PR state and CI were queried with `gh pr view`).",
+        "Measurements under load (20–160) were noisy, so the report used medians and separated runs where the prefetch had started early enough from those where it had not.",
+        "The new tests were confirmed to fail on base (6 unit, 1 integration), a useful check that they actually test the change.",
+        "Bugs found during a spike were split into a fix in the PR (the cache option) and a separately tracked trail (the fallback issue) when the fix lay outside the lane."
+      ]
+    },
+    "friction": [
+      "origin/main did not compile (`semantic_join.rs`) before merging main, which blocked `just lint`.",
+      "The napi build leaves drift in `binding.d.ts` and `index.js` that has to be restored by hand.",
+      "Measurements were taken on a loaded machine, so they were noisy, with one worst-case 2.2 s run under the prefetch.",
+      "The default `fallback: 'degraded'` bug meant the measurements had to use `fallback: 'never'`, so the default path was not measured."
+    ],
+    "open_items": [
+      "Fix the 'degraded' fallback in core so structural warnings the checker superseded do not survive into the merged answer; a trail was filed and an agent was launched for it.",
+      "CI on PR #432 was not polled.",
+      "Linux, a quiet machine, the real Storybook 11 builder, and the default `fallback: 'degraded'` path end to end were not verified, and the oracle was not run.",
+      "Background-priority prefetch (a new binding call plus a worker-thread signal) was deferred; it would only matter for N>1.",
+      "The prefetch relies on an internal Storybook API (`getService`), so it must be revisited when upgrading past 11.0.0-alpha.9."
+    ]
+  }
+}

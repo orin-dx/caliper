@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_015ZhvrGCzz3AAgfr8nuQrkL",
+  "agent_id": "a3696d0bf310e92c8",
+  "subagent_type": "general-purpose",
+  "task_description": "Delete unused code from audit",
+  "token_usage": {
+    "input_tokens": 264,
+    "cache_creation_tokens": 271998,
+    "cache_read_tokens": 23781824,
+    "output_tokens": 71420,
+    "api_call_count": 131
+  },
+  "started_at": "2026-11-11T17:23:56.56302-08:00",
+  "completed_at": "2026-11-11T17:51:08.006737-08:00"
+}

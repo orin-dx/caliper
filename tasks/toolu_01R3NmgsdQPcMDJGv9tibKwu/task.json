@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01R3NmgsdQPcMDJGv9tibKwu",
+  "agent_id": "a434bea132c326f68",
+  "subagent_type": "general-purpose",
+  "task_description": "Prefetch spike through Storybook docgen service",
+  "token_usage": {
+    "input_tokens": 410,
+    "cache_creation_tokens": 358358,
+    "cache_read_tokens": 48417470,
+    "output_tokens": 132482,
+    "api_call_count": 204
+  },
+  "started_at": "2026-11-11T16:57:38.114748-08:00",
+  "completed_at": "2026-11-11T17:50:15.637904-08:00"
+}
