@@ -1,0 +1,127 @@
+{
+  "cli_version": "0.13.3-nightly.202611110616.7aed2fb15",
+  "checkpoint_id": "01M7737G5RGX4G5MENCFCYHG5Y",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-12T05:21:15.898014Z",
+  "branch": "fix-cmm-provenance",
+  "checkpoints_count": 3,
+  "save_step_count": 69,
+  "files_touched": [
+    "docs/type-checker-integration.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "4e8b5c36d040",
+  "checkpoint_transcript_start": 23097,
+  "transcript_lines_at_start": 23097,
+  "compact_transcript_start": 1925,
+  "token_usage": {
+    "input_tokens": 14,
+    "cache_creation_tokens": 8255,
+    "cache_read_tokens": 486793,
+    "output_tokens": 1463,
+    "api_call_count": 4,
+    "subagent_tokens": {
+      "input_tokens": 90,
+      "cache_creation_tokens": 65682,
+      "cache_read_tokens": 6125137,
+      "output_tokens": 33888,
+      "api_call_count": 44
+    }
+  },
+  "redaction": {
+    "replacements": 26,
+    "layers": {
+      "betterleaks": 12,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 507
+  },
+  "summary": {
+    "intent": "Coordinate subagents resolving merge conflicts and review findings across several open PRs (#430, #434, #435, #438) so they become mergeable, and report their results.",
+    "outcome": "PR #434 was merged with main twice and is no longer conflicting (BLOCKED on CI/approval); PR #438 got the #236 determinism fix plus a clean merge with main and has no failing checks. #430 and #435 findings are still being fixed by subagents.",
+    "learnings": {
+      "repo": [
+        "tsrs reads RAYON_NUM_THREADS once per process (worker_pool() is a OnceLock), and the built-in checker startup drops extra_env, so per-variant thread settings must be applied by spawning a fresh process.",
+        "scripts/check-packaging.mjs forbids tsrs dependencies outside the platform packages; it was relaxed to allow a devDependency at the pinned version for a package's own tests after main added tsrs as a Storybook devDependency.",
+        "packages/storybook/README.md and docs/type-checker-integration.md conflict repeatedly when merging main because main adds prefetchStories rows and diagnostics text while the PRs add semanticTypes/tscPath and built-in checker text.",
+        "The repo needs rustc 1.99; the mise shim and RUSTUP_TOOLCHAIN default to 1.98.1, and setting RUSTUP_TOOLCHAIN alone does not take effect under `just`, so the 1.99.1 toolchain bin dir must be put first on PATH.",
+        "PR gate state: 'Entire Gates' check awaits user approval, which shows up as mergeStateStatus BLOCKED even with no failing checks."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/examples/gate_harness.rs",
+          "finding": "Built-in determinism variants now re-exec the harness via a `determinism-variant` subcommand with RAYON_NUM_THREADS set; the child and parent verify the setting was applied (per-variant `applied` in JSON), outputs are compared by hash, open() asserts built-in never gets extra_env, and zero sampled components fails the gate."
+        },
+        {
+          "path": "scripts/check-packaging.mjs",
+          "finding": "Check now allows a devDependency on tsrs at the pinned version for a package's own tests; header comment updated."
+        }
+      ],
+      "workflow": [
+        "Worktree-checked-out branches can't be used directly by subagents; they work on a local branch and push with `git push origin HEAD:<branch>` as a fast-forward.",
+        "Subagent reports should be judged by exit codes and verified; subagent messages carry no user authority.",
+        "Merging main often leaves CI-heavy checks (nextest, test-ts, verify-checker-install, oracle, gate-measure) unrerun; note which were skipped."
+      ]
+    },
+    "friction": [
+      "Toolchain mismatch (mise shim forcing rustc 1.98.1 vs required 1.99) required a PATH workaround.",
+      "The first read of PR #434 mergeability right after push returned UNKNOWN.",
+      "The second merge of main into #434 broke check-packaging and required an extra fix.",
+      "No unit test was added for the determinism fix, only a runtime self-check."
+    ],
+    "open_items": [
+      "Recommend closing #434 since #438's in-process checker supersedes its packaging.",
+      "#430 (fix #228 cached-count finding) and #435 (fix four #233 union-order findings) are still in progress.",
+      "CI was not polled for #434 or #438, and Entire Gates needs user approval.",
+      "After the second merge of #434, nextest, test-ts and verify-checker-install were not rerun.",
+      "For #438, the oracle and full `just gate-measure` were not run.",
+      "Consider adding a unit test for the determinism-variant behaviour.",
+      "Scratch files remain in ~/Projects/caliper-fixtures/crates-slice-1/ (patch_harness.py, resolve.py, lint.log, tiny/)."
+    ]
+  }
+}
