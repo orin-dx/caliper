@@ -85,7 +85,7 @@ fn the_checker_decides_which_props_exist_their_type_and_whether_they_are_require
 }
 
 #[test]
-fn a_description_is_the_checkers_else_the_structural_one_and_the_default_stays_structural() {
+fn a_description_is_the_checkers_else_the_structural_one_and_so_is_a_default_the_source_does_not_give() {
     let mut out = output();
     let outcome = SemanticOutcome {
         components: vec![button(vec![semantic_prop("label", "", true), semantic_prop("size", "Checker size.", true)])],
@@ -283,7 +283,7 @@ fn a_session_merge_counts_the_props_that_kept_their_structural_type() {
 
     let merged = merge_semantic_props(entry, answer.iter(), Some(&[]), &mut FxHashMap::default());
 
-    assert_eq!(merged, MergedProps { kept: 1, unread: 1 });
+    assert_eq!(merged, MergedProps { kept: 1, unread: 1, diagnostics: Vec::new() });
     assert_eq!(entry.props["label"].prop_type, PropType::Any);
     assert_eq!(entry.props["label"].degraded_by, ["unresolvableImport"]);
 }
@@ -517,4 +517,48 @@ fn an_answer_merges_into_the_entry_its_key_names_not_the_first_with_the_same_fil
             ("1 component(s) kept their structural result: why", vec!["Card".to_string()]),
         ]
     );
+}
+
+#[test]
+fn a_partial_written_order_does_not_override_a_structural_order_that_placed_members() {
+    use crate::extractor::written::WrittenMember;
+    let lit = |value: &str| PropType::StringLiteral(value.to_string());
+    let union = |members: &[&str]| PropType::Union(members.iter().map(|member| lit(member)).collect());
+    // `p: Imported | 'z'`, `Imported` = 'a' | 'b' in another file: the structural union's order is the checker's.
+    let written = [WrittenMember::Name("Imported".into()), WrittenMember::Type(lit("z"))];
+    let structural =
+        ParsedProp::new("p".into(), union(&["a", "b", "z"]), true, None, String::new(), BTreeMap::new(), None, vec![]);
+
+    let ordered = declared_order(union(&["a", "b", "z"]), Some(&written), Some(&structural), ResolverFacts::Used);
+
+    assert_eq!(ordered, union(&["a", "b", "z"]));
+    // Without a structural order, the members the declaration writes go first.
+    assert_eq!(
+        declared_order(union(&["a", "b", "z"]), Some(&written), None, ResolverFacts::Used),
+        union(&["z", "a", "b"])
+    );
+}
+
+#[test]
+fn without_the_resolver_a_default_and_a_union_order_come_from_the_syntax_and_the_checker_alone() {
+    let lit = |value: &str| PropType::StringLiteral(value.to_string());
+    let declared = PropType::Union(vec![lit("sm"), lit("lg")]);
+    let sorted = PropType::Union(vec![lit("lg"), lit("sm")]);
+    let run = |resolver: ResolverFacts, tags: &[(&str, &str)]| {
+        let mut out = output();
+        let entry = out.components.get_mut("Button").unwrap();
+        Arc::make_mut(entry.props.get_mut("size").unwrap()).prop_type = declared.clone();
+        let mut size = (*typed("size", sorted.clone())).clone();
+        size.tags = tags.iter().map(|(name, text)| (name.to_string(), text.to_string())).collect();
+        let outcome = SemanticOutcome { components: vec![button(vec![Arc::new(size)])], ..Default::default() };
+        // `/src/Button.tsx` does not exist: the syntax has nothing to say.
+        merge_semantic_with(&mut out, outcome, resolver);
+        let size = out.components["Button"].props["size"].clone();
+        (size.prop_type.clone(), size.default_value.as_ref().map(|default| default.value.clone()))
+    };
+
+    assert_eq!(run(ResolverFacts::Used, &[]), (declared.clone(), Some("\"sm\"".to_string())));
+    assert_eq!(run(ResolverFacts::Off, &[]), (sorted.clone(), None));
+    assert_eq!(run(ResolverFacts::Off, &[("default", " 'lg' ")]), (sorted.clone(), Some("'lg'".to_string())));
+    assert_eq!(run(ResolverFacts::Used, &[("defaultValue", "'lg'")]), (declared.clone(), Some("'lg'".to_string())));
 }

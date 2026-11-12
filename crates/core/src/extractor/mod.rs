@@ -36,6 +36,7 @@ mod uses;
 mod values;
 mod visit;
 mod wrapper;
+pub(crate) mod written;
 
 pub(crate) use reexports::re_export_specifiers;
 

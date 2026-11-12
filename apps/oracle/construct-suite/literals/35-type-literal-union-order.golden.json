@@ -1,0 +1,51 @@
+{
+  "checker": {
+    "k": "union",
+    "members": [
+      {
+        "k": "prim",
+        "name": "undefined"
+      },
+      {
+        "k": "lit",
+        "value": "alpha",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "mid",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "zeta",
+        "of": "string"
+      }
+    ]
+  },
+  "text": "\"alpha\" | \"mid\" | \"zeta\" | undefined",
+  "facts": {
+    "description": "",
+    "tags": {},
+    "default": null,
+    "required": false,
+    "parent": null,
+    "order": [
+      {
+        "k": "lit",
+        "value": "zeta",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "alpha",
+        "of": "string"
+      },
+      {
+        "k": "lit",
+        "value": "mid",
+        "of": "string"
+      }
+    ]
+  }
+}

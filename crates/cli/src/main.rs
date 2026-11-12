@@ -143,6 +143,11 @@ pub struct ExtractArgs {
     /// milliseconds, before the run takes the structural result with one warning
     #[arg(long, requires = "experimental_semantic_types", default_value_t = DEFAULT_SEMANTIC_TIMEOUT_MS)]
     pub semantic_timeout_ms: u64,
+
+    /// Test-only (ADR 0026's S7 gates): with `--experimental-semantic-types`, take no fact the checker lacks from the
+    /// structural resolver: defaults and union member order come from the source's syntax alone
+    #[arg(long, hide = true, requires = "experimental_semantic_types")]
+    pub no_resolver_facts: bool,
 }
 
 /// `--semantic-timeout-ms` when not given: ADR 0026's proposed 10 s. A hung checker is caught that fast, and it bounds
