@@ -1,0 +1,14 @@
+{
+  "tool_use_id": "toolu_019iDMifZqTgFDR52DrERh74",
+  "agent_id": "a23666d26b85c7d91",
+  "task_description": "Fix #430 cached-count provenance finding",
+  "token_usage": {
+    "input_tokens": 126,
+    "cache_creation_tokens": 128237,
+    "cache_read_tokens": 6855109,
+    "output_tokens": 32567,
+    "api_call_count": 63
+  },
+  "started_at": "2026-11-11T21:08:11.751238-08:00",
+  "completed_at": "2026-11-11T21:21:39.965809-08:00"
+}
