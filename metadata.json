@@ -1,0 +1,47 @@
+{
+  "cli_version": "0.13.3-nightly.202611110616.7aed2fb15",
+  "checkpoint_id": "01M76Q31CR1CNJ1R4V58T4KC48",
+  "strategy": "manual-commit",
+  "branch": "merge-428",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/core/tests/semantic_join.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 12,
+    "cache_creation_tokens": 11644,
+    "cache_read_tokens": 4256986,
+    "output_tokens": 3173,
+    "api_call_count": 5,
+    "subagent_tokens": {
+      "input_tokens": 28,
+      "cache_creation_tokens": 21932,
+      "cache_read_tokens": 5208811,
+      "output_tokens": 4765,
+      "api_call_count": 14
+    }
+  },
+  "redaction": {
+    "replacements": 26,
+    "layers": {
+      "betterleaks": 12,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
