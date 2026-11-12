@@ -309,17 +309,6 @@ pub(crate) struct Position {
 }
 
 impl Rpc {
-    pub(crate) async fn open(
-        client: Client,
-        deadline: Duration,
-        tsconfig: Option<&str>,
-        root_files: &[String],
-        record: bool,
-    ) -> Result<Rpc, CallError> {
-        let options = Rpc::prepare(&client, deadline, tsconfig).await?;
-        Rpc::open_with(client, deadline, &options, root_files, record).await
-    }
-
     /// Initializes the `tsc` session and reads the compiler options, once per process. The beta panics on
     /// string-valued enum options such as `target: "es2022"`, so options come from `parseConfigFile`, which yields
     /// numeric ones.
@@ -345,6 +334,58 @@ impl Rpc {
             }
             None => default_options(),
         })
+    }
+
+    /// A snapshot of `count` programs over the same `root_files` (one when `count` is at most one), in a session it
+    /// initializes first ([`Rpc::prepare`]), with one session bound to each program: a checker that answers requests
+    /// about different programs at once ([`crate::checker::InProcess`]) answers the sessions in parallel. The programs
+    /// read the same files, so each answers what any other would. They share the request counts and the recording; [`Rpc::release`] on the first releases the
+    /// snapshot, and with it every program.
+    pub(crate) async fn open_programs(
+        client: Client,
+        deadline: Duration,
+        tsconfig: Option<&str>,
+        root_files: &[String],
+        record: bool,
+        count: usize,
+    ) -> Result<Vec<Rpc>, CallError> {
+        let options = Rpc::prepare(&client, deadline, tsconfig).await?;
+        if count <= 1 {
+            return Ok(vec![Rpc::open_with(client, deadline, &options, root_files, record).await?]);
+        }
+        let first = Rpc {
+            client,
+            deadline,
+            snapshot: 0,
+            project: String::new(),
+            options: options.clone(),
+            recording: record.then(Arc::default),
+            calls: Arc::default(),
+        };
+        let program = json!({ "rootFiles": root_files, "compilerOptions": options });
+        let programs: Vec<Value> = std::iter::repeat_n(program, count).collect();
+        let response: SnapshotResponse =
+            decode(&first.call("createSnapshot", json!({ "createPrograms": programs })).await?)?;
+        if response.projects.len() != count {
+            return Err(CallError::Rejected(format!(
+                "createSnapshot made {} programs of {count}",
+                response.projects.len()
+            )));
+        }
+        Ok(response
+            .projects
+            .into_iter()
+            .enumerate()
+            .map(|(lane, project)| Rpc {
+                client: first.client.lane(lane),
+                deadline,
+                snapshot: response.snapshot,
+                project: project.id,
+                options: options.clone(),
+                recording: first.recording.clone(),
+                calls: first.calls.clone(),
+            })
+            .collect())
     }
 
     /// A snapshot over `root_files` in a session [`Rpc::prepare`] already initialized.

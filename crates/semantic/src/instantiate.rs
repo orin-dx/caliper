@@ -289,10 +289,13 @@ mod tests {
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
 
         let outcome = runtime.block_on(async {
-            let checker = crate::start_checker(&request).await.unwrap();
+            let checker = crate::start_checker(&request, 1).await.unwrap();
             let tsconfig = root.join("tsconfig.json");
             let files = [file.to_string()];
-            let rpc = Rpc::open(checker.client(), timeout, Some(tsconfig.as_str()), &files, false).await.unwrap();
+            let rpc = Rpc::open_programs(checker.client(), timeout, Some(tsconfig.as_str()), &files, false, 1)
+                .await
+                .unwrap()
+                .remove(0);
             let pending = vec![(target("Poly<div>"), at("Poly", "div")), (target("Poly<a>"), at("Anchor", "a"))];
             let outcome = answer(&rpc, &files, &root, &PropInterner::default(), false, pending).await.unwrap();
             rpc.release().await;
