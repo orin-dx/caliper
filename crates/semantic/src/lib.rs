@@ -28,15 +28,15 @@ mod stamps;
 
 pub use on_demand::{OnDemand, OnDemandConfig, Recycles, Snapshots};
 
-use std::sync::Arc;
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use caliper_docgen_core::types::ExtractionOutput;
 use caliper_docgen_core::types::semantic::{PropInterner, SemanticComponent, SemanticFallback, SemanticOutcome};
 use camino::{Utf8Path, Utf8PathBuf};
 use rustc_hash::FxHashMap;
-use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 use crate::checker::{Backend, Start};
@@ -52,9 +52,21 @@ use crate::rpc::{CallError, REQUESTS, Rpc};
 /// the spawn are the whole check; a build that fails either takes the structural result with one warning.
 pub const SUPPORTED_VERSIONS: &[&str] = &["7.1", "0.23.0-ts7.1.0-beta"];
 
-/// How many files are asked about at once. The checker answers requests one at a time; this keeps it from idling
-/// between them.
+/// How many files are asked about at once, shared among the programs. A program's checker answers requests one at a
+/// time; this keeps it from idling between them.
 const FILES_IN_FLIGHT: usize = 16;
+
+/// The most threads the whole-project run converts the checker's answers on: past four, the checker's own thread is
+/// the bound (measured on Chakra's components, docs/gate-measurements.md).
+const CONVERTER_THREADS: usize = 4;
+
+/// How many programs a whole-project run asks at once, each on a thread of the linked checker: a program's requests are
+/// answered one at a time, and the checker's answering is what bounds the run (docs/gate-measurements.md).
+const CHECKER_PROGRAMS: usize = 2;
+
+/// The fewest files a program answers for: a project smaller than this asks one program, which builds no second checker
+/// for a handful of components.
+const MIN_FILES_PER_PROGRAM: usize = 32;
 
 /// A component the structural pass found.
 pub use caliper_docgen_core::types::semantic::SemanticTarget as Target;
@@ -126,14 +138,17 @@ impl SemanticRequest {
     }
 }
 
-/// Resolves the request's components with the checker. Blocks; builds its own single-threaded runtime, so it must
-/// not be called from inside one.
+/// Resolves the request's components with the checker. Blocks; builds its own runtime, so it must not be called from
+/// inside one. The runtime has up to four threads: the built-in checker answers two programs at once, each on a thread
+/// of its own, and while it does, the answers it gave the other files in flight are read and converted on these.
 pub fn resolve(request: SemanticRequest) -> SemanticOutcome {
-    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+    let threads = std::thread::available_parallelism().map_or(1, |count| count.get().min(CONVERTER_THREADS));
+    let built = tokio::runtime::Builder::new_multi_thread().worker_threads(threads).enable_all().build();
+    let runtime = match built {
         Ok(runtime) => runtime,
         Err(error) => return SemanticOutcome::unavailable(format!("could not start an async runtime: {error}")),
     };
-    runtime.block_on(run(request))
+    runtime.block_on(run(request, None))
 }
 
 /// The exported targets by file, in first-seen order, and an outcome that already holds a fallback for each target
@@ -157,22 +172,27 @@ fn group_by_file(request: &SemanticRequest) -> (SemanticOutcome, FxHashMap<&Utf8
 }
 
 /// The checker `request` names: its `tsc_path` as a process, else the built-in one.
-async fn start_checker(request: &SemanticRequest) -> Result<Backend, String> {
+async fn start_checker(request: &SemanticRequest, threads: usize) -> Result<Backend, String> {
     Backend::start(Start {
         project_root: &request.project_root,
         tsc_path: request.tsc_path.as_deref(),
         expected_versions: request.expected_versions,
         timeout: request.request_timeout,
         extra_env: &request.extra_env,
+        threads,
     })
     .await
 }
 
-async fn run(request: SemanticRequest) -> SemanticOutcome {
+/// Answers `request` with a checker started for it, asking `programs` programs at once, or by default as many as
+/// [`CHECKER_PROGRAMS`] and the files allow ([`MIN_FILES_PER_PROGRAM`]).
+async fn run(request: SemanticRequest, programs: Option<usize>) -> SemanticOutcome {
     if request.targets.iter().all(|target| target.exports.is_empty()) {
         return group_by_file(&request).0;
     }
-    let checker = match start_checker(&request).await {
+    let files = group_by_file(&request).2.len();
+    let programs = programs.unwrap_or_else(|| CHECKER_PROGRAMS.min(files.div_ceil(MIN_FILES_PER_PROGRAM))).max(1);
+    let checker = match start_checker(&request, programs).await {
         Ok(checker) => checker,
         Err(reason) => return SemanticOutcome::unavailable(reason),
     };
@@ -186,8 +206,8 @@ fn root_files(request: &SemanticRequest) -> Vec<String> {
     group_by_file(request).2.iter().map(|file| file.to_string()).collect()
 }
 
-/// Answers the request's targets with a checker that is already running: one program rooted at their files, released
-/// once they are answered.
+/// Answers the request's targets with a checker that is already running: one snapshot of as many programs rooted at
+/// their files as the checker answers at once ([`Backend::parallel_programs`]), released once they are answered.
 async fn answer_with(checker: &Backend, request: &SemanticRequest) -> SemanticOutcome {
     let files = root_files(request);
     if files.is_empty() {
@@ -195,47 +215,73 @@ async fn answer_with(checker: &Backend, request: &SemanticRequest) -> SemanticOu
     }
     let started = std::time::Instant::now();
     let tsconfig = request.tsconfig.as_ref().map(|path| path.as_str());
-    let opened =
-        Rpc::open(checker.client(), request.request_timeout, tsconfig, &files, request.record_to.is_some()).await;
-    let rpc = match opened {
-        Ok(rpc) => Arc::new(rpc),
+    let count = checker.parallel_programs();
+    let record = request.record_to.is_some();
+    let opened = Rpc::open_programs(checker.client(), request.request_timeout, tsconfig, &files, record, count).await;
+    let programs: Vec<Arc<Rpc>> = match opened {
+        Ok(programs) => programs.into_iter().map(Arc::new).collect(),
         Err(error) => return SemanticOutcome::unavailable(format!("the checker stopped answering: {error}")),
     };
-    tracing::debug!(program_ms = started.elapsed().as_millis() as u64, "semantic program built");
-    let answered = answer_on(&rpc, request, &files).await;
-    rpc.release().await;
+    tracing::debug!(program_ms = started.elapsed().as_millis() as u64, programs = count, "semantic program built");
+    let answered = answer_on(&programs, request, &files).await;
+    if let Some(first) = programs.first() {
+        first.release().await;
+    }
     answered.unwrap_or_else(|error| SemanticOutcome::unavailable(format!("the checker stopped answering: {error}")))
 }
 
-/// Answers the request's targets on a snapshot whose program is rooted at `files` ([`root_files`]). The snapshot is
+/// Answers the request's targets on a snapshot whose programs are each rooted at `files` ([`root_files`]), one session
+/// bound to each: a file is answered by one of them, the `n`th file by the `n % programs.len()`th. Each program has its
+/// checker and its handles, so each has its own [`Converter`]; since every program holds the same files, each answers
+/// a component as any other would, and the output does not depend on how the files are shared out. The snapshot is
 /// left as it is, for the caller to keep or release.
-async fn answer_on(rpc: &Arc<Rpc>, request: &SemanticRequest, files: &[String]) -> Result<SemanticOutcome, CallError> {
+async fn answer_on(
+    programs: &[Arc<Rpc>],
+    request: &SemanticRequest,
+    files: &[String],
+) -> Result<SemanticOutcome, CallError> {
     let (mut outcome, by_file, order) = group_by_file(request);
-    let mut answered = session(rpc, request, files, &by_file, &order).await?;
+    let mut answered = session(programs, request, files, &by_file, &order).await?;
     outcome.components.append(&mut answered.components);
     outcome.fallbacks.append(&mut answered.fallbacks);
     Ok(outcome)
 }
 
 async fn session(
-    rpc: &Arc<Rpc>,
+    programs: &[Arc<Rpc>],
     request: &SemanticRequest,
     files: &[String],
     by_file: &FxHashMap<&Utf8Path, Vec<&Target>>,
     order: &[&Utf8Path],
 ) -> Result<SemanticOutcome, CallError> {
     let started = std::time::Instant::now();
-    let converter = Converter::new(rpc.clone(), request.reverse_queries);
-    let limit = Arc::new(Semaphore::new(FILES_IN_FLIGHT));
+    let Some(rpc) = programs.first() else { return Ok(SemanticOutcome::default()) };
+    let converters: Vec<Converter> =
+        programs.iter().map(|program| Converter::new(program.clone(), request.reverse_queries)).collect();
     let interner = Arc::new(PropInterner::default());
+    // The files in order; each worker takes the next one when it is done with its last, so a program whose files take
+    // longer answers fewer of them.
+    let queue: VecDeque<Vec<Target>> = order
+        .iter()
+        .map(|file| by_file.get(file).into_iter().flatten().map(|target| (*target).clone()).collect())
+        .collect();
+    let queue = Arc::new(Mutex::new(queue));
 
     let mut tasks = JoinSet::new();
-    for file in order {
-        let targets: Vec<Target> = by_file.get(file).into_iter().flatten().map(|target| (*target).clone()).collect();
-        let (rpc, converter, limit, interner) = (rpc.clone(), converter.clone(), limit.clone(), interner.clone());
+    for worker in 0..FILES_IN_FLIGHT {
+        let lane = worker % programs.len();
+        let (Some(rpc), Some(converter)) = (programs.get(lane), converters.get(lane)) else { continue };
+        let (rpc, converter, queue, interner) = (rpc.clone(), converter.clone(), queue.clone(), interner.clone());
         tasks.spawn(async move {
-            let _permit = limit.acquire().await;
-            answer_file(&rpc, &converter, &interner, targets).await
+            let mut answered = (SemanticOutcome::default(), Vec::new());
+            loop {
+                let next = queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).pop_front();
+                let Some(targets) = next else { return Ok(answered) };
+                let (mut outcome, mut generic) = answer_file(&rpc, &converter, &interner, targets).await?;
+                answered.0.components.append(&mut outcome.components);
+                answered.0.fallbacks.append(&mut outcome.fallbacks);
+                answered.1.append(&mut generic);
+            }
         });
     }
 
@@ -281,7 +327,7 @@ async fn session(
     tracing::debug!(
         requests = ?rpc.calls(),
         files = files.len(),
-        type_memo = ?converter.memo_stats(),
+        type_memo = ?converters.iter().map(Converter::memo_stats).fold((0, 0), |sum, (hits, misses)| (sum.0 + hits, sum.1 + misses)),
         total_ms = started.elapsed().as_millis() as u64,
         "semantic backend finished"
     );
@@ -347,4 +393,113 @@ async fn module_exports(rpc: &Rpc, file: &str) -> Result<Option<component::Modul
     let Some(symbol) = rpc.source_file_symbol(file).await? else { return Ok(None) };
     let exports = rpc.exports_of_module(&symbol.reference).await?;
     Ok(Some(component::Module { symbol, exports }))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use caliper_docgen_core::pipeline::{PipelineOptions, extract};
+
+    use super::*;
+
+    /// A project of `files` components over shared types (a union, an interface base, an `Omit` in an intersection, a
+    /// recursive alias) whose props all extend an interface the last file augments (`declare global`).
+    fn shared_types_project(files: usize) -> (tempfile::TempDir, Utf8PathBuf) {
+        let dir = tempfile::Builder::new().prefix("Programs").tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        std::fs::write(
+            root.join("types.ts"),
+            "export type Size = 'sm' | 'md' | 'lg';\n\
+             export interface Base {\n  /** The id. */\n  id: string;\n  size?: Size;\n}\n\
+             export type Tree = { label: string; children?: Tree[] };\n\
+             export type Styled = Omit<Base, 'id'> & { tone?: 'a' | 'b'; onPick?: (value: Size) => void };\n\
+             declare global { interface Augmented { fromTypes?: number } }\n",
+        )
+        .unwrap();
+        for index in 0..files {
+            let augments = if index + 1 == files {
+                "declare global { interface Augmented { fromLastFile?: boolean } }\n"
+            } else {
+                ""
+            };
+            std::fs::write(
+                root.join(format!("C{index}.tsx")),
+                format!(
+                    "import type {{ Base, Styled, Tree }} from './types';\n{augments}\
+                     export interface C{index}Props extends Base, Augmented {{ own{index}: number; tree?: Tree; styled: Styled }}\n\
+                     export function C{index}(props: C{index}Props) {{ return null; }}\n"
+                ),
+            )
+            .unwrap();
+        }
+        (dir, root)
+    }
+
+    fn answered(root: &Utf8Path, programs: usize) -> SemanticOutcome {
+        let output = extract(&PipelineOptions { src_dirs: vec![root.to_owned()], ..PipelineOptions::default() });
+        let request = SemanticRequest::new(root.to_owned(), targets_of(&output));
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        runtime.block_on(run(request, Some(programs)))
+    }
+
+    /// Three programs on the built-in checker, each answering some of the files, give the answer one program gives:
+    /// each holds every root file, so what one file declares (here a global augmentation in the last) reaches the
+    /// components the other programs answer.
+    #[test]
+    fn several_programs_answer_as_one_does() {
+        let (_dir, root) = shared_types_project(9);
+
+        let one = answered(&root, 1);
+        let three = answered(&root, 3);
+
+        assert!(one.diagnostics.is_empty() && one.fallbacks.is_empty(), "{one:?}");
+        assert_eq!(one.components.len(), 9);
+        for component in &one.components {
+            let names: Vec<&str> = component.props.iter().map(|prop| prop.name.as_str()).collect();
+            assert!(names.contains(&"fromLastFile") && names.contains(&"fromTypes"), "{names:?}");
+        }
+        assert_eq!(one, three);
+    }
+
+    /// A prop the converter keeps for later components is kept by what makes it, including which of its JSDoc was
+    /// asked: a component whose structural pass already described `id` is not handed the description another asked for,
+    /// and the one after it is not handed an empty one. The three are in one file, so they are answered in turn and the
+    /// later ones find the first one's props kept.
+    #[test]
+    fn a_kept_prop_is_one_made_by_the_same_question() {
+        let (_dir, root) = shared_types_project(0);
+        let component = |name: &str| {
+            format!(
+                "export interface {name}Props extends Base {{ own: number }}\nexport function {name}(props: {name}Props) {{ return null; }}\n"
+            )
+        };
+        let text = format!(
+            "import type {{ Base }} from './types';\n{}{}{}",
+            component("C0"),
+            component("C1"),
+            component("C2")
+        );
+        std::fs::write(root.join("All.tsx"), text).unwrap();
+        let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
+        let mut targets = targets_of(&output);
+        for target in &mut targets {
+            target.described.clear();
+        }
+        if let Some(target) = targets.iter_mut().find(|target| target.key == "C1") {
+            target.described.insert("id".to_string());
+        }
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+
+        let outcome = runtime.block_on(run(SemanticRequest::new(root.clone(), targets), Some(1)));
+
+        let description = |key: &str| {
+            let component = outcome.components.iter().find(|component| component.key == key).unwrap();
+            component.props.iter().find(|prop| prop.name == "id").unwrap().description.clone()
+        };
+        assert_eq!(
+            (description("C0"), description("C1"), description("C2")),
+            ("The id.".into(), String::new(), "The id.".into())
+        );
+    }
 }

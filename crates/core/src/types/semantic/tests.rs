@@ -562,3 +562,39 @@ fn without_the_resolver_a_default_and_a_union_order_come_from_the_syntax_and_the
     assert_eq!(run(ResolverFacts::Off, &[("default", " 'lg' ")]), (sorted.clone(), Some("'lg'".to_string())));
     assert_eq!(run(ResolverFacts::Used, &[("defaultValue", "'lg'")]), (declared.clone(), Some("'lg'".to_string())));
 }
+
+/// The whole-project merge makes a prop once per checker prop and structural prop it is made from: components handed
+/// the same checker prop over different structural props each keep their own structural description, and two over the
+/// same structural prop share one merged copy.
+#[test]
+fn one_checker_prop_over_different_structural_props_merges_into_each_its_own() {
+    let mut out = output();
+    let shared = structural("label", "Shared label.", None);
+    let template = out.components["Button"].clone();
+    let entry = |name: &str, label: Arc<ParsedProp>| {
+        let mut entry = template.clone();
+        entry.display_name = name.to_string();
+        entry.file_path = format!("/src/{name}.tsx").into();
+        entry.exports = vec![ComponentExport::named(name)];
+        entry.props = BTreeMap::from([("label".to_string(), label)]);
+        entry
+    };
+    out.components.insert("Card".to_string(), entry("Card", structural("label", "Card label.", None)));
+    out.components.insert("First".to_string(), entry("First", shared.clone()));
+    out.components.insert("Second".to_string(), entry("Second", shared));
+    let label = semantic_prop("label", "", false);
+    let answer = |key: &str| SemanticComponent { key: key.to_string(), props: vec![label.clone()], composes: None };
+    let outcome = SemanticOutcome {
+        components: vec![button(vec![label.clone()]), answer("Card"), answer("First"), answer("Second")],
+        ..Default::default()
+    };
+
+    merge_semantic(&mut out, outcome);
+
+    let merged = |key: &str| out.components[key].props["label"].clone();
+    assert_eq!(merged("Button").description, "Structural label.");
+    assert_eq!(merged("Card").description, "Card label.");
+    assert_eq!(merged("First").description, "Shared label.");
+    assert!(Arc::ptr_eq(&merged("First"), &merged("Second")));
+    assert!(!Arc::ptr_eq(&merged("Button"), &merged("Card")));
+}
