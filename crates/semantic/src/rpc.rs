@@ -515,6 +515,27 @@ impl Rpc {
         rpc.created(json!({ "createPrograms": [{ "rootFiles": root_files, "compilerOptions": options }] })).await
     }
 
+    /// A snapshot of a program rooted at `files` alone, held in the checker's memory and never written to disk (see
+    /// [`Rpc::layered`]), in a session [`Rpc::prepare`] already initialized.
+    pub(crate) async fn open_in_memory(
+        client: Client,
+        deadline: Duration,
+        options: &Value,
+        files: &[(String, String)],
+    ) -> Result<Rpc, CallError> {
+        let session = Rpc {
+            client,
+            deadline,
+            snapshot: 0,
+            project: String::new(),
+            options: options.clone(),
+            recording: None,
+            calls: Arc::default(),
+            others: Vec::new(),
+        };
+        session.layered(&[], files).await
+    }
+
     /// A new snapshot of the same program with `files` added, held in the checker's memory and never written to disk:
     /// each is a root file, keyed by its absolute path. The calls on it count, and are recorded, with this one's.
     pub(crate) async fn layered(&self, root_files: &[String], files: &[(String, String)]) -> Result<Rpc, CallError> {
@@ -574,6 +595,12 @@ impl Rpc {
             calls: Arc::default(),
             others: Vec::new(),
         })
+    }
+
+    /// The snapshot this session asks about.
+    #[cfg(test)]
+    pub(crate) fn snapshot_id(&self) -> u64 {
+        self.snapshot
     }
 
     /// Every file the snapshot's program read, as the checker names them.

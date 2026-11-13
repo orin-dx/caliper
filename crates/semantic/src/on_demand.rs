@@ -4,7 +4,9 @@
 //! one component per story, so this keeps one checker warm, starts it on the first request, and roots a small program at
 //! just the requested files: the checker loads what those files import, not the project.
 //!
-//! The snapshot of that program is kept between requests (ADR 0026 S6). The next request brings it up to date with
+//! The snapshot of that program is kept between requests (ADR 0026 S6). The warm-up ([`OnDemand::warm_up`]) builds the
+//! first: a program over the project's dependencies, so the first request re-roots it at its files and reads only what
+//! they add, instead of reading the lib and every dependency's declarations from the disk while someone waits. The next request brings it up to date with
 //! `updateSnapshot`, which re-reads only the files the session announced as changed ([`SemanticProvider::changed`]) and
 //! keeps the rest as parsed, re-rooting the program when the request names other files. The checker does not see an
 //! edit it is not told about, so before an answer every file the program read is compared with the stamp it had when
@@ -37,7 +39,7 @@ use caliper_docgen_core::types::semantic::{
     Delivery, Priority, SemanticOutcome, SemanticProvider, SemanticTarget, SharedPriority, SourceChange,
 };
 use caliper_docgen_core::types::{Diagnostic, DiagnosticCode, DiagnosticSeverity};
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use rustc_hash::{FxHashMap, FxHashSet};
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -46,6 +48,10 @@ use crate::checker::{Backend, Client};
 use crate::rpc::{CallError, Rpc};
 use crate::stamps::{self, Stamp};
 use crate::{SemanticRequest, answer_on, group_by_file, root_files};
+
+/// The file a warm-up snapshot's program is rooted at, in the project's root: held in the checker's memory, never
+/// written to disk ([`warm_source`]).
+const WARM_FILE: &str = "__caliper_warm_up__.ts";
 
 /// How many files an unannounced-edit warning names before it counts the rest.
 const UNTOLD_NAMED: usize = 5;
@@ -105,8 +111,9 @@ impl OnDemandConfig {
 /// How the snapshots a warm checker answered from were made.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Snapshots {
-    /// Built from the disk with `createSnapshot`: the first request of a checker, one after a file changed that the
-    /// checker was not told about, or one after a snapshot could not be listed or updated.
+    /// Built from the disk with `createSnapshot`: the warm-up's, the first request of a checker that was not warmed up,
+    /// one after a file changed that the checker was not told about, or one after a snapshot could not be listed or
+    /// updated.
     pub created: u32,
     /// Brought up to date from the one before with `updateSnapshot`: announced edits re-read, the rest kept.
     pub updated: u32,
@@ -231,7 +238,9 @@ impl OnDemand {
         }
     }
 
-    /// Starts the checker in the background so the first request does not pay for it.
+    /// Starts the checker in the background, and builds the snapshot the first request starts from, so the first request
+    /// pays for neither: a program over the project's dependencies (the packages its nearest `package.json` lists under
+    /// `dependencies` and `peerDependencies`, and the lib), which the first request re-roots at its files.
     pub fn warm_up(&self) {
         if let Some(jobs) = &self.jobs {
             jobs.send(Job::Warm).ok();
@@ -402,7 +411,9 @@ impl Checker {
     async fn take(&mut self, config: &OnDemandConfig, job: Job, waiting: &mut Queue<Asked>) {
         match job {
             Job::Warm => {
-                self.ensure(config).await.ok();
+                if self.ensure(config).await.is_ok() {
+                    self.warm(config).await;
+                }
             }
             Job::Changed(change) => self.told(change).await,
             Job::Answer(asked) => {
@@ -448,6 +459,38 @@ impl Checker {
             self.backend = Some(backend);
         }
         Ok(())
+    }
+
+    /// Builds the snapshot the first request starts from (see [`OnDemand::warm_up`]) and keeps it as the live one, its
+    /// files stamped as a request's are after its reply. A checker that already keeps a snapshot keeps it. Past the
+    /// memory bound, the checker stops for the session, as after a reply.
+    async fn warm(&mut self, config: &OnDemandConfig) {
+        if self.live.is_some() {
+            return;
+        }
+        let (Some(backend), Some(options)) = (self.backend.as_ref(), self.options.as_ref()) else { return };
+        let file = config.project_root.join(WARM_FILE).to_string();
+        let source = warm_source(&config.project_root);
+        let started = std::time::Instant::now();
+        let read_from = SystemTime::now();
+        let client = backend.client();
+        match Rpc::open_in_memory(client, config.request_timeout, options, &[(file.clone(), source)]).await {
+            Ok(rpc) => {
+                self.gauges.created.fetch_add(1, Ordering::Relaxed);
+                self.live = Some(Live { rpc: Arc::new(rpc), roots: vec![file], read_from, stamps: None });
+            }
+            Err(error) => {
+                tracing::debug!(%error, "the warm-up snapshot was not built; the first request builds one");
+                return;
+            }
+        }
+        let held = self.backend.as_ref().and_then(Backend::memory_mib);
+        tracing::debug!(ms = started.elapsed().as_millis() as u64, held_mib = ?held, "the warm-up snapshot is built");
+        if Upkeep::decide(held, config.max_rss_mib) == Upkeep::Down {
+            self.stop_past_bound(config, held.unwrap_or_default()).await;
+            return;
+        }
+        self.stamp().await;
     }
 
     fn stay_down(&mut self, reason: String) -> String {
@@ -569,7 +612,9 @@ impl Checker {
         let Some(live) = self.live.as_mut().filter(|live| live.stamps.is_none()) else { return };
         match live.rpc.source_file_names().await {
             Ok(files) => {
-                live.stamps = Some(stamps::record(files.into_iter().map(Utf8PathBuf::from).collect(), live.read_from))
+                // The warm-up's file is not on the disk: there is nothing to compare it with.
+                let files = files.into_iter().map(Utf8PathBuf::from).filter(|file| file.file_name() != Some(WARM_FILE));
+                live.stamps = Some(stamps::record(files.collect(), live.read_from))
             }
             Err(error) => {
                 tracing::debug!(%error, "could not list the snapshot's files; the next request builds a fresh one");
@@ -585,27 +630,48 @@ impl Checker {
         let held = Upkeep::checks_memory(self.served).then(|| backend.memory_mib()).flatten();
         let upkeep = Upkeep::decide(held, config.max_rss_mib);
         if upkeep == Upkeep::Down {
-            let mib = held.unwrap_or_default();
-            tracing::warn!(
-                held_mib = mib,
-                bound_mib = config.max_rss_mib,
-                "the built-in checker is past its memory bound"
-            );
-            self.live = None;
-            self.told.clear();
-            if let Some(old) = self.backend.take() {
-                old.shutdown_within(config.shutdown_wait).await;
-            }
-            self.options = None;
-            self.stay_down(format!(
-                "the built-in checker held {mib} MiB, more than its {} MiB bound (`max_rss_mib`), and this process \
-                 keeps that memory, so components keep their structural answer for the rest of the session",
-                config.max_rss_mib
-            ));
+            self.stop_past_bound(config, held.unwrap_or_default()).await;
             return;
         }
         self.stamp().await;
     }
+
+    /// Stops the checker for the session: it holds `mib`, past the memory bound, which a replacement would not give back.
+    async fn stop_past_bound(&mut self, config: &OnDemandConfig, mib: u64) {
+        tracing::warn!(held_mib = mib, bound_mib = config.max_rss_mib, "the built-in checker is past its memory bound");
+        self.live = None;
+        self.told.clear();
+        if let Some(old) = self.backend.take() {
+            old.shutdown_within(config.shutdown_wait).await;
+        }
+        self.options = None;
+        self.stay_down(format!(
+            "the built-in checker held {mib} MiB, more than its {} MiB bound (`max_rss_mib`), and this process keeps \
+             that memory, so components keep their structural answer for the rest of the session",
+            config.max_rss_mib
+        ));
+    }
+}
+
+/// The text of the file a warm-up roots its program at ([`WARM_FILE`]): an import of each package the nearest
+/// `package.json` at or above `project_root` lists under `dependencies` and `peerDependencies`, so the program reads
+/// their declarations as a component that imports them would. `@types` packages are left out: the compiler reads every
+/// one of them for any program. With no `package.json`, or none it can read, the file is empty and the program holds the
+/// lib and the `@types` packages alone.
+fn warm_source(project_root: &Utf8Path) -> String {
+    let Some(manifest) = project_root.ancestors().map(|dir| dir.join("package.json")).find(|file| file.is_file())
+    else {
+        return String::new();
+    };
+    let Ok(manifest) = std::fs::read_to_string(&manifest) else { return String::new() };
+    let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&manifest) else { return String::new() };
+    let mut packages = BTreeSet::new();
+    for field in ["dependencies", "peerDependencies"] {
+        if let Some(listed) = manifest.get(field).and_then(serde_json::Value::as_object) {
+            packages.extend(listed.keys().filter(|name| !name.starts_with("@types/")).cloned());
+        }
+    }
+    packages.into_iter().map(|name| format!("import {};\n", serde_json::Value::String(name))).collect()
 }
 
 /// What becomes of a checker after a reply.
@@ -637,10 +703,13 @@ mod tests {
     use std::time::Duration;
 
     use caliper_docgen_core::pipeline::{PipelineOptions, extract};
-    use caliper_docgen_core::types::semantic::{Delivery, Priority, SemanticProvider, SharedPriority};
+    use caliper_docgen_core::types::semantic::{
+        Delivery, Priority, SemanticOutcome, SemanticProvider, SemanticTarget, SharedPriority, SourceChange,
+    };
     use camino::Utf8PathBuf;
+    use std::sync::atomic::Ordering;
 
-    use super::{OnDemand, OnDemandConfig};
+    use super::{Checker, Job, OnDemand, OnDemandConfig, WARM_FILE, warm_source};
 
     use super::{INTERACTIVE_STREAK, Queue, RSS_CHECK_EVERY, Upkeep};
 
@@ -684,6 +753,144 @@ mod tests {
             .collect();
 
         assert_eq!(order, ["Other", "Button", "Button", "Button"]);
+    }
+
+    /// A project whose `Button` takes props from the package `dep` it depends on, every file written an hour ago (a
+    /// stamp taken within two seconds of an edit cannot tell it from the next).
+    struct Warmed {
+        _dir: tempfile::TempDir,
+        root: Utf8PathBuf,
+        config: OnDemandConfig,
+    }
+
+    const BUTTON: &str = "import type { DepProps } from \"dep\";\nexport function Button(props: DepProps & { label: string }) { return null; }\n";
+
+    impl Warmed {
+        fn new() -> Self {
+            let dir = tempfile::Builder::new().prefix("Warmed").tempdir().unwrap();
+            let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+            let fixture = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/project/tsconfig.json");
+            std::fs::copy(fixture, root.join("tsconfig.json")).unwrap();
+            std::fs::create_dir_all(root.join("node_modules/dep")).unwrap();
+            let mut config = OnDemandConfig::new(root.clone());
+            config.tsconfig = Some(root.join("tsconfig.json"));
+            let project = Self { _dir: dir, root, config };
+            project.write(
+                "package.json",
+                r#"{ "name": "app", "dependencies": { "dep": "1.0.0", "@types/dep": "1.0.0" } }"#,
+            );
+            project.write("node_modules/dep/package.json", r#"{ "name": "dep", "types": "index.d.ts" }"#);
+            project.write("node_modules/dep/index.d.ts", "export interface DepProps { fromDep?: string }\n");
+            project.write("Button.tsx", BUTTON);
+            project
+        }
+
+        /// Writes `text` to `name`, modified an hour ago, or half an hour ago when `later`.
+        fn write_at(&self, name: &str, text: &str, later: bool) {
+            std::fs::write(self.root.join(name), text).unwrap();
+            let file = std::fs::File::options().write(true).open(self.root.join(name)).unwrap();
+            let ago = Duration::from_secs(if later { 1800 } else { 3600 });
+            file.set_modified(std::time::SystemTime::now() - ago).unwrap();
+        }
+
+        fn write(&self, name: &str, text: &str) {
+            self.write_at(name, text, false);
+        }
+
+        fn button(&self) -> SemanticTarget {
+            let output = extract(&PipelineOptions { src_dirs: vec![self.root.clone()], ..PipelineOptions::default() });
+            crate::targets_of(&output).into_iter().find(|target| target.display_name == "Button").unwrap()
+        }
+    }
+
+    fn props(outcome: &SemanticOutcome) -> Vec<&str> {
+        outcome.components.iter().flat_map(|component| &component.props).map(|prop| prop.name.as_str()).collect()
+    }
+
+    fn current_thread() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
+    }
+
+    /// Whether the checker still holds `snapshot`: releasing one it does not hold fails, as releasing an unknown one does.
+    fn holds(runtime: &tokio::runtime::Runtime, checker: &Checker, snapshot: u64) -> bool {
+        let client = checker.backend.as_ref().unwrap().client();
+        let params = serde_json::json!({ "snapshot": snapshot }).to_string().into_bytes();
+        runtime.block_on(client.request_raw("release", params, Duration::from_secs(60))).is_ok()
+    }
+
+    fn snapshot_of(checker: &Checker) -> u64 {
+        checker.live.as_ref().unwrap().rpc.snapshot_id()
+    }
+
+    /// The warm-up keeps a snapshot over the project's dependencies, its files stamped; the first request brings it up to
+    /// date, re-rooted at its file and with the edit announced before it read again, instead of building one, and the
+    /// warm-up's snapshot is released once replaced. The answer is a cold checker's. On the base the warm-up kept no
+    /// snapshot, and the first request built one.
+    #[test]
+    fn the_first_request_after_a_warm_up_updates_the_warm_snapshot_and_releases_it() {
+        let project = Warmed::new();
+        let runtime = current_thread();
+        let mut checker = Checker::default();
+
+        runtime.block_on(checker.take(&project.config, Job::Warm, &mut Queue::default()));
+        let warm = checker.live.as_ref().expect("the warm-up keeps a snapshot");
+        let stamped: Vec<String> = warm.stamps.as_ref().unwrap().keys().map(ToString::to_string).collect();
+        let warm_snapshot = snapshot_of(&checker);
+        assert_eq!(warm.roots, [project.root.join(WARM_FILE).to_string()]);
+        assert!(stamped.contains(&project.root.join("node_modules/dep/index.d.ts").to_string()), "{stamped:?}");
+        assert!(!stamped.iter().any(|file| file.ends_with(WARM_FILE)), "{stamped:?}");
+        project.write("Button.tsx", &BUTTON.replace("label: string", "label: string; edited: number"));
+        let changed = SourceChange::Files(vec![project.root.join("Button.tsx")]);
+        runtime.block_on(checker.take(&project.config, Job::Changed(changed), &mut Queue::default()));
+        let first = runtime.block_on(checker.answer(&project.config, vec![project.button()]));
+
+        assert_eq!(props(&first), ["fromDep", "label", "edited"], "{first:?}");
+        assert_eq!(
+            (checker.gauges.created.load(Ordering::Relaxed), checker.gauges.updated.load(Ordering::Relaxed)),
+            (1, 1),
+            "the warm-up built the one snapshot, which the first request brought up to date"
+        );
+        assert_eq!(checker.live.as_ref().unwrap().roots, [project.root.join("Button.tsx").to_string()]);
+        assert_ne!(snapshot_of(&checker), warm_snapshot);
+        assert!(!holds(&runtime, &checker, warm_snapshot), "the warm-up's snapshot is released once replaced");
+        let mut cold = Checker::default();
+        assert_eq!(runtime.block_on(cold.answer(&project.config, vec![project.button()])), first);
+        for checker in [checker, cold] {
+            runtime.block_on(checker.backend.unwrap().shutdown());
+        }
+    }
+
+    /// A dependency the warm-up read that changed with nobody telling the checker is read from the disk at the first
+    /// request, with a warning that names it, and the warm-up's snapshot is released.
+    #[test]
+    fn a_dependency_changed_unannounced_after_a_warm_up_is_read_again_with_a_warning() {
+        let project = Warmed::new();
+        let runtime = current_thread();
+        let mut checker = Checker::default();
+
+        runtime.block_on(checker.take(&project.config, Job::Warm, &mut Queue::default()));
+        let warm_snapshot = snapshot_of(&checker);
+        project.write_at("node_modules/dep/index.d.ts", "export interface DepProps { fromDep2?: string }\n", true);
+        let first = runtime.block_on(checker.answer(&project.config, vec![project.button()]));
+
+        assert_eq!(props(&first), ["fromDep2", "label"], "{first:?}");
+        let warned = first.diagnostics.iter().any(|d| d.message.contains("node_modules/dep/index.d.ts"));
+        assert!(warned, "{:?}", first.diagnostics);
+        assert_eq!(checker.gauges.created.load(Ordering::Relaxed), 2, "built again from the disk");
+        assert!(!holds(&runtime, &checker, warm_snapshot), "the warm-up's snapshot is released");
+        runtime.block_on(checker.backend.take().unwrap().shutdown());
+    }
+
+    #[test]
+    fn a_warm_up_imports_each_package_the_project_depends_on_but_not_its_types_packages() {
+        let project = Warmed::new();
+        project.write(
+            "package.json",
+            r#"{ "dependencies": { "b": "1", "@scope/a": "1", "@types/react": "1" }, "peerDependencies": { "react": "1" }, "devDependencies": { "vitest": "1" } }"#,
+        );
+
+        assert_eq!(warm_source(&project.root), "import \"@scope/a\";\nimport \"b\";\nimport \"react\";\n");
+        assert_eq!(warm_source(&project.root.join("node_modules/dep")), "", "dep's own package.json lists nothing");
     }
 
     #[test]
