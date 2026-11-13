@@ -1,7 +1,6 @@
 import type { CaliperStorybookOptions } from './index.js'
 
 const FALLBACKS = ['degraded', 'never'] as const
-const SEMANTIC_TYPES = ['off', 'on-demand'] as const
 
 function assertOneOf(name: string, value: unknown, choices: readonly string[]): void {
   if (value === undefined || choices.includes(value as string)) return
@@ -10,8 +9,20 @@ function assertOneOf(name: string, value: unknown, choices: readonly string[]): 
   )
 }
 
-/** Throws for an option value that is not one of its choices: a typo must not silently take another meaning. */
-export function assertValidOptions(options: Pick<CaliperStorybookOptions, 'fallback' | 'semanticTypes'>): void {
+/**
+ * Throws for an option value that is not one of its choices: a typo must not silently take another meaning. The
+ * checker's old opt-in, `semanticTypes`, is named too: left unread, `semanticTypes: 'off'` would quietly run it.
+ */
+export function assertValidOptions(
+  options: Pick<CaliperStorybookOptions, 'fallback' | 'checker'> & { semanticTypes?: unknown },
+): void {
   assertOneOf('fallback', options.fallback, FALLBACKS)
-  assertOneOf('semanticTypes', options.semanticTypes, SEMANTIC_TYPES)
+  if (options.checker !== undefined && typeof options.checker !== 'boolean') {
+    throw new Error(`[caliper-docgen] checker is '${String(options.checker)}', expected true or false`)
+  }
+  if (options.semanticTypes !== undefined) {
+    throw new Error(
+      "[caliper-docgen] semanticTypes was replaced by checker: the checker is on by default, and 'checker: false' turns it off",
+    )
+  }
 }

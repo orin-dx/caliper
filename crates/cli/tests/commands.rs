@@ -41,7 +41,21 @@ fn stdout_of(output: &Output) -> String {
 fn check_on_a_clean_tree_prints_no_diagnostics_and_exits_0() {
     let dir = widget_dir();
     let output = run(&["check", "--json", "--src", dir.path().to_str().unwrap()]);
-    assert_eq!(stdout_of(&output), "[]\n");
+    // The one diagnostic is the checker's note of which components it answered.
+    let diagnostics: serde_json::Value = serde_json::from_str(&stdout_of(&output)).unwrap();
+    assert_eq!(
+        diagnostics,
+        serde_json::json!([{
+            "severity": "info",
+            "message": "1 component(s) resolved by the TypeScript checker",
+            "file": null, "line": null, "column": null, "help": null,
+            "code": "SEMANTIC_BACKEND",
+            "affects": ["Widget"],
+        }])
+    );
+
+    let structural = run(&["check", "--json", "--no-checker", "--src", dir.path().to_str().unwrap()]);
+    assert_eq!(stdout_of(&structural), "[]\n");
 }
 
 #[test]
@@ -101,6 +115,40 @@ fn extract_rdt_format_emits_react_docgen_typescript_props() {
     let label = &parsed["Widget"]["props"]["label"];
     assert_eq!(label["type"], serde_json::json!({ "name": "string" }));
     assert_eq!(label["required"], true);
+}
+
+/// A tree whose `made` prop has a type only the checker evaluates: the structural resolver keeps
+/// `ReturnType<typeof make>` as written.
+fn dir_with_a_computed_type() -> TempDir {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("Widget.tsx"),
+        "const make = () => ({ size: 1 });\nexport function Widget(props: { made: ReturnType<typeof make> }) { return \
+         null; }\n",
+    )
+    .unwrap();
+    dir
+}
+
+#[test]
+fn extract_and_inspect_take_the_checkers_types_unless_no_checker() {
+    let dir = dir_with_a_computed_type();
+    let src = dir.path().to_str().unwrap();
+    let made = |extra: &[&str]| {
+        let args = [&["--quiet", "extract", "--format", "rdt", "--src", src][..], extra].concat();
+        let parsed: serde_json::Value = serde_json::from_str(&stdout_of(&run(&args))).unwrap();
+        parsed["Widget"]["props"]["made"]["type"]["name"].clone()
+    };
+
+    assert_eq!(made(&[]), "{ size: number }", "the checker answers by default");
+    assert_eq!(made(&["--no-checker"]), "ReturnType<typeof make>", "--no-checker keeps the structural type");
+
+    let inspect = |extra: &[&str]| {
+        let args = [&["inspect", "Widget", "--src", src][..], extra].concat();
+        strip_ansi(&stdout_of(&run(&args)))
+    };
+    assert!(inspect(&[]).contains("{ size: number }"), "{}", inspect(&[]));
+    assert!(inspect(&["--no-checker"]).contains("ReturnType<typeof make>"), "{}", inspect(&["--no-checker"]));
 }
 
 #[test]
@@ -233,8 +281,15 @@ fn watch_reports_a_change_and_writes_out_what_extract_produces() {
 
     let watched = watch.edit_until_out_is_written(&src);
 
-    let extracted: serde_json::Value =
-        serde_json::from_str(&stdout_of(&run(&["extract", "--json", "--src", src.path().to_str().unwrap()]))).unwrap();
+    // `watch` is the structural resolver's, so it equals `extract` without the checker.
+    let extracted: serde_json::Value = serde_json::from_str(&stdout_of(&run(&[
+        "extract",
+        "--json",
+        "--no-checker",
+        "--src",
+        src.path().to_str().unwrap(),
+    ])))
+    .unwrap();
     assert_eq!(prop_names(&watched, "Widget"), ["label", "size"]);
     assert_eq!(watched["components"], extracted["components"], "watch and extract must agree on the same tree");
     assert_eq!(watched["props"], extracted["props"], "watch and extract must agree on the props the ids name");
@@ -267,8 +322,14 @@ fn watch_writes_out_before_any_change() {
         std::thread::sleep(Duration::from_millis(50));
     };
 
-    let extracted: serde_json::Value =
-        serde_json::from_str(&stdout_of(&run(&["extract", "--json", "--src", src.path().to_str().unwrap()]))).unwrap();
+    let extracted: serde_json::Value = serde_json::from_str(&stdout_of(&run(&[
+        "extract",
+        "--json",
+        "--no-checker",
+        "--src",
+        src.path().to_str().unwrap(),
+    ])))
+    .unwrap();
     assert_eq!(written["components"], extracted["components"]);
 }
 
@@ -344,8 +405,8 @@ fn extract_finds_docgen_config_ts_in_the_working_directory_and_applies_it() {
     assert_eq!(components, ["Widget"], "only the configured srcDirs are scanned");
 }
 
-/// A project whose config switches the TypeScript checker on. tsx, which evaluates the config, is only installed under
-/// apps/oracle.
+/// A project whose config names a checker binary that is not there. tsx, which evaluates the config, is only installed
+/// under apps/oracle.
 fn project_with_checker_config() -> TempDir {
     let project = TempDir::new_in(concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/oracle")).unwrap();
     std::fs::create_dir(project.path().join("components")).unwrap();
@@ -356,7 +417,7 @@ fn project_with_checker_config() -> TempDir {
     .unwrap();
     std::fs::write(
         project.path().join("docgen.config.ts"),
-        "export default { srcDirs: ['components'], experimentalSemanticTypes: true, tscPath: '/nonexistent/tsc' };\n",
+        "export default { srcDirs: ['components'], tscPath: '/nonexistent/tsc' };\n",
     )
     .unwrap();
     project
@@ -364,13 +425,13 @@ fn project_with_checker_config() -> TempDir {
 
 fn ignored_checker_note(command: &str) -> String {
     format!(
-        "warning: the config sets experimentalSemanticTypes and tscPath, but `{command}` never runs the TypeScript \
-         checker, so its output is the structural result. Only `extract` runs the checker."
+        "warning: the config sets tscPath, but `{command}` never runs the TypeScript checker, so its output is the \
+         structural result. `extract`, `check` and `inspect` run the checker."
     )
 }
 
 #[test]
-fn check_and_inspect_say_when_the_config_enables_a_checker_they_never_run() {
+fn check_inspect_and_extract_ask_the_checker_the_config_names() {
     let project = project_with_checker_config();
     let run_here = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_caliper-docgen"))
@@ -380,24 +441,30 @@ fn check_and_inspect_say_when_the_config_enables_a_checker_they_never_run() {
             .expect("failed to spawn the real binary")
     };
 
-    for (command, args) in [("check", &["check"][..]), ("inspect", &["inspect", "Widget"][..])] {
+    for (command, args) in
+        [("check", &["check"][..]), ("inspect", &["inspect", "Widget"][..]), ("extract", &["extract", "--json"][..])]
+    {
         let output = run_here(args);
         assert_eq!(output.status.code(), Some(0), "{command}: {}", String::from_utf8_lossy(&output.stderr));
         let stderr = strip_ansi(&String::from_utf8(output.stderr).unwrap());
-        assert_eq!(
-            stderr.lines().filter(|line| line.contains("never runs the TypeScript checker")).collect::<Vec<_>>(),
-            [ignored_checker_note(command)],
-            "{command}: {stderr}"
-        );
+        assert!(!stderr.contains("never runs the TypeScript checker"), "{command}: {stderr}");
     }
 
-    let quiet = run_here(&["--quiet", "check"]);
-    assert!(quiet.stderr.is_empty(), "--quiet prints nothing: {}", String::from_utf8_lossy(&quiet.stderr));
+    // The configured binary is missing, which each command reports as the checker's own warning.
+    let checked = run_here(&["check", "--json"]);
+    let diagnostics: serde_json::Value = serde_json::from_str(&stdout_of(&checked)).unwrap();
+    let backend: Vec<&str> = diagnostics
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["code"] == "SEMANTIC_BACKEND")
+        .map(|d| d["message"].as_str().unwrap())
+        .collect();
+    assert!(backend.iter().any(|message| message.contains("/nonexistent/tsc")), "{backend:?}");
 
-    // `extract` runs the checker (here it is missing, which `extract` reports itself), so it has nothing to warn about.
-    let extract = run_here(&["extract", "--json"]);
-    let stderr = String::from_utf8(extract.stderr).unwrap();
-    assert!(!stderr.contains("never runs the TypeScript checker"), "{stderr}");
+    // `--no-checker` asks none, so nothing is said about the missing binary.
+    let structural = run_here(&["check", "--json", "--no-checker"]);
+    assert_eq!(stdout_of(&structural), "[]\n");
 }
 
 #[test]

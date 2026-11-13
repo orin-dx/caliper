@@ -28,11 +28,11 @@ export interface SessionOptions {
    */
   fillAfter?: number
   /**
-   * Ask the built-in TypeScript 7.1 checker for each component a story names (experimental). `'off'` (the default)
-   * never starts it; `'on-demand'` keeps it warm, asks it for exactly the requested component, and takes the
-   * structural props when it is slower than `semanticWaitMs`.
+   * Ask the built-in TypeScript checker for each component a story names. Default: `true`: it is kept warm, asked for
+   * exactly the requested component, and the structural props stand when it is slower than `semanticWaitMs`. `false`
+   * never starts it.
    */
-  semanticTypes?: Napi.JsExtractOptions['semanticTypes']
+  checker?: boolean
   /** A checker binary to run instead of the built-in one: `typescript@7.1`'s `tsc`, or `tsrs`. */
   tscPath?: string
   /** How many milliseconds a story waits for the checker before it takes the structural props. Default: `150`. */
@@ -55,7 +55,7 @@ export function toNapiOptions(options: SessionOptions, lazy: boolean): Napi.JsEx
     loadDependencies: options.loadDependencies,
     collapseInheritedProps: options.collapseInheritedProps,
     lazy,
-    semanticTypes: options.semanticTypes,
+    checker: options.checker,
     tscPath: options.tscPath,
     semanticWaitMs: options.semanticWaitMs,
     semanticWaitEmptyMs: options.semanticWaitEmptyMs,

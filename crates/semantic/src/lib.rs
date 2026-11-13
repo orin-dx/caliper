@@ -1,4 +1,4 @@
-//! Experimental TypeScript 7.1 checker backend (`--experimental-semantic-types`).
+//! TypeScript 7.1 checker backend, on by default (ADR 0026; `--no-checker` turns it off).
 //!
 //! Asks TypeScript's checker for the props of each component the structural pass found, and hands
 //! `caliper-docgen-core` a [`SemanticOutcome`] to merge (ADR 0006, ADR 0007). The checker is the `tsrs` crates, linked

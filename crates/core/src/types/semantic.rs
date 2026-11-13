@@ -1,4 +1,4 @@
-//! What the experimental TypeScript checker backend hands back, and how it merges over the structural result.
+//! What the TypeScript checker backend (on by default, ADR 0026) hands back, and how it merges over the structural result.
 //!
 //! The backend (`caliper-docgen-semantic`) owns the process, the protocol and the checker walk; this module owns only
 //! the result shape and the merge rules of `docs/type-checker-integration.md`, so `crates/core` stays free of I/O.
@@ -98,15 +98,20 @@ impl PropInterner {
     /// The one shared copy of `prop`: an equal prop interned earlier, or `prop` itself the first time. If the internal
     /// lock is poisoned it returns `prop` unshared rather than failing.
     pub fn share(&self, prop: SemanticProp) -> Arc<SemanticProp> {
+        self.share_arc(Arc::new(prop))
+    }
+
+    /// [`Self::share`] for a prop already behind an `Arc`, such as one another interner shared: the one copy equal to
+    /// it, or `prop` itself the first time.
+    pub fn share_arc(&self, prop: Arc<SemanticProp>) -> Arc<SemanticProp> {
         let hash = prop.structural_hash();
-        let Ok(mut by_hash) = self.by_hash.lock() else { return Arc::new(prop) };
+        let Ok(mut by_hash) = self.by_hash.lock() else { return prop };
         let bucket = by_hash.entry(hash).or_default();
-        if let Some(existing) = bucket.iter().find(|existing| ***existing == prop) {
+        if let Some(existing) = bucket.iter().find(|existing| ***existing == *prop) {
             return existing.clone();
         }
-        let shared = Arc::new(prop);
-        bucket.push(shared.clone());
-        shared
+        bucket.push(prop.clone());
+        prop
     }
 }
 

@@ -7,8 +7,8 @@ describe('assertValidOptions', () => {
     for (const fallback of ['degraded', 'never'] as const) {
       expect(() => assertValidOptions({ fallback })).not.toThrow()
     }
-    for (const semanticTypes of ['off', 'on-demand'] as const) {
-      expect(() => assertValidOptions({ semanticTypes })).not.toThrow()
+    for (const checker of [true, false]) {
+      expect(() => assertValidOptions({ checker })).not.toThrow()
     }
   })
 
@@ -18,9 +18,15 @@ describe('assertValidOptions', () => {
     )
   })
 
-  it('names a semanticTypes that is not a choice', () => {
-    expect(() => assertValidOptions({ semanticTypes: 'on_demand' as never })).toThrow(
-      "[caliper-docgen] semanticTypes is 'on_demand', expected 'off' or 'on-demand'",
+  it('names a checker that is not a boolean', () => {
+    expect(() => assertValidOptions({ checker: 'on-demand' as never })).toThrow(
+      "[caliper-docgen] checker is 'on-demand', expected true or false",
+    )
+  })
+
+  it('refuses the old semanticTypes, which left unread would run the checker it meant to keep off', () => {
+    expect(() => assertValidOptions({ semanticTypes: 'off' })).toThrow(
+      "[caliper-docgen] semanticTypes was replaced by checker: the checker is on by default, and 'checker: false' turns it off",
     )
   })
 })

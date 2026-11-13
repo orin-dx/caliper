@@ -83,20 +83,20 @@ Options:
           - all:          Those, and project sources of more than 30 props
           - none:         List every prop
 
-      --experimental-semantic-types
-          Experimental: ask the built-in TypeScript 7.1 checker (`tsrs`) for
-          every component's props in one program and wait for the answer, which
-          replaces the structural one prop by prop; the structural result stands
-          wherever the checker cannot answer (off by default)
+      --no-checker
+          Do not ask the built-in TypeScript checker (`tsrs`): the structural
+          resolver answers alone, as it does wherever the checker cannot. By
+          default every component's props come from the checker, all in one
+          program, waited for
 
       --tsc-path <TSC_PATH>
-          A checker binary for `--experimental-semantic-types` to run instead of
-          the built-in one: `typescript@7.1`'s `tsc`, or `tsrs`
+          A checker binary to run instead of the built-in one:
+          `typescript@7.1`'s `tsc`, or `tsrs`
 
       --semantic-timeout-ms <SEMANTIC_TIMEOUT_MS>
-          With `--experimental-semantic-types`: how long the checker may take to
-          start or to answer any one request, in milliseconds, before the run
-          takes the structural result with one warning
+          How long the checker may take to start or to answer any one request,
+          in milliseconds, before the run takes the structural result with one
+          warning
           
           [default: 10000]
 

@@ -6,7 +6,7 @@ Add an entry when you find a gap you are not fixing now. Delete it when you fix 
 
 ## Detection
 
-- Wrapper calls with no type argument are not recognized: `createIconLoader('x')`, `lazy(() => import(...))`, `createIcon({...})`. Reading the props needs the call's return type, which the structural path doesn't have. The opt-in TypeScript backend (ADR 0006) can.
+- Wrapper calls with no type argument are not recognized: `createIconLoader('x')`, `lazy(() => import(...))`, `createIcon({...})`. Reading the props needs the call's return type, which the structural path doesn't have. The TypeScript checker, on by default, does not close this: it is asked only about the components oxc found (ADR 0026).
 - Some components are reported under a different name than `react-docgen-typescript` uses: `displayName` assignments, and compound members such as `Tabs.List`.
 
 ## Resolution

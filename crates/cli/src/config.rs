@@ -20,7 +20,7 @@ struct DocgenConfigSchema {
     extra_builtins: Option<Vec<String>>,
     load_dependencies: Option<bool>,
     collapse_inherited_props: Option<String>,
-    experimental_semantic_types: Option<bool>,
+    checker: Option<bool>,
     tsc_path: Option<String>,
 }
 
@@ -36,7 +36,7 @@ const CONFIG_KEYS: [&str; 12] = [
     "extraBuiltins",
     "loadDependencies",
     "collapseInheritedProps",
-    "experimentalSemanticTypes",
+    "checker",
     "tscPath",
 ];
 
@@ -78,8 +78,8 @@ impl DocgenConfigSchema {
                 format!("collapseInheritedProps is '{bad}', expected \"dependencies\", \"all\" or \"none\"")
             })?;
         }
-        if let Some(on) = self.experimental_semantic_types {
-            opts.experimental_semantic_types = on;
+        if let Some(on) = self.checker {
+            opts.checker = on;
         }
         if let Some(path) = self.tsc_path {
             opts.semantic_tsc_path = Some(path.into());
@@ -307,24 +307,14 @@ pub fn build_options(args: BuildOptionsArgs) -> Result<PipelineOptions> {
     Ok(opts)
 }
 
-/// The note for a command that never runs the TypeScript checker (everything but `extract`) when the config switches
-/// it on anyway: the setting is read, and then has no effect, which a config the user wrote should not do quietly.
-/// `None` when the config leaves the checker alone.
+/// The note for `watch`, which never runs the TypeScript checker, when the config names a checker binary anyway: the
+/// setting is read, and then has no effect, which a config the user wrote should not do quietly. `None` when the config
+/// names none. (`checker` itself is on by default, so a config that leaves it on says nothing about `watch`.)
 pub fn ignored_semantic_config_note(command: &str, options: &PipelineOptions) -> Option<String> {
-    let keys: Vec<&str> = [
-        (options.experimental_semantic_types, "experimentalSemanticTypes"),
-        (options.semantic_tsc_path.is_some(), "tscPath"),
-    ]
-    .into_iter()
-    .filter_map(|(set, key)| set.then_some(key))
-    .collect();
-    if keys.is_empty() {
-        return None;
-    }
+    options.semantic_tsc_path.as_ref()?;
     Some(format!(
-        "warning: the config sets {}, but `{command}` never runs the TypeScript checker, so its output is the \
-         structural result. Only `extract` runs the checker.",
-        keys.join(" and ")
+        "warning: the config sets tscPath, but `{command}` never runs the TypeScript checker, so its output is the \
+         structural result. `extract`, `check` and `inspect` run the checker."
     ))
 }
 

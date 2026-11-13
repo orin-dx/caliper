@@ -29,8 +29,8 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
         collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
     let mut options = options;
-    if args.experimental_semantic_types {
-        options.experimental_semantic_types = true;
+    if args.no_checker {
+        options.checker = false;
     }
     if let Some(path) = &args.tsc_path {
         options.semantic_tsc_path = Some(path.into());
@@ -47,13 +47,13 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
     };
 
     let mut output = caliper_docgen_core::pipeline::extract(&options);
-    if options.experimental_semantic_types {
+    if options.checker {
         let resolver = match args.no_resolver_facts {
             true => caliper_docgen_core::types::semantic::ResolverFacts::Off,
             false => caliper_docgen_core::types::semantic::ResolverFacts::Used,
         };
         let timeout = std::time::Duration::from_millis(args.semantic_timeout_ms);
-        apply_semantic_backend(&options, timeout, resolver, &mut output);
+        apply_semantic_backend(&options, timeout, resolver, None, &mut output);
     }
 
     if let Some(pb) = pb {
@@ -93,12 +93,14 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
 }
 
 /// Resolve the components the structural pass found with TypeScript's checker, all in one program, and merge the answer
-/// over `output`. The run waits for the checker; one request (or its start) that takes longer than `timeout`, like an
-/// unavailable checker, leaves `output` as it was, plus one diagnostic.
+/// over `output`; with `only`, just the component under that key. The run waits for the checker; one request (or its
+/// start) that takes longer than `timeout`, like an unavailable checker, leaves `output` as it was, plus one
+/// diagnostic.
 fn apply_semantic_backend(
     options: &caliper_docgen_core::pipeline::PipelineOptions,
     timeout: std::time::Duration,
     resolver: caliper_docgen_core::types::semantic::ResolverFacts,
+    only: Option<&str>,
     output: &mut caliper_docgen_core::types::ExtractionOutput,
 ) {
     let project_root = options
@@ -111,8 +113,11 @@ fn apply_semantic_backend(
         caliper_docgen_core::types::semantic::merge_semantic(output, outcome);
         return;
     };
-    let mut request =
-        caliper_docgen_semantic::SemanticRequest::new(project_root, caliper_docgen_semantic::targets_of(output));
+    let mut targets = caliper_docgen_semantic::targets_of(output);
+    if let Some(key) = only {
+        targets.retain(|target| target.key == key);
+    }
+    let mut request = caliper_docgen_semantic::SemanticRequest::new(project_root, targets);
     request.tsconfig = options
         .tsconfig_path
         .clone()
@@ -121,6 +126,21 @@ fn apply_semantic_backend(
     request.request_timeout = timeout;
     let outcome = caliper_docgen_semantic::resolve(request);
     caliper_docgen_core::types::semantic::merge_semantic_with(output, outcome, resolver);
+}
+
+/// What `check` and `inspect` run: unless `--no-checker` or the config turned it off, [`apply_semantic_backend`] at the
+/// default timeout, with the resolver's facts, for `only` the component under that key when given.
+pub(crate) fn apply_checker(
+    options: &caliper_docgen_core::pipeline::PipelineOptions,
+    no_checker: bool,
+    only: Option<&str>,
+    output: &mut caliper_docgen_core::types::ExtractionOutput,
+) {
+    if options.checker && !no_checker {
+        let timeout = std::time::Duration::from_millis(crate::DEFAULT_SEMANTIC_TIMEOUT_MS);
+        let resolver = caliper_docgen_core::types::semantic::ResolverFacts::Used;
+        apply_semantic_backend(options, timeout, resolver, only, output);
+    }
 }
 
 /// `--format rdt`: react-docgen-typescript's shape, shared with the NAPI binding. Like react-docgen-typescript, only

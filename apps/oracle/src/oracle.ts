@@ -1,5 +1,5 @@
-// TypeScript 7.1's checker as a test oracle for Caliper's prop types (docs/parity.md). Test-only: the opt-in semantic
-// backend is a separate, experimental feature.
+// TypeScript 7.1's checker as a test oracle for Caliper's prop types (docs/parity.md). Test-only: the checker Caliper
+// asks by default (ADR 0026) is a separate path, and the oracle keeps the Go `typescript` checker.
 //
 // For one corpus, finds components the way react-docgen-typescript does (an exported function whose only or `props`
 // parameter is the props type), reads each prop's type from the checker, and compares it structurally with the prop

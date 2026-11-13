@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <b>Fast React component prop extraction. Parses TypeScript with OXC, no type-checking pass.</b>
+  <b>React component prop extraction. TypeScript's checker decides the types, OXC reads the syntax.</b>
 </p>
 
 <p align="center">
@@ -16,11 +16,11 @@
 
 ---
 
-`caliper-docgen` reads your components and reports each one's props: type, required or optional, default, and JSDoc. It is a faster alternative to `react-docgen-typescript` for Storybook, docs sites, and LLM tooling.
+`caliper-docgen` reads your components and reports each one's props: type, required or optional, default, and JSDoc. It is an alternative to `react-docgen-typescript` for Storybook, docs sites, and LLM tooling.
 
-`react-docgen-typescript` builds a full TypeScript `Program`, which takes seconds on a mid-size design system. Caliper parses files in parallel with OXC and skips the type checker.
+By default the types come from TypeScript's own checker: `tsrs`, a Rust port of the TypeScript 7.1 checker, is built in, so there is nothing to install. OXC supplies what the syntax says: which components a file declares, defaults, JSDoc and the order props and union members are written in ([ADR 0026](docs/adr/0026-the-checker-is-the-type-authority.md)). Where the checker cannot answer, a structural resolver that reads types from the syntax alone takes over, and `--no-checker` (`checker: false`) runs it on its own.
 
-On whole libraries (Mantine, Chakra, Ant Design, shadcn/ui and React Spectrum at pinned commits, source only), Caliper takes 34 to 81ms and is 17 to 39 times faster than `react-docgen-typescript` on the same files, a median of 22 times. CI checks this weekly ([`docs/performance.md`](docs/performance.md)). Whether the types are right is judged against TypeScript's checker, not against `react-docgen-typescript`: on the props both tools list, the checker contradicts Caliper on 0 to 1.09% and `react-docgen-typescript` on 0.006 to 5.02%, depending on the corpus (weekly run of 2026-11-06, [`docs/rdt-differences.md`](docs/rdt-differences.md)). Recall against `react-docgen-typescript` (the share of its reference components and props that Caliper also reports) is in [`docs/measurement.md`](docs/measurement.md); it is not a measure of correctness, because what `react-docgen-typescript` lists beyond Caliper is not necessarily right.
+The checker costs time. Extracting the 938 components of an app that wraps Chakra UI and MUI takes about 6 s and 970 MiB with the checker, and 0.1 s and 200 MiB with `--no-checker` ([`docs/gate-measurements.md`](docs/gate-measurements.md#the-checker-is-the-default-s8)). The Storybook addon does not make a story wait for it: a story gets the structural props at once and the checker's within 150 ms, and the opening story's are fetched when `storybook dev` starts. The structural resolver alone takes 34 to 81 ms on whole libraries (Mantine, Chakra, Ant Design, shadcn/ui and React Spectrum at pinned commits, source only), 17 to 39 times faster than `react-docgen-typescript` on the same files; that is `--no-checker`, not the default, measured by hand ([`docs/performance.md`](docs/performance.md)); the weekly CI run records the default's time and memory. Whether the structural types are right is judged against TypeScript's checker, not against `react-docgen-typescript`: on the props both tools list, the checker contradicts the structural resolver on 0 to 1.09% and `react-docgen-typescript` on 0.006 to 5.02%, depending on the corpus (weekly run of 2026-11-06, [`docs/rdt-differences.md`](docs/rdt-differences.md)). Recall against `react-docgen-typescript` (the share of its reference components and props that Caliper also reports) is in [`docs/measurement.md`](docs/measurement.md); it is not a measure of correctness, because what `react-docgen-typescript` lists beyond Caliper is not necessarily right.
 
 ## A component through Caliper
 
@@ -56,7 +56,7 @@ flowchart LR
 
     files["<b>.tsx / .d.ts</b><br/>your source"] --> parse["<b>Parse</b><br/>OXC, in parallel"]
     parse --> merge["<b>Merge</b><br/>symbols across files"]
-    merge --> resolve["<b>Resolve</b><br/>props per component"]
+    merge --> resolve["<b>Resolve</b><br/>TypeScript checker, structural fallback"]
     resolve --> out["<b>Output</b><br/>canonical · rdt · toon"]
 
     class files source
@@ -64,7 +64,7 @@ flowchart LR
     class out output
 ```
 
-Caliper is pre-v1. [`docs/STATUS.md`](docs/STATUS.md) lists what works, and [`docs/edge-cases.md`](docs/edge-cases.md) the known gaps. Conditional types and mapped types over an unbound generic need a real type checker, which OXC deliberately isn't.
+Caliper is pre-v1. [`docs/STATUS.md`](docs/STATUS.md) lists what works, and [`docs/edge-cases.md`](docs/edge-cases.md) the known gaps. Conditional types and mapped types over an unbound generic need a type checker: the default asks one, and with `--no-checker` they are among those gaps.
 
 ## Install
 
@@ -88,14 +88,14 @@ caliper-docgen extract --src src --out docgen.json
 # Props of one component, as a table
 caliper-docgen inspect Button --src src
 
-# Re-extract on every change
+# Re-extract on every change (structural: watch does not run the checker)
 caliper-docgen watch --src src
 
 # Fail CI on extraction errors (--strict also fails on warnings)
 caliper-docgen check --src src
 ```
 
-Settings can also live in a `docgen.config.ts` (`srcDirs`, `htmlAttributes`, `cacheDir`, and more). `caliper-docgen --help` lists the rest, including `schema` for the JSON Schema of the output.
+`extract`, `check` and `inspect` ask the checker; `--no-checker` (config `checker: false`) skips it, and `--tsc-path` runs a checker binary instead (`typescript@7.1`'s `tsc`, or `tsrs`). Settings can also live in a `docgen.config.ts` (`srcDirs`, `htmlAttributes`, `cacheDir`, `checker`, and more). `caliper-docgen --help` lists the rest, including `schema` for the JSON Schema of the output.
 
 Parsed declarations and the dependency index are cached under `node_modules/.cache/caliper-docgen`. `--no-cache` (config, NAPI, Vite and Storybook option `cache: false`) reads and writes nothing there; the output is the same.
 
@@ -120,7 +120,7 @@ import docgen from 'virtual:caliper-docgen'
 docgen.components['Button'].props
 ```
 
-The module updates through HMR as components change. The virtual module is the canonical format; the `injectDocgenInfo` option assigns `__docgenInfo` in the `react-docgen-typescript` shape (see the [plugin README](packages/vite-plugin/README.md)).
+The module updates through HMR as components change. The plugin serves the structural resolver's output: it does not run the checker. The virtual module is the canonical format; the `injectDocgenInfo` option assigns `__docgenInfo` in the `react-docgen-typescript` shape (see the [plugin README](packages/vite-plugin/README.md)).
 
 ## Storybook
 
@@ -132,7 +132,7 @@ export default {
 }
 ```
 
-Storybook 11's docgen server then takes each component's argTypes from caliper-docgen instead of the TypeScript checker, and hands anything caliper can't document to React's own docgen. See [`packages/storybook`](packages/storybook/README.md).
+Storybook 11's docgen server then takes each component's argTypes from caliper-docgen, which asks its built-in TypeScript checker for the component a story shows (`checker: false` turns it off), and hands anything caliper can't document to React's own docgen. See [`packages/storybook`](packages/storybook/README.md).
 
 ## Supported patterns
 

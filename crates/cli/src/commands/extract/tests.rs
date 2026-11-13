@@ -15,7 +15,7 @@ fn args_for(src: &str, json: bool) -> crate::ExtractArgs {
         load_dependencies: false,
         no_load_dependencies: false,
         collapse_inherited_props: None,
-        experimental_semantic_types: false,
+        no_checker: true,
         tsc_path: None,
         semantic_timeout_ms: crate::DEFAULT_SEMANTIC_TIMEOUT_MS,
         no_resolver_facts: false,
@@ -481,7 +481,7 @@ export function Button(props: ButtonProps) { return null; }
         load_dependencies: false,
         no_load_dependencies: false,
         collapse_inherited_props: None,
-        experimental_semantic_types: false,
+        no_checker: true,
         tsc_path: None,
         semantic_timeout_ms: crate::DEFAULT_SEMANTIC_TIMEOUT_MS,
         no_resolver_facts: false,
@@ -567,7 +567,7 @@ export function Comp(props: Props) { return null; }
     assert_eq!(parsed["Comp"]["composes"], serde_json::json!(["\"a\" | \"b\""]));
 }
 
-/// `extract` over one component, optionally with the experimental checker pointed at a `tsc` that is not there.
+/// `extract` over one component, with the checker pointed at a `tsc` that is not there, or with `--no-checker`.
 fn extract_with_semantic_flag(tmp: &tempfile::TempDir, semantic: bool) -> serde_json::Value {
     std::fs::write(tmp.path().join("Plain.tsx"), "export function Plain(props: { a: string }) { return null; }\n")
         .unwrap();
@@ -585,7 +585,7 @@ fn extract_with_semantic_flag(tmp: &tempfile::TempDir, semantic: bool) -> serde_
         load_dependencies: false,
         no_load_dependencies: false,
         collapse_inherited_props: None,
-        experimental_semantic_types: semantic,
+        no_checker: !semantic,
         tsc_path: semantic.then(|| tmp.path().join("no-such-tsc").to_str().unwrap().to_owned()),
         semantic_timeout_ms: crate::DEFAULT_SEMANTIC_TIMEOUT_MS,
         no_resolver_facts: false,
@@ -597,7 +597,7 @@ fn extract_with_semantic_flag(tmp: &tempfile::TempDir, semantic: bool) -> serde_
 }
 
 #[test]
-fn the_default_output_has_no_semantic_backend_diagnostics() {
+fn the_no_checker_output_has_no_semantic_backend_diagnostics() {
     let output = extract_with_semantic_flag(&tempfile::TempDir::new().unwrap(), false);
 
     let codes: Vec<_> = output["diagnostics"].as_array().unwrap().iter().map(|d| d["code"].clone()).collect();
@@ -655,7 +655,7 @@ fn a_checker_that_never_answers_is_given_up_after_the_semantic_timeout() {
         load_dependencies: false,
         no_load_dependencies: false,
         collapse_inherited_props: None,
-        experimental_semantic_types: true,
+        no_checker: false,
         tsc_path: Some(tsc.to_str().unwrap().to_owned()),
         semantic_timeout_ms: 300,
         no_resolver_facts: false,
@@ -678,15 +678,20 @@ fn a_checker_that_never_answers_is_given_up_after_the_semantic_timeout() {
 }
 
 #[test]
-fn the_semantic_timeout_defaults_to_ten_seconds_and_needs_the_checker() {
+fn the_checker_is_on_by_default_with_a_ten_second_timeout() {
     use clap::Parser;
 
-    let parsed = crate::Cli::try_parse_from(["caliper-docgen", "extract", "--experimental-semantic-types"]).unwrap();
+    let parsed = crate::Cli::try_parse_from(["caliper-docgen", "extract"]).unwrap();
     let crate::Command::Extract(args) = parsed.command else { panic!("not extract") };
+    assert!(!args.no_checker);
     assert_eq!(args.semantic_timeout_ms, 10_000);
 
-    let refused = crate::Cli::try_parse_from(["caliper-docgen", "extract", "--semantic-timeout-ms", "500"]);
-    assert!(refused.is_err(), "--semantic-timeout-ms without --experimental-semantic-types is refused");
+    for flag in [&["--semantic-timeout-ms", "500"][..], &["--tsc-path", "/opt/tsc"], &["--no-resolver-facts"]] {
+        let refused = crate::Cli::try_parse_from([&["caliper-docgen", "extract", "--no-checker"][..], flag].concat());
+        assert!(refused.is_err(), "{flag:?} with --no-checker is refused");
+    }
+    let removed = crate::Cli::try_parse_from(["caliper-docgen", "extract", "--experimental-semantic-types"]);
+    assert!(removed.is_err(), "the old opt-in flag is gone");
 }
 
 // The RDT-shaped projection Storybook's `extractArgTypes` turns into controls.

@@ -18,10 +18,12 @@ import oracle_data
 # an issue, and so does any rise from the last record: a wrong type in Storybook is the one thing a reader cannot see.
 WRONG_GATE = 0.001
 
-# User-facing budgets for one whole run (process start included) over a pinned corpus with dependencies loaded, the
-# default. They are not week-over-week limits: a shared CI machine drifts by 10% or more on its own, and a drift that
-# stays inside the budget is not a problem. Chakra, the largest corpus, runs in about 1 s and 446 MiB.
-BUDGETS = {'ms': 2000, 'rss_mib': 600}
+# Budgets for one whole run (process start included) of the checker, the default, over a pinned corpus with dependencies
+# loaded, per corpus: `ms` and `rss_mib`. None is "record on first run": no checker run of the five corpora has been
+# measured, so none has a budget, and a run over nothing opens nothing. The rule that fills them in once a scheduled run
+# is recorded is in docs/measurement.md ("The budgets"). They are not week-over-week limits: a shared CI machine drifts
+# by 10% or more on its own, and a drift that stays inside the budget is not a problem.
+BUDGETS = {corpus: {'ms': None, 'rss_mib': None} for corpus in ('mantine', 'chakra', 'shadcn', 'antd', 'spectrum')}
 BUDGET_LABELS = {'ms': 'time', 'rss_mib': 'peak memory'}
 BUDGET_UNITS = {'ms': 'ms', 'rss_mib': 'MiB'}
 
@@ -102,9 +104,9 @@ def findings(name, entry, previous):
                        f"{100 * rate:.2f}%{was}; the gate is {100 * WRONG_GATE:.1f}%")
         elif rose:
             out.append(f"{name}: wrong types rose to {h['wrong']:,} of {judged(h):,}, {100 * rate:.2f}%{was}")
-    for key, budget in BUDGETS.items():
+    for key, budget in BUDGETS.get(name, {}).items():
         value = own_metric(entry, key)
-        if value is not None and value > budget:
+        if budget is not None and value is not None and value > budget:
             out.append(f"{name}: a whole run's {BUDGET_LABELS[key]} is {value:,} {BUDGET_UNITS[key]}, over the "
                        f"{budget:,} {BUDGET_UNITS[key]} budget")
     return out
@@ -117,8 +119,8 @@ HOW_TO_READ = (
     'for it, so it is counted apart. Recall against react-docgen-typescript (RDT) asks a different question, how much '
     'of what RDT reports Caliper also reports; it is information, because RDT is itself wrong on some props. Gates, '
     f'which open an issue: more than {100 * WRONG_GATE:.1f}% wrong (or any rise), a silent-wrong answer to a question a '
-    f"reader is asked, or a whole run over {BUDGETS['ms'] / 1000:.0f} s or {BUDGETS['rss_mib']} MiB. Time and memory "
-    'drift from week to week is shown, not alarmed on.'
+    "reader is asked, or a whole run over its corpus's time or memory budget (a corpus has none until its first run is "
+    'recorded). Time and memory drift from week to week is shown, not alarmed on.'
 )
 
 DEFINITIONS = (

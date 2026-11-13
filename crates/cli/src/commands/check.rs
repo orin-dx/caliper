@@ -1,6 +1,7 @@
 use miette::{IntoDiagnostic, Result};
 
-use crate::config::{BuildOptionsArgs, build_options, warn_ignored_semantic_config};
+use crate::commands::extract::apply_checker;
+use crate::config::{BuildOptionsArgs, build_options};
 use crate::output::{print_diagnostics, print_summary};
 
 /// Returns the process exit code (0 = clean, 1 = --strict and warnings found,
@@ -18,8 +19,8 @@ pub fn cmd_check(args: crate::CheckArgs, quiet: bool, config_path: Option<&str>)
         no_load_dependencies: args.no_load_dependencies,
         collapse_inherited_props: args.collapse_inherited_props.map(Into::into),
     })?;
-    warn_ignored_semantic_config("check", &options, quiet);
-    let output = caliper_docgen_core::pipeline::extract(&options);
+    let mut output = caliper_docgen_core::pipeline::extract(&options);
+    apply_checker(&options, args.no_checker, None, &mut output);
 
     if args.json {
         println!("{}", serde_json::to_string(&output.diagnostics).into_diagnostic()?);
@@ -44,6 +45,7 @@ mod tests {
             load_dependencies: false,
             no_load_dependencies: false,
             collapse_inherited_props: None,
+            no_checker: true,
         };
         let code = cmd_check(args, true, None).expect("cmd_check itself should not error");
         assert_eq!(code, 2, "expected exit code 2 for a nonexistent src dir even in --json mode");
@@ -69,6 +71,7 @@ mod tests {
             load_dependencies: false,
             no_load_dependencies: false,
             collapse_inherited_props: None,
+            no_checker: true,
         };
         let code = cmd_check(args, true, None).expect("cmd_check should not error");
         assert_eq!(code, 0, "expected exit code 0 for a clean run");
@@ -102,6 +105,7 @@ mod tests {
             load_dependencies: false,
             no_load_dependencies: false,
             collapse_inherited_props: None,
+            no_checker: true,
         };
         let code = cmd_check(args, true, None).expect("cmd_check should not error");
         assert_eq!(code, 1, "expected exit code 1 for --strict with warning-only diagnostics");
@@ -120,6 +124,7 @@ mod tests {
             load_dependencies: false,
             no_load_dependencies: false,
             collapse_inherited_props: None,
+            no_checker: true,
         };
         let code = cmd_check(args, true, None).expect("cmd_check should not error");
         assert_eq!(code, 0, "expected exit code 0 without --strict for warning-only diagnostics");
@@ -151,6 +156,7 @@ mod tests {
             load_dependencies: false,
             no_load_dependencies: false,
             collapse_inherited_props: None,
+            no_checker: true,
         };
         let code = cmd_check(args, true, None).expect("cmd_check should not error");
         assert_eq!(code, 2, "expected exit code 2 — the Error must outrank the Warning even with --strict");

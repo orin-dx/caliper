@@ -45,8 +45,10 @@ REFERENCE_VERSION = 2
 # and named a default export `default`. Version 3 pairs a checker component with Caliper's by file and export name
 # (ADR 0027) where version 2 paired by a normalised display name. Version 4 scores a prop whose checker type the oracle did
 # not evaluate as `not judged` where version 3 scored it identical, and classes a declaration's path by one rule
-# (apps/oracle/src/path-classes.json). Raise it when a change moves what the oracle counts.
-UNIVERSE_VERSION = 4
+# (apps/oracle/src/path-classes.json). Version 5 extracts with the checker, the default, where version 4 and earlier ran
+# `--no-checker`, so the oracle's props and verdicts are not the same measurement. Raise it when a change moves what the
+# oracle counts.
+UNIVERSE_VERSION = 5
 
 
 def norm_name(name):
@@ -88,7 +90,8 @@ def tool_run(command, out):
 
 def caliper_run(binary, src, runs):
     """Median wall ms and largest peak RSS MiB of `extract --json` in the Storybook addon's configuration (dependencies
-    loaded, inherited props not collapsed), and the JSON's size."""
+    loaded, inherited props not collapsed), and the JSON's size. The checker answers, as
+    it does by default (docs/measurement.md)."""
     command = [binary, 'extract', '--src', src, '--json', '--load-dependencies', '--collapse-inherited-props', 'none']
     with tempfile.TemporaryFile() as out:
         run_once(command, stdout=out)
@@ -468,7 +471,8 @@ def oracle(binary, name, src, root, work, rdt_out, rdg_out):
     caliper_json = os.path.join(work, f'{name}.caliper.json')
     with open(caliper_json, 'w') as f:
         subprocess.run([binary, 'extract', '--src', src, '--json', '--html-attributes', 'full', '--include-unexported',
-                        '--load-dependencies', '--collapse-inherited-props', 'none', '--quiet'], stdout=f, check=True)
+                        '--load-dependencies', '--collapse-inherited-props', 'none', '--quiet'],
+                       stdout=f, check=True)
     list_file, tsconfig = program_inputs(name, src, work)
     verdicts = os.path.join(work, f'{name}.oracle.json')
     subprocess.run(['pnpm', '--dir', os.path.join(ROOT, 'apps', 'oracle'), 'exec', 'tsx', 'src/oracle.ts', '--root', root,
