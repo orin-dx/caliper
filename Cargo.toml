@@ -105,6 +105,7 @@ trycmd            = "1.2"
 opt-level = 3
 lto = "thin"
 codegen-units = 1
+strip = "symbols"
 
 [profile.bench]
 inherits = "release"
