@@ -1,21 +1,22 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout, clippy::print_stderr)]
 //! The measurable ADR 0026 gates, through the session a Storybook addon runs: a lazy `WatchSession` asking a warm
-//! `OnDemand` over the built-in checker (`just gate-measure` runs all four).
+//! `OnDemand` over the built-in checker (`just gate-measure` runs all four). `--tsc built-in` names it, and is the
+//! default; the binary route went with trail 369 slice 4.
 //!
-//!   gate_harness memory       --src DIR [--edits 650]
-//!   gate_harness determinism  --src DIR [--components 150] [--threads 1,2,4] [--runs 3]
-//!   gate_harness first-answer --src DIR [--component ChakraButton] [--runs 5] [--budget-ms 150]
-//!   gate_harness watch        --src DIR [--edits 300] [--sample 100] [--budget-ms 25] [--props button|own]
+//!   gate_harness memory       --src DIR [--tsc built-in] [--edits 650] [--max-rss-mib N]
+//!   gate_harness determinism  --src DIR [--tsc built-in] [--components 150] [--threads 1,2,4] [--runs 3]
+//!   gate_harness first-answer --src DIR [--tsc built-in] [--component ChakraButton] [--runs 5] [--budget-ms 150]
+//!   gate_harness watch        --src DIR [--tsc built-in] [--edits 300] [--sample 100] [--budget-ms 25]
+//!                             [--max-rss-mib N] [--props button|own]
 //!
 //! `first-answer` (S4) times the first answer for one component in fresh sessions: see [`first_answer`]. `watch` (S6)
 //! times edit-and-query on the snapshot the checker keeps: see [`watch`].
 //! `memory` rewrites one component's file, tells the session, and asks for the component, `--edits` times; it samples
-//! this process's resident memory (the checker's and the session's together) after every answer and prints the
-//! recycles, the peak, and whether the last answer equals a fresh session's. `determinism` asks a fresh checker for the
-//! same components under each `RAYON_NUM_THREADS` (the checker reads it once per process, so each variant runs in a
-//! re-executed copy of this binary with the variable set, and fails if the copy did not see the requested count; see
-//! docs/gate-measurements.md), `--runs` times each, alternating the query order, and byte-compares every output. Each
-//! prints one JSON line and exits 1 on a failed check.
+//! this process's resident memory and the checker's arenas after every answer and prints the peaks and whether the last
+//! answer equals a fresh session's (see [`memory`]). `determinism` asks a fresh checker for the same components under
+//! each `RAYON_NUM_THREADS` (the checker reads it once per process, so each variant runs in a re-executed copy of this
+//! binary with the variable set, and fails if the copy did not see the requested count; see docs/gate-measurements.md),
+//! `--runs` times each, alternating the query order, and byte-compares every output. Each prints one JSON line and exits 1 on a failed check.
 use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -27,7 +28,27 @@ use caliper_docgen_core::types::semantic::{SemanticProvider, SemanticTarget};
 use caliper_docgen_semantic::{OnDemand, OnDemandConfig};
 use camino::Utf8PathBuf;
 
+/// The allocator of the native binding (the Storybook addon's process) and the CLI, so memory reads as theirs.
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 const CHECKER_NOTE: &str = "resolved by the TypeScript checker";
+
+/// `--tsc built-in`: the checker linked into this process, the only one. It has no process of its own, so the gates
+/// that sample memory read this process (the host's share included), and the checker's own arenas apart.
+const BUILT_IN: &str = "built-in";
+
+/// The resident MiB of the address range the linked `tsrs` crates carve their arenas from: what the memory bound reads
+/// for the built-in checker (`Backend::memory_mib`).
+fn arena_mib() -> u64 {
+    let resident = tsrs_core::memsplit::resident(tsrs_core::reserve::base().addr(), tsrs_core::reserve::RESERVE);
+    u64::try_from(resident >> 20).unwrap_or(u64::MAX)
+}
+
+/// After an answer: this process's resident MiB, and the checker's arena MiB.
+fn memory_after() -> (u64, u64) {
+    (process_stats(std::process::id()).map_or(0, |(mib, _)| mib), arena_mib())
+}
 
 fn arg(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).and_then(|at| args.get(at + 1)).cloned()
@@ -36,10 +57,11 @@ fn arg(args: &[String], name: &str) -> Option<String> {
 /// A lazy session with a warm checker, configured as the addon configures it (dependencies loaded, nothing collapsed).
 /// The checker runs in this process: a setting it reads from the environment (`RAYON_NUM_THREADS`) goes there before
 /// this call.
-fn open(src: &Utf8PathBuf) -> (WatchSession, Arc<OnDemand>) {
+fn open(src: &Utf8PathBuf, max_rss_mib: Option<u64>) -> (WatchSession, Arc<OnDemand>) {
     let mut config = OnDemandConfig::new(src.clone());
     config.tsconfig = src.ancestors().map(|dir| dir.join("tsconfig.json")).find(|file| file.is_file());
     config.request_timeout = Duration::from_secs(120);
+    config.max_rss_mib = max_rss_mib.unwrap_or(config.max_rss_mib);
     let checker = Arc::new(OnDemand::new(config));
     let options = PipelineOptions {
         src_dirs: vec![src.clone()],
@@ -89,30 +111,47 @@ fn own_props_source(n: usize) -> String {
     )
 }
 
-fn memory(src: &Utf8PathBuf, edits: usize) -> bool {
+/// The `memory` gate. With a `--max-rss-mib` the checker passes, it stops answering at the first check past it: from
+/// then on every answer must be structural, and one must carry the warning that names the bound.
+fn memory(src: &Utf8PathBuf, edits: usize, max_rss_mib: Option<u64>) -> bool {
     let file = src.join("GateEdited.tsx");
     std::fs::write(&file, edit_source(0)).unwrap();
-    let (session, checker) = open(src);
+    let (session, checker) = open(src, max_rss_mib);
     let (mut peak, mut answered, mut stale) = (0, 0, 0);
+    let (mut arena_peak, mut arena_last) = (0, 0);
+    let (mut structural, mut first_structural, mut bound_warned) = (0, None, false);
     for n in 1..=edits {
         std::fs::write(&file, edit_source(n)).unwrap();
         session.update_file(&file);
         let answer = session.component("GateEdited").expect("GateEdited is a component");
         // The answer must be the checker's, for this edit: a structural fallback would measure nothing.
-        answered += usize::from(by_checker(&answer));
-        stale += usize::from(!answer.entry.props.contains_key(&format!("edit{n}")));
-        peak = peak.max(process_stats(std::process::id()).map_or(0, |(mib, _)| mib));
+        if by_checker(&answer) {
+            answered += 1;
+            stale += usize::from(!answer.entry.props.contains_key(&format!("edit{n}")));
+        } else {
+            structural += 1;
+            first_structural.get_or_insert(n);
+        }
+        bound_warned |= answer.diagnostics.iter().any(|d| d.message.contains("bound (`max_rss_mib`)"));
+        let (resident, arena) = memory_after();
+        peak = peak.max(resident);
+        arena_peak = arena_peak.max(arena);
+        arena_last = arena;
     }
-    // A replacement follows the reply it is due after, so one more request settles the counters.
+    // A stop follows the reply it is due after, so one more request settles it.
     drop(checker.request(Vec::new()).recv_timeout(Duration::from_secs(120)));
     let last = session.component("GateEdited").unwrap();
-    let (fresh_session, _fresh) = open(src);
+    let (fresh_session, _fresh) = open(src, None);
     let fresh = fresh_session.component("GateEdited").unwrap();
-    let recycles = checker.recycles();
-    let ok = answered == edits && stale == 0 && last == fresh;
+    let ok = stale == 0
+        && match first_structural {
+            None => answered == edits && last == fresh,
+            // Stopped at the bound: the checker answered every edit before it, and none after.
+            Some(at) => bound_warned && answered == at - 1 && answered + structural == edits,
+        };
     println!(
-        "{{\"gate\":\"memory\",\"edits\":{edits},\"answeredByChecker\":{answered},\"staleAnswers\":{stale},\"recycles\":{{\"worn\":{}}},\"peakRssMib\":{peak},\"finalEqualsFresh\":{},\"ok\":{ok}}}",
-        recycles.worn,
+        "{{\"gate\":\"memory\",\"edits\":{edits},\"maxRssMib\":{},\"answeredByChecker\":{answered},\"staleAnswers\":{stale},\"structuralAnswers\":{structural},\"boundWarned\":{bound_warned},\"peakRssMib\":{peak},\"peakArenaMib\":{arena_peak},\"lastArenaMib\":{arena_last},\"finalEqualsFresh\":{},\"ok\":{ok}}}",
+        max_rss_mib.map_or("null".to_string(), |mib| mib.to_string()),
         last == fresh,
     );
     ok
@@ -130,7 +169,7 @@ struct Variant {
 }
 
 fn sample_keys(src: &Utf8PathBuf, components: usize) -> Vec<String> {
-    let (probe, _checker) = open(src);
+    let (probe, _checker) = open(src, None);
     let mut keys = probe.component_keys();
     keys.retain(|key| key != "GateEdited");
     keys.sort();
@@ -140,7 +179,7 @@ fn sample_keys(src: &Utf8PathBuf, components: usize) -> Vec<String> {
 
 /// Asks one fresh checker for `keys`; its settings must already be in this process's environment (see [`open`]).
 fn run_variant(src: &Utf8PathBuf, keys: &[String], run: usize) -> Variant {
-    let (session, _checker) = open(src);
+    let (session, _checker) = open(src, None);
     let mut order = keys.to_vec();
     if run % 2 == 1 {
         order.reverse();
@@ -196,11 +235,19 @@ fn determinism_variant(src: &Utf8PathBuf, components: usize, count: &str, run: u
     true
 }
 
-/// A variant in a fresh copy of this binary: tsrs reads the count once per process, so it cannot change inside one.
-/// `None` when the child fails or reports a count other than the one asked for.
+/// A variant in a fresh copy of this binary: tsrs reads the count once per process, so it cannot change inside
+/// one. `None` when the child fails or reports a count other than the one asked for.
 fn variant_in_a_copy(src: &Utf8PathBuf, components: usize, count: &str, run: usize) -> Option<serde_json::Value> {
     let output = Command::new(std::env::current_exe().expect("the harness's own path"))
-        .args(["determinism-variant", "--src", src.as_str(), "--components", &components.to_string()])
+        .args([
+            "determinism-variant",
+            "--src",
+            src.as_str(),
+            "--tsc",
+            BUILT_IN,
+            "--components",
+            &components.to_string(),
+        ])
         .args(["--threads", count, "--run", &run.to_string()])
         .env("RAYON_NUM_THREADS", count)
         .stderr(std::process::Stdio::inherit())
@@ -265,25 +312,27 @@ struct WatchRun {
     edits: usize,
     sample: usize,
     budget_ms: f64,
+    max_rss_mib: Option<u64>,
     own_props: bool,
 }
 
 /// ADR 0026 S6: edit-and-query on the kept snapshot. Rewrites one component's file (`ButtonProps & { edit{n}: string }`),
 /// applies it with `update_file`, which tells the checker, and times that and the component's answer, `--edits` times,
-/// sampling this process's resident memory after each. Then it times the checker's answer alone on its unchanged
+/// sampling this process's resident memory and the checker's arenas after each. Then it times the checker's answer alone on its unchanged
 /// snapshot, and byte-compares the edited component and every `--sample`th other component with a fresh session asked
-/// in reverse order. Passes when every answer is the checker's, carries its edit and no warning, the bytes match, and
-/// the p95 is at most `--budget-ms`. `--props own` edits a component with one prop of its own in the same program
-/// instead ([`own_props_source`]).
+/// in reverse order. Passes when every answer is the checker's, carries its edit and no warning, its arenas stay under
+/// `--max-rss-mib`, the bytes match, and the p95 is at most `--budget-ms`. `--props own` edits a component with one prop
+/// of its own in the same program instead ([`own_props_source`]).
 fn watch(src: &Utf8PathBuf, run: WatchRun) -> bool {
-    let WatchRun { edits, sample, budget_ms, own_props } = run;
+    let WatchRun { edits, sample, budget_ms, max_rss_mib, own_props } = run;
     let source = if own_props { own_props_source } else { edit_source };
     let file = src.join("GateEdited.tsx");
     std::fs::write(&file, source(0)).unwrap();
-    let (session, checker) = open(src);
+    let (session, checker) = open(src, max_rss_mib);
+    let threshold = max_rss_mib.unwrap_or(OnDemandConfig::new(src.clone()).max_rss_mib);
     drop(session.component("GateEdited").expect("GateEdited is a component"));
     let (mut times, mut updates, mut peak) = (Vec::new(), Vec::new(), 0);
-    let (mut answered, mut stale, mut warned) = (0, 0, 0);
+    let (mut answered, mut stale, mut warned, mut arena_peak) = (0, 0, 0, 0);
     // CPU time is what an edit costs whatever else the machine runs; the checker's is this process's.
     let own_cpu = cpu_ms(std::process::id());
     for n in 1..=edits {
@@ -296,7 +345,9 @@ fn watch(src: &Utf8PathBuf, run: WatchRun) -> bool {
         answered += usize::from(by_checker(&answer));
         stale += usize::from(!answer.entry.props.contains_key(&format!("edit{n}")));
         warned += usize::from(answer.diagnostics.iter().any(|d| d.severity == DiagnosticSeverity::Warning));
-        peak = peak.max(process_stats(std::process::id()).map_or(0, |(mib, _)| mib));
+        let (resident, arena) = memory_after();
+        peak = peak.max(resident);
+        arena_peak = arena_peak.max(arena);
     }
     let own_cpu = own_cpu.zip(cpu_ms(std::process::id())).map_or(0.0, |(start, end)| (end - start) / edits as f64);
     let snapshots = checker.snapshots();
@@ -324,24 +375,23 @@ fn watch(src: &Utf8PathBuf, run: WatchRun) -> bool {
     let mut keys: Vec<String> = keys.into_iter().step_by(sample.max(1)).collect();
     keys.insert(0, "GateEdited".to_string());
     let watched = answer_bytes(&session, &keys);
-    let (fresh_session, _fresh) = open(src);
+    let (fresh_session, _fresh) = open(src, None);
     let reversed: Vec<String> = keys.iter().rev().cloned().collect();
     let mut fresh = answer_bytes(&fresh_session, &reversed);
     fresh.reverse();
     let identical = watched == fresh;
-    let recycles = checker.recycles();
 
     times.sort_by(f64::total_cmp);
     updates.sort_by(f64::total_cmp);
     query.sort_by(f64::total_cmp);
     let (p50, p95, p99) = (percentile(&times, 0.5), percentile(&times, 0.95), percentile(&times, 0.99));
-    let ok = answered == edits && stale == 0 && warned == 0 && identical && p95 <= budget_ms;
+    // The bound is on what the checker holds, its arenas, since this process is the host's as well.
+    let ok = answered == edits && stale == 0 && warned == 0 && identical && arena_peak <= threshold && p95 <= budget_ms;
     println!(
-        "{{\"gate\":\"watch\",\"props\":\"{}\",\"edits\":{edits},\"answeredByChecker\":{answered},\"staleAnswers\":{stale},\"warnedAnswers\":{warned},\"snapshots\":{{\"created\":{},\"updated\":{}}},\"recycles\":{{\"worn\":{}}},\"peakRssMib\":{peak},\"editAndQueryMs\":{{\"p50\":{p50:.1},\"p95\":{p95:.1},\"p99\":{p99:.1},\"max\":{:.1}}},\"updateFileMs\":{{\"p50\":{:.1}}},\"cpuMsPerEdit\":{{\"caliper\":{own_cpu:.1}}},\"queryOnlyMs\":{{\"p50\":{:.1},\"min\":{:.1}}},\"budgetMs\":{budget_ms},\"comparedComponents\":{},\"comparedBytes\":{},\"equalsFreshReversed\":{identical},\"ok\":{ok}}}",
+        "{{\"gate\":\"watch\",\"props\":\"{}\",\"edits\":{edits},\"answeredByChecker\":{answered},\"staleAnswers\":{stale},\"warnedAnswers\":{warned},\"snapshots\":{{\"created\":{},\"updated\":{}}},\"peakRssMib\":{peak},\"peakArenaMib\":{arena_peak},\"maxRssMib\":{threshold},\"editAndQueryMs\":{{\"p50\":{p50:.1},\"p95\":{p95:.1},\"p99\":{p99:.1},\"max\":{:.1}}},\"updateFileMs\":{{\"p50\":{:.1}}},\"cpuMsPerEdit\":{{\"caliper\":{own_cpu:.1}}},\"queryOnlyMs\":{{\"p50\":{:.1},\"min\":{:.1}}},\"budgetMs\":{budget_ms},\"comparedComponents\":{},\"comparedBytes\":{},\"equalsFreshReversed\":{identical},\"ok\":{ok}}}",
         if own_props { "own" } else { "button" },
         snapshots.created,
         snapshots.updated,
-        recycles.worn,
         times.last().copied().unwrap_or(0.0),
         percentile(&updates, 0.5),
         percentile(&query, 0.5),
@@ -371,7 +421,7 @@ fn first_answer(src: &Utf8PathBuf, key: &str, runs: usize, budget_ms: u128) -> b
         drop(plain.component(key).expect("the key is a component"));
         structural.push(began.elapsed().as_millis());
 
-        let (session, checker) = open(src);
+        let (session, checker) = open(src, None);
         let began = Instant::now();
         checker.warm_up();
         // Queued behind the warm-up, an empty request returns once the checker is up and initialized.
@@ -399,9 +449,15 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let src = Utf8PathBuf::from(arg(&args, "--src").expect("--src"));
     let src = Utf8PathBuf::from_path_buf(std::fs::canonicalize(src).unwrap()).unwrap();
+    if let Some(tsc) = arg(&args, "--tsc").filter(|tsc| tsc != BUILT_IN) {
+        eprintln!("--tsc {tsc}: the built-in checker is the only one (`--tsc {BUILT_IN}`, the default)");
+        std::process::exit(2);
+    }
     let number = |name: &str, default: usize| arg(&args, name).map_or(default, |n| n.parse().expect("a number"));
     let ok = match args.get(1).map(String::as_str) {
-        Some("memory") => memory(&src, number("--edits", 650)),
+        Some("memory") => {
+            memory(&src, number("--edits", 650), arg(&args, "--max-rss-mib").map(|n| n.parse().expect("a number")))
+        }
         Some("determinism") => {
             let threads = arg(&args, "--threads").unwrap_or_else(|| "1,2,4".to_string());
             determinism(
@@ -423,6 +479,7 @@ fn main() {
                 edits: number("--edits", 300),
                 sample: number("--sample", 100),
                 budget_ms: arg(&args, "--budget-ms").map_or(25.0, |n| n.parse().expect("a number")),
+                max_rss_mib: arg(&args, "--max-rss-mib").map(|n| n.parse().expect("a number")),
                 own_props: arg(&args, "--props").is_some_and(|props| props == "own"),
             },
         ),
@@ -433,7 +490,7 @@ fn main() {
             arg(&args, "--budget-ms").map_or(150, |n| n.parse().expect("a number")),
         ),
         _ => {
-            eprintln!("usage: gate_harness memory|determinism|first-answer|watch --src DIR");
+            eprintln!("usage: gate_harness memory|determinism|first-answer|watch --src DIR [--tsc {BUILT_IN}]");
             false
         }
     };

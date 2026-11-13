@@ -598,3 +598,67 @@ fn one_checker_prop_over_different_structural_props_merges_into_each_its_own() {
     assert!(Arc::ptr_eq(&merged("First"), &merged("Second")));
     assert!(!Arc::ptr_eq(&merged("Button"), &merged("Card")));
 }
+
+#[test]
+fn a_union_prop_with_a_parent_seen_under_several_components_and_files_keeps_its_written_order_in_each() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let (base, other) = (dir.path().join("Base.ts"), dir.path().join("Other.ts"));
+    std::fs::write(&base, "export interface BaseProps { size: 'lg' | 'sm' }\n").unwrap();
+    std::fs::write(&other, "export interface OtherProps { tone: 'b' | 'a' }\n").unwrap();
+    let lit = |value: &str| PropType::StringLiteral(value.to_string());
+    let union = |members: [&str; 2]| PropType::Union(members.iter().map(|member| lit(member)).collect());
+    let inherited = |name: &str, parent: &str, file: &std::path::Path, members| {
+        Arc::new(SemanticProp {
+            parent: Some(PropParent { name: parent.to_string(), file_name: file.to_str().unwrap().to_string() }),
+            prop_type: union(members),
+            ..(*semantic_prop(name, "", true)).clone()
+        })
+    };
+    // The checker sorts a union's members; the same `Arc` is shared by every component that inherits the prop.
+    let size = inherited("size", "BaseProps", &base, ["lg", "sm"]);
+    let tone = inherited("tone", "OtherProps", &other, ["a", "b"]);
+    let mut out = output();
+    let component = |key: &str, props: Vec<Arc<SemanticProp>>| SemanticComponent { key: key.into(), ..button(props) };
+    let outcome = SemanticOutcome {
+        components: vec![
+            component("Button", vec![size.clone(), tone.clone(), size.clone()]),
+            component("Card", vec![tone, size]),
+        ],
+        ..Default::default()
+    };
+
+    merge_semantic(&mut out, outcome);
+
+    for key in ["Button", "Card"] {
+        let props = &out.components[key].props;
+        assert_eq!(props["size"].prop_type, union(["lg", "sm"]), "{key}");
+        assert_eq!(props["tone"].prop_type, union(["b", "a"]), "{key}");
+        assert_eq!(props.keys().map(String::as_str).collect::<Vec<_>>(), ["size", "tone"], "{key}");
+    }
+}
+
+#[test]
+fn a_component_whose_props_repeat_an_earlier_ones_gets_the_same_props_and_a_repeated_name_keeps_the_later_prop() {
+    let (label, size) = (semantic_prop("alpha", "L", false), semantic_prop("beta", "S", true));
+    let later = semantic_prop("alpha", "Later", true);
+    let mut out = output();
+    let component = |key: &str, props: Vec<Arc<SemanticProp>>| SemanticComponent { key: key.into(), ..button(props) };
+    let outcome = SemanticOutcome {
+        components: vec![
+            component("Button", vec![size.clone(), label.clone()]),
+            component("Card", vec![size.clone(), label.clone()]),
+        ],
+        ..Default::default()
+    };
+    merge_semantic(&mut out, outcome);
+    let (first, second) = (&out.components["Button"].props, &out.components["Card"].props);
+    assert_eq!(first, second);
+    assert_eq!(first.keys().map(String::as_str).collect::<Vec<_>>(), ["alpha", "beta"]);
+
+    let mut out = output();
+    merge_semantic(
+        &mut out,
+        SemanticOutcome { components: vec![button(vec![label, size, later])], ..Default::default() },
+    );
+    assert_eq!(out.components["Button"].props["alpha"].description, "Later");
+}

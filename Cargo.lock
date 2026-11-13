@@ -280,6 +280,7 @@ dependencies = [
  "caliper-docgen-core",
  "camino",
  "insta",
+ "mimalloc",
  "rustc-hash",
  "serde",
  "serde_json",
@@ -287,6 +288,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tsrs_api",
+ "tsrs_core",
  "tsrs_vfs",
 ]
 

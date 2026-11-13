@@ -54,6 +54,7 @@ oxc_resolver      = "11"
 # checker, never a lockfile refresh.
 tsrs_api          = "=0.24.0"
 tsrs_vfs          = "=0.24.0"
+tsrs_core         = "=0.24.0"
 
 # Core data
 compact_str       = { version = "0.10", features = ["serde"] }

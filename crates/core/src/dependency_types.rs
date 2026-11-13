@@ -293,7 +293,7 @@ pub(crate) struct DependencyLayer {
     /// Falls back to the parent's.
     pub(crate) import_map: Arc<ImportResolutionMap>,
     /// `(module, name)` → the declaring `(file, name)`, or `None` when the module's types do not export it.
-    exports: FxHashMap<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>>,
+    exports: dashmap::ReadOnlyView<(PathKey, CompactString), Option<(Utf8PathBuf, CompactString)>, FxBuildHasher>,
     /// `(directory, specifier)` → module, for every resolution the loader made.
     resolutions: FxHashMap<(Box<str>, Box<str>), Result<Utf8PathBuf, Unresolved>>,
     files: FxHashSet<PathKey>,
@@ -1082,7 +1082,7 @@ pub(crate) fn load(
                 for (key, value) in &layer.resolutions {
                     loader.resolutions.insert(key.clone(), value.clone());
                 }
-                for (key, value) in &layer.exports {
+                for (key, value) in layer.exports.iter() {
                     loader.exports.insert(key.clone(), value.clone());
                 }
                 for (key, data) in &layer.parsed {
@@ -1165,7 +1165,7 @@ pub(crate) fn load(
     let import_map = Arc::new(
         ImportResolutionMap::build(&imports).with_fallback(parent.as_ref().map(|layer| layer.import_map.clone())),
     );
-    let exports: FxHashMap<_, _> = loader.exports.into_iter().collect();
+    let exports = loader.exports.into_read_only();
     let resolutions: FxHashMap<_, _> = loader.resolutions.into_iter().collect();
     let unresolved: FxHashMap<_, _> = loader.unresolved.into_iter().collect();
     let files: FxHashSet<PathKey> = files.into_iter().collect();

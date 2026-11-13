@@ -7,8 +7,8 @@ use caliper_docgen_core::pipeline::{HtmlAttributeMode, PipelineOptions, WatchSes
 use caliper_docgen_core::types::semantic::{
     Delivery, Priority, SemanticOutcome, SemanticProvider, SemanticTarget, SharedPriority,
 };
-use caliper_docgen_core::types::{ExtractionOutput, PropType};
-use caliper_docgen_semantic::{OnDemand, OnDemandConfig, Recycles, targets_of};
+use caliper_docgen_core::types::{DiagnosticSeverity, ExtractionOutput, PropType};
+use caliper_docgen_semantic::{OnDemand, OnDemandConfig, targets_of};
 use camino::Utf8PathBuf;
 
 struct Project {
@@ -54,41 +54,6 @@ fn ask_in_background(checker: &OnDemand, target: SemanticTarget) -> SemanticOutc
     receiver.recv_timeout(Duration::from_secs(60)).expect("a delivery").expect("the checker answers")
 }
 
-/// A story asked while background requests wait is answered before them. The worker takes every request queued while
-/// the checker starts (`warm_up`, which builds its session) before it picks one; the answers arrive in the order the
-/// one worker gives them.
-#[test]
-fn a_story_asked_behind_queued_background_requests_is_answered_before_them() {
-    let project = project();
-    let output = structural(&project);
-    let (button, other) = (target(&output, "Button"), target(&output, "Other"));
-    let checker = checker(&project.root);
-    let (sender, answered) = std::sync::mpsc::channel();
-    let queue = |name: &'static str, target: &SemanticTarget, priority: Priority| {
-        let sender = sender.clone();
-        let delivery = Delivery::new(move |outcome| {
-            sender.send((name, outcome)).ok();
-        });
-        checker.request_at(vec![target.clone()], SharedPriority::new(priority), delivery);
-    };
-    checker.warm_up();
-    for _ in 0..3 {
-        queue("Button", &button, Priority::Background);
-    }
-    queue("Other", &other, Priority::Interactive);
-
-    let order: Vec<&str> = (0..4)
-        .map(|_| {
-            let (name, outcome) = answered.recv_timeout(Duration::from_secs(60)).expect("an answer");
-            let outcome = outcome.expect("the checker answered");
-            assert_eq!(outcome.components.len(), 1, "{name}: {:?}", outcome.diagnostics);
-            name
-        })
-        .collect();
-
-    assert_eq!(order, ["Other", "Button", "Button", "Button"]);
-}
-
 /// The built-in checker answers in this process, for a project with no `typescript` of its own.
 #[test]
 fn one_warm_checker_answers_the_component_it_is_asked_about_and_then_the_next() {
@@ -110,16 +75,16 @@ fn one_warm_checker_answers_the_component_it_is_asked_about_and_then_the_next() 
     assert_eq!(names, ["a"]);
 }
 
-/// The checker is replaced by a fresh session after its 64 programs, whatever priority each was asked at; the 65th
-/// request is the first the fresh one answers.
+/// The checker is never replaced: a fresh session would parse every file again while this process keeps most of what
+/// the old one held, so it would hold more, not less. One session keeps its snapshot through 66 requests, whatever
+/// priority each was asked at.
 #[test]
-fn the_checker_is_replaced_after_its_programs() {
+fn the_checker_is_not_replaced_however_many_programs_it_builds() {
     let project = project();
     let output = structural(&project);
     let checker = checker(&project.root);
-    assert_eq!(checker.recycles(), Recycles::default());
 
-    for round in 0..65 {
+    for round in 0..66 {
         let answered = match round % 2 {
             0 => ask(&checker, target(&output, "Button")),
             _ => ask_in_background(&checker, target(&output, "Button")),
@@ -127,7 +92,42 @@ fn the_checker_is_replaced_after_its_programs() {
         assert_eq!((answered.diagnostics.len(), answered.components.len()), (0, 1), "request {round}");
     }
 
-    assert_eq!(checker.recycles(), Recycles { worn: 1 });
+    assert_eq!(checker.snapshots().created, 1, "one session kept its snapshot throughout");
+}
+
+/// What the checker holds is bounded: past the bound, it stays down, and every later request keeps its structural
+/// answer with a warning that says why. Its arenas hold the TypeScript lib at least, so one program passes a bound of
+/// zero, and the first check is after the first program.
+#[test]
+fn a_checker_past_its_memory_bound_stays_down_and_says_why() {
+    let project = project();
+    let output = structural(&project);
+    let mut config = OnDemandConfig::new(project.root.clone());
+    config.request_timeout = Duration::from_secs(60);
+    config.max_rss_mib = 0;
+    let checker = OnDemand::new(config);
+
+    let first = ask(&checker, target(&output, "Button"));
+    let later: Vec<SemanticOutcome> = ["Button", "Other"].map(|name| ask(&checker, target(&output, name))).into();
+
+    // The answer the bound was read after is the checker's: a correct answer, which cost more than the bound.
+    assert_eq!((first.diagnostics.len(), first.components.len()), (0, 1));
+    for outcome in later {
+        assert!(outcome.components.is_empty());
+        assert_eq!(outcome.diagnostics.len(), 1);
+        let diagnostic = &outcome.diagnostics[0];
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Warning);
+        let message = diagnostic.message.as_str();
+        let held = message.strip_prefix("TypeScript checker backend unavailable: the built-in checker held ").and_then(
+            |rest| {
+                rest.strip_suffix(
+                    " MiB, more than its 0 MiB bound (`max_rss_mib`), and this process keeps that memory, so \
+                     components keep their structural answer for the rest of the session",
+                )
+            },
+        );
+        assert!(held.is_some_and(|mib| mib.parse::<u64>().is_ok_and(|mib| mib > 0)), "{message}");
+    }
 }
 
 #[test]

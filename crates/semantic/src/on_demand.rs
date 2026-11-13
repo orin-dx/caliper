@@ -13,10 +13,14 @@
 //!
 //! The worker runs on its own thread with its own runtime, so a caller on any thread (a NAPI worker, a rayon task)
 //! never nests runtimes and can bound how long it waits. A failure to start or a crash yields an outcome with no
-//! components and one diagnostic, never an error; after [`MAX_RESTARTS`] crashes the checker stays down.
+//! components and one diagnostic, never an error; after [`MAX_RESTARTS`] crashes the checker stays down. A panic in
+//! the checker counts as a crash: its session is not asked again, and a fresh one starts.
 //!
-//! A checker is replaced by a fresh session after [`MAX_REQUESTS_PER_PROCESS`] programs, which drops what the old one
-//! held.
+//! What the checker holds is bounded by [`OnDemandConfig::max_rss_mib`] ([`Backend::memory_mib`]). Its memory is read
+//! from its arenas, which leave out the host's (Node, Storybook), and it is never replaced: a closed session gives back
+//! only part of its arenas, and a fresh one parses every file again, so a replacement raises what this process holds
+//! (measured in `docs/gate-measurements.md`). Past the bound it stays down instead, and its components keep their
+//! structural answer with a warning that says why.
 //!
 //! Requests wait in two queues: an interactive one (a story someone opened) is answered before any background one (a
 //! warm-up, a fill, a prefetch), first come first served within each, and a background request a caller raised while
@@ -53,15 +57,20 @@ const INTERACTIVE_STREAK: u32 = 4;
 /// Crashes the checker may have before it stays down for the session.
 const MAX_RESTARTS: u32 = 3;
 
-/// Programs one checker builds before it is replaced. Its memory grows with every program it has loaded (measured:
-/// antd reached 600 MiB after 50 single-component programs), and a fresh process costs 30 to 70 ms.
-const MAX_REQUESTS_PER_PROCESS: u32 = 64;
+/// What the checker may hold, in MiB, between requests, measured by its arenas: past it, it stops for the session. Its
+/// arenas reached 46 MiB over 2,000 Chakra edits and 165 MiB over 937 Chakra and MUI components (single-component
+/// programs peaked at 157 to 612 MiB in a `tsc` process); past this, it has loaded more than a story session needs.
+const DEFAULT_MAX_RSS_MIB: u64 = 768;
 
-/// How long dropping a checker waits, by default, for its worker to finish a request and stop the checker, before
-/// leaving the worker to finish on its own. Closing a session must not wait for a 60 s request.
+/// How many requests pass between memory checks: each reads the arenas' pages, which costs a few milliseconds. The
+/// checker is also checked after its first program.
+const RSS_CHECK_EVERY: u32 = 4;
+
+/// How long dropping a checker waits, by default, for its worker to finish a request and stop the checker, before leaving
+/// the worker to finish on its own. Closing a session must not wait for a 60 s request.
 const DEFAULT_SHUTDOWN_WAIT: Duration = Duration::from_secs(5);
 
-/// How a warm [`OnDemand`] checker starts and is kept: where it runs, and how long to wait on it.
+/// How a warm [`OnDemand`] checker starts and is kept: where it runs, how long to wait on it, and what it may hold.
 #[derive(Debug, Clone)]
 pub struct OnDemandConfig {
     /// Where the checker finds `node_modules`: its working directory.
@@ -70,28 +79,27 @@ pub struct OnDemandConfig {
     pub tsconfig: Option<Utf8PathBuf>,
     /// Bound on each request to the checker.
     pub request_timeout: Duration,
-    /// How long dropping the checker waits for a request in progress before it lets the worker finish alone.
+    /// What the checker may hold, in MiB, read after a request from its arenas (the part of this process's memory the
+    /// `tsrs` crates allocated): past it, the checker stops for the session, its components keeping their structural
+    /// answer with a warning. A request that needs more finishes first: the bound is between requests, not inside one.
+    pub max_rss_mib: u64,
+    /// How long dropping the checker waits for a request in progress before it lets the worker finish alone, and how
+    /// long a checker that panicked or went past its memory bound is given to close its session.
     pub shutdown_wait: Duration,
 }
 
 impl OnDemandConfig {
-    /// A configuration for `project_root` with a 60 second request timeout, a 5 second shutdown wait, and no explicit
-    /// tsconfig.
+    /// A configuration for `project_root` with a 60 second request timeout, a 768 MiB memory bound, a 5 second shutdown
+    /// wait, and no explicit tsconfig.
     pub fn new(project_root: Utf8PathBuf) -> Self {
         Self {
             project_root,
             tsconfig: None,
             request_timeout: Duration::from_secs(60),
+            max_rss_mib: DEFAULT_MAX_RSS_MIB,
             shutdown_wait: DEFAULT_SHUTDOWN_WAIT,
         }
     }
-}
-
-/// How often a warm checker was replaced on purpose (crashes are not counted).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Recycles {
-    /// Replaced after building the most programs one checker is allowed.
-    pub worn: u32,
 }
 
 /// How the snapshots a warm checker answered from were made.
@@ -107,7 +115,6 @@ pub struct Snapshots {
 /// What the worker thread reports about the checker, for the type that owns the thread to read.
 #[derive(Default)]
 struct Gauges {
-    worn: AtomicU32,
     created: AtomicU32,
     updated: AtomicU32,
 }
@@ -118,6 +125,10 @@ enum Job {
     /// Files changed on disk; queued before any request that may read them.
     Changed(SourceChange),
     Answer(Asked),
+    /// Tests only: the worker waits until this is released (or its sender dropped) before it takes another job, so a
+    /// test can queue requests while the worker is busy and know they are all filed before one is picked.
+    #[cfg(test)]
+    Hold(mpsc::Receiver<()>),
 }
 
 /// One request waiting for the checker.
@@ -212,12 +223,6 @@ impl OnDemand {
         }
     }
 
-    /// How many times the checker has been replaced so far. A replacement happens after the reply it follows, so read
-    /// this after the next request to see the last one.
-    pub fn recycles(&self) -> Recycles {
-        Recycles { worn: self.gauges.worn.load(Ordering::Relaxed) }
-    }
-
     /// How many snapshots the answers so far came from, by how each was made.
     pub fn snapshots(&self) -> Snapshots {
         Snapshots {
@@ -231,6 +236,16 @@ impl OnDemand {
         if let Some(jobs) = &self.jobs {
             jobs.send(Job::Warm).ok();
         }
+    }
+
+    /// Tests only: holds the worker at its next job until the returned sender sends or is dropped (see [`Job::Hold`]).
+    #[cfg(test)]
+    fn hold(&self) -> mpsc::Sender<()> {
+        let (release, held) = mpsc::channel();
+        if let Some(jobs) = &self.jobs {
+            jobs.send(Job::Hold(held)).ok();
+        }
+        release
     }
 }
 
@@ -291,6 +306,8 @@ fn worker(config: OnDemandConfig, mut queue: UnboundedReceiver<Job>, gauges: Arc
                 match job {
                     Job::Answer(asked) => asked.delivery.deliver(Some(SemanticOutcome::unavailable(reason.clone()))),
                     Job::Warm | Job::Changed(_) => {}
+                    #[cfg(test)]
+                    Job::Hold(_) => {}
                 }
             }
             return;
@@ -324,7 +341,7 @@ fn worker(config: OnDemandConfig, mut queue: UnboundedReceiver<Job>, gauges: Arc
             };
             asked.delivery.deliver(Some(checker.answer(&config, asked.targets).await));
             // After the reply, so the caller never waits for the memory check or the replacement.
-            checker.maintain().await;
+            checker.maintain(&config).await;
         }
         if let Some(backend) = checker.backend.take() {
             backend.shutdown().await;
@@ -381,7 +398,7 @@ fn untold_warning(files: &[Utf8PathBuf]) -> Diagnostic {
 }
 
 impl Checker {
-    /// Acts on a job as it arrives: starts the checker, applies a change, or files a request by its priority.
+    /// Acts on a job as it arrives: starts the process, applies a change, or files a request by its priority.
     async fn take(&mut self, config: &OnDemandConfig, job: Job, waiting: &mut Queue<Asked>) {
         match job {
             Job::Warm => {
@@ -392,6 +409,10 @@ impl Checker {
                 let priority = asked.priority.clone();
                 waiting.push(asked, priority);
             }
+            #[cfg(test)]
+            Job::Hold(released) => {
+                released.recv().ok();
+            }
         }
     }
 
@@ -401,7 +422,7 @@ impl Checker {
         }
         if self.backend.as_ref().is_some_and(|backend| !backend.is_alive()) {
             if let Some(dead) = self.backend.take() {
-                dead.shutdown().await;
+                dead.shutdown_within(config.shutdown_wait).await;
             }
             self.options = None;
             self.live = None;
@@ -413,6 +434,8 @@ impl Checker {
         }
         if self.backend.is_none() {
             let backend = Backend::start(&config.project_root, 1).map_err(|reason| self.stay_down(reason))?;
+            // A checker started after a crash counts its own programs.
+            self.served = 0;
             // Initialize the session and read the compiler options once; every request after builds only its program.
             let tsconfig = config.tsconfig.as_ref().map(|path| path.as_str());
             match Rpc::prepare(&backend.client(), config.request_timeout, tsconfig).await {
@@ -502,7 +525,11 @@ impl Checker {
                         Err(CallError::Rejected(message)) => {
                             tracing::debug!(%message, "the checker could not update its snapshot; building a fresh one");
                         }
-                        Err(fatal) => return Err(fatal),
+                        Err(fatal) => {
+                            // The kept snapshot is no longer held anywhere else: release it before giving up on it.
+                            live.rpc.release().await;
+                            return Err(fatal);
+                        }
                     }
                 } else {
                     tracing::warn!(files = ?drift.untold, "files changed that the checker was not told about");
@@ -551,34 +578,129 @@ impl Checker {
         }
     }
 
-    /// Replaces the checker when it has built enough programs, and otherwise stamps the snapshot it keeps. A planned
-    /// replacement, not a crash: the next request starts a fresh checker.
-    async fn maintain(&mut self) {
-        if self.backend.is_none() {
-            return;
-        }
-        if self.served >= MAX_REQUESTS_PER_PROCESS {
-            self.gauges.worn.fetch_add(1, Ordering::Relaxed);
-            tracing::debug!(served = self.served, "replacing the checker");
-            // The snapshot goes with the checker; the next one reads every file from the disk.
+    /// Stops the checker for the session past the memory bound (see [`Upkeep`]), and otherwise stamps the snapshot it
+    /// keeps.
+    async fn maintain(&mut self, config: &OnDemandConfig) {
+        let Some(backend) = self.backend.as_ref() else { return };
+        let held = Upkeep::checks_memory(self.served).then(|| backend.memory_mib()).flatten();
+        let upkeep = Upkeep::decide(held, config.max_rss_mib);
+        if upkeep == Upkeep::Down {
+            let mib = held.unwrap_or_default();
+            tracing::warn!(
+                held_mib = mib,
+                bound_mib = config.max_rss_mib,
+                "the built-in checker is past its memory bound"
+            );
             self.live = None;
             self.told.clear();
             if let Some(old) = self.backend.take() {
-                old.shutdown().await;
+                old.shutdown_within(config.shutdown_wait).await;
             }
             self.options = None;
-            self.served = 0;
+            self.stay_down(format!(
+                "the built-in checker held {mib} MiB, more than its {} MiB bound (`max_rss_mib`), and this process \
+                 keeps that memory, so components keep their structural answer for the rest of the session",
+                config.max_rss_mib
+            ));
             return;
         }
         self.stamp().await;
     }
 }
 
+/// What becomes of a checker after a reply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Upkeep {
+    /// It keeps answering.
+    Keep,
+    /// The checker holds more than the memory bound, which a replacement would not give back: it stays down for the
+    /// session.
+    Down,
+}
+
+impl Upkeep {
+    /// Whether to read what the checker holds after its `served`th program: the first, so that one program past the
+    /// bound is caught at once, and every [`RSS_CHECK_EVERY`]th.
+    fn checks_memory(served: u32) -> bool {
+        served == 1 || served.is_multiple_of(RSS_CHECK_EVERY)
+    }
+
+    fn decide(held_mib: Option<u64>, bound_mib: u64) -> Upkeep {
+        if held_mib.is_some_and(|mib| mib > bound_mib) { Upkeep::Down } else { Upkeep::Keep }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use caliper_docgen_core::types::semantic::{Priority, SharedPriority};
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-    use super::{INTERACTIVE_STREAK, Queue};
+    use std::time::Duration;
+
+    use caliper_docgen_core::pipeline::{PipelineOptions, extract};
+    use caliper_docgen_core::types::semantic::{Delivery, Priority, SemanticProvider, SharedPriority};
+    use camino::Utf8PathBuf;
+
+    use super::{OnDemand, OnDemandConfig};
+
+    use super::{INTERACTIVE_STREAK, Queue, RSS_CHECK_EVERY, Upkeep};
+
+    /// A story asked while background requests wait is answered before them. The worker is held until all four are
+    /// queued ([`OnDemand::hold`]); it then files every queued job before it picks one, so the order does not depend on
+    /// how fast the test thread queues them. The answers arrive in the order the one worker gives them.
+    #[test]
+    fn a_story_asked_behind_queued_background_requests_is_answered_before_them() {
+        let dir = tempfile::Builder::new().prefix("OnDemand").tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        let fixtures = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/project");
+        for name in ["Button.tsx", "tsconfig.json"] {
+            std::fs::copy(fixtures.join(name), root.join(name)).unwrap();
+        }
+        let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
+        let target = |name: &str| crate::targets_of(&output).into_iter().find(|t| t.display_name == name).unwrap();
+        let checker = OnDemand::new(OnDemandConfig::new(root.clone()));
+        let (sender, answered) = std::sync::mpsc::channel();
+        let queue = |name: &'static str, priority: Priority| {
+            let sender = sender.clone();
+            let delivery = Delivery::new(move |outcome| {
+                sender.send((name, outcome)).ok();
+            });
+            checker.request_at(vec![target(name)], SharedPriority::new(priority), delivery);
+        };
+
+        let release = checker.hold();
+        for _ in 0..3 {
+            queue("Button", Priority::Background);
+        }
+        queue("Other", Priority::Interactive);
+        release.send(()).unwrap();
+
+        let order: Vec<&str> = (0..4)
+            .map(|_| {
+                let (name, outcome) = answered.recv_timeout(Duration::from_secs(60)).expect("an answer");
+                let outcome = outcome.expect("the checker answered");
+                assert_eq!(outcome.components.len(), 1, "{name}: {:?}", outcome.diagnostics);
+                name
+            })
+            .collect();
+
+        assert_eq!(order, ["Other", "Button", "Button", "Button"]);
+    }
+
+    #[test]
+    fn the_checker_stops_past_the_bound_and_keeps_answering_within_it() {
+        assert_eq!(Upkeep::decide(Some(100), 768), Upkeep::Keep);
+        assert_eq!(Upkeep::decide(None, 768), Upkeep::Keep);
+        assert_eq!(Upkeep::decide(Some(768), 768), Upkeep::Keep);
+        assert_eq!(Upkeep::decide(Some(800), 768), Upkeep::Down);
+    }
+
+    #[test]
+    fn the_checker_is_read_after_its_first_program_and_every_fourth() {
+        assert_eq!(RSS_CHECK_EVERY, 4);
+        let read = (1..=9).filter(|served| Upkeep::checks_memory(*served)).collect::<Vec<_>>();
+        assert_eq!(read, [1, 4, 8]);
+        assert!(Upkeep::checks_memory(64));
+    }
 
     fn drain(queue: &mut Queue<&'static str>) -> Vec<&'static str> {
         std::iter::from_fn(|| queue.next()).collect()
