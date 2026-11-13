@@ -194,7 +194,7 @@ enum Job {
 }
 
 struct Asked {
-    method: String,
+    method: &'static str,
     params: Vec<u8>,
     reply: oneshot::Sender<Result<String, String>>,
 }
@@ -213,17 +213,16 @@ impl Client {
         Client { lanes: self.lanes.clone(), lane }
     }
 
-    /// One request, its answer the `result` as the JSON text it arrived as. The wait is bounded by `deadline`.
+    /// One request, its parameters the JSON text `params`, its answer the `result` as the JSON text it arrived as. The
+    /// wait is bounded by `deadline`.
     pub(crate) async fn request_raw(
         &self,
-        method: &str,
-        params: Value,
+        method: &'static str,
+        params: Vec<u8>,
         deadline: Duration,
     ) -> Result<Box<RawValue>, RequestError> {
-        let params = serde_json::to_vec(&params)
-            .map_err(|error| RequestError::Malformed(format!("failed to serialize a request: {error}")))?;
         let (reply, answer) = oneshot::channel();
-        let asked = Asked { method: method.to_string(), params, reply };
+        let asked = Asked { method, params, reply };
         let Some(jobs) = self.lanes.get(self.lane % self.lanes.len().max(1)) else {
             return Err(RequestError::Closed);
         };
@@ -437,7 +436,7 @@ impl<S: Served> Lane<S> {
                 continue;
             }
             let session = &self.session;
-            let answered = catch_unwind(AssertUnwindSafe(|| session.handle(&asked.method, &asked.params)))
+            let answered = catch_unwind(AssertUnwindSafe(|| session.handle(asked.method, &asked.params)))
                 .unwrap_or_else(|panic| {
                     let text = panic
                         .downcast_ref::<String>()
@@ -451,7 +450,7 @@ impl<S: Served> Lane<S> {
                     // A caller that stopped waiting meanwhile (its deadline passed) never learns of a snapshot this
                     // made.
                     if let Err(Ok(unread)) = asked.reply.send(Ok(text)) {
-                        session.discard(&asked.method, &unread);
+                        session.discard(asked.method, &unread);
                     }
                 }
                 Err(Failure { message, panicked }) => {
@@ -490,8 +489,8 @@ mod tests {
         Backend::start(Utf8Path::new("/"), 1).unwrap()
     }
 
-    async fn ask(client: &Client, method: &str, params: Value) -> Result<Value, RequestError> {
-        let answer = client.request_raw(method, params, Duration::from_secs(120)).await?;
+    async fn ask(client: &Client, method: &'static str, params: Value) -> Result<Value, RequestError> {
+        let answer = client.request_raw(method, serde_json::to_vec(&params).unwrap(), Duration::from_secs(120)).await?;
         Ok(serde_json::from_str(answer.get()).unwrap())
     }
 
@@ -639,7 +638,7 @@ mod tests {
 
         // The second waits until the first is done (300 ms) and is taken, then stops waiting before its own is.
         for (method, wait) in [("createSnapshot", 100), ("getTypeOfSymbol", 350)] {
-            let late = runtime.block_on(client.request_raw(method, Value::Null, Duration::from_millis(wait)));
+            let late = runtime.block_on(client.request_raw(method, b"null".to_vec(), Duration::from_millis(wait)));
             assert!(matches!(late, Err(RequestError::Timeout { .. })), "{late:?}");
         }
         let waited = std::time::Instant::now();
@@ -876,7 +875,11 @@ mod tests {
             "createPrograms": [{ "rootFiles": ["/virtual/slow.ts"], "compilerOptions": { "noEmit": true } }],
         });
 
-        let late = runtime.block_on(client.request_raw("createSnapshot", params, Duration::from_micros(1)));
+        let late = runtime.block_on(client.request_raw(
+            "createSnapshot",
+            serde_json::to_vec(&params).unwrap(),
+            Duration::from_micros(1),
+        ));
         let next = runtime.block_on(program(&client, "/virtual/next.ts", "export const n = 1;\n", 100));
 
         match late {
@@ -896,7 +899,7 @@ mod tests {
         let client = checker.client();
 
         runtime.block_on(checker.shutdown());
-        let after = runtime.block_on(client.request_raw("initialize", Value::Null, Duration::from_secs(5)));
+        let after = runtime.block_on(client.request_raw("initialize", b"null".to_vec(), Duration::from_secs(5)));
 
         assert!(matches!(after, Err(RequestError::Closed)), "{after:?}");
     }
