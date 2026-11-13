@@ -26,9 +26,12 @@ tracing.workspace         = true
 rustc-hash.workspace      = true
 tsrs_api.workspace        = true
 tsrs_vfs.workspace        = true
+tsrs_core.workspace       = true
 rmp-serde.workspace       = true
 xxhash-rust.workspace     = true
 
 [dev-dependencies]
 tempfile.workspace        = true
 insta.workspace           = true
+# The native binding's allocator, so the gate harness measures memory as the addon's process holds it.
+mimalloc                  = { version = "0.1", default-features = false }

@@ -549,7 +549,9 @@ fn replace_props<'a>(
 ) -> MergedProps {
     let Merge { composes, unanswered, syntax, resolver } = *merge;
     let code_defaults = syntax.code_defaults(entry);
-    let mut props: BTreeMap<String, Arc<ParsedProp>> = BTreeMap::new();
+    // Collected, then built into the map in one pass: a design system's components place thousands of props each, and
+    // one insert per prop searched the map every time. A name given twice keeps the later prop, as an insert did.
+    let mut placed: Vec<(String, Arc<ParsedProp>)> = Vec::with_capacity(props_in.size_hint().0);
     let mut unread = 0;
     for prop in props_in {
         let structural = entry.props.get(&prop.name);
@@ -565,7 +567,7 @@ fn replace_props<'a>(
         );
         if let Some(made) = memo.made.get(&key) {
             unread += usize::from(made.unread);
-            props.insert(prop.name.clone(), made.merged.clone());
+            placed.push((prop.name.clone(), made.merged.clone()));
             continue;
         }
         let written = written.unwrap_or_else(|| syntax.written(entry, prop));
@@ -616,8 +618,9 @@ fn replace_props<'a>(
                 unread: !unread_kinds.is_empty(),
             },
         );
-        props.insert(prop.name.clone(), merged);
+        placed.push((prop.name.clone(), merged));
     }
+    let mut props: BTreeMap<String, Arc<ParsedProp>> = placed.into_iter().collect();
     let mut kept = 0;
     if unanswered == Unanswered::Keep {
         for (name, structural) in &entry.props {

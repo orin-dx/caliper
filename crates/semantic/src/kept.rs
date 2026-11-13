@@ -67,6 +67,12 @@ impl Reads {
         }
     }
 
+    /// Keeps the run's answer from being kept: the checker was refused a file it read (see `checker::TsrsSession`), so
+    /// its answer is not the one the disk's files make.
+    pub(crate) fn spoil(&self) {
+        self.unsettled.store(true, Ordering::Relaxed);
+    }
+
     /// Every question and answer digest, sorted, when the run read one state of the disk.
     fn settled(&self) -> Option<Vec<(Question, u128)>> {
         if self.unsettled.load(Ordering::Relaxed) {
@@ -472,5 +478,23 @@ mod tests {
 
         assert!(load(&cache.join(FILE), request_key(&other)).is_none());
         assert!(kept(&root, &cache).is_some());
+    }
+
+    /// A file the checker is refused for its nesting (`checker::MAX_NESTING`) makes an answer that is not the disk's
+    /// files' answer, so none is kept, and a run after it asks the checker again.
+    #[test]
+    fn a_run_that_was_refused_a_file_keeps_no_answer() {
+        let (_dir, root, cache) = project();
+        let depth = crate::checker::MAX_NESTING + 1;
+        std::fs::write(
+            root.join("tone.ts"),
+            format!("export type Tone = {}string{};\n", "{ a: ".repeat(depth), " }".repeat(depth)),
+        )
+        .unwrap();
+
+        let refused = resolve_cached(request(&root), &cache);
+
+        assert!(refused.components.is_empty() || !refused.fallbacks.is_empty() || !refused.diagnostics.is_empty());
+        assert!(!cache.join(FILE).exists());
     }
 }

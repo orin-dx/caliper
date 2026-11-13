@@ -178,10 +178,30 @@ fn without_a_tsc_path_the_built_in_checker_answers_one_component_and_then_the_ne
     assert_eq!(checker.process_id(), None);
 }
 
-/// The built-in checker is replaced by a fresh session after its 64 programs, as a process is; the memory bound, which
-/// would count this whole process, is not applied to it.
+/// The built-in checker is not replaced after a process's 64 programs: a fresh session would parse every file again
+/// while this process keeps most of what the old one held, so it would hold more, not less.
 #[test]
-fn the_built_in_checker_is_replaced_after_its_programs_and_never_for_memory() {
+fn the_built_in_checker_is_not_replaced_after_the_programs_a_process_is_allowed() {
+    let project = project(false);
+    let output = structural(&project);
+    let mut config = OnDemandConfig::new(project.root.clone());
+    config.request_timeout = Duration::from_secs(60);
+    let checker = OnDemand::new(config);
+
+    for round in 0..66 {
+        let answered = ask(&checker, target(&output, "Button"));
+        assert_eq!((answered.diagnostics.len(), answered.components.len()), (0, 1), "request {round}");
+    }
+
+    assert_eq!(checker.recycles(), Recycles::default());
+    assert_eq!(checker.snapshots().created, 1, "one session kept its snapshot throughout");
+}
+
+/// What the built-in checker holds is bounded: past the bound, it stays down, and every later request keeps its
+/// structural answer with a warning that says why. Its arenas hold the TypeScript lib at least, so one program passes a
+/// bound of zero, and the first check is after the first program.
+#[test]
+fn a_built_in_checker_past_its_memory_bound_stays_down_and_says_why() {
     let project = project(false);
     let output = structural(&project);
     let mut config = OnDemandConfig::new(project.root.clone());
@@ -189,12 +209,28 @@ fn the_built_in_checker_is_replaced_after_its_programs_and_never_for_memory() {
     config.max_rss_mib = 0;
     let checker = OnDemand::new(config);
 
-    for round in 0..65 {
-        let answered = ask(&checker, target(&output, "Button"));
-        assert_eq!((answered.diagnostics.len(), answered.components.len()), (0, 1), "request {round}");
-    }
+    let first = ask(&checker, target(&output, "Button"));
+    let later: Vec<SemanticOutcome> = ["Button", "Other"].map(|name| ask(&checker, target(&output, name))).into();
 
-    assert_eq!(checker.recycles(), Recycles { worn: 1, bloated: 0 });
+    // The answer the bound was read after is the checker's: a correct answer, which cost more than the bound.
+    assert_eq!((first.diagnostics.len(), first.components.len()), (0, 1));
+    for outcome in later {
+        assert!(outcome.components.is_empty());
+        assert_eq!(outcome.diagnostics.len(), 1);
+        let diagnostic = &outcome.diagnostics[0];
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Warning);
+        let message = diagnostic.message.as_str();
+        let held = message.strip_prefix("TypeScript checker backend unavailable: the built-in checker held ").and_then(
+            |rest| {
+                rest.strip_suffix(
+                " MiB, more than its 0 MiB bound (`max_rss_mib`), and this process keeps that memory, so components \
+                 keep their structural answer for the rest of the session",
+            )
+            },
+        );
+        assert!(held.is_some_and(|mib| mib.parse::<u64>().is_ok_and(|mib| mib > 0)), "{message}");
+    }
+    assert_eq!(checker.recycles(), Recycles::default());
 }
 
 #[test]
