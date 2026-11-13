@@ -19,7 +19,7 @@ const OPTION_KEY_SET = {
   warmUp: true,
   fillAfter: true,
   prefetchStories: true,
-  semanticTypes: true,
+  checker: true,
   tscPath: true,
   semanticWaitMs: true,
   semanticWaitEmptyMs: true,

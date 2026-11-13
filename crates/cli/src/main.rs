@@ -55,7 +55,7 @@ enum Command {
     /// Extract prop types and write to stdout or --out file
     Extract(ExtractArgs),
 
-    /// Watch for changes and re-extract
+    /// Watch for changes and re-extract with the structural resolver (no checker)
     Watch(WatchArgs),
 
     /// Validate extraction — exits 2 if any errors, or 1 if --strict and there are warnings. For CI.
@@ -128,30 +128,28 @@ pub struct ExtractArgs {
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
 
-    /// Experimental: ask the built-in TypeScript 7.1 checker (`tsrs`) for every component's props in one program and
-    /// wait for the answer, which replaces the structural one prop by prop; the structural result stands wherever the
-    /// checker cannot answer (off by default)
+    /// Do not ask the built-in TypeScript checker (`tsrs`): the structural resolver answers alone, as it does wherever
+    /// the checker cannot. By default every component's props come from the checker, all in one program, waited for
     #[arg(long)]
-    pub experimental_semantic_types: bool,
+    pub no_checker: bool,
 
-    /// A checker binary for `--experimental-semantic-types` to run instead of the built-in one: `typescript@7.1`'s
-    /// `tsc`, or `tsrs`
-    #[arg(long, requires = "experimental_semantic_types")]
+    /// A checker binary to run instead of the built-in one: `typescript@7.1`'s `tsc`, or `tsrs`
+    #[arg(long, conflicts_with = "no_checker")]
     pub tsc_path: Option<String>,
 
-    /// With `--experimental-semantic-types`: how long the checker may take to start or to answer any one request, in
-    /// milliseconds, before the run takes the structural result with one warning
-    #[arg(long, requires = "experimental_semantic_types", default_value_t = DEFAULT_SEMANTIC_TIMEOUT_MS)]
+    /// How long the checker may take to start or to answer any one request, in milliseconds, before the run takes the
+    /// structural result with one warning
+    #[arg(long, conflicts_with = "no_checker", default_value_t = DEFAULT_SEMANTIC_TIMEOUT_MS)]
     pub semantic_timeout_ms: u64,
 
-    /// Test-only (ADR 0026's S7 gates): with `--experimental-semantic-types`, take no fact the checker lacks from the
-    /// structural resolver: defaults and union member order come from the source's syntax alone
-    #[arg(long, hide = true, requires = "experimental_semantic_types")]
+    /// Test-only (ADR 0026's S7 gates): take no fact the checker lacks from the structural resolver: defaults and union
+    /// member order come from the source's syntax alone
+    #[arg(long, hide = true, conflicts_with = "no_checker")]
     pub no_resolver_facts: bool,
 }
 
 /// `--semantic-timeout-ms` when not given: ADR 0026's proposed 10 s. A hung checker is caught that fast, and it bounds
-/// each request, not the run: a 938-component Chakra and MUI program answers in 15 to 17 s in all within it.
+/// each request, not the run: a 938-component Chakra and MUI program answers in about 6 s in all within it.
 pub const DEFAULT_SEMANTIC_TIMEOUT_MS: u64 = 10_000;
 
 /// The formats `extract` can write.
@@ -219,6 +217,10 @@ pub struct InspectArgs {
     /// (DOM and ARIA attributes, style systems) from loaded dependencies by default; a dependency's own API is listed unless it declares more than 200 props
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
+
+    /// Do not ask the built-in TypeScript checker for the component's props: the structural resolver answers alone
+    #[arg(long)]
+    pub no_checker: bool,
 }
 
 /// The options of `watch`.
@@ -271,6 +273,10 @@ pub struct CheckArgs {
     /// (DOM and ARIA attributes, style systems) from loaded dependencies by default; a dependency's own API is listed unless it declares more than 200 props
     #[arg(long, value_enum)]
     pub collapse_inherited_props: Option<CollapseInheritedPropsArg>,
+
+    /// Do not ask the built-in TypeScript checker: check the structural resolver's diagnostics alone
+    #[arg(long)]
+    pub no_checker: bool,
 }
 
 /// The options of `completions`.

@@ -2,28 +2,33 @@
 //! `tsc --api` process when an explicit `tsc_path` names one (the Go `typescript@7.1` the tests and the parity gate
 //! run, or a `tsrs` binary). Both answer the same methods with the same JSON, so [`crate::rpc`] does not know which.
 //!
-//! The linked checker answers on one thread of its own with a 512 MiB stack, the stack the `tsrs` binary serves on. A
+//! The linked checker answers on threads of its own with a 512 MiB stack, the stack the `tsrs` binary serves on. A
 //! query runs on the thread that calls it, and a type nested 2,000 deep overflows a default 2 MiB thread: a stack
-//! overflow aborts the whole process and cannot be caught. Callers on any thread send it requests over a channel, and
-//! it answers them one at a time, in the order they arrive.
+//! overflow aborts the whole process and cannot be caught. Callers on any thread send it requests over a channel, one
+//! per checker thread (a lane), and each thread answers its own one at a time, in the order they arrive; a run that asks
+//! several programs at once sends each program's requests down a lane of its own ([`Client::lane`]). Every lane asks
+//! the same session.
 //!
 //! It is guarded so that it does not take its host (Node, Storybook) down with it:
 //!
-//! - **Panics.** A panic inside the checker comes back as an error to the request that caused it, and the thread then
-//!   closes its session and ends, as a crashed process would: a session a panic unwound through is not asked again, so
-//!   no later answer comes from state it left half-built. The caller starts a fresh one ([`crate::on_demand`] does, up
-//!   to its restart limit). A panic `tsrs` itself reports as the client's fault (an unknown `moduleResolution`) is an
-//!   error like any other, and the session keeps answering.
+//! - **Panics.** A panic inside the checker comes back as an error to the request that caused it, and every lane then
+//!   stops: a request any lane takes afterwards fails, and the last lane to leave closes the session, as a crashed
+//!   process would end. A session a panic unwound through is not asked again, so no later answer comes from state it
+//!   left half-built. The caller starts a fresh one ([`crate::on_demand`] does, up to its restart limit; a
+//!   whole-project run fails on the first lane's error and answers structurally). A panic `tsrs` itself reports as the
+//!   client's fault (an unknown `moduleResolution`) is an error like any other, and the session keeps answering.
 //! - **Nesting.** `tsrs` parses on threads of its own with a 256 MiB stack, which a file nested a few hundred thousand
 //!   brackets deep overflows (measured on macOS arm64: an object type 200,000 deep parses, 300,000 aborts). Every file
 //!   the checker reads from the disk is measured first ([`nesting`]), and a request that read one nested deeper than
-//!   [`MAX_NESTING`] fails with an error that names it, so its components keep their structural answer.
+//!   [`MAX_NESTING`] fails with an error that names it, so its components keep their structural answer. Requests that
+//!   build snapshots, which are the ones that read files, run one at a time across the lanes, so a refusal is the
+//!   request's that met it; any other request that sees a refusal fails too.
 //! - **Memory.** [`Backend::memory_mib`] reads what the linked checker holds: the resident part of the address range
 //!   `tsrs` allocates its arenas from, which leaves out the host's own memory. [`crate::on_demand`] bounds it.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, RwLock, mpsc};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -56,6 +61,9 @@ pub(crate) struct Start<'a> {
     pub(crate) expected_versions: &'static [&'static str],
     pub(crate) timeout: Duration,
     pub(crate) extra_env: &'a [(String, String)],
+    /// How many threads the linked checker answers on: requests about different programs of its session run at once.
+    /// A process answers on its own terms.
+    pub(crate) threads: usize,
 }
 
 /// A running checker.
@@ -71,7 +79,7 @@ impl Backend {
     /// supported version, or a checker thread that cannot be spawned, is an error that says so.
     pub(crate) async fn start(start: Start<'_>) -> Result<Backend, String> {
         let Some(tsc_path) = start.tsc_path else {
-            return InProcess::start(start.project_root).map(Backend::InProcess);
+            return InProcess::start(start.project_root, start.threads).map(Backend::InProcess);
         };
         let tsc_path = locate::explicit_tsc(tsc_path)?;
         let mut config = SupervisorConfig::new(tsc_path, start.project_root.to_owned(), start.expected_versions);
@@ -81,6 +89,15 @@ impl Backend {
             .await
             .map(|supervisor| Backend::Process(Box::new(supervisor)))
             .map_err(|error| error.to_string())
+    }
+
+    /// How many programs a run asks at once: one per thread of the linked checker, one for a process (whose requests
+    /// this client sends one at a time).
+    pub(crate) fn parallel_programs(&self) -> usize {
+        match self {
+            Backend::Process(_) => 1,
+            Backend::InProcess(checker) => checker.threads,
+        }
     }
 
     pub(crate) fn client(&self) -> Client {
@@ -215,6 +232,15 @@ pub(crate) enum Client {
 }
 
 impl Client {
+    /// The client whose requests the `lane`th thread of the linked checker answers ([`InProcess::start`]); a process
+    /// has one lane, so its client is itself.
+    pub(crate) fn lane(&self, lane: usize) -> Client {
+        match self {
+            Client::Process(client) => Client::Process(client.clone()),
+            Client::InProcess(linked) => Client::InProcess(Linked { lanes: linked.lanes.clone(), lane }),
+        }
+    }
+
     /// One request, its answer the `result` as the JSON text it arrived as. The wait is bounded by `deadline`; an
     /// error is the one the process route would give for the same failure.
     pub(crate) async fn request_raw(
@@ -230,13 +256,15 @@ impl Client {
     }
 }
 
-/// The linked checker: the thread that owns its session, and the way to it.
+/// The linked checker: the first of the threads that share its session, and the way to them.
 pub(crate) struct InProcess {
     client: Linked,
     thread: JoinHandle<()>,
-    /// Set by the thread, before it answers, when it will answer nothing more: a panic unwound through its session.
+    threads: usize,
+    /// Set by a thread, before it answers, when no thread will answer anything more: a panic unwound through the
+    /// session.
     ended: Arc<AtomicBool>,
-    /// Disconnected once the thread has closed its session.
+    /// Disconnected once every thread has left and the last has closed the session.
     closed: mpsc::Receiver<()>,
 }
 
@@ -252,35 +280,40 @@ struct Asked {
     reply: oneshot::Sender<Result<String, String>>,
 }
 
-/// The sending end of the linked checker's queue.
+/// The sending ends of the linked checker's queues, one per thread, and the one this client sends to.
 #[derive(Clone)]
 pub(crate) struct Linked {
-    jobs: mpsc::Sender<Job>,
+    lanes: Arc<[mpsc::Sender<Job>]>,
+    lane: usize,
 }
 
 impl InProcess {
     /// Spawns the checker thread, which creates its session there: the session's work, from the first request on,
-    /// runs on that thread's stack.
-    pub(crate) fn start(project_root: &Utf8Path) -> Result<InProcess, String> {
+    /// runs on that thread's stack. With `threads` above one it starts as many more, each answering a queue of its own
+    /// (a lane, [`Client::lane`]) on the same session: requests about one program wait for each other (each program
+    /// has one checker, which `tsrs_api` locks for the length of a request), so a run that sends the requests about
+    /// each of its programs down a lane of its own has them answered at once.
+    pub(crate) fn start(project_root: &Utf8Path, threads: usize) -> Result<InProcess, String> {
         let cwd = project_root.to_string();
-        InProcess::spawn(move || TsrsSession::open(cwd))
+        InProcess::spawn(threads, move || TsrsSession::open(cwd))
     }
 
-    /// Spawns the checker thread over the session `open` makes on it.
-    fn spawn<S: Served>(open: impl FnOnce() -> S + Send + 'static) -> Result<InProcess, String> {
-        let (jobs, queue) = mpsc::channel();
+    /// Spawns the checker threads over the session `open` makes on the first.
+    pub(crate) fn spawn<S: Served + Send + Sync + 'static>(
+        threads: usize,
+        open: impl FnOnce() -> S + Send + 'static,
+    ) -> Result<InProcess, String> {
+        let (lanes, queues): (Vec<_>, Vec<_>) = (0..threads.max(1)).map(|_| mpsc::channel()).unzip();
+        let threads = lanes.len();
         let ended = Arc::new(AtomicBool::new(false));
         let thread_ended = Arc::clone(&ended);
         let (closing, closed) = mpsc::channel::<()>();
         let thread = std::thread::Builder::new()
             .name("caliper-checker".to_string())
             .stack_size(CHECKER_STACK_BYTES)
-            .spawn(move || {
-                serve(open, &queue, &thread_ended);
-                drop(closing);
-            })
+            .spawn(move || serve(open, queues, thread_ended, closing))
             .map_err(|error| format!("could not start the checker thread: {error}"))?;
-        Ok(InProcess { client: Linked { jobs }, thread, ended, closed })
+        Ok(InProcess { client: Linked { lanes: lanes.into(), lane: 0 }, thread, threads, ended, closed })
     }
 }
 
@@ -289,7 +322,10 @@ impl Linked {
         let params = serde_json::to_vec(&params).map_err(|error| TscClientError::Serialize(Arc::new(error)))?;
         let (reply, answer) = oneshot::channel();
         let asked = Asked { method: method.to_string(), params, reply };
-        if self.jobs.send(Job::Request(asked)).is_err() {
+        let Some(jobs) = self.lanes.get(self.lane % self.lanes.len().max(1)) else {
+            return Err(TscClientError::SessionClosed);
+        };
+        if jobs.send(Job::Request(asked)).is_err() {
             return Err(TscClientError::SessionClosed);
         }
         let answered = match tokio::time::timeout(deadline, answer).await {
@@ -307,19 +343,21 @@ impl Linked {
 
     fn stop(&self) {
         // A thread that already ended has nothing to stop.
-        self.jobs.send(Job::Stop).ok();
+        for jobs in self.lanes.iter() {
+            jobs.send(Job::Stop).ok();
+        }
     }
 }
 
 /// Why the checker did not answer a request.
-struct Failure {
-    message: String,
+pub(crate) struct Failure {
+    pub(crate) message: String,
     /// A panic unwound through the session, which is not asked again.
-    panicked: bool,
+    pub(crate) panicked: bool,
 }
 
 /// What the checker thread asks: the `tsrs` session, or a stand-in in the tests.
-trait Served {
+pub(crate) trait Served {
     /// Answers one request with its JSON text.
     fn handle(&self, method: &str, params: &[u8]) -> Result<String, Failure>;
     /// Releases the snapshot an answer of `method` made, when that answer will not reach the caller, who could then
@@ -340,8 +378,10 @@ fn snapshot_made(method: &str, answer: &str) -> Option<u64> {
 /// A `tsrs` session over the disk, where every file is measured before the session reads it.
 struct TsrsSession {
     session: Arc<Session>,
-    /// The files nested past [`MAX_NESTING`] the session was refused since the last request began, with their depth.
+    /// The files nested past [`MAX_NESTING`] the session was refused, with their depth (see [`TsrsSession::answer`]).
     refused: Arc<Mutex<Vec<(String, usize)>>>,
+    /// Held alone by a request that builds a snapshot, and shared by every other, across the lanes.
+    building: RwLock<()>,
 }
 
 impl TsrsSession {
@@ -365,19 +405,37 @@ impl TsrsSession {
         );
         let fs: Arc<dyn FS> = Arc::new(bundled::wrap_fs(measured));
         let session = Session::new(SessionOptions::new(cwd, bundled::lib_path(), fs, false));
-        TsrsSession { session, refused }
+        TsrsSession { session, refused, building: RwLock::new(()) }
     }
 
-    fn take_refused(&self) -> Vec<(String, usize)> {
-        std::mem::take(&mut *self.refused.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+    fn refused(&self) -> std::sync::MutexGuard<'_, Vec<(String, usize)>> {
+        self.refused.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Answers one request and the refusals it met. A request that builds a snapshot (the ones that read files) has
+    /// the session to itself among the lanes, so a refusal noted meanwhile is its own; it clears the list before and
+    /// takes it after. Any other request runs beside the others and only looks: a refusal one of them met (a file read
+    /// late) fails every request that sees it, until the next snapshot is built.
+    fn answer(&self, method: &str, params: &[u8]) -> (tsrs_api::ApiResult<Response>, Option<(String, usize)>) {
+        if matches!(method, "createSnapshot" | "updateSnapshot") {
+            let _alone = self.building.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+            self.refused().clear();
+            let answered = self.session.handle_request(method, params);
+            let refused = std::mem::take(&mut *self.refused()).into_iter().next();
+            (answered, refused)
+        } else {
+            let _beside = self.building.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let answered = self.session.handle_request(method, params);
+            let refused = self.refused().first().cloned();
+            (answered, refused)
+        }
     }
 }
 
 impl Served for TsrsSession {
     fn handle(&self, method: &str, params: &[u8]) -> Result<String, Failure> {
-        self.take_refused();
-        let answered = self.session.handle_request(method, params);
-        if let Some((file, depth)) = self.take_refused().into_iter().next() {
+        let (answered, refused) = self.answer(method, params);
+        if let Some((file, depth)) = refused {
             // The session answered without the file, which it took for missing: not an answer to give, and a snapshot
             // it made for it would be held with no one to release it.
             if let Ok(Response::Json(text)) = &answered {
@@ -417,49 +475,101 @@ impl Served for TsrsSession {
     }
 }
 
-/// The checker thread: one session, answering each request in turn until it is stopped, every sender is gone, or a
-/// panic unwound through the session. A panic is caught here too, should one escape `tsrs`'s own catch.
-fn serve<S: Served>(open: impl FnOnce() -> S, queue: &mpsc::Receiver<Job>, ended: &AtomicBool) {
-    let session = open();
-    for job in queue {
-        let asked = match job {
-            Job::Request(asked) => asked,
-            Job::Stop => break,
-        };
-        // A caller that stopped waiting (its deadline passed, its run ended) is not answered.
-        if asked.reply.is_closed() {
-            continue;
-        }
-        let answered =
-            catch_unwind(AssertUnwindSafe(|| session.handle(&asked.method, &asked.params))).unwrap_or_else(|panic| {
-                let text = panic
-                    .downcast_ref::<String>()
-                    .map(String::as_str)
-                    .or_else(|| panic.downcast_ref::<&str>().copied())
-                    .unwrap_or("a panic with no message");
-                Err(Failure { message: format!("panic: {text}"), panicked: true })
-            });
-        match answered {
-            Ok(text) => {
-                // A caller that stopped waiting meanwhile (its deadline passed) never learns of a snapshot this made.
-                if let Err(Ok(unread)) = asked.reply.send(Ok(text)) {
-                    session.discard(&asked.method, &unread);
-                }
-            }
-            Err(Failure { message, panicked }) => {
-                if panicked {
-                    tracing::warn!(method = asked.method, %message, "the built-in checker panicked; it is replaced");
-                    // Before the reply, so the caller never sends its next request to a session that will not answer.
-                    ended.store(true, Ordering::Release);
-                    asked.reply.send(Err(message)).ok();
-                    break;
-                }
-                asked.reply.send(Err(message)).ok();
-            }
+/// The checker threads: one session, each thread answering the requests of its queue (its lane) in turn. The first
+/// thread creates the session and starts the others.
+fn serve<S: Served + Send + Sync + 'static>(
+    open: impl FnOnce() -> S,
+    queues: Vec<mpsc::Receiver<Job>>,
+    ended: Arc<AtomicBool>,
+    closing: mpsc::Sender<()>,
+) {
+    let session = Arc::new(open());
+    let left = Arc::new(AtomicUsize::new(queues.len()));
+    let mut queues = queues.into_iter();
+    let Some(own) = queues.next() else {
+        catch_unwind(AssertUnwindSafe(|| session.close())).ok();
+        return;
+    };
+    for (index, queue) in queues.enumerate() {
+        let lane =
+            Lane { session: session.clone(), ended: ended.clone(), left: left.clone(), _closing: closing.clone() };
+        let spawned = std::thread::Builder::new()
+            .name(format!("caliper-checker-{}", index + 1))
+            .stack_size(CHECKER_STACK_BYTES)
+            .spawn(move || lane.answer(&queue));
+        // Its queue is dropped with the closure, so its lane's requests fail as from a stopped checker.
+        if spawned.is_err() {
+            left.fetch_sub(1, Ordering::AcqRel);
         }
     }
-    // A session a panic left half-built may panic again while it closes; the thread ends either way.
-    catch_unwind(AssertUnwindSafe(|| session.close())).ok();
+    Lane { session, ended, left, _closing: closing }.answer(&own);
+}
+
+/// What one checker thread shares with the others.
+struct Lane<S> {
+    session: Arc<S>,
+    /// Set, before its reply, by the thread whose request a panic unwound through: no thread answers after it.
+    ended: Arc<AtomicBool>,
+    /// The threads that have not left; the last to leave closes the session.
+    left: Arc<AtomicUsize>,
+    /// Dropped as the thread leaves: [`InProcess::closed`] disconnects once every thread has.
+    _closing: mpsc::Sender<()>,
+}
+
+impl<S: Served> Lane<S> {
+    /// The requests of `queue` in turn, until the thread is stopped, every sender is gone, or a panic unwound through
+    /// the session on any thread. A panic is caught here too, should one escape `tsrs`'s own catch.
+    fn answer(self, queue: &mpsc::Receiver<Job>) {
+        for job in queue {
+            let asked = match job {
+                Job::Request(asked) => asked,
+                Job::Stop => break,
+            };
+            if self.ended.load(Ordering::Acquire) {
+                let message = "the built-in checker stopped: a panic unwound through its session".to_string();
+                asked.reply.send(Err(message)).ok();
+                break;
+            }
+            // A caller that stopped waiting (its deadline passed, its run ended) is not answered.
+            if asked.reply.is_closed() {
+                continue;
+            }
+            let session = &self.session;
+            let answered = catch_unwind(AssertUnwindSafe(|| session.handle(&asked.method, &asked.params)))
+                .unwrap_or_else(|panic| {
+                    let text = panic
+                        .downcast_ref::<String>()
+                        .map(String::as_str)
+                        .or_else(|| panic.downcast_ref::<&str>().copied())
+                        .unwrap_or("a panic with no message");
+                    Err(Failure { message: format!("panic: {text}"), panicked: true })
+                });
+            match answered {
+                Ok(text) => {
+                    // A caller that stopped waiting meanwhile (its deadline passed) never learns of a snapshot this
+                    // made.
+                    if let Err(Ok(unread)) = asked.reply.send(Ok(text)) {
+                        session.discard(&asked.method, &unread);
+                    }
+                }
+                Err(Failure { message, panicked }) => {
+                    if panicked {
+                        tracing::warn!(method = asked.method, %message, "the built-in checker panicked; it is replaced");
+                        // Before the reply, so the caller never sends its next request to a session that will not
+                        // answer, and before any other lane takes its next.
+                        self.ended.store(true, Ordering::Release);
+                        asked.reply.send(Err(message)).ok();
+                        break;
+                    }
+                    asked.reply.send(Err(message)).ok();
+                }
+            }
+        }
+        if self.left.fetch_sub(1, Ordering::AcqRel) == 1 {
+            // A session a panic left half-built may panic again while it closes; the thread ends either way.
+            catch_unwind(AssertUnwindSafe(|| self.session.close())).ok();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -475,7 +585,7 @@ mod tests {
     }
 
     fn linked() -> Backend {
-        Backend::InProcess(InProcess::start(Utf8Path::new("/")).unwrap())
+        Backend::InProcess(InProcess::start(Utf8Path::new("/"), 1).unwrap())
     }
 
     async fn ask(client: &Client, method: &str, params: Value) -> Result<Value, TscClientError> {
@@ -544,6 +654,7 @@ mod tests {
             expected_versions: &["7.1"],
             timeout: Duration::from_secs(5),
             extra_env: &[],
+            threads: 1,
         };
 
         let linked = runtime.block_on(Backend::start(start(None))).unwrap();
@@ -610,7 +721,7 @@ mod tests {
     fn fake() -> (Backend, Arc<std::sync::atomic::AtomicU32>) {
         let closed = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let session = Fake { closed: Arc::clone(&closed) };
-        (Backend::InProcess(InProcess::spawn(move || session).unwrap()), closed)
+        (Backend::InProcess(InProcess::spawn(1, move || session).unwrap()), closed)
     }
 
     /// Each discarded answer's method and the snapshot it made.
@@ -644,7 +755,7 @@ mod tests {
         let runtime = runtime();
         let discarded = Arc::default();
         let session = Slow { discarded: Arc::clone(&discarded) };
-        let checker = Backend::InProcess(InProcess::spawn(move || session).unwrap());
+        let checker = Backend::InProcess(InProcess::spawn(1, move || session).unwrap());
         let client = checker.client();
 
         // The second waits until the first is done (300 ms) and is taken, then stops waiting before its own is.
@@ -693,6 +804,34 @@ mod tests {
         }
     }
 
+    /// Every lane shares the one session, so a panic on one stops them all: the request the other lane takes next fails,
+    /// the session is closed once, and the checker says it no longer answers.
+    #[test]
+    fn a_panic_on_one_lane_stops_every_lane() {
+        let runtime = runtime();
+        let closed = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let session = Fake { closed: Arc::clone(&closed) };
+        let checker = Backend::InProcess(InProcess::spawn(2, move || session).unwrap());
+        let (first, second) = (checker.client().lane(0), checker.client().lane(1));
+
+        let before = runtime.block_on(ask(&second, "ping", Value::Null));
+        let panicked = runtime.block_on(ask(&first, "boom", Value::Null));
+        let after = runtime.block_on(ask(&second, "ping", Value::Null));
+
+        assert_eq!(before.unwrap(), json!("pong"));
+        assert!(matches!(panicked, Err(TscClientError::RpcError { .. })), "{panicked:?}");
+        match after {
+            Err(TscClientError::RpcError { message, .. }) => {
+                assert_eq!(message, "the built-in checker stopped: a panic unwound through its session");
+            }
+            other => panic!("expected the other lane stopped, got {other:?}"),
+        }
+        assert!(!checker.is_alive());
+        assert!(matches!(runtime.block_on(ask(&second, "ping", Value::Null)), Err(TscClientError::SessionClosed)));
+        runtime.block_on(checker.shutdown_within(Duration::from_secs(5)));
+        assert_eq!(closed.load(Ordering::Relaxed), 1, "the last lane to leave closes the session, once");
+    }
+
     /// After a panic, the checker its owner starts in its place answers.
     #[test]
     fn a_fresh_linked_checker_answers_after_one_that_panicked() {
@@ -739,8 +878,10 @@ mod tests {
         let (importer, shallow) = (root.join("importer.ts"), root.join("shallow.ts"));
         std::fs::write(&importer, "export const n = 1;\n").unwrap();
         std::fs::write(&shallow, "export const m = 2;\n").unwrap();
-        let checker = Backend::InProcess(InProcess::start(&root).unwrap());
-        let client = checker.client();
+        // Two lanes, as a whole-project run has: the refused requests go down the second while the first builds a
+        // snapshot of its own, which must neither take the refusal nor be released.
+        let checker = Backend::InProcess(InProcess::start(&root, 2).unwrap());
+        let (client, other) = (checker.client(), checker.client().lane(1));
         let snapshot = |scope: &Value| scope["snapshot"].as_u64().unwrap();
 
         let kept = runtime.block_on(program_on_disk(&client, &importer)).unwrap();
@@ -748,22 +889,25 @@ mod tests {
         std::fs::write(&importer, "import type { Deep } from './deep';\nexport type D = Deep;\n").unwrap();
         let changes = json!({ "fileNotifications": { "changed": [importer], "deleted": [] }, "ensurePrograms": true });
         let updated = runtime.block_on(ask(
-            &client,
+            &other,
             "updateSnapshot",
             json!({ "snapshot": kept["snapshot"], "changes": changes }),
         ));
-        let created = runtime.block_on(program_on_disk(&client, &importer));
+        let (created, beside) = runtime
+            .block_on(async { tokio::join!(program_on_disk(&other, &importer), program_on_disk(&client, &shallow)) });
         let after = runtime.block_on(program_on_disk(&client, &shallow)).unwrap();
 
         assert!(matches!(updated, Err(TscClientError::RpcError { .. })), "{updated:?}");
         assert!(matches!(created, Err(TscClientError::RpcError { .. })), "{created:?}");
-        assert_eq!(snapshot(&after), snapshot(&kept) + 3, "two snapshots were made in between");
-        for refused in [snapshot(&kept) + 1, snapshot(&kept) + 2] {
+        let beside = beside.unwrap();
+        assert_eq!(snapshot(&after), snapshot(&kept) + 4, "three snapshots were made in between");
+        let refused = (snapshot(&kept) + 1..snapshot(&after)).filter(|id| *id != snapshot(&beside));
+        for refused in refused {
             let again = runtime.block_on(ask(&client, "release", json!({ "snapshot": refused })));
             assert!(again.is_err(), "snapshot {refused} of a refused request is still held");
         }
         // What the caller was answered it still holds, and releases itself.
-        for answered in [&kept, &after] {
+        for answered in [&kept, &beside, &after] {
             let released = runtime.block_on(ask(&client, "release", json!({ "snapshot": answered["snapshot"] })));
             assert!(released.is_ok(), "{released:?}");
         }
@@ -782,7 +926,7 @@ mod tests {
         std::fs::write(&deep, format!("export type Deep = {}string{};\n", "{ a: ".repeat(depth), " }".repeat(depth)))
             .unwrap();
         std::fs::write(&shallow, "export const n = 1;\n").unwrap();
-        let checker = Backend::InProcess(InProcess::start(&root).unwrap());
+        let checker = Backend::InProcess(InProcess::start(&root, 1).unwrap());
         let client = checker.client();
 
         let refused = runtime.block_on(program_on_disk(&client, &deep));

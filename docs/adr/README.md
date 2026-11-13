@@ -6,7 +6,7 @@ Short, dated records of _architectural_ decisions — ones that shape system str
 
 One line per ADR, with what it guards. Add a line when you add an ADR.
 
-- [1. Parse with OXC instead of the TypeScript compiler](0001-oxc-over-typescript-compiler.md) — do not add a type-checking pass to the default path. The opt-in backend is 0006.
+- [1. Parse with OXC instead of the TypeScript compiler](0001-oxc-over-typescript-compiler.md) — OXC parses; since 0026 the checker, not a structural pass, decides types on the default path. The first backend is 0006.
 - [2. Hand-write Serialize/Deserialize for PropType instead of deriving it](0002-manual-serialize-for-prop-type.md) — do not derive them on `PropType` or `CollectedType`.
 - [3. Cache the DTS parse cache with positional (not named) MessagePack](0003-positional-msgpack-cache-encoding.md) — do not reorder, insert or remove `SourceData` fields without bumping `CACHE_SCHEMA_VERSION`.
 - 4. Defer full type-checker integration — removed: superseded by 0006. The gap list and gates are in `docs/type-checker-integration.md`.

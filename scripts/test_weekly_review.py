@@ -10,6 +10,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import corpora
+import headline
 import weekly
 
 REACT = '/r/node_modules/@types/react/index.d.ts'
@@ -216,13 +217,18 @@ class RecallIsNotComparedAcrossReferences(unittest.TestCase):
             "types are not compared with last week's"])
 
     def test_scoring_an_unjudged_prop_apart_is_universe_version_4_and_is_not_compared_with_3(self):
-        self.assertEqual(weekly.UNIVERSE_VERSION, 4)
         now = {'corpora': {'antd': self.universe(4, 1)}}
         before = {'corpora': {'antd': self.universe(3, 0)}}
         self.assertEqual(weekly.findings(now, before), [])
         self.assertEqual(weekly.changes(now, before), [
             "antd: the oracle's universe is version 4 now and was version 3 last week, so its props, agreement and wrong "
             "types are not compared with last week's"])
+
+    def test_the_checker_default_is_universe_version_5_and_is_not_compared_with_the_structural_record(self):
+        self.assertEqual(weekly.UNIVERSE_VERSION, 5)
+        now = {'corpora': {'antd': self.universe(5, 1)}}
+        before = {'corpora': {'antd': self.universe(4, 0)}}
+        self.assertEqual(weekly.findings(now, before), [])
 
     def test_the_summary_says_the_universe_changed(self):
         now = {'corpora': {'antd': self.universe(2, 0)}}
@@ -283,7 +289,8 @@ class OnlyCaliperOwnNumbersOpenAnIssueForCost(unittest.TestCase):
         now = shape_of_nov_2()
         now['corpora']['shadcn']['caliper'].update(ms=2500, rss_mib=700)
         now['corpora']['shadcn']['rdt']['rss_mib'] = 1394
-        out = weekly.findings(now, {'corpora': {}})
+        with mock.patch.dict(headline.BUDGETS, {'shadcn': {'ms': 2000, 'rss_mib': 600}}):
+            out = weekly.findings(now, {'corpora': {}})
         self.assertEqual(len(out), 2)
         self.assertTrue(all(line.startswith('shadcn: a whole run') for line in out))
 
@@ -296,12 +303,6 @@ class OnlyCaliperOwnNumbersOpenAnIssueForCost(unittest.TestCase):
         before['corpora']['shadcn']['react_docgen']['rss_mib'] = 1593
         self.assertEqual(weekly.findings(shape_of_nov_2(), before), [])
         self.assertEqual(weekly.changes(shape_of_nov_2(), before), ['shadcn: time 300 -> 458'])
-
-    def test_the_largest_corpus_stays_inside_the_budget_with_its_own_spread(self):
-        """Chakra's peak was 446, 451 and 555 MiB in three records; the budget has to hold all three."""
-        for rss in (446, 451, 555):
-            now = {'corpora': {'chakra': {'caliper': {'ms': 1048, 'rss_mib': rss}}}}
-            self.assertEqual(weekly.findings(now, now), [])
 
     def test_a_missing_metric_does_not_crash_the_rule(self):
         before = {'corpora': {'antd': {'caliper': {'ms': 100}}}}

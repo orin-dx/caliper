@@ -206,7 +206,8 @@ it.runIf(required)('the caliper binary REQUIRE_CALIPER_BIN=1 demands exists', ()
 describe.skipIf(!available)('the construct suite against the caliper binary', () => {
   it('every row has the verdict expectations.json allows', () => {
     expect.hasAssertions()
-    // The addon's options (docs/measurement.md), with a cold cache so the run does not depend on one.
+    // The addon's options (docs/measurement.md), with a cold cache so the run does not depend on one. The structural
+    // path: expectations.json is the resolver's, and the checker lane holds the checker's.
     const stdout = execFileSync(
       bin,
       [
@@ -222,6 +223,7 @@ describe.skipIf(!available)('the construct suite against the caliper binary', ()
         'none',
         '--no-cache',
         '--quiet',
+        '--no-checker',
       ],
       { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
     )

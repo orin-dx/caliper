@@ -378,19 +378,28 @@ fn load_dependencies_is_on_by_default_and_the_config_and_the_flags_set_it() {
 }
 
 #[test]
-fn the_experimental_semantic_backend_is_off_unless_the_config_turns_it_on() {
+fn the_checker_is_on_unless_the_config_turns_it_off() {
     let options = |json: &str| {
         let schema: DocgenConfigSchema = serde_json::from_str(json).expect("valid config JSON");
         schema.into_pipeline_options().unwrap()
     };
 
-    let off = options("{}");
-    assert!(!off.experimental_semantic_types);
-    assert_eq!(off.semantic_tsc_path, None);
+    let default = options("{}");
+    assert!(default.checker);
+    assert_eq!(default.semantic_tsc_path, None);
 
-    let on = options(r#"{ "experimentalSemanticTypes": true, "tscPath": "node_modules/typescript/bin/tsc" }"#);
-    assert!(on.experimental_semantic_types);
-    assert_eq!(on.semantic_tsc_path, Some("node_modules/typescript/bin/tsc".into()));
+    let off = options(r#"{ "checker": false }"#);
+    assert!(!off.checker);
+
+    let process = options(r#"{ "tscPath": "node_modules/typescript/bin/tsc" }"#);
+    assert!(process.checker);
+    assert_eq!(process.semantic_tsc_path, Some("node_modules/typescript/bin/tsc".into()));
+}
+
+#[test]
+fn the_old_opt_in_key_is_refused_by_name() {
+    let refused = serde_json::from_str::<DocgenConfigSchema>(r#"{ "experimentalSemanticTypes": true }"#).unwrap_err();
+    assert!(refused.to_string().contains("experimentalSemanticTypes"), "{refused}");
 }
 
 #[test]
@@ -465,27 +474,20 @@ fn a_config_with_an_unrecognized_html_attributes_is_an_error_naming_the_file_and
 }
 
 #[test]
-fn a_config_that_leaves_the_checker_alone_has_nothing_to_say() {
-    assert_eq!(ignored_semantic_config_note("check", &PipelineOptions::default()), None);
+fn a_config_that_names_no_checker_binary_has_nothing_to_say() {
+    assert_eq!(ignored_semantic_config_note("watch", &PipelineOptions::default()), None);
+    let off = PipelineOptions { checker: false, ..Default::default() };
+    assert_eq!(ignored_semantic_config_note("watch", &off), None);
 }
 
 #[test]
-fn the_note_names_each_checker_key_the_config_set() {
-    let on = PipelineOptions { experimental_semantic_types: true, ..Default::default() };
-    assert_eq!(
-        ignored_semantic_config_note("inspect", &on).as_deref(),
-        Some(
-            "warning: the config sets experimentalSemanticTypes, but `inspect` never runs the TypeScript checker, so \
-             its output is the structural result. Only `extract` runs the checker."
-        )
-    );
-
+fn the_note_names_the_checker_binary_watch_never_runs() {
     let path = PipelineOptions { semantic_tsc_path: Some("/opt/tsc".into()), ..Default::default() };
     assert_eq!(
         ignored_semantic_config_note("watch", &path).as_deref(),
         Some(
             "warning: the config sets tscPath, but `watch` never runs the TypeScript checker, so its output is the \
-             structural result. Only `extract` runs the checker."
+             structural result. `extract`, `check` and `inspect` run the checker."
         )
     );
 }

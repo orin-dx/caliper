@@ -1,6 +1,6 @@
 # 0001. Parse with OXC instead of the TypeScript compiler
 
-**Status:** Accepted **Date:** 2026-07-22 (retroactive — true since the project started)
+**Status:** Accepted, superseded in part by 0026 (the checker decides types on the default path; OXC still parses) **Date:** 2026-07-22 (retroactive — true since the project started)
 
 ## Context
 

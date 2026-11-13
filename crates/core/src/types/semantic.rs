@@ -1,4 +1,4 @@
-//! What the experimental TypeScript checker backend hands back, and how it merges over the structural result.
+//! What the TypeScript checker backend (on by default, ADR 0026) hands back, and how it merges over the structural result.
 //!
 //! The backend (`caliper-docgen-semantic`) owns the process, the protocol and the checker walk; this module owns only
 //! the result shape and the merge rules of `docs/type-checker-integration.md`, so `crates/core` stays free of I/O.
@@ -98,15 +98,20 @@ impl PropInterner {
     /// The one shared copy of `prop`: an equal prop interned earlier, or `prop` itself the first time. If the internal
     /// lock is poisoned it returns `prop` unshared rather than failing.
     pub fn share(&self, prop: SemanticProp) -> Arc<SemanticProp> {
+        self.share_arc(Arc::new(prop))
+    }
+
+    /// [`Self::share`] for a prop already behind an `Arc`, such as one another interner shared: the one copy equal to
+    /// it, or `prop` itself the first time.
+    pub fn share_arc(&self, prop: Arc<SemanticProp>) -> Arc<SemanticProp> {
         let hash = prop.structural_hash();
-        let Ok(mut by_hash) = self.by_hash.lock() else { return Arc::new(prop) };
+        let Ok(mut by_hash) = self.by_hash.lock() else { return prop };
         let bucket = by_hash.entry(hash).or_default();
-        if let Some(existing) = bucket.iter().find(|existing| ***existing == prop) {
+        if let Some(existing) = bucket.iter().find(|existing| ***existing == *prop) {
             return existing.clone();
         }
-        let shared = Arc::new(prop);
-        bucket.push(shared.clone());
-        shared
+        bucket.push(prop.clone());
+        prop
     }
 }
 
@@ -322,13 +327,36 @@ fn apply_props(
     entry: &mut ComponentEntry,
     semantic: &SemanticComponent,
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
+    memo: &mut MergeMemo,
     syntax: &SourceSyntax,
     resolver: ResolverFacts,
 ) -> MergedProps {
     // The whole-project merge replaces the props and leaves `@types/react`'s to the inheritance layers.
     let own = semantic.props.iter().filter(|prop| !prop.react_declared);
     let merge = Merge { composes: semantic.composes.as_deref(), unanswered: Unanswered::Drop, syntax, resolver };
-    replace_props(entry, own, &merge, shared)
+    replace_props(entry, own, &merge, shared, memo)
+}
+
+/// What one merged prop was made from, by identity: the checker's prop, the structural prop of the same name, the
+/// union a prop without a `parent` writes in the entry's file (a prop with one finds it by itself) and the code
+/// default, each by address (`0` for none). The first two are shared copies
+/// (the backend's and the resolver's interners), so the components of a design system that share a prop share its key.
+type MergeKey = (usize, usize, (usize, usize), usize);
+
+/// The props one merge has made, by what they were made from ([`MergeKey`]). A merged prop is a function of those
+/// inputs and the merge's [`ResolverFacts`] alone, so a prop made from the same ones is the one made before: it skips
+/// the copy, the reordering and the interning of a type that is often hundreds of members wide. Each entry holds the
+/// two props its key points at, so neither is freed and its address taken by another prop while the merge runs.
+#[derive(Default)]
+struct MergeMemo {
+    made: FxHashMap<MergeKey, MemoEntry>,
+}
+
+struct MemoEntry {
+    _semantic: Arc<SemanticProp>,
+    _structural: Option<Arc<ParsedProp>>,
+    merged: Arc<ParsedProp>,
+    unread: bool,
 }
 
 /// How a merge went for one component.
@@ -365,7 +393,7 @@ pub fn merge_semantic_props<'a>(
     let props: Vec<Arc<SemanticProp>> = props.cloned().collect();
     let syntax = SourceSyntax::read(std::iter::once((&*entry, props.as_slice())));
     let merge = Merge { composes, unanswered: Unanswered::Keep, syntax: &syntax, resolver: ResolverFacts::Used };
-    let mut merged = replace_props(entry, props.iter(), &merge, shared);
+    let mut merged = replace_props(entry, props.iter(), &merge, shared, &mut MergeMemo::default());
     merged.diagnostics = syntax.diagnostics;
     merged
 }
@@ -516,6 +544,7 @@ fn replace_props<'a>(
     props_in: impl Iterator<Item = &'a Arc<SemanticProp>>,
     merge: &Merge<'_>,
     shared: &mut FxHashMap<u64, Vec<Arc<ParsedProp>>>,
+    memo: &mut MergeMemo,
 ) -> MergedProps {
     let Merge { composes, unanswered, syntax, resolver } = *merge;
     let code_defaults = syntax.code_defaults(entry);
@@ -523,6 +552,22 @@ fn replace_props<'a>(
     let mut unread = 0;
     for prop in props_in {
         let structural = entry.props.get(&prop.name);
+        let code_default = code_defaults.and_then(|defaults| defaults.get(&prop.name));
+        // The union a prop with a `parent` writes is found by the prop alone, so it needs no place in the key; one with
+        // none is looked for in the entry's own file.
+        let written = prop.parent.is_none().then(|| syntax.written(entry, prop));
+        let key: MergeKey = (
+            Arc::as_ptr(prop) as usize,
+            structural.map_or(0, |s| Arc::as_ptr(s) as usize),
+            written.flatten().map_or((0, 0), |w| (w.as_ptr() as usize, w.len())),
+            code_default.map_or(0, |d| std::ptr::from_ref(d) as usize),
+        );
+        if let Some(made) = memo.made.get(&key) {
+            unread += usize::from(made.unread);
+            props.insert(prop.name.clone(), made.merged.clone());
+            continue;
+        }
+        let written = written.unwrap_or_else(|| syntax.written(entry, prop));
         let description = if prop.description.is_empty() {
             structural.map(|s| s.description.clone()).unwrap_or_default()
         } else {
@@ -536,21 +581,14 @@ fn replace_props<'a>(
         let unread_kinds = structural.map(|s| unread_by_checker(&prop.prop_type, &s.prop_type)).unwrap_or_default();
         let prop_type = match structural {
             Some(structural) if !unread_kinds.is_empty() => structural.prop_type.clone(),
-            Some(_) | None => {
-                declared_order(prop.prop_type.clone(), syntax.written(entry, prop), structural.map(|s| &**s), resolver)
-            }
+            Some(_) | None => declared_order(prop.prop_type.clone(), written, structural.map(|s| &**s), resolver),
         };
         unread += usize::from(!unread_kinds.is_empty());
         let merged = ParsedProp::new(
             prop.name.clone(),
             prop_type,
             prop.required,
-            default_of(
-                code_defaults.and_then(|defaults| defaults.get(&prop.name)),
-                &prop.tags,
-                structural.map(|s| &**s),
-                resolver,
-            ),
+            default_of(code_default, &prop.tags, structural.map(|s| &**s), resolver),
             description,
             tags,
             prop.parent.clone(),
@@ -568,6 +606,15 @@ fn replace_props<'a>(
                 merged
             }
         };
+        memo.made.insert(
+            key,
+            MemoEntry {
+                _semantic: prop.clone(),
+                _structural: structural.cloned(),
+                merged: merged.clone(),
+                unread: !unread_kinds.is_empty(),
+            },
+        );
         props.insert(prop.name.clone(), merged);
     }
     let mut kept = 0;
@@ -614,9 +661,10 @@ pub fn merge_semantic_with(output: &mut ExtractionOutput, outcome: SemanticOutco
     let mut merged_keys = Vec::new();
     let (mut unread_keys, mut unread_props) = (Vec::new(), 0);
     let mut shared: FxHashMap<u64, Vec<Arc<ParsedProp>>> = FxHashMap::default();
+    let mut memo = MergeMemo::default();
     for semantic in components {
         let Some(entry) = output.components.get_mut(&semantic.key) else { continue };
-        let unread = apply_props(entry, &semantic, &mut shared, &syntax, resolver).unread;
+        let unread = apply_props(entry, &semantic, &mut shared, &mut memo, &syntax, resolver).unread;
         if unread > 0 {
             unread_props += unread;
             unread_keys.push(semantic.key.clone());

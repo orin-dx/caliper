@@ -274,12 +274,15 @@ describe('createDocgenProvider', () => {
     warn.mockRestore()
   })
 
-  it('fails at startup for a fallback or semanticTypes that is not a choice', () => {
+  it('fails at startup for a fallback or checker that is not a choice, and for the old semanticTypes', () => {
     expect(() => createDocgenProvider({ fallback: 'Degraded' as never }, binding())).toThrow(
       "[caliper-docgen] fallback is 'Degraded', expected 'degraded' or 'never'",
     )
-    expect(() => createDocgenProvider({ semanticTypes: 'on_demand' as never }, binding())).toThrow(
-      "[caliper-docgen] semanticTypes is 'on_demand', expected 'off' or 'on-demand'",
+    expect(() => createDocgenProvider({ checker: 'on-demand' as never }, binding())).toThrow(
+      "[caliper-docgen] checker is 'on-demand', expected true or false",
+    )
+    expect(() => createDocgenProvider({ semanticTypes: 'off' } as never, binding())).toThrow(
+      "[caliper-docgen] semanticTypes was replaced by checker: the checker is on by default, and 'checker: false' turns it off",
     )
   })
 

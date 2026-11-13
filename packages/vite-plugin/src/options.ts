@@ -32,7 +32,11 @@ export interface CaliperDocgenOptions {
   collapseInheritedProps?: 'dependencies' | 'all' | 'none'
 }
 
-/** What the native session is created with: the options, with the source directories made absolute. */
+/**
+ * What the native session is created with: the options, with the source directories made absolute. The plugin serves
+ * the whole output as one module and injects docs into every transformed file, and neither waits for a checker, so
+ * its session is the structural resolver's (`checker: false`); the CLI and the Storybook addon ask the checker.
+ */
 export function toNapiOptions(options: CaliperDocgenOptions, srcDirs: string[]): JsExtractOptions {
   return {
     srcDirs,
@@ -41,5 +45,6 @@ export function toNapiOptions(options: CaliperDocgenOptions, srcDirs: string[]):
     cache: options.cache,
     loadDependencies: options.loadDependencies,
     collapseInheritedProps: options.collapseInheritedProps,
+    checker: false,
   }
 }

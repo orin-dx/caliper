@@ -155,7 +155,7 @@ pub(super) fn resolve_typeof(
         help: Some(
             "Only components, cva variants and `as const` arrays have a type here. The type of a value built by a \
              call (a zod schema behind `z.infer`, a store, a hook's result) comes from the checker: declare the type \
-             where it is used, or run with `--experimental-semantic-types`."
+             where it is used, or leave the checker on (drop `--no-checker`)."
                 .into(),
         ),
         code: DiagnosticCode::OpaqueType,

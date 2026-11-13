@@ -7,7 +7,7 @@ use caliper_docgen_core::types::ComponentExport;
 use caliper_docgen_core::types::semantic::{PropInterner, SemanticProp};
 
 use crate::Target;
-use crate::convert::{Converter, declared_in, without_undefined};
+use crate::convert::{Converter, PropKey, declared_in, without_undefined};
 use crate::declared::Asked;
 use crate::instantiate::{self, Instantiation};
 use crate::rpc::{CallError, Rpc, SignatureKind, SymbolInfo, TypeInfo, flag};
@@ -157,7 +157,6 @@ pub(crate) async fn props_of_type(
     let references: Vec<_> = own.iter().map(|property| &property.reference).collect();
     let types = if references.is_empty() { Vec::new() } else { rpc.types_of_symbols(&references).await? };
 
-    let converted = converter.convert_roots(&types).await?;
     // React's own descriptions and tags are the structural pass's to give, and its props are most of a component's.
     let asked: Vec<Asked<'_>> = own
         .iter()
@@ -170,11 +169,28 @@ pub(crate) async fn props_of_type(
             }
         })
         .collect();
-    let declared = converter.declared(&asked).await?;
-    let mut props = Vec::with_capacity(own.len());
-    for ((property, prop_type), declared) in own.iter().zip(converted).zip(declared) {
+    let keys: Vec<PropKey> = asked
+        .iter()
+        .zip(&types)
+        .map(|(asked, prop_type)| PropKey::of(asked.property, prop_type, asked.description, asked.tags))
+        .collect();
+    let mut props: Vec<Option<Arc<SemanticProp>>> = keys.iter().map(|key| converter.known_prop(key)).collect();
+    let missing: Vec<usize> = (0..props.len()).filter(|index| props.get(*index).is_some_and(Option::is_none)).collect();
+    let unknown_types: Vec<TypeInfo> = missing.iter().filter_map(|index| types.get(*index).cloned()).collect();
+    let converted = converter.convert_roots(&unknown_types).await?;
+    let unknown_asked: Vec<Asked<'_>> = missing
+        .iter()
+        .filter_map(|index| asked.get(*index))
+        .map(|asked| Asked { property: asked.property, description: asked.description, tags: asked.tags })
+        .collect();
+    let declared = converter.declared(&unknown_asked).await?;
+    let mut keys: Vec<Option<PropKey>> = keys.into_iter().map(Some).collect();
+    for ((index, prop_type), declared) in missing.iter().zip(converted).zip(declared) {
+        let (Some(property), Some(key)) = (own.get(*index), keys.get_mut(*index).and_then(Option::take)) else {
+            continue;
+        };
         let required = property.flags & flag::SYMBOL_OPTIONAL == 0;
-        props.push(interner.share(SemanticProp {
+        let prop = interner.share(SemanticProp {
             name: property.name.clone(),
             prop_type: without_undefined(prop_type, !required),
             required,
@@ -183,8 +199,13 @@ pub(crate) async fn props_of_type(
             parent: declared.parent,
             declarations: declared.declarations,
             react_declared: is_react_declared(property),
-        }));
+        });
+        converter.keep_prop(key, prop.clone());
+        if let Some(slot) = props.get_mut(*index) {
+            *slot = Some(prop);
+        }
     }
+    let props: Vec<Arc<SemanticProp>> = props.into_iter().flatten().collect();
     let composes = converter.composes(props_type).await?;
     Ok(Ok(Props { props, composes }))
 }

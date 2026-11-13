@@ -47,7 +47,7 @@ Two habits that repeatedly caught real bugs during the 2026-08-12 spec-validatio
 - `crates/core` — pure extraction logic; @crates/core/AGENTS.md
 - `crates/cli` — clap CLI, no logic; @crates/cli/AGENTS.md
 - `crates/binding` — thin NAPI wrapper, delegates to core
-- `crates/semantic` — opt-in TypeScript 7.1 checker backend (`docs/type-checker-integration.md`)
+- `crates/semantic` — TypeScript 7.1 checker backend, on by default (`docs/type-checker-integration.md`)
 - `crates/tsc-client` — client for the checker process the semantic crate drives
 
 ## Scripts

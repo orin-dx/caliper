@@ -471,7 +471,7 @@ impl Checker {
                 extra_env: config.extra_env.clone(),
                 reverse_queries: false,
             };
-            let backend = start_checker(&request).await.map_err(|reason| self.stay_down(reason))?;
+            let backend = start_checker(&request, 1).await.map_err(|reason| self.stay_down(reason))?;
             // A checker started after a crash counts its own programs.
             self.served = 0;
             // Initialize the session and read the compiler options once; every request after builds only its program.
@@ -512,7 +512,7 @@ impl Checker {
             return group_by_file(&request).0;
         }
         let answered = match self.snapshot_for(client, config.request_timeout, roots.clone()).await {
-            Ok((rpc, warning)) => answer_on(&rpc, &request, &roots).await.map(|mut outcome| {
+            Ok((rpc, warning)) => answer_on(std::slice::from_ref(&rpc), &request, &roots).await.map(|mut outcome| {
                 outcome.diagnostics.extend(warning);
                 outcome
             }),

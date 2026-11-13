@@ -92,13 +92,13 @@ pub struct PipelineOptions {
     pub load_dependencies: bool,
     /// Which large inherited sources to record as a layer instead of expanding.
     pub collapse_inherited_props: CollapseInheritedProps,
-    /// Ask the TypeScript 7.1 checker for each component's props and merge them over the structural result
-    /// (`docs/type-checker-integration.md`). Off by default and experimental. `extract` ignores it: the checker
-    /// backend lives in `caliper-docgen-semantic`, which depends on this crate, so the embedding (the CLI) runs it and
-    /// calls [`crate::types::semantic::merge_semantic`].
-    pub experimental_semantic_types: bool,
-    /// The `tsc` binary the semantic backend spawns. When unset it finds `node_modules/typescript/bin/tsc` above the
-    /// first source directory.
+    /// Ask the built-in TypeScript checker for each component's props and merge them over the structural result
+    /// (ADR 0026, `docs/type-checker-integration.md`). On by default; off, the structural resolver answers alone.
+    /// `extract` ignores it: the checker backend lives in `caliper-docgen-semantic`, which depends on this crate, so
+    /// the embedding (the CLI) runs it and calls [`crate::types::semantic::merge_semantic`].
+    pub checker: bool,
+    /// A checker binary to run as a `--api` process instead of the built-in checker (`typescript@7.1`'s `tsc`, or
+    /// `tsrs`). Unset, the built-in one answers.
     pub semantic_tsc_path: Option<Utf8PathBuf>,
 }
 
@@ -115,7 +115,7 @@ impl Default for PipelineOptions {
             use_cache: true,
             load_dependencies: true,
             collapse_inherited_props: CollapseInheritedProps::default(),
-            experimental_semantic_types: false,
+            checker: true,
             semantic_tsc_path: None,
         }
     }
