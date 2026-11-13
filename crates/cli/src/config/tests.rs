@@ -386,20 +386,17 @@ fn the_checker_is_on_unless_the_config_turns_it_off() {
 
     let default = options("{}");
     assert!(default.checker);
-    assert_eq!(default.semantic_tsc_path, None);
 
     let off = options(r#"{ "checker": false }"#);
     assert!(!off.checker);
-
-    let process = options(r#"{ "tscPath": "node_modules/typescript/bin/tsc" }"#);
-    assert!(process.checker);
-    assert_eq!(process.semantic_tsc_path, Some("node_modules/typescript/bin/tsc".into()));
 }
 
 #[test]
-fn the_old_opt_in_key_is_refused_by_name() {
-    let refused = serde_json::from_str::<DocgenConfigSchema>(r#"{ "experimentalSemanticTypes": true }"#).unwrap_err();
-    assert!(refused.to_string().contains("experimentalSemanticTypes"), "{refused}");
+fn the_old_opt_in_key_and_the_removed_checker_binary_are_refused_by_name() {
+    for key in ["experimentalSemanticTypes", "tscPath"] {
+        let refused = serde_json::from_str::<DocgenConfigSchema>(&format!(r#"{{ "{key}": true }}"#)).unwrap_err();
+        assert!(refused.to_string().contains(key), "{refused}");
+    }
 }
 
 #[test]
@@ -473,25 +470,6 @@ fn a_config_with_an_unrecognized_html_attributes_is_an_error_naming_the_file_and
     );
 }
 
-#[test]
-fn a_config_that_names_no_checker_binary_has_nothing_to_say() {
-    assert_eq!(ignored_semantic_config_note("watch", &PipelineOptions::default()), None);
-    let off = PipelineOptions { checker: false, ..Default::default() };
-    assert_eq!(ignored_semantic_config_note("watch", &off), None);
-}
-
-#[test]
-fn the_note_names_the_checker_binary_watch_never_runs() {
-    let path = PipelineOptions { semantic_tsc_path: Some("/opt/tsc".into()), ..Default::default() };
-    assert_eq!(
-        ignored_semantic_config_note("watch", &path).as_deref(),
-        Some(
-            "warning: the config sets tscPath, but `watch` never runs the TypeScript checker, so its output is the \
-             structural result. `extract`, `check` and `inspect` run the checker."
-        )
-    );
-}
-
 /// A fresh directory under `apps/oracle` (where `tsx` resolves from), holding `docgen.config.ts` with `source`.
 /// `package_json` is written beside it when given, which decides whether the `.ts` file is an ES module.
 fn config_in_oracle(source: &str, package_json: Option<&str>) -> (tempfile::TempDir, std::path::PathBuf) {
@@ -542,17 +520,6 @@ fn a_relative_cache_dir_in_a_config_resolves_against_the_config_files_directory(
     let opts = try_load_config(&config_path).expect("loads").expect("a config");
 
     assert_eq!(opts.cache_dir, Some(dir.join(".cache/docgen")));
-}
-
-#[test]
-fn a_relative_tsc_path_in_a_config_resolves_against_the_config_files_directory() {
-    let (tmp, config_path) =
-        config_in_oracle("export default { tscPath: \"node_modules/typescript/bin/tsc\" };\n", None);
-    let dir = canonical_dir(&tmp);
-
-    let opts = try_load_config(&config_path).expect("loads").expect("a config");
-
-    assert_eq!(opts.semantic_tsc_path, Some(dir.join("node_modules/typescript/bin/tsc")));
 }
 
 #[test]

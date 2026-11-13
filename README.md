@@ -95,7 +95,7 @@ caliper-docgen watch --src src
 caliper-docgen check --src src
 ```
 
-`extract`, `check` and `inspect` ask the checker; `--no-checker` (config `checker: false`) skips it, and `--tsc-path` runs a checker binary instead (`typescript@7.1`'s `tsc`, or `tsrs`). Settings can also live in a `docgen.config.ts` (`srcDirs`, `htmlAttributes`, `cacheDir`, `checker`, and more). `caliper-docgen --help` lists the rest, including `schema` for the JSON Schema of the output.
+`extract`, `check` and `inspect` ask the checker built into Caliper; `--no-checker` (config `checker: false`) skips it. Settings can also live in a `docgen.config.ts` (`srcDirs`, `htmlAttributes`, `cacheDir`, `checker`, and more). `caliper-docgen --help` lists the rest, including `schema` for the JSON Schema of the output.
 
 Parsed declarations and the dependency index are cached under `node_modules/.cache/caliper-docgen`. `--no-cache` (config, NAPI, Vite and Storybook option `cache: false`) reads and writes nothing there; the output is the same.
 

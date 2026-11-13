@@ -278,7 +278,6 @@ name = "caliper-docgen-semantic"
 version = "0.4.0"
 dependencies = [
  "caliper-docgen-core",
- "caliper-docgen-tsc-client",
  "camino",
  "insta",
  "mimalloc",
@@ -293,23 +292,6 @@ dependencies = [
  "tsrs_core",
  "tsrs_vfs",
  "xxhash-rust",
-]
-
-[[package]]
-name = "caliper-docgen-tsc-client"
-version = "0.2.1"
-dependencies = [
- "bytes",
- "camino",
- "dashmap",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
 ]
 
 [[package]]
@@ -2645,31 +2627,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.6",
-]
-
-[[package]]
-name = "tokio-stream"
-version = "0.1.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3d06f0b082ba57c26b79407372e57cf2a1e28124f78e9479fe80322cf53420b"
-dependencies = [
- "futures-core",
- "pin-project-lite",
- "tokio",
-]
-
-[[package]]
-name = "tokio-util"
-version = "0.7.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e464cf451ba96ebfc6f9b6542f17ee8b8956e33f1e40d9690624e59d7a7f8a4b"
-dependencies = [
- "bytes",
- "futures-core",
- "futures-sink",
- "libc",
- "pin-project-lite",
- "tokio",
 ]
 
 [[package]]

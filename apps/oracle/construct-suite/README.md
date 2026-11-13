@@ -117,7 +117,7 @@ ADR 0026 makes the Go checker (`typescript-beta`) the type authority and lets ts
 pnpm --filter caliper-docgen-oracle construct:parity   # or: just test-parity
 ```
 
-Run it on every tsrs bump, before changing the pin in the version allow-lists (`crates/tsc-client/src/supervisor.rs`, `crates/semantic/src/lib.rs`), together with the construct suite. Bump the `tsrs` devDependency of `apps/oracle` first, run it, and change the Rust pins only when it passes. The weekly oracle keeps the Go checker as the independent arbiter; this run does not replace it.
+Run it on every tsrs bump, together with the construct suite and the checker lane. Bump the `tsrs` devDependency of `apps/oracle` first, run it, and change the Rust pins (`tsrs_api` and `tsrs_vfs` in the root `Cargo.toml`) only when it passes; `scripts/check-packaging.mjs` (`just lint`) fails while the two pins name different releases. The weekly oracle keeps the Go checker as the independent arbiter; this run does not replace it.
 
 A reported difference is a row where tsrs gives a different answer than the Go checker. The report names the row, both `typeToString` texts, the differing facts, and a diff of the two normalized forms (`-` Go, `+` tsrs). Treat it as a tsrs bug or a protocol change until shown otherwise: do not pin that tsrs version, and report it upstream.
 
@@ -127,13 +127,13 @@ A reported difference is a row where tsrs gives a different answer than the Go c
 
 ## The checker lane
 
-ADR 0026's gate before the default flipped, kept as the checker path's: the suite through the checker (the default since S8, here with the pinned `tsrs` through `--tsc-path`, and `--no-resolver-facts`, so a default and a union's member order come from the checker and oxc's syntax, not the structural resolver), held to `checker-expectations.json`, which has the shape of `expectations.json`. Green rows must stay green; every other row is a documented gap with a one-line reason. The lane fails when a row is better or worse than its entry (an improvement means the gap closed: update the entry and drop the `gap`), when the checker did not answer for a row, or when the backend was unavailable.
+ADR 0026's gate before the default flipped, kept as the checker path's: the suite through the checker (the default since S8, the `tsrs` crates linked into the release binary, with `--no-resolver-facts`, so a default and a union's member order come from the checker and oxc's syntax, not the structural resolver), held to `checker-expectations.json`, which has the shape of `expectations.json`. Green rows must stay green; every other row is a documented gap with a one-line reason. The lane fails when a row is better or worse than its entry (an improvement means the gap closed: update the entry and drop the `gap`), when the checker did not answer for a row, or when the backend was unavailable.
 
 ```sh
 just test-checker-lane   # CI job "Test / Checker lane"
 ```
 
-The recipe builds the release binary, then runs `construct:check`, `construct:parity`, the lane (`construct:checker`) and `tests/construct-checker-lane.test.ts` with `REQUIRE_TSRS=1 REQUIRE_CALIPER_BIN=1`, so a missing binary fails instead of skipping. `TSRS_BIN` is the native binary the `tsrs` package itself selects (`src/tsrs-bin.ts` calls its `lib/getExePath.js`): `node_modules/@tsrs/<os>-<arch>[-gnu|-musl]/tsrs`. The `bin/tsrs` shim is a Node launcher and is not used. Regenerate an entry by running `CALIPER_SEMANTIC=1 TSRS_BIN=<path> pnpm --filter caliper-docgen-oracle construct:checker` and reading the report.
+The recipe builds the release binary, then runs `construct:check`, `construct:parity`, the lane (`construct:checker`) and `tests/construct-checker-lane.test.ts` with `REQUIRE_CALIPER_BIN=1`, so a missing binary fails instead of skipping. Regenerate an entry by running `CALIPER_SEMANTIC=1 pnpm --filter caliper-docgen-oracle construct:checker` and reading the report.
 
 ADR 0026's S4 gate is that the checker path equals the structural path except listed improvements. The lane and `tests/construct-checker-lane.test.ts` (which needs no binary, so it runs with the package tests) hold the two files to it: a row whose checker verdicts rank below its `expectations.json` verdicts fails unless its `checker-expectations.json` entry gives an `"improvement"` reason, the case where the comparison scores the checker's answer lower although it states more (no row needs one today: `react/34` did until the comparator read `Omit<HTMLAttributes<…>>` as one family). An `"improvement"` on a row that does not rank below the structural path fails too, so the list stays honest. Rows the checker ranks above the structural path are improvements already explained by the structural `gap`. A member keyed by a symbol (`[tag]`) is read by `src/caliper-norm.ts` as the checker side states it.
 

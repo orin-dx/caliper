@@ -440,8 +440,8 @@ fn extract_finds_docgen_config_ts_in_the_working_directory_and_applies_it() {
     assert_eq!(components, ["Widget"], "only the configured srcDirs are scanned");
 }
 
-/// A project whose config names a checker binary that is not there. tsx, which evaluates the config, is only installed
-/// under apps/oracle.
+/// A project whose config names `tscPath`, the checker binary option that was removed. tsx, which evaluates the
+/// config, is only installed under apps/oracle.
 fn project_with_checker_config() -> TempDir {
     let project = TempDir::new_in(concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/oracle")).unwrap();
     std::fs::create_dir(project.path().join("components")).unwrap();
@@ -458,73 +458,22 @@ fn project_with_checker_config() -> TempDir {
     project
 }
 
-fn ignored_checker_note(command: &str) -> String {
-    format!(
-        "warning: the config sets tscPath, but `{command}` never runs the TypeScript checker, so its output is the \
-         structural result. `extract`, `check` and `inspect` run the checker."
-    )
-}
-
+/// A config that still names `tscPath` is refused, naming the key, rather than run with another checker than the one it
+/// names.
 #[test]
-fn check_inspect_and_extract_ask_the_checker_the_config_names() {
+fn a_config_that_names_a_checker_binary_is_refused() {
     let project = project_with_checker_config();
-    let run_here = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_caliper-docgen"))
+
+    for args in [&["check"][..], &["inspect", "Widget"], &["extract", "--json"], &["extract", "--json", "--no-checker"]]
+    {
+        let output = Command::new(env!("CARGO_BIN_EXE_caliper-docgen"))
             .current_dir(project.path())
             .args(args)
             .output()
-            .expect("failed to spawn the real binary")
-    };
-
-    for (command, args) in
-        [("check", &["check"][..]), ("inspect", &["inspect", "Widget"][..]), ("extract", &["extract", "--json"][..])]
-    {
-        let output = run_here(args);
-        assert_eq!(output.status.code(), Some(0), "{command}: {}", String::from_utf8_lossy(&output.stderr));
+            .expect("failed to spawn the real binary");
         let stderr = strip_ansi(&String::from_utf8(output.stderr).unwrap());
-        assert!(!stderr.contains("never runs the TypeScript checker"), "{command}: {stderr}");
-    }
-
-    // The configured binary is missing, which each command reports as the checker's own warning.
-    let checked = run_here(&["check", "--json"]);
-    let diagnostics: serde_json::Value = serde_json::from_str(&stdout_of(&checked)).unwrap();
-    let backend: Vec<&str> = diagnostics
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|d| d["code"] == "SEMANTIC_BACKEND")
-        .map(|d| d["message"].as_str().unwrap())
-        .collect();
-    assert!(backend.iter().any(|message| message.contains("/nonexistent/tsc")), "{backend:?}");
-
-    // `--no-checker` asks none, so nothing is said about the missing binary.
-    let structural = run_here(&["check", "--json", "--no-checker"]);
-    assert_eq!(stdout_of(&structural), "[]\n");
-}
-
-#[test]
-fn watch_says_when_the_config_enables_a_checker_it_never_runs() {
-    let project = project_with_checker_config();
-    let stderr_log = project.path().join("stderr.log");
-    let _watch = KillOnDrop(
-        Command::new(env!("CARGO_BIN_EXE_caliper-docgen"))
-            .current_dir(project.path())
-            .arg("watch")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(std::fs::File::create(&stderr_log).unwrap())
-            .spawn()
-            .expect("failed to spawn the real binary"),
-    );
-
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        let logged = strip_ansi(&std::fs::read_to_string(&stderr_log).unwrap());
-        if logged.lines().any(|line| line == ignored_checker_note("watch")) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "watch never said the checker is ignored: {logged}");
-        std::thread::sleep(Duration::from_millis(100));
+        assert_ne!(output.status.code(), Some(0), "{args:?}: {stderr}");
+        assert!(stderr.contains("tscPath"), "{args:?}: {stderr}");
     }
 }
 

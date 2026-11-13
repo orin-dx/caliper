@@ -143,7 +143,6 @@ describe('preset', () => {
       fillAfter: 5,
       prefetchStories: 3,
       checker: false,
-      tscPath: '/bin/tsc',
       semanticWaitMs: 7,
       semanticWaitEmptyMs: 70,
       fallback: 'never',

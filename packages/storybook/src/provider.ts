@@ -82,7 +82,6 @@ export function createDocgenProvider(
     warmUp: options.warmUp,
     fillAfter: options.fillAfter,
     checker: options.checker,
-    tscPath: options.tscPath,
     semanticWaitMs: options.semanticWaitMs,
     semanticWaitEmptyMs: options.semanticWaitEmptyMs,
   }

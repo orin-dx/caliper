@@ -138,9 +138,6 @@ pub struct JsExtractOptions {
     /// answers with the structural props when the checker is slower than `semanticWaitMs` (ADR 0022, ADR 0026). On by
     /// default; `false` never starts it, so the structural resolver answers alone. `extractAll` does not ask it.
     pub checker: Option<bool>,
-    /// Session only, with the checker on: a checker binary to run instead of the built-in one (`typescript@7.1`'s
-    /// `tsc`, or `tsrs`).
-    pub tsc_path: Option<String>,
     /// Session only, with the checker on: how many milliseconds a request waits for the checker before it takes the
     /// structural answer (default 150).
     pub semantic_wait_ms: Option<u32>,
@@ -158,7 +155,6 @@ fn new_session(options: JsExtractOptions) -> napi::Result<Arc<WatchSession>> {
     let lazy = options.lazy.unwrap_or(false);
     let semantic = options.checker.unwrap_or(true).then(|| {
         (
-            options.tsc_path.clone(),
             options.tsconfig_path.clone(),
             options.src_dirs.first().cloned(),
             options.semantic_wait_ms.unwrap_or(DEFAULT_SEMANTIC_WAIT_MS),
@@ -171,8 +167,8 @@ fn new_session(options: JsExtractOptions) -> napi::Result<Arc<WatchSession>> {
         false => WatchSession::new(pipeline_options),
     };
     let session = match semantic {
-        Some((tsc_path, tsconfig, first_src, wait_ms, wait_empty_ms)) => {
-            let checker = on_demand_checker(tsc_path, tsconfig, first_src);
+        Some((tsconfig, first_src, wait_ms, wait_empty_ms)) => {
+            let checker = on_demand_checker(tsconfig, first_src);
             let session = session.with_semantic(checker, std::time::Duration::from_millis(u64::from(wait_ms)));
             match wait_empty_ms {
                 Some(ms) => session.with_semantic_wait_empty(std::time::Duration::from_millis(u64::from(ms))),
@@ -186,11 +182,7 @@ fn new_session(options: JsExtractOptions) -> napi::Result<Arc<WatchSession>> {
 
 /// A warm checker for the project that holds `first_src`. It starts in the background, so a request that arrives before
 /// it is up takes the structural answer rather than waiting for it.
-fn on_demand_checker(
-    tsc_path: Option<String>,
-    tsconfig: Option<String>,
-    first_src: Option<String>,
-) -> Arc<caliper_docgen_semantic::OnDemand> {
+fn on_demand_checker(tsconfig: Option<String>, first_src: Option<String>) -> Arc<caliper_docgen_semantic::OnDemand> {
     let root = first_src
         .as_deref()
         .and_then(|dir| caliper_docgen_core::canonical_path::canonicalize(camino::Utf8Path::new(dir)).ok())
@@ -200,7 +192,6 @@ fn on_demand_checker(
     config.tsconfig = tsconfig
         .map(camino::Utf8PathBuf::from)
         .or_else(|| root.ancestors().map(|dir| dir.join("tsconfig.json")).find(|file| file.is_file()));
-    config.tsc_path = tsc_path.map(camino::Utf8PathBuf::from);
     let checker = caliper_docgen_semantic::OnDemand::new(config);
     checker.warm_up();
     Arc::new(checker)
@@ -595,7 +586,6 @@ mod tests {
             collapse_inherited_props: None,
             lazy: None,
             checker: None,
-            tsc_path: None,
             semantic_wait_ms: None,
             semantic_wait_empty_ms: None,
         }
@@ -1023,7 +1013,6 @@ mod tests {
             lazy,
             // These hold the structural session's own answers, which the checker's would replace within its wait.
             checker: Some(false),
-            tsc_path: None,
             semantic_wait_ms: None,
             semantic_wait_empty_ms: None,
             ..base_options()
@@ -1069,7 +1058,6 @@ mod tests {
             lazy,
             // These hold the structural session's own answers, which the checker's would replace within its wait.
             checker: Some(false),
-            tsc_path: None,
             semantic_wait_ms: None,
             semantic_wait_empty_ms: None,
             ..base_options()
@@ -1121,7 +1109,6 @@ mod tests {
             lazy,
             // These hold the structural session's own answers, which the checker's would replace within its wait.
             checker: Some(false),
-            tsc_path: None,
             semantic_wait_ms: None,
             semantic_wait_empty_ms: None,
             ..base_options()

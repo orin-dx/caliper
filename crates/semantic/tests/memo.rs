@@ -1,7 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stderr)]
-//! What the conversion memo costs and what it may not change. Two fixture projects, each replayed from its recording
-//! (`memo.recording.json`, `cycles.recording.json`, made by the `record_fixture` example) and asked live (the
-//! built-in checker, or the `tsrs` binary `TSRS_BIN` names), forward and last to first:
+//! What the conversion memo costs and what it may not change. Fixture projects, each asked of the built-in checker
+//! forward and last to first:
 //!
 //! - `memo`: one big type under many different enclosing types. The number of round trips to the checker is held to a
 //!   bound, so a memo keyed by the whole enclosing context (which converts the type again under each) fails, and a
@@ -24,35 +23,21 @@ use serde_json::{Value, json};
 mod support;
 use support::copy_fixture;
 
-const FAKE_VERSION: &str = "7.1.0-test";
-
 struct Project {
     _dir: tempfile::TempDir,
     root: Utf8PathBuf,
 }
 
-/// `tests/fixtures/<fixture>` in a scratch directory whose name has an upper-case letter (see `replay_tsc.rs`), with
-/// `replay-tsc` installed as `node_modules/typescript/bin/tsc` when `replay`.
-fn project(fixture: &str, replay: bool) -> Project {
+/// `tests/fixtures/<fixture>` in a scratch directory.
+fn project(fixture: &str) -> Project {
     let dir = tempfile::Builder::new().prefix("Memo").tempdir().unwrap();
     let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
     copy_fixture(&Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(fixture), &root);
-    if replay {
-        let package = root.join("node_modules/typescript");
-        std::fs::create_dir_all(package.join("bin")).unwrap();
-        std::fs::write(package.join("package.json"), format!(r#"{{"version": "{FAKE_VERSION}"}}"#)).unwrap();
-        std::fs::copy(env!("CARGO_BIN_EXE_replay-tsc"), package.join("bin/tsc")).unwrap();
-    }
     Project { _dir: dir, root }
 }
 
 fn structural(project: &Project) -> ExtractionOutput {
     extract(&PipelineOptions { src_dirs: vec![project.root.clone()], ..PipelineOptions::default() })
-}
-
-/// The `tsrs` binary `TSRS_BIN` names, to run as a process; `None` asks the built-in checker.
-fn tsrs_bin() -> Option<Utf8PathBuf> {
-    std::env::var("TSRS_BIN").ok().filter(|bin| !bin.is_empty()).map(Utf8PathBuf::from)
 }
 
 /// The outcome of one run, and the calls the backend made to the checker.
@@ -63,28 +48,15 @@ struct Run {
     calls: Vec<Value>,
 }
 
-/// Asks the checker about every component of `fixture`: replayed, or live (`reverse`: asked last to first).
-fn run(fixture: &str, live: Option<(&Option<Utf8PathBuf>, bool)>) -> Run {
-    let project = project(fixture, live.is_none());
+/// Asks the checker about every component of `fixture`, last to first when `reverse`.
+fn run(fixture: &str, reverse: bool) -> Run {
+    let project = project(fixture);
     let output = structural(&project);
     let calls = project.root.join("calls.json");
     let mut request = SemanticRequest::new(project.root.clone(), targets_of(&output));
     request.request_timeout = Duration::from_secs(60);
     request.record_to = Some(calls.clone());
-    match live {
-        None => {
-            request.tsc_path = Some(project.root.join("node_modules/typescript/bin/tsc"));
-            request.expected_versions = &[FAKE_VERSION];
-            request.extra_env.push((
-                "REPLAY_FIXTURE".to_string(),
-                format!("{}/tests/fixtures/{fixture}.recording.json", env!("CARGO_MANIFEST_DIR")),
-            ));
-        }
-        Some((bin, reverse)) => {
-            request.tsc_path = bin.clone();
-            request.reverse_queries = reverse;
-        }
-    }
+    request.reverse_queries = reverse;
     let outcome = resolve(request);
     assert_eq!(outcome.diagnostics, []);
     assert_eq!(outcome.fallbacks, []);
@@ -92,12 +64,10 @@ fn run(fixture: &str, live: Option<(&Option<Utf8PathBuf>, bool)>) -> Run {
     Run { outcome, round_trips: recorded.len(), calls: recorded }
 }
 
-/// Every way to ask: replayed, and live, first to last and last to first.
+/// Every way to ask: first to last and last to first.
 fn each_way(fixture: &str, check: impl Fn(&Run, &str)) {
-    check(&run(fixture, None), "replayed");
-    let bin = tsrs_bin();
     for reverse in [false, true] {
-        check(&run(fixture, Some((&bin, reverse))), if reverse { "live, last to first" } else { "live" });
+        check(&run(fixture, reverse), if reverse { "last to first" } else { "first to last" });
     }
 }
 

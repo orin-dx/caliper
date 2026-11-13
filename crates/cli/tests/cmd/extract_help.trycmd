@@ -89,10 +89,6 @@ Options:
           default every component's props come from the checker, all in one
           program, waited for
 
-      --tsc-path <TSC_PATH>
-          A checker binary to run instead of the built-in one:
-          `typescript@7.1`'s `tsc`, or `tsrs`
-
       --semantic-timeout-ms <SEMANTIC_TIMEOUT_MS>
           How long the checker may take to start or to answer any one request,
           in milliseconds, before the run takes the structural result with one

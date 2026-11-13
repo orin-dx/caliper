@@ -1,10 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stderr)]
 //! Wide types on the checker path (`tests/fixtures/families`): what the project declares is listed whole however wide,
 //! and what a dependency declares is named. The fixture has an interface of 150 own fields, a package interface of 150
-//! fields, and a `@types/react` stand-in whose DOM attribute interface has over a hundred properties. The answer is
-//! replayed from its recording (`families.recording.json`, made by the `record_fixture` example), always, and it is
-//! asked live (the built-in checker, or the `tsrs` binary `TSRS_BIN` names), first to last and last to first, and must
-//! give the same bytes.
+//! fields, and a `@types/react` stand-in whose DOM attribute interface has over a hundred properties. The built-in
+//! checker is asked first to last and last to first, and must give the same bytes.
 
 use std::time::Duration;
 
@@ -18,25 +16,16 @@ use serde_json::{Value, json};
 mod support;
 use support::copy_fixture;
 
-const FAKE_VERSION: &str = "7.1.0-test";
-
 struct Project {
     _dir: tempfile::TempDir,
     root: Utf8PathBuf,
 }
 
-/// The fixture in a scratch directory whose name has an upper-case letter (see `replay_tsc.rs`), with `replay-tsc`
-/// installed as `node_modules/typescript/bin/tsc` when `replay`.
-fn project(replay: bool) -> Project {
+/// The fixture in a scratch directory.
+fn project() -> Project {
     let dir = tempfile::Builder::new().prefix("Families").tempdir().unwrap();
     let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
     copy_fixture(&Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/families"), &root);
-    if replay {
-        let package = root.join("node_modules/typescript");
-        std::fs::create_dir_all(package.join("bin")).unwrap();
-        std::fs::write(package.join("package.json"), format!(r#"{{"version": "{FAKE_VERSION}"}}"#)).unwrap();
-        std::fs::copy(env!("CARGO_BIN_EXE_replay-tsc"), package.join("bin/tsc")).unwrap();
-    }
     Project { _dir: dir, root }
 }
 
@@ -44,24 +33,12 @@ fn structural(project: &Project) -> ExtractionOutput {
     extract(&PipelineOptions { src_dirs: vec![project.root.clone()], ..PipelineOptions::default() })
 }
 
-fn answer(project: &Project, live: Option<(&Option<Utf8PathBuf>, bool)>) -> Value {
+/// The checker's answer, asked first to last, or last to first when `reverse`.
+fn answer(project: &Project, reverse: bool) -> Value {
     let output = structural(project);
     let mut request = SemanticRequest::new(project.root.clone(), targets_of(&output));
     request.request_timeout = Duration::from_secs(60);
-    match live {
-        None => {
-            request.tsc_path = Some(project.root.join("node_modules/typescript/bin/tsc"));
-            request.expected_versions = &[FAKE_VERSION];
-            request.extra_env.push((
-                "REPLAY_FIXTURE".to_string(),
-                format!("{}/tests/fixtures/families.recording.json", env!("CARGO_MANIFEST_DIR")),
-            ));
-        }
-        Some((bin, reverse)) => {
-            request.tsc_path = bin.clone();
-            request.reverse_queries = reverse;
-        }
-    }
+    request.reverse_queries = reverse;
     let outcome = resolve(request);
     assert_eq!(outcome.diagnostics, []);
     assert_eq!(outcome.fallbacks, []);
@@ -91,18 +68,11 @@ fn rendered(outcome: &SemanticOutcome) -> Value {
     json!({ "components": components })
 }
 
-/// The `tsrs` binary `TSRS_BIN` names, to run as a process; `None` asks the built-in checker.
-fn tsrs_bin() -> Option<Utf8PathBuf> {
-    std::env::var("TSRS_BIN").ok().filter(|bin| !bin.is_empty()).map(Utf8PathBuf::from)
-}
-
-/// The answer replayed and, from a real `tsrs`, live both ways round, held to the same checks.
+/// The answer asked both ways round, held to the same checks.
 fn answers(check: impl Fn(&Value)) {
-    check(&answer(&project(true), None));
-    let bin = tsrs_bin();
-    let real = project(false);
+    let project = project();
     for reverse in [false, true] {
-        check(&answer(&real, Some((&bin, reverse))));
+        check(&answer(&project, reverse));
     }
 }
 
@@ -131,16 +101,10 @@ fn literal(value: &str) -> Value {
 }
 
 #[test]
-fn the_recorded_answers_of_the_checker_convert_to_the_snapshot() {
-    insta::assert_json_snapshot!("families", answer(&project(true), None));
-}
-
-#[test]
-fn a_real_tsrs_gives_the_snapshot_whichever_way_round_it_is_asked() {
-    let bin = tsrs_bin();
-    let real = project(false);
-    let forward = answer(&real, Some((&bin, false)));
-    let reversed = answer(&real, Some((&bin, true)));
+fn the_checker_gives_the_snapshot_whichever_way_round_it_is_asked() {
+    let project = project();
+    let forward = answer(&project, false);
+    let reversed = answer(&project, true);
 
     insta::assert_json_snapshot!("families", forward);
     assert_eq!(serde_json::to_string(&forward).unwrap(), serde_json::to_string(&reversed).unwrap());

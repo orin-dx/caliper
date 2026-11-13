@@ -497,4 +497,35 @@ mod tests {
         assert!(refused.components.is_empty() || !refused.fallbacks.is_empty() || !refused.diagnostics.is_empty());
         assert!(!cache.join(FILE).exists());
     }
+
+    /// A run of two programs (40 files, past `MIN_FILES_PER_PROGRAM` twice): the second program's snapshot is derived
+    /// from the first's and reads its files from that cache, not from the disk, so the questions noted must still
+    /// cover a file only one component imports, whichever program answers it. Editing it discards the kept answer.
+    #[test]
+    fn an_edit_to_a_file_one_component_of_a_two_program_run_imports_discards_the_answer() {
+        let (_dir, root, cache) = project();
+        for index in 0..38 {
+            std::fs::write(
+                root.join(format!("C{index}.tsx")),
+                format!("export function C{index}(props: {{ label: string }}) {{ return null; }}\n"),
+            )
+            .unwrap();
+        }
+        std::fs::write(root.join("last.ts"), "export type Last = 'a' | 'b';\n").unwrap();
+        std::fs::write(
+            root.join("Z.tsx"),
+            "import type { Last } from './last';\nexport function Z(props: { last: Last }) { return null; }\n",
+        )
+        .unwrap();
+        let first = resolve_cached(request(&root), &cache);
+        assert_eq!(first.components.len(), 41, "{:?}", first.fallbacks);
+        assert!(kept(&root, &cache).is_some());
+
+        std::fs::write(root.join("last.ts"), "export type Last = 'a' | 'b' | 'c';\n").unwrap();
+
+        assert!(kept(&root, &cache).is_none());
+        let rerun = resolve_cached(request(&root), &cache);
+        let last = rerun.components.iter().find(|c| c.key == "Z").unwrap();
+        assert!(format!("{:?}", last.props[0].prop_type).contains("\"c\""), "{last:?}");
+    }
 }

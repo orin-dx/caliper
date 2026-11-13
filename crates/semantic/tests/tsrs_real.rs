@@ -1,6 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stderr)]
-//! The backend against a real `tsrs`: the built-in checker, or a `tsrs` process when `TSRS_BIN` names its binary
-//! (`node_modules/tsrs/bin/tsrs`, or `node_modules/@tsrs/<platform>/tsrs`).
+//! The backend against the `tsrs` it links: what it reads as an error type, and the lib it embeds.
 
 use caliper_docgen_core::pipeline::{PipelineOptions, extract};
 use caliper_docgen_core::types::semantic::{SemanticOutcome, merge_semantic};
@@ -8,14 +7,11 @@ use caliper_docgen_core::types::{ObjectField, PropParent, PropType};
 use caliper_docgen_semantic::{SemanticRequest, resolve, targets_of};
 use camino::Utf8PathBuf;
 
-/// The `tsrs` binary `TSRS_BIN` names, to run as a process; `None` asks the built-in checker.
-fn tsrs_bin() -> Option<Utf8PathBuf> {
-    std::env::var("TSRS_BIN").ok().filter(|bin| !bin.is_empty()).map(Utf8PathBuf::from)
-}
-
+/// The checker gives an unresolved import or an undeclared name the flag of `any` as well; only its `intrinsicName`
+/// (`"error"`, where a written `any` says `"any"`) tells them apart. An error type is not `any`: the prop says it could
+/// not be resolved.
 #[test]
 fn tsrs_marks_an_unresolved_name_degraded_and_a_written_any_not() {
-    let bin = tsrs_bin();
     let dir = tempfile::Builder::new().prefix("TsrsReal").tempdir().unwrap();
     let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
     let fixture = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/errors");
@@ -23,10 +19,7 @@ fn tsrs_marks_an_unresolved_name_degraded_and_a_written_any_not() {
         std::fs::copy(fixture.join(name), root.join(name)).unwrap();
     }
     let mut output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
-    let mut request = SemanticRequest::new(root, targets_of(&output));
-    request.tsc_path = bin;
-
-    let outcome = resolve(request);
+    let outcome = resolve(SemanticRequest::new(root, targets_of(&output)));
     assert!(outcome.diagnostics.is_empty() && outcome.fallbacks.is_empty(), "{outcome:?}");
     merge_semantic(&mut output, outcome);
 
@@ -39,8 +32,8 @@ fn tsrs_marks_an_unresolved_name_degraded_and_a_written_any_not() {
     }
 }
 
-/// The built-in checker reads TypeScript's lib from the files it embeds, named `bundled:///libs/lib.*.d.ts`, where a
-/// process reads them from its install. Those are still the lib: an interface it declares keeps its name, an alias it
+/// The built-in checker reads TypeScript's lib from the files it embeds, named `bundled:///libs/lib.*.d.ts`. Those are
+/// still the lib: an interface it declares keeps its name, an alias it
 /// declares (`Partial`) is expanded, and a prop it declares names the lib file as its parent's.
 #[test]
 fn the_lib_the_built_in_checker_embeds_is_read_as_the_lib() {
