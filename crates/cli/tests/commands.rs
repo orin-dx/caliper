@@ -274,6 +274,41 @@ fn out_is_staged_next_to_the_target_not_in_the_current_directory() {
     assert!(written["components"]["Widget"].is_object());
 }
 
+/// `extract` keeps the checker's answer in the cache directory and a rerun over the same files writes the same bytes
+/// from it; `--no-cache` neither reads nor writes it, and `check` does not keep one.
+#[test]
+fn extract_keeps_the_checker_answer_and_a_rerun_writes_the_same_bytes() {
+    let (src, caches) = (widget_dir(), TempDir::new().unwrap());
+    let src_arg = src.path().to_str().unwrap();
+    let cache = |name: &str| caches.path().join(name);
+    let extract = |extra: &[&str]| {
+        let mut args = vec!["extract", "--json", "--src", src_arg];
+        args.extend_from_slice(extra);
+        stdout_of(&run(&args))
+    };
+    let kept = cache("kept");
+    let kept_arg = kept.to_str().unwrap();
+
+    let first = extract(&["--cache-dir", kept_arg]);
+    let rerun = extract(&["--cache-dir", kept_arg]);
+    let bypassed = cache("bypassed");
+    let without = extract(&["--no-cache", "--cache-dir", bypassed.to_str().unwrap()]);
+    // `check` has no `--cache-dir`: its cache is the default one, under the source's `node_modules`.
+    stdout_of(&run(&["check", "--json", "--src", src_arg]));
+    let checked = src.path().join("node_modules/.cache/caliper-docgen");
+
+    let without_stats = |text: &str| {
+        let mut value: serde_json::Value = serde_json::from_str(text).unwrap();
+        value.as_object_mut().unwrap().remove("stats");
+        value.to_string()
+    };
+    assert!(kept.join("checker-answers.msgpack").is_file());
+    assert_eq!(without_stats(&rerun), without_stats(&first));
+    assert_eq!(without_stats(&without), without_stats(&first));
+    assert!(!bypassed.exists());
+    assert!(!checked.join("checker-answers.msgpack").exists());
+}
+
 #[test]
 fn watch_reports_a_change_and_writes_out_what_extract_produces() {
     let src = widget_dir();

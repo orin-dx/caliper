@@ -41,6 +41,14 @@ def extract_command(binary, src, cache_dir):
             '--cache-dir', cache_dir]
 
 
+def forget_kept_answer(cache_dir):
+    """Removes the checker's answer `extract` keeps in the cache directory, so the next run asks the checker as a
+    first run does: the timed runs compare the checker's pass, not one build's kept answer against the other's."""
+    kept = os.path.join(cache_dir, 'checker-answers.msgpack')
+    if os.path.exists(kept):
+        os.remove(kept)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('branch', nargs='?')
@@ -71,12 +79,14 @@ def main():
                 if not src:
                     sys.exit(f"{corpus['name']}: dependencies not installed, so none would be loaded; "
                              f"run `scripts/corpora.py setup --corpus {corpus['name']}`")
-                command = lambda binary: extract_command(binary, src, os.path.join(tmp, 'cache-' + os.path.basename(binary)))
+                cache_of = lambda binary: os.path.join(tmp, 'cache-' + os.path.basename(binary))
+                command = lambda binary: extract_command(binary, src, cache_of(binary))
                 samples = {'base': [], 'head': []}
                 for label, binary in builds.items():
                     run_once(command(binary))
                 for i in range(args.runs):
                     for label in (('base', 'head') if i % 2 == 0 else ('head', 'base')):
+                        forget_kept_answer(cache_of(builds[label]))
                         samples[label].append(run_once(command(builds[label])))
                 median = {label: (statistics.median(s for s, _ in runs) * 1000, statistics.median(r for _, r in runs))
                           for label, runs in samples.items()}

@@ -281,6 +281,7 @@ dependencies = [
  "caliper-docgen-tsc-client",
  "camino",
  "insta",
+ "rmp-serde",
  "rustc-hash",
  "serde",
  "serde_json",
@@ -289,6 +290,7 @@ dependencies = [
  "tracing",
  "tsrs_api",
  "tsrs_vfs",
+ "xxhash-rust",
 ]
 
 [[package]]

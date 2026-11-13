@@ -26,6 +26,8 @@ tracing.workspace         = true
 rustc-hash.workspace      = true
 tsrs_api.workspace        = true
 tsrs_vfs.workspace        = true
+rmp-serde.workspace       = true
+xxhash-rust.workspace     = true
 
 [dev-dependencies]
 tempfile.workspace        = true

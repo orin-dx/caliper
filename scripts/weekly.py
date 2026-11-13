@@ -91,14 +91,23 @@ def tool_run(command, out):
 def caliper_run(binary, src, runs):
     """Median wall ms and largest peak RSS MiB of `extract --json` in the Storybook addon's configuration (dependencies
     loaded, inherited props not collapsed), and the JSON's size. The checker answers, as
-    it does by default (docs/measurement.md)."""
-    command = [binary, 'extract', '--src', src, '--json', '--load-dependencies', '--collapse-inherited-props', 'none']
-    with tempfile.TemporaryFile() as out:
+    it does by default (docs/measurement.md). The parse caches are warm (a warm-up run fills them), but each timed run
+    asks the checker everything: the answer `extract` keeps is removed first, since react-docgen-typescript keeps none.
+    `rerun_ms` is the median of as many runs that find it, what a rerun over unchanged files costs."""
+    with tempfile.TemporaryDirectory() as cache, tempfile.TemporaryFile() as out:
+        command = [binary, 'extract', '--src', src, '--json', '--load-dependencies', '--collapse-inherited-props', 'none',
+                   '--cache-dir', cache]
         run_once(command, stdout=out)
         size = out.tell()
-    samples = [run_once(command) for _ in range(runs)]
+        kept = os.path.join(cache, 'checker-answers.msgpack')
+        samples = []
+        for _ in range(runs):
+            if os.path.exists(kept):
+                os.remove(kept)
+            samples.append(run_once(command))
+        reruns = [run_once(command) for _ in range(runs)]
     return {'ms': round(statistics.median(s for s, _ in samples) * 1000), 'rss_mib': round(max(r for _, r in samples)),
-            'json_mb': round(size / 2**20, 2)}
+            'json_mb': round(size / 2**20, 2), 'rerun_ms': round(statistics.median(s for s, _ in reruns) * 1000)}
 
 
 def caliper_components(binary, src, root):
@@ -622,11 +631,15 @@ def excluded_line(corpus, oracle_entry):
 def markdown(record, notes, reference_changed=None, moved=(), baseline=True, baseline_failed=False):
     lines = headline.markdown(record)
     lines += [f"Caliper {record['caliper']}, time the median of {record['runs']} runs (after one warm-up run) and memory the largest peak of them; RDT "
-              'and react-docgen one cold run each, so the comparison favours Caliper. Whole process, Node start included.', '', '### Time and memory', '',
-              '| Corpus | Caliper | JSON | RDT | react-docgen |', '| --- | --: | --: | --: | --: |']
+              'and react-docgen one cold run each, so the comparison favours Caliper. Whole process, Node start included. Each '
+              "Caliper run asks the checker everything; Rerun is a run over unchanged files, which reuses the checker's kept answer.",
+              '', '### Time and memory', '',
+              '| Corpus | Caliper | Rerun | JSON | RDT | react-docgen |', '| --- | --: | --: | --: | --: | --: |']
     for name, e in record['corpora'].items():
         cell = lambda t: f"{t['ms'] / 1000:.2f} s, {t['rss_mib']:,} MiB"
-        lines.append(f"| {name} | {cell(e['caliper'])} | {e['caliper']['json_mb']} MB | {cell(e['rdt'])} | "
+        rerun = e['caliper'].get('rerun_ms')
+        rerun = f'{rerun / 1000:.2f} s' if rerun is not None else '-'
+        lines.append(f"| {name} | {cell(e['caliper'])} | {rerun} | {e['caliper']['json_mb']} MB | {cell(e['rdt'])} | "
                      f"{cell(e['react_docgen'])} |")
     lines += ['', '### Reference (RDT, cleaned)', '',
               '| Corpus | RDT entries with props | Not components | Repeats merged | Reference | Same file | Paired | Unpaired |',
