@@ -67,7 +67,11 @@ enum Pending {
 
 /// What a prop's JSDoc is kept by: its declarations, where the checker reads it, or the symbol when it has none.
 fn jsdoc_key(property: &SymbolInfo) -> String {
-    if property.declarations.is_empty() { property.reference.text().to_string() } else { property.declarations.join("\n") }
+    if property.declarations.is_empty() {
+        property.reference.text().to_string()
+    } else {
+        property.declarations.join("\n")
+    }
 }
 
 /// The declarations, description and tags of every prop of `asked`, in its order: at most one round trip for what

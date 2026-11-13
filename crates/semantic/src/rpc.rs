@@ -759,8 +759,7 @@ fn default_options() -> Value {
 
 /// An answer parsed from its text straight into `T`, in one pass.
 pub(crate) fn decode<T: DeserializeOwned>(answer: &str) -> Result<T, CallError> {
-    serde_json::from_str(answer)
-        .map_err(|error| CallError::Rejected(format!("unexpected response shape: {error}")))
+    serde_json::from_str(answer).map_err(|error| CallError::Rejected(format!("unexpected response shape: {error}")))
 }
 
 #[cfg(test)]
@@ -783,8 +782,7 @@ mod tests {
 
     #[test]
     fn a_symbol_arrives_with_the_name_the_source_writes() {
-        let symbol: SymbolInfo =
-            serde_json::from_str(r#"{ "reference": {}, "name": "___size", "flags": 0 }"#).unwrap();
+        let symbol: SymbolInfo = serde_json::from_str(r#"{ "reference": {}, "name": "___size", "flags": 0 }"#).unwrap();
 
         assert_eq!(symbol.name, "__size");
     }
