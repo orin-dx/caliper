@@ -133,10 +133,6 @@ pub struct ExtractArgs {
     #[arg(long)]
     pub no_checker: bool,
 
-    /// A checker binary to run instead of the built-in one: `typescript@7.1`'s `tsc`, or `tsrs`
-    #[arg(long, conflicts_with = "no_checker")]
-    pub tsc_path: Option<String>,
-
     /// How long the checker may take to start or to answer any one request, in milliseconds, before the run takes the
     /// structural result with one warning
     #[arg(long, conflicts_with = "no_checker", default_value_t = DEFAULT_SEMANTIC_TIMEOUT_MS)]

@@ -308,26 +308,21 @@ describe('DocgenSession.fresh', () => {
     expect(seen[1]).toMatchObject({ htmlAttributes: 'full' })
   })
 
-  it('leaves the checker to the binding, which starts it by default, and passes its binary and wait', async () => {
+  it('leaves the checker to the binding, which starts it by default, and passes its waits', async () => {
     const fake = new FakeBinding({})
     const seen: unknown[] = []
     fake.createSession = ((options: unknown) => (seen.push(options), 7)) as never
     await new DocgenSession({ srcDirs: [src] }, fake).fresh()
-    await new DocgenSession(
-      { srcDirs: [src], tscPath: '/opt/ts/bin/tsc', semanticWaitMs: 80, semanticWaitEmptyMs: 900 },
-      fake,
-    ).fresh()
+    await new DocgenSession({ srcDirs: [src], semanticWaitMs: 80, semanticWaitEmptyMs: 900 }, fake).fresh()
     await new DocgenSession({ srcDirs: [src], checker: false }, fake).fresh()
     expect(seen).toEqual([
       expect.objectContaining({
         checker: undefined,
-        tscPath: undefined,
         semanticWaitMs: undefined,
         semanticWaitEmptyMs: undefined,
       }),
       expect.objectContaining({
         checker: undefined,
-        tscPath: '/opt/ts/bin/tsc',
         semanticWaitMs: 80,
         semanticWaitEmptyMs: 900,
       }),

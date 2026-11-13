@@ -298,10 +298,7 @@ impl SemanticOutcome {
             DiagnosticCode::SemanticBackend,
             format!("TypeScript checker backend unavailable: {}", reason.into()),
         )
-        .with_help(
-            "The structural result is used instead. The checker is built in; `--tsc-path` (`tscPath`) runs a checker \
-             binary instead (`typescript@7.1`'s `tsc`, or `tsrs`).",
-        );
+        .with_help("The structural result is used instead.");
         Self { diagnostics: vec![diagnostic], ..Self::default() }
     }
 }

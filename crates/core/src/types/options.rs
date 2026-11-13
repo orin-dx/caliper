@@ -97,9 +97,6 @@ pub struct PipelineOptions {
     /// `extract` ignores it: the checker backend lives in `caliper-docgen-semantic`, which depends on this crate, so
     /// the embedding (the CLI) runs it and calls [`crate::types::semantic::merge_semantic`].
     pub checker: bool,
-    /// A checker binary to run as a `--api` process instead of the built-in checker (`typescript@7.1`'s `tsc`, or
-    /// `tsrs`). Unset, the built-in one answers.
-    pub semantic_tsc_path: Option<Utf8PathBuf>,
 }
 
 impl Default for PipelineOptions {
@@ -116,7 +113,6 @@ impl Default for PipelineOptions {
             load_dependencies: true,
             collapse_inherited_props: CollapseInheritedProps::default(),
             checker: true,
-            semantic_tsc_path: None,
         }
     }
 }

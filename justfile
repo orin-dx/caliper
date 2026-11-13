@@ -17,7 +17,7 @@ semver:
     #!/usr/bin/env bash
     set -uo pipefail
     status=0
-    for crate in caliper-docgen-core caliper-docgen-semantic caliper-docgen-tsc-client; do
+    for crate in caliper-docgen-core caliper-docgen-semantic; do
         if cargo semver-checks check-release -p "$crate"; then
             continue
         fi
@@ -74,21 +74,18 @@ test-parity:
     pnpm --filter caliper-docgen-oracle construct:parity
 
 # The checker gates of ADR 0026, with nothing allowed to skip: the golden check, tsrs-against-Go parity, and the construct
-# suite through the checker path held to checker-expectations.json. The pinned tsrs binary is the one the `tsrs` package
-# itself selects for this platform (@tsrs/<os>-<arch>[-gnu|-musl]); see apps/oracle/construct-suite/README.md.
+# suite through the checker path (the release binary, which links tsrs) held to checker-expectations.json; see
+# apps/oracle/construct-suite/README.md.
 test-checker-lane:
     #!/usr/bin/env bash
     set -euo pipefail
     cargo build --release --locked -p caliper-docgen
-    export REQUIRE_TSRS=1 REQUIRE_CALIPER_BIN=1 CALIPER_BIN="$PWD/target/release/caliper-docgen"
-    TSRS_BIN="$(pnpm --silent --filter caliper-docgen-oracle exec tsx src/tsrs-bin.ts)"
-    export TSRS_BIN
-    echo "tsrs: $TSRS_BIN"
+    export REQUIRE_CALIPER_BIN=1 CALIPER_BIN="$PWD/target/release/caliper-docgen"
     pnpm --filter caliper-docgen-oracle construct:check
     pnpm --filter caliper-docgen-oracle construct:parity
     CALIPER_SEMANTIC=1 pnpm --filter caliper-docgen-oracle construct:checker
     pnpm --filter caliper-docgen-oracle exec vitest run tests/construct-checker-lane.test.ts
-    # S5's gate on tsrs: generic components instantiated (Test / Rust runs the same tests on the Go checker).
+    # S5's gate on tsrs: generic components instantiated.
     cargo test --locked -p caliper-docgen-semantic --lib instantiate
     cargo test --locked -p caliper-docgen-semantic --test instantiate
     # S6's gate on tsrs: a kept snapshot brought up to date, and an edit nobody announced caught loudly.
@@ -100,7 +97,7 @@ test-integration:
     NAPI_BINARY_REQUIRED=true pnpm --filter caliper-docgen-vite-plugin test:integration
     NAPI_BINARY_REQUIRED=true pnpm --filter caliper-docgen-storybook test:integration
 
-# Measure ADR 0026's memory, determinism, first-answer and watch gates against the pinned tsrs
+# Measure ADR 0026's memory, determinism, first-answer and watch gates on the built-in checker, as the addon runs it
 # (docs/gate-measurements.md). Builds the large project outside the repository (GATE_FIXTURES, default
 # ~/Projects/caliper-fixtures/gate-large), so it needs the network or a warm pnpm store; `just gate-measure --runs 3`
 # passes options to every gate. Takes minutes, runs every gate, and fails if any failed.
@@ -110,10 +107,9 @@ gate-measure *args:
     fixtures="${GATE_FIXTURES:-$HOME/Projects/caliper-fixtures/gate-large}"
     node scripts/gate_fixtures.mjs "$fixtures"
     cargo build --release --locked -p caliper-docgen-semantic --example gate_harness
-    TSRS_BIN="$(pnpm --silent --filter caliper-docgen-oracle exec tsx src/tsrs-bin.ts)"
     failed=0
     for gate in memory determinism first-answer watch; do
-        target/release/examples/gate_harness "$gate" --src "$fixtures/src" --tsc "$TSRS_BIN" {{ args }} || failed=1
+        target/release/examples/gate_harness "$gate" --src "$fixtures/src" {{ args }} || failed=1
     done
     exit "$failed"
 

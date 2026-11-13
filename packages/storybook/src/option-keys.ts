@@ -20,7 +20,6 @@ const OPTION_KEY_SET = {
   fillAfter: true,
   prefetchStories: true,
   checker: true,
-  tscPath: true,
   semanticWaitMs: true,
   semanticWaitEmptyMs: true,
   fallback: true,
