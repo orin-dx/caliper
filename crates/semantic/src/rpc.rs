@@ -361,6 +361,9 @@ pub(crate) struct Rpc {
     /// Every call and its answer, when the caller asked to record a replay fixture; shared with a layered snapshot.
     recording: Option<Arc<Mutex<Vec<Value>>>>,
     calls: Arc<Mutex<BTreeMap<&'static str, u64>>>,
+    /// The snapshots of the other lanes [`Rpc::open_programs`] opened beside this one, which [`Rpc::release`] on this
+    /// one releases too.
+    others: Vec<u64>,
 }
 
 /// A diagnostic the checker reports for a file: where it starts and what it says.
@@ -412,6 +415,7 @@ impl Rpc {
             options: Value::Null,
             recording: None,
             calls: Arc::default(),
+            others: Vec::new(),
         };
         rpc.call("initialize", &Value::Null).await?;
         Ok(match tsconfig {
@@ -423,11 +427,14 @@ impl Rpc {
         })
     }
 
-    /// A snapshot of `count` programs over the same `root_files` (one when `count` is at most one), in a session it
-    /// initializes first ([`Rpc::prepare`]), with one session bound to each program: a checker that answers requests
-    /// about different programs at once ([`crate::checker::InProcess`]) answers the sessions in parallel. The programs
-    /// read the same files, so each answers what any other would. They share the request counts and the recording;
-    /// [`Rpc::release`] on the first releases the snapshot, and with it every program.
+    /// One snapshot of a program over `root_files` for each of `count` lanes (one when `count` is at most one), in a
+    /// session it initializes first ([`Rpc::prepare`]), with one session bound to each, the `n`th asking down the
+    /// checker's `n`th lane ([`Client::lane`]): a checker that answers requests about different snapshots at once
+    /// ([`crate::checker`]) answers the sessions in parallel. Each lane has a snapshot of its own because the checker
+    /// registers the symbols, types and signatures it hands out in one table per snapshot, behind one lock: two programs
+    /// of one snapshot wait for each other on it. The first lane's snapshot is built from the disk; each other one is
+    /// derived from it ([`Rpc::beside`]), so every program reads the same text of every file. They share the request
+    /// counts and the recording; [`Rpc::release`] on the first releases every snapshot.
     pub(crate) async fn open_programs(
         client: Client,
         deadline: Duration,
@@ -437,44 +444,54 @@ impl Rpc {
         count: usize,
     ) -> Result<Vec<Rpc>, CallError> {
         let options = Rpc::prepare(&client, deadline, tsconfig).await?;
-        if count <= 1 {
-            return Ok(vec![Rpc::open_with(client, deadline, &options, root_files, record).await?]);
+        let first = Rpc::open_with(client.lane(0), deadline, &options, root_files, record).await?;
+        let mut lanes: Vec<Rpc> = Vec::with_capacity(count.max(1));
+        for lane in 1..count {
+            match first.beside(client.lane(lane), root_files).await {
+                Ok(rpc) => lanes.push(rpc),
+                Err(error) => {
+                    // Nothing will hold the snapshots made so far to release them later.
+                    first.release().await;
+                    for opened in &lanes {
+                        opened.release().await;
+                    }
+                    return Err(error);
+                }
+            }
         }
-        let first = Rpc {
-            client,
-            deadline,
-            snapshot: 0,
-            project: String::new(),
-            options: options.clone(),
-            recording: record.then(Arc::default),
-            calls: Arc::default(),
-        };
-        let program = json!({ "rootFiles": root_files, "compilerOptions": options });
-        let programs: Vec<Value> = std::iter::repeat_n(program, count).collect();
+        let others = lanes.iter().map(|rpc| rpc.snapshot).collect();
+        lanes.insert(0, Rpc { others, ..first });
+        Ok(lanes)
+    }
+
+    /// A snapshot of its own for a program over `root_files` beside this one's, asked through `client`: derived from
+    /// this snapshot (`updateSnapshot` with `createPrograms`), it reads every file as this one holds it, from the files
+    /// this snapshot has read and parsed, and does not go to the disk again. It shares the request counts and the
+    /// recording; it is released on its own.
+    async fn beside(&self, client: Client, root_files: &[String]) -> Result<Rpc, CallError> {
+        let changes = json!({
+            "createPrograms": [{ "rootFiles": root_files, "compilerOptions": self.options }],
+            "ensurePrograms": true,
+        });
         let response: SnapshotResponse =
-            decode(&first.call("createSnapshot", &json!({ "createPrograms": programs })).await?)?;
-        if response.projects.len() != count {
+            decode(&self.call("updateSnapshot", &json!({ "snapshot": self.snapshot, "changes": changes })).await?)?;
+        let rpc = Rpc {
+            client,
+            deadline: self.deadline,
+            snapshot: response.snapshot,
+            project: String::new(),
+            options: self.options.clone(),
+            recording: self.recording.clone(),
+            calls: self.calls.clone(),
+            others: Vec::new(),
+        };
+        // The response lists the programs the update made or changed: the one created, not this one's.
+        let Some(project) = response.projects.into_iter().find(|project| project.id != self.project) else {
             // Nothing will hold this snapshot to release it later.
-            Rpc { snapshot: response.snapshot, ..first }.release().await;
-            return Err(CallError::Rejected(format!(
-                "createSnapshot made {} programs of {count}",
-                response.projects.len()
-            )));
-        }
-        Ok(response
-            .projects
-            .into_iter()
-            .enumerate()
-            .map(|(lane, project)| Rpc {
-                client: first.client.lane(lane),
-                deadline,
-                snapshot: response.snapshot,
-                project: project.id,
-                options: options.clone(),
-                recording: first.recording.clone(),
-                calls: first.calls.clone(),
-            })
-            .collect())
+            rpc.release().await;
+            return Err(CallError::Rejected("updateSnapshot created no program".to_string()));
+        };
+        Ok(Rpc { project: project.id, ..rpc })
     }
 
     /// A snapshot over `root_files` in a session [`Rpc::prepare`] already initialized.
@@ -493,6 +510,7 @@ impl Rpc {
             options: options.clone(),
             recording: record.then(Arc::default),
             calls: Arc::default(),
+            others: Vec::new(),
         };
         rpc.created(json!({ "createPrograms": [{ "rootFiles": root_files, "compilerOptions": options }] })).await
     }
@@ -508,6 +526,7 @@ impl Rpc {
             options: self.options.clone(),
             recording: self.recording.clone(),
             calls: self.calls.clone(),
+            others: Vec::new(),
         };
         let mut roots = root_files.to_vec();
         roots.extend(files.iter().map(|(path, _)| path.clone()));
@@ -553,6 +572,7 @@ impl Rpc {
             options: self.options.clone(),
             recording: self.recording.clone(),
             calls: Arc::default(),
+            others: Vec::new(),
         })
     }
 
@@ -574,8 +594,11 @@ impl Rpc {
         Ok(self)
     }
 
+    /// Releases the snapshot, and those of the lanes opened beside it ([`Rpc::open_programs`]).
     pub(crate) async fn release(&self) {
-        self.call("release", &json!({ "snapshot": self.snapshot })).await.ok();
+        for snapshot in std::iter::once(self.snapshot).chain(self.others.iter().copied()) {
+            self.call("release", &json!({ "snapshot": snapshot })).await.ok();
+        }
     }
 
     /// The recorded calls as a JSON array, or `None` when recording was off.
@@ -799,7 +822,169 @@ pub(crate) fn decode<T: DeserializeOwned>(answer: &RawValue) -> Result<T, CallEr
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::panic)]
+
     use super::*;
+
+    use caliper_docgen_core::pipeline::{PipelineOptions, extract};
+    use caliper_docgen_core::types::semantic::SemanticOutcome;
+    use camino::{Utf8Path, Utf8PathBuf};
+
+    use crate::checker::{Backend, Failure, Served};
+    use crate::{SemanticRequest, answer_on, root_files, targets_of};
+
+    fn multi_thread() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap()
+    }
+
+    /// Components over shared types whose props extend an interface the last file augments (`declare global`).
+    fn lanes_project() -> (tempfile::TempDir, Utf8PathBuf) {
+        let dir = tempfile::Builder::new().prefix("Lanes").tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        std::fs::write(
+            root.join("types.ts"),
+            "export type Size = 'sm' | 'md' | 'lg';\nexport interface Base {\n  /** The id. */\n  id: string;\n  size?: Size;\n}\n\
+             declare global { interface Augmented { fromTypes?: number } }\n",
+        )
+        .unwrap();
+        for index in 0..6 {
+            let augments =
+                if index == 5 { "declare global { interface Augmented { fromLastFile?: boolean } }\n" } else { "" };
+            std::fs::write(
+                root.join(format!("C{index}.tsx")),
+                format!(
+                    "import type {{ Base, Size }} from './types';\n{augments}\
+                     export interface C{index}Props extends Base, Augmented {{ own{index}: number; pick?: (size: Size) => void }}\n\
+                     export function C{index}(props: C{index}Props) {{ return null; }}\n"
+                ),
+            )
+            .unwrap();
+        }
+        (dir, root)
+    }
+
+    /// Asks `lanes` programs on a checker with as many lanes about the project's components: their snapshots, the
+    /// answer, and whether each snapshot was still held after the first program was released.
+    fn answered_on_lanes(root: &Utf8Path, lanes: usize) -> (Vec<u64>, SemanticOutcome, Vec<bool>) {
+        let output = extract(&PipelineOptions { src_dirs: vec![root.to_owned()], ..PipelineOptions::default() });
+        let request = SemanticRequest::new(root.to_owned(), targets_of(&output));
+        let files = root_files(&request);
+        let checker = Backend::start(root, lanes).unwrap();
+        let runtime = multi_thread();
+        let deadline = Duration::from_secs(120);
+        let (snapshots, outcome, held) = runtime.block_on(async {
+            let programs = Rpc::open_programs(checker.client(), deadline, None, &files, false, lanes).await.unwrap();
+            let programs: Vec<Arc<Rpc>> = programs.into_iter().map(Arc::new).collect();
+            let snapshots: Vec<u64> = programs.iter().map(|program| program.snapshot).collect();
+            let outcome = answer_on(&programs, &request, &files).await.unwrap();
+            programs[0].release().await;
+            let (client, mut held) = (checker.client(), Vec::new());
+            for snapshot in &snapshots {
+                // Releasing a snapshot the checker no longer holds fails, as releasing an unknown one does.
+                let params = json!({ "snapshot": snapshot }).to_string().into_bytes();
+                held.push(client.request_raw("release", params, deadline).await.is_ok());
+            }
+            (snapshots, outcome, held)
+        });
+        runtime.block_on(checker.shutdown());
+        (snapshots, outcome, held)
+    }
+
+    /// Each lane asks a snapshot of its own, derived from the first, and three lanes give the answer one gives: every
+    /// program holds every root file, so what the last file declares reaches the components the other lanes answer.
+    /// Releasing the first program releases every lane's snapshot. On the base the lanes shared one snapshot.
+    #[test]
+    fn each_lane_has_a_snapshot_of_its_own_and_they_answer_as_one_program_does() {
+        let (_dir, root) = lanes_project();
+
+        let (one_snapshots, one, one_held) = answered_on_lanes(&root, 1);
+        let (snapshots, three, held) = answered_on_lanes(&root, 3);
+
+        assert!(one.diagnostics.is_empty() && one.fallbacks.is_empty(), "{one:?}");
+        assert_eq!(one.components.len(), 6);
+        for component in &one.components {
+            let names: Vec<&str> = component.props.iter().map(|prop| prop.name.as_str()).collect();
+            assert!(names.contains(&"fromLastFile") && names.contains(&"fromTypes"), "{names:?}");
+        }
+        assert_eq!(one, three);
+        assert_eq!(one_snapshots.len(), 1);
+        assert_eq!(snapshots.len(), 3);
+        let distinct: std::collections::BTreeSet<u64> = snapshots.iter().copied().collect();
+        assert_eq!(distinct.len(), 3, "each lane has a snapshot of its own: {snapshots:?}");
+        assert_eq!(
+            (one_held, held),
+            (vec![false], vec![false; 3]),
+            "the first program's release releases every lane's"
+        );
+    }
+
+    /// Stands in for a session: makes snapshot 1 of as many programs as asked on `createSnapshot` (so a run that asked
+    /// all the lanes' programs of one snapshot would open), and fails or panics on `updateSnapshot`, which
+    /// derives each other lane's; records the snapshots it was told to release, and whether it was closed.
+    struct Underived {
+        panics: bool,
+        released: Arc<Mutex<Vec<u64>>>,
+        closed: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl Served for Underived {
+        fn handle(&self, method: &str, params: &[u8]) -> Result<String, Failure> {
+            match method {
+                "initialize" => Ok("null".to_string()),
+                "createSnapshot" => {
+                    // As many programs as asked for.
+                    let params: Value = serde_json::from_slice(params).unwrap();
+                    let count = params["createPrograms"].as_array().map_or(1, Vec::len);
+                    let projects: Vec<Value> = (0..count).map(|n| json!({ "id": format!("p{n}") })).collect();
+                    Ok(json!({ "snapshot": 1, "projects": projects }).to_string())
+                }
+                "updateSnapshot" if self.panics => panic!("checker invariant broken"),
+                "updateSnapshot" => Err(Failure { message: "a file nests too deep".to_string(), panicked: false }),
+                "release" => {
+                    let params: Value = serde_json::from_slice(params).unwrap();
+                    self.released.lock().unwrap().push(params["snapshot"].as_u64().unwrap());
+                    Ok("null".to_string())
+                }
+                other => panic!("unexpected {other}"),
+            }
+        }
+
+        fn discard(&self, _method: &str, _answer: &str) {}
+
+        fn close(&self) {
+            self.closed.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+
+    /// A lane whose snapshot cannot be made fails the opening, and the snapshot made before it is released, since no
+    /// one will hold it; one that panics stops the checker, which closes its session and every snapshot with it.
+    #[test]
+    fn a_lane_whose_snapshot_cannot_be_made_releases_the_one_made_before_it() {
+        for panics in [false, true] {
+            let released = Arc::new(Mutex::new(Vec::new()));
+            let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let session = Underived { panics, released: released.clone(), closed: closed.clone() };
+            let checker = Backend::spawn(2, move || session).unwrap();
+            let runtime = multi_thread();
+
+            let opened = runtime.block_on(Rpc::open_programs(
+                checker.client(),
+                Duration::from_secs(5),
+                None,
+                &["/p/a.ts".to_string()],
+                false,
+                2,
+            ));
+
+            assert!(opened.is_err(), "panics: {panics}");
+            runtime.block_on(checker.shutdown_within(Duration::from_secs(5)));
+            if panics {
+                assert!(closed.load(std::sync::atomic::Ordering::Acquire), "the session is closed");
+            } else {
+                assert_eq!(*released.lock().unwrap(), [1], "the first lane's snapshot is released");
+            }
+        }
+    }
 
     #[test]
     fn a_name_with_three_or_more_leading_underscores_loses_the_one_the_checker_added() {
