@@ -53,8 +53,9 @@ use crate::rpc::{CallError, REQUESTS, Rpc};
 pub const SUPPORTED_VERSIONS: &[&str] = &["7.1", "0.23.0-ts7.1.0-beta"];
 
 /// How many files are asked about at once, shared among the programs. A program's checker answers requests one at a
-/// time; this keeps it from idling between them.
-const FILES_IN_FLIGHT: usize = 16;
+/// time; this keeps it from idling between them. Four per program is enough: more only queue behind the checker, and
+/// sixteen measured slower and 150 MiB larger on Chakra's components (docs/gate-measurements.md).
+const FILES_IN_FLIGHT: usize = 8;
 
 /// The most threads the whole-project run converts the checker's answers on: past four, the checker's own thread is
 /// the bound (measured on Chakra's components, docs/gate-measurements.md).
