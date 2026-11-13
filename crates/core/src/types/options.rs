@@ -122,11 +122,11 @@ impl Default for PipelineOptions {
 }
 
 impl PipelineOptions {
-    /// Where the parse and dependency caches live: `cache_dir` when set, else `node_modules/.cache/caliper-docgen`
-    /// under the nearest ancestor of the first source directory that has a `node_modules` or a `package.json`, so
-    /// running from another directory neither misses the project's cache nor creates a `node_modules` there. A source
-    /// directory in no project gets a directory in the OS temp directory.
-    pub(crate) fn effective_cache_dir(&self) -> Utf8PathBuf {
+    /// Where the parse and dependency caches (and `extract`'s kept checker answer) live: `cache_dir` when set, else
+    /// `node_modules/.cache/caliper-docgen` under the nearest ancestor of the first source directory that has a
+    /// `node_modules` or a `package.json`, so running from another directory neither misses the project's cache nor
+    /// creates a `node_modules` there. A source directory in no project gets a directory in the OS temp directory.
+    pub fn effective_cache_dir(&self) -> Utf8PathBuf {
         if let Some(dir) = &self.cache_dir {
             return dir.clone();
         }

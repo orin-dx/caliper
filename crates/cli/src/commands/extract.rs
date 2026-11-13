@@ -53,7 +53,7 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
             false => caliper_docgen_core::types::semantic::ResolverFacts::Used,
         };
         let timeout = std::time::Duration::from_millis(args.semantic_timeout_ms);
-        apply_semantic_backend(&options, timeout, resolver, None, &mut output);
+        apply_semantic_backend(&options, timeout, resolver, None, true, &mut output);
     }
 
     if let Some(pb) = pb {
@@ -95,12 +95,14 @@ pub fn cmd_extract(args: crate::ExtractArgs, quiet: bool, config_path: Option<&s
 /// Resolve the components the structural pass found with TypeScript's checker, all in one program, and merge the answer
 /// over `output`; with `only`, just the component under that key. The run waits for the checker; one request (or its
 /// start) that takes longer than `timeout`, like an unavailable checker, leaves `output` as it was, plus one
-/// diagnostic.
+/// diagnostic. With `kept` and the cache on, the answer is kept in the cache directory and reused while the checker
+/// would read the disk as it did (`caliper_docgen_semantic::resolve_cached`); only `extract` asks for that.
 fn apply_semantic_backend(
     options: &caliper_docgen_core::pipeline::PipelineOptions,
     timeout: std::time::Duration,
     resolver: caliper_docgen_core::types::semantic::ResolverFacts,
     only: Option<&str>,
+    kept: bool,
     output: &mut caliper_docgen_core::types::ExtractionOutput,
 ) {
     let project_root = options
@@ -124,7 +126,10 @@ fn apply_semantic_backend(
         .or_else(|| request.project_root.ancestors().map(|dir| dir.join("tsconfig.json")).find(|file| file.is_file()));
     request.tsc_path = options.semantic_tsc_path.clone();
     request.request_timeout = timeout;
-    let outcome = caliper_docgen_semantic::resolve(request);
+    let outcome = match kept && options.use_cache {
+        true => caliper_docgen_semantic::resolve_cached(request, &options.effective_cache_dir()),
+        false => caliper_docgen_semantic::resolve(request),
+    };
     caliper_docgen_core::types::semantic::merge_semantic_with(output, outcome, resolver);
 }
 
@@ -139,7 +144,7 @@ pub(crate) fn apply_checker(
     if options.checker && !no_checker {
         let timeout = std::time::Duration::from_millis(crate::DEFAULT_SEMANTIC_TIMEOUT_MS);
         let resolver = caliper_docgen_core::types::semantic::ResolverFacts::Used;
-        apply_semantic_backend(options, timeout, resolver, only, output);
+        apply_semantic_backend(options, timeout, resolver, only, false, output);
     }
 }
 

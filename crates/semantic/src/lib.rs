@@ -20,6 +20,7 @@ mod component;
 mod convert;
 mod declared;
 mod instantiate;
+mod kept;
 mod locate;
 mod on_demand;
 mod printed;
@@ -53,8 +54,9 @@ use crate::rpc::{CallError, REQUESTS, Rpc};
 pub const SUPPORTED_VERSIONS: &[&str] = &["7.1", "0.23.0-ts7.1.0-beta"];
 
 /// How many files are asked about at once, shared among the programs. A program's checker answers requests one at a
-/// time; this keeps it from idling between them.
-const FILES_IN_FLIGHT: usize = 16;
+/// time; this keeps it from idling between them. Four per program is enough: more only queue behind the checker, and
+/// sixteen measured slower and 150 MiB larger on Chakra's components (docs/gate-measurements.md).
+const FILES_IN_FLIGHT: usize = 8;
 
 /// The most threads the whole-project run converts the checker's answers on: past four, the checker's own thread is
 /// the bound (measured on Chakra's components, docs/gate-measurements.md).
@@ -142,13 +144,41 @@ impl SemanticRequest {
 /// inside one. The runtime has up to four threads: the built-in checker answers two programs at once, each on a thread
 /// of its own, and while it does, the answers it gave the other files in flight are read and converted on these.
 pub fn resolve(request: SemanticRequest) -> SemanticOutcome {
+    resolve_noting(request, None)
+}
+
+/// [`resolve`], with the answer kept in `cache_dir` for the next run over the same request: a run whose built-in
+/// checker would read the disk exactly as the last one did gets the last one's answer without starting the checker.
+/// Every question that checker asked of the file system (each file it read or looked for, each directory it listed,
+/// the tsconfig and what it extends) is asked again first, and any different answer, a new file where it found none
+/// included, discards the kept answer whole; so does another build of Caliper or of the pinned checker, and another
+/// request. A request that names a checker binary (`tsc_path`) or records its calls is answered as [`resolve`] answers
+/// it, and nothing is kept for it. The answer is the one [`resolve`] gives.
+pub fn resolve_cached(request: SemanticRequest, cache_dir: &Utf8Path) -> SemanticOutcome {
+    if request.tsc_path.is_some() || request.record_to.is_some() {
+        return resolve(request);
+    }
+    let file = cache_dir.join(kept::FILE);
+    let key = kept::request_key(&request);
+    let started = std::time::Instant::now();
+    if let Some(outcome) = kept::load(&file, key) {
+        tracing::debug!(ms = started.elapsed().as_millis() as u64, "the checker's kept answer still holds");
+        return outcome;
+    }
+    let reads = Arc::new(kept::Reads::default());
+    let outcome = resolve_noting(request, Some(reads.clone()));
+    kept::save(&file, key, &reads, &outcome);
+    outcome
+}
+
+fn resolve_noting(request: SemanticRequest, reads: Option<Arc<kept::Reads>>) -> SemanticOutcome {
     let threads = std::thread::available_parallelism().map_or(1, |count| count.get().min(CONVERTER_THREADS));
     let built = tokio::runtime::Builder::new_multi_thread().worker_threads(threads).enable_all().build();
     let runtime = match built {
         Ok(runtime) => runtime,
         Err(error) => return SemanticOutcome::unavailable(format!("could not start an async runtime: {error}")),
     };
-    runtime.block_on(run(request, None))
+    runtime.block_on(run_noting(request, None, reads))
 }
 
 /// The exported targets by file, in first-seen order, and an outcome that already holds a fallback for each target
@@ -173,6 +203,15 @@ fn group_by_file(request: &SemanticRequest) -> (SemanticOutcome, FxHashMap<&Utf8
 
 /// The checker `request` names: its `tsc_path` as a process, else the built-in one.
 async fn start_checker(request: &SemanticRequest, threads: usize) -> Result<Backend, String> {
+    start_noting(request, threads, None).await
+}
+
+/// [`start_checker`], the linked checker noting what it reads in `reads` ([`kept`]).
+async fn start_noting(
+    request: &SemanticRequest,
+    threads: usize,
+    reads: Option<Arc<kept::Reads>>,
+) -> Result<Backend, String> {
     Backend::start(Start {
         project_root: &request.project_root,
         tsc_path: request.tsc_path.as_deref(),
@@ -180,19 +219,30 @@ async fn start_checker(request: &SemanticRequest, threads: usize) -> Result<Back
         timeout: request.request_timeout,
         extra_env: &request.extra_env,
         threads,
+        reads,
     })
     .await
 }
 
 /// Answers `request` with a checker started for it, asking `programs` programs at once, or by default as many as
 /// [`CHECKER_PROGRAMS`] and the files allow ([`MIN_FILES_PER_PROGRAM`]).
+#[cfg(test)]
 async fn run(request: SemanticRequest, programs: Option<usize>) -> SemanticOutcome {
+    run_noting(request, programs, None).await
+}
+
+/// [`run`], the linked checker noting what it reads in `reads` ([`kept`]).
+async fn run_noting(
+    request: SemanticRequest,
+    programs: Option<usize>,
+    reads: Option<Arc<kept::Reads>>,
+) -> SemanticOutcome {
     if request.targets.iter().all(|target| target.exports.is_empty()) {
         return group_by_file(&request).0;
     }
     let files = group_by_file(&request).2.len();
     let programs = programs.unwrap_or_else(|| CHECKER_PROGRAMS.min(files.div_ceil(MIN_FILES_PER_PROGRAM))).max(1);
-    let checker = match start_checker(&request, programs).await {
+    let checker = match start_noting(&request, programs, reads).await {
         Ok(checker) => checker,
         Err(reason) => return SemanticOutcome::unavailable(reason),
     };
@@ -460,6 +510,34 @@ mod tests {
             assert!(names.contains(&"fromLastFile") && names.contains(&"fromTypes"), "{names:?}");
         }
         assert_eq!(one, three);
+    }
+
+    /// A symbol's type is kept by the symbol, not by what it is named or where it is declared: two instantiations of
+    /// one generic interface list a property of the same name and declaration, each a symbol of its own with its own
+    /// type, and the second component, answered after the first on the same program, is not handed the first's type.
+    #[test]
+    fn a_kept_symbol_type_is_the_type_of_that_symbol() {
+        let (_dir, root) = shared_types_project(0);
+        std::fs::write(
+            root.join("Boxes.tsx"),
+            "interface Box<T> { value: T; label?: string }\n\
+             export function Text(props: Box<string>) { return null; }\n\
+             export function Count(props: Box<number>) { return null; }\n\
+             export function Again(props: Box<string>) { return null; }\n",
+        )
+        .unwrap();
+        let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+
+        let outcome = runtime.block_on(run(SemanticRequest::new(root.clone(), targets_of(&output)), Some(1)));
+
+        let value = |key: &str| {
+            let component = outcome.components.iter().find(|component| component.key == key).unwrap();
+            component.props.iter().find(|prop| prop.name == "value").unwrap().prop_type.clone()
+        };
+        assert_eq!(value("Text"), caliper_docgen_core::types::PropType::String);
+        assert_eq!(value("Count"), caliper_docgen_core::types::PropType::Number);
+        assert_eq!(value("Again"), caliper_docgen_core::types::PropType::String);
     }
 
     /// A prop the converter keeps for later components is kept by what makes it, including which of its JSDoc was

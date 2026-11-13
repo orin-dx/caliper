@@ -15,14 +15,14 @@ use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use caliper_docgen_tsc_client::{MalformedFrameReason, Supervisor, SupervisorConfig, TscClientError};
+use caliper_docgen_tsc_client::{Supervisor, SupervisorConfig, TscClientError};
 use camino::Utf8Path;
 use serde_json::Value;
-use serde_json::value::RawValue;
 use tokio::sync::oneshot;
 use tsrs_api::{Handler, Response, Session, SessionOptions};
 use tsrs_vfs::{FS, bundled, osvfs};
 
+use crate::kept::{Reads, Recording};
 use crate::locate;
 
 /// The stack of the thread the linked checker answers on: what the `tsrs` binary gives each of its threads.
@@ -42,6 +42,8 @@ pub(crate) struct Start<'a> {
     /// How many threads the linked checker answers on: requests about different programs of its session run at once.
     /// A process answers on its own terms.
     pub(crate) threads: usize,
+    /// Note every question the linked checker asks of the disk here ([`crate::kept`]); a process's are not seen.
+    pub(crate) reads: Option<Arc<Reads>>,
 }
 
 /// A running checker.
@@ -57,7 +59,7 @@ impl Backend {
     /// supported version, or a checker thread that cannot be spawned, is an error that says so.
     pub(crate) async fn start(start: Start<'_>) -> Result<Backend, String> {
         let Some(tsc_path) = start.tsc_path else {
-            return InProcess::start(start.project_root, start.threads).map(Backend::InProcess);
+            return InProcess::start(start.project_root, start.threads, start.reads).map(Backend::InProcess);
         };
         let tsc_path = locate::explicit_tsc(tsc_path)?;
         let mut config = SupervisorConfig::new(tsc_path, start.project_root.to_owned(), start.expected_versions);
@@ -132,15 +134,16 @@ impl Client {
     }
 
     /// One request, its answer the `result` as the JSON text it arrived as. The wait is bounded by `deadline`; an
-    /// error is the one the process route would give for the same failure.
+    /// error is the one the process route would give for the same failure. The linked checker's text is handed on as
+    /// it was written, not read through first: the caller parses it once, into the shape it expects.
     pub(crate) async fn request_raw(
         &self,
         method: &str,
         params: Value,
         deadline: Duration,
-    ) -> Result<Box<RawValue>, TscClientError> {
+    ) -> Result<Box<str>, TscClientError> {
         match self {
-            Client::Process(client) => Ok(client.request_raw(method, params, deadline).await?.result),
+            Client::Process(client) => Ok(client.request_raw(method, params, deadline).await?.result.into()),
             Client::InProcess(linked) => linked.request(method, params, deadline).await,
         }
     }
@@ -178,21 +181,25 @@ impl InProcess {
     /// (a lane, [`Client::lane`]) on the same session: requests about one program wait for each other (each program
     /// has one checker, which `tsrs_api` locks for the length of a request), so a run that sends the requests about
     /// each of its programs down a lane of its own has them answered at once.
-    pub(crate) fn start(project_root: &Utf8Path, threads: usize) -> Result<InProcess, String> {
+    pub(crate) fn start(
+        project_root: &Utf8Path,
+        threads: usize,
+        reads: Option<Arc<Reads>>,
+    ) -> Result<InProcess, String> {
         let (lanes, queues): (Vec<_>, Vec<_>) = (0..threads.max(1)).map(|_| mpsc::channel()).unzip();
         let threads = lanes.len();
         let cwd = project_root.to_string();
         let thread = std::thread::Builder::new()
             .name("caliper-checker".to_string())
             .stack_size(CHECKER_STACK_BYTES)
-            .spawn(move || serve(cwd, queues))
+            .spawn(move || serve(cwd, queues, reads))
             .map_err(|error| format!("could not start the checker thread: {error}"))?;
         Ok(InProcess { client: Linked { lanes: lanes.into(), lane: 0 }, thread, threads })
     }
 }
 
 impl Linked {
-    async fn request(&self, method: &str, params: Value, deadline: Duration) -> Result<Box<RawValue>, TscClientError> {
+    async fn request(&self, method: &str, params: Value, deadline: Duration) -> Result<Box<str>, TscClientError> {
         let params = serde_json::to_vec(&params).map_err(|error| TscClientError::Serialize(Arc::new(error)))?;
         let (reply, answer) = oneshot::channel();
         let asked = Asked { method: method.to_string(), params, reply };
@@ -209,8 +216,7 @@ impl Linked {
             Err(_elapsed) => return Err(TscClientError::Timeout { method: method.to_string(), after: deadline }),
         };
         match answered {
-            Ok(text) => RawValue::from_string(text)
-                .map_err(|_invalid| TscClientError::MalformedFrame { reason: MalformedFrameReason::InvalidJson }),
+            Ok(text) => Ok(text.into_boxed_str()),
             Err(message) => Err(TscClientError::RpcError { code: INTERNAL_ERROR, message, data: None }),
         }
     }
@@ -225,8 +231,11 @@ impl Linked {
 
 /// The checker threads: one session, each thread answering the requests of its queue in turn until it is stopped or
 /// every sender is gone. The first thread creates the session and starts the others; the last to leave closes it.
-fn serve(cwd: String, queues: Vec<mpsc::Receiver<Job>>) {
-    let fs: Arc<dyn FS> = Arc::new(bundled::wrap_fs(osvfs::fs()));
+fn serve(cwd: String, queues: Vec<mpsc::Receiver<Job>>, reads: Option<Arc<Reads>>) {
+    let fs: Arc<dyn FS> = match reads {
+        Some(reads) => Arc::new(bundled::wrap_fs(Recording { inner: osvfs::fs(), reads })),
+        None => Arc::new(bundled::wrap_fs(osvfs::fs())),
+    };
     let session = Session::new(SessionOptions::new(cwd, bundled::lib_path(), fs, false));
     let left = Arc::new(AtomicUsize::new(queues.len()));
     let mut queues = queues.into_iter();
@@ -282,12 +291,12 @@ mod tests {
     }
 
     fn linked() -> Backend {
-        Backend::InProcess(InProcess::start(Utf8Path::new("/"), 1).unwrap())
+        Backend::InProcess(InProcess::start(Utf8Path::new("/"), 1, None).unwrap())
     }
 
     async fn ask(client: &Client, method: &str, params: Value) -> Result<Value, TscClientError> {
         let answer = client.request_raw(method, params, Duration::from_secs(120)).await?;
-        Ok(serde_json::from_str(answer.get()).unwrap())
+        Ok(serde_json::from_str(&answer).unwrap())
     }
 
     /// A program of `file` holding `text`, held in the checker's memory: its snapshot and project.
@@ -341,6 +350,7 @@ mod tests {
             timeout: Duration::from_secs(5),
             extra_env: &[],
             threads: 1,
+            reads: None,
         };
 
         let linked = runtime.block_on(Backend::start(start(None))).unwrap();

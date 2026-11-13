@@ -40,10 +40,9 @@ use rustc_hash::FxHashMap;
 use crate::declared::Declared;
 use crate::printed::{Marker, SignatureMarkers, signature_markers, tuple_labels};
 use crate::rpc::{
-    CallError, CompactSymbol, IndexInfo, ObjectMembers, Rpc, SignatureInfo, SignatureKind, SymbolInfo, TypeInfo,
-    decode, flag,
+    CallError, CompactSymbol, IndexInfo, ObjectMembers, Rpc, SignatureInfo, SignatureKind, SymbolInfo, SymbolRef,
+    TypeInfo, decode, flag,
 };
-use serde_json::value::RawValue;
 
 /// Nesting past which an object, union or intersection is cut with [`TruncationLimit::Depth`].
 const MAX_DEPTH: u8 = 5;
@@ -360,7 +359,7 @@ type Memo = Mutex<FxHashMap<(u64, u8), Vec<Arc<Entry>>>>;
 
 /// The parts of each type asked about so far, by (type handle, which parts), as the text the checker answered: read
 /// again on each use, which costs a fraction of the round trip, and is several times smaller than the read lists.
-type PartsSeen = Mutex<FxHashMap<(u64, Parts), Arc<RawValue>>>;
+type PartsSeen = Mutex<FxHashMap<(u64, Parts), Arc<str>>>;
 
 /// The props answered so far, by the hash of their [`PropKey`] and then the key itself.
 type KeptProps = Mutex<FxHashMap<u64, Vec<(PropKey, Arc<SemanticProp>)>>>;
@@ -390,7 +389,7 @@ impl PropKey {
     pub(crate) fn of(property: &SymbolInfo, prop_type: &TypeInfo, description: bool, tags: bool) -> Self {
         use std::hash::{Hash, Hasher};
         let optional = property.flags & flag::SYMBOL_OPTIONAL != 0;
-        let symbol = property.declarations.is_empty().then(|| property.reference.to_string());
+        let symbol = property.declarations.is_empty().then(|| property.reference.text().to_string());
         let mut hasher = rustc_hash::FxHasher::default();
         (&property.name, optional, prop_type.id, &property.declarations, &property.parent, &symbol, description, tags)
             .hash(&mut hasher);
@@ -406,6 +405,13 @@ impl PropKey {
             tags,
         }
     }
+}
+
+/// The type of each symbol asked about, by its reference, each type held once however many symbols have it.
+#[derive(Default)]
+struct SymbolTypes {
+    by_symbol: FxHashMap<SymbolRef, Arc<TypeInfo>>,
+    by_id: FxHashMap<u64, Arc<TypeInfo>>,
 }
 
 /// Which parts of a type [`Converter::parts`] asks for.
@@ -457,6 +463,11 @@ struct State {
     maps: Mutex<FxHashMap<MapKey, usize>>,
     /// The props answered so far ([`crate::component::props_of_type`]), by what makes one ([`PropKey`]).
     props: KeptProps,
+    /// The type of each symbol asked about so far, by its reference: what `getTypeOfSymbol` answers for a symbol does
+    /// not change inside a snapshot. Chakra's props types are each their own instantiation, so each lists its own
+    /// property symbols, but six in ten of those were listed by a component before (the same style props reached
+    /// through the same instantiation), and their types need not be asked again.
+    symbol_types: Mutex<SymbolTypes>,
     hits: AtomicU64,
     misses: AtomicU64,
 }
@@ -500,6 +511,39 @@ impl Converter {
         if !bucket.iter().any(|(known, _)| *known == key) {
             bucket.push((key, prop));
         }
+    }
+
+    /// The type of each symbol, in order: those asked about before in this snapshot from what the checker answered
+    /// then, the others in one request.
+    pub(crate) async fn types_of_symbols(&self, symbols: &[&SymbolRef]) -> Result<Vec<TypeInfo>, CallError> {
+        let mut types: Vec<Option<TypeInfo>> = {
+            let known = self.state.symbol_types.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            symbols.iter().map(|symbol| known.by_symbol.get(*symbol).map(|info| TypeInfo::clone(info))).collect()
+        };
+        let unknown: Vec<&SymbolRef> =
+            symbols.iter().zip(&types).filter(|(_, known)| known.is_none()).map(|(symbol, _)| *symbol).collect();
+        if !unknown.is_empty() {
+            let answered = self.rpc.types_of_symbols(&unknown).await?;
+            if answered.len() != unknown.len() {
+                return Err(CallError::Rejected(format!(
+                    "getTypesOfSymbols answered {} types for {} symbols",
+                    answered.len(),
+                    unknown.len()
+                )));
+            }
+            let mut known = self.state.symbol_types.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut answered = answered.into_iter();
+            for (symbol, slot) in symbols.iter().zip(&mut types) {
+                if slot.is_none()
+                    && let Some(info) = answered.next()
+                {
+                    let shared = known.by_id.entry(info.id).or_insert_with(|| Arc::new(info.clone())).clone();
+                    known.by_symbol.insert((*symbol).clone(), shared);
+                    *slot = Some(info);
+                }
+            }
+        }
+        Ok(types.into_iter().flatten().collect())
     }
 
     /// Memo hits and misses so far, for the debug line.
@@ -725,7 +769,7 @@ impl Converter {
         let text = match known {
             Some(text) => text,
             None => {
-                let fetched: Arc<RawValue> = match kind {
+                let fetched: Arc<str> = match kind {
                     Parts::Members => self.rpc.members_text(id).await?,
                     Parts::Arguments => self.rpc.type_arguments_text(id).await?,
                 }
@@ -1397,7 +1441,7 @@ impl Converter {
         let (types, readonly) = if references.is_empty() {
             (Vec::new(), Vec::new())
         } else {
-            (self.rpc.types_of_symbols(&references).await?, self.rpc.readonly_symbols(&references).await?)
+            (self.types_of_symbols(&references).await?, self.rpc.readonly_symbols(&references).await?)
         };
         let converted = self.convert_all(&types, cx).await?;
         let mut fields = Vec::with_capacity(properties.len() + indexes.len());
@@ -1461,7 +1505,7 @@ impl Converter {
             return Ok(None);
         }
         let references: Vec<_> = parameters.iter().map(|parameter| &parameter.reference).collect();
-        let types = if references.is_empty() { Vec::new() } else { self.rpc.types_of_symbols(&references).await? };
+        let types = if references.is_empty() { Vec::new() } else { self.types_of_symbols(&references).await? };
         let converted = self.convert_all(&types, cx).await?;
         let mut params = Vec::with_capacity(parameters.len());
         for (index, (parameter, param_type)) in parameters.iter().zip(converted).enumerate() {

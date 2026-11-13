@@ -11,6 +11,7 @@ use camino::Utf8PathBuf;
 use rustc_hash::{FxHashMap, FxHasher};
 
 mod order;
+mod stored;
 mod syntax;
 
 use crate::extractor::written::WrittenMember;

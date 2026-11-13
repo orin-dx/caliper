@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use tokio::sync::OnceCell;
 
 use crate::convert::declared_in;
-use crate::rpc::{CallError, CompactSymbol, JsDocTag, Rpc, SymbolInfo, decode, flag};
+use crate::rpc::{CallError, CompactSymbol, JsDocTag, Rpc, SymbolInfo, SymbolRef, decode, flag};
 
 /// One prop to look up, and which of its JSDoc to ask for.
 pub(crate) struct Asked<'a> {
@@ -43,7 +43,7 @@ pub(crate) struct Declared {
 }
 
 /// The symbol a declaration declares, by the parent it names and the reference that asks about it.
-type DeclaredSymbol = Option<(Option<CompactSymbol>, Value)>;
+type DeclaredSymbol = Option<(Option<CompactSymbol>, SymbolRef)>;
 
 /// What one snapshot's answers about declarations are kept as: they do not change inside it.
 #[derive(Debug, Default)]
@@ -67,7 +67,11 @@ enum Pending {
 
 /// What a prop's JSDoc is kept by: its declarations, where the checker reads it, or the symbol when it has none.
 fn jsdoc_key(property: &SymbolInfo) -> String {
-    if property.declarations.is_empty() { property.reference.to_string() } else { property.declarations.join("\n") }
+    if property.declarations.is_empty() {
+        property.reference.text().to_string()
+    } else {
+        property.declarations.join("\n")
+    }
 }
 
 /// The declarations, description and tags of every prop of `asked`, in its order: at most one round trip for what
@@ -188,7 +192,7 @@ async fn parent_names(
     declares: &[Vec<DeclaredSymbol>],
 ) -> Result<FxHashMap<CompactSymbol, Option<String>>, CallError> {
     let mut known: FxHashMap<CompactSymbol, Option<String>> = FxHashMap::default();
-    let mut unseen: Vec<(CompactSymbol, &Value)> = Vec::new();
+    let mut unseen: Vec<(CompactSymbol, &SymbolRef)> = Vec::new();
     {
         let seen = memo.parents.lock().unwrap_or_else(PoisonError::into_inner);
         let named = declares.iter().flatten().flatten();
@@ -264,7 +268,7 @@ mod tests {
 
     fn symbol(declarations: &[&str], parent: Option<u64>) -> SymbolInfo {
         SymbolInfo {
-            reference: json!({ "id": 7 }),
+            reference: SymbolRef::of(r#"{"id":7}"#),
             name: "x".to_string(),
             flags: 4,
             declarations: declarations.iter().map(|declaration| declaration.to_string()).collect(),
@@ -307,7 +311,7 @@ mod tests {
     #[test]
     fn jsdoc_is_kept_by_the_declarations_so_two_symbols_of_one_declaration_share_it() {
         let declared = symbol(&["8.173./p/base.ts"], Some(3));
-        let mapped = SymbolInfo { reference: json!({ "id": 99 }), ..symbol(&["8.173./p/base.ts"], None) };
+        let mapped = SymbolInfo { reference: SymbolRef::of(r#"{"id":99}"#), ..symbol(&["8.173./p/base.ts"], None) };
         let synthetic = symbol(&[], None);
 
         assert_eq!(jsdoc_key(&declared), jsdoc_key(&mapped));
