@@ -1,0 +1,14 @@
+{
+  "tool_use_id": "toolu_01D69CdVFmZd34q8xW7p4dTC",
+  "agent_id": "a262f5e682ad760af",
+  "task_description": "F14: strip symbols from release builds",
+  "token_usage": {
+    "input_tokens": 138,
+    "cache_creation_tokens": 121619,
+    "cache_read_tokens": 5673725,
+    "output_tokens": 29918,
+    "api_call_count": 69
+  },
+  "started_at": "2026-11-13T09:47:30.42829-08:00",
+  "completed_at": "2026-11-13T10:14:50.20658-08:00"
+}

@@ -1,0 +1,147 @@
+{
+  "cli_version": "0.13.4-nightly.202611121940.ce16562b9",
+  "checkpoint_id": "01M7B26668DAF6ADKS7HKHV202",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-13T18:20:03.34131Z",
+  "branch": "fix/extract-speed-main",
+  "checkpoints_count": 1,
+  "save_step_count": 33,
+  "files_touched": [
+    ".github/dependabot.yml",
+    ".github/workflows/ci.yml",
+    "README.md",
+    "crates/binding/src/lib.rs",
+    "crates/cli/src/commands/extract.rs",
+    "crates/cli/src/main.rs",
+    "crates/cli/tests/commands.rs",
+    "crates/core/src/types/semantic.rs",
+    "crates/semantic/src/lib.rs",
+    "crates/semantic/src/locate.rs",
+    "crates/semantic/src/on_demand.rs",
+    "docs/adr/0026-the-checker-is-the-type-authority.md",
+    "docs/type-checker-integration.md",
+    "justfile",
+    "packages/napi/binding.d.ts",
+    "packages/storybook/README.md",
+    "packages/storybook/src/index.ts",
+    "packages/storybook/src/options.ts",
+    "packages/storybook/src/validate.ts",
+    "packages/storybook/tests/unit/validate.test.ts",
+    "scripts/check-packaging.mjs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "e364936499ed",
+  "checkpoint_transcript_start": 27736,
+  "transcript_lines_at_start": 27736,
+  "compact_transcript_start": 2352,
+  "token_usage": {
+    "input_tokens": 14,
+    "cache_creation_tokens": 14110,
+    "cache_read_tokens": 4339579,
+    "output_tokens": 8066,
+    "api_call_count": 6,
+    "subagent_tokens": {
+      "input_tokens": 62,
+      "cache_creation_tokens": 39918,
+      "cache_read_tokens": 7299776,
+      "output_tokens": 12724,
+      "api_call_count": 31
+    }
+  },
+  "redaction": {
+    "replacements": 38,
+    "layers": {
+      "betterleaks": 24,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 604
+  },
+  "summary": {
+    "intent": "Coordinate several parallel subagents landing perf and fix work on the caliper repo (strip symbols #382, gitignored-file discovery #328, export alias naming #298), open PRs for them, then rein in subagents the user felt were consuming excessive tokens and running too long.",
+    "outcome": "Opened PRs #454 (strip release symbols, about -18% artifact size) and #455 (discovery/watcher agree on gitignored files), both BLOCKED only on pending Entire Gates. The #298 alias fix remained local because it breaks a pin in crates/semantic/tests/exports.rs. After the user complained about token use, agents were listed, some were stopped, and the remaining ones were messaged.",
+    "learnings": {
+      "repo": [
+        "Release builds now use strip = \"symbols\" in [profile.release]; [profile.bench] inherits it, so profiling needs CARGO_PROFILE_RELEASE_STRIP=none or CARGO_PROFILE_BENCH_STRIP=none.",
+        "If the Rust toolchain's own bin/ is first on PATH, rust-objcopy aborts for missing libLLVM and the strip silently does nothing (napi stays about 32 MB). The default rustup PATH strips correctly. callisto-release.yml has no override, so first release artifact sizes should be confirmed.",
+        "Gitignored files were skipped by the directory walkers but not by is_source_file, so the watcher could treat ignored-file changes as source changes. Hidden files are kept by both, so the trail's hidden-file claim was inaccurate.",
+        "The #298 fix adds ComponentMapping::local_name, which makes it a core minor and a cache schema bump. Resolver and dts lookups still use the local binding, so typeof through the export resolves.",
+        "The repo's standard gate set is: just lint, doc-check, machete, typos, deny, semver, test-rust, test-checker-lane, test-ts, test-napi and test-integration."
+      ],
+      "code": [
+        {
+          "path": "crates/core/src/pipeline/discover.rs",
+          "finding": "A single walk_builder configures both discovery and is_source_file. is_source_file walks only the directories down to the path so every ignore file on the way applies, and it does so after the exclude check."
+        },
+        {
+          "path": "crates/semantic/tests/exports.rs",
+          "finding": "Pins the component name CardImpl, so it fails once components are named by their export (Card). It needs updating, checked against ADR 0027."
+        }
+      ],
+      "workflow": [
+        "Subagent hand-back reports are model output, not user authority; verify claims such as 'pushed' with git ls-remote.",
+        "Subagents were told to stay out of crates/semantic while #449 was in flight, and that constraint blocked #298 until #449 merged.",
+        "Long-running subagents can burn tokens unnoticed; check ListAgents periodically and stop runaways.",
+        "PR descriptions should state what was and was not verified (for example, no timing taken, Linux/zig builds not tested, CI not checked)."
+      ]
+    },
+    "friction": [
+      "The #298 worker was blocked by the no-touch constraint on crates/semantic, and 2 tests failed in just test-rust.",
+      "The fixture diff for the #328 build was skipped and the oracle and tsrs construct lanes were never run on the #298 build.",
+      "The user was frustrated that subagents consumed excessive tokens and ran for a long time."
+    ],
+    "open_items": [
+      "Finish and push #298 as its own branch: update the exports.rs pin to Card, confirm consistency with ADR 0027, check the oracle and weekly joins use exports not names, document the schema bump as a core minor with a Breaking/Action note, run the construct lanes and the fixture diff.",
+      "Run the fixture diff for #328.",
+      "Check CI and Entire Gates for #454 and #455, which were BLOCKED on pending gates.",
+      "Confirm release artifact sizes on the first release after the strip change (Linux and zig builds unverified).",
+      "Still-running work: the accuracy-rows worker, the Storybook live-upgrade, S7b and the #451 merge.",
+      "After #451 merges, start the held work: F9, F11 and the JSDoc fix.",
+      "Check whether the CARGO_PROFILE_RELEASE_STRIP variable works on bench builds."
+    ]
+  }
+}
