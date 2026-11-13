@@ -397,7 +397,7 @@ async fn module_exports(rpc: &Rpc, file: &str) -> Result<Option<component::Modul
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::unwrap_used, clippy::panic)]
 
     use caliper_docgen_core::pipeline::{PipelineOptions, extract};
 
@@ -460,6 +460,70 @@ mod tests {
             assert!(names.contains(&"fromLastFile") && names.contains(&"fromTypes"), "{names:?}");
         }
         assert_eq!(one, three);
+    }
+
+    /// Stands in for the built-in checker's session: it initializes and makes a snapshot of as many programs as asked,
+    /// and panics on any question about them, counting how many it was asked.
+    struct Panicking {
+        asked: Arc<std::sync::atomic::AtomicU32>,
+    }
+
+    impl checker::Served for Panicking {
+        fn handle(&self, method: &str, params: &[u8]) -> Result<String, checker::Failure> {
+            match method {
+                "initialize" | "release" => Ok("null".to_string()),
+                "createSnapshot" => {
+                    let params: serde_json::Value = serde_json::from_slice(params).unwrap();
+                    let count = params["createPrograms"].as_array().map_or(1, Vec::len);
+                    let projects: Vec<_> = (0..count).map(|n| serde_json::json!({ "id": format!("p{n}") })).collect();
+                    Ok(serde_json::json!({ "snapshot": 1, "projects": projects }).to_string())
+                }
+                _ => {
+                    self.asked.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    panic!("checker invariant broken")
+                }
+            }
+        }
+
+        fn discard(&self, _method: &str, _answer: &str) {}
+
+        fn close(&self) {}
+    }
+
+    /// A whole-project run on two lanes whose checker panics: the lane that met it fails its file, the other lane
+    /// stops, and the run gives every component its structural answer with one diagnostic, never a partial answer.
+    #[test]
+    fn a_panic_on_one_lane_fails_the_whole_run_to_the_structural_answer() {
+        let (_dir, root) = shared_types_project(6);
+        let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
+        let request = SemanticRequest::new(root.clone(), targets_of(&output));
+        let asked = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let session = Panicking { asked: Arc::clone(&asked) };
+        let checker = Backend::InProcess(checker::InProcess::spawn(2, move || session).unwrap());
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+
+        let outcome = runtime.block_on(answer_with(&checker, &request));
+
+        assert!(outcome.components.is_empty(), "{:?}", outcome.components);
+        assert_eq!(outcome.diagnostics.len(), 1, "{:?}", outcome.diagnostics);
+        let message = &outcome.diagnostics[0].message;
+        // Whichever lane's error the run meets first: the panic, the other lane's refusal after it, or a request that
+        // was still queued on a lane that stopped.
+        let reason = message.strip_prefix("TypeScript checker backend unavailable: the checker stopped answering: ");
+        assert!(
+            reason.is_some_and(|reason| [
+                "panic: checker invariant broken",
+                "the built-in checker stopped: a panic unwound through its session",
+                "session shut down",
+            ]
+            .iter()
+            .any(|said| reason.contains(said))),
+            "{message}"
+        );
+        // Each lane met the panic at most once: none was asked again after it.
+        assert!((1..=2).contains(&asked.load(std::sync::atomic::Ordering::Relaxed)));
+        assert!(!checker.is_alive());
+        runtime.block_on(checker.shutdown());
     }
 
     /// A prop the converter keeps for later components is kept by what makes it, including which of its JSDoc was
