@@ -1,0 +1,106 @@
+{
+  "cli_version": "0.13.4-nightly.202611121940.ce16562b9",
+  "checkpoint_id": "01M79EEMVEN5EBRN76FNFYYQ8A",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-13T03:15:48.299253Z",
+  "branch": "perf/checker-shared-bases",
+  "checkpoints_count": 4,
+  "save_step_count": 1,
+  "files_touched": [
+    "README.md",
+    "docs/adr/0026-the-checker-is-the-type-authority.md",
+    "docs/type-checker-integration.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "573c6e0cccdc",
+  "checkpoint_transcript_start": 25242,
+  "transcript_lines_at_start": 25242,
+  "compact_transcript_start": 2155,
+  "token_usage": {
+    "input_tokens": 16,
+    "cache_creation_tokens": 3252,
+    "cache_read_tokens": 3233108,
+    "output_tokens": 2703,
+    "api_call_count": 8,
+    "subagent_tokens": {
+      "input_tokens": 22,
+      "cache_creation_tokens": 13439,
+      "cache_read_tokens": 5050348,
+      "output_tokens": 4605,
+      "api_call_count": 11
+    }
+  },
+  "redaction": {
+    "replacements": 34,
+    "layers": {
+      "betterleaks": 20,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 563
+  },
+  "summary": {
+    "intent": "Push three local commits (tests, docs and changeset, lint fixes) ending at 4c59ef11 to the remote branch perf/checker-extract-speed in the caliper repo using --no-verify, then link the trail and write a PR body.",
+    "outcome": "The push never landed; the remote stayed at 854da4c6. The assistant verified that 4c59ef11 exists, descends from the remote tip and would fast-forward cleanly, but it was blocked from pushing with --no-verify and the user's attempts did not take effect or return output. The user was told to run the push from a regular terminal.",
+    "learnings": {
+      "repo": [
+        "The speed commits live on the local branch perf/checker-extract-speed; the worktree-agent-aed2d... branch points at main's tip, so pushing it was rejected.",
+        "The follow-up branch perf/checker-shared-bases contains 4c59ef11, so it is based on the speed work.",
+        "The 3 commits to push (tests, docs and changeset, lint fixes) sit on top of remote tip 854da4c6, so the push is a clean fast-forward and cannot overwrite anything."
+      ],
+      "code": [],
+      "workflow": [
+        "Verify a remote push with `git ls-remote origin <branch>` and confirm a commit's validity with `git cat-file -t` and `git merge-base --is-ancestor` before claiming where it lives.",
+        "The permission classifier blocks `git push --no-verify` from the assistant even when the user authorizes it in chat; the user has to run it themselves in a terminal.",
+        "User messages beginning with `!` arrived as plain text in this session, so the shell passthrough did not run and no command output reached the assistant.",
+        "When asking a user to run a command, ask them to paste the exact output so the next step rests on facts rather than guesses."
+      ]
+    },
+    "friction": null,
+    "open_items": null
+  }
+}
