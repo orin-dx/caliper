@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use serde_json::{Value, json};
 
@@ -36,11 +36,96 @@ fn classify(error: RequestError) -> CallError {
     }
 }
 
+/// The reference the checker wants back to name a symbol, kept as the JSON text it arrived as: it is opaque to us, and
+/// is only ever sent back, written into a request as it is.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(transparent)]
+pub(crate) struct SymbolRef(Box<RawValue>);
+
+impl SymbolRef {
+    /// The reference's JSON text, which names the symbol within its snapshot.
+    pub(crate) fn text(&self) -> &str {
+        self.0.get()
+    }
+}
+
+#[cfg(test)]
+impl From<Value> for SymbolRef {
+    fn from(value: Value) -> Self {
+        SymbolRef(serde_json::value::to_raw_value(&value).unwrap_or_else(|_| RawValue::NULL.to_owned()))
+    }
+}
+
+/// What a request asks about besides the snapshot and project [`Rpc`] adds: written as the fields of its parameters, a
+/// symbol's reference as the text it arrived as.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub(crate) enum Asking<'a> {
+    Symbol {
+        symbol: &'a SymbolRef,
+    },
+    Symbols {
+        symbols: &'a [&'a SymbolRef],
+    },
+    /// A declaration, by its node handle.
+    Location {
+        location: &'a str,
+    },
+    Type {
+        #[serde(rename = "type")]
+        type_id: u64,
+    },
+    Signatures {
+        #[serde(rename = "type")]
+        type_id: u64,
+        kind: u8,
+    },
+    /// A type printed with `TypeFormatFlags`.
+    Printed {
+        #[serde(rename = "type")]
+        type_id: u64,
+        flags: u64,
+    },
+    /// A type or signature, by the handle the checker gave it.
+    Object {
+        #[serde(rename = "objectId")]
+        object_id: u64,
+    },
+    File {
+        file: &'a str,
+    },
+    Nothing {},
+}
+
+/// A request's parameters: the snapshot and project, then the fields of what it asks.
+#[derive(Serialize)]
+struct Scoped<'a, E> {
+    project: &'a str,
+    snapshot: u64,
+    #[serde(flatten)]
+    extra: E,
+}
+
+/// One request of a batch.
+#[derive(Serialize)]
+struct Batched<'a, E> {
+    method: &'static str,
+    params: Scoped<'a, E>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchParams<'a, 'b, E> {
+    requests: &'b [Batched<'a, E>],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    continuation_token: Option<&'b str>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SymbolInfo {
     /// The full reference the checker wants back to name this symbol; opaque to us.
-    pub reference: Value,
+    pub reference: SymbolRef,
     /// The name the source writes: the checker's escaped name with the escaping removed (see
     /// [`unescape_leading_underscores`]).
     #[serde(deserialize_with = "unescaped_name")]
@@ -80,8 +165,11 @@ pub(crate) fn unescape_leading_underscores(name: &str) -> &str {
 }
 
 fn unescaped_name<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
-    let name = String::deserialize(deserializer)?;
-    Ok(unescape_leading_underscores(&name).to_string())
+    let mut name = String::deserialize(deserializer)?;
+    if unescape_leading_underscores(&name).len() < name.len() {
+        name.remove(0);
+    }
+    Ok(name)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -272,7 +360,10 @@ pub(crate) struct Rpc {
     options: Value,
     /// Every call and its answer, when the caller asked to record a replay fixture; shared with a layered snapshot.
     recording: Option<Arc<Mutex<Vec<Value>>>>,
-    calls: Arc<Mutex<BTreeMap<String, u64>>>,
+    calls: Arc<Mutex<BTreeMap<&'static str, u64>>>,
+    /// The snapshots of the other lanes [`Rpc::open_programs`] opened beside this one, which [`Rpc::release`] on this
+    /// one releases too.
+    others: Vec<u64>,
 }
 
 /// A diagnostic the checker reports for a file: where it starts and what it says.
@@ -324,22 +415,26 @@ impl Rpc {
             options: Value::Null,
             recording: None,
             calls: Arc::default(),
+            others: Vec::new(),
         };
-        rpc.call("initialize", Value::Null).await?;
+        rpc.call("initialize", &Value::Null).await?;
         Ok(match tsconfig {
             Some(file) => {
-                let parsed: Value = decode(&rpc.call("parseConfigFile", json!({ "file": file })).await?)?;
+                let parsed: Value = decode(&rpc.call("parseConfigFile", &json!({ "file": file })).await?)?;
                 parsed.get("options").cloned().unwrap_or_else(default_options)
             }
             None => default_options(),
         })
     }
 
-    /// A snapshot of `count` programs over the same `root_files` (one when `count` is at most one), in a session it
-    /// initializes first ([`Rpc::prepare`]), with one session bound to each program: a checker that answers requests
-    /// about different programs at once ([`crate::checker::InProcess`]) answers the sessions in parallel. The programs
-    /// read the same files, so each answers what any other would. They share the request counts and the recording;
-    /// [`Rpc::release`] on the first releases the snapshot, and with it every program.
+    /// One snapshot of a program over `root_files` for each of `count` lanes (one when `count` is at most one), in a
+    /// session it initializes first ([`Rpc::prepare`]), with one session bound to each, the `n`th asking down the
+    /// checker's `n`th lane ([`Client::lane`]): a checker that answers requests about different snapshots at once
+    /// ([`crate::checker`]) answers the sessions in parallel. Each lane has a snapshot of its own because the checker
+    /// registers the symbols, types and signatures it hands out in one table per snapshot, behind one lock: two programs
+    /// of one snapshot wait for each other on it. The first lane's snapshot is built from the disk; each other one is
+    /// derived from it ([`Rpc::beside`]), so every program reads the same text of every file. They share the request
+    /// counts and the recording; [`Rpc::release`] on the first releases every snapshot.
     pub(crate) async fn open_programs(
         client: Client,
         deadline: Duration,
@@ -349,44 +444,54 @@ impl Rpc {
         count: usize,
     ) -> Result<Vec<Rpc>, CallError> {
         let options = Rpc::prepare(&client, deadline, tsconfig).await?;
-        if count <= 1 {
-            return Ok(vec![Rpc::open_with(client, deadline, &options, root_files, record).await?]);
+        let first = Rpc::open_with(client.lane(0), deadline, &options, root_files, record).await?;
+        let mut lanes: Vec<Rpc> = Vec::with_capacity(count.max(1));
+        for lane in 1..count {
+            match first.beside(client.lane(lane), root_files).await {
+                Ok(rpc) => lanes.push(rpc),
+                Err(error) => {
+                    // Nothing will hold the snapshots made so far to release them later.
+                    first.release().await;
+                    for opened in &lanes {
+                        opened.release().await;
+                    }
+                    return Err(error);
+                }
+            }
         }
-        let first = Rpc {
-            client,
-            deadline,
-            snapshot: 0,
-            project: String::new(),
-            options: options.clone(),
-            recording: record.then(Arc::default),
-            calls: Arc::default(),
-        };
-        let program = json!({ "rootFiles": root_files, "compilerOptions": options });
-        let programs: Vec<Value> = std::iter::repeat_n(program, count).collect();
+        let others = lanes.iter().map(|rpc| rpc.snapshot).collect();
+        lanes.insert(0, Rpc { others, ..first });
+        Ok(lanes)
+    }
+
+    /// A snapshot of its own for a program over `root_files` beside this one's, asked through `client`: derived from
+    /// this snapshot (`updateSnapshot` with `createPrograms`), it reads every file as this one holds it, from the files
+    /// this snapshot has read and parsed, and does not go to the disk again. It shares the request counts and the
+    /// recording; it is released on its own.
+    async fn beside(&self, client: Client, root_files: &[String]) -> Result<Rpc, CallError> {
+        let changes = json!({
+            "createPrograms": [{ "rootFiles": root_files, "compilerOptions": self.options }],
+            "ensurePrograms": true,
+        });
         let response: SnapshotResponse =
-            decode(&first.call("createSnapshot", json!({ "createPrograms": programs })).await?)?;
-        if response.projects.len() != count {
+            decode(&self.call("updateSnapshot", &json!({ "snapshot": self.snapshot, "changes": changes })).await?)?;
+        let rpc = Rpc {
+            client,
+            deadline: self.deadline,
+            snapshot: response.snapshot,
+            project: String::new(),
+            options: self.options.clone(),
+            recording: self.recording.clone(),
+            calls: self.calls.clone(),
+            others: Vec::new(),
+        };
+        // The response lists the programs the update made or changed: the one created, not this one's.
+        let Some(project) = response.projects.into_iter().find(|project| project.id != self.project) else {
             // Nothing will hold this snapshot to release it later.
-            Rpc { snapshot: response.snapshot, ..first }.release().await;
-            return Err(CallError::Rejected(format!(
-                "createSnapshot made {} programs of {count}",
-                response.projects.len()
-            )));
-        }
-        Ok(response
-            .projects
-            .into_iter()
-            .enumerate()
-            .map(|(lane, project)| Rpc {
-                client: first.client.lane(lane),
-                deadline,
-                snapshot: response.snapshot,
-                project: project.id,
-                options: options.clone(),
-                recording: first.recording.clone(),
-                calls: first.calls.clone(),
-            })
-            .collect())
+            rpc.release().await;
+            return Err(CallError::Rejected("updateSnapshot created no program".to_string()));
+        };
+        Ok(Rpc { project: project.id, ..rpc })
     }
 
     /// A snapshot over `root_files` in a session [`Rpc::prepare`] already initialized.
@@ -405,8 +510,30 @@ impl Rpc {
             options: options.clone(),
             recording: record.then(Arc::default),
             calls: Arc::default(),
+            others: Vec::new(),
         };
         rpc.created(json!({ "createPrograms": [{ "rootFiles": root_files, "compilerOptions": options }] })).await
+    }
+
+    /// A snapshot of a program rooted at `files` alone, held in the checker's memory and never written to disk (see
+    /// [`Rpc::layered`]), in a session [`Rpc::prepare`] already initialized.
+    pub(crate) async fn open_in_memory(
+        client: Client,
+        deadline: Duration,
+        options: &Value,
+        files: &[(String, String)],
+    ) -> Result<Rpc, CallError> {
+        let session = Rpc {
+            client,
+            deadline,
+            snapshot: 0,
+            project: String::new(),
+            options: options.clone(),
+            recording: None,
+            calls: Arc::default(),
+            others: Vec::new(),
+        };
+        session.layered(&[], files).await
     }
 
     /// A new snapshot of the same program with `files` added, held in the checker's memory and never written to disk:
@@ -420,6 +547,7 @@ impl Rpc {
             options: self.options.clone(),
             recording: self.recording.clone(),
             calls: self.calls.clone(),
+            others: Vec::new(),
         };
         let mut roots = root_files.to_vec();
         roots.extend(files.iter().map(|(path, _)| path.clone()));
@@ -454,7 +582,7 @@ impl Rpc {
         }
         changes.insert("ensurePrograms".to_string(), Value::Bool(true));
         let response: SnapshotResponse =
-            decode(&self.call("updateSnapshot", json!({ "snapshot": self.snapshot, "changes": changes })).await?)?;
+            decode(&self.call("updateSnapshot", &json!({ "snapshot": self.snapshot, "changes": changes })).await?)?;
         // The response lists only the projects it replaced; the synthetic program keeps its id.
         let project = response.projects.into_iter().next().map_or_else(|| self.project.clone(), |project| project.id);
         Ok(Rpc {
@@ -465,17 +593,49 @@ impl Rpc {
             options: self.options.clone(),
             recording: self.recording.clone(),
             calls: Arc::default(),
+            others: Vec::new(),
         })
+    }
+
+    /// Runs `work` on the checker thread this session asks ([`Client::run_on_thread`]), given this session as that
+    /// thread asks it, in place; each request is bounded by this session's deadline.
+    pub(crate) async fn run_on_thread<T: Send + 'static>(
+        self: &Arc<Self>,
+        work: impl FnOnce(Arc<Rpc>) -> T + Send + 'static,
+    ) -> Result<T, CallError> {
+        let this = Arc::clone(self);
+        let run = self.client.run_on_thread(self.deadline, move |client| work(Arc::new(this.through(client))));
+        run.await.map_err(classify)
+    }
+
+    /// This session asked through `client`: the same snapshot and project, counts and recording.
+    fn through(&self, client: Client) -> Rpc {
+        Rpc {
+            client,
+            deadline: self.deadline,
+            snapshot: self.snapshot,
+            project: self.project.clone(),
+            options: self.options.clone(),
+            recording: self.recording.clone(),
+            calls: self.calls.clone(),
+            others: Vec::new(),
+        }
+    }
+
+    /// The snapshot this session asks about.
+    #[cfg(test)]
+    pub(crate) fn snapshot_id(&self) -> u64 {
+        self.snapshot
     }
 
     /// Every file the snapshot's program read, as the checker names them.
     pub(crate) async fn source_file_names(&self) -> Result<Vec<String>, CallError> {
-        self.scoped("getSourceFileNames", json!({})).await
+        self.scoped("getSourceFileNames", Asking::Nothing {}).await
     }
 
     /// This session bound to the snapshot `createSnapshot` makes from `params`, and to its one project.
     async fn created(mut self, params: Value) -> Result<Rpc, CallError> {
-        let response: SnapshotResponse = decode(&self.call("createSnapshot", params).await?)?;
+        let response: SnapshotResponse = decode(&self.call("createSnapshot", &params).await?)?;
         self.snapshot = response.snapshot;
         let Some(project) = response.projects.into_iter().next() else {
             // Nothing will hold this snapshot to release it later.
@@ -486,8 +646,11 @@ impl Rpc {
         Ok(self)
     }
 
+    /// Releases the snapshot, and those of the lanes opened beside it ([`Rpc::open_programs`]).
     pub(crate) async fn release(&self) {
-        self.call("release", json!({ "snapshot": self.snapshot })).await.ok();
+        for snapshot in std::iter::once(self.snapshot).chain(self.others.iter().copied()) {
+            self.call("release", &json!({ "snapshot": snapshot })).await.ok();
+        }
     }
 
     /// The recorded calls as a JSON array, or `None` when recording was off.
@@ -497,139 +660,135 @@ impl Rpc {
     }
 
     /// Requests sent so far, by method.
-    pub(crate) fn calls(&self) -> BTreeMap<String, u64> {
+    pub(crate) fn calls(&self) -> BTreeMap<&'static str, u64> {
         self.calls.lock().map(|calls| calls.clone()).unwrap_or_default()
     }
 
     /// One request, its answer as the JSON text it arrived as: [`decode`] parses it once, into the shape the caller
-    /// expects.
-    async fn call(&self, method: &str, params: Value) -> Result<Box<RawValue>, CallError> {
+    /// expects. The parameters are written straight to the text the checker reads.
+    async fn call(&self, method: &'static str, params: &impl Serialize) -> Result<Box<RawValue>, CallError> {
         if let Ok(mut calls) = self.calls.lock() {
-            *calls.entry(method.to_string()).or_default() += 1;
+            *calls.entry(method).or_default() += 1;
         }
         REQUESTS.try_with(|count| count.fetch_add(1, std::sync::atomic::Ordering::Relaxed)).ok();
+        let params = serde_json::to_vec(params)
+            .map_err(|error| CallError::Fatal(format!("failed to serialize a request: {error}")))?;
         let Some(log) = &self.recording else {
             return self.client.request_raw(method, params, self.deadline).await.map_err(classify);
         };
-        let answer = self.client.request_raw(method, params.clone(), self.deadline).await.map_err(classify)?;
-        let result: Value = decode(&answer)?;
+        let sent: Value = serde_json::from_slice(&params).unwrap_or(Value::Null);
+        let answer = self.client.request_raw(method, params, self.deadline).await.map_err(classify)?;
+        let (params, result): (Value, Value) = (sent, decode(&answer)?);
         if let Ok(mut log) = log.lock() {
             log.push(json!({ "method": method, "params": params, "result": result }));
         }
         Ok(answer)
     }
 
-    async fn scoped<T: DeserializeOwned>(&self, method: &str, extra: Value) -> Result<T, CallError> {
+    async fn scoped<T: DeserializeOwned>(&self, method: &'static str, extra: Asking<'_>) -> Result<T, CallError> {
         decode(&self.scoped_text(method, extra).await?)
     }
 
     /// A request about this snapshot and project, its answer left as text.
-    async fn scoped_text(&self, method: &str, extra: Value) -> Result<Box<RawValue>, CallError> {
-        let mut params = json!({ "snapshot": self.snapshot, "project": self.project });
-        if let (Some(base), Value::Object(extra)) = (params.as_object_mut(), extra) {
-            base.extend(extra);
-        }
-        self.call(method, params).await
+    async fn scoped_text(&self, method: &'static str, extra: Asking<'_>) -> Result<Box<RawValue>, CallError> {
+        self.call(method, &Scoped { project: &self.project, snapshot: self.snapshot, extra }).await
     }
 
     pub(crate) async fn source_file_symbol(&self, file: &str) -> Result<Option<SymbolInfo>, CallError> {
-        self.scoped("getSymbolOfSourceFile", json!({ "file": file })).await
+        self.scoped("getSymbolOfSourceFile", Asking::File { file }).await
     }
 
-    pub(crate) async fn exports_of_module(&self, module: &Value) -> Result<Vec<SymbolInfo>, CallError> {
-        self.scoped("getExportsOfModule", json!({ "symbol": module })).await
+    pub(crate) async fn exports_of_module(&self, module: &SymbolRef) -> Result<Vec<SymbolInfo>, CallError> {
+        self.scoped("getExportsOfModule", Asking::Symbol { symbol: module }).await
     }
 
     /// Only for symbols flagged `Alias`: the beta panics on a plain `default` export.
-    pub(crate) async fn aliased_symbol(&self, symbol: &Value) -> Result<SymbolInfo, CallError> {
-        self.scoped("getAliasedSymbol", json!({ "symbol": symbol })).await
+    pub(crate) async fn aliased_symbol(&self, symbol: &SymbolRef) -> Result<SymbolInfo, CallError> {
+        self.scoped("getAliasedSymbol", Asking::Symbol { symbol }).await
     }
 
-    pub(crate) async fn type_of_symbol(&self, symbol: &Value) -> Result<TypeInfo, CallError> {
-        self.scoped("getTypeOfSymbol", json!({ "symbol": symbol })).await
+    pub(crate) async fn type_of_symbol(&self, symbol: &SymbolRef) -> Result<TypeInfo, CallError> {
+        self.scoped("getTypeOfSymbol", Asking::Symbol { symbol }).await
     }
 
-    pub(crate) async fn types_of_symbols(&self, symbols: &[&Value]) -> Result<Vec<TypeInfo>, CallError> {
-        self.scoped("getTypesOfSymbols", json!({ "symbols": symbols })).await
+    pub(crate) async fn types_of_symbols(&self, symbols: &[&SymbolRef]) -> Result<Vec<TypeInfo>, CallError> {
+        self.scoped("getTypesOfSymbols", Asking::Symbols { symbols }).await
     }
 
     /// The call signatures of a type, or with `SignatureKind::Construct` its construct signatures.
     pub(crate) async fn signatures(&self, type_id: u64, kind: SignatureKind) -> Result<Vec<SignatureInfo>, CallError> {
-        self.scoped("getSignaturesOfType", json!({ "type": type_id, "kind": kind as u8 })).await
+        self.scoped("getSignaturesOfType", Asking::Signatures { type_id, kind: kind as u8 }).await
     }
 
     pub(crate) async fn type_parameters(&self, signature: u64) -> Result<Vec<TypeInfo>, CallError> {
-        self.scoped("getTypeParametersOfSignature", json!({ "objectId": signature })).await
+        self.scoped("getTypeParametersOfSignature", Asking::Object { object_id: signature }).await
     }
 
     /// The type a type parameter defaults to (`"div"` in `E extends ElementType = "div"`); none when it declares none.
     pub(crate) async fn default_of_type_parameter(&self, type_id: u64) -> Result<Option<TypeInfo>, CallError> {
-        self.scoped("getDefaultFromTypeParameter", json!({ "objectId": type_id })).await
+        self.scoped("getDefaultFromTypeParameter", Asking::Object { object_id: type_id }).await
     }
 
     /// The type a type alias or interface declares, `T` in `type A = T`.
-    pub(crate) async fn declared_type_of_symbol(&self, symbol: &Value) -> Result<TypeInfo, CallError> {
-        self.scoped("getDeclaredTypeOfSymbol", json!({ "symbol": symbol })).await
+    pub(crate) async fn declared_type_of_symbol(&self, symbol: &SymbolRef) -> Result<TypeInfo, CallError> {
+        self.scoped("getDeclaredTypeOfSymbol", Asking::Symbol { symbol }).await
     }
 
     /// The type errors in a file of the program.
     pub(crate) async fn semantic_diagnostics(&self, file: &str) -> Result<Vec<FileDiagnostic>, CallError> {
-        self.scoped("getSemanticDiagnostics", json!({ "file": file })).await
+        self.scoped("getSemanticDiagnostics", Asking::File { file }).await
     }
 
     /// The symbol that declares a type: the interface, class, enum member or unique symbol behind it.
     pub(crate) async fn symbol_of_type(&self, type_id: u64) -> Result<Option<SymbolInfo>, CallError> {
-        self.scoped("getSymbolOfType", json!({ "objectId": type_id })).await
+        self.scoped("getSymbolOfType", Asking::Object { object_id: type_id }).await
     }
 
     /// The types a class or interface extends, instantiated as it names them (`Omit<HTMLAttributes<HTMLDivElement>, "color">`);
     /// none for a type that is not a class or interface.
     pub(crate) async fn base_types(&self, type_id: u64) -> Result<Vec<TypeInfo>, CallError> {
-        let bases: Option<Vec<TypeInfo>> = self.scoped("getBaseTypes", json!({ "type": type_id })).await?;
+        let bases: Option<Vec<TypeInfo>> = self.scoped("getBaseTypes", Asking::Type { type_id }).await?;
         Ok(bases.unwrap_or_default())
     }
 
     pub(crate) async fn alias_type_arguments(&self, type_id: u64) -> Result<Vec<TypeInfo>, CallError> {
-        self.scoped("getAliasTypeArgumentsOfType", json!({ "objectId": type_id })).await
+        self.scoped("getAliasTypeArgumentsOfType", Asking::Object { object_id: type_id }).await
     }
 
     /// The generic type a reference instantiates; for a tuple reference, the tuple type that holds its element flags.
     pub(crate) async fn target_of_type(&self, type_id: u64) -> Result<TypeInfo, CallError> {
-        self.scoped("getTargetOfType", json!({ "objectId": type_id })).await
+        self.scoped("getTargetOfType", Asking::Object { object_id: type_id }).await
     }
 
-    pub(crate) async fn parent_of_symbol(&self, symbol: &Value) -> Result<Option<SymbolInfo>, CallError> {
-        self.scoped("getParentOfSymbolForChecker", json!({ "symbol": symbol })).await
+    pub(crate) async fn parent_of_symbol(&self, symbol: &SymbolRef) -> Result<Option<SymbolInfo>, CallError> {
+        self.scoped("getParentOfSymbolForChecker", Asking::Symbol { symbol }).await
     }
 
     /// Whether each property is declared `readonly`, in one round trip.
-    pub(crate) async fn readonly_symbols(&self, symbols: &[&Value]) -> Result<Vec<bool>, CallError> {
-        let requests = symbols.iter().map(|symbol| ("isReadonlySymbol", json!({ "symbol": symbol }))).collect();
+    pub(crate) async fn readonly_symbols(&self, symbols: &[&SymbolRef]) -> Result<Vec<bool>, CallError> {
+        let requests = symbols.iter().map(|symbol| ("isReadonlySymbol", Asking::Symbol { symbol })).collect();
         self.batch(requests).await?.iter().map(|answer| decode(answer)).collect()
     }
 
     /// Several requests in one round trip. A request the checker rejects fails the batch: nothing here asks for one
     /// that may legitimately fail.
-    pub(crate) async fn batch(&self, requests: Vec<(&str, Value)>) -> Result<Vec<Box<RawValue>>, CallError> {
+    pub(crate) async fn batch(
+        &self,
+        requests: Vec<(&'static str, Asking<'_>)>,
+    ) -> Result<Vec<Box<RawValue>>, CallError> {
         let wanted = requests.len();
-        let scoped: Vec<Value> = requests
+        let scoped: Vec<Batched<'_, Asking<'_>>> = requests
             .into_iter()
-            .map(|(method, mut params)| {
-                if let Value::Object(map) = &mut params {
-                    map.insert("snapshot".to_string(), json!(self.snapshot));
-                    map.insert("project".to_string(), json!(self.project));
-                }
-                json!({ "method": method, "params": params })
+            .map(|(method, extra)| Batched {
+                method,
+                params: Scoped { project: &self.project, snapshot: self.snapshot, extra },
             })
             .collect();
         let mut answers = Vec::with_capacity(wanted);
         let mut token: Option<String> = None;
         loop {
-            let mut params = json!({ "requests": scoped });
-            if let (Some(token), Some(map)) = (&token, params.as_object_mut()) {
-                map.insert("continuationToken".to_string(), json!(token));
-            }
-            let page: BatchPage = decode(&self.call("batchRequests", params).await?)?;
+            let params = BatchParams { requests: &scoped, continuation_token: token.as_deref() };
+            let page: BatchPage = decode(&self.call("batchRequests", &params).await?)?;
             for response in page.responses {
                 if let Some(error) = response.error {
                     return Err(CallError::Rejected(error));
@@ -648,34 +807,34 @@ impl Rpc {
     }
 
     pub(crate) async fn parameters(&self, signature: u64) -> Result<Vec<SymbolInfo>, CallError> {
-        self.scoped("getParametersOfSignature", json!({ "objectId": signature })).await
+        self.scoped("getParametersOfSignature", Asking::Object { object_id: signature }).await
     }
 
     pub(crate) async fn return_type(&self, signature: u64) -> Result<TypeInfo, CallError> {
-        self.scoped("getReturnTypeOfSignature", json!({ "objectId": signature })).await
+        self.scoped("getReturnTypeOfSignature", Asking::Object { object_id: signature }).await
     }
 
     pub(crate) async fn properties(&self, type_id: u64) -> Result<Vec<SymbolInfo>, CallError> {
-        self.scoped("getPropertiesOfType", json!({ "type": type_id })).await
+        self.scoped("getPropertiesOfType", Asking::Type { type_id }).await
     }
 
     /// The members of a union, intersection or template literal, as the text the checker answered (a list of types).
     pub(crate) async fn members_text(&self, type_id: u64) -> Result<Box<RawValue>, CallError> {
-        self.scoped_text("getTypesOfType", json!({ "objectId": type_id })).await
+        self.scoped_text("getTypesOfType", Asking::Object { object_id: type_id }).await
     }
 
     /// The type arguments of a reference, as the text the checker answered (a list of types).
     pub(crate) async fn type_arguments_text(&self, type_id: u64) -> Result<Box<RawValue>, CallError> {
-        self.scoped_text("getTypeArguments", json!({ "type": type_id })).await
+        self.scoped_text("getTypeArguments", Asking::Type { type_id }).await
     }
 
     /// The call and construct signatures, the properties and the index signatures of a type, in one round trip.
     pub(crate) async fn object_members(&self, type_id: u64) -> Result<ObjectMembers, CallError> {
         let requests = vec![
-            ("getSignaturesOfType", json!({ "type": type_id, "kind": SignatureKind::Call as u8 })),
-            ("getSignaturesOfType", json!({ "type": type_id, "kind": SignatureKind::Construct as u8 })),
-            ("getPropertiesOfType", json!({ "type": type_id })),
-            ("getIndexInfosOfType", json!({ "type": type_id })),
+            ("getSignaturesOfType", Asking::Signatures { type_id, kind: SignatureKind::Call as u8 }),
+            ("getSignaturesOfType", Asking::Signatures { type_id, kind: SignatureKind::Construct as u8 }),
+            ("getPropertiesOfType", Asking::Type { type_id }),
+            ("getIndexInfosOfType", Asking::Type { type_id }),
         ];
         let mut answers = self.batch(requests).await?.into_iter();
         let mut next = || answers.next().ok_or_else(|| CallError::Rejected("a short batch".to_string()));
@@ -688,17 +847,17 @@ impl Rpc {
     }
 
     pub(crate) async fn alias_symbol(&self, type_id: u64) -> Result<Option<SymbolInfo>, CallError> {
-        self.scoped("getAliasSymbolOfType", json!({ "objectId": type_id })).await
+        self.scoped("getAliasSymbolOfType", Asking::Object { object_id: type_id }).await
     }
 
     pub(crate) async fn type_to_string(&self, type_id: u64) -> Result<String, CallError> {
-        self.scoped("typeToString", json!({ "type": type_id })).await
+        self.scoped("typeToString", Asking::Type { type_id }).await
     }
 
     /// The type as written inside a type alias declaration, and never cut short: an alias at the top is printed as what
     /// it stands for (`(value?: string) => void`, not `Handler`), and a long type is printed to its end.
     pub(crate) async fn type_to_string_expanded(&self, type_id: u64) -> Result<String, CallError> {
-        self.scoped("typeToString", json!({ "type": type_id, "flags": flag::PRINT_EXPANDED })).await
+        self.scoped("typeToString", Asking::Printed { type_id, flags: flag::PRINT_EXPANDED }).await
     }
 }
 
@@ -715,7 +874,169 @@ pub(crate) fn decode<T: DeserializeOwned>(answer: &RawValue) -> Result<T, CallEr
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::panic)]
+
     use super::*;
+
+    use caliper_docgen_core::pipeline::{PipelineOptions, extract};
+    use caliper_docgen_core::types::semantic::SemanticOutcome;
+    use camino::{Utf8Path, Utf8PathBuf};
+
+    use crate::checker::{Backend, Failure, Served};
+    use crate::{SemanticRequest, answer_on, root_files, targets_of};
+
+    fn multi_thread() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap()
+    }
+
+    /// Components over shared types whose props extend an interface the last file augments (`declare global`).
+    fn lanes_project() -> (tempfile::TempDir, Utf8PathBuf) {
+        let dir = tempfile::Builder::new().prefix("Lanes").tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        std::fs::write(
+            root.join("types.ts"),
+            "export type Size = 'sm' | 'md' | 'lg';\nexport interface Base {\n  /** The id. */\n  id: string;\n  size?: Size;\n}\n\
+             declare global { interface Augmented { fromTypes?: number } }\n",
+        )
+        .unwrap();
+        for index in 0..6 {
+            let augments =
+                if index == 5 { "declare global { interface Augmented { fromLastFile?: boolean } }\n" } else { "" };
+            std::fs::write(
+                root.join(format!("C{index}.tsx")),
+                format!(
+                    "import type {{ Base, Size }} from './types';\n{augments}\
+                     export interface C{index}Props extends Base, Augmented {{ own{index}: number; pick?: (size: Size) => void }}\n\
+                     export function C{index}(props: C{index}Props) {{ return null; }}\n"
+                ),
+            )
+            .unwrap();
+        }
+        (dir, root)
+    }
+
+    /// Asks `lanes` programs on a checker with as many lanes about the project's components: their snapshots, the
+    /// answer, and whether each snapshot was still held after the first program was released.
+    fn answered_on_lanes(root: &Utf8Path, lanes: usize) -> (Vec<u64>, SemanticOutcome, Vec<bool>) {
+        let output = extract(&PipelineOptions { src_dirs: vec![root.to_owned()], ..PipelineOptions::default() });
+        let request = SemanticRequest::new(root.to_owned(), targets_of(&output));
+        let files = root_files(&request);
+        let checker = Backend::start(root, lanes).unwrap();
+        let runtime = multi_thread();
+        let deadline = Duration::from_secs(120);
+        let (snapshots, outcome, held) = runtime.block_on(async {
+            let programs = Rpc::open_programs(checker.client(), deadline, None, &files, false, lanes).await.unwrap();
+            let programs: Vec<Arc<Rpc>> = programs.into_iter().map(Arc::new).collect();
+            let snapshots: Vec<u64> = programs.iter().map(|program| program.snapshot).collect();
+            let outcome = answer_on(&programs, &request, &files).await.unwrap();
+            programs[0].release().await;
+            let (client, mut held) = (checker.client(), Vec::new());
+            for snapshot in &snapshots {
+                // Releasing a snapshot the checker no longer holds fails, as releasing an unknown one does.
+                let params = json!({ "snapshot": snapshot }).to_string().into_bytes();
+                held.push(client.request_raw("release", params, deadline).await.is_ok());
+            }
+            (snapshots, outcome, held)
+        });
+        runtime.block_on(checker.shutdown());
+        (snapshots, outcome, held)
+    }
+
+    /// Each lane asks a snapshot of its own, derived from the first, and three lanes give the answer one gives: every
+    /// program holds every root file, so what the last file declares reaches the components the other lanes answer.
+    /// Releasing the first program releases every lane's snapshot. On the base the lanes shared one snapshot.
+    #[test]
+    fn each_lane_has_a_snapshot_of_its_own_and_they_answer_as_one_program_does() {
+        let (_dir, root) = lanes_project();
+
+        let (one_snapshots, one, one_held) = answered_on_lanes(&root, 1);
+        let (snapshots, three, held) = answered_on_lanes(&root, 3);
+
+        assert!(one.diagnostics.is_empty() && one.fallbacks.is_empty(), "{one:?}");
+        assert_eq!(one.components.len(), 6);
+        for component in &one.components {
+            let names: Vec<&str> = component.props.iter().map(|prop| prop.name.as_str()).collect();
+            assert!(names.contains(&"fromLastFile") && names.contains(&"fromTypes"), "{names:?}");
+        }
+        assert_eq!(one, three);
+        assert_eq!(one_snapshots.len(), 1);
+        assert_eq!(snapshots.len(), 3);
+        let distinct: std::collections::BTreeSet<u64> = snapshots.iter().copied().collect();
+        assert_eq!(distinct.len(), 3, "each lane has a snapshot of its own: {snapshots:?}");
+        assert_eq!(
+            (one_held, held),
+            (vec![false], vec![false; 3]),
+            "the first program's release releases every lane's"
+        );
+    }
+
+    /// Stands in for a session: makes snapshot 1 of as many programs as asked on `createSnapshot` (so a run that asked
+    /// all the lanes' programs of one snapshot would open), and fails or panics on `updateSnapshot`, which
+    /// derives each other lane's; records the snapshots it was told to release, and whether it was closed.
+    struct Underived {
+        panics: bool,
+        released: Arc<Mutex<Vec<u64>>>,
+        closed: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl Served for Underived {
+        fn handle(&self, method: &str, params: &[u8]) -> Result<String, Failure> {
+            match method {
+                "initialize" => Ok("null".to_string()),
+                "createSnapshot" => {
+                    // As many programs as asked for.
+                    let params: Value = serde_json::from_slice(params).unwrap();
+                    let count = params["createPrograms"].as_array().map_or(1, Vec::len);
+                    let projects: Vec<Value> = (0..count).map(|n| json!({ "id": format!("p{n}") })).collect();
+                    Ok(json!({ "snapshot": 1, "projects": projects }).to_string())
+                }
+                "updateSnapshot" if self.panics => panic!("checker invariant broken"),
+                "updateSnapshot" => Err(Failure { message: "a file nests too deep".to_string(), panicked: false }),
+                "release" => {
+                    let params: Value = serde_json::from_slice(params).unwrap();
+                    self.released.lock().unwrap().push(params["snapshot"].as_u64().unwrap());
+                    Ok("null".to_string())
+                }
+                other => panic!("unexpected {other}"),
+            }
+        }
+
+        fn discard(&self, _method: &str, _answer: &str) {}
+
+        fn close(&self) {
+            self.closed.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+
+    /// A lane whose snapshot cannot be made fails the opening, and the snapshot made before it is released, since no
+    /// one will hold it; one that panics stops the checker, which closes its session and every snapshot with it.
+    #[test]
+    fn a_lane_whose_snapshot_cannot_be_made_releases_the_one_made_before_it() {
+        for panics in [false, true] {
+            let released = Arc::new(Mutex::new(Vec::new()));
+            let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let session = Underived { panics, released: released.clone(), closed: closed.clone() };
+            let checker = Backend::spawn(2, move || session).unwrap();
+            let runtime = multi_thread();
+
+            let opened = runtime.block_on(Rpc::open_programs(
+                checker.client(),
+                Duration::from_secs(5),
+                None,
+                &["/p/a.ts".to_string()],
+                false,
+                2,
+            ));
+
+            assert!(opened.is_err(), "panics: {panics}");
+            runtime.block_on(checker.shutdown_within(Duration::from_secs(5)));
+            if panics {
+                assert!(closed.load(std::sync::atomic::Ordering::Acquire), "the session is closed");
+            } else {
+                assert_eq!(*released.lock().unwrap(), [1], "the first lane's snapshot is released");
+            }
+        }
+    }
 
     #[test]
     fn a_name_with_three_or_more_leading_underscores_loses_the_one_the_checker_added() {
@@ -729,6 +1050,35 @@ mod tests {
         for name in ["size", "_single", "__call", "__type", "default", "", "a___b"] {
             assert_eq!(unescape_leading_underscores(name), name);
         }
+    }
+
+    /// A symbol's reference goes back as the text it arrived as, inside the parameters a request or a batch writes.
+    #[test]
+    fn a_reference_is_written_back_as_it_arrived() {
+        let symbol: SymbolInfo =
+            serde_json::from_str(r#"{"reference":{"kind":1,"id":4,"file":"7"},"name":"a","flags":0}"#).unwrap();
+        let scoped = |extra| Scoped { project: "p0", snapshot: 3, extra };
+
+        let one = serde_json::to_string(&scoped(Asking::Symbol { symbol: &symbol.reference })).unwrap();
+        let both = [&symbol.reference, &symbol.reference];
+        let many = serde_json::to_string(&scoped(Asking::Symbols { symbols: &both })).unwrap();
+        let requests = [
+            Batched { method: "isReadonlySymbol", params: scoped(Asking::Symbol { symbol: &symbol.reference }) },
+            Batched { method: "getTypesOfType", params: scoped(Asking::Object { object_id: 12 }) },
+        ];
+        let page = serde_json::to_string(&BatchParams { requests: &requests, continuation_token: Some("t") }).unwrap();
+
+        assert_eq!(symbol.reference.text(), r#"{"kind":1,"id":4,"file":"7"}"#);
+        assert_eq!(one, r#"{"project":"p0","snapshot":3,"symbol":{"kind":1,"id":4,"file":"7"}}"#);
+        assert_eq!(
+            many,
+            r#"{"project":"p0","snapshot":3,"symbols":[{"kind":1,"id":4,"file":"7"},{"kind":1,"id":4,"file":"7"}]}"#
+        );
+        assert_eq!(
+            page,
+            r#"{"requests":[{"method":"isReadonlySymbol","params":{"project":"p0","snapshot":3,"symbol":{"kind":1,"id":4,"file":"7"}}},{"method":"getTypesOfType","params":{"project":"p0","snapshot":3,"objectId":12}}],"continuationToken":"t"}"#
+        );
+        assert_eq!(serde_json::to_string(&scoped(Asking::Nothing {})).unwrap(), r#"{"project":"p0","snapshot":3}"#);
     }
 
     #[test]
