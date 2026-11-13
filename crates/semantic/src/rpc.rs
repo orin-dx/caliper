@@ -597,6 +597,31 @@ impl Rpc {
         })
     }
 
+    /// Runs `work` on the checker thread this session asks ([`Client::run_on_thread`]), given this session as that
+    /// thread asks it, in place; each request is bounded by this session's deadline.
+    pub(crate) async fn run_on_thread<T: Send + 'static>(
+        self: &Arc<Self>,
+        work: impl FnOnce(Arc<Rpc>) -> T + Send + 'static,
+    ) -> Result<T, CallError> {
+        let this = Arc::clone(self);
+        let run = self.client.run_on_thread(self.deadline, move |client| work(Arc::new(this.through(client))));
+        run.await.map_err(classify)
+    }
+
+    /// This session asked through `client`: the same snapshot and project, counts and recording.
+    fn through(&self, client: Client) -> Rpc {
+        Rpc {
+            client,
+            deadline: self.deadline,
+            snapshot: self.snapshot,
+            project: self.project.clone(),
+            options: self.options.clone(),
+            recording: self.recording.clone(),
+            calls: self.calls.clone(),
+            others: Vec::new(),
+        }
+    }
+
     /// The snapshot this session asks about.
     #[cfg(test)]
     pub(crate) fn snapshot_id(&self) -> u64 {

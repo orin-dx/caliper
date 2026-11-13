@@ -14,7 +14,9 @@
 //! that names it.
 //!
 //! The worker runs on its own thread with its own runtime, so a caller on any thread (a NAPI worker, a rayon task)
-//! never nests runtimes and can bound how long it waits. A failure to start or a crash yields an outcome with no
+//! never nests runtimes and can bound how long it waits. It converts an answer on the checker's thread
+//! ([`crate::checker::Client::run_on_thread`]), where each of its requests is answered in place instead of crossing a
+//! channel there and back; each request is still bounded by [`OnDemandConfig::request_timeout`]. A failure to start or a crash yields an outcome with no
 //! components and one diagnostic, never an error; after [`MAX_RESTARTS`] crashes the checker stays down. A panic in
 //! the checker counts as a crash: its session is not asked again, and a fresh one starts.
 //!
@@ -514,10 +516,23 @@ impl Checker {
             return group_by_file(&request).0;
         }
         let answered = match self.snapshot_for(client, config.request_timeout, roots.clone()).await {
-            Ok((rpc, warning)) => answer_on(std::slice::from_ref(&rpc), &request, &roots).await.map(|mut outcome| {
-                outcome.diagnostics.extend(warning);
-                outcome
-            }),
+            Ok((rpc, warning)) => {
+                // Converted on the checker's thread, where each request is answered in place: the answer waits for
+                // every request anyway, and none crosses a channel there and back.
+                let converted = rpc.run_on_thread(move |rpc| {
+                    let runtime =
+                        tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|error| {
+                            CallError::Fatal(format!(
+                                "could not start an async runtime on the checker's thread: {error}"
+                            ))
+                        })?;
+                    runtime.block_on(answer_on(std::slice::from_ref(&rpc), &request, &roots))
+                });
+                converted.await.and_then(|answered| answered).map(|mut outcome| {
+                    outcome.diagnostics.extend(warning);
+                    outcome
+                })
+            }
             Err(error) => Err(error),
         };
         self.served += 1;

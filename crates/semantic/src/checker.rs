@@ -22,14 +22,17 @@
 //!   [`MAX_NESTING`] fails with an error that names it, so its components keep their structural answer. Requests that
 //!   build snapshots, which are the ones that read files, run one at a time across the lanes, so a refusal is the
 //!   request's that met it; any other request that sees a refusal fails too.
+//! - **Work on the thread.** A caller that would wait for every answer anyway (the on-demand checker) can run its whole
+//!   conversion on a lane's own thread ([`Client::run_on_thread`]): the requests it makes there are answered in place,
+//!   with the same guards, and no answer crosses a channel. Each request is still bounded by the caller's deadline.
 //! - **Memory.** [`Backend::memory_mib`] reads what the linked checker holds: the resident part of the address range
 //!   `tsrs` allocates its arenas from, which leaves out the host's own memory. [`crate::on_demand`] bounds it.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock, mpsc};
-use std::thread::JoinHandle;
-use std::time::Duration;
+use std::thread::{JoinHandle, ThreadId};
+use std::time::{Duration, Instant};
 
 use camino::Utf8Path;
 use serde_json::Value;
@@ -108,7 +111,7 @@ impl Backend {
             .stack_size(CHECKER_STACK_BYTES)
             .spawn(move || serve(open, queues, thread_ended, closing))
             .map_err(|error| format!("could not start the checker thread: {error}"))?;
-        Ok(Backend { client: Client { lanes: lanes.into(), lane: 0 }, thread, threads, ended, closed })
+        Ok(Backend { client: Client { lanes: lanes.into(), lane: 0, in_place: None }, thread, threads, ended, closed })
     }
 
     /// How many programs a run asks at once: one per thread.
@@ -189,8 +192,53 @@ pub(crate) fn nesting(text: &str) -> usize {
 
 enum Job {
     Request(Asked),
+    /// Work to run on the lane's thread, its requests answered in place ([`Client::run_on_thread`]).
+    Run(Run),
     /// Close the session and end the thread; requests sent after it fail as from a stopped checker.
     Stop,
+}
+
+/// Work for a lane's thread, given the session to ask in place.
+struct Run {
+    work: Box<dyn FnOnce(Arc<dyn Ask>) + Send>,
+    progress: Arc<Progress>,
+}
+
+/// How far work on a lane's thread is, for the caller that waits for it to bound each request it makes by its deadline.
+struct Progress {
+    /// When the request in progress started, and its method; when the work was sent, until it starts; `None` between
+    /// requests.
+    since: Mutex<Option<(Instant, &'static str)>>,
+    /// Set once the caller stopped waiting: the work is not started, and its later requests fail as to a stopped
+    /// checker, except a release, so it gives back what it holds.
+    cancelled: AtomicBool,
+}
+
+impl Progress {
+    fn set(&self, since: Option<(Instant, &'static str)>) {
+        *self.since.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = since;
+    }
+
+    fn since(&self) -> Option<(Instant, &'static str)> {
+        *self.since.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// The session as work on a lane's thread asks it: in place, one request at a time, with the guards a lane applies to
+/// the requests of its queue.
+trait Ask: Send + Sync {
+    fn ask(&self, method: &'static str, params: &[u8]) -> Result<String, RequestError>;
+    /// The thread the work runs on: a request from any other goes through the lane's queue.
+    fn thread(&self) -> ThreadId;
+}
+
+/// Stops waiting for work on a lane's thread when the wait is dropped (its caller gave up or was cancelled).
+struct Abandon(Arc<Progress>);
+
+impl Drop for Abandon {
+    fn drop(&mut self) {
+        self.0.cancelled.store(true, Ordering::Release);
+    }
 }
 
 struct Asked {
@@ -205,12 +253,60 @@ struct Asked {
 pub(crate) struct Client {
     lanes: Arc<[mpsc::Sender<Job>]>,
     lane: usize,
+    /// The session, asked in place, when this client was given to work on its lane's thread.
+    in_place: Option<Arc<dyn Ask>>,
 }
 
 impl Client {
     /// The client whose requests the `lane`th thread of the checker answers ([`Backend::start`]).
     pub(crate) fn lane(&self, lane: usize) -> Client {
-        Client { lanes: self.lanes.clone(), lane }
+        Client { lanes: self.lanes.clone(), lane, in_place: None }
+    }
+
+    /// Runs `work` on the thread of this client's lane, after the requests queued before it, and returns what it
+    /// returns. The client `work` is given asks the session in place from that thread, with no channel between: a
+    /// request costs no thread hop either way. The wait is bounded as each of its requests would be: past `deadline`
+    /// inside one request (or before the work starts), this stops waiting with a timeout, and the work's later requests
+    /// fail. A panic in the session ends the lane as one in a queued request does; a panic in `work` itself leaves the
+    /// session answering, and the wait ends as from a stopped checker.
+    pub(crate) async fn run_on_thread<T: Send + 'static>(
+        &self,
+        deadline: Duration,
+        work: impl FnOnce(Client) -> T + Send + 'static,
+    ) -> Result<T, RequestError> {
+        let progress =
+            Arc::new(Progress { since: Mutex::new(Some((Instant::now(), "run"))), cancelled: AtomicBool::new(false) });
+        let abandon = Abandon(progress.clone());
+        let (reply, mut answer) = oneshot::channel();
+        let (lanes, lane) = (self.lanes.clone(), self.lane);
+        let work: Box<dyn FnOnce(Arc<dyn Ask>) + Send> = Box::new(move |in_place| {
+            let client = Client { lanes, lane, in_place: Some(in_place) };
+            reply.send(work(client)).ok();
+        });
+        let Some(jobs) = self.lanes.get(self.lane % self.lanes.len().max(1)) else {
+            return Err(RequestError::Closed);
+        };
+        if jobs.send(Job::Run(Run { work, progress: progress.clone() })).is_err() {
+            return Err(RequestError::Closed);
+        }
+        loop {
+            // Until the request in progress (or the wait for the work to start) is past its deadline.
+            let wait = progress.since().map_or(deadline, |(since, _)| deadline.saturating_sub(since.elapsed()));
+            match tokio::time::timeout(wait, &mut answer).await {
+                Ok(Ok(done)) => {
+                    drop(abandon);
+                    return Ok(done);
+                }
+                Ok(Err(_dropped)) => return Err(RequestError::Closed),
+                Err(_elapsed) => {
+                    if let Some((since, method)) = progress.since()
+                        && since.elapsed() >= deadline
+                    {
+                        return Err(RequestError::Timeout { method: method.to_string(), after: deadline });
+                    }
+                }
+            }
+        }
     }
 
     /// One request, its parameters the JSON text `params`, its answer the `result` as the JSON text it arrived as. The
@@ -221,6 +317,13 @@ impl Client {
         params: Vec<u8>,
         deadline: Duration,
     ) -> Result<Box<RawValue>, RequestError> {
+        if let Some(in_place) =
+            self.in_place.as_ref().filter(|in_place| in_place.thread() == std::thread::current().id())
+        {
+            let text = in_place.ask(method, &params)?;
+            return RawValue::from_string(text)
+                .map_err(|_invalid| RequestError::Malformed(format!("{method} answered with text that is not JSON")));
+        }
         let (reply, answer) = oneshot::channel();
         let asked = Asked { method, params, reply };
         let Some(jobs) = self.lanes.get(self.lane % self.lanes.len().max(1)) else {
@@ -406,6 +509,63 @@ fn serve<S: Served + Send + Sync + 'static>(
     Lane { session, ended, left, _closing: closing }.answer(&own);
 }
 
+/// The message of a request a lane refuses because a panic unwound through the session.
+const STOPPED: &str = "the built-in checker stopped: a panic unwound through its session";
+
+/// One request to the session, a panic caught as a failure that says so.
+fn handled<S: Served>(session: &S, method: &'static str, params: &[u8]) -> Result<String, Failure> {
+    catch_unwind(AssertUnwindSafe(|| session.handle(method, params))).unwrap_or_else(|panic| {
+        let text = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap_or("a panic with no message");
+        Err(Failure { message: format!("panic: {text}"), panicked: true })
+    })
+}
+
+/// The session as work on a lane's thread asks it ([`Client::run_on_thread`]).
+struct InPlace<S> {
+    session: Arc<S>,
+    ended: Arc<AtomicBool>,
+    progress: Arc<Progress>,
+    thread: ThreadId,
+    /// Set when this lane is to leave: a panic unwound through the session. Requests after it fail as to a stopped
+    /// checker, as they would once the lane's thread had ended.
+    left: AtomicBool,
+}
+
+impl<S: Served + Send + Sync> Ask for InPlace<S> {
+    fn ask(&self, method: &'static str, params: &[u8]) -> Result<String, RequestError> {
+        let released = method == "release";
+        if self.left.load(Ordering::Acquire) || (self.progress.cancelled.load(Ordering::Acquire) && !released) {
+            return Err(RequestError::Closed);
+        }
+        if self.ended.load(Ordering::Acquire) {
+            self.left.store(true, Ordering::Release);
+            return Err(RequestError::Rejected(STOPPED.to_string()));
+        }
+        self.progress.set(Some((Instant::now(), method)));
+        let answered = handled(&*self.session, method, params);
+        self.progress.set(None);
+        match answered {
+            Ok(text) => Ok(text),
+            Err(Failure { message, panicked }) => {
+                if panicked {
+                    tracing::warn!(method, %message, "the built-in checker panicked; it is replaced");
+                    self.ended.store(true, Ordering::Release);
+                    self.left.store(true, Ordering::Release);
+                }
+                Err(RequestError::Rejected(message))
+            }
+        }
+    }
+
+    fn thread(&self) -> ThreadId {
+        self.thread
+    }
+}
+
 /// What one checker thread shares with the others.
 struct Lane<S> {
     session: Arc<S>,
@@ -417,18 +577,27 @@ struct Lane<S> {
     _closing: mpsc::Sender<()>,
 }
 
-impl<S: Served> Lane<S> {
+impl<S: Served + Send + Sync + 'static> Lane<S> {
     /// The requests of `queue` in turn, until the thread is stopped, every sender is gone, or a panic unwound through
     /// the session on any thread. A panic is caught here too, should one escape `tsrs`'s own catch.
     fn answer(self, queue: &mpsc::Receiver<Job>) {
         for job in queue {
             let asked = match job {
                 Job::Request(asked) => asked,
+                Job::Run(run) => {
+                    if self.ended.load(Ordering::Acquire) {
+                        // Dropping the work tells its caller the checker stopped.
+                        break;
+                    }
+                    if !self.run(run) {
+                        break;
+                    }
+                    continue;
+                }
                 Job::Stop => break,
             };
             if self.ended.load(Ordering::Acquire) {
-                let message = "the built-in checker stopped: a panic unwound through its session".to_string();
-                asked.reply.send(Err(message)).ok();
+                asked.reply.send(Err(STOPPED.to_string())).ok();
                 break;
             }
             // A caller that stopped waiting (its deadline passed, its run ended) is not answered.
@@ -436,15 +605,7 @@ impl<S: Served> Lane<S> {
                 continue;
             }
             let session = &self.session;
-            let answered = catch_unwind(AssertUnwindSafe(|| session.handle(asked.method, &asked.params)))
-                .unwrap_or_else(|panic| {
-                    let text = panic
-                        .downcast_ref::<String>()
-                        .map(String::as_str)
-                        .or_else(|| panic.downcast_ref::<&str>().copied())
-                        .unwrap_or("a panic with no message");
-                    Err(Failure { message: format!("panic: {text}"), panicked: true })
-                });
+            let answered = handled(&**session, asked.method, &asked.params);
             match answered {
                 Ok(text) => {
                     // A caller that stopped waiting meanwhile (its deadline passed) never learns of a snapshot this
@@ -470,6 +631,28 @@ impl<S: Served> Lane<S> {
             // A session a panic left half-built may panic again while it closes; the thread ends either way.
             catch_unwind(AssertUnwindSafe(|| self.session.close())).ok();
         }
+    }
+
+    /// Runs work on this thread, its requests answered in place; whether the lane goes on answering (no panic unwound
+    /// through the session meanwhile). Work whose caller stopped waiting is not started; a panic in the work itself is
+    /// caught, and its caller learns of it as of a stopped checker.
+    fn run(&self, Run { work, progress }: Run) -> bool {
+        if progress.cancelled.load(Ordering::Acquire) {
+            return true;
+        }
+        progress.set(None);
+        let in_place = Arc::new(InPlace {
+            session: self.session.clone(),
+            ended: self.ended.clone(),
+            progress,
+            thread: std::thread::current().id(),
+            left: AtomicBool::new(false),
+        });
+        let asked: Arc<dyn Ask> = in_place.clone();
+        if catch_unwind(AssertUnwindSafe(|| work(asked))).is_err() {
+            tracing::warn!("work on the built-in checker's thread panicked; the checker keeps answering");
+        }
+        !in_place.left.load(Ordering::Acquire) && !self.ended.load(Ordering::Acquire)
     }
 }
 
@@ -889,6 +1072,146 @@ mod tests {
             other => panic!("expected a timeout, got {other:?}"),
         }
         assert!(next.unwrap()["snapshot"].as_u64().is_some());
+        runtime.block_on(checker.shutdown());
+    }
+
+    /// Stands in for a session: answers `ping` with the name of the thread it answered on, panics on `boom`, and waits
+    /// on `hold` until the gate opens. Counts how often it was closed.
+    struct Gated {
+        gate: Mutex<mpsc::Receiver<()>>,
+        closed: Arc<std::sync::atomic::AtomicU32>,
+        asked: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Served for Gated {
+        fn handle(&self, method: &str, _params: &[u8]) -> Result<String, Failure> {
+            self.asked.lock().unwrap().push(method.to_string());
+            match method {
+                "ping" | "release" => Ok(json!(std::thread::current().name()).to_string()),
+                "hold" => {
+                    self.gate.lock().unwrap().recv().ok();
+                    Ok("null".to_string())
+                }
+                _ => panic!("checker invariant broken"),
+            }
+        }
+
+        fn discard(&self, _method: &str, _answer: &str) {}
+
+        fn close(&self) {
+            self.closed.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// A checker over [`Gated`]: the gate its `hold` waits on, how often it was closed, and the methods it was asked.
+    struct GatedChecker {
+        checker: Backend,
+        gate: mpsc::Sender<()>,
+        closed: Arc<std::sync::atomic::AtomicU32>,
+        asked: Arc<Mutex<Vec<String>>>,
+    }
+
+    fn gated() -> GatedChecker {
+        let (gate, held) = mpsc::channel();
+        let closed = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let asked = Arc::default();
+        let session = Gated { gate: Mutex::new(held), closed: Arc::clone(&closed), asked: Arc::clone(&asked) };
+        GatedChecker { checker: Backend::spawn(1, move || session).unwrap(), gate, closed, asked }
+    }
+
+    /// Asks `method` from work on the lane's thread, in its own runtime there, as the on-demand checker does.
+    fn on_thread(
+        runtime: &tokio::runtime::Runtime,
+        client: &Client,
+        deadline: Duration,
+        methods: &'static [&'static str],
+    ) -> Result<Vec<Result<Value, String>>, RequestError> {
+        runtime.block_on(client.run_on_thread(deadline, move |client| {
+            let here = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            let mut answers = Vec::new();
+            for method in methods {
+                let answered = here.block_on(client.request_raw(method, b"null".to_vec(), Duration::from_secs(60)));
+                answers.push(answered.map(|text| serde_json::from_str(text.get()).unwrap()).map_err(|e| e.to_string()));
+            }
+            answers
+        }))
+    }
+
+    /// Work on a lane's thread is answered there, in place: the lane is busy running it, so a request that went through
+    /// its queue would wait behind it until the deadline. The lane answers its queue again afterwards.
+    #[test]
+    fn work_on_the_checker_thread_asks_the_session_in_place() {
+        let runtime = runtime();
+        let GatedChecker { checker, .. } = gated();
+        let client = checker.client();
+
+        let answers = on_thread(&runtime, &client, Duration::from_secs(5), &["ping", "ping"]).unwrap();
+        let after = runtime.block_on(ask(&client, "ping", Value::Null));
+
+        assert_eq!(answers, [Ok(json!("caliper-checker")), Ok(json!("caliper-checker"))]);
+        assert_eq!(after.unwrap(), json!("caliper-checker"));
+        runtime.block_on(checker.shutdown());
+    }
+
+    /// A panic in a request asked in place ends the lane as one in a queued request does: the request fails with it,
+    /// the work's later requests fail as to a stopped checker, the session is closed once, and the checker says it no
+    /// longer answers.
+    #[test]
+    fn a_panic_in_a_request_asked_in_place_stops_the_checker() {
+        let runtime = runtime();
+        let GatedChecker { checker, closed, .. } = gated();
+        let client = checker.client();
+
+        let answers = on_thread(&runtime, &client, Duration::from_secs(5), &["boom", "ping"]).unwrap();
+        let after = runtime.block_on(ask(&client, "ping", Value::Null));
+
+        assert_eq!(answers[0], Err("panic: checker invariant broken".to_string()));
+        assert_eq!(answers[1], Err("session shut down".to_string()));
+        assert!(!checker.is_alive());
+        assert!(matches!(after, Err(RequestError::Closed)), "{after:?}");
+        runtime.block_on(checker.shutdown_within(Duration::from_secs(5)));
+        assert_eq!(closed.load(Ordering::Relaxed), 1);
+    }
+
+    /// Each request asked in place is bounded by the caller's deadline: past it inside one, the caller stops waiting
+    /// with a timeout that names it, and once the session returns, the work's later requests fail except a release, so
+    /// it can give back what it holds. A panic in the work itself leaves the session answering.
+    #[test]
+    fn a_request_asked_in_place_past_its_deadline_times_out_and_the_work_stops_asking() {
+        let runtime = runtime();
+        let GatedChecker { checker, gate, asked, .. } = gated();
+        let client = checker.client();
+
+        let late = on_thread(&runtime, &client, Duration::from_millis(50), &["hold", "ping", "release"]);
+        let (answered, finished) = mpsc::channel();
+        let work = client.run_on_thread(Duration::from_secs(5), move |client| {
+            let here = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            let answers: Vec<_> = ["ping", "release"]
+                .into_iter()
+                .map(|method| {
+                    here.block_on(client.request_raw(method, b"null".to_vec(), Duration::from_secs(5))).is_ok()
+                })
+                .collect();
+            answered.send(answers).ok();
+        });
+        drop(gate);
+        let next = runtime.block_on(work);
+        let panicked = runtime.block_on(client.run_on_thread(Duration::from_secs(5), |_| panic!("a converter bug")));
+        let after = runtime.block_on(ask(&client, "ping", Value::Null));
+
+        match late {
+            Err(RequestError::Timeout { method, after }) => {
+                assert_eq!((method.as_str(), after), ("hold", Duration::from_millis(50)));
+            }
+            other => panic!("expected a timeout, got {other:?}"),
+        }
+        assert!(next.is_ok());
+        assert_eq!(finished.recv().unwrap(), [true, true], "work sent after the late one is answered");
+        // The late work's `ping` was not asked; its release was, and so was everything after it.
+        assert_eq!(*asked.lock().unwrap(), ["hold", "release", "ping", "release", "ping"]);
+        assert!(matches!(panicked, Err(RequestError::Closed)), "{panicked:?}");
+        assert_eq!(after.unwrap(), json!("caliper-checker"));
+        assert!(checker.is_alive());
         runtime.block_on(checker.shutdown());
     }
 
