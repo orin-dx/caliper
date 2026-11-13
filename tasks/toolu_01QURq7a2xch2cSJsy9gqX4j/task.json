@@ -1,0 +1,14 @@
+{
+  "tool_use_id": "toolu_01QURq7a2xch2cSJsy9gqX4j",
+  "agent_id": "a02ae43ae46f6d8d6",
+  "task_description": "Find perf hotspots and missed wins",
+  "token_usage": {
+    "input_tokens": 318,
+    "cache_creation_tokens": 350038,
+    "cache_read_tokens": 32981995,
+    "output_tokens": 116259,
+    "api_call_count": 159
+  },
+  "started_at": "2026-11-12T20:43:31.807308-08:00",
+  "completed_at": "2026-11-12T21:29:23.898888-08:00"
+}

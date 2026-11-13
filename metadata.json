@@ -1,0 +1,64 @@
+{
+  "cli_version": "0.13.4-nightly.202611121940.ce16562b9",
+  "checkpoint_id": "01M79TP042P5647VKS5QP1T3M2",
+  "strategy": "manual-commit",
+  "branch": "worktree-agent-af10b7bfbe1efda9c",
+  "checkpoints_count": 18,
+  "files_touched": [
+    "README.md",
+    "crates/binding/src/lib.rs",
+    "crates/cli/src/commands/extract.rs",
+    "crates/cli/src/main.rs",
+    "crates/cli/tests/commands.rs",
+    "crates/core/src/types/semantic.rs",
+    "crates/semantic/src/lib.rs",
+    "crates/semantic/src/on_demand.rs",
+    "docs/adr/0026-the-checker-is-the-type-authority.md",
+    "docs/type-checker-integration.md",
+    "packages/cli/README.md",
+    "packages/napi/README.md",
+    "packages/napi/binding.d.ts",
+    "packages/storybook/README.md",
+    "packages/storybook/src/index.ts",
+    "packages/storybook/src/options.ts",
+    "packages/storybook/src/validate.ts",
+    "packages/storybook/tests/unit/validate.test.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 122,
+    "cache_creation_tokens": 87896,
+    "cache_read_tokens": 25501626,
+    "output_tokens": 62412,
+    "api_call_count": 56,
+    "subagent_tokens": {
+      "input_tokens": 338,
+      "cache_creation_tokens": 1279447,
+      "cache_read_tokens": 35314559,
+      "output_tokens": 125137,
+      "api_call_count": 168
+    }
+  },
+  "redaction": {
+    "replacements": 34,
+    "layers": {
+      "betterleaks": 20,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}

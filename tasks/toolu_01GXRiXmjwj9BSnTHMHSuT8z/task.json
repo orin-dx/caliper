@@ -1,0 +1,14 @@
+{
+  "tool_use_id": "toolu_01GXRiXmjwj9BSnTHMHSuT8z",
+  "agent_id": "ac2746210233cc4d1",
+  "task_description": "Shared bases, answer cache, memory",
+  "token_usage": {
+    "input_tokens": 566,
+    "cache_creation_tokens": 972383,
+    "cache_read_tokens": 80912906,
+    "output_tokens": 210046,
+    "api_call_count": 279
+  },
+  "started_at": "2026-11-12T18:01:05.131878-08:00",
+  "completed_at": "2026-11-12T19:19:36.09544-08:00"
+}
