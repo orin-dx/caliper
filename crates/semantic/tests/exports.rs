@@ -4,7 +4,7 @@
 //!
 //! - `Menu.tsx`: `Menu.Item = Item; export default Menu`. `Item` is `default.Item`, so it has `value`, not `Menu`'s
 //!   `label` and `open`;
-//! - `Card.tsx`: `export { CardImpl as Card }` beside `export default function Other`. `CardImpl` is `Card`, so it has
+//! - `Card.tsx`: `export { CardImpl as Card }` beside `export default function Other`. `Card` is exported under that name, so it has
 //!   `title`, not `Other`'s `other`;
 //! - `Tabs.tsx`: `export const Tabs = Object.assign(TabsRoot, { Tab })`. `Tab` is `Tabs.Tab`.
 
@@ -64,7 +64,7 @@ fn each_component_gets_the_props_of_its_own_export() {
     let project = project("exports");
     let mut output = structural(&project);
     let expected = owned(&[
-        ("CardImpl", &["title"]),
+        ("Card", &["title"]),
         ("Item", &["value"]),
         ("Menu", &["label", "open"]),
         ("Other", &["other"]),
@@ -77,7 +77,7 @@ fn each_component_gets_the_props_of_its_own_export() {
     merge_semantic(&mut output, outcome);
 
     assert_eq!(prop_names(&output), expected, "the checker");
-    let resolved = ["CardImpl", "Item", "Menu", "Other", "Tab", "Tabs"].map(String::from).to_vec();
+    let resolved = ["Card", "Item", "Menu", "Other", "Tab", "Tabs"].map(String::from).to_vec();
     assert_eq!(
         checker_diagnostics(&output),
         [("6 component(s) resolved by the TypeScript checker".to_string(), resolved)]
@@ -90,13 +90,13 @@ fn each_component_gets_the_props_of_its_own_export() {
 fn a_missing_export_keeps_the_structural_result_and_never_falls_back_to_default() {
     let project = project("exports");
     let mut output = structural(&project);
-    output.components.get_mut("CardImpl").unwrap().exports = vec![ComponentExport::named("Gone")];
-    let before = output.components["CardImpl"].clone();
+    output.components.get_mut("Card").unwrap().exports = vec![ComponentExport::named("Gone")];
+    let before = output.components["Card"].clone();
 
     let outcome = resolve(request(&project, targets_of(&output)));
     merge_semantic(&mut output, outcome);
 
-    assert_eq!(output.components["CardImpl"], before);
+    assert_eq!(output.components["Card"], before);
     let resolved = ["Item", "Menu", "Other", "Tab", "Tabs"].map(String::from).to_vec();
     assert_eq!(
         checker_diagnostics(&output),
@@ -105,7 +105,7 @@ fn a_missing_export_keeps_the_structural_result_and_never_falls_back_to_default(
             (
                 "1 component(s) kept their structural result: the checker finds no export `Gone` in its module"
                     .to_string(),
-                vec!["CardImpl".to_string()]
+                vec!["Card".to_string()]
             )
         ]
     );
