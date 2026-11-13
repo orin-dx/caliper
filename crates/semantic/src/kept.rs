@@ -258,9 +258,21 @@ impl Header {
 /// A digest of everything in the request that the answer depends on: the components with all the structural pass
 /// says of them, the project root (the checker's working directory), the tsconfig's path and the query order.
 pub(crate) fn request_key(request: &SemanticRequest) -> u128 {
+    fn sorted(names: &rustc_hash::FxHashSet<String>) -> Vec<&String> {
+        let mut names: Vec<&String> = names.iter().collect();
+        names.sort();
+        names
+    }
+    let targets: Vec<_> = request
+        .targets
+        .iter()
+        .map(|target| {
+            let wanted = target.react_wanted.as_ref().map(sorted);
+            (&target.key, &target.file_path, &target.display_name, &target.exports, sorted(&target.described), wanted)
+        })
+        .collect();
+    let described = format!("{:?}", (&request.project_root, &request.tsconfig, targets, request.reverse_queries));
     let mut hasher = Xxh3::new();
-    let described =
-        format!("{:?}", (&request.project_root, &request.tsconfig, &request.targets, request.reverse_queries));
     hasher.update(described.as_bytes());
     hasher.digest128()
 }
