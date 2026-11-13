@@ -1,6 +1,6 @@
 # 0027. Identify a component by its declaration and its exports, not its display name
 
-**Status:** Proposed **Date:** 2026-11-10
+**Status:** Accepted **Date:** 2026-11-10 (accepted 2026-11-13, once implemented)
 
 ## Context
 
