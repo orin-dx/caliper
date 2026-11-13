@@ -83,6 +83,23 @@ pub fn targets_of(output: &ExtractionOutput) -> Vec<Target> {
         .collect()
 }
 
+/// What a run does with the memory and the checker's snapshot when it is done: free them, or leave them to the end of
+/// the process.
+///
+/// Freeing a large project's converters, interner and snapshot one allocation at a time costs tens of milliseconds
+/// that a process about to exit spends waiting for nothing. [`Teardown::OneShot`] is for that process alone (the CLI's
+/// `extract`): it forgets what the run built instead of dropping it, and does not ask the checker to release its
+/// snapshot, which the checker's shutdown takes down anyway. Anything that outlives the run (a watch, a Storybook
+/// session, the binding, a command that keeps running) must use [`Teardown::Session`], which is the default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Teardown {
+    /// The process ends when the run does: forget the run's memory and do not release its snapshot.
+    OneShot,
+    /// The process goes on: free the run's memory and release its snapshot.
+    #[default]
+    Session,
+}
+
 /// One whole-project request to the checker: the components to answer for, and how to ask. Built with
 /// [`SemanticRequest::new`] and answered by [`resolve`].
 #[derive(Debug, Clone)]
@@ -100,6 +117,7 @@ pub struct SemanticRequest {
     /// Ask the checker about a component's props, and about the members of each type, last to first. The answer must
     /// not change: no id the checker hands out, and so no order of queries, may show in it. The tests set this.
     pub reverse_queries: bool,
+    teardown: Teardown,
 }
 
 impl SemanticRequest {
@@ -112,7 +130,15 @@ impl SemanticRequest {
             request_timeout: Duration::from_secs(60),
             record_to: None,
             reverse_queries: false,
+            teardown: Teardown::Session,
         }
+    }
+
+    /// The request with `teardown` as what the run does with its memory and snapshot when done ([`Teardown`]).
+    #[must_use]
+    pub fn with_teardown(mut self, teardown: Teardown) -> Self {
+        self.teardown = teardown;
+        self
     }
 }
 
@@ -126,7 +152,13 @@ pub fn resolve(request: SemanticRequest) -> SemanticOutcome {
         Ok(runtime) => runtime,
         Err(error) => return SemanticOutcome::unavailable(format!("could not start an async runtime: {error}")),
     };
-    runtime.block_on(run(request, None))
+    let teardown = request.teardown;
+    let outcome = runtime.block_on(run(request, None));
+    if teardown == Teardown::OneShot {
+        // Dropping the runtime waits for its threads to wind down.
+        std::mem::forget(runtime);
+    }
+    outcome
 }
 
 /// The exported targets by file, in first-seen order, and an outcome that already holds a fallback for each target
@@ -189,8 +221,14 @@ async fn answer_with(checker: &Backend, request: &SemanticRequest) -> SemanticOu
     };
     tracing::debug!(program_ms = started.elapsed().as_millis() as u64, programs = count, "semantic program built");
     let answered = answer_on(&programs, request, &files).await;
-    if let Some(first) = programs.first() {
-        first.release().await;
+    match request.teardown {
+        Teardown::Session => {
+            if let Some(first) = programs.first() {
+                first.release().await;
+            }
+        }
+        // The checker's shutdown, next, takes the snapshot down with it.
+        Teardown::OneShot => std::mem::forget(programs),
     }
     answered.unwrap_or_else(|error| SemanticOutcome::unavailable(format!("the checker stopped answering: {error}")))
 }
@@ -298,6 +336,10 @@ async fn session(
     );
     outcome.components.sort_by(|a, b| a.key.cmp(&b.key));
     outcome.fallbacks.sort_by(|a, b| a.key.cmp(&b.key));
+    if request.teardown == Teardown::OneShot {
+        std::mem::forget(converters);
+        std::mem::forget(interner);
+    }
     Ok(outcome)
 }
 
@@ -489,6 +531,59 @@ mod tests {
         assert!((1..=2).contains(&asked.load(std::sync::atomic::Ordering::Relaxed)));
         assert!(!checker.is_alive());
         runtime.block_on(checker.shutdown());
+    }
+
+    /// Stands in for the checker's session: makes snapshots, refuses every question about them, and counts the
+    /// snapshots released.
+    struct Refusing {
+        released: Arc<std::sync::atomic::AtomicU32>,
+    }
+
+    impl checker::Served for Refusing {
+        fn handle(&self, method: &str, params: &[u8]) -> Result<String, checker::Failure> {
+            match method {
+                "initialize" => Ok("null".to_string()),
+                "release" => {
+                    self.released.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    Ok("null".to_string())
+                }
+                "createSnapshot" => {
+                    let params: serde_json::Value = serde_json::from_slice(params).unwrap();
+                    let count = params["createPrograms"].as_array().map_or(1, Vec::len);
+                    let projects: Vec<_> = (0..count).map(|n| serde_json::json!({ "id": format!("p{n}") })).collect();
+                    Ok(serde_json::json!({ "snapshot": 1, "projects": projects }).to_string())
+                }
+                _ => Err(checker::Failure { message: "refused".to_string(), panicked: false }),
+            }
+        }
+
+        fn discard(&self, _method: &str, _answer: &str) {}
+
+        fn close(&self) {}
+    }
+
+    /// How many times a run under `teardown` asks the checker to release its snapshot.
+    fn releases_under(teardown: Teardown) -> u32 {
+        let (_dir, root) = shared_types_project(2);
+        let output = extract(&PipelineOptions { src_dirs: vec![root.clone()], ..PipelineOptions::default() });
+        let request = SemanticRequest::new(root, targets_of(&output)).with_teardown(teardown);
+        let released = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let session = Refusing { released: Arc::clone(&released) };
+        let checker = Backend::spawn(1, move || session).unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+        runtime.block_on(answer_with(&checker, &request));
+        runtime.block_on(checker.shutdown());
+        released.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// A run that goes on after it (a session, the library) releases its snapshot, even when the checker failed it;
+    /// one whose process ends with it does not wait for the release.
+    #[test]
+    fn only_a_session_run_releases_its_snapshot() {
+        assert_eq!(releases_under(Teardown::Session), 1);
+        assert_eq!(releases_under(Teardown::OneShot), 0);
+        assert_eq!(Teardown::default(), Teardown::Session);
+        assert_eq!(SemanticRequest::new(Utf8PathBuf::new(), Vec::new()).teardown, Teardown::Session);
     }
 
     /// A prop the converter keeps for later components is kept by what makes it, including which of its JSDoc was

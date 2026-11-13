@@ -216,7 +216,7 @@ mod tests {
 
     fn property(declaration: &str) -> SymbolInfo {
         SymbolInfo {
-            reference: serde_json::Value::Null,
+            reference: serde_json::Value::Null.into(),
             name: "x".to_string(),
             flags: 4,
             declarations: vec![declaration.to_string()],
