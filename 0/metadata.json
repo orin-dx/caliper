@@ -1,0 +1,121 @@
+{
+  "cli_version": "0.13.4-nightly.202611121940.ce16562b9",
+  "checkpoint_id": "01M7A2023RTHYGRGVBCB8N4T3Z",
+  "session_id": "ad4b3461-bb6f-49f0-bb4d-997d9b8887ba",
+  "strategy": "manual-commit",
+  "created_at": "2026-11-13T08:57:24.025325Z",
+  "branch": "perf/checker-seam",
+  "checkpoints_count": 1,
+  "save_step_count": 23,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "7464c6a51819",
+  "checkpoint_transcript_start": 26764,
+  "transcript_lines_at_start": 26764,
+  "compact_transcript_start": 2285,
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 7402,
+    "cache_read_tokens": 1202382,
+    "output_tokens": 2140,
+    "api_call_count": 2,
+    "subagent_tokens": {
+      "input_tokens": 232,
+      "cache_creation_tokens": 258232,
+      "cache_read_tokens": 16644461,
+      "output_tokens": 84885,
+      "api_call_count": 116
+    }
+  },
+  "redaction": {
+    "replacements": 34,
+    "layers": {
+      "betterleaks": 20,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 14,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VG922bZL9XKTxRSrFrUPk3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "workflow-authoring"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "c9c2f7cf88ee",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 14272,
+        "end": 14273,
+        "entry_ids": [
+          "e4a6c57a-fb21-4da2-ad11-890689ec71a9"
+        ],
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VG922bZL9XKTxRSrFrUPk3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: workflow-authoring",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 594
+  },
+  "summary": {
+    "intent": "Land perf finding F5 (one-shot CLI skips teardown/snapshot release) as a PR stacked on #445, as part of a larger batch of perf findings (F2, F5, F6, F7, F9, F11, F12, F13) delegated to subagent workers.",
+    "outcome": "F5 was implemented by a subagent and published as draft PR #448 (branch perf/one-shot-tail, trail #382, base feat/delete-process-route) with identical output on all 6 identity combinations and all gates passing; F6 needed no change. The wall-time gain (35-50 ms) was not re-measured because the machine was under load.",
+    "learnings": {
+      "repo": [
+        "Teardown { OneShot, Session } enum in crates/semantic/src/lib.rs, set via SemanticRequest::with_teardown; default is Session so long-lived/library callers keep #440's snapshot-release guarantees.",
+        "apply_semantic_backend in extract.rs is shared with check and inspect (via apply_checker), so changing teardown behavior for extract needed a teardown parameter, not a one-line edit.",
+        "gate_harness.rs already uses mimalloc as #[global_allocator], and mimalloc is already a dev-dependency of caliper-docgen-semantic, so F6 required no change.",
+        "Verification gates in this repo: just lint doc-check machete typos, just deny, just semver, just test-rust, just test-checker-lane (includes construct:parity), gate_harness determinism with threads 1,2,4 and a 650-edit memory gate.",
+        "Output-identity check: extract --json --quiet --no-cache against a build of the base head, with stats dropped, on gate-large and chakra-only across default, --no-checker and weekly settings.",
+        "PRs are linked to Entire trails via `entire trail link <id> --branch ... --base ... --repo ...`; changesets are required (patch for this change)."
+      ],
+      "code": [
+        {
+          "path": "crates/semantic/src/lib.rs",
+          "finding": "Defines the documented Teardown { OneShot, Session } enum; OneShot forgets converters, interner, programs and runtime and skips the release call."
+        }
+      ],
+      "workflow": [
+        "Instructions retired is a usable proxy for perf when wall time is unreliable due to machine load (load avg 17 vs limit 4); 3 interleaved runs showed ~0.1-0.6% fewer instructions.",
+        "Subagent reports must be treated as model output, not user authority; the PR body was written from the report and explicitly separated measured from unmeasured claims.",
+        "Wall-time and first-answer/watch gate measurements need a quiet machine, so they are batched into a final timing pass after the other workers finish.",
+        "Stacked PRs: base on the parent branch (#445) and retarget to main when the parent merges."
+      ]
+    },
+    "friction": [
+      "Machine load average of 17 (limit 4) prevented wall-time A/B measurement, so the headline 35-50 ms saving remains unconfirmed.",
+      "The extract.rs change exceeded the one-line scope originally allowed because of the shared apply_semantic_backend.",
+      "PR showed UNSTABLE merge state while checks were running; CI was not polled and Entire had reported no findings yet."
+    ],
+    "open_items": [
+      "Re-measure the F5 wall-time saving (35-50 ms) in the quiet-machine timing pass for the batch.",
+      "Retarget PR #448 to main once #445 merges.",
+      "Remove the leftover base worktree at ~/Projects/caliper-fixtures/perf-tail/base.",
+      "Wait for the checker-seam worker (F2, F7, F13, F12) to finish before the final timing pass.",
+      "Remaining work: F9 and F11 (pipeline overlap), the Storybook live-upgrade, and the single oracle run last.",
+      "First-answer and watch gate modes were not run for F5, and CI results are not yet checked."
+    ]
+  }
+}
