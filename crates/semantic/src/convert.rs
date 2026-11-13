@@ -362,8 +362,8 @@ type Memo = Mutex<FxHashMap<(u64, u8), Vec<Arc<Entry>>>>;
 /// again on each use, which costs a fraction of the round trip, and is several times smaller than the read lists.
 type PartsSeen = Mutex<FxHashMap<(u64, Parts), Arc<RawValue>>>;
 
-/// The props answered so far, by the hash of their [`PropKey`] and then the key itself.
-type KeptProps = Mutex<FxHashMap<u64, Vec<(PropKey, Arc<SemanticProp>)>>>;
+/// The props answered so far, by the hash of their [`PropKey`] and then the key itself, owned.
+type KeptProps = Mutex<FxHashMap<u64, Vec<(KeptKey, Arc<SemanticProp>)>>>;
 
 /// Everything a component's prop is made of ([`crate::component::props_of_type`]): its property's name, optionality and
 /// declarations, the symbol it is a member of (its JSDoc's key when it has no declaration: the symbol itself), its type's
@@ -372,40 +372,82 @@ type KeptProps = Mutex<FxHashMap<u64, Vec<(PropKey, Arc<SemanticProp>)>>>;
 /// JSDoc are read from the declarations, the parent and the symbol alone ([`crate::declared`]). Chakra's components
 /// share a thousand style props, each a union converted from the same handle, so a component after the first finds
 /// them here and neither converts, copies nor interns them again.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) struct PropKey {
+///
+/// The key borrows what it is made of from the property: most props are found kept, and only one that is not is copied,
+/// into the [`KeptKey`] it is kept by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PropKey<'a> {
     hash: u64,
-    name: String,
+    name: &'a str,
     optional: bool,
     type_id: u64,
-    declarations: Vec<String>,
-    parent: Option<CompactSymbol>,
-    /// The symbol, only for a property with no declaration.
-    symbol: Option<String>,
+    declarations: &'a [String],
+    parent: Option<&'a CompactSymbol>,
+    /// The symbol's reference, only for a property with no declaration.
+    symbol: Option<&'a str>,
     description: bool,
     tags: bool,
 }
 
-impl PropKey {
-    pub(crate) fn of(property: &SymbolInfo, prop_type: &TypeInfo, description: bool, tags: bool) -> Self {
+impl<'a> PropKey<'a> {
+    pub(crate) fn of(property: &'a SymbolInfo, prop_type: &TypeInfo, description: bool, tags: bool) -> Self {
         use std::hash::{Hash, Hasher};
         let optional = property.flags & flag::SYMBOL_OPTIONAL != 0;
-        let symbol = property.declarations.is_empty().then(|| property.reference.to_string());
+        let symbol = property.declarations.is_empty().then(|| property.reference.text());
+        let parent = property.parent.as_ref();
         let mut hasher = rustc_hash::FxHasher::default();
-        (&property.name, optional, prop_type.id, &property.declarations, &property.parent, &symbol, description, tags)
+        (&property.name, optional, prop_type.id, &property.declarations, parent, symbol, description, tags)
             .hash(&mut hasher);
         PropKey {
             hash: hasher.finish(),
-            name: property.name.clone(),
+            name: &property.name,
             optional,
             type_id: prop_type.id,
-            declarations: property.declarations.clone(),
-            parent: property.parent.clone(),
+            declarations: &property.declarations,
+            parent,
             symbol,
             description,
             tags,
         }
     }
+
+    /// Whether `kept` was made from what this key names.
+    fn names(&self, kept: &KeptKey) -> bool {
+        self.name == kept.name
+            && self.optional == kept.optional
+            && self.type_id == kept.type_id
+            && self.declarations == kept.declarations.as_slice()
+            && self.parent == kept.parent.as_ref()
+            && self.symbol == kept.symbol.as_deref()
+            && self.description == kept.description
+            && self.tags == kept.tags
+    }
+
+    fn to_kept(self) -> KeptKey {
+        KeptKey {
+            name: self.name.to_string(),
+            optional: self.optional,
+            type_id: self.type_id,
+            declarations: self.declarations.to_vec(),
+            parent: self.parent.cloned(),
+            symbol: self.symbol.map(str::to_string),
+            description: self.description,
+            tags: self.tags,
+        }
+    }
+}
+
+/// A [`PropKey`] that owns what it is made of, for a prop kept for the components after its own.
+#[derive(Debug)]
+struct KeptKey {
+    name: String,
+    optional: bool,
+    type_id: u64,
+    declarations: Vec<String>,
+    parent: Option<CompactSymbol>,
+    symbol: Option<String>,
+    description: bool,
+    tags: bool,
 }
 
 /// Which parts of a type [`Converter::parts`] asks for.
@@ -488,17 +530,17 @@ impl Converter {
     }
 
     /// The prop made earlier in this snapshot from what `key` names, if one was.
-    pub(crate) fn known_prop(&self, key: &PropKey) -> Option<Arc<SemanticProp>> {
+    pub(crate) fn known_prop(&self, key: &PropKey<'_>) -> Option<Arc<SemanticProp>> {
         let props = self.state.props.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        props.get(&key.hash)?.iter().find(|(known, _)| known == key).map(|(_, prop)| prop.clone())
+        props.get(&key.hash)?.iter().find(|(known, _)| key.names(known)).map(|(_, prop)| prop.clone())
     }
 
     /// Keeps `prop` as the prop `key` makes, for the components after this one.
-    pub(crate) fn keep_prop(&self, key: PropKey, prop: Arc<SemanticProp>) {
+    pub(crate) fn keep_prop(&self, key: PropKey<'_>, prop: Arc<SemanticProp>) {
         let mut props = self.state.props.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let bucket = props.entry(key.hash).or_default();
-        if !bucket.iter().any(|(known, _)| *known == key) {
-            bucket.push((key, prop));
+        if !bucket.iter().any(|(known, _)| key.names(known)) {
+            bucket.push((key.to_kept(), prop));
         }
     }
 
@@ -1590,6 +1632,59 @@ mod tests {
 
     fn type_of(flags: u64, object_flags: u64) -> TypeInfo {
         serde_json::from_value(serde_json::json!({ "id": 1, "flags": flags, "objectFlags": object_flags })).unwrap()
+    }
+
+    fn property(fields: serde_json::Value) -> SymbolInfo {
+        let mut symbol = serde_json::json!({
+            "reference": { "kind": 1, "id": 40, "snapshot": 2 },
+            "name": "size",
+            "flags": 0,
+            "declarations": ["12.171./p/a.ts"],
+            "parent": { "id": 9, "file": "3" },
+        });
+        if let (Some(symbol), serde_json::Value::Object(fields)) = (symbol.as_object_mut(), fields) {
+            symbol.extend(fields);
+        }
+        serde_json::from_value(symbol).unwrap()
+    }
+
+    /// A key borrowed from a property finds the owned key kept for an equal property, read from an answer of its own,
+    /// and no key that differs from it in any part.
+    #[test]
+    fn a_borrowed_prop_key_names_the_kept_key_of_an_equal_property_and_no_other() {
+        let prop_type = type_of(flag::STRING, 0);
+        let kept = property(serde_json::json!({}));
+        let kept_key = PropKey::of(&kept, &prop_type, true, false);
+        let stored = kept_key.to_kept();
+        let asked = property(serde_json::json!({}));
+
+        let found = PropKey::of(&asked, &prop_type, true, false);
+
+        assert!(found.names(&stored));
+        assert_eq!(found.hash, kept_key.hash);
+        assert_eq!(found, kept_key);
+        let other_type = type_of(flag::NUMBER, 0);
+        let other_type = TypeInfo { id: 2, ..other_type };
+        let differing = [
+            property(serde_json::json!({ "name": "tone" })),
+            property(serde_json::json!({ "flags": flag::SYMBOL_OPTIONAL })),
+            property(serde_json::json!({ "declarations": ["12.171./p/b.ts"] })),
+            property(serde_json::json!({ "parent": { "id": 10, "file": "3" } })),
+            property(serde_json::json!({ "parent": null })),
+        ];
+        for other in &differing {
+            assert!(!PropKey::of(other, &prop_type, true, false).names(&stored), "{other:?}");
+        }
+        assert!(!PropKey::of(&asked, &other_type, true, false).names(&stored));
+        assert!(!PropKey::of(&asked, &prop_type, false, false).names(&stored));
+        assert!(!PropKey::of(&asked, &prop_type, true, true).names(&stored));
+        // A property with no declaration is named by its symbol's reference.
+        let synthetic =
+            |id: u64| property(serde_json::json!({ "declarations": [], "reference": { "kind": 1, "id": id } }));
+        let (first, again, other) = (synthetic(50), synthetic(50), synthetic(51));
+        let stored = PropKey::of(&first, &prop_type, true, false).to_kept();
+        assert!(PropKey::of(&again, &prop_type, true, false).names(&stored));
+        assert!(!PropKey::of(&other, &prop_type, true, false).names(&stored));
     }
 
     #[test]
